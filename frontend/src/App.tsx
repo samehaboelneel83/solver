@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
+import EntityList from "./pages/EntityList";
 import { getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -27,7 +28,7 @@ export default function App() {
         }
       >
         <Route index element={<Placeholder />} />
-        <Route path=":schemaName/:tableName" element={<Placeholder />} />
+        <Route path=":schemaName/:tableName" element={<EntityList />} />
       </Route>
     </Routes>
   );
