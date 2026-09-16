@@ -5,7 +5,13 @@ from app.models.domain import (  # noqa: F401
     AttributeDefinition,
     Entity,
     EntityAttribute,
+    EntityRole,
+    EntityState,
     EntityType,
+    Hierarchy,
+    HierarchyNode,
     Relationship,
     RelationshipType,
+    RoleType,
+    StateType,
 )

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -114,3 +114,85 @@ class Relationship(UUIDPKMixin, Base):
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class Hierarchy(UUIDPKMixin, Base):
+    __tablename__ = "hierarchy"
+    __table_args__ = {"schema": "domain"}
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("iam.organization.id"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity_type.id"), nullable=True
+    )
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class HierarchyNode(UUIDPKMixin, Base):
+    __tablename__ = "hierarchy_node"
+    __table_args__ = {"schema": "domain"}
+
+    hierarchy_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.hierarchy.id"), nullable=False
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity.id"), nullable=False
+    )
+    parent_node_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.hierarchy_node.id"), nullable=True
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class RoleType(UUIDPKMixin, Base):
+    __tablename__ = "role_type"
+    __table_args__ = {"schema": "domain"}
+
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class EntityRole(UUIDPKMixin, Base):
+    __tablename__ = "entity_role"
+    __table_args__ = {"schema": "domain"}
+
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity.id"), nullable=False
+    )
+    role_type_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.role_type.id"), nullable=False
+    )
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class StateType(UUIDPKMixin, Base):
+    __tablename__ = "state_type"
+    __table_args__ = {"schema": "domain"}
+
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity_type.id"), nullable=True
+    )
+
+
+class EntityState(UUIDPKMixin, Base):
+    __tablename__ = "entity_state"
+    __table_args__ = {"schema": "domain"}
+
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity.id"), nullable=False
+    )
+    state_type_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.state_type.id"), nullable=False
+    )
+    state_value: Mapped[str] = mapped_column(String(100), nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

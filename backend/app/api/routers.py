@@ -154,3 +154,99 @@ router.include_router(
         table_name="relationship",
     )
 )
+
+
+from app.models.domain import (
+    EntityRole,
+    EntityState,
+    Hierarchy,
+    HierarchyNode,
+    RoleType,
+    StateType,
+)
+
+# --- domain: group B (hierarchy, roles, states) ---
+
+HierarchyCreate, HierarchyUpdate, HierarchyRead = make_crud_schemas(
+    Hierarchy, name="Hierarchy", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=Hierarchy,
+        create_schema=HierarchyCreate,
+        update_schema=HierarchyUpdate,
+        read_schema=HierarchyRead,
+        schema_name="domain",
+        table_name="hierarchy",
+    )
+)
+
+HierarchyNodeCreate, HierarchyNodeUpdate, HierarchyNodeRead = make_crud_schemas(
+    HierarchyNode, name="HierarchyNode", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=HierarchyNode,
+        create_schema=HierarchyNodeCreate,
+        update_schema=HierarchyNodeUpdate,
+        read_schema=HierarchyNodeRead,
+        schema_name="domain",
+        table_name="hierarchy_node",
+    )
+)
+
+RoleTypeCreate, RoleTypeUpdate, RoleTypeRead = make_crud_schemas(
+    RoleType, name="RoleType", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=RoleType,
+        create_schema=RoleTypeCreate,
+        update_schema=RoleTypeUpdate,
+        read_schema=RoleTypeRead,
+        schema_name="domain",
+        table_name="role_type",
+    )
+)
+
+EntityRoleCreate, EntityRoleUpdate, EntityRoleRead = make_crud_schemas(
+    EntityRole, name="EntityRole", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=EntityRole,
+        create_schema=EntityRoleCreate,
+        update_schema=EntityRoleUpdate,
+        read_schema=EntityRoleRead,
+        schema_name="domain",
+        table_name="entity_role",
+    )
+)
+
+StateTypeCreate, StateTypeUpdate, StateTypeRead = make_crud_schemas(
+    StateType, name="StateType", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=StateType,
+        create_schema=StateTypeCreate,
+        update_schema=StateTypeUpdate,
+        read_schema=StateTypeRead,
+        schema_name="domain",
+        table_name="state_type",
+    )
+)
+
+EntityStateCreate, EntityStateUpdate, EntityStateRead = make_crud_schemas(
+    EntityState, name="EntityState", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=EntityState,
+        create_schema=EntityStateCreate,
+        update_schema=EntityStateUpdate,
+        read_schema=EntityStateRead,
+        schema_name="domain",
+        table_name="entity_state",
+    )
+)
