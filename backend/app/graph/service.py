@@ -169,3 +169,226 @@ def get_domain_graph(
         hierarchies=hierarchies,
         attribute_definitions=attribute_definitions,
     )
+
+
+class GraphNotFoundError(Exception):
+    """Raised when a write targets an entity/relationship id that doesn't
+    exist. Mapped to HTTP 404 by the route layer."""
+
+
+class GraphConflictError(Exception):
+    """Raised when a write would violate a DB relationship (e.g. deleting
+    a still-referenced entity). Mapped to HTTP 409 by the route layer."""
+
+
+class GraphValidationError(Exception):
+    """Raised when a write fails a domain-level validation (e.g. an
+    edge's relationship_type doesn't match the two entities' types).
+    Mapped to HTTP 422 by the route layer."""
+
+
+def _entity_to_node(db: Session, entity: Entity, *, hierarchy_id: uuid.UUID | None) -> GraphNode:
+    entity_type = db.get(EntityType, entity.entity_type_id)
+    attrs: dict[str, Any] = {
+        "code": entity.code,
+        "status": entity.status,
+        "description": entity.description,
+    }
+    attr_rows = db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity.id).all()
+    for row in attr_rows:
+        definition = db.get(AttributeDefinition, row.attribute_id)
+        if definition is not None:
+            attrs[definition.code] = _attribute_value(row)
+
+    parent_entity_id = None
+    if hierarchy_id is not None:
+        node = (
+            db.query(HierarchyNode)
+            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
+            .first()
+        )
+        if node is not None and node.parent_node_id is not None:
+            parent_node = db.get(HierarchyNode, node.parent_node_id)
+            if parent_node is not None:
+                parent_entity_id = parent_node.entity_id
+
+    return GraphNode(
+        id=str(entity.id),
+        type=entity_type.code if entity_type else "",
+        label=_node_label(entity),
+        parent=str(parent_entity_id) if parent_entity_id else None,
+        attributes=attrs,
+    )
+
+
+def _write_entity_attributes(
+    db: Session, *, entity_id: uuid.UUID, entity_type_id: uuid.UUID, attributes: dict[str, Any]
+) -> None:
+    if not attributes:
+        return
+    definitions = {
+        d.code: d
+        for d in db.query(AttributeDefinition).filter(AttributeDefinition.entity_type_id == entity_type_id).all()
+    }
+    for code, value in attributes.items():
+        definition = definitions.get(code)
+        if definition is None:
+            continue  # unknown attribute code for this entity type -- silently skip
+        existing = (
+            db.query(EntityAttribute)
+            .filter(EntityAttribute.entity_id == entity_id, EntityAttribute.attribute_id == definition.id)
+            .first()
+        )
+        row = existing or EntityAttribute(entity_id=entity_id, attribute_id=definition.id)
+        row.value_string = None
+        row.value_number = None
+        row.value_boolean = None
+        row.value_date = None
+        row.value_datetime = None
+        row.value_json = None
+        if definition.data_type == "string":
+            row.value_string = str(value)
+        elif definition.data_type == "number":
+            row.value_number = value
+        elif definition.data_type == "boolean":
+            row.value_boolean = bool(value)
+        elif definition.data_type == "date":
+            row.value_date = value
+        elif definition.data_type == "datetime":
+            row.value_datetime = value
+        else:
+            row.value_json = value
+        if existing is None:
+            db.add(row)
+
+
+def create_node(
+    db: Session,
+    *,
+    organization_id: uuid.UUID,
+    entity_type_id: uuid.UUID,
+    name: str,
+    code: str | None = None,
+    status: str | None = None,
+    description: str | None = None,
+    attributes: dict[str, Any] | None = None,
+    hierarchy_id: uuid.UUID | None = None,
+    parent_entity_id: uuid.UUID | None = None,
+) -> GraphNode:
+    entity = Entity(
+        organization_id=organization_id,
+        entity_type_id=entity_type_id,
+        name=name,
+        code=code,
+        status=status,
+        description=description,
+    )
+    db.add(entity)
+    db.flush()  # populate entity.id before using it below
+
+    _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity_type_id, attributes=attributes or {})
+
+    if hierarchy_id is not None:
+        parent_node_id = None
+        if parent_entity_id is not None:
+            parent_node = (
+                db.query(HierarchyNode)
+                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
+                .first()
+            )
+            parent_node_id = parent_node.id if parent_node else None
+        db.add(HierarchyNode(hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0))
+
+    db.commit()
+    db.refresh(entity)
+    return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
+
+
+def update_node(
+    db: Session,
+    entity_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    code: str | None = None,
+    status: str | None = None,
+    description: str | None = None,
+    attributes: dict[str, Any] | None = None,
+    hierarchy_id: uuid.UUID | None = None,
+    parent_entity_id: uuid.UUID | None = None,
+) -> GraphNode:
+    entity = db.get(Entity, entity_id)
+    if entity is None:
+        raise GraphNotFoundError(f"entity {entity_id} not found")
+
+    if name is not None:
+        entity.name = name
+    if code is not None:
+        entity.code = code
+    if status is not None:
+        entity.status = status
+    if description is not None:
+        entity.description = description
+
+    if attributes:
+        _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity.entity_type_id, attributes=attributes)
+
+    if hierarchy_id is not None:
+        # hierarchy_id being given at all is the "touch placement" signal;
+        # parent_entity_id=None within that means "move to root".
+        node = (
+            db.query(HierarchyNode)
+            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
+            .first()
+        )
+        parent_node_id = None
+        if parent_entity_id is not None:
+            parent_node = (
+                db.query(HierarchyNode)
+                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
+                .first()
+            )
+            parent_node_id = parent_node.id if parent_node else None
+        if node is None:
+            db.add(
+                HierarchyNode(
+                    hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0
+                )
+            )
+        else:
+            node.parent_node_id = parent_node_id
+
+    db.commit()
+    db.refresh(entity)
+    return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
+
+
+def delete_node(db: Session, entity_id: uuid.UUID) -> None:
+    entity = db.get(Entity, entity_id)
+    if entity is None:
+        raise GraphNotFoundError(f"entity {entity_id} not found")
+
+    relationship_count = (
+        db.query(Relationship)
+        .filter((Relationship.source_entity_id == entity_id) | (Relationship.target_entity_id == entity_id))
+        .count()
+    )
+    hierarchy_node_rows = db.query(HierarchyNode).filter(HierarchyNode.entity_id == entity_id).all()
+    child_count = 0
+    for node in hierarchy_node_rows:
+        child_count += db.query(HierarchyNode).filter(HierarchyNode.parent_node_id == node.id).count()
+
+    if relationship_count or child_count:
+        parts = []
+        if relationship_count:
+            parts.append(f"{relationship_count} relationship(s)")
+        if child_count:
+            parts.append(f"{child_count} child hierarchy placement(s)")
+        raise GraphConflictError(f"entity still has {' and '.join(parts)} — remove them first")
+
+    # entity_attribute rows are the entity's own data, not a connection to
+    # something else -- delete them automatically rather than blocking on them.
+    db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity_id).delete()
+    for node in hierarchy_node_rows:
+        db.delete(node)
+    db.delete(entity)
+    db.commit()
