@@ -21,4 +21,14 @@ from app.models.domain import (  # noqa: F401
     TimeCalendar,
     TimePeriod,
 )
-from app.models.problem import Problem, Scenario, VariableDefinition, VariableDimension  # noqa: F401
+from app.models.problem import (  # noqa: F401
+    ConstraintDefinition,
+    ConstraintScope,
+    Objective,
+    ObjectiveComponent,
+    Parameter,
+    Problem,
+    Scenario,
+    VariableDefinition,
+    VariableDimension,
+)

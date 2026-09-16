@@ -398,3 +398,83 @@ router.include_router(
         table_name="variable_dimension",
     )
 )
+
+from app.models.problem import (
+    ConstraintDefinition,
+    ConstraintScope,
+    Objective,
+    ObjectiveComponent,
+    Parameter,
+)
+
+# --- problem: group B (constraints, objectives, parameters) ---
+
+ConstraintDefinitionCreate, ConstraintDefinitionUpdate, ConstraintDefinitionRead = make_crud_schemas(
+    ConstraintDefinition, name="ConstraintDefinition", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=ConstraintDefinition,
+        create_schema=ConstraintDefinitionCreate,
+        update_schema=ConstraintDefinitionUpdate,
+        read_schema=ConstraintDefinitionRead,
+        schema_name="problem",
+        table_name="constraint_definition",
+    )
+)
+
+ConstraintScopeCreate, ConstraintScopeUpdate, ConstraintScopeRead = make_crud_schemas(
+    ConstraintScope, name="ConstraintScope", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=ConstraintScope,
+        create_schema=ConstraintScopeCreate,
+        update_schema=ConstraintScopeUpdate,
+        read_schema=ConstraintScopeRead,
+        schema_name="problem",
+        table_name="constraint_scope",
+    )
+)
+
+ObjectiveCreate, ObjectiveUpdate, ObjectiveRead = make_crud_schemas(
+    Objective, name="Objective", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=Objective,
+        create_schema=ObjectiveCreate,
+        update_schema=ObjectiveUpdate,
+        read_schema=ObjectiveRead,
+        schema_name="problem",
+        table_name="objective",
+    )
+)
+
+ObjectiveComponentCreate, ObjectiveComponentUpdate, ObjectiveComponentRead = make_crud_schemas(
+    ObjectiveComponent, name="ObjectiveComponent", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=ObjectiveComponent,
+        create_schema=ObjectiveComponentCreate,
+        update_schema=ObjectiveComponentUpdate,
+        read_schema=ObjectiveComponentRead,
+        schema_name="problem",
+        table_name="objective_component",
+    )
+)
+
+ParameterCreate, ParameterUpdate, ParameterRead = make_crud_schemas(
+    Parameter, name="Parameter", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=Parameter,
+        create_schema=ParameterCreate,
+        update_schema=ParameterUpdate,
+        read_schema=ParameterRead,
+        schema_name="problem",
+        table_name="parameter",
+    )
+)
