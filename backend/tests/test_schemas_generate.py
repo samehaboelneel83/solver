@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -52,6 +52,19 @@ def test_read_schema_validates_from_orm_instance():
     instance = DummyModel(id=uuid.uuid4(), name="hello", note=None, created_at=None)
     read = Read.model_validate(instance)
     assert read.name == "hello"
+
+
+def test_read_schema_validates_populated_datetime_column():
+    # Regression test: sqlalchemy.DateTime's class name is "DateTime", which
+    # upper()-cases to "DATETIME", not "TIMESTAMP". If _TYPE_MAP only has a
+    # "TIMESTAMP" key, this falls through to the str default and any real
+    # datetime value fails Read.model_validate() with a ValidationError.
+    _, _, Read = _schemas()
+    now = datetime.now(timezone.utc)
+    instance = DummyModel(id=uuid.uuid4(), name="hello", note=None, created_at=now)
+    read = Read.model_validate(instance)
+    assert isinstance(read.created_at, datetime)
+    assert read.created_at == now
 
 
 class DummyModelWithAliasedColumn(_ScratchBase):
