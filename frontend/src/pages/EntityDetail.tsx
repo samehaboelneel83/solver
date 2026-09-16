@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import EntityForm from "../components/EntityForm";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
@@ -7,6 +8,7 @@ export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
   const isNew = id === undefined;
   const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
@@ -20,12 +22,17 @@ export default function EntityDetail() {
   }
 
   async function handleSubmit(values: Record<string, unknown>) {
-    if (isNew) {
-      await createEntity.mutateAsync(values);
-    } else {
-      await updateEntity.mutateAsync(values);
+    setError(null);
+    try {
+      if (isNew) {
+        await createEntity.mutateAsync(values);
+      } else {
+        await updateEntity.mutateAsync(values);
+      }
+      navigate(`/${schemaName}/${tableName}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save. Please check your input and try again.");
     }
-    navigate(`/${schemaName}/${tableName}`);
   }
 
   return (
@@ -33,6 +40,7 @@ export default function EntityDetail() {
       <h1 className="mb-4 text-lg font-semibold text-slate-900">
         {isNew ? "New" : "Edit"} {schemaName}.{tableName}
       </h1>
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <EntityForm
         fields={table.fields}
         initialValues={isNew ? undefined : existing}
