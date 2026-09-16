@@ -12,7 +12,14 @@ type EntityFormProps = {
 };
 
 function defaultValueFor(field: FieldMeta): unknown {
-  return field.type === "boolean" ? false : "";
+  if (field.type === "boolean") {
+    // Non-required booleans start as "" ("(use default)"), which
+    // handleSubmit omits so the column's own default applies. Always
+    // sending `false` here would silently invert defaults that are `true`
+    // (e.g. is_active).
+    return field.required ? false : "";
+  }
+  return "";
 }
 
 function FkSelect({
@@ -68,7 +75,11 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
       if (raw === "") {
         continue; // omit empty optional fields so the backend/DB default applies
       }
-      if (field.type === "json" && typeof raw === "string") {
+      if (field.type === "boolean" && typeof raw === "string") {
+        // Tri-state select value; a required boolean's checkbox already
+        // yields a real boolean and falls through to the else branch.
+        payload[field.name] = raw === "true";
+      } else if (field.type === "json" && typeof raw === "string") {
         try {
           payload[field.name] = JSON.parse(raw);
         } catch {
@@ -98,12 +109,25 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
               onChange={(v) => setField(field.name, v)}
             />
           ) : field.type === "boolean" ? (
-            <input
-              type="checkbox"
-              checked={Boolean(values[field.name])}
-              onChange={(e) => setField(field.name, e.target.checked)}
-              data-testid={`field-${field.name}`}
-            />
+            field.required ? (
+              <input
+                type="checkbox"
+                checked={Boolean(values[field.name])}
+                onChange={(e) => setField(field.name, e.target.checked)}
+                data-testid={`field-${field.name}`}
+              />
+            ) : (
+              <select
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                value={String(values[field.name] ?? "")}
+                onChange={(e) => setField(field.name, e.target.value)}
+                data-testid={`field-${field.name}`}
+              >
+                <option value="">(use default)</option>
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            )
           ) : field.type === "json" ? (
             <textarea
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"

@@ -69,6 +69,40 @@ def test_meta_schema_writable_distinguishes_server_default_from_nullable(auth_he
     # input -- must remain writable (this is what the naive is_required()
     # fix would have incorrectly hidden from create forms).
     assert fields_by_name["description"]["writable"] is True
-    # Required-on-create field -- sanity check that ordinary required
-    # writable fields are unaffected by the nullability check.
+    # Writable field -- sanity check that ordinary writable fields are
+    # unaffected by the nullability check.
     assert fields_by_name["is_active"]["writable"] is True
+
+
+def test_meta_schema_keeps_client_default_fields_writable(auth_headers):
+    """A NOT NULL column with a client-side ORM default (is_active) is
+    optional on create -- but unlike a server-generated column it must stay
+    writable, or the form could never set it. Regression guard for the
+    interaction between the generator's client-default handling and
+    meta.py's server-generated demotion."""
+    client = TestClient(app)
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    fields_by_name = {f["name"]: f for f in tables[("iam", "organization")]["fields"]}
+
+    # default=True on the ORM column -> optional on create, still writable.
+    assert fields_by_name["is_active"]["required"] is False
+    assert fields_by_name["is_active"]["writable"] is True
+    # server_default=func.now() -> optional on create AND not writable.
+    # (unchanged behaviour: this is the case meta.py must still demote)
+    assert fields_by_name["created_at"]["writable"] is False
+
+
+def test_meta_schema_hides_hidden_fields_entirely(auth_headers):
+    """hashed_password is passed as `hidden`, so it must not appear in the
+    metadata at all -- otherwise the frontend would render an input for it."""
+    client = TestClient(app)
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    user_account = tables[("iam", "user_account")]
+    field_names = {f["name"] for f in user_account["fields"]}
+
+    assert "hashed_password" not in field_names
+    assert "username" in field_names

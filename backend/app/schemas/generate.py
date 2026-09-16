@@ -34,12 +34,15 @@ def make_crud_schemas(
     name: str,
     readonly: frozenset = frozenset({"id"}),
     server_default: frozenset = frozenset(),
+    hidden: frozenset = frozenset(),
 ) -> tuple[Type[BaseModel], Type[BaseModel], Type[BaseModel]]:
     """Derive (Create, Update, Read) Pydantic schemas from a SQLAlchemy model.
 
     readonly: fields never accepted on create or update (e.g. primary key).
     server_default: fields optional on create because the database fills
         them in (e.g. created_at via `server_default=func.now()`).
+    hidden: fields excluded from all three schemas entirely (e.g.
+        hashed_password) — unlike readonly, these never appear even in Read.
     """
     mapper = inspect(model)
     create_fields: dict[str, tuple] = {}
@@ -55,8 +58,21 @@ def make_crud_schemas(
     for attr in mapper.column_attrs:
         col = attr.columns[0]
         field_name = attr.key
+
+        # Hidden fields are dropped before anything else, so they appear in
+        # neither Create, Update nor Read (and therefore never reach
+        # /api/meta/schema or any API response).
+        if field_name in hidden:
+            continue
+
         py_type = _python_type(col)
-        optional_on_create = col.nullable or field_name in server_default
+        # A column with a Python-side ORM default (e.g. `default=True`) is
+        # optional on create too: omitting it from the payload lets
+        # SQLAlchemy apply that default at INSERT time. Without this, every
+        # such column would be wrongly required on create.
+        optional_on_create = (
+            col.nullable or col.default is not None or field_name in server_default
+        )
 
         if col.nullable:
             read_fields[field_name] = (Optional[py_type], None)

@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -37,28 +39,31 @@ def organization_id(auth_headers):
 
 def test_entity_type_create(auth_headers, organization_id):
     client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    code = f"employee-a-{suffix}"
     response = client.post(
         "/api/domain/entity_type/",
         json={
             "organization_id": organization_id,
-            "code": "employee-a",
+            "code": code,
             "name": "Employee",
             "is_abstract": False,
         },
         headers=auth_headers,
     )
     assert response.status_code == 201
-    assert response.json()["code"] == "employee-a"
+    assert response.json()["code"] == code
 
 
 def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
     client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
 
     et_response = client.post(
         "/api/domain/entity_type/",
         json={
             "organization_id": organization_id,
-            "code": "vehicle-a",
+            "code": f"vehicle-a-{suffix}",
             "name": "Vehicle",
             "is_abstract": False,
         },
@@ -72,7 +77,7 @@ def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
         json={
             "organization_id": organization_id,
             "entity_type_id": entity_type_id,
-            "code": "veh-1",
+            "code": f"veh-1-{suffix}",
             "name": "Truck 1",
         },
         headers=auth_headers,
@@ -84,7 +89,7 @@ def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
         "/api/domain/attribute_definition/",
         json={
             "entity_type_id": entity_type_id,
-            "code": "capacity_kg",
+            "code": f"capacity_kg-{suffix}",
             "name": "Capacity (kg)",
             "data_type": "number",
             "is_required": False,
@@ -105,7 +110,7 @@ def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
     rel_type_response = client.post(
         "/api/domain/relationship_type/",
         json={
-            "code": "assigned_to-a",
+            "code": f"assigned_to-a-{suffix}",
             "name": "Assigned To",
             "is_directed": True,
             "metadata_": {"note": "test-tag"},
@@ -127,7 +132,7 @@ def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
         json={
             "organization_id": organization_id,
             "entity_type_id": entity_type_id,
-            "code": "veh-2",
+            "code": f"veh-2-{suffix}",
             "name": "Truck 2",
         },
         headers=auth_headers,

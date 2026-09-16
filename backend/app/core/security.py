@@ -13,7 +13,13 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return _pwd_context.verify(password, hashed)
+    # A malformed/non-bcrypt stored value makes passlib raise rather than
+    # return False, which would surface as a 500 from /api/auth/login.
+    # Treat any unverifiable hash as a failed login instead.
+    try:
+        return _pwd_context.verify(password, hashed)
+    except Exception:
+        return False
 
 
 def create_access_token(subject: str, expires_minutes: int | None = None) -> str:

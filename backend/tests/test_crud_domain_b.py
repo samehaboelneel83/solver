@@ -86,10 +86,11 @@ def test_hierarchy_node_chain(auth_headers, organization_id, entity_id):
 
 def test_entity_role_and_entity_state(auth_headers, entity_id):
     client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
 
     role_type_response = client.post(
         "/api/domain/role_type/",
-        json={"code": "supervisor-b", "name": "Supervisor"},
+        json={"code": f"supervisor-b-{suffix}", "name": "Supervisor"},
         headers=auth_headers,
     )
     assert role_type_response.status_code == 201
@@ -104,7 +105,7 @@ def test_entity_role_and_entity_state(auth_headers, entity_id):
 
     state_type_response = client.post(
         "/api/domain/state_type/",
-        json={"code": "availability-b", "name": "Availability"},
+        json={"code": f"availability-b-{suffix}", "name": "Availability"},
         headers=auth_headers,
     )
     assert state_type_response.status_code == 201

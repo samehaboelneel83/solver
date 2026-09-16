@@ -20,6 +20,12 @@ def test_verify_password_rejects_wrong_password():
     assert not verify_password("wrong password", hashed)
 
 
+def test_verify_password_returns_false_for_malformed_hash():
+    """passlib raises UnknownHashError on a non-bcrypt stored value; that
+    must not escape as a 500 from /api/auth/login."""
+    assert verify_password("anything", "not-a-real-bcrypt-hash") is False
+
+
 def test_access_token_roundtrip():
     token = create_access_token(subject="admin")
     payload = decode_access_token(token)

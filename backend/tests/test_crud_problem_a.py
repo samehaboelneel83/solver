@@ -90,3 +90,27 @@ def test_variable_definition_and_dimension(auth_headers, problem_id):
         headers=auth_headers,
     )
     assert dimension_response.status_code == 201
+
+
+def test_problem_create_without_client_defaults(auth_headers, organization_id):
+    """version (default=1) and status (default="DRAFT") are NOT NULL columns
+    with client-side ORM defaults. Omitting them must succeed and apply
+    those defaults -- previously they were required on create, so the
+    generic form (which omits empty inputs) could not create a Problem at
+    all and returned 422."""
+    client = TestClient(app)
+    code = f"minimal-problem-{uuid.uuid4().hex[:8]}"
+
+    response = client.post(
+        "/api/problem/problem/",
+        json={
+            "organization_id": organization_id,
+            "code": code,
+            "name": "Minimal Problem",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["version"] == 1
+    assert body["status"] == "DRAFT"

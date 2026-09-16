@@ -23,7 +23,11 @@ router.include_router(
 )
 
 UserAccountCreate, UserAccountUpdate, UserAccountRead = make_crud_schemas(
-    UserAccount, name="UserAccount", readonly={"id"}, server_default={"created_at"}
+    UserAccount,
+    name="UserAccount",
+    readonly={"id"},
+    server_default={"created_at"},
+    hidden={"hashed_password"},
 )
 router.include_router(
     build_crud_router(
