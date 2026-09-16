@@ -31,7 +31,7 @@
 - Create: `.gitignore`
 
 **Interfaces:**
-- Produces: a running Postgres reachable at `postgres:5432` (service name `postgres`) inside the `solver_net` network, database name `solver`, and a running ClickHouse reachable at `clickhouse:8123` (HTTP) / `clickhouse:9000` (native), database `analytics`. Host ports 5432, 8123, 9000 are published for local admin access. Later tasks depend on these service names and ports.
+- Produces: a running Postgres reachable at `postgres:5432` (service name `postgres`) inside the `solver_net` network, database name `solver`, and a running ClickHouse reachable at `clickhouse:8123` (HTTP) / `clickhouse:9000` (native), database `analytics`. On the host, Postgres is published at `localhost:5544` (not the default 5432 — this machine already has another Postgres container bound to 5432), and ClickHouse at `localhost:8123`/`localhost:9000`. Later tasks depend on these service names and host ports.
 
 - [ ] **Step 1: Write `.gitignore`**
 
@@ -88,7 +88,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "5544:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -335,7 +335,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
       DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
     ports:
-      - "8000:8000"
+      - "8010:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -356,7 +356,7 @@ Expected: PASS (shape check).
 Then:
 ```bash
 docker compose up -d --build backend
-curl http://localhost:8000/api/health
+curl http://localhost:8010/api/health
 ```
 Expected: `{"postgres":"ok","clickhouse":"ok"}`.
 
@@ -600,13 +600,13 @@ Run:
 docker compose up -d postgres
 cd backend
 pip install -r requirements.txt
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
 ```
 (Use the same credentials as `.env`; connecting from the host uses `localhost`, not the service name `postgres`.)
 
 - [ ] **Step 8: Run test again to verify it passes**
 
-Run: `DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver pytest tests/test_migrations_iam.py -v`
+Run: `DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver pytest tests/test_migrations_iam.py -v`
 Expected: PASS
 
 - [ ] **Step 9: Commit**
@@ -772,8 +772,8 @@ def downgrade() -> None:
 
 Run:
 ```bash
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver pytest tests/test_migrations_domain_a.py -v
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver pytest tests/test_migrations_domain_a.py -v
 ```
 Expected: PASS
 
@@ -914,8 +914,8 @@ def downgrade() -> None:
 
 Run:
 ```bash
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver pytest tests/test_migrations_domain_b.py -v
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver pytest tests/test_migrations_domain_b.py -v
 ```
 Expected: PASS
 
@@ -1055,8 +1055,8 @@ def downgrade() -> None:
 
 Run:
 ```bash
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver pytest tests/test_migrations_domain_c.py -v
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver pytest tests/test_migrations_domain_c.py -v
 ```
 Expected: PASS
 
@@ -1257,8 +1257,8 @@ def downgrade() -> None:
 
 Run:
 ```bash
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver pytest tests/test_migrations_problem.py -v
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver pytest tests/test_migrations_problem.py -v
 ```
 Expected: PASS
 
@@ -1410,7 +1410,7 @@ Expected: PASS
 
 - [ ] **Step 5: Rebuild backend and confirm startup still works**
 
-Run: `docker compose up -d --build backend && curl http://localhost:8000/api/health`
+Run: `docker compose up -d --build backend && curl http://localhost:8010/api/health`
 Expected: `{"postgres":"ok","clickhouse":"ok"}` and no startup errors in `docker compose logs backend`.
 
 - [ ] **Step 6: Commit**
@@ -1813,7 +1813,7 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_auth.py -v
 ```
@@ -1824,7 +1824,7 @@ Expected: PASS
 Run:
 ```bash
 docker compose up -d --build backend
-curl -X POST http://localhost:8000/api/auth/login -d "username=admin&password=change-me-admin"
+curl -X POST http://localhost:8010/api/auth/login -d "username=admin&password=change-me-admin"
 ```
 Expected: JSON body with `access_token` and `"token_type":"bearer"`.
 
@@ -2355,7 +2355,7 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_crud_iam.py -v
 ```
@@ -2366,8 +2366,8 @@ Expected: PASS
 Run:
 ```bash
 docker compose up -d --build backend
-TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login -d "username=admin&password=change-me-admin" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/iam/organization/
+TOKEN=$(curl -s -X POST http://localhost:8010/api/auth/login -d "username=admin&password=change-me-admin" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8010/api/iam/organization/
 ```
 Expected: `{"items":[...],"total":...}` including the seeded `"default"` organization.
 
@@ -2766,8 +2766,8 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_crud_domain_a.py -v
 ```
@@ -3132,8 +3132,8 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_crud_domain_b.py -v
 ```
@@ -3467,8 +3467,8 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_crud_domain_c.py -v
 ```
@@ -3742,8 +3742,8 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_crud_problem_a.py -v
 ```
@@ -4083,8 +4083,8 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver alembic upgrade head
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver alembic upgrade head
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/ -v
 ```
@@ -4275,7 +4275,7 @@ Run:
 ```bash
 docker compose up -d postgres clickhouse
 cd backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest tests/test_meta_schema.py -v
 ```
@@ -4286,7 +4286,7 @@ Expected: PASS
 Run:
 ```bash
 docker compose up -d --build backend
-DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5432/solver \
+DATABASE_URL=postgresql+psycopg2://solver:change-me@localhost:5544/solver \
 CLICKHOUSE_HOST=localhost JWT_SECRET=test-secret ADMIN_PASSWORD=change-me-admin \
 pytest -v
 ```
@@ -4373,7 +4373,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": "http://localhost:8010",
     },
   },
   test: {
@@ -4785,7 +4785,7 @@ server {
     build: ./frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3010:80"
     depends_on:
       - backend
     networks:
@@ -4798,7 +4798,7 @@ Run:
 ```bash
 cd frontend && npm test
 docker compose up -d --build frontend
-curl -I http://localhost:3000
+curl -I http://localhost:3010
 ```
 Expected: all Vitest tests pass; `curl` returns `HTTP/1.1 200 OK`.
 
@@ -6145,17 +6145,17 @@ echo "== Applying database migrations =="
 docker compose exec -T backend alembic upgrade head
 
 echo "== Checking backend health =="
-curl -sf http://localhost:8000/api/health | tee /tmp/solver_health.json
+curl -sf http://localhost:8010/api/health | tee /tmp/solver_health.json
 grep -q '"postgres":"ok"' /tmp/solver_health.json
 grep -q '"clickhouse":"ok"' /tmp/solver_health.json
 
 echo "== Logging in as the seeded admin =="
-TOKEN=$(curl -sf -X POST http://localhost:8000/api/auth/login \
+TOKEN=$(curl -sf -X POST http://localhost:8010/api/auth/login \
   -d "username=${ADMIN_USERNAME:-admin}&password=${ADMIN_PASSWORD:-change-me-admin}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 echo "== Verifying the metadata endpoint lists all 31 registered tables =="
-TABLE_COUNT=$(curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/meta/schema \
+TABLE_COUNT=$(curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:8010/api/meta/schema \
   | python3 -c "import sys,json;print(len(json.load(sys.stdin)))")
 if [[ "$TABLE_COUNT" != "31" ]]; then
   echo "expected 31 registered tables, got $TABLE_COUNT"
@@ -6163,15 +6163,15 @@ if [[ "$TABLE_COUNT" != "31" ]]; then
 fi
 
 echo "== Creating an organization through the full stack =="
-curl -sf -X POST http://localhost:8000/api/iam/organization/ \
+curl -sf -X POST http://localhost:8010/api/iam/organization/ \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"code":"smoke-test-org","name":"Smoke Test Org"}' | tee /tmp/solver_org.json
 grep -q '"code":"smoke-test-org"' /tmp/solver_org.json
 
 echo "== Checking the frontend serves and proxies /api to the backend =="
-FRONTEND_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000)
+FRONTEND_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3010)
 [[ "$FRONTEND_STATUS" == "200" ]]
-curl -sf http://localhost:3000/api/health | grep -q '"postgres":"ok"'
+curl -sf http://localhost:3010/api/health | grep -q '"postgres":"ok"'
 
 echo "== All smoke checks passed =="
 ```
@@ -6188,7 +6188,7 @@ Expected: script prints `== All smoke checks passed ==` and exits 0. If a step f
 
 - [ ] **Step 3: Manually verify the UI once**
 
-Open `http://localhost:3000` in a browser:
+Open `http://localhost:3010` in a browser:
 1. Log in with `admin` / the `ADMIN_PASSWORD` from `.env`.
 2. Confirm the Dashboard shows `postgres: ok` and `clickhouse: ok`, and a row count per table (31 rows in the table list).
 3. Click `domain` → `entity_type` in the sidebar, click **New**, fill in `code`/`name`, submit — confirm it appears in the list.
