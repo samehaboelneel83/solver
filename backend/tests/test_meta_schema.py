@@ -51,3 +51,24 @@ def test_meta_schema_flags_foreign_keys_and_readonly_id(auth_headers):
     assert fields_by_name["id"]["writable"] is False
     assert fields_by_name["organization_id"]["is_fk"] is True
     assert fields_by_name["organization_id"]["fk_table"] == "iam.organization"
+
+
+def test_meta_schema_writable_distinguishes_server_default_from_nullable(auth_headers):
+    client = TestClient(app)
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    organization = tables[("iam", "organization")]
+    fields_by_name = {f["name"]: f for f in organization["fields"]}
+
+    # NOT NULL column, optional on create only because it's server-generated
+    # (server_default, Task 11) -- must not be writable, or the frontend
+    # would render an editable timestamp input on create.
+    assert fields_by_name["created_at"]["writable"] is False
+    # Nullable column, optional on create because it's genuinely optional
+    # input -- must remain writable (this is what the naive is_required()
+    # fix would have incorrectly hidden from create forms).
+    assert fields_by_name["description"]["writable"] is True
+    # Required-on-create field -- sanity check that ordinary required
+    # writable fields are unaffected by the nullability check.
+    assert fields_by_name["is_active"]["writable"] is True
