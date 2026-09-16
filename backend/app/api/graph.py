@@ -48,18 +48,21 @@ def create_node_route(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ):
-    return create_node(
-        db,
-        organization_id=payload.organization_id,
-        entity_type_id=payload.entity_type_id,
-        name=payload.name,
-        code=payload.code,
-        status=payload.status,
-        description=payload.description,
-        attributes=payload.attributes,
-        hierarchy_id=payload.hierarchy_id,
-        parent_entity_id=payload.parent_entity_id,
-    )
+    try:
+        return create_node(
+            db,
+            organization_id=payload.organization_id,
+            entity_type_id=payload.entity_type_id,
+            name=payload.name,
+            code=payload.code,
+            status=payload.status,
+            description=payload.description,
+            attributes=payload.attributes,
+            hierarchy_id=payload.hierarchy_id,
+            parent_entity_id=payload.parent_entity_id,
+        )
+    except GraphNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class UpdateNodeRequest(BaseModel):

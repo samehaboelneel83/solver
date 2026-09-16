@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.graph.schemas import (
@@ -275,6 +276,19 @@ def create_node(
     hierarchy_id: uuid.UUID | None = None,
     parent_entity_id: uuid.UUID | None = None,
 ) -> GraphNode:
+    parent_node_id = None
+    if hierarchy_id is not None and parent_entity_id is not None:
+        parent_node = (
+            db.query(HierarchyNode)
+            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
+            .first()
+        )
+        if parent_node is None:
+            raise GraphNotFoundError(
+                f"parent_entity_id {parent_entity_id} has no placement in hierarchy {hierarchy_id}"
+            )
+        parent_node_id = parent_node.id
+
     entity = Entity(
         organization_id=organization_id,
         entity_type_id=entity_type_id,
@@ -289,14 +303,6 @@ def create_node(
     _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity_type_id, attributes=attributes or {})
 
     if hierarchy_id is not None:
-        parent_node_id = None
-        if parent_entity_id is not None:
-            parent_node = (
-                db.query(HierarchyNode)
-                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
-                .first()
-            )
-            parent_node_id = parent_node.id if parent_node else None
         db.add(HierarchyNode(hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0))
 
     db.commit()
@@ -320,6 +326,19 @@ def update_node(
     if entity is None:
         raise GraphNotFoundError(f"entity {entity_id} not found")
 
+    parent_node_id = None
+    if hierarchy_id is not None and parent_entity_id is not None:
+        parent_node = (
+            db.query(HierarchyNode)
+            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
+            .first()
+        )
+        if parent_node is None:
+            raise GraphNotFoundError(
+                f"parent_entity_id {parent_entity_id} has no placement in hierarchy {hierarchy_id}"
+            )
+        parent_node_id = parent_node.id
+
     if name is not None:
         entity.name = name
     if code is not None:
@@ -340,14 +359,6 @@ def update_node(
             .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
             .first()
         )
-        parent_node_id = None
-        if parent_entity_id is not None:
-            parent_node = (
-                db.query(HierarchyNode)
-                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
-                .first()
-            )
-            parent_node_id = parent_node.id if parent_node else None
         if node is None:
             db.add(
                 HierarchyNode(
@@ -391,4 +402,10 @@ def delete_node(db: Session, entity_id: uuid.UUID) -> None:
     for node in hierarchy_node_rows:
         db.delete(node)
     db.delete(entity)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise GraphConflictError(
+            "entity became referenced by a new relationship or hierarchy placement during deletion — try again"
+        )

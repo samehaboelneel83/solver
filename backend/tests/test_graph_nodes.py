@@ -207,3 +207,140 @@ def test_delete_node_succeeds_when_unreferenced(auth_headers, organization_id):
 
     delete_response = client.delete(f"/api/graph/domain/nodes/{entity_id}", headers=auth_headers)
     assert delete_response.status_code == 204
+
+
+def test_delete_node_returns_409_when_it_has_child_hierarchy_placements(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"unit-{suffix}", "name": "Unit"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    hierarchy_response = client.post(
+        "/api/domain/hierarchy/",
+        json={"organization_id": organization_id, "code": f"org-chart-{suffix}", "name": "Org Chart"},
+        headers=auth_headers,
+    )
+    hierarchy_id = hierarchy_response.json()["id"]
+
+    parent = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Parent",
+            "hierarchy_id": hierarchy_id,
+        },
+        headers=auth_headers,
+    ).json()
+
+    child_response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Child",
+            "hierarchy_id": hierarchy_id,
+            "parent_entity_id": parent["id"],
+        },
+        headers=auth_headers,
+    )
+    assert child_response.status_code == 201
+
+    delete_response = client.delete(f"/api/graph/domain/nodes/{parent['id']}", headers=auth_headers)
+    assert delete_response.status_code == 409
+    assert "child hierarchy placement" in delete_response.json()["detail"].lower()
+
+
+def test_update_node_can_move_to_root_and_reparent(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"unit-{suffix}", "name": "Unit"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    hierarchy_response = client.post(
+        "/api/domain/hierarchy/",
+        json={"organization_id": organization_id, "code": f"org-chart-{suffix}", "name": "Org Chart"},
+        headers=auth_headers,
+    )
+    hierarchy_id = hierarchy_response.json()["id"]
+
+    parent_a = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "A", "hierarchy_id": hierarchy_id},
+        headers=auth_headers,
+    ).json()
+    parent_b = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "B", "hierarchy_id": hierarchy_id},
+        headers=auth_headers,
+    ).json()
+    child = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Child",
+            "hierarchy_id": hierarchy_id,
+            "parent_entity_id": parent_a["id"],
+        },
+        headers=auth_headers,
+    ).json()
+    assert child["parent"] == parent_a["id"]
+
+    reparent_response = client.patch(
+        f"/api/graph/domain/nodes/{child['id']}",
+        json={"hierarchy_id": hierarchy_id, "parent_entity_id": parent_b["id"]},
+        headers=auth_headers,
+    )
+    assert reparent_response.status_code == 200
+    assert reparent_response.json()["parent"] == parent_b["id"]
+
+    root_response = client.patch(
+        f"/api/graph/domain/nodes/{child['id']}",
+        json={"hierarchy_id": hierarchy_id, "parent_entity_id": None},
+        headers=auth_headers,
+    )
+    assert root_response.status_code == 200
+    assert root_response.json()["parent"] is None
+
+
+def test_create_node_returns_404_for_unresolvable_parent_entity_id(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"unit-{suffix}", "name": "Unit"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    hierarchy_response = client.post(
+        "/api/domain/hierarchy/",
+        json={"organization_id": organization_id, "code": f"org-chart-{suffix}", "name": "Org Chart"},
+        headers=auth_headers,
+    )
+    hierarchy_id = hierarchy_response.json()["id"]
+
+    response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Orphan",
+            "hierarchy_id": hierarchy_id,
+            "parent_entity_id": str(uuid.uuid4()),
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
