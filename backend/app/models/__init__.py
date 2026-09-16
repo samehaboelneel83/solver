@@ -21,3 +21,4 @@ from app.models.domain import (  # noqa: F401
     TimeCalendar,
     TimePeriod,
 )
+from app.models.problem import Problem, Scenario, VariableDefinition, VariableDimension  # noqa: F401

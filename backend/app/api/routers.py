@@ -337,3 +337,64 @@ router.include_router(
         table_name="time_period",
     )
 )
+
+
+from app.models.problem import Problem, Scenario, VariableDefinition, VariableDimension
+
+# --- problem: group A (problem, scenario, variables) ---
+
+ProblemCreate, ProblemUpdate, ProblemRead = make_crud_schemas(
+    Problem, name="Problem", readonly={"id"}, server_default={"created_at"}
+)
+router.include_router(
+    build_crud_router(
+        model=Problem,
+        create_schema=ProblemCreate,
+        update_schema=ProblemUpdate,
+        read_schema=ProblemRead,
+        schema_name="problem",
+        table_name="problem",
+    )
+)
+
+ScenarioCreate, ScenarioUpdate, ScenarioRead = make_crud_schemas(
+    Scenario, name="Scenario", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=Scenario,
+        create_schema=ScenarioCreate,
+        update_schema=ScenarioUpdate,
+        read_schema=ScenarioRead,
+        schema_name="problem",
+        table_name="scenario",
+    )
+)
+
+VariableDefinitionCreate, VariableDefinitionUpdate, VariableDefinitionRead = make_crud_schemas(
+    VariableDefinition, name="VariableDefinition", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=VariableDefinition,
+        create_schema=VariableDefinitionCreate,
+        update_schema=VariableDefinitionUpdate,
+        read_schema=VariableDefinitionRead,
+        schema_name="problem",
+        table_name="variable_definition",
+    )
+)
+
+VariableDimensionCreate, VariableDimensionUpdate, VariableDimensionRead = make_crud_schemas(
+    VariableDimension, name="VariableDimension", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=VariableDimension,
+        create_schema=VariableDimensionCreate,
+        update_schema=VariableDimensionUpdate,
+        read_schema=VariableDimensionRead,
+        schema_name="problem",
+        table_name="variable_dimension",
+    )
+)
