@@ -65,3 +65,13 @@ services:
         condition: service_healthy
     networks:
       - solver_net
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3010:80"
+    depends_on:
+      - backend
+    networks:
+      - solver_net
