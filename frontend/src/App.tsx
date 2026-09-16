@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
 import { getToken } from "./api/client";
 
@@ -10,7 +11,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 function Placeholder() {
-  return <div className="p-6">Logged in.</div>;
+  return <div>Select a table from the sidebar.</div>;
 }
 
 export default function App() {
@@ -18,13 +19,16 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
-        path="/*"
+        path="/"
         element={
           <RequireAuth>
-            <Placeholder />
+            <AppShell />
           </RequireAuth>
         }
-      />
+      >
+        <Route index element={<Placeholder />} />
+        <Route path=":schemaName/:tableName" element={<Placeholder />} />
+      </Route>
     </Routes>
   );
 }
