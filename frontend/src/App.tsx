@@ -3,6 +3,7 @@ import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
+import Dashboard from "./pages/Dashboard";
 import { getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -10,10 +11,6 @@ function RequireAuth({ children }: { children: JSX.Element }) {
     return <Navigate to="/login" replace />;
   }
   return children;
-}
-
-function Placeholder() {
-  return <div>Select a table from the sidebar.</div>;
 }
 
 export default function App() {
@@ -28,7 +25,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Placeholder />} />
+        <Route index element={<Dashboard />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
