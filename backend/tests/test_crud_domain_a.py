@@ -104,11 +104,23 @@ def test_entity_attribute_and_relationship_chain(auth_headers, organization_id):
 
     rel_type_response = client.post(
         "/api/domain/relationship_type/",
-        json={"code": "assigned_to-a", "name": "Assigned To", "is_directed": True},
+        json={
+            "code": "assigned_to-a",
+            "name": "Assigned To",
+            "is_directed": True,
+            "metadata_": {"note": "test-tag"},
+        },
         headers=auth_headers,
     )
     assert rel_type_response.status_code == 201
+    assert rel_type_response.json()["metadata_"] == {"note": "test-tag"}
     relationship_type_id = rel_type_response.json()["id"]
+
+    rel_type_get_response = client.get(
+        f"/api/domain/relationship_type/{relationship_type_id}", headers=auth_headers
+    )
+    assert rel_type_get_response.status_code == 200
+    assert rel_type_get_response.json()["metadata_"] == {"note": "test-tag"}
 
     other_entity_response = client.post(
         "/api/domain/entity/",
