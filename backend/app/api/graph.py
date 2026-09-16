@@ -10,9 +10,13 @@ from app.graph.schemas import GraphResponse
 from app.graph.service import (
     GraphConflictError,
     GraphNotFoundError,
+    GraphValidationError,
+    create_edge,
     create_node,
+    delete_edge,
     delete_node,
     get_domain_graph,
+    update_edge,
     update_node,
 )
 from app.models.iam import UserAccount
@@ -110,3 +114,59 @@ def delete_node_route(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except GraphConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class CreateEdgeRequest(BaseModel):
+    relationship_type_id: uuid.UUID
+    source_entity_id: uuid.UUID
+    target_entity_id: uuid.UUID
+    attributes: dict = {}
+
+
+@router.post("/edges", status_code=201)
+def create_edge_route(
+    payload: CreateEdgeRequest,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+):
+    try:
+        return create_edge(
+            db,
+            relationship_type_id=payload.relationship_type_id,
+            source_entity_id=payload.source_entity_id,
+            target_entity_id=payload.target_entity_id,
+            attributes=payload.attributes,
+        )
+    except GraphNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class UpdateEdgeRequest(BaseModel):
+    attributes: dict | None = None
+
+
+@router.patch("/edges/{relationship_id}")
+def update_edge_route(
+    relationship_id: uuid.UUID,
+    payload: UpdateEdgeRequest,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+):
+    try:
+        return update_edge(db, relationship_id, attributes=payload.attributes)
+    except GraphNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/edges/{relationship_id}", status_code=204)
+def delete_edge_route(
+    relationship_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> None:
+    try:
+        delete_edge(db, relationship_id)
+    except GraphNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -409,3 +409,78 @@ def delete_node(db: Session, entity_id: uuid.UUID) -> None:
         raise GraphConflictError(
             "entity became referenced by a new relationship or hierarchy placement during deletion — try again"
         )
+
+
+def _relationship_to_edge(db: Session, relationship: Relationship) -> GraphEdge:
+    rel_type = db.get(RelationshipType, relationship.relationship_type_id)
+    return GraphEdge(
+        id=str(relationship.id),
+        source=str(relationship.source_entity_id),
+        target=str(relationship.target_entity_id),
+        type=rel_type.code if rel_type else "",
+        label=rel_type.name if rel_type else "",
+        attributes=relationship.attributes or {},
+    )
+
+
+def create_edge(
+    db: Session,
+    *,
+    relationship_type_id: uuid.UUID,
+    source_entity_id: uuid.UUID,
+    target_entity_id: uuid.UUID,
+    attributes: dict[str, Any] | None = None,
+) -> GraphEdge:
+    relationship_type = db.get(RelationshipType, relationship_type_id)
+    if relationship_type is None:
+        raise GraphNotFoundError(f"relationship_type {relationship_type_id} not found")
+
+    source_entity = db.get(Entity, source_entity_id)
+    target_entity = db.get(Entity, target_entity_id)
+    if source_entity is None or target_entity is None:
+        raise GraphNotFoundError("source or target entity not found")
+
+    if (
+        relationship_type.source_entity_type is not None
+        and relationship_type.source_entity_type != source_entity.entity_type_id
+    ):
+        raise GraphValidationError(
+            "source entity's type does not match this relationship type's required source type"
+        )
+    if (
+        relationship_type.target_entity_type is not None
+        and relationship_type.target_entity_type != target_entity.entity_type_id
+    ):
+        raise GraphValidationError(
+            "target entity's type does not match this relationship type's required target type"
+        )
+
+    relationship = Relationship(
+        relationship_type_id=relationship_type_id,
+        source_entity_id=source_entity_id,
+        target_entity_id=target_entity_id,
+        attributes=attributes or {},
+    )
+    db.add(relationship)
+    db.commit()
+    db.refresh(relationship)
+    return _relationship_to_edge(db, relationship)
+
+
+def update_edge(db: Session, relationship_id: uuid.UUID, *, attributes: dict[str, Any] | None = None) -> GraphEdge:
+    relationship = db.get(Relationship, relationship_id)
+    if relationship is None:
+        raise GraphNotFoundError(f"relationship {relationship_id} not found")
+    if attributes is not None:
+        relationship.attributes = attributes
+    db.commit()
+    db.refresh(relationship)
+    return _relationship_to_edge(db, relationship)
+
+
+def delete_edge(db: Session, relationship_id: uuid.UUID) -> None:
+    relationship = db.get(Relationship, relationship_id)
+    if relationship is None:
+        raise GraphNotFoundError(f"relationship {relationship_id} not found")
+    db.delete(relationship)
+    db.commit()
