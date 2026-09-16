@@ -19,3 +19,38 @@ export function useDeleteEntity(schemaName: string, tableName: string) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["entities", schemaName, tableName] }),
   });
 }
+
+export function useEntity(schemaName: string, tableName: string, id: string | undefined) {
+  return useQuery({
+    queryKey: ["entity", schemaName, tableName, id],
+    queryFn: () => apiFetch<Record<string, unknown>>(`/api/${schemaName}/${tableName}/${id}`),
+    enabled: Boolean(schemaName && tableName && id),
+  });
+}
+
+export function useCreateEntity(schemaName: string, tableName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiFetch(`/api/${schemaName}/${tableName}/`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["entities", schemaName, tableName] }),
+  });
+}
+
+export function useUpdateEntity(schemaName: string, tableName: string, id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Record<string, unknown>) =>
+      apiFetch(`/api/${schemaName}/${tableName}/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entities", schemaName, tableName] });
+      queryClient.invalidateQueries({ queryKey: ["entity", schemaName, tableName, id] });
+    },
+  });
+}

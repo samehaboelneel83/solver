@@ -1,0 +1,44 @@
+import { useNavigate, useParams } from "react-router-dom";
+import EntityForm from "../components/EntityForm";
+import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
+import { useSchema } from "../api/meta";
+
+export default function EntityDetail() {
+  const { schemaName = "", tableName = "", id } = useParams();
+  const isNew = id === undefined;
+  const navigate = useNavigate();
+
+  const { data: tables } = useSchema();
+  const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+
+  const { data: existing } = useEntity(schemaName, tableName, isNew ? undefined : id);
+  const createEntity = useCreateEntity(schemaName, tableName);
+  const updateEntity = useUpdateEntity(schemaName, tableName, id ?? "");
+
+  if (!table || (!isNew && !existing)) {
+    return <p className="text-sm text-slate-400">Loading…</p>;
+  }
+
+  async function handleSubmit(values: Record<string, unknown>) {
+    if (isNew) {
+      await createEntity.mutateAsync(values);
+    } else {
+      await updateEntity.mutateAsync(values);
+    }
+    navigate(`/${schemaName}/${tableName}`);
+  }
+
+  return (
+    <div>
+      <h1 className="mb-4 text-lg font-semibold text-slate-900">
+        {isNew ? "New" : "Edit"} {schemaName}.{tableName}
+      </h1>
+      <EntityForm
+        fields={table.fields}
+        initialValues={isNew ? undefined : existing}
+        onSubmit={handleSubmit}
+        submitLabel={isNew ? "Create" : "Save"}
+      />
+    </div>
+  );
+}
