@@ -1951,13 +1951,16 @@ from sqlalchemy import inspect
 
 _TYPE_MAP: dict[str, type] = {
     "UUID": uuid.UUID,
+    "STRING": str,
     "VARCHAR": str,
     "TEXT": str,
     "INTEGER": int,
+    "BIGINTEGER": int,
     "BIGINT": int,
     "NUMERIC": float,
     "BOOLEAN": bool,
     "DATE": datetime.date,
+    "DATETIME": datetime.datetime,
     "TIMESTAMP": datetime.datetime,
     "JSON": Any,
     "JSONB": Any,
