@@ -250,3 +250,90 @@ router.include_router(
         table_name="entity_state",
     )
 )
+
+
+from app.models.domain import Event, EventType, Resource, ResourceType, TimeCalendar, TimePeriod
+
+# --- domain: group C (events, resources, time) ---
+
+EventTypeCreate, EventTypeUpdate, EventTypeRead = make_crud_schemas(
+    EventType, name="EventType", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=EventType,
+        create_schema=EventTypeCreate,
+        update_schema=EventTypeUpdate,
+        read_schema=EventTypeRead,
+        schema_name="domain",
+        table_name="event_type",
+    )
+)
+
+EventCreate, EventUpdate, EventRead = make_crud_schemas(Event, name="Event", readonly={"id"})
+router.include_router(
+    build_crud_router(
+        model=Event,
+        create_schema=EventCreate,
+        update_schema=EventUpdate,
+        read_schema=EventRead,
+        schema_name="domain",
+        table_name="event",
+    )
+)
+
+ResourceTypeCreate, ResourceTypeUpdate, ResourceTypeRead = make_crud_schemas(
+    ResourceType, name="ResourceType", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=ResourceType,
+        create_schema=ResourceTypeCreate,
+        update_schema=ResourceTypeUpdate,
+        read_schema=ResourceTypeRead,
+        schema_name="domain",
+        table_name="resource_type",
+    )
+)
+
+ResourceCreate, ResourceUpdate, ResourceRead = make_crud_schemas(
+    Resource, name="Resource", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=Resource,
+        create_schema=ResourceCreate,
+        update_schema=ResourceUpdate,
+        read_schema=ResourceRead,
+        schema_name="domain",
+        table_name="resource",
+    )
+)
+
+TimeCalendarCreate, TimeCalendarUpdate, TimeCalendarRead = make_crud_schemas(
+    TimeCalendar, name="TimeCalendar", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=TimeCalendar,
+        create_schema=TimeCalendarCreate,
+        update_schema=TimeCalendarUpdate,
+        read_schema=TimeCalendarRead,
+        schema_name="domain",
+        table_name="time_calendar",
+    )
+)
+
+TimePeriodCreate, TimePeriodUpdate, TimePeriodRead = make_crud_schemas(
+    TimePeriod, name="TimePeriod", readonly={"id"}
+)
+router.include_router(
+    build_crud_router(
+        model=TimePeriod,
+        create_schema=TimePeriodCreate,
+        update_schema=TimePeriodUpdate,
+        read_schema=TimePeriodRead,
+        schema_name="domain",
+        table_name="time_period",
+    )
+)

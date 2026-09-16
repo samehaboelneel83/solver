@@ -196,3 +196,79 @@ class EntityState(UUIDPKMixin, Base):
     state_value: Mapped[str] = mapped_column(String(100), nullable=False)
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EventType(UUIDPKMixin, Base):
+    __tablename__ = "event_type"
+    __table_args__ = {"schema": "domain"}
+
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class Event(UUIDPKMixin, Base):
+    __tablename__ = "event"
+    __table_args__ = {"schema": "domain"}
+
+    event_type_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.event_type.id"), nullable=False
+    )
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity.id"), nullable=True
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class ResourceType(UUIDPKMixin, Base):
+    __tablename__ = "resource_type"
+    __table_args__ = {"schema": "domain"}
+
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    capacity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class Resource(UUIDPKMixin, Base):
+    __tablename__ = "resource"
+    __table_args__ = {"schema": "domain"}
+
+    resource_type_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.resource_type.id"), nullable=False
+    )
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.entity.id"), nullable=True
+    )
+    capacity: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    availability_rule: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class TimeCalendar(UUIDPKMixin, Base):
+    __tablename__ = "time_calendar"
+    __table_args__ = {"schema": "domain"}
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("iam.organization.id"), nullable=True
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    timezone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class TimePeriod(UUIDPKMixin, Base):
+    __tablename__ = "time_period"
+    __table_args__ = {"schema": "domain"}
+
+    calendar_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.time_calendar.id"), nullable=False
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("domain.time_period.id"), nullable=True
+    )
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
