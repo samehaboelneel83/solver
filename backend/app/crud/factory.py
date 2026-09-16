@@ -1,7 +1,7 @@
 from typing import Type
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -31,8 +31,8 @@ def build_crud_router(
 
     @router.get("/")
     def list_items(
-        limit: int = 50,
-        offset: int = 0,
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
         db: Session = Depends(get_db),
         _: UserAccount = Depends(get_current_user),
     ) -> dict:

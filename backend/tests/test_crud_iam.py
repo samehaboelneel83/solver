@@ -32,6 +32,19 @@ def test_unauthenticated_request_is_rejected():
     assert response.status_code == 401
 
 
+def test_list_rejects_out_of_bounds_pagination_params(auth_headers):
+    client = TestClient(app)
+
+    negative_limit = client.get("/api/iam/organization/?limit=-1", headers=auth_headers)
+    assert negative_limit.status_code == 422
+
+    negative_offset = client.get("/api/iam/organization/?offset=-1", headers=auth_headers)
+    assert negative_offset.status_code == 422
+
+    too_large_limit = client.get("/api/iam/organization/?limit=501", headers=auth_headers)
+    assert too_large_limit.status_code == 422
+
+
 def test_organization_crud_lifecycle(auth_headers):
     client = TestClient(app)
 
