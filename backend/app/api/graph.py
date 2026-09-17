@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -69,6 +70,8 @@ def create_node_route(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except GraphConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class UpdateNodeRequest(BaseModel):
@@ -88,22 +91,31 @@ def update_node_route(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ):
+    # Only fields the client actually sent get passed through -- update_node's
+    # UNSET-defaulted params tell "field omitted" (leave alone) apart from
+    # "field explicitly null" (clear it), and model_fields_set is how we
+    # recover which one this request meant.
+    fields_set = payload.model_fields_set
+    field_kwargs: dict[str, Any] = {
+        field: getattr(payload, field)
+        for field in ("name", "code", "status", "description")
+        if field in fields_set
+    }
     try:
         return update_node(
             db,
             entity_id,
-            name=payload.name,
-            code=payload.code,
-            status=payload.status,
-            description=payload.description,
             attributes=payload.attributes,
             hierarchy_id=payload.hierarchy_id,
             parent_entity_id=payload.parent_entity_id,
+            **field_kwargs,
         )
     except GraphNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except GraphConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GraphValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/nodes/{entity_id}", status_code=204)

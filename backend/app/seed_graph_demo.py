@@ -1,7 +1,16 @@
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
-from app.models.domain import Entity, EntityType, Hierarchy, HierarchyNode, Relationship, RelationshipType
+from app.models.domain import (
+    AttributeDefinition,
+    Entity,
+    EntityAttribute,
+    EntityType,
+    Hierarchy,
+    HierarchyNode,
+    Relationship,
+    RelationshipType,
+)
 from app.models.iam import Organization
 
 
@@ -90,6 +99,49 @@ def _get_or_create_relationship(db: Session, relationship_type_id, source_entity
     return row
 
 
+def _get_or_create_attribute_definition(
+    db: Session, entity_type_id, *, code: str, name: str, data_type: str
+) -> AttributeDefinition:
+    existing = (
+        db.query(AttributeDefinition)
+        .filter(AttributeDefinition.entity_type_id == entity_type_id, AttributeDefinition.code == code)
+        .first()
+    )
+    if existing:
+        return existing
+    row = AttributeDefinition(entity_type_id=entity_type_id, code=code, name=name, data_type=data_type)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _set_entity_attribute_value(db: Session, entity_id, attribute_id, *, data_type: str, value) -> None:
+    """Idempotent set: writes (or overwrites) the single entity_attribute row
+    for this entity/attribute pair, rather than adding a duplicate each run."""
+    existing = (
+        db.query(EntityAttribute)
+        .filter(EntityAttribute.entity_id == entity_id, EntityAttribute.attribute_id == attribute_id)
+        .first()
+    )
+    row = existing or EntityAttribute(entity_id=entity_id, attribute_id=attribute_id)
+    row.value_string = None
+    row.value_number = None
+    row.value_boolean = None
+    row.value_date = None
+    row.value_datetime = None
+    row.value_json = None
+    if data_type == "number":
+        row.value_number = value
+    elif data_type == "boolean":
+        row.value_boolean = value
+    else:
+        row.value_json = value
+    if existing is None:
+        db.add(row)
+    db.commit()
+
+
 def _get_or_create_hierarchy_node(db: Session, hierarchy_id, entity_id, *, parent_node_id, level: int) -> HierarchyNode:
     existing = (
         db.query(HierarchyNode)
@@ -132,6 +184,17 @@ def seed_graph_demo(db: Session) -> None:
     ahmed = _get_or_create_entity(db, org.id, employee_type.id, code="ahmed-demo", name="Ahmed")
     sara = _get_or_create_entity(db, org.id, employee_type.id, code="sara-demo", name="Sara")
     mostafa = _get_or_create_entity(db, org.id, employee_type.id, code="mostafa-demo", name="Mostafa")
+
+    # EAV attributes on employee-demo -- exercises the typed-attribute write
+    # path (the shipped seed previously had no attribute definitions at all).
+    rank_attr = _get_or_create_attribute_definition(db, employee_type.id, code="rank", name="Rank", data_type="number")
+    is_manager_attr = _get_or_create_attribute_definition(
+        db, employee_type.id, code="is_manager", name="Is Manager", data_type="boolean"
+    )
+    _set_entity_attribute_value(db, ahmed.id, rank_attr.id, data_type="number", value=3.0)
+    _set_entity_attribute_value(db, ahmed.id, is_manager_attr.id, data_type="boolean", value=True)
+    _set_entity_attribute_value(db, sara.id, rank_attr.id, data_type="number", value=2.0)
+    _set_entity_attribute_value(db, mostafa.id, rank_attr.id, data_type="number", value=1.0)
 
     _get_or_create_relationship(db, works_for.id, ahmed.id, unit_a.id)
     _get_or_create_relationship(db, works_for.id, sara.id, unit_a.id)

@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +36,74 @@ def _attribute_value(row: EntityAttribute) -> Any:
         if value is not None:
             return value
     return None
+
+
+class _Unset:
+    """Sentinel type distinct from None, so update_node can tell "field not
+    given in the request" (leave column alone) apart from "field explicitly
+    set to null" (clear the column)."""
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET: Any = _Unset()
+
+
+_TRUE_STRINGS = {"true", "1", "yes"}
+_FALSE_STRINGS = {"false", "0", "no"}
+
+
+def coerce_attribute_value(data_type: str, code: str, value: Any) -> Any:
+    """Coerce a raw JSON value into the Python type appropriate for storing
+    it in the entity_attribute row matching `data_type`. Raises
+    GraphValidationError with a message naming the attribute `code` when the
+    value doesn't fit the declared type."""
+    if data_type == "number":
+        if isinstance(value, bool):
+            raise GraphValidationError(f"attribute {code} expects a number")
+        if isinstance(value, (int, float, str)):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                raise GraphValidationError(f"attribute {code} expects a number")
+        raise GraphValidationError(f"attribute {code} expects a number")
+
+    if data_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in _TRUE_STRINGS | _FALSE_STRINGS:
+            return value.strip().lower() in _TRUE_STRINGS
+        raise GraphValidationError(f"attribute {code} expects a boolean")
+
+    if data_type == "date":
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                raise GraphValidationError(f"attribute {code} expects a date")
+        raise GraphValidationError(f"attribute {code} expects a date")
+
+    if data_type == "datetime":
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+            try:
+                return datetime.fromisoformat(normalized)
+            except ValueError:
+                raise GraphValidationError(f"attribute {code} expects a datetime")
+        raise GraphValidationError(f"attribute {code} expects a datetime")
+
+    if data_type == "string":
+        return str(value)
+
+    # json (or any other/unrecognized data_type): stored as-is.
+    return value
 
 
 def get_domain_graph(
@@ -105,9 +174,17 @@ def get_domain_graph(
             )
         )
 
+    entity_id_set = set(entity_ids)
     relationships = []
-    if entity_ids:
-        relationships = db.query(Relationship).filter(Relationship.source_entity_id.in_(entity_ids)).all()
+    if entity_id_set:
+        relationships = (
+            db.query(Relationship)
+            .filter(
+                Relationship.source_entity_id.in_(entity_id_set),
+                Relationship.target_entity_id.in_(entity_id_set),
+            )
+            .all()
+        )
     relationship_type_by_id = {rt.id: rt for rt in db.query(RelationshipType).all()}
 
     edges = []
@@ -234,12 +311,18 @@ def _write_entity_attributes(
     for code, value in attributes.items():
         definition = definitions.get(code)
         if definition is None:
-            continue  # unknown attribute code for this entity type -- silently skip
+            raise GraphValidationError(f"unknown attribute {code} for this entity type")
         existing = (
             db.query(EntityAttribute)
             .filter(EntityAttribute.entity_id == entity_id, EntityAttribute.attribute_id == definition.id)
             .first()
         )
+        if value is None:
+            # Explicit null clears the attribute -- delete the row if it exists.
+            if existing is not None:
+                db.delete(existing)
+            continue
+        coerced = coerce_attribute_value(definition.data_type, code, value)
         row = existing or EntityAttribute(entity_id=entity_id, attribute_id=definition.id)
         row.value_string = None
         row.value_number = None
@@ -248,17 +331,17 @@ def _write_entity_attributes(
         row.value_datetime = None
         row.value_json = None
         if definition.data_type == "string":
-            row.value_string = str(value)
+            row.value_string = coerced
         elif definition.data_type == "number":
-            row.value_number = value
+            row.value_number = coerced
         elif definition.data_type == "boolean":
-            row.value_boolean = bool(value)
+            row.value_boolean = coerced
         elif definition.data_type == "date":
-            row.value_date = value
+            row.value_date = coerced
         elif definition.data_type == "datetime":
-            row.value_datetime = value
+            row.value_datetime = coerced
         else:
-            row.value_json = value
+            row.value_json = coerced
         if existing is None:
             db.add(row)
 
@@ -316,6 +399,9 @@ def create_node(
     except IntegrityError:
         db.rollback()
         raise GraphConflictError("an entity with this code already exists for this type")
+    except GraphValidationError:
+        db.rollback()
+        raise
     db.refresh(entity)
     return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
 
@@ -324,14 +410,19 @@ def update_node(
     db: Session,
     entity_id: uuid.UUID,
     *,
-    name: str | None = None,
-    code: str | None = None,
-    status: str | None = None,
-    description: str | None = None,
+    name: str | None | _Unset = UNSET,
+    code: str | None | _Unset = UNSET,
+    status: str | None | _Unset = UNSET,
+    description: str | None | _Unset = UNSET,
     attributes: dict[str, Any] | None = None,
     hierarchy_id: uuid.UUID | None = None,
     parent_entity_id: uuid.UUID | None = None,
 ) -> GraphNode:
+    """Update an entity's node fields. `name`/`code`/`status`/`description`
+    default to the UNSET sentinel: leave the column untouched when the field
+    wasn't part of the request at all, but honor an explicit `None` as "clear
+    this column" (name is the one exception -- an entity must have a name,
+    so an explicit null there is a validation error rather than a clear)."""
     entity = db.get(Entity, entity_id)
     if entity is None:
         raise GraphNotFoundError(f"entity {entity_id} not found")
@@ -349,13 +440,15 @@ def update_node(
             )
         parent_node_id = parent_node.id
 
-    if name is not None:
+    if name is not UNSET:
+        if name is None:
+            raise GraphValidationError("name cannot be empty")
         entity.name = name
-    if code is not None:
+    if code is not UNSET:
         entity.code = code
-    if status is not None:
+    if status is not UNSET:
         entity.status = status
-    if description is not None:
+    if description is not UNSET:
         entity.description = description
 
     try:
@@ -390,6 +483,9 @@ def update_node(
     except IntegrityError:
         db.rollback()
         raise GraphConflictError("an entity with this code already exists for this type")
+    except GraphValidationError:
+        db.rollback()
+        raise
     db.refresh(entity)
     return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
 

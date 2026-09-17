@@ -81,3 +81,66 @@ def test_get_domain_graph_requires_auth():
     client = TestClient(app)
     response = client.get(f"/api/graph/domain?organization_id={uuid.uuid4()}")
     assert response.status_code == 401
+
+
+def test_graph_edges_exclude_cross_org_targets(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    other_org_response = client.post(
+        "/api/iam/organization/",
+        json={"code": f"other-org-{suffix}", "name": "Other Org"},
+        headers=auth_headers,
+    )
+    assert other_org_response.status_code == 201
+    other_organization_id = other_org_response.json()["id"]
+
+    type_a = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"thing-a-{suffix}", "name": "Thing A"},
+        headers=auth_headers,
+    ).json()
+    type_b = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": other_organization_id, "code": f"thing-b-{suffix}", "name": "Thing B"},
+        headers=auth_headers,
+    ).json()
+    rel_type = client.post(
+        "/api/domain/relationship_type/",
+        json={"code": f"linked_to-{suffix}", "name": "Linked To", "is_directed": False},
+        headers=auth_headers,
+    ).json()
+
+    node_in_org = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": type_a["id"], "name": "In Org"},
+        headers=auth_headers,
+    ).json()
+    node_in_other_org = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": other_organization_id, "entity_type_id": type_b["id"], "name": "In Other Org"},
+        headers=auth_headers,
+    ).json()
+
+    edge_response = client.post(
+        "/api/graph/domain/edges",
+        json={
+            "relationship_type_id": rel_type["id"],
+            "source_entity_id": node_in_org["id"],
+            "target_entity_id": node_in_other_org["id"],
+        },
+        headers=auth_headers,
+    )
+    assert edge_response.status_code == 201
+
+    graph_response = client.get(
+        f"/api/graph/domain?organization_id={organization_id}", headers=auth_headers
+    )
+    assert graph_response.status_code == 200
+    edge_ids = {edge["id"] for edge in graph_response.json()["edges"]}
+    assert edge_response.json()["id"] not in edge_ids
+
+    # Sanity check: the source-side node is still in the graph, just not the edge.
+    node_ids = {node["id"] for node in graph_response.json()["nodes"]}
+    assert node_in_org["id"] in node_ids
+    assert node_in_other_org["id"] not in node_ids

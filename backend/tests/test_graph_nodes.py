@@ -471,3 +471,243 @@ def test_create_node_returns_404_for_unresolvable_parent_entity_id(auth_headers,
         headers=auth_headers,
     )
     assert response.status_code == 404
+
+
+def _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix):
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"employee-{suffix}", "name": "Employee"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    client.post(
+        "/api/domain/attribute_definition/",
+        json={
+            "entity_type_id": entity_type_id,
+            "code": "rank",
+            "name": "Rank",
+            "data_type": "number",
+            "is_required": False,
+            "is_multi_value": False,
+        },
+        headers=auth_headers,
+    )
+    client.post(
+        "/api/domain/attribute_definition/",
+        json={
+            "entity_type_id": entity_type_id,
+            "code": "is_manager",
+            "name": "Is Manager",
+            "data_type": "boolean",
+            "is_required": False,
+            "is_multi_value": False,
+        },
+        headers=auth_headers,
+    )
+    return entity_type_id
+
+
+def test_update_node_rejects_text_in_number_attribute(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"rank": "not-a-number"}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "rank" in response.json()["detail"].lower()
+
+
+def test_update_node_accepts_numeric_string_for_number(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"rank": "36"}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    # value_number is a Numeric column -- it comes back over JSON as a string
+    # (Decimal is encoded as str to preserve precision), so compare numerically.
+    assert float(response.json()["attributes"]["rank"]) == 36
+
+
+def test_update_node_boolean_accepts_true_string(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"is_manager": "true"}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["attributes"]["is_manager"] is True
+
+
+def test_update_node_unknown_attribute_code_returns_422(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"does_not_exist": "x"}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "does_not_exist" in response.json()["detail"].lower()
+
+
+def test_update_node_explicit_null_clears_description(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"employee-{suffix}", "name": "Employee"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Ahmed",
+            "status": "ACTIVE",
+            "description": "Old description",
+        },
+        headers=auth_headers,
+    ).json()
+
+    # An empty PATCH must leave existing fields untouched.
+    untouched_response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={},
+        headers=auth_headers,
+    )
+    assert untouched_response.status_code == 200
+    assert untouched_response.json()["attributes"]["description"] == "Old description"
+    assert untouched_response.json()["attributes"]["status"] == "ACTIVE"
+
+    # An explicit null must clear the field.
+    cleared_response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"description": None},
+        headers=auth_headers,
+    )
+    assert cleared_response.status_code == 200
+    assert cleared_response.json()["attributes"]["description"] is None
+    assert cleared_response.json()["attributes"]["status"] == "ACTIVE"
+
+    graph_response = client.get(
+        f"/api/graph/domain?organization_id={organization_id}", headers=auth_headers
+    )
+    graph_node = next(n for n in graph_response.json()["nodes"] if n["id"] == node["id"])
+    assert graph_node["attributes"]["description"] is None
+
+
+def test_update_node_explicit_null_name_returns_422(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"employee-{suffix}", "name": "Employee"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"name": None},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "name" in response.json()["detail"].lower()
+
+
+def test_update_node_null_attribute_removes_value(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Ahmed",
+            "attributes": {"rank": 5},
+        },
+        headers=auth_headers,
+    ).json()
+    assert float(node["attributes"]["rank"]) == 5
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"rank": None}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert "rank" not in response.json()["attributes"]
+
+
+def test_create_node_rejects_unknown_attribute_code(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Ahmed",
+            "attributes": {"not_a_real_attribute": "x"},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "not_a_real_attribute" in response.json()["detail"].lower()
+
+
