@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EntityTypeOption, GraphEdge } from "../types/graph";
 
 export type FilterCriteria = {
@@ -55,9 +55,64 @@ export function deriveFilterCriteria(
 // happens in GraphDemo itself (not inside this component), so `edges` isn't read here. Kept on
 // the signature rather than dropped so the prop list matches the documented contract and stays
 // available to any future in-component use (e.g. showing edge counts in the type panel).
+const SEARCH_DEBOUNCE_MS = 200;
+
 export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, value, onChange }: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
+
+  // The search box's own text is local state so typing stays instant and
+  // responsive; the (expensive, re-styles every node/edge) onChange call up
+  // to GraphDemo is debounced ~200ms behind it. Kept in refs rather than
+  // captured in the closure below so a debounced call that fires after
+  // `value`/`onChange` changed (e.g. selectedTypes toggled while the user
+  // was still typing) still merges onto the *current* value, not a stale one.
+  const [searchDraft, setSearchDraft] = useState(value.search);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The most recent typed value not yet committed via onChange, or null once
+  // it has been (or there's nothing pending). Lets unmount flush it instead
+  // of silently dropping it -- see the cleanup effect below.
+  const pendingSearchRef = useRef<string | null>(null);
+
+  // Resync the local draft when `search` changes from outside (e.g.
+  // GraphDemo resetting filterState on an organisation switch), but not as
+  // a reaction to our own debounced onChange below -- by the time that
+  // fires, value.search already equals searchDraft, so this is a no-op then.
+  useEffect(() => {
+    setSearchDraft(value.search);
+  }, [value.search]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        // Flush rather than drop a still-pending debounced search on unmount
+        // -- GraphDemo remounts this component whenever its `graph` query
+        // goes transiently undefined (e.g. mid-refetch on a hierarchy
+        // switch), and a keystroke typed just before that would otherwise
+        // vanish even though the input still visibly showed it.
+        if (pendingSearchRef.current !== null) {
+          onChangeRef.current({ ...valueRef.current, search: pendingSearchRef.current });
+        }
+      }
+    };
+  }, []);
+
+  function handleSearchChange(next: string) {
+    setSearchDraft(next);
+    pendingSearchRef.current = next;
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    debounceRef.current = setTimeout(() => {
+      pendingSearchRef.current = null;
+      onChangeRef.current({ ...valueRef.current, search: next });
+    }, SEARCH_DEBOUNCE_MS);
+  }
 
   const selectedSet = useMemo(
     () => (value.selectedTypes === null ? new Set(entityTypes.map((et) => et.code)) : new Set(value.selectedTypes)),
@@ -88,8 +143,8 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
       <input
         type="text"
         placeholder="Search by label or code…"
-        value={value.search}
-        onChange={(e) => onChange({ ...value, search: e.target.value })}
+        value={searchDraft}
+        onChange={(e) => handleSearchChange(e.target.value)}
         className="rounded-md border border-slate-300 px-2 py-1 text-sm"
         data-testid="filter-search"
       />

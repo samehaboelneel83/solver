@@ -77,21 +77,62 @@ describe("FilterBar", () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...DEFAULT_FILTER_STATE, selectedTypes: null });
   });
 
-  it("updates search via onChange as the value prop, not internal state", () => {
-    const onChange = vi.fn();
-    render(
-      <FilterBar
-        entityTypes={entityTypes}
-        edges={edges}
-        selectedNodeId={null}
-        value={DEFAULT_FILTER_STATE}
-        onChange={onChange}
-      />
-    );
+  it("updates search via a debounced onChange as the value prop, not internal state", () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      render(
+        <FilterBar
+          entityTypes={entityTypes}
+          edges={edges}
+          selectedNodeId={null}
+          value={DEFAULT_FILTER_STATE}
+          onChange={onChange}
+        />
+      );
 
-    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "ahmed" } });
+      fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "ahmed" } });
 
-    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_FILTER_STATE, search: "ahmed" });
+      // The input itself updates immediately (stays responsive)...
+      expect(screen.getByTestId("filter-search")).toHaveValue("ahmed");
+      // ...but onChange (which drives GraphEditor's re-style pass) is debounced.
+      expect(onChange).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(200);
+
+      expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_FILTER_STATE, search: "ahmed" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("debounces rapid keystrokes into a single onChange call with the final value", () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      render(
+        <FilterBar
+          entityTypes={entityTypes}
+          edges={edges}
+          selectedNodeId={null}
+          value={DEFAULT_FILTER_STATE}
+          onChange={onChange}
+        />
+      );
+
+      const input = screen.getByTestId("filter-search");
+      fireEvent.change(input, { target: { value: "a" } });
+      vi.advanceTimersByTime(50);
+      fireEvent.change(input, { target: { value: "ah" } });
+      vi.advanceTimersByTime(50);
+      fireEvent.change(input, { target: { value: "ahmed" } });
+      vi.advanceTimersByTime(200);
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_FILTER_STATE, search: "ahmed" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("disables the highlight toggle when nothing is selected", () => {
