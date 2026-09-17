@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.crud.registry import TABLE_REGISTRY
 from app.main import app
 from app.seed import seed_admin
 
@@ -253,3 +254,122 @@ def test_meta_reports_defaults_and_choices(auth_headers):
     name_field = problem_fields["name"]
     assert not name_field.get("default")
     assert not name_field.get("choices")
+
+
+def test_schema_reports_table_labels(auth_headers):
+    client = TestClient(app)
+
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    assert response.status_code == 200
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    entity_type_table = tables[("domain", "entity_type")]
+    assert entity_type_table["label"] == "Entity type"
+    assert entity_type_table["label_plural"] == "Entity types"
+
+    # Irregular plurals must not just tack an "s" on.
+    entity_table = tables[("domain", "entity")]
+    assert entity_table["label"] == "Entity"
+    assert entity_table["label_plural"] == "Entities"
+
+    hierarchy_table = tables[("domain", "hierarchy")]
+    assert hierarchy_table["label"] == "Hierarchy"
+    assert hierarchy_table["label_plural"] == "Hierarchies"
+
+
+def test_schema_reports_field_label_overrides(auth_headers):
+    client = TestClient(app)
+
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    assert response.status_code == 200
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    relationship_fields = {f["name"]: f for f in tables[("domain", "relationship")]["fields"]}
+    assert relationship_fields["source_entity_id"]["label"] == "From"
+    assert relationship_fields["target_entity_id"]["label"] == "To"
+
+    entity_fields = {f["name"]: f for f in tables[("domain", "entity")]["fields"]}
+    assert entity_fields["entity_type_id"]["label"] == "Type"
+    assert entity_fields["organization_id"]["label"] == "Organization"
+
+    entity_type_fields = {f["name"]: f for f in tables[("domain", "entity_type")]["fields"]}
+    assert entity_type_fields["is_abstract"]["label"] == "Abstract type"
+
+
+def test_schema_field_label_falls_back_to_humanised_name(auth_headers):
+    """Fields with no override in FIELD_LABELS still get a sensible label
+    from humanise(): a single trailing "_id" is dropped, underscores
+    become spaces, and only the first letter is capitalised."""
+    client = TestClient(app)
+
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    assert response.status_code == 200
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    relationship_fields = {f["name"]: f for f in tables[("domain", "relationship")]["fields"]}
+    assert relationship_fields["valid_from"]["label"] == "Valid from"
+    assert relationship_fields["valid_to"]["label"] == "Valid to"
+
+    entity_type_fields = {f["name"]: f for f in tables[("domain", "entity_type")]["fields"]}
+    assert entity_type_fields["parent_type_id"]["label"] == "Parent type"
+    assert entity_type_fields["code"]["label"] == "Code"
+
+
+def test_schema_field_keeps_all_existing_keys(auth_headers):
+    """Adding `label` must not disturb any key the frontend already
+    depends on."""
+    client = TestClient(app)
+
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    assert response.status_code == 200
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    code_field = next(f for f in tables[("domain", "entity_type")]["fields"] if f["name"] == "code")
+    expected_keys = {
+        "name",
+        "type",
+        "required",
+        "writable",
+        "is_fk",
+        "fk_table",
+        "default",
+        "choices",
+        "label_field",
+        "label",
+    }
+    assert set(code_field.keys()) == expected_keys
+
+
+def test_meta_counts_requires_auth():
+    client = TestClient(app)
+
+    response = client.get("/api/meta/counts")
+
+    assert response.status_code == 401
+
+
+def test_meta_counts_reports_one_entry_per_table_and_increments(auth_headers):
+    client = TestClient(app)
+
+    response = client.get("/api/meta/counts", headers=auth_headers)
+    assert response.status_code == 200
+    counts = response.json()
+    assert len(counts) == len(TABLE_REGISTRY)
+
+    by_table = {(c["schema"], c["table"]): c for c in counts}
+    role_type_before = by_table[("domain", "role_type")]
+    assert isinstance(role_type_before["total"], int)
+    assert role_type_before["label_plural"] == "Role types"
+
+    suffix = uuid.uuid4().hex[:8]
+    create_response = client.post(
+        "/api/domain/role_type/",
+        json={"code": f"cnt-{suffix}", "name": f"Count Test {suffix}"},
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201
+
+    response_after = client.get("/api/meta/counts", headers=auth_headers)
+    assert response_after.status_code == 200
+    by_table_after = {(c["schema"], c["table"]): c for c in response_after.json()}
+    assert by_table_after[("domain", "role_type")]["total"] == role_type_before["total"] + 1

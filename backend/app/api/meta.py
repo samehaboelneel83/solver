@@ -4,8 +4,10 @@ import uuid
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import inspect
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.db import get_db
 from app.crud.labels import DEFAULT_LABEL_COLUMNS
 from app.crud.registry import TABLE_REGISTRY
 from app.models.iam import UserAccount
@@ -38,6 +40,57 @@ CHOICES: dict[tuple[str | None, str], list[str]] = {
 
 def _choices_for(table: str, field: str) -> list[str] | None:
     return CHOICES.get((table, field)) or CHOICES.get((None, field))
+
+
+# Human-readable field labels for the schema-driven UI (Task 3 consumes
+# these), keyed by (table, field) with a (None, field) fallback shared
+# across tables that use the same field name -- same shape as CHOICES
+# above. Only fields whose plain-English label isn't what humanise()
+# would produce need an entry here (e.g. "entity_type_id" would
+# otherwise humanise to "Entity type", which reads oddly as a field
+# label on the entity/hierarchy/etc. rows that carry it).
+FIELD_LABELS: dict[tuple[str | None, str], str] = {
+    (None, "source_entity_id"): "From",
+    (None, "target_entity_id"): "To",
+    (None, "entity_type_id"): "Type",
+    (None, "organization_id"): "Organization",
+    (None, "is_abstract"): "Abstract type",
+}
+
+# Table labels (singular, plural) for tables whose plural isn't just
+# humanise(table) + "s". Every one of the 31 registered tables was
+# checked; only "entity" and "hierarchy" need an override -- the rest
+# (including "parameter", "scenario", "objective") pluralise correctly
+# with a trailing "s".
+TABLE_LABELS: dict[str, tuple[str, str]] = {
+    "entity": ("Entity", "Entities"),
+    "hierarchy": ("Hierarchy", "Hierarchies"),
+}
+
+
+def humanise(name: str) -> str:
+    """Fallback label for a table or field with no explicit override:
+    strip a single trailing "_id", replace underscores with spaces, and
+    capitalise only the first character -- leaving the rest of the
+    string (and any already-upper-case acronym) untouched."""
+    if name.endswith("_id"):
+        name = name[: -len("_id")]
+    name = name.replace("_", " ")
+    if not name:
+        return name
+    return name[0].upper() + name[1:]
+
+
+def _field_label(table: str, field: str) -> str:
+    return FIELD_LABELS.get((table, field)) or FIELD_LABELS.get((None, field)) or humanise(field)
+
+
+def _table_labels(table: str) -> tuple[str, str]:
+    override = TABLE_LABELS.get(table)
+    if override is not None:
+        return override
+    singular = humanise(table)
+    return singular, f"{singular}s"
 
 
 def _scalar_default(column):
@@ -136,9 +189,41 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
                     "default": default_by_field.get(field_name),
                     "choices": _choices_for(meta.table, field_name),
                     "label_field": field_name in DEFAULT_LABEL_COLUMNS,
+                    "label": _field_label(meta.table, field_name),
                 }
             )
 
-        tables.append({"schema": meta.schema, "table": meta.table, "fields": fields})
+        label, label_plural = _table_labels(meta.table)
+        tables.append(
+            {
+                "schema": meta.schema,
+                "table": meta.table,
+                "label": label,
+                "label_plural": label_plural,
+                "fields": fields,
+            }
+        )
 
     return tables
+
+
+@router.get("/counts")
+def get_counts(
+    db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
+) -> list[dict]:
+    """One row count per registered table, so the dashboard can render
+    every table's total from a single request instead of firing one
+    request per table (A-1/A-2 from the audit)."""
+    counts = []
+    for meta in TABLE_REGISTRY:
+        _, label_plural = _table_labels(meta.table)
+        total = db.query(meta.model).count()
+        counts.append(
+            {
+                "schema": meta.schema,
+                "table": meta.table,
+                "label_plural": label_plural,
+                "total": total,
+            }
+        )
+    return counts
