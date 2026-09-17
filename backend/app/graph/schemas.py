@@ -2,6 +2,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+# These schemas define the same contract as frontend/src/types/graph.ts and must
+# be kept in sync by hand -- there is no code generation between them in this phase.
+
 
 class GraphNode(BaseModel):
     id: str

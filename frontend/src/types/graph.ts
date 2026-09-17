@@ -1,3 +1,5 @@
+// These types define the same contract as backend/app/graph/schemas.py and must
+// be kept in sync by hand -- there is no code generation between them in this phase.
 export type GraphNode = {
   id: string;
   type: string;

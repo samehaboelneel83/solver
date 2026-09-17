@@ -92,6 +92,23 @@ Navigate to http://localhost:3010 and sign in with the seeded admin:
 The sidebar, tables and forms are generated entirely from `GET /api/meta/schema`
 — there is no hardcoded table list in the frontend.
 
+## Graph Editor demo
+
+`/graph` is a demo page for the Graph Editor sub-project: an interactive
+Cytoscape.js canvas over the same `domain.entity`/`domain.relationship` tables
+used by the generic CRUD admin UI, with drag-connect edge creation, a
+create-node form, hierarchy nesting via ELK layout, and a property panel for
+editing or deleting the selected node/edge. It reads and writes through
+`GET/POST/PATCH/DELETE /api/graph/domain...`, not the generic CRUD routes.
+
+To see anything on the page, seed some demo data first:
+
+```bash
+docker compose exec -T backend python -m app.seed_graph_demo
+```
+
+The seed is idempotent — re-running it does not create duplicates.
+
 ## Tests
 
 ```bash
@@ -110,6 +127,16 @@ API and checks the frontend proxy:
 ```bash
 docker compose down -v      # optional: start from a truly cold state
 ./scripts/smoke_test.sh
+```
+
+`scripts/graph_smoke_check.py` is the equivalent smoke check for the Graph
+Editor sub-project: it assumes the stack is already up and migrated and that
+`app.seed_graph_demo` has been run, then exercises `/api/graph/domain...`
+end-to-end and checks the `/graph` page is served by the frontend proxy.
+
+```bash
+docker compose exec -T backend python -m app.seed_graph_demo
+python scripts/graph_smoke_check.py
 ```
 
 ## Known limitations in this phase
@@ -135,3 +162,14 @@ docker compose down -v      # optional: start from a truly cold state
 - The backend image has no bind mount: after changing anything under `backend/`,
   run `docker compose build backend && docker compose up -d backend` before the
   container sees it.
+- **Hierarchy collapse/expand is not implemented** on the Graph Editor demo
+  page. Cytoscape's compound nodes provide nesting only; collapsing or
+  expanding a compound node's children would require the
+  `cytoscape-expand-collapse` extension, which is not currently installed.
+- **Dynamic EAV attribute editing is incomplete** on the Graph Editor demo
+  page: attribute inputs in the property panel are plain text (not typed by
+  the attribute's declared `data_type`), the create-node form doesn't expose
+  attribute inputs at all, and search doesn't match on attribute values.
+- **The Graph Editor demo page shares its data with the backend test suite**
+  (no test-database isolation), so nodes/entities created by running `pytest`
+  will appear on the `/graph` demo page.
