@@ -207,10 +207,11 @@ containers until the image is rebuilt and the container recreated from it.
 ./scripts/rebuild.sh
 ```
 
-rebuilds both images, recreates both containers, and checks that each is
-actually serving (`/api/health` on the backend, `/` on the frontend).
-Rebuild **both** even if you only touched one side — a stale image on the
-side you didn't touch is easy to miss and has shipped before.
+rebuilds both images, recreates both containers, and waits (retrying for up
+to ~30s) for each to actually start serving — `/api/health` on the backend,
+`/` on the frontend — before confirming. Rebuild **both** even if you only
+touched one side — a stale image on the side you didn't touch is easy to
+miss and has shipped before.
 
 ## Full-stack smoke test
 
