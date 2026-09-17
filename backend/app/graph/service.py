@@ -401,6 +401,13 @@ def delete_node(db: Session, entity_id: uuid.UUID) -> None:
     db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity_id).delete()
     for node in hierarchy_node_rows:
         db.delete(node)
+    # Flush the child-row deletes before deleting the entity itself: these models
+    # have no ORM relationship() links (plain FK columns only), so the unit of
+    # work cannot infer that hierarchy_node/entity_attribute must be deleted
+    # before entity, and may otherwise attempt the entity DELETE first, tripping
+    # hierarchy_node_entity_id_fkey even though the referencing rows are already
+    # staged for deletion in the same flush.
+    db.flush()
     db.delete(entity)
     try:
         db.commit()
