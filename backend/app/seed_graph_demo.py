@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal
+from app.graph.service import _clear_attribute_values
 from app.models.domain import (
     AttributeDefinition,
     Entity,
@@ -125,12 +126,7 @@ def _set_entity_attribute_value(db: Session, entity_id, attribute_id, *, data_ty
         .first()
     )
     row = existing or EntityAttribute(entity_id=entity_id, attribute_id=attribute_id)
-    row.value_string = None
-    row.value_number = None
-    row.value_boolean = None
-    row.value_date = None
-    row.value_datetime = None
-    row.value_json = None
+    _clear_attribute_values(row)
     if data_type == "number":
         row.value_number = value
     elif data_type == "boolean":

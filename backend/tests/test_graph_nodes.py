@@ -528,6 +528,30 @@ def test_update_node_rejects_text_in_number_attribute(auth_headers, organization
     assert "rank" in response.json()["detail"].lower()
 
 
+@pytest.mark.parametrize("non_finite", ["NaN", "Infinity", "-Infinity"])
+def test_update_node_rejects_non_finite_number(auth_headers, organization_id, non_finite):
+    # Python's float() happily parses these strings, so they'd otherwise sail
+    # through the "is this parseable as a number" check and get stored as
+    # NaN/inf, which is neither valid domain data nor safely JSON-serializable.
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    entity_type_id = _create_employee_type_with_attributes(client, auth_headers, organization_id, suffix)
+
+    node = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": entity_type_id, "name": "Ahmed"},
+        headers=auth_headers,
+    ).json()
+
+    response = client.patch(
+        f"/api/graph/domain/nodes/{node['id']}",
+        json={"attributes": {"rank": non_finite}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+    assert "rank" in response.json()["detail"].lower()
+
+
 def test_update_node_accepts_numeric_string_for_number(auth_headers, organization_id):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
@@ -545,9 +569,21 @@ def test_update_node_accepts_numeric_string_for_number(auth_headers, organizatio
         headers=auth_headers,
     )
     assert response.status_code == 200
-    # value_number is a Numeric column -- it comes back over JSON as a string
-    # (Decimal is encoded as str to preserve precision), so compare numerically.
-    assert float(response.json()["attributes"]["rank"]) == 36
+    rank = response.json()["attributes"]["rank"]
+    # value_number is a Numeric/Decimal column -- _attribute_value casts it to
+    # float before it reaches the JSON response, so it must come back as a
+    # real JSON number, not a string like "36.0".
+    assert isinstance(rank, float)
+    assert rank == 36
+
+    # Same guarantee via the get_domain_graph read path (not just the
+    # update_node mutation response) -- both funnel through _attribute_value.
+    graph_response = client.get(
+        f"/api/graph/domain?organization_id={organization_id}", headers=auth_headers
+    )
+    graph_node = next(n for n in graph_response.json()["nodes"] if n["id"] == node["id"])
+    assert isinstance(graph_node["attributes"]["rank"], float)
+    assert graph_node["attributes"]["rank"] == 36
 
 
 def test_update_node_boolean_accepts_true_string(auth_headers, organization_id):
@@ -681,7 +717,7 @@ def test_update_node_null_attribute_removes_value(auth_headers, organization_id)
         },
         headers=auth_headers,
     ).json()
-    assert float(node["attributes"]["rank"]) == 5
+    assert node["attributes"]["rank"] == 5
 
     response = client.patch(
         f"/api/graph/domain/nodes/{node['id']}",

@@ -1,3 +1,4 @@
+import math
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -31,7 +32,13 @@ def _node_label(entity: Entity) -> str:
 
 
 def _attribute_value(row: EntityAttribute) -> Any:
-    for column in ("value_string", "value_number", "value_boolean", "value_date", "value_datetime", "value_json"):
+    if row.value_number is not None:
+        # value_number is a Numeric/Decimal column -- left as Decimal, it
+        # serializes over JSON as a string (e.g. "3.0") rather than a number,
+        # which is surprising for anything reading GraphNode.attributes as
+        # typed JSON. Cast to float so it round-trips as a real JSON number.
+        return float(row.value_number)
+    for column in ("value_string", "value_boolean", "value_date", "value_datetime", "value_json"):
         value = getattr(row, column)
         if value is not None:
             return value
@@ -64,9 +71,12 @@ def coerce_attribute_value(data_type: str, code: str, value: Any) -> Any:
             raise GraphValidationError(f"attribute {code} expects a number")
         if isinstance(value, (int, float, str)):
             try:
-                return float(value)
+                coerced = float(value)
             except (TypeError, ValueError):
                 raise GraphValidationError(f"attribute {code} expects a number")
+            if not math.isfinite(coerced):
+                raise GraphValidationError(f"attribute {code} expects a finite number")
+            return coerced
         raise GraphValidationError(f"attribute {code} expects a number")
 
     if data_type == "boolean":
@@ -299,6 +309,19 @@ def _entity_to_node(db: Session, entity: Entity, *, hierarchy_id: uuid.UUID | No
     )
 
 
+def _clear_attribute_values(row: EntityAttribute) -> None:
+    """Null out all of an entity_attribute row's typed value_* columns, so
+    only the one matching its definition's data_type ends up set. Shared by
+    the write path here and by seed_graph_demo, which writes EAV rows
+    directly rather than through create_node/update_node."""
+    row.value_string = None
+    row.value_number = None
+    row.value_boolean = None
+    row.value_date = None
+    row.value_datetime = None
+    row.value_json = None
+
+
 def _write_entity_attributes(
     db: Session, *, entity_id: uuid.UUID, entity_type_id: uuid.UUID, attributes: dict[str, Any]
 ) -> None:
@@ -324,12 +347,7 @@ def _write_entity_attributes(
             continue
         coerced = coerce_attribute_value(definition.data_type, code, value)
         row = existing or EntityAttribute(entity_id=entity_id, attribute_id=definition.id)
-        row.value_string = None
-        row.value_number = None
-        row.value_boolean = None
-        row.value_date = None
-        row.value_datetime = None
-        row.value_json = None
+        _clear_attribute_values(row)
         if definition.data_type == "string":
             row.value_string = coerced
         elif definition.data_type == "number":
