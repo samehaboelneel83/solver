@@ -96,6 +96,43 @@ def test_options_ids_resolves_exact_rows(auth_headers):
     assert {item["id"] for item in items} == set(ids)
 
 
+def test_options_ids_over_default_limit_returns_all(auth_headers):
+    """`ids` must return exactly the requested rows, not just the first
+    `limit` (default 50) of them -- Task 3's frontend batches every
+    distinct FK id on a page into one `ids=` call, so silently truncating
+    at 50 would leave later rows showing raw UUIDs instead of labels."""
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    ids = []
+    for i in range(60):
+        response = client.post(
+            "/api/domain/role_type/",
+            json={"code": f"opt-bulk-{i}-{suffix}", "name": f"Opt Bulk {i}"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+        ids.append(response.json()["id"])
+
+    response = client.get(
+        f"/api/domain/role_type/options?ids={','.join(ids)}", headers=auth_headers
+    )
+    assert response.status_code == 200
+    items = response.json()
+    assert {item["id"] for item in items} == set(ids)
+    assert len(items) == 60
+
+
+def test_options_too_many_ids_returns_422(auth_headers):
+    client = TestClient(app)
+    ids = [str(uuid.uuid4()) for _ in range(201)]
+
+    response = client.get(
+        f"/api/domain/role_type/options?ids={','.join(ids)}", headers=auth_headers
+    )
+    assert response.status_code == 422
+
+
 def test_options_invalid_id_returns_422(auth_headers):
     client = TestClient(app)
 

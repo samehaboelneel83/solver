@@ -57,10 +57,19 @@ def _register_options_route(meta: TableMeta) -> None:
                     id_values.append(uuid.UUID(raw))
                 except ValueError:
                     raise HTTPException(status_code=422, detail=f"invalid uuid {raw!r}")
-            query = query.filter(model.id.in_(id_values))
-        elif q:
-            if columns:
-                query = query.filter(or_(*[col.ilike(f"%{q}%") for col in columns]))
+            if len(id_values) > 200:
+                raise HTTPException(status_code=422, detail="too many ids (max 200)")
+            if not id_values:
+                return []
+            # `ids` means "return exactly these rows" (Task 3 batches every
+            # distinct FK id on a page into one call), so `limit` -- which
+            # exists to cap an unbounded `q`/browse listing -- does not
+            # apply here; only the 200-id cap above bounds the query.
+            rows = query.filter(model.id.in_(id_values)).all()
+            return [{"id": str(row.id), "label": label_for(db, row, meta.schema, meta.table)} for row in rows]
+
+        if q and columns:
+            query = query.filter(or_(*[col.ilike(f"%{q}%") for col in columns]))
 
         rows = query.limit(limit).all()
         return [{"id": str(row.id), "label": label_for(db, row, meta.schema, meta.table)} for row in rows]
