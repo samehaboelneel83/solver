@@ -19,6 +19,13 @@ type EntityFormProps = {
    * empty fields so column defaults apply.
    */
   isEdit?: boolean;
+  /**
+   * True while `onSubmit`'s mutation is in flight. Disables the submit
+   * button and swaps its label to "Saving…" so a slow request can't be
+   * fired twice by a second click (C-4) -- under ~1s latency the button
+   * used to stay live with its normal label the whole time.
+   */
+  isSubmitting?: boolean;
 };
 
 function defaultValueFor(field: FieldMeta): unknown {
@@ -58,7 +65,14 @@ function hasNonEmptyValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
 }
 
-export default function EntityForm({ fields, initialValues, onSubmit, submitLabel, isEdit = false }: EntityFormProps) {
+export default function EntityForm({
+  fields,
+  initialValues,
+  onSubmit,
+  submitLabel,
+  isEdit = false,
+  isSubmitting = false,
+}: EntityFormProps) {
   const writableFields = fields.filter((f) => f.writable);
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const initial: Record<string, unknown> = {};
@@ -234,9 +248,10 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
       ))}
       <button
         type="submit"
-        className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+        disabled={isSubmitting}
+        className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {submitLabel}
+        {isSubmitting ? "Saving…" : submitLabel}
       </button>
     </form>
   );

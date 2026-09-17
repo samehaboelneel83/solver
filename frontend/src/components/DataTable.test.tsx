@@ -81,7 +81,7 @@ describe("DataTable", () => {
     onRowClick.mockClear();
     fireEvent.click(screen.getByText("Delete"));
     expect(onRowClick).not.toHaveBeenCalled();
-    expect(onDelete).toHaveBeenCalledWith("1");
+    expect(onDelete).toHaveBeenCalledWith("1", "employee");
     (window.confirm as any).mockRestore();
   });
 
@@ -107,8 +107,44 @@ describe("DataTable", () => {
 
       fireEvent.click(screen.getByText("Delete"));
 
-      expect(window.confirm).toHaveBeenCalledWith("Delete this row? This cannot be undone.");
-      expect(onDelete).toHaveBeenCalledWith("1");
+      expect(window.confirm).toHaveBeenCalledWith('Delete "employee"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("1", "employee");
+    });
+
+    it("names the record from `name` when there is no `code`, and falls back to 'this row' when neither is present (D-6)", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithQueryClient(
+        <DataTable
+          fields={fields}
+          rows={[{ id: "2", name: "Acme Corp" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+      fireEvent.click(screen.getByText("Delete"));
+      expect(window.confirm).toHaveBeenCalledWith('Delete "Acme Corp"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("2", "Acme Corp");
+
+      (window.confirm as any).mockClear();
+      onDelete.mockClear();
+      renderWithQueryClient(
+        <DataTable
+          fields={fields}
+          rows={[{ id: "3" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+      fireEvent.click(screen.getAllByText("Delete")[1]);
+      expect(window.confirm).toHaveBeenCalledWith('Delete "this row"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("3", "this row");
     });
 
     it("skips onDelete when the confirmation is cancelled", () => {

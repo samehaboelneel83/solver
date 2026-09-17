@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DataTable from "../components/DataTable";
+import Skeleton from "../components/Skeleton";
+import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
@@ -16,6 +18,7 @@ export default function EntityList() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const toast = useToast();
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
@@ -65,7 +68,7 @@ export default function EntityList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  const { data, isLoading, error } = useEntityList(schemaName, tableName, {
+  const { data, isLoading, error, refetch } = useEntityList(schemaName, tableName, {
     limit: PAGE_SIZE,
     offset,
     q,
@@ -177,8 +180,19 @@ export default function EntityList() {
         ))}
       </div>
       {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
-      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
-      {error && <p className="text-sm text-red-600">{formatApiError(error)}</p>}
+      {isLoading && <Skeleton rows={PAGE_SIZE > 10 ? 8 : PAGE_SIZE} cols={table.fields.length + 1} />}
+      {error && (
+        <div className="mb-3 flex items-center gap-3 text-sm text-red-600">
+          <p>{formatApiError(error)}</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {data && (
         <DataTable
           key={`${schemaName}.${tableName}`}
@@ -191,9 +205,10 @@ export default function EntityList() {
           order={order}
           onSort={handleSort}
           onPageChange={handlePageChange}
-          onDelete={(id) => {
+          onDelete={(id, label) => {
             setDeleteError(null);
             deleteEntity.mutate(id, {
+              onSuccess: () => toast.success(`Deleted "${label}"`),
               onError: (err) => setDeleteError(formatApiError(err)),
             });
           }}

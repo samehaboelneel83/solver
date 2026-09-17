@@ -7,6 +7,7 @@ import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
 import { formatApiError } from "../api/errors";
 import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
+import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
 
@@ -192,6 +193,7 @@ export default function GraphEditor({
   const { data, isLoading, error: loadError } = useGraph(organizationId, hierarchyId);
   const createNode = useCreateNode(organizationId, hierarchyId);
   const createEdge = useCreateEdge(organizationId, hierarchyId);
+  const toast = useToast();
 
   // Create the cytoscape instance exactly once per mount. Data is applied
   // (and the instance kept alive across refetches/mutations) by the effect
@@ -443,13 +445,18 @@ export default function GraphEditor({
     if (!pendingEdge) {
       return;
     }
+    const relationshipTypeName =
+      data?.relationship_types.find((rt) => rt.id === relationshipTypeId)?.name ?? "Relationship";
     createEdge.mutate(
       {
         relationship_type_id: relationshipTypeId,
         source_entity_id: pendingEdge.sourceId,
         target_entity_id: pendingEdge.targetId,
       },
-      { onError: (e) => setError(formatApiError(e)) }
+      {
+        onSuccess: () => toast.success(`"${relationshipTypeName}" created`),
+        onError: (e) => setError(formatApiError(e)),
+      }
     );
     setPendingEdge(null);
   }
@@ -493,7 +500,10 @@ export default function GraphEditor({
         hierarchy_id: hierarchyId ?? undefined,
         parent_entity_id: parentEntityId,
       },
-      { onError: (e) => setError(formatApiError(e)) }
+      {
+        onSuccess: () => toast.success(`"${name}" created`),
+        onError: (e) => setError(formatApiError(e)),
+      }
     );
     setShowCreateNode(false);
     setCreateEntityTypeId("");
@@ -625,8 +635,12 @@ export default function GraphEditor({
               </select>
             </label>
           )}
-          <button type="submit" className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white">
-            Create
+          <button
+            type="submit"
+            disabled={createNode.isPending}
+            className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {createNode.isPending ? "Creating…" : "Create"}
           </button>
         </form>
       )}

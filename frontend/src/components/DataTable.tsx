@@ -15,7 +15,7 @@ type DataTableProps = {
   order?: "asc" | "desc";
   onSort?: (column: string) => void;
   onPageChange: (offset: number) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, label: string) => void;
   onRowClick?: (id: string) => void;
 };
 
@@ -23,6 +23,19 @@ function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+/**
+ * Human-readable name for a row, so the delete confirmation (D-6) can say
+ * "Delete "employee"?" instead of the anonymous "Delete this row?" that reads
+ * identically for every row in the table. Prefers `code` (usually the
+ * stable, human-assigned identifier) over `name`, then falls back to a
+ * generic phrase when neither is present.
+ */
+function recordLabel(row: Row): string {
+  if (typeof row.code === "string" && row.code) return row.code;
+  if (typeof row.name === "string" && row.name) return row.name;
+  return "this row";
 }
 
 function idsForColumns(rows: Row[], columns: string[]): string[] {
@@ -75,9 +88,10 @@ export default function DataTable({
     return labels?.[id] ?? id;
   }
 
-  function handleDeleteClick(id: string) {
-    if (window.confirm("Delete this row? This cannot be undone.")) {
-      onDelete(id);
+  function handleDeleteClick(row: Row) {
+    const label = recordLabel(row);
+    if (window.confirm(`Delete "${label}"? This cannot be undone.`)) {
+      onDelete(String(row.id), label);
     }
   }
 
@@ -137,7 +151,7 @@ export default function DataTable({
                     className="text-xs text-red-600 hover:underline"
                     onClick={(event) => {
                       event.stopPropagation();
-                      handleDeleteClick(String(row.id));
+                      handleDeleteClick(row);
                     }}
                   >
                     Delete

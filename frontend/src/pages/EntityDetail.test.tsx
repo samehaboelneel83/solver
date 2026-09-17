@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityDetail from "./EntityDetail";
+import { ToastProvider } from "../components/ToastProvider";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -15,11 +16,13 @@ function renderAtNew() {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
-        <Routes>
-          <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
-        </Routes>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -28,11 +31,13 @@ function renderAtId(id: string) {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/domain/entity_type/${id}`]}>
-        <Routes>
-          <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
-        </Routes>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[`/domain/entity_type/${id}`]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -71,6 +76,37 @@ describe("EntityDetail (create mode)", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+  });
+
+  it("disables the submit button and shows 'Saving…' while the create mutation is pending (C-4)", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/" && options?.method === "POST") {
+        // Never resolves -- the mutation stays pending so the test can
+        // inspect the button while it's in flight.
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderAtNew();
+
+    fireEvent.change(await screen.findByTestId("field-code"), { target: { value: "employee" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    const button = await screen.findByText("Saving…");
+    expect(button).toBeDisabled();
   });
 });
 
@@ -291,6 +327,64 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     expect(await screen.findByRole("heading", { name: "Edit entity type" })).toBeInTheDocument();
     expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe("Edit entity type · Problem Solver"));
+  });
+
+  it("shows an 'Entity type created' toast after a successful create (D-1)", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
+      if (path === "/api/domain/entity_type/" && options?.method === "POST") {
+        return Promise.resolve({ id: "new-id", code: "employee" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(await screen.findByTestId("field-code"), { target: { value: "employee" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Entity type created");
+  });
+
+  it("shows an 'Entity type saved' toast after a successful update (D-1)", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
+      if (path === "/api/domain/entity_type/existing-id" && options?.method === "PUT") {
+        return Promise.resolve({ id: "existing-id", code: "updated-code" });
+      }
+      if (path === "/api/domain/entity_type/existing-id") {
+        return Promise.resolve({ id: "existing-id", code: "existing-code" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    const codeField = (await screen.findByTestId("field-code")) as HTMLInputElement;
+    await waitFor(() => expect(codeField.value).toBe("existing-code"));
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Entity type saved");
   });
 });
 

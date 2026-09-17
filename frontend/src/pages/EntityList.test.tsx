@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityList from "./EntityList";
+import { ToastProvider } from "../components/ToastProvider";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -22,15 +23,19 @@ const schemaResponse = [
   },
 ];
 
-function renderWithProviders(initialEntry: string) {
-  const queryClient = new QueryClient();
+function renderWithProviders(initialEntry: string, options: { retry?: boolean } = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: options.retry ?? false } },
+  });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route path=":schemaName/:tableName" element={<EntityList />} />
-        </Routes>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path=":schemaName/:tableName" element={<EntityList />} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -133,6 +138,64 @@ describe("EntityList", () => {
 
     expect(await screen.findByText("row is referenced elsewhere")).toBeInTheDocument();
     (window.confirm as any).mockRestore();
+  });
+
+  it("shows a toast naming the deleted record (D-1/D-6)", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(schemaResponse);
+      }
+      if (options?.method === "DELETE") {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve({ items: [{ id: "1", code: "employee" }], total: 1 });
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithProviders("/domain/entity_type");
+    await screen.findByText("employee");
+
+    fireEvent.click(screen.getByText("Delete"));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent('Deleted "employee"');
+    (window.confirm as any).mockRestore();
+  });
+
+  it("shows a Retry button on a failed list load, and clicking it re-issues the request (D-4)", async () => {
+    let listCallCount = 0;
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(schemaResponse);
+      }
+      listCallCount += 1;
+      return Promise.reject(new ApiError(500, "internal error"));
+    });
+
+    renderWithProviders("/domain/entity_type");
+
+    const retryButton = await screen.findByText("Retry");
+    expect(screen.getByText("Server error (500). Please try again.")).toBeInTheDocument();
+    expect(listCallCount).toBe(1);
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(listCallCount).toBe(2));
+  });
+
+  it("renders skeleton rows instead of the text 'Loading…' while the list is loading (D-5)", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(schemaResponse);
+      }
+      // Never resolves -- the list query stays in its loading state.
+      return new Promise(() => {});
+    });
+
+    renderWithProviders("/domain/entity_type");
+
+    expect(await screen.findAllByTestId("skeleton-row")).not.toHaveLength(0);
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
   });
 
   it("renders an unknown-table message when the schema has no matching table", async () => {

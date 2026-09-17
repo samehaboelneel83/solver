@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useDeleteEdge, useDeleteNode, useUpdateEdge, useUpdateNode } from "../api/graph";
 import { formatApiError } from "../api/errors";
 import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
+import { useToast } from "./ToastProvider";
 import type { GraphResponse } from "../types/graph";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
@@ -20,6 +21,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
   const updateEdge = useUpdateEdge(organizationId, hierarchyId);
   const deleteEdge = useDeleteEdge(organizationId, hierarchyId);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   if (!selection) {
     return <p className="text-sm text-slate-500">Select a node or edge to see its properties.</p>;
@@ -63,13 +65,18 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       }
       updateNode.mutate(
         { entityId: node!.id, payload: { name, status, description, attributes } },
-        { onError: (err) => setError(formatApiError(err)) }
+        {
+          onSuccess: () => toast.success(`"${name}" saved`),
+          onError: (err) => setError(formatApiError(err)),
+        }
       );
     }
 
     function handleDelete() {
       setError(null);
+      const label = node!.label;
       deleteNode.mutate(node!.id, {
+        onSuccess: () => toast.success(`"${label}" deleted`),
         onError: (err) => setError(formatApiError(err)),
       });
     }
@@ -117,13 +124,18 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
             </p>
           ))}
           <div className="flex gap-2">
-            <button type="submit" className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white">
+            <button
+              type="submit"
+              disabled={updateNode.isPending}
+              className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
               Save
             </button>
             <button
               type="button"
               onClick={handleDelete}
-              className="rounded-md border border-red-300 px-3 py-1 text-sm text-red-600"
+              disabled={deleteNode.isPending}
+              className="rounded-md border border-red-300 px-3 py-1 text-sm text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Delete
             </button>
@@ -153,15 +165,21 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       setError("Attributes must be valid JSON");
       return;
     }
+    const edgeLabel = edge!.label || edge!.type;
     updateEdge.mutate(
       { relationshipId: edge!.id, attributes },
-      { onError: (err) => setError(formatApiError(err)) }
+      {
+        onSuccess: () => toast.success(`"${edgeLabel}" saved`),
+        onError: (err) => setError(formatApiError(err)),
+      }
     );
   }
 
   function handleEdgeDelete() {
     setError(null);
+    const edgeLabel = edge!.label || edge!.type;
     deleteEdge.mutate(edge!.id, {
+      onSuccess: () => toast.success(`"${edgeLabel}" deleted`),
       onError: (err) => setError(formatApiError(err)),
     });
   }
@@ -181,13 +199,18 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
           />
         </label>
         <div className="flex gap-2">
-          <button type="submit" className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white">
+          <button
+            type="submit"
+            disabled={updateEdge.isPending}
+            className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
             Save
           </button>
           <button
             type="button"
             onClick={handleEdgeDelete}
-            className="rounded-md border border-red-300 px-3 py-1 text-sm text-red-600"
+            disabled={deleteEdge.isPending}
+            className="rounded-md border border-red-300 px-3 py-1 text-sm text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Delete
           </button>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import EntityForm from "../components/EntityForm";
 import RelatedRecords from "../components/RelatedRecords";
+import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
@@ -15,6 +16,7 @@ export default function EntityDetail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
@@ -85,11 +87,14 @@ export default function EntityDetail() {
 
   async function handleSubmit(values: Record<string, unknown>) {
     setError(null);
+    const recordTypeLabel = table ? tableLabel(table) : "Record";
     try {
       if (isNew) {
         await createEntity.mutateAsync(values);
+        toast.success(`${recordTypeLabel} created`);
       } else {
         await updateEntity.mutateAsync(values);
+        toast.success(`${recordTypeLabel} saved`);
       }
       navigate(`/${schemaName}/${tableName}`);
     } catch (err) {
@@ -110,6 +115,7 @@ export default function EntityDetail() {
         onSubmit={handleSubmit}
         submitLabel={isNew ? "Create" : "Save"}
         isEdit={!isNew}
+        isSubmitting={createEntity.isPending || updateEntity.isPending}
       />
       {!isNew && id && <RelatedRecords schema={schemaName} table={tableName} id={id} />}
     </div>
