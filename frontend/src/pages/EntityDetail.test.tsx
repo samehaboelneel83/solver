@@ -120,7 +120,7 @@ describe("EntityDetail (edit mode)", () => {
 });
 
 describe("EntityDetail (missing record)", () => {
-  it("shows 'Record not found' and a link back to the list on a 404", async () => {
+  it("shows '<table> not found' using the raw table name as a fallback when no label is present", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/meta/schema") {
         return Promise.resolve([
@@ -153,7 +153,44 @@ describe("EntityDetail (missing record)", () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText("Record not found")).toBeInTheDocument();
+    expect(await screen.findByText("entity_type not found")).toBeInTheDocument();
+    expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
+  });
+
+  it("shows '<table label> not found' when the backend has sent a label", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            label: "Entity type",
+            label_plural: "Entity types",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/missing-id") {
+        return Promise.reject(new ApiError(404, "not found"));
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/missing-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Entity type not found")).toBeInTheDocument();
     expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
   });
 });
@@ -194,6 +231,66 @@ describe("EntityDetail (load error other than 404)", () => {
 
     expect(await screen.findByText("Server error (500). Please try again.")).toBeInTheDocument();
     expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
+  });
+});
+
+describe("EntityDetail human-readable titles (B-1)", () => {
+  const labeledSchema = [
+    {
+      schema: "domain",
+      table: "entity_type",
+      label: "Entity type",
+      label_plural: "Entity types",
+      fields: [
+        { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+      ],
+    },
+  ];
+
+  it("renders the create page's <h1> as 'New entity type', lower-cased mid-sentence, with the schema.table subtitle", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("heading", { name: "New entity type" })).toBeInTheDocument();
+    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("New entity type · Problem Solver"));
+  });
+
+  it("renders the edit page's <h1> using the table's own label (Task 5 finishes the record-name part)", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
+      if (path === "/api/domain/entity_type/existing-id") {
+        return Promise.resolve({ id: "existing-id", code: "existing-code" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Edit entity type" })).toBeInTheDocument();
+    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Edit entity type · Problem Solver"));
   });
 });
 

@@ -141,3 +141,71 @@ describe("EntityList", () => {
     expect(await screen.findByText("Unknown table domain.does_not_exist")).toBeInTheDocument();
   });
 });
+
+describe("EntityList human-readable titles and headers (B-1)", () => {
+  const labeledSchemaResponse = [
+    {
+      schema: "domain",
+      table: "entity_type",
+      label: "Entity type",
+      label_plural: "Entity types",
+      fields: [
+        { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+        {
+          name: "organization_id",
+          type: "uuid",
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "iam.organization",
+          label: "Organization",
+        },
+        { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null, label: "Code" },
+        {
+          name: "is_abstract",
+          type: "boolean",
+          required: true,
+          writable: true,
+          is_fk: false,
+          fk_table: null,
+          label: "Abstract type",
+        },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(labeledSchemaResponse);
+      }
+      return Promise.resolve({ items: [{ id: "1", organization_id: "org-1", code: "employee", is_abstract: false }], total: 1 });
+    });
+  });
+
+  it("renders the <h1> as the plural label with the raw schema.table kept as a subtitle", async () => {
+    renderWithProviders("/domain/entity_type");
+
+    expect(await screen.findByRole("heading", { name: "Entity types" })).toBeInTheDocument();
+    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+  });
+
+  it("renders column headers using field labels instead of raw snake_case names", async () => {
+    renderWithProviders("/domain/entity_type");
+    await screen.findByRole("heading", { name: "Entity types" });
+
+    expect(screen.getByText("Organization")).toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.getByText("Abstract type")).toBeInTheDocument();
+    expect(screen.queryByText("organization_id")).not.toBeInTheDocument();
+    expect(screen.queryByText("is_abstract")).not.toBeInTheDocument();
+  });
+
+  it("sets document.title to the plural label once the schema loads", async () => {
+    renderWithProviders("/domain/entity_type");
+
+    await waitFor(() => {
+      expect(document.title).toBe("Entity types · Problem Solver");
+    });
+  });
+});

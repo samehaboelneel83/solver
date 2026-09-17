@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import type { ListResult } from "../api/entities";
 import { useSchema } from "../api/meta";
+import { fieldLabel, tableLabelPlural } from "../lib/labels";
 
 type ChildRef = {
   schema: string;
@@ -25,17 +26,24 @@ type RelatedRecordsProps = {
  * table itself), or a child table with more than one FK field pointing at
  * this parent (e.g. `relationship.source_entity_id` and
  * `relationship.target_entity_id` both -> `entity`). */
-function childRefsFrom(tables: { schema: string; table: string; fields: { name: string; is_fk: boolean; fk_table: string | null }[] }[], schema: string, table: string): ChildRef[] {
+type ChildTable = {
+  schema: string;
+  table: string;
+  label?: string;
+  label_plural?: string;
+  fields: { name: string; is_fk: boolean; fk_table: string | null; label?: string }[];
+};
+
+function childRefsFrom(tables: ChildTable[], schema: string, table: string): ChildRef[] {
   const targetKey = `${schema}.${table}`;
-  type RawRef = { schema: string; table: string; field: string; isSelfReference: boolean };
+  type RawRef = { table: ChildTable; field: ChildTable["fields"][number]; isSelfReference: boolean };
   const raw: RawRef[] = [];
   for (const t of tables) {
     for (const f of t.fields) {
       if (f.is_fk && f.fk_table === targetKey) {
         raw.push({
-          schema: t.schema,
-          table: t.table,
-          field: f.name,
+          table: t,
+          field: f,
           isSelfReference: t.schema === schema && t.table === table,
         });
       }
@@ -44,18 +52,19 @@ function childRefsFrom(tables: { schema: string; table: string; fields: { name: 
 
   const refCountByTable = new Map<string, number>();
   for (const r of raw) {
-    const key = `${r.schema}.${r.table}`;
+    const key = `${r.table.schema}.${r.table.table}`;
     refCountByTable.set(key, (refCountByTable.get(key) ?? 0) + 1);
   }
 
   return raw.map((r) => {
-    const key = `${r.schema}.${r.table}`;
+    const key = `${r.table.schema}.${r.table.table}`;
     const needsFieldLabel = r.isSelfReference || (refCountByTable.get(key) ?? 0) > 1;
+    const tableName = tableLabelPlural(r.table);
     return {
-      schema: r.schema,
-      table: r.table,
-      field: r.field,
-      label: needsFieldLabel ? `${r.table} via ${r.field}` : r.table,
+      schema: r.table.schema,
+      table: r.table.table,
+      field: r.field.name,
+      label: needsFieldLabel ? `${tableName} via ${fieldLabel(r.field)}` : tableName,
     };
   });
 }

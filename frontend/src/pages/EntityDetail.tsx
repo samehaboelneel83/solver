@@ -7,17 +7,25 @@ import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { lowerFirst, tableLabel } from "../lib/labels";
 
 export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
   const isNew = id === undefined;
-  useDocumentTitle(`${isNew ? "New" : "Edit"} ${schemaName}.${tableName}`);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+
+  // "New entity type" / "Edit entity type": the table label mid-sentence
+  // reads better lower-cased than the shoutier "New Entity type". Falls
+  // back to the raw schema.table pair while the schema is still loading.
+  const pageTitle = `${isNew ? "New" : "Edit"} ${
+    table ? lowerFirst(tableLabel(table)) : `${schemaName}.${tableName}`
+  }`;
+  useDocumentTitle(pageTitle);
 
   const {
     data: existing,
@@ -54,7 +62,7 @@ export default function EntityDetail() {
     if (entityError instanceof ApiError && entityError.status === 404) {
       return (
         <div>
-          <p className="text-sm text-slate-500">Record not found</p>
+          <p className="text-sm text-slate-500">{table ? tableLabel(table) : "Record"} not found</p>
           <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
             Back to list
           </Link>
@@ -91,9 +99,10 @@ export default function EntityDetail() {
 
   return (
     <div>
-      <h1 className="mb-4 text-lg font-semibold text-slate-900">
-        {isNew ? "New" : "Edit"} {schemaName}.{tableName}
-      </h1>
+      <h1 className="text-lg font-semibold text-slate-900">{pageTitle}</h1>
+      <p className="mb-4 text-xs text-slate-500">
+        {schemaName}.{tableName}
+      </p>
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <EntityForm
         fields={table.fields}

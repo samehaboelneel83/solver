@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { optionLabelsQuery } from "../api/options";
+import { fieldLabel } from "../lib/labels";
 import type { FieldMeta } from "../types/meta";
 
 type Row = Record<string, unknown>;
@@ -86,19 +87,21 @@ export default function DataTable({
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-slate-500">
-              {columns.map((col) => (
-                <th key={col} className="px-3 py-2 font-medium">
+              {fields.map((field) => (
+                <th key={field.name} className="px-3 py-2 font-medium">
                   {onSort ? (
                     <button
                       type="button"
-                      onClick={() => onSort(col)}
+                      onClick={() => onSort(field.name)}
                       className="flex items-center gap-1 hover:text-slate-900"
                     >
-                      <span>{col}</span>
-                      {orderBy === col && <span aria-hidden="true">{order === "desc" ? "↓" : "↑"}</span>}
+                      <span>{fieldLabel(field)}</span>
+                      {orderBy === field.name && (
+                        <span aria-hidden="true">{order === "desc" ? "↓" : "↑"}</span>
+                      )}
                     </button>
                   ) : (
-                    col
+                    fieldLabel(field)
                   )}
                 </th>
               ))}

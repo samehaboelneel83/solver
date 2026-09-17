@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import FkPicker from "./FkPicker";
 import type { FieldMeta } from "../types/meta";
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from "../lib/datetime";
+import { fieldLabel } from "../lib/labels";
 
 type EntityFormProps = {
   fields: FieldMeta[];
@@ -137,7 +138,7 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
       {writableFields.map((field) => (
         <div key={field.name}>
           <label className="block text-sm font-medium text-slate-700">
-            {field.name}
+            {fieldLabel(field)}
             {field.required && <span className="text-red-500"> *</span>}
           </label>
           {field.is_fk && field.fk_table ? (

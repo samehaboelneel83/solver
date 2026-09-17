@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
 import { useSchema } from "../api/meta";
+import { tableLabelPlural } from "../lib/labels";
 import type { TableMeta } from "../types/meta";
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
@@ -74,7 +75,7 @@ export default function AppShell() {
               {schemaTables.map((t) => (
                 <li key={`${t.schema}.${t.table}`}>
                   <NavLink to={`/${t.schema}/${t.table}`} className={tableLinkClassName}>
-                    {t.table}
+                    {tableLabelPlural(t)}
                   </NavLink>
                 </li>
               ))}

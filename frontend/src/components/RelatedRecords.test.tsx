@@ -232,6 +232,49 @@ describe("RelatedRecords", () => {
     );
   });
 
+  it("labels rows with the child table's plural label instead of the raw table name, e.g. 'Variable definitions (1)' (B-1)", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "problem",
+            table: "problem",
+            label: "Problem",
+            label_plural: "Problems",
+            fields: [{ name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null }],
+          },
+          {
+            schema: "problem",
+            table: "variable_definition",
+            label: "Variable definition",
+            label_plural: "Variable definitions",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              {
+                name: "problem_id",
+                type: "uuid",
+                required: true,
+                writable: true,
+                is_fk: true,
+                fk_table: "problem.problem",
+                label: "Problem",
+              },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/problem/variable_definition/?f_problem_id=p1&limit=1") {
+        return Promise.resolve({ items: [{ id: "v1" }], total: 1 });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderRelated("problem", "problem", "p1");
+
+    expect(await screen.findByText("Variable definitions (1)")).toBeInTheDocument();
+    expect(screen.queryByText(/variable_definition \(/)).not.toBeInTheDocument();
+  });
+
   it("shows a '?' with a title when a count query fails, instead of the loading placeholder forever", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/meta/schema") {

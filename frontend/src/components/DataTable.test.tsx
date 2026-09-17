@@ -133,6 +133,56 @@ describe("DataTable", () => {
     });
   });
 
+  describe("human-readable column headers (B-1)", () => {
+    const labeledFields = [
+      { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+      {
+        name: "organization_id",
+        type: "uuid" as const,
+        required: true,
+        writable: true,
+        is_fk: true,
+        fk_table: "iam.organization",
+        label: "Organization",
+      },
+      { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label: "Code" },
+    ];
+
+    it("renders field labels as column headers instead of raw snake_case names", () => {
+      renderWithQueryClient(
+        <DataTable
+          fields={labeledFields}
+          rows={[]}
+          total={0}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText("Organization")).toBeInTheDocument();
+      expect(screen.getByText("Code")).toBeInTheDocument();
+      expect(screen.queryByText("organization_id")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the raw field name when a column has no label", () => {
+      renderWithQueryClient(
+        <DataTable
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText("code")).toBeInTheDocument();
+    });
+  });
+
   describe("foreign key columns", () => {
     beforeEach(() => {
       (apiFetch as any).mockReset();

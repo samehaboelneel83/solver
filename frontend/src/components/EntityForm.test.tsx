@@ -344,6 +344,49 @@ describe("EntityForm clearing fields on edit vs create (M-7)", () => {
   });
 });
 
+describe("EntityForm human-readable field labels (B-1)", () => {
+  const relationshipFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    {
+      name: "source_entity_id",
+      type: "uuid" as const,
+      required: true,
+      writable: true,
+      is_fk: true,
+      fk_table: "domain.entity",
+      label: "From",
+    },
+    {
+      name: "target_entity_id",
+      type: "uuid" as const,
+      required: true,
+      writable: true,
+      is_fk: true,
+      fk_table: "domain.entity",
+      label: "To",
+    },
+  ];
+
+  it("renders 'From'/'To' labels instead of the raw source_entity_id/target_entity_id column names", () => {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={relationshipFields} onSubmit={vi.fn()} submitLabel="Create" />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText("From")).toBeInTheDocument();
+    expect(screen.getByText("To")).toBeInTheDocument();
+    expect(screen.queryByText("source_entity_id")).not.toBeInTheDocument();
+    expect(screen.queryByText("target_entity_id")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the raw field name when no label is present", () => {
+    renderWithProviders();
+    expect(screen.getByText("code")).toBeInTheDocument();
+  });
+});
+
 describe("EntityForm hints", () => {
   it("renders a datalist of choices for a field with choices", () => {
     renderRichForm();

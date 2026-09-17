@@ -66,4 +66,14 @@ describe("AppShell", () => {
     expect(main).not.toBeNull();
     expect(main?.className.split(/\s+/)).toContain("min-w-0");
   });
+
+  it("lists the plural human label (e.g. 'Entity types') instead of the raw table name when the backend sends one (B-1)", async () => {
+    (apiFetch as any).mockResolvedValue([
+      { schema: "domain", table: "entity_type", label: "Entity type", label_plural: "Entity types", fields: [] },
+    ]);
+    renderWithProviders();
+
+    expect(await screen.findByText("Entity types")).toBeInTheDocument();
+    expect(screen.queryByText("entity_type")).not.toBeInTheDocument();
+  });
 });

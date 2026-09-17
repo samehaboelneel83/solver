@@ -5,6 +5,7 @@ import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { tableLabelPlural } from "../lib/labels";
 
 const PAGE_SIZE = 20;
 const FILTER_PREFIX = "f_";
@@ -12,13 +13,16 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 export default function EntityList() {
   const { schemaName = "", tableName = "" } = useParams();
-  useDocumentTitle(schemaName && tableName ? `${schemaName}.${tableName}` : "List");
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+
+  useDocumentTitle(
+    table ? tableLabelPlural(table) : schemaName && tableName ? `${schemaName}.${tableName}` : "List"
+  );
 
   const q = searchParams.get("q") ?? "";
   const offset = Number(searchParams.get("offset") ?? "0") || 0;
@@ -131,9 +135,12 @@ export default function EntityList() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">
-          {schemaName}.{tableName}
-        </h1>
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">{tableLabelPlural(table)}</h1>
+          <p className="text-xs text-slate-500">
+            {schemaName}.{tableName}
+          </p>
+        </div>
         <Link
           to={`/${schemaName}/${tableName}/new${newLinkQuery ? `?${newLinkQuery}` : ""}`}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
