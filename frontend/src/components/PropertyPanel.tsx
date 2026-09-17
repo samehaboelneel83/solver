@@ -22,7 +22,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
   const [error, setError] = useState<string | null>(null);
 
   if (!selection) {
-    return <p className="text-sm text-slate-400">Select a node or edge to see its properties.</p>;
+    return <p className="text-sm text-slate-500">Select a node or edge to see its properties.</p>;
   }
 
   if (selection.kind === "node") {
@@ -112,7 +112,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
             </label>
           ))}
           {hiddenDefinitions.map((def) => (
-            <p key={def.id} className="text-xs text-slate-400">
+            <p key={def.id} className="text-xs text-slate-500">
               attribute {def.code} hidden: collides with a built-in field
             </p>
           ))}

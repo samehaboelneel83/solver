@@ -5,6 +5,7 @@ import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import GraphDemo from "./pages/GraphDemo";
+import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -33,6 +34,7 @@ export default function App() {
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

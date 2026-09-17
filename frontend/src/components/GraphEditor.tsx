@@ -543,7 +543,7 @@ export default function GraphEditor({
           + New Node
         </button>
         {layoutStatus && (
-          <span data-testid="layout-status" className="text-xs text-slate-400">
+          <span data-testid="layout-status" className="text-xs text-slate-500">
             {layoutStatus}
           </span>
         )}
@@ -605,7 +605,7 @@ export default function GraphEditor({
                   </label>
                 ))}
                 {hidden.map((def) => (
-                  <p key={def.id} className="basis-full text-xs text-slate-400">
+                  <p key={def.id} className="basis-full text-xs text-slate-500">
                     attribute {def.code} hidden: collides with a built-in field
                   </p>
                 ))}
@@ -681,7 +681,7 @@ export default function GraphEditor({
         </div>
       )}
 
-      {isLoading && <p className="text-sm text-slate-400">Loading graph…</p>}
+      {isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
       {loadError && <p className="text-sm text-red-600">Failed to load graph</p>}
       {/* Cytoscape caches this container's bounding rect when the instance is created (and
           otherwise only recomputes it on its own triggers), so if the page scrolls afterward --

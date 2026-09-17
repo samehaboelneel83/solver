@@ -3,8 +3,10 @@ import { apiFetch } from "../api/client";
 import type { ListResult } from "../api/entities";
 import { useHealth } from "../api/health";
 import { useSchema } from "../api/meta";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 export default function Dashboard() {
+  useDocumentTitle("Dashboard");
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: tables } = useSchema();
 
@@ -22,24 +24,24 @@ export default function Dashboard() {
 
       <div className="mb-6 grid grid-cols-2 gap-4">
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs uppercase text-slate-400">Postgres</div>
+          <div className="text-xs uppercase text-slate-500">Postgres</div>
           <div
-            className={`text-lg font-semibold ${health?.postgres === "ok" ? "text-emerald-600" : "text-red-600"}`}
+            className={`text-lg font-semibold ${health?.postgres === "ok" ? "text-emerald-700" : "text-red-600"}`}
           >
             {healthLoading ? "…" : (health?.postgres ?? "unknown")}
           </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="text-xs uppercase text-slate-400">ClickHouse</div>
+          <div className="text-xs uppercase text-slate-500">ClickHouse</div>
           <div
-            className={`text-lg font-semibold ${health?.clickhouse === "ok" ? "text-emerald-600" : "text-red-600"}`}
+            className={`text-lg font-semibold ${health?.clickhouse === "ok" ? "text-emerald-700" : "text-red-600"}`}
           >
             {healthLoading ? "…" : (health?.clickhouse ?? "unknown")}
           </div>
         </div>
       </div>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Row counts</h2>
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Row counts</h2>
       <table className="w-full max-w-md border-collapse text-sm">
         <tbody>
           {(tables ?? []).map((t, index) => (

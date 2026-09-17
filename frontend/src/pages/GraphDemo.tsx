@@ -6,6 +6,7 @@ import PropertyPanel from "../components/PropertyPanel";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
 import type { FilterState } from "../components/FilterBar";
 import { useGraph } from "../api/graph";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
 
@@ -24,6 +25,7 @@ function useOrganizations() {
 }
 
 export default function GraphDemo() {
+  useDocumentTitle("Domain Graph");
   const { data: organizations, isLoading: orgsLoading } = useOrganizations();
   // Only set once the user explicitly picks an org; the effective organizationId below
   // falls back to the org coded "default" (or the first org, alphabetically by name) until
@@ -65,15 +67,15 @@ export default function GraphDemo() {
   }
 
   if (orgsLoading || !organizations) {
-    return <p className="text-sm text-slate-400">Loading organization…</p>;
+    return <p className="text-sm text-slate-500">Loading organization…</p>;
   }
 
   if (organizations.length === 0) {
-    return <p className="text-sm text-slate-400">No organizations found. Create one to view the graph.</p>;
+    return <p className="text-sm text-slate-500">No organizations found. Create one to view the graph.</p>;
   }
 
   if (!organizationId) {
-    return <p className="text-sm text-slate-400">Loading organization…</p>;
+    return <p className="text-sm text-slate-500">Loading organization…</p>;
   }
 
   return (

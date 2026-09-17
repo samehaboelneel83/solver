@@ -6,10 +6,12 @@ import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
   const isNew = id === undefined;
+  useDocumentTitle(`${isNew ? "New" : "Edit"} ${schemaName}.${tableName}`);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function EntityDetail() {
 
   if (tables && !table) {
     return (
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-500">
         Unknown table {schemaName}.{tableName}
       </p>
     );
@@ -52,7 +54,7 @@ export default function EntityDetail() {
     if (entityError instanceof ApiError && entityError.status === 404) {
       return (
         <div>
-          <p className="text-sm text-slate-400">Record not found</p>
+          <p className="text-sm text-slate-500">Record not found</p>
           <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
             Back to list
           </Link>
@@ -70,7 +72,7 @@ export default function EntityDetail() {
   }
 
   if (!table || (!isNew && !existing)) {
-    return <p className="text-sm text-slate-400">Loading…</p>;
+    return <p className="text-sm text-slate-500">Loading…</p>;
   }
 
   async function handleSubmit(values: Record<string, unknown>) {

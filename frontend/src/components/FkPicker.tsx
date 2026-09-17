@@ -135,11 +135,11 @@ export default function FkPicker({ fkTable, value, onChange, required, testId }:
           className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border border-slate-300 bg-white text-sm shadow-md"
         >
           {query === "" ? (
-            <li className="px-3 py-2 text-slate-400">Type to search</li>
+            <li className="px-3 py-2 text-slate-500">Type to search</li>
           ) : search.isLoading ? (
-            <li className="px-3 py-2 text-slate-400">Searching…</li>
+            <li className="px-3 py-2 text-slate-500">Searching…</li>
           ) : options.length === 0 ? (
-            <li className="px-3 py-2 text-slate-400">No matches</li>
+            <li className="px-3 py-2 text-slate-500">No matches</li>
           ) : (
             options.map((option, index) => (
               <li

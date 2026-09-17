@@ -4,6 +4,7 @@ import DataTable from "../components/DataTable";
 import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const PAGE_SIZE = 20;
 const FILTER_PREFIX = "f_";
@@ -11,6 +12,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 export default function EntityList() {
   const { schemaName = "", tableName = "" } = useParams();
+  useDocumentTitle(schemaName && tableName ? `${schemaName}.${tableName}` : "List");
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -71,14 +73,14 @@ export default function EntityList() {
 
   if (tables && !table) {
     return (
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-slate-500">
         Unknown table {schemaName}.{tableName}
       </p>
     );
   }
 
   if (!table) {
-    return <p className="text-sm text-slate-400">Loading table definition…</p>;
+    return <p className="text-sm text-slate-500">Loading table definition…</p>;
   }
 
   function updateParams(mutator: (params: URLSearchParams) => void) {
@@ -160,7 +162,7 @@ export default function EntityList() {
               type="button"
               onClick={() => removeFilter(key)}
               aria-label={`Remove filter ${key}`}
-              className="text-slate-400 hover:text-slate-700"
+              className="text-slate-500 hover:text-slate-700"
             >
               ×
             </button>
@@ -168,7 +170,7 @@ export default function EntityList() {
         ))}
       </div>
       {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
-      {isLoading && <p className="text-sm text-slate-400">Loading…</p>}
+      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
       {error && <p className="text-sm text-red-600">{formatApiError(error)}</p>}
       {data && (
         <DataTable
