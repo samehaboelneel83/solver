@@ -263,3 +263,65 @@ def test_list_order_rejects_invalid_direction(auth_headers):
         "/api/domain/role_type/?order_by=code&order=sideways", headers=auth_headers
     )
     assert response.status_code == 422
+
+
+def test_list_pagination_is_stable_without_order_by(auth_headers):
+    """With no order_by, the list route must still return rows in a stable order
+    (ORDER BY id) -- otherwise offset pagination over N single-row pages can skip
+    or repeat a row, since Postgres makes no ordering guarantee on its own (M-6)."""
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    codes = [f"page-{suffix}-{i}" for i in range(5)]
+    for code in codes:
+        response = client.post(
+            "/api/domain/role_type/",
+            json={"code": code, "name": code},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+
+    seen_ids = []
+    for offset in range(len(codes)):
+        page = client.get(
+            f"/api/domain/role_type/?q={suffix}&limit=1&offset={offset}", headers=auth_headers
+        )
+        assert page.status_code == 200
+        items = page.json()["items"]
+        assert len(items) == 1
+        seen_ids.append(items[0]["id"])
+
+    assert len(seen_ids) == len(set(seen_ids)), "a row was repeated across pages"
+
+
+def test_list_pagination_is_stable_with_order_by_on_a_non_unique_column(auth_headers, organization_id):
+    """order_by on a column that isn't unique (name, here, shared by every row created
+    below) needs `id` appended as a tiebreaker, or rows with equal values can be
+    reordered between two page fetches and a row can be skipped or repeated (M-6)."""
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    for i in range(5):
+        response = client.post(
+            "/api/domain/entity_type/",
+            json={
+                "organization_id": organization_id,
+                "code": f"tiebreak-{suffix}-{i}",
+                "name": f"same-name-{suffix}",
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 201
+
+    seen_ids = []
+    for offset in range(5):
+        page = client.get(
+            f"/api/domain/entity_type/?q={suffix}&order_by=name&limit=1&offset={offset}",
+            headers=auth_headers,
+        )
+        assert page.status_code == 200
+        items = page.json()["items"]
+        assert len(items) == 1
+        seen_ids.append(items[0]["id"])
+
+    assert len(seen_ids) == len(set(seen_ids)), "a row was repeated across pages"

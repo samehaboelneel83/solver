@@ -143,11 +143,22 @@ def build_crud_router(
         if order_normalized not in ("asc", "desc"):
             raise HTTPException(status_code=422, detail=f"invalid order {order!r}, expected asc or desc")
 
+        # A stable order is required for offset pagination to be meaningful at
+        # all -- without one, Postgres is free to return rows in a different
+        # order across two otherwise-identical queries (e.g. after a
+        # concurrent write, or just because it felt like it), which can skip
+        # or repeat rows across pages. `id` (every model's UUID primary key)
+        # is unique and never null, so it's always a valid sort key: the sole
+        # order when none was requested, and a tiebreaker appended after any
+        # requested order_by (whose own column may not be unique).
         if order_by is not None:
             attr = filterable.get(order_by)
             if attr is None:
                 raise HTTPException(status_code=422, detail=f"unknown column {order_by}")
-            query = query.order_by(attr.desc() if order_normalized == "desc" else attr.asc())
+            primary = attr.desc() if order_normalized == "desc" else attr.asc()
+            query = query.order_by(primary, model.id.asc())
+        else:
+            query = query.order_by(model.id.asc())
 
         try:
             total = query.count()
