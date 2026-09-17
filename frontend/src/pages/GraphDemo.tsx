@@ -39,6 +39,7 @@ export default function GraphDemo() {
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
       {graph && (
         <FilterBar
+          key={hierarchyId ?? "none"}
           entityTypes={graph.entity_types}
           edges={graph.edges}
           selectedNodeId={selection?.kind === "node" ? selection.id : null}
@@ -58,6 +59,7 @@ export default function GraphDemo() {
         <div className="w-72 shrink-0 rounded-md border border-slate-200 p-3">
           {graph && (
             <PropertyPanel
+              key={selection ? `${selection.kind}-${selection.id}` : "none"}
               organizationId={organizationId}
               hierarchyId={hierarchyId}
               graph={graph}
