@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
@@ -8,8 +8,10 @@ import GraphDemo from "./pages/GraphDemo";
 import { getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
+  const location = useLocation();
   if (!getToken()) {
-    return <Navigate to="/login" replace />;
+    const next = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?next=${next}`} replace />;
   }
   return children;
 }

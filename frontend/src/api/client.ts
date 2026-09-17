@@ -42,8 +42,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   if (response.status === 401) {
     setToken(null);
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
+    const { pathname, search } = window.location;
+    if (pathname !== "/login") {
+      const next = encodeURIComponent(pathname + search);
+      window.location.href = `/login?reason=expired&next=${next}`;
     }
     throw new ApiError(401, "unauthorized");
   }

@@ -28,4 +28,26 @@ describe("apiFetch", () => {
     await expect(apiFetch("/api/iam/organization/")).rejects.toThrow();
     expect(getToken()).toBeNull();
   });
+
+  it("redirects to /login with reason=expired and the current path on a 401", async () => {
+    vi.stubGlobal("location", { pathname: "/finance/invoice/42", search: "?tab=details", href: "" });
+    setToken("stale-token");
+    (fetch as any).mockResolvedValue(new Response("unauthorized", { status: 401 }));
+
+    await expect(apiFetch("/api/iam/organization/")).rejects.toThrow();
+
+    expect(window.location.href).toBe(
+      "/login?reason=expired&next=" + encodeURIComponent("/finance/invoice/42?tab=details")
+    );
+  });
+
+  it("does not redirect again when already on the login page", async () => {
+    vi.stubGlobal("location", { pathname: "/login", search: "", href: "" });
+    setToken("stale-token");
+    (fetch as any).mockResolvedValue(new Response("unauthorized", { status: 401 }));
+
+    await expect(apiFetch("/api/iam/organization/")).rejects.toThrow();
+
+    expect(window.location.href).toBe("");
+  });
 });
