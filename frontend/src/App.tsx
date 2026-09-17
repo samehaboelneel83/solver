@@ -5,12 +5,12 @@ import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import GraphDemo from "./pages/GraphDemo";
-import { getToken } from "./api/client";
+import { currentLocationParam, getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const location = useLocation();
   if (!getToken()) {
-    const next = encodeURIComponent(location.pathname + location.search);
+    const next = currentLocationParam(location.pathname, location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
   return children;

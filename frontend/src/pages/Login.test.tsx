@@ -84,4 +84,37 @@ describe("Login page", () => {
       expect(screen.getByText("Home page")).toBeInTheDocument();
     });
   });
+
+  it("navigates to the next path (with query string) after a successful login", async () => {
+    renderAt("/login?next=" + encodeURIComponent("/domain/entity?offset=20"));
+
+    submitLoginForm();
+
+    await waitFor(() => {
+      expect(screen.getByText("Entity page")).toBeInTheDocument();
+    });
+  });
+
+  const unsafeNextValues: Array<[string, string]> = [
+    ["a tab-smuggled protocol-relative URL", "/\t/evil.com"],
+    ["a protocol-relative URL", "//evil.example.com"],
+    ["an absolute URL to another origin", "https://evil.example.com"],
+    ["a backslash-smuggled URL", "/\\evil.com"],
+  ];
+
+  it.each(unsafeNextValues)(
+    "does not leave the app's origin when next is %s",
+    async (_label, unsafeNext) => {
+      renderAt("/login?next=" + encodeURIComponent(unsafeNext));
+
+      submitLoginForm();
+
+      // None of these should land on a page other than the app's own "/" —
+      // in particular they must never produce a cross-origin navigation.
+      await waitFor(() => {
+        expect(screen.getByText("Home page")).toBeInTheDocument();
+      });
+      expect(window.location.origin).toBe("http://localhost:3000");
+    }
+  );
 });

@@ -20,6 +20,11 @@ export function getToken(): string | null {
   }
 }
 
+/** Encodes a pathname + search as a `next` redirect param value. */
+export function currentLocationParam(pathname: string, search: string): string {
+  return encodeURIComponent(pathname + search);
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -44,7 +49,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     setToken(null);
     const { pathname, search } = window.location;
     if (pathname !== "/login") {
-      const next = encodeURIComponent(pathname + search);
+      const next = currentLocationParam(pathname, search);
       window.location.href = `/login?reason=expired&next=${next}`;
     }
     throw new ApiError(401, "unauthorized");

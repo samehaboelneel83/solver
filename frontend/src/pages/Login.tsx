@@ -3,11 +3,29 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { login } from "../api/client";
 import { formatApiError } from "../api/errors";
 
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
+
+/**
+ * Only accept `next` values that resolve, same-origin, to a path on this
+ * app. Rejects control characters (tabs/newlines can be stripped by URL
+ * parsing and turn an apparently-relative path into a protocol-relative
+ * one), absolute URLs to other origins, and protocol-relative URLs
+ * (`//evil.example.com`).
+ */
 function safeNext(next: string | null): string {
-  if (next && next.startsWith("/") && !next.startsWith("//")) {
-    return next;
+  if (!next || CONTROL_CHARS.test(next)) {
+    return "/";
   }
-  return "/";
+  try {
+    const resolved = new URL(next, window.location.origin);
+    if (resolved.origin !== window.location.origin || !resolved.pathname.startsWith("/")) {
+      return "/";
+    }
+  } catch {
+    return "/";
+  }
+  return next;
 }
 
 export default function Login() {
