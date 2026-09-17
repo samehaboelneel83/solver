@@ -67,6 +67,8 @@ def create_node_route(
         )
     except GraphNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 class UpdateNodeRequest(BaseModel):
@@ -100,6 +102,8 @@ def update_node_route(
         )
     except GraphNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/nodes/{entity_id}", status_code=204)
@@ -141,6 +145,8 @@ def create_edge_route(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except GraphValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GraphConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 class UpdateEdgeRequest(BaseModel):

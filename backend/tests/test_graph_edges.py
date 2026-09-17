@@ -184,6 +184,46 @@ def test_create_edge_allows_unconstrained_relationship_type(auth_headers, organi
     assert edge_response.status_code == 201
 
 
+def test_create_edge_returns_409_when_relationship_already_exists(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    any_type = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"thing-{suffix}", "name": "Thing"},
+        headers=auth_headers,
+    ).json()
+    rel_type = client.post(
+        "/api/domain/relationship_type/",
+        json={"code": f"related_to-{suffix}", "name": "Related To", "is_directed": False},
+        headers=auth_headers,
+    ).json()
+    a = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": any_type["id"], "name": "A"},
+        headers=auth_headers,
+    ).json()
+    b = client.post(
+        "/api/graph/domain/nodes",
+        json={"organization_id": organization_id, "entity_type_id": any_type["id"], "name": "B"},
+        headers=auth_headers,
+    ).json()
+
+    payload = {
+        "relationship_type_id": rel_type["id"],
+        "source_entity_id": a["id"],
+        "target_entity_id": b["id"],
+        "attributes": {},
+    }
+
+    first_response = client.post("/api/graph/domain/edges", json=payload, headers=auth_headers)
+    assert first_response.status_code == 201
+
+    duplicate_response = client.post("/api/graph/domain/edges", json=payload, headers=auth_headers)
+    assert duplicate_response.status_code == 409
+    assert "relationship" in duplicate_response.json()["detail"].lower()
+
+
 def test_update_edge_replaces_attributes(auth_headers, organization_id):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]

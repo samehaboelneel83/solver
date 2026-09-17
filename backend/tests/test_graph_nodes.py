@@ -361,6 +361,86 @@ def test_update_node_can_move_to_root_and_reparent(auth_headers, organization_id
     assert root_response.json()["parent"] is None
 
 
+def test_create_node_returns_409_for_duplicate_code(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"employee-{suffix}", "name": "Employee"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+    code = f"ahmed-{suffix}"
+
+    first_response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Ahmed",
+            "code": code,
+        },
+        headers=auth_headers,
+    )
+    assert first_response.status_code == 201
+
+    duplicate_response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Another Ahmed",
+            "code": code,
+        },
+        headers=auth_headers,
+    )
+    assert duplicate_response.status_code == 409
+    assert "code" in duplicate_response.json()["detail"].lower()
+
+
+def test_update_node_returns_409_when_code_collides_with_existing_entity(auth_headers, organization_id):
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"employee-{suffix}", "name": "Employee"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    existing_code = f"ahmed-{suffix}"
+    client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Ahmed",
+            "code": existing_code,
+        },
+        headers=auth_headers,
+    )
+    node_b = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Sara",
+            "code": f"sara-{suffix}",
+        },
+        headers=auth_headers,
+    ).json()
+
+    update_response = client.patch(
+        f"/api/graph/domain/nodes/{node_b['id']}",
+        json={"code": existing_code},
+        headers=auth_headers,
+    )
+    assert update_response.status_code == 409
+    assert "code" in update_response.json()["detail"].lower()
+
+
 def test_create_node_returns_404_for_unresolvable_parent_entity_id(auth_headers, organization_id):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]

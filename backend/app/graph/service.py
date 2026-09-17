@@ -298,14 +298,24 @@ def create_node(
         description=description,
     )
     db.add(entity)
-    db.flush()  # populate entity.id before using it below
+    try:
+        # domain.entity has UNIQUE (organization_id, entity_type_id, code); the flush
+        # below (needed to populate entity.id) is where a duplicate code trips that
+        # constraint, so it -- like the commit -- must stay inside this guard rather
+        # than surfacing as an unhandled 500.
+        db.flush()  # populate entity.id before using it below
 
-    _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity_type_id, attributes=attributes or {})
+        _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity_type_id, attributes=attributes or {})
 
-    if hierarchy_id is not None:
-        db.add(HierarchyNode(hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0))
+        if hierarchy_id is not None:
+            db.add(
+                HierarchyNode(hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0)
+            )
 
-    db.commit()
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise GraphConflictError("an entity with this code already exists for this type")
     db.refresh(entity)
     return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
 
@@ -348,27 +358,38 @@ def update_node(
     if description is not None:
         entity.description = description
 
-    if attributes:
-        _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity.entity_type_id, attributes=attributes)
-
-    if hierarchy_id is not None:
-        # hierarchy_id being given at all is the "touch placement" signal;
-        # parent_entity_id=None within that means "move to root".
-        node = (
-            db.query(HierarchyNode)
-            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
-            .first()
-        )
-        if node is None:
-            db.add(
-                HierarchyNode(
-                    hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0
-                )
+    try:
+        # domain.entity has UNIQUE (organization_id, entity_type_id, code). The
+        # entity.code assignment above is only staged in memory; a query below
+        # (or the commit itself) can trigger the autoflush that actually sends
+        # the UPDATE and trips that constraint, so everything from here to the
+        # commit stays inside this guard rather than surfacing as an unhandled 500.
+        if attributes:
+            _write_entity_attributes(
+                db, entity_id=entity.id, entity_type_id=entity.entity_type_id, attributes=attributes
             )
-        else:
-            node.parent_node_id = parent_node_id
 
-    db.commit()
+        if hierarchy_id is not None:
+            # hierarchy_id being given at all is the "touch placement" signal;
+            # parent_entity_id=None within that means "move to root".
+            node = (
+                db.query(HierarchyNode)
+                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
+                .first()
+            )
+            if node is None:
+                db.add(
+                    HierarchyNode(
+                        hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0
+                    )
+                )
+            else:
+                node.parent_node_id = parent_node_id
+
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise GraphConflictError("an entity with this code already exists for this type")
     db.refresh(entity)
     return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
 
@@ -474,7 +495,15 @@ def create_edge(
         attributes=attributes or {},
     )
     db.add(relationship)
-    db.commit()
+    try:
+        # domain.relationship has UNIQUE (relationship_type_id, source_entity_id,
+        # target_entity_id) -- creating an edge that already exists trips this at
+        # commit time, so it must stay inside this guard rather than surfacing as
+        # an unhandled 500.
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise GraphConflictError("this relationship already exists")
     db.refresh(relationship)
     return _relationship_to_edge(db, relationship)
 
