@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EntityTypeOption, GraphEdge } from "../types/graph";
 
 export type FilterCriteria = {
@@ -32,6 +32,18 @@ export default function FilterBar({ entityTypes, edges, selectedNodeId, onChange
     }
     onChange({ selectedTypes: allSelected ? null : Array.from(types), search: searchValue, highlightIds });
   }
+
+  // Emit the current criteria on mount (so consumers start with an explicit default
+  // rather than an implicit "no filter applied" state), and re-emit whenever the
+  // selected node changes so `highlightIds` stays consistent with `selectedNodeId`:
+  // cleared when the selection is lost, recomputed for the newly-selected node.
+  const stateRef = useRef({ selected, search, highlighting });
+  stateRef.current = { selected, search, highlighting };
+  useEffect(() => {
+    const { selected: currentSelected, search: currentSearch, highlighting: currentHighlighting } = stateRef.current;
+    emit(currentSelected, currentSearch, currentHighlighting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNodeId]);
 
   function toggleType(code: string) {
     const next = new Set(selected);
