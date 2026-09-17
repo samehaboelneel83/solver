@@ -126,13 +126,11 @@ def test_user_account_never_exposes_hashed_password(auth_headers):
 
 def test_user_account_cannot_be_created_with_a_raw_hash(auth_headers):
     """`hidden` drops hashed_password from the Create schema, so Pydantic
-    ignores it and the NOT NULL column rejects the insert. Asserting the
-    observed status (500, from the IntegrityError) rather than a clean 422,
-    because the field no longer exists to be validated -- see the follow-up
-    note in the fix-wave report about returning a 4xx here instead."""
-    # raise_server_exceptions=False so the unhandled IntegrityError surfaces
-    # as the 500 a real HTTP client sees, instead of propagating into pytest.
-    client = TestClient(app, raise_server_exceptions=False)
+    ignores it and the NOT NULL column rejects the insert at the database
+    level. Task 1 (generic CRUD hardening) wraps that IntegrityError and
+    returns a 409 with a helpful detail message instead of the raw 500
+    that used to surface here."""
+    client = TestClient(app)
 
     response = client.post(
         "/api/iam/user_account/",
@@ -143,5 +141,5 @@ def test_user_account_cannot_be_created_with_a_raw_hash(auth_headers):
         },
         headers=auth_headers,
     )
-    assert response.status_code == 500
-    assert response.status_code != 201
+    assert response.status_code == 409
+    assert "required" in response.json()["detail"]
