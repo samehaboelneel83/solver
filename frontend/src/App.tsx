@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
+import GraphDemo from "./pages/GraphDemo";
 import { getToken } from "./api/client";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -26,6 +27,7 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="graph" element={<GraphDemo />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />

@@ -29,6 +29,9 @@ export default function AppShell() {
         <Link to="/" className="mb-4 block text-sm text-slate-600 hover:text-slate-900">
           Dashboard
         </Link>
+        <Link to="/graph" className="mb-4 block text-sm text-slate-600 hover:text-slate-900">
+          Domain Graph
+        </Link>
         {isLoading && <p className="text-sm text-slate-400">Loading navigation…</p>}
         {error && <p className="text-sm text-red-600">Failed to load navigation</p>}
         {Object.entries(grouped).map(([schemaName, schemaTables]) => (
