@@ -203,6 +203,147 @@ describe("EntityForm date/datetime formatting", () => {
   });
 });
 
+describe("EntityForm datetime submit round-trip", () => {
+  it("converts the local datetime-local string back to an ISO UTC instant on submit (I-1)", async () => {
+    const onSubmit = renderRichForm();
+
+    fireEvent.change(screen.getByTestId("field-starts_at"), { target: { value: "2026-03-15T14:45" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    const expected = new Date("2026-03-15T14:45").toISOString();
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ starts_at: expected }));
+    });
+    // Sanity: this is a real UTC instant, not the naive local string passed through.
+    expect(expected.endsWith("Z")).toBe(true);
+  });
+});
+
+describe("EntityForm numeric finite guard", () => {
+  // A native `<input type="number">` sanitizes an out-of-range value like "1e400"
+  // back to "" on assignment (in jsdom and in real browsers alike -- it can't hold a
+  // value that parses to Infinity), so it can never actually deliver "1e400" to
+  // onChange; `choices` routes this field through the plain-text/datalist input
+  // instead, which lets the test reach the Number.isFinite guard in handleSubmit
+  // itself (unreachable via the native widget, but a real contract gap, exactly like
+  // attributeValueFromForm's twin guard).
+  const numericFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    {
+      name: "score",
+      type: "number" as const,
+      required: false,
+      writable: true,
+      is_fk: false,
+      fk_table: null,
+      choices: ["1", "2", "100"],
+    },
+  ];
+
+  function renderNumericForm(onSubmit = vi.fn()) {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={numericFields} onSubmit={onSubmit} submitLabel="Save" />
+      </QueryClientProvider>
+    );
+    return onSubmit;
+  }
+
+  it("blocks submit with an inline error for a non-finite numeric input (1e400 -> Infinity)", () => {
+    const onSubmit = renderNumericForm();
+
+    fireEvent.change(screen.getByTestId("field-score"), { target: { value: "1e400" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(screen.getByText("score: expects a number")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits a real finite number once corrected", async () => {
+    const onSubmit = renderNumericForm();
+
+    fireEvent.change(screen.getByTestId("field-score"), { target: { value: "1e400" } });
+    fireEvent.click(screen.getByText("Save"));
+    expect(screen.getByText("score: expects a number")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("field-score"), { target: { value: "42" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ score: 42 });
+    });
+  });
+});
+
+describe("EntityForm clearing fields on edit vs create (M-7)", () => {
+  const clearableFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    { name: "description", type: "string" as const, required: false, writable: true, is_fk: false, fk_table: null },
+  ];
+
+  it("sends description: null when an edit form's initially non-empty field is cleared", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm
+          fields={clearableFields}
+          initialValues={{ description: "x" }}
+          onSubmit={onSubmit}
+          submitLabel="Save"
+          isEdit
+        />
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByTestId("field-description"), { target: { value: "" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ description: null });
+    });
+  });
+
+  it("omits description (does not send null) when a create form's field is left empty", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={clearableFields} onSubmit={onSubmit} submitLabel="Create" />
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({});
+    });
+  });
+
+  it("omits description on edit when it was already empty and stays empty (nothing to clear)", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm
+          fields={clearableFields}
+          initialValues={{ description: "" }}
+          onSubmit={onSubmit}
+          submitLabel="Save"
+          isEdit
+        />
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({});
+    });
+  });
+});
+
 describe("EntityForm hints", () => {
   it("renders a datalist of choices for a field with choices", () => {
     renderRichForm();

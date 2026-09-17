@@ -1,6 +1,33 @@
 import type { AttributeDefinitionOption } from "../types/graph";
+import { fromDatetimeLocalValue, toDatetimeLocalValue } from "../lib/datetime";
 
 const INPUT_CLASS = "block w-full rounded-md border border-slate-300 px-2 py-1 text-sm";
+
+/**
+ * Attribute codes that collide with a node's built-in fields -- `name` is
+ * always its own input, and `code`/`status`/`description` are always keys
+ * in `GraphNode.attributes` set from the entity's own columns. The backend
+ * (`get_domain_graph`/`_entity_to_node`) makes the built-in value win over
+ * an EAV row using one of these codes, so an attribute definition that
+ * collides would render an input whose edits are silently never reflected.
+ * Hidden from the attribute inputs entirely instead, with a note.
+ */
+export const BUILTIN_ATTRIBUTE_CODES: ReadonlySet<string> = new Set(["code", "status", "description", "name"]);
+
+/** Splits `definitions` into the ones safe to render (`visible`) and the
+ * ones that collide with a built-in field (`hidden`), per
+ * `BUILTIN_ATTRIBUTE_CODES` above. Shared by PropertyPanel and GraphEditor's
+ * create-node form so both apply the same rule. */
+export function splitBuiltinCollisions<T extends { code: string }>(
+  definitions: T[]
+): { visible: T[]; hidden: T[] } {
+  const visible: T[] = [];
+  const hidden: T[] = [];
+  for (const def of definitions) {
+    (BUILTIN_ATTRIBUTE_CODES.has(def.code) ? hidden : visible).push(def);
+  }
+  return { visible, hidden };
+}
 
 /**
  * Renders a form input appropriate for an attribute's `data_type` (Task 7's typed
@@ -41,7 +68,7 @@ export function AttributeInput({ def, defaultValue }: { def: AttributeDefinition
       <input
         type="datetime-local"
         name={name}
-        defaultValue={typeof defaultValue === "string" ? defaultValue.slice(0, 16) : ""}
+        defaultValue={typeof defaultValue === "string" ? toDatetimeLocalValue(defaultValue) : ""}
         className={INPUT_CLASS}
       />
     );
@@ -80,8 +107,9 @@ export function AttributeInput({ def, defaultValue }: { def: AttributeDefinition
  *   and `JSON.stringify` silently turns either into `null` in the request body, which would
  *   otherwise look identical to the user explicitly clearing the attribute -- a 200 that quietly
  *   deletes data instead of the 422 a bad value should produce), `json` is parsed (throwing a
- *   plain Error with a field-naming message on invalid JSON), and date/datetime/string are
- *   passed through as the string the input gave.
+ *   plain Error with a field-naming message on invalid JSON), `datetime` is converted from the
+ *   input's naive local wall-clock string to an ISO UTC instant (the same conversion EntityForm
+ *   uses), and date/string are passed through as the string the input gave.
  */
 export function attributeValueFromForm(form: FormData, def: AttributeDefinitionOption): unknown {
   const name = `attr:${def.code}`;
@@ -99,6 +127,9 @@ export function attributeValueFromForm(form: FormData, def: AttributeDefinitionO
       throw new Error(`${def.name}: expects a number`);
     }
     return num;
+  }
+  if (def.data_type === "datetime") {
+    return fromDatetimeLocalValue(rawStr);
   }
   if (def.data_type === "json") {
     try {

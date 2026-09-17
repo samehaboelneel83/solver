@@ -1,12 +1,23 @@
 import { FormEvent, useState } from "react";
 import FkPicker from "./FkPicker";
 import type { FieldMeta } from "../types/meta";
+import { fromDatetimeLocalValue, toDatetimeLocalValue } from "../lib/datetime";
 
 type EntityFormProps = {
   fields: FieldMeta[];
   initialValues?: Record<string, unknown>;
   onSubmit: (values: Record<string, unknown>) => void;
   submitLabel: string;
+  /**
+   * True when this form is editing an existing record rather than creating
+   * a new one. `initialValues` alone can't tell the two apart -- a "New"
+   * form can also carry `initialValues` as a prefill from the query string
+   * (e.g. `/new?entity_type_id=abc`) -- so callers pass this explicitly.
+   * Only an edit form sends an explicit `null` for a nullable field that
+   * had a real value and was cleared (M-7); a create form keeps omitting
+   * empty fields so column defaults apply.
+   */
+  isEdit?: boolean;
 };
 
 function defaultValueFor(field: FieldMeta): unknown {
@@ -20,27 +31,19 @@ function defaultValueFor(field: FieldMeta): unknown {
   return "";
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /** Formats a stored value for a date/datetime `<input>`. Date-only values
  * are truncated (no timezone math: a bare calendar date has no instant to
- * convert). Datetime values are read through a `Date` object and rendered
- * back in LOCAL wall-clock time, since that is what a `datetime-local`
- * input expects and displays -- string-slicing an ISO/UTC timestamp would
- * silently show the wrong (UTC) time to the user. */
+ * convert). Datetime values go through the shared local-time helper, since
+ * that is what a `datetime-local` input expects and displays -- string-
+ * slicing an ISO/UTC timestamp would silently show the wrong (UTC) time to
+ * the user. */
 function toInputValue(field: FieldMeta, value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   if (field.type === "date") {
     return String(value).slice(0, 10);
   }
   if (field.type === "datetime") {
-    const date = new Date(String(value));
-    if (Number.isNaN(date.getTime())) return String(value);
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(
-      date.getHours()
-    )}:${pad2(date.getMinutes())}`;
+    return toDatetimeLocalValue(String(value));
   }
   return String(value);
 }
@@ -50,7 +53,11 @@ function placeholderFor(field: FieldMeta): string | undefined {
   return `default: ${field.default}`;
 }
 
-export default function EntityForm({ fields, initialValues, onSubmit, submitLabel }: EntityFormProps) {
+function hasNonEmptyValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+export default function EntityForm({ fields, initialValues, onSubmit, submitLabel, isEdit = false }: EntityFormProps) {
   const writableFields = fields.filter((f) => f.writable);
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const initial: Record<string, unknown> = {};
@@ -60,7 +67,7 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
     return initial;
   });
 
-  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   function setField(name: string, value: unknown) {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -69,11 +76,21 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const payload: Record<string, unknown> = {};
-    const nextJsonErrors: Record<string, string> = {};
+    const nextFieldErrors: Record<string, string> = {};
     for (const field of writableFields) {
       const raw = values[field.name];
       if (raw === "") {
-        continue; // omit empty optional fields so the backend/DB default applies
+        // On EDIT, a nullable field that started with a real value and was
+        // cleared sends an explicit `null` so the column actually gets
+        // cleared (matching the Graph Editor's PropertyPanel) -- omitting
+        // it here would just leave the old value in place. On CREATE,
+        // empties stay omitted so column defaults apply. Booleans are the
+        // one exception in both modes: their tri-state "(use default)"
+        // always means "leave the column alone", never "clear it".
+        if (field.type !== "boolean" && isEdit && !field.required && hasNonEmptyValue(initialValues?.[field.name])) {
+          payload[field.name] = null;
+        }
+        continue;
       }
       if (field.type === "boolean" && typeof raw === "string") {
         // Tri-state select value; a required boolean's checkbox already
@@ -86,16 +103,30 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
           // Storing invalid JSON as a plain string used to silently corrupt
           // the column; block the submit and point at the offending field
           // instead.
-          nextJsonErrors[field.name] = `${field.name}: invalid JSON`;
+          nextFieldErrors[field.name] = `${field.name}: invalid JSON`;
         }
       } else if (field.type === "integer" || field.type === "number") {
-        payload[field.name] = Number(raw);
+        const num = Number(raw);
+        if (!Number.isFinite(num)) {
+          // "abc" -> NaN, "1e400" -> Infinity: both are non-finite and
+          // JSON.stringify silently turns either into `null`, which would
+          // look identical to the user explicitly clearing the field --
+          // block the submit instead of quietly deleting data.
+          nextFieldErrors[field.name] = `${field.name}: expects a number`;
+        } else {
+          payload[field.name] = num;
+        }
+      } else if (field.type === "datetime" && typeof raw === "string") {
+        // The input holds a naive local wall-clock string; convert it to a
+        // real UTC instant before sending, or every save would drift by the
+        // browser's timezone offset.
+        payload[field.name] = fromDatetimeLocalValue(raw);
       } else {
         payload[field.name] = raw;
       }
     }
-    setJsonErrors(nextJsonErrors);
-    if (Object.keys(nextJsonErrors).length > 0) {
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
       return;
     }
     onSubmit(payload);
@@ -151,8 +182,8 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
                 onChange={(e) => setField(field.name, e.target.value)}
                 data-testid={`field-${field.name}`}
               />
-              {jsonErrors[field.name] && (
-                <p className="mt-1 text-xs text-red-600">{jsonErrors[field.name]}</p>
+              {fieldErrors[field.name] && (
+                <p className="mt-1 text-xs text-red-600">{fieldErrors[field.name]}</p>
               )}
             </>
           ) : field.choices && field.choices.length > 0 ? (
@@ -171,24 +202,32 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
                   <option key={choice} value={choice} />
                 ))}
               </datalist>
+              {fieldErrors[field.name] && (
+                <p className="mt-1 text-xs text-red-600">{fieldErrors[field.name]}</p>
+              )}
             </>
           ) : (
-            <input
-              type={
-                field.type === "integer" || field.type === "number"
-                  ? "number"
-                  : field.type === "date"
-                    ? "date"
-                    : field.type === "datetime"
-                      ? "datetime-local"
-                      : "text"
-              }
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              placeholder={placeholderFor(field)}
-              value={toInputValue(field, values[field.name])}
-              onChange={(e) => setField(field.name, e.target.value)}
-              data-testid={`field-${field.name}`}
-            />
+            <>
+              <input
+                type={
+                  field.type === "integer" || field.type === "number"
+                    ? "number"
+                    : field.type === "date"
+                      ? "date"
+                      : field.type === "datetime"
+                        ? "datetime-local"
+                        : "text"
+                }
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                placeholder={placeholderFor(field)}
+                value={toInputValue(field, values[field.name])}
+                onChange={(e) => setField(field.name, e.target.value)}
+                data-testid={`field-${field.name}`}
+              />
+              {fieldErrors[field.name] && (
+                <p className="mt-1 text-xs text-red-600">{fieldErrors[field.name]}</p>
+              )}
+            </>
           )}
         </div>
       ))}

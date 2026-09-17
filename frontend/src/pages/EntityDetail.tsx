@@ -98,6 +98,7 @@ export default function EntityDetail() {
         initialValues={isNew ? prefill : existing}
         onSubmit={handleSubmit}
         submitLabel={isNew ? "Create" : "Save"}
+        isEdit={!isNew}
       />
       {!isNew && id && <RelatedRecords schema={schemaName} table={tableName} id={id} />}
     </div>

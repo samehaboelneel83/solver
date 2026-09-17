@@ -1,5 +1,6 @@
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { attributeValueFromForm } from "./attributeInputs";
+import { AttributeInput, attributeValueFromForm } from "./attributeInputs";
 import type { AttributeDefinitionOption } from "../types/graph";
 
 const numberDef: AttributeDefinitionOption = {
@@ -54,5 +55,39 @@ describe("attributeValueFromForm", () => {
     const boolDef: AttributeDefinitionOption = { ...numberDef, code: "active", name: "Active", data_type: "boolean" };
     expect(attributeValueFromForm(formWith("attr:active", "on"), boolDef)).toBe(true);
     expect(attributeValueFromForm(new FormData(), boolDef)).toBe(false);
+  });
+
+  it("converts a datetime attribute's local wall-clock value to an ISO UTC instant (I-3)", () => {
+    const datetimeDef: AttributeDefinitionOption = {
+      ...numberDef,
+      code: "starts_at",
+      name: "Starts At",
+      data_type: "datetime",
+    };
+    const value = attributeValueFromForm(formWith("attr:starts_at", "2026-03-15T14:45"), datetimeDef);
+    // Timezone-safe: computed via Date, not a hardcoded expected string.
+    expect(value).toBe(new Date("2026-03-15T14:45").toISOString());
+  });
+});
+
+describe("AttributeInput datetime display (I-3)", () => {
+  it("renders a stored UTC instant as the local wall-clock string, not a UTC-sliced one", () => {
+    const datetimeDef: AttributeDefinitionOption = {
+      id: "a1",
+      entity_type_id: "t1",
+      code: "starts_at",
+      name: "Starts At",
+      data_type: "datetime",
+    };
+    const iso = "2026-10-01T08:00:00Z";
+    const date = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const expected = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+      date.getHours()
+    )}:${pad(date.getMinutes())}`;
+
+    render(<AttributeInput def={datetimeDef} defaultValue={iso} />);
+
+    expect((screen.getByDisplayValue(expected) as HTMLInputElement).value).toBe(expected);
   });
 });
