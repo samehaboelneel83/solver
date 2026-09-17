@@ -92,6 +92,57 @@ Navigate to http://localhost:3010 and sign in with the seeded admin:
 The sidebar, tables and forms are generated entirely from `GET /api/meta/schema`
 — there is no hardcoded table list in the frontend.
 
+## Admin UI
+
+The generic admin UI (list and detail/edit pages) is metadata-driven from
+`GET /api/meta/schema` and talks to the same generic CRUD API you can call
+directly.
+
+### List endpoint query params
+
+`GET /api/{schema}/{table}/` accepts:
+
+- `limit` / `offset` — pagination (default `limit=50`, max `500`).
+- `q` — free-text search, `ILIKE`-OR'd across the table's `String`/`Text`
+  columns.
+- `f_<column>=<value>` — an equality filter on any exposed column, one query
+  param per column (e.g. `f_status=ACTIVE&f_is_active=true`). The value is
+  cast to the column's Python type (bool/UUID/int/float/Decimal/date/
+  datetime); an unknown column or a value that fails to cast returns `422`.
+- `order_by=<column>&order=asc|desc` — sort by any exposed column.
+
+A column dropped from the read schema (e.g. `hashed_password`) can't be
+reached through `q`, `f_<column>` or `order_by` even though it's a real
+mapped column.
+
+`GET /api/{schema}/{table}/options` is the FK-dropdown endpoint: `?q=` runs
+the same searchable-column search for a combobox, and `?ids=id1,id2,...`
+(max 200) resolves a specific set of ids to `{id, label}` pairs, which is
+how a list page batch-resolves every FK value shown on a page in one
+request instead of one per row.
+
+`GET /api/meta/schema` also reports, per field, a `default` (the column's
+client-side scalar default, if any) and `choices` (a curated list of
+suggested values for a handful of free-text fields like `status` — a hint
+only; the CRUD routes still accept any string).
+
+### Admin UI features
+
+- Search, filters and sort are reflected in the URL (`q`, `f_<column>`,
+  `order_by`, `order`, `offset`), so a filtered/sorted list view is a
+  shareable, bookmarkable, back-button-safe link.
+- Deleting a row asks for confirmation first.
+- Foreign-key columns render as their resolved human label instead of a raw
+  id, and editing one uses a searchable picker (type to query, pick from a
+  dropdown) instead of a `<select>` that only showed the first page of
+  rows.
+- A detail page's "Related records" section lists every other table with a
+  foreign key pointing at the current row, with a live count and a link to
+  that filtered child list.
+- A `401` (expired or invalid token) sends you to the login page with a
+  message explaining why, and signing back in returns you to the page you
+  were on.
+
 ## Graph Editor demo
 
 `/graph` is a demo page for the Graph Editor sub-project: an interactive
@@ -100,6 +151,25 @@ used by the generic CRUD admin UI, with drag-connect edge creation, a
 create-node form, hierarchy nesting via ELK layout, and a property panel for
 editing or deleting the selected node/edge. It reads and writes through
 `GET/POST/PATCH/DELETE /api/graph/domain...`, not the generic CRUD routes.
+
+- An **organisation selector** above the graph switches which org's graph is
+  loaded (defaults to the org coded `default`); switching it resets the
+  current hierarchy, selection and filters.
+- A **compact type filter** ("Types: N of M") is a dropdown of per-type
+  checkboxes (with its own text filter, "All"/"None") that narrows which
+  node types are drawn, alongside a free-text search box and a "highlight
+  connections" toggle that dims everything but the selected node's
+  neighbors.
+- **Connect mode**: toggle "Connect" to switch the canvas into drag-to-draw
+  edge creation — drag from one node to another and a picker lets you
+  choose from the relationship types valid between those two entity types,
+  then confirms the edge.
+- **Typed attribute editing**: node attribute inputs, in both the
+  create-node form and the property panel, are rendered per the
+  attribute's declared `data_type` — a checkbox for `boolean`, a
+  finite-number input for `number`, a date/datetime picker, and so on —
+  instead of one plain text box. Edge (relationship) attributes are still
+  edited as raw JSON.
 
 To see anything on the page, seed some demo data first:
 
@@ -112,12 +182,35 @@ The seed is idempotent — re-running it does not create duplicates.
 ## Tests
 
 ```bash
-# Backend (41+ tests) — runs inside the backend container
+# Backend (103 tests) — runs inside the backend container
 docker compose exec -T backend pytest -v
 
 # Frontend (Vitest + React Testing Library)
 cd frontend && npm install && npm test
 ```
+
+The backend test suite runs against its own `<db>_test` database, never the
+one the running stack (and its admin UI / `/graph` demo page) uses.
+`backend/tests/conftest.py` rewrites `DATABASE_URL` to `<db>_test`
+(override with `TEST_DATABASE_URL`) and migrates it to head before any test
+code imports `app` — the first `pytest` run creates and migrates that
+database automatically; later runs just reuse it. Data created while
+running `pytest` no longer shows up anywhere in the running stack.
+
+## Rebuilding after a code change
+
+Neither the backend nor the frontend Docker image has a bind mount, so a
+code change under `backend/` or `frontend/` is invisible to the running
+containers until the image is rebuilt and the container recreated from it.
+
+```bash
+./scripts/rebuild.sh
+```
+
+rebuilds both images, recreates both containers, and checks that each is
+actually serving (`/api/health` on the backend, `/` on the frontend).
+Rebuild **both** even if you only touched one side — a stale image on the
+side you didn't touch is easy to miss and has shipped before.
 
 ## Full-stack smoke test
 
@@ -148,28 +241,25 @@ python scripts/graph_smoke_check.py
   endpoint that hashes a submitted plaintext password. Note that
   `POST /api/iam/user_account/` currently returns a 500 rather than a clean
   4xx, since the required column simply isn't in the schema any more.
-- **No list filtering.** `GET /api/{schema}/{table}/` supports `limit`/`offset`
-  pagination but not the per-column equality filtering described in spec §6.2,
-  and `DataTable` has no filter UI. Recorded as a follow-up.
 - **No enforced RBAC.** Auth is real (JWT, bearer token on every CRUD and meta
   route), but `role`/`user_role` are not checked per endpoint — any
   authenticated user can read and write every table. Deferred by spec §2.
 - **Styling is plain Tailwind,** not the shadcn/ui component library named in
   spec §7.1. Components were hand-rolled instead; functionally equivalent, but
   don't go looking for a shadcn install that isn't there.
-- **JSONB fields are edited as raw JSON** in the generic form, with no shape
-  validation. Deferred by spec §2.
-- The backend image has no bind mount: after changing anything under `backend/`,
-  run `docker compose build backend && docker compose up -d backend` before the
-  container sees it.
+- **JSONB fields are edited as raw JSON**, with no shape validation: any
+  JSONB column in the generic admin form, and the Graph Editor demo page's
+  edge (relationship) attribute editor. Node attributes on the Graph Editor
+  demo page are the exception — those are typed by the attribute's declared
+  `data_type`.
+- **No optimistic locking.** Neither the generic CRUD `PUT` nor the Graph
+  Editor's `PATCH` routes carry a version/etag check — the last save wins,
+  silently overwriting a concurrent edit.
+- Neither the backend nor the frontend image has a bind mount; see
+  "Rebuilding after a code change" above — a code change is invisible to the
+  running containers until `./scripts/rebuild.sh` rebuilds and recreates
+  them.
 - **Hierarchy collapse/expand is not implemented** on the Graph Editor demo
   page. Cytoscape's compound nodes provide nesting only; collapsing or
   expanding a compound node's children would require the
   `cytoscape-expand-collapse` extension, which is not currently installed.
-- **Dynamic EAV attribute editing is incomplete** on the Graph Editor demo
-  page: attribute inputs in the property panel are plain text (not typed by
-  the attribute's declared `data_type`), the create-node form doesn't expose
-  attribute inputs at all, and search doesn't match on attribute values.
-- **The Graph Editor demo page shares its data with the backend test suite**
-  (no test-database isolation), so nodes/entities created by running `pytest`
-  will appear on the `/graph` demo page.

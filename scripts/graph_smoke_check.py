@@ -91,12 +91,38 @@ def main():
     updated = request("PATCH", f"/api/graph/domain/nodes/{node['id']}", token=token, body={"status": "ACTIVE"})
     assert updated["attributes"]["status"] == "ACTIVE"
 
+    print("== Rejecting a non-numeric value for a typed (number) attribute (422) ==")
+    try:
+        request(
+            "PATCH",
+            f"/api/graph/domain/nodes/{node['id']}",
+            token=token,
+            body={"attributes": {"rank": "not a number"}},
+        )
+        raise AssertionError("expected a 422 for a non-numeric rank, PATCH succeeded instead")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 422, f"expected 422, got {exc.code}"
+
+    print("== Accepting a numeric value for a typed (number) attribute ==")
+    updated = request(
+        "PATCH", f"/api/graph/domain/nodes/{node['id']}", token=token, body={"attributes": {"rank": 5}}
+    )
+    rank = updated["attributes"]["rank"]
+    assert rank == 5, f"expected rank 5, got {rank!r}"
+    assert isinstance(rank, (int, float)) and not isinstance(rank, bool), (
+        f"expected rank to come back as a JSON number, got {type(rank).__name__}"
+    )
+
     print("== Confirming delete is blocked (409) while the node still has an edge ==")
     try:
         request("DELETE", f"/api/graph/domain/nodes/{node['id']}", token=token)
         raise AssertionError("expected a 409 conflict, delete succeeded instead")
     except urllib.error.HTTPError as exc:
         assert exc.code == 409, f"expected 409, got {exc.code}"
+        body = json.loads(exc.read())
+        assert isinstance(body["detail"], str), (
+            f"expected a plain string 409 detail, got {type(body['detail']).__name__}: {body['detail']!r}"
+        )
 
     print("== Deleting the edge, then the now-unreferenced node ==")
     request("DELETE", f"/api/graph/domain/edges/{edge['id']}", token=token)
