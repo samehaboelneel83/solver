@@ -171,6 +171,18 @@ editing or deleting the selected node/edge. It reads and writes through
   instead of one plain text box. Edge (relationship) attributes are still
   edited as raw JSON.
 
+An attribute definition whose `code` collides with a node's built-in
+fields (`code`, `status`, `description`, `name`) is hidden from both the
+create-node form and the property panel, with a small note explaining why
+— the built-in column always wins server-side, so an input for the
+shadowed attribute would silently never take effect.
+
+Cytoscape caches its container's bounding rect when the instance is
+created; if the page scrolls afterward (or in an automated browser test
+that scrolls/resizes after mount), call `cy.resize()` before relying on
+rendered node positions or hit-testing (tap/drag) — otherwise they're
+computed against the stale rect.
+
 To see anything on the page, seed some demo data first:
 
 ```bash
@@ -182,7 +194,7 @@ The seed is idempotent — re-running it does not create duplicates.
 ## Tests
 
 ```bash
-# Backend (103 tests) — runs inside the backend container
+# Backend (107 tests) — runs inside the backend container
 docker compose exec -T backend pytest -v
 
 # Frontend (Vitest + React Testing Library)
@@ -239,9 +251,14 @@ python scripts/graph_smoke_check.py
   deliberately excluded from the generic CRUD API, so `iam.user_account` is
   read-only in practice and only the seeded admin exists. Provisioning
   additional users was never a stated MVP capability; it needs a dedicated
-  endpoint that hashes a submitted plaintext password. Note that
-  `POST /api/iam/user_account/` currently returns a 500 rather than a clean
-  4xx, since the required column simply isn't in the schema any more.
+  endpoint that hashes a submitted plaintext password. `POST
+  /api/iam/user_account/` returns a clean `409` (`hashed_password is
+  required`) rather than a raw 500, since the NOT NULL column is simply
+  unreachable through the generic schema any more.
+- **Graph search matches labels and codes, not attribute values.** The
+  Graph Editor's free-text search filters nodes by their label and their
+  `code` attribute only; other EAV attribute values (e.g. a custom `rank`
+  or `hired` attribute) are not searched.
 - **No enforced RBAC.** Auth is real (JWT, bearer token on every CRUD and meta
   route), but `role`/`user_role` are not checked per endpoint — any
   authenticated user can read and write every table. Deferred by spec §2.
