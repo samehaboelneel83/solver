@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { shouldRetry } from "./main";
-import { ApiError } from "./api/client";
+import { shouldRetry } from "./queryRetry";
+import { ApiError } from "../api/client";
 
 describe("shouldRetry", () => {
   it("never retries a 404 (client error)", () => {
