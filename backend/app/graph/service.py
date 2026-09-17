@@ -401,15 +401,20 @@ def delete_node(db: Session, entity_id: uuid.UUID) -> None:
     db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity_id).delete()
     for node in hierarchy_node_rows:
         db.delete(node)
-    # Flush the child-row deletes before deleting the entity itself: these models
-    # have no ORM relationship() links (plain FK columns only), so the unit of
-    # work cannot infer that hierarchy_node/entity_attribute must be deleted
-    # before entity, and may otherwise attempt the entity DELETE first, tripping
-    # hierarchy_node_entity_id_fkey even though the referencing rows are already
-    # staged for deletion in the same flush.
-    db.flush()
-    db.delete(entity)
     try:
+        # Flush the child-row deletes before deleting the entity itself: these
+        # models have no ORM relationship() links (plain FK columns only), so
+        # the unit of work cannot infer that hierarchy_node/entity_attribute
+        # must be deleted before entity, and may otherwise attempt the entity
+        # DELETE first, tripping hierarchy_node_entity_id_fkey even though the
+        # referencing rows are already staged for deletion in the same flush.
+        # This flush (like the commit below) can itself raise IntegrityError
+        # if a concurrent request inserted a new child hierarchy placement or
+        # relationship in the window between the precheck above and here --
+        # keeping it inside this try/except preserves the 409-on-conflict
+        # behavior for that race instead of letting it surface as a 500.
+        db.flush()
+        db.delete(entity)
         db.commit()
     except IntegrityError:
         db.rollback()

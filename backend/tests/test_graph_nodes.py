@@ -209,6 +209,53 @@ def test_delete_node_succeeds_when_unreferenced(auth_headers, organization_id):
     assert delete_response.status_code == 204
 
 
+def test_delete_node_succeeds_for_root_hierarchy_placement_with_no_children_or_relationships(
+    auth_headers, organization_id
+):
+    # Regression test for a bug found by the Task 12 smoke check: an entity
+    # placed at the root of a hierarchy (hierarchy_id given, no parent) gets
+    # its own HierarchyNode row even though it has no children of its own and
+    # no relationships. delete_node must still be able to delete it -- it
+    # previously failed with a spurious 409 because db.flush() of the
+    # HierarchyNode delete happened after the ORM had already attempted to
+    # delete the Entity row in the same flush (these models have no
+    # relationship()-based ordering hints), tripping
+    # hierarchy_node_entity_id_fkey.
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+
+    et_response = client.post(
+        "/api/domain/entity_type/",
+        json={"organization_id": organization_id, "code": f"unit-{suffix}", "name": "Unit"},
+        headers=auth_headers,
+    )
+    entity_type_id = et_response.json()["id"]
+
+    hierarchy_response = client.post(
+        "/api/domain/hierarchy/",
+        json={"organization_id": organization_id, "code": f"org-chart-{suffix}", "name": "Org Chart"},
+        headers=auth_headers,
+    )
+    hierarchy_id = hierarchy_response.json()["id"]
+
+    node_response = client.post(
+        "/api/graph/domain/nodes",
+        json={
+            "organization_id": organization_id,
+            "entity_type_id": entity_type_id,
+            "name": "Lone Root",
+            "hierarchy_id": hierarchy_id,
+        },
+        headers=auth_headers,
+    )
+    assert node_response.status_code == 201
+    entity_id = node_response.json()["id"]
+    assert node_response.json()["parent"] is None
+
+    delete_response = client.delete(f"/api/graph/domain/nodes/{entity_id}", headers=auth_headers)
+    assert delete_response.status_code == 204
+
+
 def test_delete_node_returns_409_when_it_has_child_hierarchy_placements(auth_headers, organization_id):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
