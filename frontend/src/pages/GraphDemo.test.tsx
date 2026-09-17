@@ -117,7 +117,7 @@ describe("GraphDemo", () => {
     expect(screen.queryByDisplayValue("ACTIVE")).not.toBeInTheDocument();
   });
 
-  it("resets the filter bar (and the applied filter) to defaults when the hierarchy is switched", async () => {
+  it("keeps the filter bar's search text when the hierarchy is switched (state now lives in GraphDemo, not FilterBar)", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/iam/organization/")) {
         return Promise.resolve({ items: [{ id: "org-1", code: "default" }], total: 1 });
@@ -138,13 +138,16 @@ describe("GraphDemo", () => {
 
     renderWithProviders();
     await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByText("Org Chart")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Org Chart (org-chart)")).toBeInTheDocument());
 
     fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "ahmed" } });
     expect(screen.getByTestId("filter-search")).toHaveValue("ahmed");
 
     fireEvent.change(screen.getByTestId("hierarchy-select"), { target: { value: "h1" } });
 
-    await waitFor(() => expect(screen.getByTestId("filter-search")).toHaveValue(""));
+    // Give the hierarchy-triggered refetch a tick to settle, then confirm the search text
+    // (owned by GraphDemo's filterState, not FilterBar's own state) is still there.
+    await waitFor(() => expect(screen.getByTestId("hierarchy-select")).toHaveValue("h1"));
+    expect(screen.getByTestId("filter-search")).toHaveValue("ahmed");
   });
 });

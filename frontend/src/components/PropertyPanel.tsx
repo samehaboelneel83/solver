@@ -1,5 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useDeleteEdge, useDeleteNode, useUpdateEdge, useUpdateNode } from "../api/graph";
+import { formatApiError } from "../api/errors";
+import { AttributeInput, attributeValueFromForm } from "./attributeInputs";
 import type { GraphResponse } from "../types/graph";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
@@ -36,32 +38,40 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       setError(null);
       const form = new FormData(event.currentTarget);
       const name = String(form.get("name") ?? "");
-      const status = String(form.get("status") ?? "") || undefined;
-      const description = String(form.get("description") ?? "") || undefined;
+      // An empty status/description field sends an explicit `null` (present in the JSON
+      // body) rather than being omitted -- the backend (Task 7) tells "field left alone"
+      // apart from "field explicitly cleared" by whether the key is present at all, so
+      // omitting it here (the previous bug) meant clearing could never work.
+      const statusRaw = String(form.get("status") ?? "");
+      const status = statusRaw.trim() === "" ? null : statusRaw;
+      const descriptionRaw = String(form.get("description") ?? "");
+      const description = descriptionRaw.trim() === "" ? null : descriptionRaw;
       const attributes: Record<string, unknown> = {};
-      for (const def of definitions) {
-        const raw = form.get(`attr:${def.code}`);
-        if (raw !== null && raw !== "") {
-          attributes[def.code] = def.data_type === "boolean" ? raw === "true" : raw;
+      try {
+        for (const def of definitions) {
+          attributes[def.code] = attributeValueFromForm(form, def);
         }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Invalid attribute value");
+        return;
       }
       updateNode.mutate(
         { entityId: node!.id, payload: { name, status, description, attributes } },
-        { onError: (err) => setError(err instanceof Error ? err.message : "Failed to save") }
+        { onError: (err) => setError(formatApiError(err)) }
       );
     }
 
     function handleDelete() {
       setError(null);
       deleteNode.mutate(node!.id, {
-        onError: (err) => setError(err instanceof Error ? err.message : "Failed to delete"),
+        onError: (err) => setError(formatApiError(err)),
       });
     }
 
     return (
       <div>
         <h3 className="mb-2 text-sm font-semibold text-slate-900">
-          {node.type}: {node.label}
+          {entityType?.name ?? node.type}: {node.label}
         </h3>
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
         <form onSubmit={handleSubmit} className="space-y-2" data-testid="node-property-form">
@@ -92,11 +102,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
           {definitions.map((def) => (
             <label key={def.id} className="block text-xs">
               {def.name}
-              <input
-                name={`attr:${def.code}`}
-                defaultValue={String(node.attributes[def.code] ?? "")}
-                className="block w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-              />
+              <AttributeInput def={def} defaultValue={node.attributes[def.code]} />
             </label>
           ))}
           <div className="flex gap-2">
@@ -138,14 +144,14 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
     }
     updateEdge.mutate(
       { relationshipId: edge!.id, attributes },
-      { onError: (err) => setError(err instanceof Error ? err.message : "Failed to save") }
+      { onError: (err) => setError(formatApiError(err)) }
     );
   }
 
   function handleEdgeDelete() {
     setError(null);
     deleteEdge.mutate(edge!.id, {
-      onError: (err) => setError(err instanceof Error ? err.message : "Failed to delete"),
+      onError: (err) => setError(formatApiError(err)),
     });
   }
 

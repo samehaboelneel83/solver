@@ -46,7 +46,19 @@ export function useCreateNode(organizationId: string, hierarchyId: string | null
   });
 }
 
-export type UpdateNodePayload = Partial<Omit<CreateNodePayload, "organization_id" | "entity_type_id">>;
+// status/description widen to `| null` here (beyond CreateNodePayload's `string | undefined`)
+// because the update endpoint (Task 7) reads an explicit `null` in the JSON body as "clear
+// this column", distinct from omitting the key entirely ("leave it alone"). They're Omit-ed
+// from the Partial<...> base first and re-added, rather than just intersected in -- intersecting
+// `string | undefined` with `string | null | undefined` collapses back to `string | undefined`
+// (null isn't in both sides), which is exactly the type error this exists to avoid.
+export type UpdateNodePayload = Omit<
+  Partial<Omit<CreateNodePayload, "organization_id" | "entity_type_id">>,
+  "status" | "description"
+> & {
+  status?: string | null;
+  description?: string | null;
+};
 
 export function useUpdateNode(organizationId: string, hierarchyId: string | null) {
   const queryClient = useQueryClient();

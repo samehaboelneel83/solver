@@ -6,6 +6,7 @@ import elk from "cytoscape-elk";
 import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
 import { formatApiError } from "../api/errors";
+import { AttributeInput, attributeValueFromForm } from "./attributeInputs";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
 
@@ -183,6 +184,7 @@ export default function GraphEditor({
 
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
+  const [createEntityTypeId, setCreateEntityTypeId] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -302,7 +304,11 @@ export default function GraphEditor({
         return;
       }
       const typeOk = selectedTypes === null || selectedTypes.includes(graphNode.type);
-      const searchOk = !searchLower || graphNode.label.toLowerCase().includes(searchLower);
+      const codeValue = graphNode.attributes?.code;
+      const searchOk =
+        !searchLower ||
+        graphNode.label.toLowerCase().includes(searchLower) ||
+        (typeof codeValue === "string" && codeValue.toLowerCase().includes(searchLower));
       node.style("display", typeOk && searchOk ? "element" : "none");
     });
 
@@ -430,6 +436,7 @@ export default function GraphEditor({
 
   function handleCreateNode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError(null);
     const form = new FormData(event.currentTarget);
     const entityTypeId = String(form.get("entity_type_id") ?? "");
     const name = String(form.get("name") ?? "");
@@ -438,18 +445,33 @@ export default function GraphEditor({
     if (!entityTypeId || !name) {
       return;
     }
+    const definitions = data?.attribute_definitions.filter((d) => d.entity_type_id === entityTypeId) ?? [];
+    const attributes: Record<string, unknown> = {};
+    try {
+      for (const def of definitions) {
+        const value = attributeValueFromForm(form, def);
+        if (value !== null) {
+          attributes[def.code] = value;
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid attribute value");
+      return;
+    }
     createNode.mutate(
       {
         organization_id: organizationId,
         entity_type_id: entityTypeId,
         name,
         code,
+        attributes,
         hierarchy_id: hierarchyId ?? undefined,
         parent_entity_id: parentEntityId,
       },
       { onError: (e) => setError(formatApiError(e)) }
     );
     setShowCreateNode(false);
+    setCreateEntityTypeId("");
   }
 
   return (
@@ -464,7 +486,7 @@ export default function GraphEditor({
           <option value="">No hierarchy nesting</option>
           {data?.hierarchies.map((h) => (
             <option key={h.id} value={h.id}>
-              {h.name}
+              {h.name} ({h.code})
             </option>
           ))}
         </select>
@@ -486,7 +508,10 @@ export default function GraphEditor({
         </button>
         <button
           type="button"
-          onClick={() => setShowCreateNode((v) => !v)}
+          onClick={() => {
+            setShowCreateNode((v) => !v);
+            setCreateEntityTypeId("");
+          }}
           className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white"
           data-testid="toggle-create-node"
         >
@@ -519,11 +544,17 @@ export default function GraphEditor({
         >
           <label className="text-xs">
             Type
-            <select name="entity_type_id" required className="block rounded-md border border-slate-300 px-2 py-1 text-sm">
+            <select
+              name="entity_type_id"
+              required
+              value={createEntityTypeId}
+              onChange={(e) => setCreateEntityTypeId(e.target.value)}
+              className="block rounded-md border border-slate-300 px-2 py-1 text-sm"
+            >
               <option value="">—</option>
               {data.entity_types.map((et) => (
                 <option key={et.id} value={et.id}>
-                  {et.name}
+                  {et.name} ({et.code})
                 </option>
               ))}
             </select>
@@ -536,9 +567,17 @@ export default function GraphEditor({
             Code
             <input name="code" className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
           </label>
+          {data.attribute_definitions
+            .filter((def) => def.entity_type_id === createEntityTypeId)
+            .map((def) => (
+              <label key={def.id} className="text-xs">
+                {def.name}
+                <AttributeInput def={def} />
+              </label>
+            ))}
           {hierarchyId && (
             <label className="text-xs">
-              Parent
+              Parent (any node placed in this hierarchy will be used; others get an error)
               <select name="parent_entity_id" className="block rounded-md border border-slate-300 px-2 py-1 text-sm">
                 <option value="">(root)</option>
                 {data.nodes.map((n) => (
@@ -569,16 +608,35 @@ export default function GraphEditor({
                 </p>
               );
             }
-            return validTypes.map((rt) => (
+            // Type-constrained matches (naming a specific source and/or target type) first,
+            // since they're almost always what the user meant for this dragged pair; fully
+            // unconstrained ("any -> any") types are the generic catch-alls, listed after a
+            // divider so they read as a separate, lower-priority group.
+            const constrained = validTypes.filter(
+              (rt) => rt.source_entity_type !== null || rt.target_entity_type !== null
+            );
+            const unconstrained = validTypes.filter(
+              (rt) => rt.source_entity_type === null && rt.target_entity_type === null
+            );
+            const button = (rt: RelationshipTypeOption) => (
               <button
                 key={rt.id}
                 type="button"
                 onClick={() => handleConfirmEdge(rt.id)}
                 className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm"
               >
-                {rt.name}
+                {rt.name} ({rt.code})
               </button>
-            ));
+            );
+            return (
+              <>
+                {constrained.map(button)}
+                {constrained.length > 0 && unconstrained.length > 0 && (
+                  <hr data-testid="picker-divider" className="my-1 border-slate-200" />
+                )}
+                {unconstrained.map(button)}
+              </>
+            );
           })()}
           <button type="button" onClick={() => setPendingEdge(null)} className="text-sm text-slate-500">
             Cancel

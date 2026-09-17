@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import GraphEditor from "../components/GraphEditor";
 import PropertyPanel from "../components/PropertyPanel";
-import FilterBar from "../components/FilterBar";
-import type { FilterCriteria } from "../components/FilterBar";
+import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
+import type { FilterState } from "../components/FilterBar";
 import { useGraph } from "../api/graph";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
@@ -26,9 +26,12 @@ export default function GraphDemo() {
   const { data: organizationId, isLoading: orgLoading } = useDefaultOrganizationId();
   const [hierarchyId, setHierarchyId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
-  const [filter, setFilter] = useState<FilterCriteria | undefined>(undefined);
+  // Owned here (not inside FilterBar) so it survives GraphEditor's hierarchy-driven data
+  // reload and FilterBar no longer needs a remount key to "reset" on hierarchy switch.
+  const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER_STATE);
 
   const { data: graph } = useGraph(organizationId ?? "", hierarchyId);
+  const selectedNodeId = selection?.kind === "node" ? selection.id : null;
 
   if (orgLoading || !organizationId) {
     return <p className="text-sm text-slate-400">Loading organization…</p>;
@@ -39,11 +42,11 @@ export default function GraphDemo() {
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
       {graph && (
         <FilterBar
-          key={hierarchyId ?? "none"}
           entityTypes={graph.entity_types}
           edges={graph.edges}
-          selectedNodeId={selection?.kind === "node" ? selection.id : null}
-          onChange={setFilter}
+          selectedNodeId={selectedNodeId}
+          value={filterState}
+          onChange={setFilterState}
         />
       )}
       <div className="flex gap-4">
@@ -52,7 +55,7 @@ export default function GraphDemo() {
             organizationId={organizationId}
             hierarchyId={hierarchyId}
             onHierarchyChange={setHierarchyId}
-            filter={filter}
+            filter={graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined}
             onSelectionChange={setSelection}
           />
         </div>

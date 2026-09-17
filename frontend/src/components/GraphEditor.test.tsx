@@ -198,7 +198,7 @@ describe("GraphEditor", () => {
     renderWithProviders();
 
     expect(screen.getByTestId("hierarchy-select")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Org Chart")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Org Chart (org-chart)")).toBeInTheDocument());
   });
 
   it("opens a type-filtered relationship picker when edgehandles completes a drag-connect, and creates the edge on confirm", async () => {
@@ -253,10 +253,10 @@ describe("GraphEditor", () => {
     act(() => ehcompleteHandler(null, { id: () => "e1" }, { id: () => "e2" }));
 
     await waitFor(() => expect(screen.getByTestId("edge-type-picker")).toBeInTheDocument());
-    expect(screen.getByText("Works For")).toBeInTheDocument();
-    expect(screen.queryByText("Manages")).not.toBeInTheDocument();
+    expect(screen.getByText("Works For (works_for)")).toBeInTheDocument();
+    expect(screen.queryByText("Manages (manages)")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Works For"));
+    fireEvent.click(screen.getByText("Works For (works_for)"));
 
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(
@@ -264,6 +264,56 @@ describe("GraphEditor", () => {
         expect.objectContaining({ method: "POST" })
       )
     );
+  });
+
+  it("lists type-constrained relationship types before a divider, then unconstrained (any -> any) types", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "unit", label: "Unit A", parent: null, attributes: {} },
+      ],
+      edges: [],
+      entity_types: [],
+      relationship_types: [
+        {
+          id: "rt-any",
+          code: "related_to",
+          name: "Related To",
+          is_directed: false,
+          source_entity_type: null,
+          target_entity_type: null,
+        },
+        {
+          id: "rt1",
+          code: "works_for",
+          name: "Works For",
+          is_directed: true,
+          source_entity_type: "employee",
+          target_entity_type: "unit",
+        },
+      ],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    const ehcompleteHandler = registeredHandlersRef.current["ehcomplete"];
+    act(() => ehcompleteHandler(null, { id: () => "e1" }, { id: () => "e2" }));
+
+    await waitFor(() => expect(screen.getByTestId("edge-type-picker")).toBeInTheDocument());
+    const divider = screen.getByTestId("picker-divider");
+    const constrainedButton = screen.getByText("Works For (works_for)");
+    const unconstrainedButton = screen.getByText("Related To (related_to)");
+
+    // constrained button precedes the divider, which precedes the unconstrained button
+    expect(
+      constrainedButton.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      divider.compareDocumentPosition(unconstrainedButton) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   it("submits the create-node form and calls the nodes endpoint", async () => {
@@ -300,6 +350,115 @@ describe("GraphEditor", () => {
         expect.objectContaining({ method: "POST" })
       )
     );
+  });
+
+  it("shows an input per attribute_definition of the chosen create-node type, typed by data_type, and sends attributes", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path.startsWith("/api/graph/domain?")) {
+        return Promise.resolve({
+          nodes: [],
+          edges: [],
+          entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+          relationship_types: [],
+          hierarchies: [],
+          attribute_definitions: [
+            { id: "a1", entity_type_id: "t1", code: "rank", name: "Rank", data_type: "number" },
+            { id: "a2", entity_type_id: "t1", code: "active", name: "Active", data_type: "boolean" },
+          ],
+        });
+      }
+      if (path === "/api/graph/domain/nodes" && options?.method === "POST") {
+        return Promise.resolve({ id: "e1", type: "employee", label: "New Person", parent: null, attributes: {} });
+      }
+      return Promise.resolve({});
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("toggle-create-node"));
+    await waitFor(() => expect(screen.getByTestId("create-node-form")).toBeInTheDocument());
+
+    // No type chosen yet -- no attribute inputs.
+    expect(screen.queryByLabelText("Rank")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "t1" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New Person" } });
+
+    const rankInput = screen.getByLabelText("Rank") as HTMLInputElement;
+    expect(rankInput).toHaveAttribute("type", "number");
+    const activeInput = screen.getByLabelText("Active") as HTMLInputElement;
+    expect(activeInput).toHaveAttribute("type", "checkbox");
+
+    fireEvent.change(rankInput, { target: { value: "3" } });
+    fireEvent.click(activeInput);
+    fireEvent.submit(screen.getByTestId("create-node-form"));
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/graph/domain/nodes",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"rank":3'),
+        })
+      )
+    );
+    // .filter(...).pop() rather than .find(...) -- apiFetch's call history isn't cleared
+    // between tests in this file, so .find() could match a stale call from an earlier test.
+    const body = JSON.parse(
+      (apiFetch as any).mock.calls
+        .filter((c: any[]) => c[0] === "/api/graph/domain/nodes" && c[1]?.method === "POST")
+        .pop()[1].body
+    );
+    expect(body.attributes).toEqual({ rank: 3, active: true });
+  });
+
+  it("shows the Parent dropdown with '(root)' first and a hint, listing all nodes", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+      ],
+      edges: [],
+      entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+      relationship_types: [],
+      hierarchies: [{ id: "h1", code: "org-chart", name: "Org Chart" }],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders({ hierarchyId: "h1" });
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("toggle-create-node"));
+    await waitFor(() => expect(screen.getByTestId("create-node-form")).toBeInTheDocument());
+
+    const parentSelect = screen.getByLabelText(/^Parent/) as HTMLSelectElement;
+    const optionLabels = Array.from(parentSelect.options).map((o) => o.textContent);
+    expect(optionLabels[0]).toBe("(root)");
+    expect(optionLabels).toEqual(expect.arrayContaining(["Ahmed", "Sara"]));
+    expect(screen.getByText(/any node placed in this hierarchy will be used/i)).toBeInTheDocument();
+  });
+
+  it("matches attributes.code (not just label) when filtering by search", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: { code: "nurse-74yg" } },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: { code: "other-code" } },
+      ],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders({ filter: { selectedTypes: null, search: "nurse-74yg", highlightIds: null } });
+    await waitFor(() => expect(mockCytoscapeInstance.nodes).toHaveBeenCalled());
+
+    const e1 = mockCytoscapeInstance.getElementById("e1");
+    const e2 = mockCytoscapeInstance.getElementById("e2");
+    await waitFor(() => expect(e1.style("display")).toBe("element"));
+    expect(e2.style("display")).toBe("none");
   });
 
   it("calls the latest onSelectionChange after a rerender, not the one captured when the cytoscape instance was created", async () => {
@@ -477,7 +636,7 @@ describe("GraphEditor", () => {
     act(() => ehcompleteHandler(null, { id: () => "e1" }, { id: () => "e2" }));
 
     await waitFor(() => expect(screen.getByTestId("edge-type-picker")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Works For"));
+    fireEvent.click(screen.getByText("Works For (works_for)"));
 
     await waitFor(() =>
       expect(screen.getByTestId("graph-error")).toHaveTextContent("this relationship already exists")
