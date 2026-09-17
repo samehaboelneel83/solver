@@ -108,7 +108,14 @@ export default function GraphDemo() {
       )}
       <div className="flex gap-4">
         <div className="flex-1">
+          {/* Keyed by organizationId: an org switch is rare and its graph is unrelated to the
+              previous one, so the simplest correct fix is to fully rebuild the canvas (a fresh
+              cytoscape instance) rather than diff across organisations -- otherwise a failed or
+              still-in-flight refetch after switching orgs could leave the previous org's nodes
+              drawn and actionable. Hierarchy switches within the same org stay incremental, via
+              GraphEditor's own diffing effect. */}
           <GraphEditor
+            key={organizationId}
             organizationId={organizationId}
             hierarchyId={hierarchyId}
             onHierarchyChange={setHierarchyId}

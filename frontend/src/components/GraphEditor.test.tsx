@@ -49,6 +49,7 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
       forEach: (fn: (ele: any) => void) => ids.forEach((id) => fn(wrapEle(id))),
       map: (fn: (ele: any) => any) => ids.map((id) => fn(wrapEle(id))),
       removeClass: (cls: string) => ids.forEach((id) => wrapEle(id).removeClass(cls)),
+      remove: () => ids.forEach((id) => store.delete(id)),
       length: ids.length,
     };
   }
@@ -413,6 +414,39 @@ describe("GraphEditor", () => {
     expect(body.attributes).toEqual({ rank: 3, active: true });
   });
 
+  it("hides a create-node attribute definition whose code collides with a built-in field, with a note (M-9)", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path.startsWith("/api/graph/domain?")) {
+        return Promise.resolve({
+          nodes: [],
+          edges: [],
+          entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+          relationship_types: [],
+          hierarchies: [],
+          attribute_definitions: [
+            { id: "a1", entity_type_id: "t1", code: "rank", name: "Rank", data_type: "number" },
+            { id: "a2", entity_type_id: "t1", code: "status", name: "Shadow Status", data_type: "string" },
+          ],
+        });
+      }
+      if (path === "/api/graph/domain/nodes" && options?.method === "POST") {
+        return Promise.resolve({ id: "e1", type: "employee", label: "New Person", parent: null, attributes: {} });
+      }
+      return Promise.resolve({});
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("toggle-create-node"));
+    await waitFor(() => expect(screen.getByTestId("create-node-form")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "t1" } });
+
+    expect(screen.getByLabelText("Rank")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Shadow Status")).not.toBeInTheDocument();
+    expect(screen.getByText("attribute status hidden: collides with a built-in field")).toBeInTheDocument();
+  });
+
   it("shows the Parent dropdown with '(root)' first and a hint, listing all nodes", async () => {
     (apiFetch as any).mockResolvedValue({
       nodes: [
@@ -691,6 +725,41 @@ describe("GraphEditor", () => {
 
     await waitFor(() => expect(screen.getByTestId("graph-error")).toHaveTextContent("Layout failed"));
   });
+
+  it("clears the canvas when the graph query errors, so stale nodes from a previous query aren't left drawn (I-2/M-5)", async () => {
+    (apiFetch as any).mockResolvedValueOnce({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    // retry: false so the failed query settles into its error state
+    // immediately instead of going through react-query's default retry/backoff.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor organizationId="org-1" hierarchyId={null} onHierarchyChange={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+    expect(elementStore.has("e1")).toBe(true);
+
+    (apiFetch as any).mockRejectedValue(new Error("network down"));
+    // A hierarchy switch changes the query key, forcing a refetch that now rejects.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor organizationId="org-1" hierarchyId="h1" onHierarchyChange={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(screen.getByText("Failed to load graph")).toBeInTheDocument());
+    expect(mockCytoscapeInstance.remove).not.toHaveBeenCalled(); // elements() batch-removed, not per-id remove
+    expect(elementStore.size).toBe(0);
+  });
 });
 
 describe("applyGraphToCy", () => {
@@ -766,6 +835,35 @@ describe("applyGraphToCy", () => {
     const result = applyGraphToCy(mockCytoscapeInstance, graphB);
 
     expect(result.structureChanged).toBe(false);
+  });
+
+  it("gives every newly-added node its own position object, even though their coordinates are equal (M-2)", () => {
+    const graphA = {
+      ...baseGraph(),
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+        { id: "e3", type: "employee", label: "Lina", parent: null, attributes: {} },
+      ],
+    };
+
+    applyGraphToCy(mockCytoscapeInstance, graphA);
+
+    const addedElements = mockCytoscapeInstance.add.mock.calls.flatMap((call: any[]) => call[0]);
+    const nodeElements = addedElements.filter((el: any) => !("source" in el.data));
+    expect(nodeElements).toHaveLength(3);
+
+    const positions = nodeElements.map((el: any) => el.position);
+    // Same coordinates (all three are new, so all land at the viewport
+    // centre)...
+    expect(positions.every((p: any) => p.x === positions[0].x && p.y === positions[0].y)).toBe(true);
+    // ...but distinct object references. Cytoscape stores `position` by
+    // reference and mutates it in place during layout, so nodes sharing one
+    // object would all end up wherever the layout wrote last, collapsing
+    // the whole graph onto a single point -- reverting the per-node
+    // `{ x: center.x, y: center.y }` object literal to a single shared
+    // `center` object makes this assertion fail.
+    expect(new Set(positions).size).toBe(positions.length);
   });
 
   it("does not throw and skips an edge whose source/target node is not among the kept-or-added nodes", () => {

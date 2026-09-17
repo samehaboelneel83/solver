@@ -6,7 +6,7 @@ import elk from "cytoscape-elk";
 import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
 import { formatApiError } from "../api/errors";
-import { AttributeInput, attributeValueFromForm } from "./attributeInputs";
+import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
 
@@ -278,7 +278,22 @@ export default function GraphEditor({
 
   useEffect(() => {
     const cy = cyRef.current;
-    if (!cy || !data) {
+    if (!cy) {
+      return;
+    }
+    if (loadError) {
+      // The org/hierarchy query just failed -- whatever was drawn from a
+      // previous successful query is now stale and unconfirmed (e.g. it
+      // could belong to a different organisation entirely). Clear it so
+      // there's nothing left on the canvas that looks actionable; "data
+      // becomes undefined because the query key changed" (a normal
+      // in-flight refetch, no error) intentionally does NOT hit this branch
+      // and leaves the current drawing alone until the new data arrives.
+      cy.elements().remove();
+      hasLaidOutRef.current = false;
+      return;
+    }
+    if (!data) {
       return;
     }
     const { structureChanged } = applyGraphToCy(cy, data);
@@ -287,7 +302,7 @@ export default function GraphEditor({
       hasLaidOutRef.current = true;
       startLayout(cy);
     }
-  }, [data]);
+  }, [data, loadError]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -295,15 +310,20 @@ export default function GraphEditor({
       return;
     }
     const searchLower = (filter?.search ?? "").toLowerCase();
-    const selectedTypes = filter?.selectedTypes ?? null;
+    // Built once per run instead of re-deriving per node: a Map for O(1) id
+    // lookup instead of `Array.find`, and a Set for O(1) membership instead
+    // of `Array.includes` -- both were previously re-scanned for every node
+    // on every filter/data change, O(n*m) over the whole graph.
+    const nodeById = new Map(data.nodes.map((n) => [n.id, n]));
+    const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
     const highlightIds = filter?.highlightIds ?? null;
 
     cy.nodes().forEach((node) => {
-      const graphNode = data.nodes.find((n) => n.id === node.id());
+      const graphNode = nodeById.get(node.id());
       if (!graphNode) {
         return;
       }
-      const typeOk = selectedTypes === null || selectedTypes.includes(graphNode.type);
+      const typeOk = selectedTypesSet === null || selectedTypesSet.has(graphNode.type);
       const codeValue = graphNode.attributes?.code;
       const searchOk =
         !searchLower ||
@@ -445,7 +465,12 @@ export default function GraphEditor({
     if (!entityTypeId || !name) {
       return;
     }
-    const definitions = data?.attribute_definitions.filter((d) => d.entity_type_id === entityTypeId) ?? [];
+    // Attribute definitions that collide with a built-in field (code/status/
+    // description/name) are hidden from the form and never sent -- see
+    // splitBuiltinCollisions.
+    const { visible: definitions } = splitBuiltinCollisions(
+      data?.attribute_definitions.filter((d) => d.entity_type_id === entityTypeId) ?? []
+    );
     const attributes: Record<string, unknown> = {};
     try {
       for (const def of definitions) {
@@ -567,14 +592,26 @@ export default function GraphEditor({
             Code
             <input name="code" className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
           </label>
-          {data.attribute_definitions
-            .filter((def) => def.entity_type_id === createEntityTypeId)
-            .map((def) => (
-              <label key={def.id} className="text-xs">
-                {def.name}
-                <AttributeInput def={def} />
-              </label>
-            ))}
+          {(() => {
+            const { visible, hidden } = splitBuiltinCollisions(
+              data.attribute_definitions.filter((def) => def.entity_type_id === createEntityTypeId)
+            );
+            return (
+              <>
+                {visible.map((def) => (
+                  <label key={def.id} className="text-xs">
+                    {def.name}
+                    <AttributeInput def={def} />
+                  </label>
+                ))}
+                {hidden.map((def) => (
+                  <p key={def.id} className="basis-full text-xs text-slate-400">
+                    attribute {def.code} hidden: collides with a built-in field
+                  </p>
+                ))}
+              </>
+            );
+          })()}
           {hierarchyId && (
             <label className="text-xs">
               Parent (any node placed in this hierarchy will be used; others get an error)
@@ -646,6 +683,11 @@ export default function GraphEditor({
 
       {isLoading && <p className="text-sm text-slate-400">Loading graph…</p>}
       {loadError && <p className="text-sm text-red-600">Failed to load graph</p>}
+      {/* Cytoscape caches this container's bounding rect when the instance is created (and
+          otherwise only recomputes it on its own triggers), so if the page scrolls afterward --
+          or in a headless/automated browser test that scrolls or resizes the window after mount
+          -- rendered node positions and hit-testing (tap/drag) go stale against the old rect.
+          Call cy.resize() before relying on them in that situation. */}
       <div ref={containerRef} data-testid="cytoscape-container" style={{ width: "100%", height: "600px" }} />
     </div>
   );

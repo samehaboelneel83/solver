@@ -146,9 +146,14 @@ describe("GraphDemo", () => {
     fireEvent.change(screen.getByTestId("hierarchy-select"), { target: { value: "h1" } });
 
     // Give the hierarchy-triggered refetch a tick to settle, then confirm the search text
-    // (owned by GraphDemo's filterState, not FilterBar's own state) is still there.
+    // (owned by GraphDemo's filterState, not FilterBar's own state) is still there. A plain
+    // synchronous assertion here would race FilterBar's ~200ms debounced onChange (M-8) --
+    // the hierarchy switch transiently unmounts/remounts FilterBar (graph goes undefined
+    // mid-refetch), and if that happens before the debounce commits, the freshly-mounted
+    // instance would briefly read GraphDemo's still-stale filterState.search. waitFor gives
+    // the debounce time to land.
     await waitFor(() => expect(screen.getByTestId("hierarchy-select")).toHaveValue("h1"));
-    expect(screen.getByTestId("filter-search")).toHaveValue("ahmed");
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toHaveValue("ahmed"));
   });
 
   it("defaults the organization selector to the org coded 'default' and switching orgs re-queries the graph and clears selection/hierarchy", async () => {
@@ -197,11 +202,19 @@ describe("GraphDemo", () => {
     fireEvent.change(screen.getByTestId("hierarchy-select"), { target: { value: "h1" } });
     await waitFor(() => expect(screen.getByTestId("hierarchy-select")).toHaveValue("h1"));
 
+    const cytoscapeCallsBeforeSwitch = mockCytoscape.mock.calls.length;
+
     fireEvent.change(screen.getByTestId("org-select"), { target: { value: "org-2" } });
     expect(screen.getByTestId("org-select")).toHaveValue("org-2");
 
     // Selection and hierarchy are reset on org change.
     expect(screen.queryByDisplayValue("Ahmed")).not.toBeInTheDocument();
+
+    // GraphEditor is keyed by organizationId (I-2/M-5): switching orgs remounts it with a
+    // brand new cytoscape instance rather than diffing the old org's nodes away, so a failed
+    // or still-in-flight refetch for the new org can never leave the previous org's nodes
+    // drawn and actionable.
+    await waitFor(() => expect(mockCytoscape.mock.calls.length).toBeGreaterThan(cytoscapeCallsBeforeSwitch));
 
     await waitFor(() => {
       const graphCalls = (apiFetch as any).mock.calls.filter(([path]: [string]) =>
