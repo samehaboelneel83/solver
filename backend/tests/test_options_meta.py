@@ -315,6 +315,28 @@ def test_schema_field_label_falls_back_to_humanised_name(auth_headers):
     assert entity_type_fields["code"]["label"] == "Code"
 
 
+def test_schema_field_label_drops_is_prefix_and_alias_underscore(auth_headers):
+    """A boolean column should read as the thing it describes ("Runtime"),
+    not as a question ("Is runtime"), and a column aliased to dodge a
+    SQLAlchemy name collision ("metadata_") must not leak its trailing
+    underscore to the user as a stray space."""
+    client = TestClient(app)
+
+    response = client.get("/api/meta/schema", headers=auth_headers)
+    assert response.status_code == 200
+    tables = {(t["schema"], t["table"]): t for t in response.json()}
+
+    parameter_fields = {f["name"]: f for f in tables[("problem", "parameter")]["fields"]}
+    assert parameter_fields["is_runtime"]["label"] == "Runtime"
+
+    constraint_fields = {f["name"]: f for f in tables[("problem", "constraint_definition")]["fields"]}
+    assert constraint_fields["is_hard"]["label"] == "Hard"
+
+    relationship_type_fields = {f["name"]: f for f in tables[("domain", "relationship_type")]["fields"]}
+    assert relationship_type_fields["metadata_"]["label"] == "Metadata"
+    assert relationship_type_fields["is_directed"]["label"] == "Directed"
+
+
 def test_schema_field_keeps_all_existing_keys(auth_headers):
     """Adding `label` must not disturb any key the frontend already
     depends on."""

@@ -70,12 +70,19 @@ TABLE_LABELS: dict[str, tuple[str, str]] = {
 
 def humanise(name: str) -> str:
     """Fallback label for a table or field with no explicit override:
-    strip a single trailing "_id", replace underscores with spaces, and
+    strip a single trailing "_id", drop an "is_" prefix so boolean
+    columns read as the thing they describe ("is_active" -> "Active")
+    rather than as a question, replace underscores with spaces, and
     capitalise only the first character -- leaving the rest of the
-    string (and any already-upper-case acronym) untouched."""
+    string (and any already-upper-case acronym) untouched. Trailing
+    underscores are stripped too: columns whose name collides with a
+    SQLAlchemy attribute are aliased that way (e.g. "metadata_"), and
+    the alias should never reach the user as a stray space."""
     if name.endswith("_id"):
         name = name[: -len("_id")]
-    name = name.replace("_", " ")
+    if name.startswith("is_"):
+        name = name[len("is_") :]
+    name = name.rstrip("_").replace("_", " ")
     if not name:
         return name
     return name[0].upper() + name[1:]
