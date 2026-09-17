@@ -1,11 +1,13 @@
 import uuid
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Type
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import String, Text, inspect, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -20,6 +22,11 @@ def searchable_columns(model: Type) -> list:
 
     Used to build the OR-ed `ilike` search for the `q` list param. Also
     reused by Task 2's search UI to know which columns are searchable.
+
+    Note: this does not know about a router's `read_schema`, so callers
+    that expose data over HTTP (list_items below) must additionally
+    intersect the result with the read schema's fields to avoid leaking
+    `hidden` columns through search.
     """
     mapper = inspect(model)
     return [
@@ -29,10 +36,24 @@ def searchable_columns(model: Type) -> list:
     ]
 
 
-def _filterable_attrs(model: Type) -> dict:
-    """Map attribute name -> InstrumentedAttribute, for filter/order validation."""
+def _column_attr_keys(model: Type) -> dict:
+    """Map Column object -> attribute name, to correlate searchable_columns()
+    output (raw Columns) back to read-schema field names (attribute names)."""
     mapper = inspect(model)
-    return {prop.key: getattr(model, prop.key) for prop in mapper.column_attrs}
+    return {prop.columns[0]: prop.key for prop in mapper.column_attrs}
+
+
+def _filterable_attrs(model: Type, read_schema: Type[BaseModel]) -> dict:
+    """Map attribute name -> InstrumentedAttribute, for filter/order validation.
+
+    Restricted to columns that are actually exposed on `read_schema`, so a
+    column dropped via `hidden=` (e.g. hashed_password) can't be reached
+    through `f_<column>` or `order_by` even though it's still a real
+    mapped column on the model.
+    """
+    mapper = inspect(model)
+    allowed = set(read_schema.model_fields.keys())
+    return {prop.key: getattr(model, prop.key) for prop in mapper.column_attrs if prop.key in allowed}
 
 
 def _python_type(attr) -> type:
@@ -45,14 +66,24 @@ def _python_type(attr) -> type:
 def _cast_filter_value(attr, raw: str):
     py_type = _python_type(attr)
     if py_type is bool:
-        lowered = raw.lower()
-        if lowered not in ("true", "false"):
-            raise ValueError(f"not a boolean: {raw!r}")
-        return lowered == "true"
+        lowered = raw.strip().lower()
+        if lowered in ("true", "1"):
+            return True
+        if lowered in ("false", "0"):
+            return False
+        raise ValueError(f"not a boolean: {raw!r}")
     if py_type is uuid.UUID:
         return uuid.UUID(raw)
     if py_type is int:
         return int(raw)
+    if py_type is float:
+        return float(raw)
+    if py_type is Decimal:
+        return Decimal(raw)
+    if py_type is datetime:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if py_type is date:
+        return date.fromisoformat(raw)
     return raw
 
 
@@ -85,11 +116,13 @@ def build_crud_router(
         db: Session = Depends(get_db),
         _: UserAccount = Depends(get_current_user),
     ) -> dict:
-        filterable = _filterable_attrs(model)
+        filterable = _filterable_attrs(model, read_schema)
         query = db.query(model)
 
         if q:
-            columns = searchable_columns(model)
+            allowed_field_names = set(read_schema.model_fields.keys())
+            column_keys = _column_attr_keys(model)
+            columns = [c for c in searchable_columns(model) if column_keys.get(c) in allowed_field_names]
             if columns:
                 query = query.filter(or_(*[col.ilike(f"%{q}%") for col in columns]))
 
@@ -102,18 +135,26 @@ def build_crud_router(
                 raise HTTPException(status_code=422, detail=f"unknown column {column_name}")
             try:
                 value = _cast_filter_value(attr, raw_value)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, ArithmeticError, InvalidOperation):
                 raise HTTPException(status_code=422, detail=f"invalid value for column {column_name}")
             query = query.filter(attr == value)
+
+        order_normalized = order.strip().lower()
+        if order_normalized not in ("asc", "desc"):
+            raise HTTPException(status_code=422, detail=f"invalid order {order!r}, expected asc or desc")
 
         if order_by is not None:
             attr = filterable.get(order_by)
             if attr is None:
                 raise HTTPException(status_code=422, detail=f"unknown column {order_by}")
-            query = query.order_by(attr.desc() if order.lower() == "desc" else attr.asc())
+            query = query.order_by(attr.desc() if order_normalized == "desc" else attr.asc())
 
-        total = query.count()
-        rows = query.offset(offset).limit(limit).all()
+        try:
+            total = query.count()
+            rows = query.offset(offset).limit(limit).all()
+        except DataError as exc:
+            db.rollback()
+            raise HTTPException(status_code=422, detail="invalid filter value") from exc
         return {
             "items": [read_schema.model_validate(row).model_dump(mode="json") for row in rows],
             "total": total,

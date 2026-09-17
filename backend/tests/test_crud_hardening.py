@@ -219,3 +219,47 @@ def test_list_order_by(auth_headers):
 
     bad_order_response = client.get("/api/domain/role_type/?order_by=nope", headers=auth_headers)
     assert bad_order_response.status_code == 422
+
+
+def test_list_filter_bad_datetime_returns_422_not_500(auth_headers, organization_id):
+    """f_<column>=<garbage> against a non str/bool/int/uuid column (here,
+    entity_type.created_at, a DateTime) used to fall through _cast_filter_value's
+    `return raw` branch and hit Postgres as a raw string, surfacing as a 500
+    (psycopg2.errors.InvalidDatetimeFormat) instead of a clean validation error."""
+    client = TestClient(app)
+
+    bad_response = client.get(
+        "/api/domain/entity_type/?f_created_at=notadate", headers=auth_headers
+    )
+    assert bad_response.status_code == 422
+
+    valid_response = client.get(
+        "/api/domain/entity_type/?f_created_at=2026-01-01T00:00:00%2B00:00", headers=auth_headers
+    )
+    assert valid_response.status_code == 200
+
+
+def test_list_filter_and_order_reject_hidden_columns(auth_headers):
+    """hashed_password is dropped from UserAccountRead via `hidden=`, so it
+    must not be reachable through f_<column> or order_by either -- both
+    used to return 200 and act as a password-hash oracle/side channel."""
+    client = TestClient(app)
+
+    order_response = client.get(
+        "/api/iam/user_account/?order_by=hashed_password", headers=auth_headers
+    )
+    assert order_response.status_code == 422
+
+    filter_response = client.get(
+        "/api/iam/user_account/?f_hashed_password=x", headers=auth_headers
+    )
+    assert filter_response.status_code == 422
+
+
+def test_list_order_rejects_invalid_direction(auth_headers):
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/domain/role_type/?order_by=code&order=sideways", headers=auth_headers
+    )
+    assert response.status_code == 422
