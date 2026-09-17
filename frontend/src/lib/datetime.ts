@@ -28,5 +28,9 @@ export function toDatetimeLocalValue(iso: string): string {
  * every save.
  */
 export function fromDatetimeLocalValue(local: string): string {
-  return new Date(local).toISOString();
+  const date = new Date(local);
+  // Mirror toDatetimeLocalValue: pass an unparseable value through so the
+  // backend rejects it with a 422 instead of the form throwing on submit.
+  if (Number.isNaN(date.getTime())) return local;
+  return date.toISOString();
 }

@@ -292,6 +292,10 @@ def test_list_pagination_is_stable_without_order_by(auth_headers):
         seen_ids.append(items[0]["id"])
 
     assert len(seen_ids) == len(set(seen_ids)), "a row was repeated across pages"
+    # Postgres compares uuids bytewise, which matches the hex-string order, so the
+    # default ORDER BY id must yield ascending ids across pages -- this pins the
+    # default ordering rather than relying on insertion order happening to hold.
+    assert seen_ids == sorted(seen_ids), "rows were not returned in id order"
 
 
 def test_list_pagination_is_stable_with_order_by_on_a_non_unique_column(auth_headers, organization_id):
