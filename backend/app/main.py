@@ -6,6 +6,7 @@ from app.api.auth import router as auth_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.meta import router as meta_router
+from app.api.options import router as options_router
 from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
@@ -18,6 +19,11 @@ app = FastAPI(title="Problem Solver Platform API")
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(meta_router)
+# Must precede crud_router: FastAPI matches routes in registration order,
+# and crud_router's GET /api/{schema}/{table}/{item_id} would otherwise
+# swallow /options requests, answering 422 "invalid uuid" for the literal
+# path segment "options".
+app.include_router(options_router)
 app.include_router(crud_router)
 app.include_router(graph_router)
 

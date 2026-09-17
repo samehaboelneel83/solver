@@ -6,10 +6,52 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import inspect
 
 from app.api.deps import get_current_user
+from app.crud.labels import DEFAULT_LABEL_COLUMNS
 from app.crud.registry import TABLE_REGISTRY
 from app.models.iam import UserAccount
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
+
+# Curated free-text "type" choices, keyed by (table, field) with a
+# (None, field) fallback shared across tables that use the same field
+# name (e.g. every `status` column). Hints only -- the CRUD routes still
+# accept any value.
+CHOICES: dict[tuple[str | None, str], list[str]] = {
+    (None, "status"): ["DRAFT", "ACTIVE", "ARCHIVED"],
+    (None, "severity"): ["error", "warning", "info"],
+    (None, "objective_type"): ["minimize", "maximize"],
+    (None, "variable_type"): ["binary", "integer", "continuous"],
+    (None, "dimension_type"): ["entity", "time", "set"],
+    (None, "cardinality"): ["one_to_one", "one_to_many", "many_to_many"],
+    (None, "problem_type"): ["scheduling", "assignment", "routing", "other"],
+    (None, "data_type"): ["string", "number", "boolean", "date", "datetime", "json"],
+    ("attribute_definition", "data_type"): [
+        "string",
+        "number",
+        "boolean",
+        "date",
+        "datetime",
+        "json",
+    ],
+}
+
+
+def _choices_for(table: str, field: str) -> list[str] | None:
+    return CHOICES.get((table, field)) or CHOICES.get((None, field))
+
+
+def _scalar_default(column):
+    """The client-side ORM default's value, when it's a plain scalar
+    (str/int/bool/float) rather than a callable like uuid.uuid4."""
+    default = getattr(column, "default", None)
+    if default is None:
+        return None
+    arg = getattr(default, "arg", None)
+    if callable(arg):
+        return None
+    if isinstance(arg, (str, int, bool, float)):
+        return arg
+    return None
 
 _TYPE_LABELS: dict[type, str] = {
     str: "string",
@@ -38,10 +80,12 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
         fk_table_by_field: dict[str, str] = {}
         nullable_by_field: dict[str, bool] = {}
         has_client_default_by_field: dict[str, bool] = {}
+        default_by_field: dict[str, object] = {}
         for attr in mapper.column_attrs:
             column = attr.columns[0]
             nullable_by_field[attr.key] = column.nullable
             has_client_default_by_field[attr.key] = column.default is not None
+            default_by_field[attr.key] = _scalar_default(column)
             for fk in column.foreign_keys:
                 fk_table_by_field[attr.key] = fk.column.table.fullname
                 break
@@ -89,6 +133,9 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
                     "writable": is_writable,
                     "is_fk": field_name in fk_table_by_field,
                     "fk_table": fk_table_by_field.get(field_name),
+                    "default": default_by_field.get(field_name),
+                    "choices": _choices_for(meta.table, field_name),
+                    "label_field": field_name in DEFAULT_LABEL_COLUMNS,
                 }
             )
 
