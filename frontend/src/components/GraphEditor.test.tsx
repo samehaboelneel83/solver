@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import GraphEditor, { applyGraphToCy } from "./GraphEditor";
+import GraphEditor, { applyGraphToCy, positionsAreDegenerate } from "./GraphEditor";
 
 const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore } = vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
@@ -302,6 +302,52 @@ describe("GraphEditor", () => {
     );
   });
 
+  it("calls the latest onSelectionChange after a rerender, not the one captured when the cytoscape instance was created", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    const queryClient = new QueryClient();
+    const firstOnSelectionChange = vi.fn();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor
+          organizationId="org-1"
+          hierarchyId={null}
+          onHierarchyChange={vi.fn()}
+          onSelectionChange={firstOnSelectionChange}
+        />
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    // The cytoscape instance (and its tap handlers) is created once on mount; rerender with a
+    // brand new onSelectionChange callback -- the mount effect does NOT rerun (deps are `[]`), so
+    // this only passes if the handlers read the callback through a ref instead of a stale closure.
+    const secondOnSelectionChange = vi.fn();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor
+          organizationId="org-1"
+          hierarchyId={null}
+          onHierarchyChange={vi.fn()}
+          onSelectionChange={secondOnSelectionChange}
+        />
+      </QueryClientProvider>
+    );
+
+    const tapNodeHandler = registeredHandlersRef.current["tap:node"];
+    act(() => tapNodeHandler({ target: { id: () => "e1" } }));
+
+    expect(secondOnSelectionChange).toHaveBeenCalledWith({ kind: "node", id: "e1" });
+    expect(firstOnSelectionChange).not.toHaveBeenCalled();
+  });
+
   it("passes ELK options that request hierarchy-safe layout to cy.layout", async () => {
     (apiFetch as any).mockResolvedValue({
       nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
@@ -561,5 +607,49 @@ describe("applyGraphToCy", () => {
     const result = applyGraphToCy(mockCytoscapeInstance, graphB);
 
     expect(result.structureChanged).toBe(false);
+  });
+
+  it("does not throw and skips an edge whose source/target node is not among the kept-or-added nodes", () => {
+    const graphA = baseGraph(); // just node e1
+    applyGraphToCy(mockCytoscapeInstance, graphA);
+
+    const graphWithDanglingEdge = {
+      ...graphA,
+      edges: [
+        { id: "r-bad", source: "e1", target: "does-not-exist", type: "manages", label: "Manages", attributes: {} },
+      ],
+    };
+
+    expect(() => applyGraphToCy(mockCytoscapeInstance, graphWithDanglingEdge)).not.toThrow();
+
+    const addedElements = mockCytoscapeInstance.add.mock.calls.flatMap((call: any[]) => call[0]);
+    expect(addedElements.some((el: any) => el.data.id === "r-bad")).toBe(false);
+  });
+});
+
+describe("positionsAreDegenerate", () => {
+  it("returns false for fewer than 2 positions", () => {
+    expect(positionsAreDegenerate([])).toBe(false);
+    expect(positionsAreDegenerate([{ x: 5, y: 5 }])).toBe(false);
+  });
+
+  it("returns false when positions are meaningfully spread out", () => {
+    expect(
+      positionsAreDegenerate([
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 50, y: 80 },
+      ])
+    ).toBe(false);
+  });
+
+  it("returns true when every position is within 1px of every other (e.g. a layout that never moved anything)", () => {
+    expect(
+      positionsAreDegenerate([
+        { x: 27, y: 13877 },
+        { x: 27, y: 13877 },
+        { x: 27.4, y: 13877.2 },
+      ])
+    ).toBe(true);
   });
 });

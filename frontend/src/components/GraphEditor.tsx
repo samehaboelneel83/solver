@@ -85,25 +85,43 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
     }
   });
 
+  // An edge whose source/target isn't among the nodes that will actually exist in cy (kept
+  // existing ones + the ones we're about to add) can't be created -- real Cytoscape's cy.add()
+  // throws synchronously ("Can not create edge ... with nonexistent source/target"), which would
+  // abort the whole batch. Skip those rather than let a dangling edge take down the update.
+  const validNodeIds = new Set(graph.nodes.map((n) => n.id));
+  let skippedEdgeCount = 0;
+
   const newEdges: GraphEdge[] = [];
   desiredEdges.forEach((edge, id) => {
     if (existingEdgeIds.has(id)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ele = (cy as any).getElementById(id);
       ele.data({ label: edge.label, type: edge.type });
+    } else if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
+      skippedEdgeCount += 1;
     } else {
       newEdges.push(edge);
     }
   });
+
+  if (skippedEdgeCount > 0 && typeof console !== "undefined") {
+    // eslint-disable-next-line no-console
+    console.warn(`applyGraphToCy: skipped ${skippedEdgeCount} edge(s) referencing a missing node`);
+  }
 
   if (newNodes.length > 0 || newEdges.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const extent = (cy as any).extent?.() ?? { x1: 0, y1: 0, x2: 0, y2: 0 };
     const center = { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
     const elementsToAdd = [
+      // Each new node gets its OWN position object -- cytoscape stores `position` by reference
+      // (no clone) and later mutates it in place when the layout repositions a node, so nodes
+      // that shared one `center` object would all keep reflecting whichever node's position was
+      // set last, collapsing the whole graph onto a single point after layout.
       ...newNodes.map((node) => ({
         data: { id: node.id, label: node.label, type: node.type, parent: node.parent ?? undefined },
-        position: center,
+        position: { x: center.x, y: center.y },
       })),
       ...newEdges.map((edge) => ({
         data: { id: edge.id, source: edge.source, target: edge.target, label: edge.label, type: edge.type },
@@ -119,6 +137,31 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
   return { structureChanged };
 }
 
+const GRID_LAYOUT = { name: "grid" } as const;
+
+/**
+ * True when `positions` has 2+ points that are all within 1px of each other in both x and y --
+ * i.e. a layout that computed distinct per-node results but somehow left every node stacked on
+ * the same spot (see the `center`-object-sharing bug applyGraphToCy guards against above; kept
+ * as a runtime safety net for any other cause, e.g. a genuine ELK failure).
+ */
+export function positionsAreDegenerate(positions: { x: number; y: number }[]): boolean {
+  if (positions.length < 2) {
+    return false;
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of positions) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return maxX - minX < 1 && maxY - minY < 1;
+}
+
 export default function GraphEditor({
   organizationId,
   hierarchyId,
@@ -132,6 +175,11 @@ export default function GraphEditor({
   const ehRef = useRef<any>(null);
   const graphRef = useRef<GraphResponse | null>(null);
   const hasLaidOutRef = useRef(false);
+  // The mount effect (below) registers cy event handlers exactly once, so they close over
+  // whatever `onSelectionChange` was at that first render. Route through a ref, kept current on
+  // every render, so a later render's new callback is the one actually invoked on tap.
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
@@ -198,16 +246,16 @@ export default function GraphEditor({
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "node", (evt: any) => {
-      onSelectionChange?.({ kind: "node", id: evt.target.id() });
+      onSelectionChangeRef.current?.({ kind: "node", id: evt.target.id() });
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "edge", (evt: any) => {
-      onSelectionChange?.({ kind: "edge", id: evt.target.id() });
+      onSelectionChangeRef.current?.({ kind: "edge", id: evt.target.id() });
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", (evt: any) => {
       if (evt.target === cy) {
-        onSelectionChange?.(null);
+        onSelectionChangeRef.current?.(null);
       }
     });
     cy.on("ehcomplete", (_event: unknown, sourceNode: NodeSingular, targetNode: NodeSingular) => {
@@ -279,11 +327,36 @@ export default function GraphEditor({
       setLayoutStatus(null);
       setError("Layout failed");
     };
+    const runGridFallback = () => {
+      setLayoutStatus("ELK layout produced no positions — showing a grid");
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (cy.layout(GRID_LAYOUT as any) as any)?.run?.();
+      } catch {
+        // Nothing more we can do -- leave the note above visible so the user knows why the
+        // canvas looks the way it does, rather than pretending the layout succeeded.
+      }
+    };
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lay: any = cy.layout(ELK_LAYOUT as any);
       lay.on?.("layoutstart", () => setLayoutStatus("Laying out…"));
-      lay.on?.("layoutstop", () => setLayoutStatus(null));
+      lay.on?.("layoutstop", () => {
+        setLayoutStatus(null);
+        // A layout that "succeeds" but leaves every node stacked on the same point (e.g. a
+        // shared-position-object bug, or ELK genuinely failing to produce output for some
+        // graph) is worse than no layout at all -- detect it and fall back to a plain grid
+        // rather than leaving the user staring at one dot.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodesColl: any = (cy as any).nodes?.();
+        const positions =
+          nodesColl && typeof nodesColl.map === "function"
+            ? nodesColl.map((n: any) => n.position())
+            : [];
+        if (positionsAreDegenerate(positions)) {
+          runGridFallback();
+        }
+      });
       const runResult = lay.run();
       Promise.resolve(runResult).catch(fail);
       lay.promiseOn?.("layoutstop")?.catch(fail);
