@@ -9,7 +9,7 @@ vi.mock("../api/client", async () => {
   return { ...actual, apiFetch: vi.fn() };
 });
 
-import { apiFetch } from "../api/client";
+import { ApiError, apiFetch } from "../api/client";
 
 function renderAtNew() {
   const queryClient = new QueryClient();
@@ -115,6 +115,91 @@ describe("EntityDetail (edit mode)", () => {
         "/api/domain/entity_type/existing-id",
         expect.objectContaining({ method: "PUT" })
       );
+    });
+  });
+});
+
+describe("EntityDetail (missing record)", () => {
+  it("shows 'Record not found' and a link back to the list on a 404", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/missing-id") {
+        return Promise.reject(new ApiError(404, "not found"));
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    // retry: false so the 404 error state settles immediately instead of
+    // going through react-query's default retry/backoff.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/missing-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Record not found")).toBeInTheDocument();
+    expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
+  });
+});
+
+describe("EntityDetail (create mode with query-string prefill)", () => {
+  it("prefills a foreign-key field from the query string and resolves its label", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+              {
+                name: "organization_id",
+                type: "uuid",
+                required: false,
+                writable: true,
+                is_fk: true,
+                fk_table: "iam.organization",
+              },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/iam/organization/options?ids=org-1") {
+        return Promise.resolve([{ id: "org-1", label: "Acme" }]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/new?organization_id=org-1"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => {
+      expect((screen.getByTestId("field-organization_id") as HTMLInputElement).value).toBe("Acme");
     });
   });
 });

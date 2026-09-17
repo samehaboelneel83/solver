@@ -1,7 +1,5 @@
 import { FormEvent, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "../api/client";
-import type { ListResult } from "../api/entities";
+import FkPicker from "./FkPicker";
 import type { FieldMeta } from "../types/meta";
 
 type EntityFormProps = {
@@ -22,35 +20,34 @@ function defaultValueFor(field: FieldMeta): unknown {
   return "";
 }
 
-function FkSelect({
-  fkTable,
-  value,
-  onChange,
-}: {
-  fkTable: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const [schemaName, tableName] = fkTable.split(".");
-  const { data } = useQuery({
-    queryKey: ["fk-options", fkTable],
-    queryFn: () => apiFetch<ListResult>(`/api/${schemaName}/${tableName}/?limit=200&offset=0`),
-  });
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
 
-  return (
-    <select
-      className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="">—</option>
-      {data?.items.map((row) => (
-        <option key={String(row.id)} value={String(row.id)}>
-          {String((row as Record<string, unknown>).code ?? (row as Record<string, unknown>).name ?? row.id)}
-        </option>
-      ))}
-    </select>
-  );
+/** Formats a stored value for a date/datetime `<input>`. Date-only values
+ * are truncated (no timezone math: a bare calendar date has no instant to
+ * convert). Datetime values are read through a `Date` object and rendered
+ * back in LOCAL wall-clock time, since that is what a `datetime-local`
+ * input expects and displays -- string-slicing an ISO/UTC timestamp would
+ * silently show the wrong (UTC) time to the user. */
+function toInputValue(field: FieldMeta, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (field.type === "date") {
+    return String(value).slice(0, 10);
+  }
+  if (field.type === "datetime") {
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return String(value);
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(
+      date.getHours()
+    )}:${pad2(date.getMinutes())}`;
+  }
+  return String(value);
+}
+
+function placeholderFor(field: FieldMeta): string | undefined {
+  if (field.default === undefined || field.default === null) return undefined;
+  return `default: ${field.default}`;
 }
 
 export default function EntityForm({ fields, initialValues, onSubmit, submitLabel }: EntityFormProps) {
@@ -63,6 +60,8 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
     return initial;
   });
 
+  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+
   function setField(name: string, value: unknown) {
     setValues((prev) => ({ ...prev, [name]: value }));
   }
@@ -70,6 +69,7 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const payload: Record<string, unknown> = {};
+    const nextJsonErrors: Record<string, string> = {};
     for (const field of writableFields) {
       const raw = values[field.name];
       if (raw === "") {
@@ -83,13 +83,20 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
         try {
           payload[field.name] = JSON.parse(raw);
         } catch {
-          payload[field.name] = raw;
+          // Storing invalid JSON as a plain string used to silently corrupt
+          // the column; block the submit and point at the offending field
+          // instead.
+          nextJsonErrors[field.name] = `${field.name}: invalid JSON`;
         }
       } else if (field.type === "integer" || field.type === "number") {
         payload[field.name] = Number(raw);
       } else {
         payload[field.name] = raw;
       }
+    }
+    setJsonErrors(nextJsonErrors);
+    if (Object.keys(nextJsonErrors).length > 0) {
+      return;
     }
     onSubmit(payload);
   }
@@ -103,10 +110,12 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
             {field.required && <span className="text-red-500"> *</span>}
           </label>
           {field.is_fk && field.fk_table ? (
-            <FkSelect
+            <FkPicker
               fkTable={field.fk_table}
               value={String(values[field.name] ?? "")}
               onChange={(v) => setField(field.name, v)}
+              required={field.required}
+              testId={`field-${field.name}`}
             />
           ) : field.type === "boolean" ? (
             field.required ? (
@@ -129,17 +138,40 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
               </select>
             )
           ) : field.type === "json" ? (
-            <textarea
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-              rows={4}
-              value={
-                typeof values[field.name] === "string"
-                  ? (values[field.name] as string)
-                  : JSON.stringify(values[field.name] ?? "")
-              }
-              onChange={(e) => setField(field.name, e.target.value)}
-              data-testid={`field-${field.name}`}
-            />
+            <>
+              <textarea
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                rows={4}
+                placeholder={placeholderFor(field)}
+                value={
+                  typeof values[field.name] === "string"
+                    ? (values[field.name] as string)
+                    : JSON.stringify(values[field.name] ?? "")
+                }
+                onChange={(e) => setField(field.name, e.target.value)}
+                data-testid={`field-${field.name}`}
+              />
+              {jsonErrors[field.name] && (
+                <p className="mt-1 text-xs text-red-600">{jsonErrors[field.name]}</p>
+              )}
+            </>
+          ) : field.choices && field.choices.length > 0 ? (
+            <>
+              <input
+                type="text"
+                list={`choices-${field.name}`}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                placeholder={placeholderFor(field)}
+                value={String(values[field.name] ?? "")}
+                onChange={(e) => setField(field.name, e.target.value)}
+                data-testid={`field-${field.name}`}
+              />
+              <datalist id={`choices-${field.name}`}>
+                {field.choices.map((choice) => (
+                  <option key={choice} value={choice} />
+                ))}
+              </datalist>
+            </>
           ) : (
             <input
               type={
@@ -152,7 +184,8 @@ export default function EntityForm({ fields, initialValues, onSubmit, submitLabe
                       : "text"
               }
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              value={String(values[field.name] ?? "")}
+              placeholder={placeholderFor(field)}
+              value={toInputValue(field, values[field.name])}
               onChange={(e) => setField(field.name, e.target.value)}
               data-testid={`field-${field.name}`}
             />

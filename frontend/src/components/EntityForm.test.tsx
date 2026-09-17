@@ -44,10 +44,10 @@ describe("EntityForm", () => {
     expect(screen.queryByTestId("field-id")).not.toBeInTheDocument();
   });
 
-  it("renders a checkbox for boolean fields and a select populated from the FK table", async () => {
+  it("renders a checkbox for boolean fields and a searchable picker for FK fields", () => {
     renderWithProviders();
     expect(screen.getByTestId("field-is_active")).toHaveAttribute("type", "checkbox");
-    expect(await screen.findByText("acme")).toBeInTheDocument();
+    expect(screen.getByTestId("field-organization_id")).toHaveAttribute("role", "combobox");
   });
 
   it("submits typed values and omits empty optional fields", async () => {
@@ -121,5 +121,102 @@ describe("EntityForm optional booleans", () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith({ code: "acme", is_active: false });
     });
+  });
+});
+
+const richFields = [
+  { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+  { name: "expression", type: "json" as const, required: false, writable: true, is_fk: false, fk_table: null },
+  { name: "starts_at", type: "datetime" as const, required: false, writable: true, is_fk: false, fk_table: null },
+  {
+    name: "status",
+    type: "string" as const,
+    required: false,
+    writable: true,
+    is_fk: false,
+    fk_table: null,
+    choices: ["DRAFT", "ACTIVE"],
+  },
+  {
+    name: "priority",
+    type: "string" as const,
+    required: false,
+    writable: true,
+    is_fk: false,
+    fk_table: null,
+    default: "DRAFT",
+  },
+];
+
+function renderRichForm(onSubmit = vi.fn(), initialValues?: Record<string, unknown>) {
+  const queryClient = new QueryClient();
+  render(
+    <QueryClientProvider client={queryClient}>
+      <EntityForm fields={richFields} initialValues={initialValues} onSubmit={onSubmit} submitLabel="Save" />
+    </QueryClientProvider>
+  );
+  return onSubmit;
+}
+
+describe("EntityForm JSON validation", () => {
+  it("blocks submit and shows an inline error for invalid JSON", () => {
+    const onSubmit = renderRichForm();
+
+    fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a":' } });
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(screen.getByText("expression: invalid JSON")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits the parsed value once the JSON is fixed", async () => {
+    const onSubmit = renderRichForm();
+
+    fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a":' } });
+    fireEvent.click(screen.getByText("Save"));
+    expect(screen.getByText("expression: invalid JSON")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a": 1}' } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ expression: { a: 1 } });
+    });
+    expect(screen.queryByText("expression: invalid JSON")).not.toBeInTheDocument();
+  });
+});
+
+describe("EntityForm date/datetime formatting", () => {
+  it("renders a datetime initial value as a local-time datetime-local string", () => {
+    const isoValue = "2026-10-01T08:00:00Z";
+    const expected = (() => {
+      const date = new Date(isoValue);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+        date.getHours()
+      )}:${pad(date.getMinutes())}`;
+    })();
+
+    renderRichForm(vi.fn(), { starts_at: isoValue });
+
+    expect((screen.getByTestId("field-starts_at") as HTMLInputElement).value).toBe(expected);
+  });
+});
+
+describe("EntityForm hints", () => {
+  it("renders a datalist of choices for a field with choices", () => {
+    renderRichForm();
+
+    const input = screen.getByTestId("field-status");
+    expect(input).toHaveAttribute("list", "choices-status");
+    const datalist = document.getElementById("choices-status");
+    const optionValues = Array.from(datalist?.querySelectorAll("option") ?? []).map((o) => o.getAttribute("value"));
+    expect(optionValues).toEqual(["DRAFT", "ACTIVE"]);
+  });
+
+  it("shows the column default as a placeholder", () => {
+    renderRichForm();
+
+    expect(screen.getByTestId("field-priority")).toHaveAttribute("placeholder", "default: DRAFT");
   });
 });
