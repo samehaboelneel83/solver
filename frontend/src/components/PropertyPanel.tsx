@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useDeleteEdge, useDeleteNode, useUpdateEdge, useUpdateNode } from "../api/graph";
 import { formatApiError } from "../api/errors";
-import { AttributeInput, attributeValueFromForm } from "./attributeInputs";
+import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
 import type { GraphResponse } from "../types/graph";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
@@ -31,7 +31,13 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       return null;
     }
     const entityType = graph.entity_types.find((et) => et.code === node.type);
-    const definitions = graph.attribute_definitions.filter((d) => d.entity_type_id === entityType?.id);
+    // Attribute definitions that collide with a built-in field (code/status/
+    // description/name) are hidden here -- editing them would look like it
+    // works but the built-in value always wins server-side. See
+    // splitBuiltinCollisions.
+    const { visible: definitions, hidden: hiddenDefinitions } = splitBuiltinCollisions(
+      graph.attribute_definitions.filter((d) => d.entity_type_id === entityType?.id)
+    );
 
     function handleSubmit(event: FormEvent<HTMLFormElement>) {
       event.preventDefault();
@@ -104,6 +110,11 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
               {def.name}
               <AttributeInput def={def} defaultValue={node.attributes[def.code]} />
             </label>
+          ))}
+          {hiddenDefinitions.map((def) => (
+            <p key={def.id} className="text-xs text-slate-400">
+              attribute {def.code} hidden: collides with a built-in field
+            </p>
           ))}
           <div className="flex gap-2">
             <button type="submit" className="rounded-md bg-slate-900 px-3 py-1 text-sm text-white">

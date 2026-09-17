@@ -167,12 +167,14 @@ def get_domain_graph(
     nodes = []
     for entity in entities:
         entity_type = entity_type_by_id.get(entity.entity_type_id)
-        attrs: dict[str, Any] = {
-            "code": entity.code,
-            "status": entity.status,
-            "description": entity.description,
-        }
-        attrs.update(attributes_by_entity_id.get(entity.id, {}))
+        # Built-ins are applied AFTER the EAV values, not before: an
+        # attribute_definition whose code happens to collide with one of
+        # these (e.g. a custom "status" attribute) must never shadow the
+        # entity's own column -- the built-in value always wins (M-9).
+        attrs: dict[str, Any] = dict(attributes_by_entity_id.get(entity.id, {}))
+        attrs["code"] = entity.code
+        attrs["status"] = entity.status
+        attrs["description"] = entity.description
         parent_entity_id = parent_by_entity_id.get(entity.id)
         nodes.append(
             GraphNode(
@@ -196,6 +198,27 @@ def get_domain_graph(
             .all()
         )
     relationship_type_by_id = {rt.id: rt for rt in db.query(RelationshipType).all()}
+
+    # relationship_type is a global taxonomy (no organization_id column), so its
+    # source_entity_type/target_entity_type constraint can legitimately name an
+    # entity_type belonging to a DIFFERENT organization than the one being
+    # viewed. Resolving those ids only against entity_type_by_id (org-scoped,
+    # for the nodes/attribute_definitions below) silently turned such a
+    # constraint into "any" (None) -- the picker then offered, and create then
+    # 422'd on, a combination it should have excluded outright. Look the
+    # referenced entity_types up globally instead.
+    referenced_entity_type_ids = {
+        rt.source_entity_type for rt in relationship_type_by_id.values() if rt.source_entity_type is not None
+    } | {rt.target_entity_type for rt in relationship_type_by_id.values() if rt.target_entity_type is not None}
+    global_entity_type_by_id = entity_type_by_id
+    if referenced_entity_type_ids - entity_type_by_id.keys():
+        global_entity_type_by_id = {
+            **entity_type_by_id,
+            **{
+                et.id: et
+                for et in db.query(EntityType).filter(EntityType.id.in_(referenced_entity_type_ids)).all()
+            },
+        }
 
     edges = []
     for rel in relationships:
@@ -222,13 +245,13 @@ def get_domain_graph(
             name=rt.name,
             is_directed=rt.is_directed,
             source_entity_type=(
-                entity_type_by_id[rt.source_entity_type].code
-                if rt.source_entity_type in entity_type_by_id
+                global_entity_type_by_id[rt.source_entity_type].code
+                if rt.source_entity_type in global_entity_type_by_id
                 else None
             ),
             target_entity_type=(
-                entity_type_by_id[rt.target_entity_type].code
-                if rt.target_entity_type in entity_type_by_id
+                global_entity_type_by_id[rt.target_entity_type].code
+                if rt.target_entity_type in global_entity_type_by_id
                 else None
             ),
         )
@@ -277,16 +300,19 @@ class GraphValidationError(Exception):
 
 def _entity_to_node(db: Session, entity: Entity, *, hierarchy_id: uuid.UUID | None) -> GraphNode:
     entity_type = db.get(EntityType, entity.entity_type_id)
-    attrs: dict[str, Any] = {
-        "code": entity.code,
-        "status": entity.status,
-        "description": entity.description,
-    }
+    # EAV values are collected first, then the built-ins are applied on top
+    # -- an attribute_definition whose code collides with one of these
+    # (e.g. a custom "status" attribute) must never shadow the entity's own
+    # column, so the built-in value always wins (M-9).
+    attrs: dict[str, Any] = {}
     attr_rows = db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity.id).all()
     for row in attr_rows:
         definition = db.get(AttributeDefinition, row.attribute_id)
         if definition is not None:
             attrs[definition.code] = _attribute_value(row)
+    attrs["code"] = entity.code
+    attrs["status"] = entity.status
+    attrs["description"] = entity.description
 
     parent_entity_id = None
     if hierarchy_id is not None:

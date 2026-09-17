@@ -177,6 +177,22 @@ describe("PropertyPanel", () => {
     expect(body.description).toBeNull();
   });
 
+  it("hides an attribute definition whose code collides with a built-in field, with an explanatory note (M-9)", () => {
+    const collidingGraph = {
+      ...graph,
+      attribute_definitions: [
+        ...graph.attribute_definitions,
+        { id: "a9", entity_type_id: "t1", code: "status", name: "Shadow Status", data_type: "string" },
+      ],
+    };
+    renderWithProviders({ graph: collidingGraph as any });
+
+    expect(screen.queryByLabelText("Shadow Status")).not.toBeInTheDocument();
+    expect(screen.getByText("attribute status hidden: collides with a built-in field")).toBeInTheDocument();
+    // The real "rank" attribute (no collision) still renders normally.
+    expect(screen.getByDisplayValue("Captain")).toBeInTheDocument();
+  });
+
   it("renders a formatted error when the save is rejected with a 409", async () => {
     (apiFetch as any).mockRejectedValue(new ApiError(409, JSON.stringify({ detail: "a conflicting entity exists" })));
     renderWithProviders();
