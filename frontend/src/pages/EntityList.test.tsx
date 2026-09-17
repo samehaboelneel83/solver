@@ -158,7 +158,7 @@ describe("EntityList", () => {
     fireEvent.click(screen.getByText("Delete"));
 
     const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent('Deleted "employee"');
+    expect(status).toHaveTextContent("employee deleted");
     (window.confirm as any).mockRestore();
   });
 
@@ -196,6 +196,26 @@ describe("EntityList", () => {
 
     expect(await screen.findAllByTestId("skeleton-row")).not.toHaveLength(0);
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+
+  it("renders skeleton rows on a cold navigation, while the schema (table) query is still pending (D-5 regression)", async () => {
+    // Mirrors the real race: the meta/schema fetch and the list fetch run
+    // concurrently, so there is a window where `table` (derived from the
+    // schema) isn't resolved yet even though this isn't the "unknown table"
+    // terminal state -- it just hasn't loaded. A pre-existing early return
+    // on `!table` used to render a plain "Loading table definition…" string
+    // here instead of the skeleton, with no window in which skeleton rows
+    // were ever on screen.
+    (apiFetch as any).mockImplementation(() => new Promise(() => {}));
+
+    renderWithProviders("/domain/entity_type");
+
+    expect(await screen.findAllByTestId("skeleton-row")).not.toHaveLength(0);
+    expect(screen.queryByText("Loading table definition…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    // There's still a heading -- the raw schema.table fallback -- even
+    // though the labeled schema hasn't loaded.
+    expect(screen.getByRole("heading", { name: "domain.entity_type" })).toBeInTheDocument();
   });
 
   it("renders an unknown-table message when the schema has no matching table", async () => {

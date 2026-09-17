@@ -760,6 +760,32 @@ describe("GraphEditor", () => {
     expect(mockCytoscapeInstance.remove).not.toHaveBeenCalled(); // elements() batch-removed, not per-id remove
     expect(elementStore.size).toBe(0);
   });
+
+  it("shows a Retry button next to a failed graph load that re-issues the request (D-4)", async () => {
+    let graphCallCount = 0;
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/graph/domain?")) {
+        graphCallCount += 1;
+        return Promise.reject(new Error("network down"));
+      }
+      return Promise.resolve({});
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor organizationId="org-1" hierarchyId={null} onHierarchyChange={vi.fn()} />
+      </QueryClientProvider>
+    );
+
+    const retryButton = await screen.findByText("Retry");
+    expect(screen.getByText("Failed to load graph")).toBeInTheDocument();
+    expect(graphCallCount).toBe(1);
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(graphCallCount).toBe(2));
+  });
 });
 
 describe("applyGraphToCy", () => {

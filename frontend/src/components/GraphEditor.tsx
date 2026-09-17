@@ -190,7 +190,7 @@ export default function GraphEditor({
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading, error: loadError } = useGraph(organizationId, hierarchyId);
+  const { data, isLoading, error: loadError, refetch: refetchGraph } = useGraph(organizationId, hierarchyId);
   const createNode = useCreateNode(organizationId, hierarchyId);
   const createEdge = useCreateEdge(organizationId, hierarchyId);
   const toast = useToast();
@@ -454,7 +454,7 @@ export default function GraphEditor({
         target_entity_id: pendingEdge.targetId,
       },
       {
-        onSuccess: () => toast.success(`"${relationshipTypeName}" created`),
+        onSuccess: () => toast.success(`${relationshipTypeName} created`),
         onError: (e) => setError(formatApiError(e)),
       }
     );
@@ -501,7 +501,7 @@ export default function GraphEditor({
         parent_entity_id: parentEntityId,
       },
       {
-        onSuccess: () => toast.success(`"${name}" created`),
+        onSuccess: () => toast.success(`${name} created`),
         onError: (e) => setError(formatApiError(e)),
       }
     );
@@ -674,7 +674,8 @@ export default function GraphEditor({
                 key={rt.id}
                 type="button"
                 onClick={() => handleConfirmEdge(rt.id)}
-                className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                disabled={createEdge.isPending}
+                className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {rt.name} ({rt.code})
               </button>
@@ -696,7 +697,18 @@ export default function GraphEditor({
       )}
 
       {isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
-      {loadError && <p className="text-sm text-red-600">Failed to load graph</p>}
+      {loadError && (
+        <div className="mb-2 flex items-center gap-3 text-sm text-red-600">
+          <p>Failed to load graph</p>
+          <button
+            type="button"
+            onClick={() => refetchGraph()}
+            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* Cytoscape caches this container's bounding rect when the instance is created (and
           otherwise only recomputes it on its own triggers), so if the page scrolls afterward --
           or in a headless/automated browser test that scrolls or resizes the window after mount

@@ -66,7 +66,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       updateNode.mutate(
         { entityId: node!.id, payload: { name, status, description, attributes } },
         {
-          onSuccess: () => toast.success(`"${name}" saved`),
+          onSuccess: () => toast.success(`${name} saved`),
           onError: (err) => setError(formatApiError(err)),
         }
       );
@@ -76,7 +76,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
       setError(null);
       const label = node!.label;
       deleteNode.mutate(node!.id, {
-        onSuccess: () => toast.success(`"${label}" deleted`),
+        onSuccess: () => toast.success(`${label} deleted`),
         onError: (err) => setError(formatApiError(err)),
       });
     }
@@ -169,7 +169,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
     updateEdge.mutate(
       { relationshipId: edge!.id, attributes },
       {
-        onSuccess: () => toast.success(`"${edgeLabel}" saved`),
+        onSuccess: () => toast.success(`${edgeLabel} saved`),
         onError: (err) => setError(formatApiError(err)),
       }
     );
@@ -179,7 +179,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
     setError(null);
     const edgeLabel = edge!.label || edge!.type;
     deleteEdge.mutate(edge!.id, {
-      onSuccess: () => toast.success(`"${edgeLabel}" deleted`),
+      onSuccess: () => toast.success(`${edgeLabel} deleted`),
       onError: (err) => setError(formatApiError(err)),
     });
   }

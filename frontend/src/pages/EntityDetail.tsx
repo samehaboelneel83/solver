@@ -33,6 +33,7 @@ export default function EntityDetail() {
     data: existing,
     error: entityError,
     isError: isEntityError,
+    refetch: refetchEntity,
   } = useEntity(schemaName, tableName, isNew ? undefined : id);
   const createEntity = useCreateEntity(schemaName, tableName);
   const updateEntity = useUpdateEntity(schemaName, tableName, id ?? "");
@@ -73,7 +74,16 @@ export default function EntityDetail() {
     }
     return (
       <div>
-        <p className="text-sm text-red-600">{formatApiError(entityError)}</p>
+        <div className="mb-2 flex items-center gap-3">
+          <p className="text-sm text-red-600">{formatApiError(entityError)}</p>
+          <button
+            type="button"
+            onClick={() => refetchEntity()}
+            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Retry
+          </button>
+        </div>
         <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
           Back to list
         </Link>

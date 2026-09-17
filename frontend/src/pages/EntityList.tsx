@@ -23,9 +23,13 @@ export default function EntityList() {
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
 
-  useDocumentTitle(
-    table ? tableLabelPlural(table) : schemaName && tableName ? `${schemaName}.${tableName}` : "List"
-  );
+  // Shared fallback while the schema is still loading (or for a route with
+  // no params at all): the raw "schema.table" pair, so there's always a
+  // heading/title rather than a blank one during the load.
+  const rawTableName = schemaName && tableName ? `${schemaName}.${tableName}` : "List";
+  const headingLabel = table ? tableLabelPlural(table) : rawTableName;
+
+  useDocumentTitle(headingLabel);
 
   const q = searchParams.get("q") ?? "";
   const offset = Number(searchParams.get("offset") ?? "0") || 0;
@@ -78,16 +82,15 @@ export default function EntityList() {
   });
   const deleteEntity = useDeleteEntity(schemaName, tableName);
 
+  // "meta loaded, no match" is a terminal state distinct from loading --
+  // keep it as an early return so it's never confused with the skeleton
+  // below (which covers "meta hasn't resolved yet at all").
   if (tables && !table) {
     return (
       <p className="text-sm text-slate-500">
         Unknown table {schemaName}.{tableName}
       </p>
     );
-  }
-
-  if (!table) {
-    return <p className="text-sm text-slate-500">Loading table definition…</p>;
   }
 
   function updateParams(mutator: (params: URLSearchParams) => void) {
@@ -139,7 +142,7 @@ export default function EntityList() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900">{tableLabelPlural(table)}</h1>
+          <h1 className="text-lg font-semibold text-slate-900">{headingLabel}</h1>
           <p className="text-xs text-slate-500">
             {schemaName}.{tableName}
           </p>
@@ -180,7 +183,14 @@ export default function EntityList() {
         ))}
       </div>
       {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
-      {isLoading && <Skeleton rows={PAGE_SIZE > 10 ? 8 : PAGE_SIZE} cols={table.fields.length + 1} />}
+      {/* Covers both "list still loading" AND "schema (table.fields) hasn't
+          resolved yet" -- the two queries run concurrently, so on a cold
+          navigation there is no window where `table` is known but the list
+          is still loading (or vice versa) without this OR. Skipped once an
+          error has already replaced the loading state below. */}
+      {(isLoading || !table) && !error && (
+        <Skeleton rows={PAGE_SIZE > 10 ? 8 : PAGE_SIZE} cols={table ? table.fields.length + 1 : 4} />
+      )}
       {error && (
         <div className="mb-3 flex items-center gap-3 text-sm text-red-600">
           <p>{formatApiError(error)}</p>
@@ -193,7 +203,7 @@ export default function EntityList() {
           </button>
         </div>
       )}
-      {data && (
+      {data && table && (
         <DataTable
           key={`${schemaName}.${tableName}`}
           fields={table.fields}
@@ -208,7 +218,7 @@ export default function EntityList() {
           onDelete={(id, label) => {
             setDeleteError(null);
             deleteEntity.mutate(id, {
-              onSuccess: () => toast.success(`Deleted "${label}"`),
+              onSuccess: () => toast.success(`${label} deleted`),
               onError: (err) => setDeleteError(formatApiError(err)),
             });
           }}

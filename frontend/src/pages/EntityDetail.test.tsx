@@ -268,6 +268,47 @@ describe("EntityDetail (load error other than 404)", () => {
     expect(await screen.findByText("Server error (500). Please try again.")).toBeInTheDocument();
     expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
   });
+
+  it("shows a Retry button next to the error that re-issues the entity request (D-4)", async () => {
+    let entityCallCount = 0;
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/broken-id") {
+        entityCallCount += 1;
+        return Promise.reject(new ApiError(500, "internal error"));
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/broken-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const retryButton = await screen.findByText("Retry");
+    expect(entityCallCount).toBe(1);
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(entityCallCount).toBe(2));
+  });
 });
 
 describe("EntityDetail human-readable titles (B-1)", () => {

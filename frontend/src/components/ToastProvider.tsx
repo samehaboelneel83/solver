@@ -8,13 +8,24 @@ type ToastContextValue = {
   error: (message: string) => void;
 };
 
-const noop = () => {};
-
 // A component that calls useToast() without a <ToastProvider> ancestor (e.g.
 // a unit test that mounts just that component) gets working no-ops rather
 // than a crash -- the whole point of D-1 is confirming success, never
-// breaking the app when confirmation isn't wired up yet.
-const ToastContext = createContext<ToastContextValue>({ success: noop, error: noop });
+// breaking the app when confirmation isn't wired up yet. In dev builds the
+// no-op also warns, so a real component accidentally mounted outside the
+// provider fails loudly during development instead of silently dropping
+// every confirmation it tries to show.
+function warnDropped() {
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn("useToast() called outside ToastProvider; the message was dropped");
+  }
+}
+
+const ToastContext = createContext<ToastContextValue>({
+  success: warnDropped,
+  error: warnDropped,
+});
 
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
