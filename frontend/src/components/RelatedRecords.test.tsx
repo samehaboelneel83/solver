@@ -11,8 +11,7 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderRelated(schema: string, table: string, id: string) {
-  const queryClient = new QueryClient();
+function renderRelated(schema: string, table: string, id: string, queryClient = new QueryClient()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -163,5 +162,109 @@ describe("RelatedRecords", () => {
       "href",
       "/domain/entity_type?f_parent_type_id=et1"
     );
+  });
+
+  it("labels each FK field 'via' when a child table has more than one FK to the same parent", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity",
+            fields: [{ name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null }],
+          },
+          {
+            schema: "domain",
+            table: "relationship",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              {
+                name: "source_entity_id",
+                type: "uuid",
+                required: true,
+                writable: true,
+                is_fk: true,
+                fk_table: "domain.entity",
+              },
+              {
+                name: "target_entity_id",
+                type: "uuid",
+                required: true,
+                writable: true,
+                is_fk: true,
+                fk_table: "domain.entity",
+              },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/relationship/?f_source_entity_id=e1&limit=1") {
+        return Promise.resolve({ items: [{ id: "r1" }], total: 2 });
+      }
+      if (path === "/api/domain/relationship/?f_target_entity_id=e1&limit=1") {
+        return Promise.resolve({ items: [{ id: "r2" }], total: 5 });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderRelated("domain", "entity", "e1");
+
+    const sourceRow = (await screen.findByText("relationship via source_entity_id (2)")).closest(
+      "li"
+    ) as HTMLElement;
+    expect(within(sourceRow).getByText("relationship via source_entity_id (2)")).toHaveAttribute(
+      "href",
+      "/domain/relationship?f_source_entity_id=e1"
+    );
+    expect(within(sourceRow).getByText("New")).toHaveAttribute(
+      "href",
+      "/domain/relationship/new?source_entity_id=e1"
+    );
+
+    const targetRow = screen.getByText("relationship via target_entity_id (5)").closest("li") as HTMLElement;
+    expect(within(targetRow).getByText("relationship via target_entity_id (5)")).toHaveAttribute(
+      "href",
+      "/domain/relationship?f_target_entity_id=e1"
+    );
+    expect(within(targetRow).getByText("New")).toHaveAttribute(
+      "href",
+      "/domain/relationship/new?target_entity_id=e1"
+    );
+  });
+
+  it("shows a '?' with a title when a count query fails, instead of the loading placeholder forever", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(SCHEMA_WITH_CHILDREN);
+      }
+      if (path === "/api/problem/variable_definition/?f_problem_id=p1&limit=1") {
+        return Promise.reject(new Error("boom"));
+      }
+      if (path === "/api/problem/constraint_definition/?f_problem_id=p1&limit=1") {
+        return Promise.resolve({ items: [], total: 0 });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    // retry: false so the failed query settles into its error state
+    // immediately instead of going through react-query's default retries.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderRelated("problem", "problem", "p1", queryClient);
+
+    const marker = await screen.findByTitle("Count unavailable");
+    expect(marker).toHaveTextContent("?");
+
+    const row = marker.closest("li") as HTMLElement;
+    expect(within(row).getByRole("link", { name: /variable_definition/ })).toHaveAttribute(
+      "href",
+      "/problem/variable_definition?f_problem_id=p1"
+    );
+    expect(within(row).getByText("New")).toHaveAttribute(
+      "href",
+      "/problem/variable_definition/new?problem_id=p1"
+    );
+
+    // the healthy sibling row still resolves normally
+    expect(await screen.findByText("constraint_definition (0)")).toBeInTheDocument();
   });
 });

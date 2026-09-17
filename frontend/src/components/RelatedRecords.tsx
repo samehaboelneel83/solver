@@ -19,25 +19,45 @@ type RelatedRecordsProps = {
 };
 
 /** Every table that has a foreign key pointing at `<schema>.<table>`, one row
- * per FK field (a self-reference like `parent_type_id` is included and
- * labelled with the field name so it isn't confused with the table itself). */
+ * per FK field. A row is labelled `<table> via <field>` instead of plain
+ * `<table>` whenever the field name is needed to tell rows apart: a
+ * self-reference like `parent_type_id` (always ambiguous with the parent
+ * table itself), or a child table with more than one FK field pointing at
+ * this parent (e.g. `relationship.source_entity_id` and
+ * `relationship.target_entity_id` both -> `entity`). */
 function childRefsFrom(tables: { schema: string; table: string; fields: { name: string; is_fk: boolean; fk_table: string | null }[] }[], schema: string, table: string): ChildRef[] {
   const targetKey = `${schema}.${table}`;
-  const refs: ChildRef[] = [];
+  type RawRef = { schema: string; table: string; field: string; isSelfReference: boolean };
+  const raw: RawRef[] = [];
   for (const t of tables) {
     for (const f of t.fields) {
       if (f.is_fk && f.fk_table === targetKey) {
-        const isSelfReference = t.schema === schema && t.table === table;
-        refs.push({
+        raw.push({
           schema: t.schema,
           table: t.table,
           field: f.name,
-          label: isSelfReference ? `${t.table} via ${f.name}` : t.table,
+          isSelfReference: t.schema === schema && t.table === table,
         });
       }
     }
   }
-  return refs;
+
+  const refCountByTable = new Map<string, number>();
+  for (const r of raw) {
+    const key = `${r.schema}.${r.table}`;
+    refCountByTable.set(key, (refCountByTable.get(key) ?? 0) + 1);
+  }
+
+  return raw.map((r) => {
+    const key = `${r.schema}.${r.table}`;
+    const needsFieldLabel = r.isSelfReference || (refCountByTable.get(key) ?? 0) > 1;
+    return {
+      schema: r.schema,
+      table: r.table,
+      field: r.field,
+      label: needsFieldLabel ? `${r.table} via ${r.field}` : r.table,
+    };
+  });
 }
 
 /** "Related records" section for a detail page: every table with a foreign
@@ -74,13 +94,19 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
         {children.map((child, index) => {
           const result = counts[index];
           const count = result?.data?.total;
-          const countLabel = count === undefined ? "…" : count;
+          const countNode = result?.isError ? (
+            <span title="Count unavailable">?</span>
+          ) : count === undefined ? (
+            "…"
+          ) : (
+            count
+          );
           const listHref = `/${child.schema}/${child.table}?f_${child.field}=${encodeURIComponent(id)}`;
           const newHref = `/${child.schema}/${child.table}/new?${child.field}=${encodeURIComponent(id)}`;
           return (
             <li key={`${child.schema}.${child.table}.${child.field}`} className="flex items-center gap-3 text-sm">
               <Link to={listHref} className="text-blue-600 underline">
-                {child.label} ({countLabel})
+                {child.label} ({countNode})
               </Link>
               <Link to={newHref} className="text-slate-500 underline">
                 New
