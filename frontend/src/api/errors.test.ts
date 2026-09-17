@@ -24,6 +24,19 @@ describe("formatApiError", () => {
     expect(formatApiError(err)).toBe("code: Field required\nname: String too short");
   });
 
+  it("joins every loc segment after the leading body/query/path marker with a dot", () => {
+    const err = new ApiError(
+      422,
+      JSON.stringify({ detail: [{ loc: ["body", "attributes", "rank"], msg: "Invalid value" }] })
+    );
+    expect(formatApiError(err)).toBe("attributes.rank: Invalid value");
+  });
+
+  it("renders a non-string, non-array detail as JSON", () => {
+    const err = new ApiError(400, JSON.stringify({ detail: { code: "conflict", reason: "locked" } }));
+    expect(formatApiError(err)).toBe(JSON.stringify({ code: "conflict", reason: "locked" }));
+  });
+
   it("formats a 409 conflict with a plain-text detail", () => {
     const err = new ApiError(409, JSON.stringify({ detail: "x already exists" }));
     expect(formatApiError(err)).toBe("x already exists");

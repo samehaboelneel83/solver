@@ -1,4 +1,5 @@
-import { useOptionLabels } from "../api/options";
+import { useQueries } from "@tanstack/react-query";
+import { optionLabelsQuery } from "../api/options";
 import type { FieldMeta } from "../types/meta";
 
 type Row = Record<string, unknown>;
@@ -51,23 +52,25 @@ export default function DataTable({
 }: DataTableProps) {
   const columns = fields.map((f) => f.name);
 
-  // FK columns, grouped by the table they reference. `fields` comes from
-  // table metadata and is stable for the lifetime of this component
-  // instance (callers remount DataTable when the schema/table changes),
-  // so this loop calls useOptionLabels the same number of times on every
-  // render of a given instance.
+  // FK columns, grouped by the table they reference: one label query per
+  // distinct FK table on the page. useQueries (rather than calling
+  // useOptionLabels in a loop) is safe even if the number of FK tables
+  // changes between renders of the same DataTable instance.
   const fkFields = fields.filter((f) => f.is_fk && f.fk_table) as (FieldMeta & { fk_table: string })[];
   const fkTables = Array.from(new Set(fkFields.map((f) => f.fk_table)));
-  const labelQueries = fkTables.map((fkTable) => {
-    const columnsForTable = fkFields.filter((f) => f.fk_table === fkTable).map((f) => f.name);
-    const ids = idsForColumns(rows, columnsForTable);
-    return { fkTable, query: useOptionLabels(fkTable, ids) };
+  const labelResults = useQueries({
+    queries: fkTables.map((fkTable) => {
+      const columnsForTable = fkFields.filter((f) => f.fk_table === fkTable).map((f) => f.name);
+      const ids = idsForColumns(rows, columnsForTable);
+      return optionLabelsQuery(fkTable, ids);
+    }),
   });
 
   function labelFor(col: string, id: string): string {
     const fkTable = fkFields.find((f) => f.name === col)?.fk_table;
     if (!fkTable) return id;
-    const labels = labelQueries.find((entry) => entry.fkTable === fkTable)?.query.data;
+    const index = fkTables.indexOf(fkTable);
+    const labels = index >= 0 ? labelResults[index]?.data : undefined;
     return labels?.[id] ?? id;
   }
 

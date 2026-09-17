@@ -33,15 +33,19 @@ export function useOptions(fkTable: string, q: string) {
   });
 }
 
-/** Resolve a set of FK ids to human labels, as a map of id -> label.
- * Batches at most 200 ids per request (the server's own cap) and skips
- * the request entirely when there are no ids to resolve. */
-export function useOptionLabels(fkTable: string, ids: string[]) {
+/** Query-options factory for resolving a set of FK ids to human labels, as
+ * a map of id -> label. Batches at most 200 ids per request (the server's
+ * own cap) and skips the request entirely when there are no ids to
+ * resolve. Shared by `useOptionLabels` (below, for a single table) and by
+ * `DataTable` (one query per distinct FK table on the page, via
+ * `useQueries` so the query count can safely vary between renders) so
+ * both paths land on the same cache entry for a given (fkTable, ids). */
+export function optionLabelsQuery(fkTable: string, ids: string[]) {
   const uniqueSortedIds = Array.from(new Set(ids.filter((id) => id))).sort();
   const key = uniqueSortedIds.join(",");
 
-  return useQuery({
-    queryKey: ["options", fkTable, "ids", key],
+  return {
+    queryKey: ["options", fkTable, "ids", key] as const,
     queryFn: async () => {
       const batches = chunk(uniqueSortedIds, IDS_BATCH_SIZE);
       const results = await Promise.all(
@@ -56,5 +60,10 @@ export function useOptionLabels(fkTable: string, ids: string[]) {
       return labels;
     },
     enabled: Boolean(fkTable) && uniqueSortedIds.length > 0,
-  });
+  };
+}
+
+/** Resolve a set of FK ids to human labels for a single table. */
+export function useOptionLabels(fkTable: string, ids: string[]) {
+  return useQuery(optionLabelsQuery(fkTable, ids));
 }

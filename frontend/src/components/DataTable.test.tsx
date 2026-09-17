@@ -184,5 +184,78 @@ describe("DataTable", () => {
       const cell = screen.getByText("Acme Corp");
       expect(cell.getAttribute("title")).toBe("11111111-1111-1111-1111-111111111111");
     });
+
+    it("does not throw when the number of FK tables changes between renders without a key change", async () => {
+      (apiFetch as any).mockResolvedValue([]);
+
+      const queryClient = new QueryClient();
+      const zeroFkFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+      ];
+      const twoFkFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        {
+          name: "organization_id",
+          type: "uuid" as const,
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "iam.organization",
+        },
+        {
+          name: "role_type_id",
+          type: "uuid" as const,
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "domain.role_type",
+        },
+      ];
+      const zeroFkRows = [{ id: "1" }];
+      const twoFkRows = [
+        {
+          id: "1",
+          organization_id: "11111111-1111-1111-1111-111111111111",
+          role_type_id: "22222222-2222-2222-2222-222222222222",
+        },
+      ];
+
+      const { rerender } = render(
+        <QueryClientProvider client={queryClient}>
+          <DataTable
+            fields={zeroFkFields}
+            rows={zeroFkRows}
+            total={1}
+            limit={20}
+            offset={0}
+            onPageChange={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </QueryClientProvider>
+      );
+
+      expect(() => {
+        rerender(
+          <QueryClientProvider client={queryClient}>
+            <DataTable
+              fields={twoFkFields}
+              rows={twoFkRows}
+              total={1}
+              limit={20}
+              offset={0}
+              onPageChange={vi.fn()}
+              onDelete={vi.fn()}
+            />
+          </QueryClientProvider>
+        );
+      }).not.toThrow();
+
+      // The FK ids render (falling back to the raw id, since the mock
+      // resolves no labels) once the new queries settle.
+      await waitFor(() => {
+        expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
+        expect(screen.getByText("22222222-2222-2222-2222-222222222222")).toBeInTheDocument();
+      });
+    });
   });
 });
