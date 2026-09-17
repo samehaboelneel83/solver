@@ -150,4 +150,81 @@ describe("GraphDemo", () => {
     await waitFor(() => expect(screen.getByTestId("hierarchy-select")).toHaveValue("h1"));
     expect(screen.getByTestId("filter-search")).toHaveValue("ahmed");
   });
+
+  it("defaults the organization selector to the org coded 'default' and switching orgs re-queries the graph and clears selection/hierarchy", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/iam/organization/")) {
+        // Alphabetically, "Alpha Clinic" sorts before "Zeta Org" -- the default org
+        // must still be picked by code, not by list order or alphabetical position.
+        return Promise.resolve({
+          items: [
+            { id: "org-2", code: "north-clinic", name: "Alpha Clinic" },
+            { id: "org-1", code: "default", name: "Zeta Org" },
+          ],
+          total: 2,
+        });
+      }
+      if (path.startsWith("/api/graph/domain?")) {
+        return Promise.resolve({
+          nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+          edges: [],
+          entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+          relationship_types: [],
+          hierarchies: [{ id: "h1", code: "org-chart", name: "Org Chart" }],
+          attribute_definitions: [],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    renderWithProviders();
+
+    await waitFor(() => expect(screen.getByTestId("org-select")).toBeInTheDocument());
+    expect(screen.getByTestId("org-select")).toHaveValue("org-1");
+    const options = Array.from(
+      screen.getByTestId("org-select").querySelectorAll("option")
+    ) as HTMLOptionElement[];
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Alpha Clinic (north-clinic)",
+      "Zeta Org (default)",
+    ]);
+
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    const tapNodeHandler = registeredHandlersRef.current["tap:node"];
+    tapNodeHandler({ target: { id: () => "e1" } });
+    await waitFor(() => expect(screen.getByDisplayValue("Ahmed")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("hierarchy-select"), { target: { value: "h1" } });
+    await waitFor(() => expect(screen.getByTestId("hierarchy-select")).toHaveValue("h1"));
+
+    fireEvent.change(screen.getByTestId("org-select"), { target: { value: "org-2" } });
+    expect(screen.getByTestId("org-select")).toHaveValue("org-2");
+
+    // Selection and hierarchy are reset on org change.
+    expect(screen.queryByDisplayValue("Ahmed")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const graphCalls = (apiFetch as any).mock.calls.filter(([path]: [string]) =>
+        path.startsWith("/api/graph/domain?")
+      );
+      expect(graphCalls.length).toBeGreaterThan(0);
+      const lastPath = graphCalls[graphCalls.length - 1][0] as string;
+      expect(lastPath).toContain("organization_id=org-2");
+      expect(lastPath).not.toContain("hierarchy_id");
+    });
+  });
+
+  it("shows a message instead of a blank page when no organizations exist", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/iam/organization/")) {
+        return Promise.resolve({ items: [], total: 0 });
+      }
+      return Promise.resolve({});
+    });
+
+    renderWithProviders();
+
+    await waitFor(() => expect(screen.getByText(/no organizations/i)).toBeInTheDocument());
+    expect(screen.queryByTestId("org-select")).not.toBeInTheDocument();
+  });
 });

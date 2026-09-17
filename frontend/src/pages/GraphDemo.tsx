@@ -9,26 +9,42 @@ import { useGraph } from "../api/graph";
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
 
-function useDefaultOrganizationId() {
+type Organization = { id: string; code: string; name: string };
+
+function useOrganizations() {
   return useQuery({
-    queryKey: ["organizations", "default"],
+    queryKey: ["organizations", "list"],
     queryFn: async () => {
-      const result = await apiFetch<{ items: { id: string; code: string }[]; total: number }>(
-        "/api/iam/organization/?limit=50&offset=0"
+      const result = await apiFetch<{ items: Organization[]; total: number }>(
+        "/api/iam/organization/?limit=200&offset=0"
       );
-      const defaultOrg = result.items.find((item) => item.code === "default");
-      return defaultOrg?.id ?? null;
+      return [...result.items].sort((a, b) => a.name.localeCompare(b.name));
     },
   });
 }
 
 export default function GraphDemo() {
-  const { data: organizationId, isLoading: orgLoading } = useDefaultOrganizationId();
+  const { data: organizations, isLoading: orgsLoading } = useOrganizations();
+  // Only set once the user explicitly picks an org; the effective organizationId below
+  // falls back to the org coded "default" (or the first org, alphabetically by name) until
+  // then, so there's no separate effect-driven state update to initialize it.
+  const [organizationOverride, setOrganizationOverride] = useState<string | null>(null);
   const [hierarchyId, setHierarchyId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   // Owned here (not inside FilterBar) so it survives GraphEditor's hierarchy-driven data
   // reload and FilterBar no longer needs a remount key to "reset" on hierarchy switch.
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER_STATE);
+
+  const organizationId = useMemo(() => {
+    if (!organizations || organizations.length === 0) {
+      return null;
+    }
+    if (organizationOverride && organizations.some((org) => org.id === organizationOverride)) {
+      return organizationOverride;
+    }
+    const defaultOrg = organizations.find((org) => org.code === "default") ?? organizations[0];
+    return defaultOrg.id;
+  }, [organizations, organizationOverride]);
 
   const { data: graph } = useGraph(organizationId ?? "", hierarchyId);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
@@ -41,13 +57,46 @@ export default function GraphDemo() {
     [filterState, selectedNodeId, graph?.edges]
   );
 
-  if (orgLoading || !organizationId) {
+  function handleOrganizationChange(id: string) {
+    setOrganizationOverride(id);
+    setHierarchyId(null);
+    setSelection(null);
+    setFilterState(DEFAULT_FILTER_STATE);
+  }
+
+  if (orgsLoading || !organizations) {
+    return <p className="text-sm text-slate-400">Loading organization…</p>;
+  }
+
+  if (organizations.length === 0) {
+    return <p className="text-sm text-slate-400">No organizations found. Create one to view the graph.</p>;
+  }
+
+  if (!organizationId) {
     return <p className="text-sm text-slate-400">Loading organization…</p>;
   }
 
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
+      <div className="mb-4">
+        <label htmlFor="org-select" className="mb-1 block text-xs font-medium text-slate-600">
+          Organization
+        </label>
+        <select
+          id="org-select"
+          data-testid="org-select"
+          value={organizationId}
+          onChange={(event) => handleOrganizationChange(event.target.value)}
+          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+        >
+          {organizations.map((org) => (
+            <option key={org.id} value={org.id}>
+              {`${org.name} (${org.code})`}
+            </option>
+          ))}
+        </select>
+      </div>
       {graph && (
         <FilterBar
           entityTypes={graph.entity_types}
