@@ -7,6 +7,9 @@ export type FieldMeta = {
   writable: boolean;
   is_fk: boolean;
   fk_table: string | null;
+  default?: string | number | boolean | null;
+  choices?: string[] | null;
+  label_field?: boolean;
 };
 
 export type TableMeta = {

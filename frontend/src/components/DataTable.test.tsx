@@ -1,6 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DataTable from "./DataTable";
+
+vi.mock("../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
+  return { ...actual, apiFetch: vi.fn() };
+});
+
+import { apiFetch } from "../api/client";
 
 const fields = [
   { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
@@ -9,9 +17,14 @@ const fields = [
 
 const rows = [{ id: "1", code: "employee" }];
 
+function renderWithQueryClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient();
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
 describe("DataTable", () => {
   it("renders rows and pagination info", () => {
-    render(
+    renderWithQueryClient(
       <DataTable
         fields={fields}
         rows={rows}
@@ -27,27 +40,9 @@ describe("DataTable", () => {
     expect(screen.getByText("1-1 of 1")).toBeInTheDocument();
   });
 
-  it("calls onDelete with the row id when Delete is clicked", () => {
-    const onDelete = vi.fn();
-    render(
-      <DataTable
-        fields={fields}
-        rows={rows}
-        total={1}
-        limit={20}
-        offset={0}
-        onPageChange={vi.fn()}
-        onDelete={onDelete}
-      />
-    );
-
-    fireEvent.click(screen.getByText("Delete"));
-    expect(onDelete).toHaveBeenCalledWith("1");
-  });
-
   it("calls onPageChange with the next offset", () => {
     const onPageChange = vi.fn();
-    render(
+    renderWithQueryClient(
       <DataTable
         fields={fields}
         rows={rows}
@@ -66,7 +61,8 @@ describe("DataTable", () => {
   it("calls onRowClick when a row is clicked, but not when Delete is clicked", () => {
     const onRowClick = vi.fn();
     const onDelete = vi.fn();
-    render(
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithQueryClient(
       <DataTable
         fields={fields}
         rows={rows}
@@ -86,5 +82,107 @@ describe("DataTable", () => {
     fireEvent.click(screen.getByText("Delete"));
     expect(onRowClick).not.toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalledWith("1");
+    (window.confirm as any).mockRestore();
+  });
+
+  describe("delete confirmation", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("calls onDelete when the confirmation is accepted", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithQueryClient(
+        <DataTable
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Delete"));
+
+      expect(window.confirm).toHaveBeenCalledWith("Delete this row? This cannot be undone.");
+      expect(onDelete).toHaveBeenCalledWith("1");
+    });
+
+    it("skips onDelete when the confirmation is cancelled", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWithQueryClient(
+        <DataTable
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Delete"));
+
+      expect(window.confirm).toHaveBeenCalled();
+      expect(onDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("foreign key columns", () => {
+    beforeEach(() => {
+      (apiFetch as any).mockReset();
+    });
+
+    it("renders the resolved label instead of the raw UUID", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.includes("/options")) {
+          return Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111", label: "Acme Corp" }]);
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+
+      const fkFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        {
+          name: "organization_id",
+          type: "uuid" as const,
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "iam.organization",
+        },
+      ];
+      const fkRows = [{ id: "1", organization_id: "11111111-1111-1111-1111-111111111111" }];
+
+      renderWithQueryClient(
+        <DataTable
+          fields={fkFields}
+          rows={fkRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getByText("Acme Corp")).toBeInTheDocument();
+      });
+
+      const call = (apiFetch as any).mock.calls.find(([path]: [string]) => path.includes("/options"));
+      expect(call[0]).toContain("/api/iam/organization/options");
+      expect(call[0]).toContain("ids=11111111-1111-1111-1111-111111111111");
+
+      const cell = screen.getByText("Acme Corp");
+      expect(cell.getAttribute("title")).toBe("11111111-1111-1111-1111-111111111111");
+    });
   });
 });

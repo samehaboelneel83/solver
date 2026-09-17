@@ -3,11 +3,33 @@ import { apiFetch } from "./client";
 
 export type ListResult<T = Record<string, unknown>> = { items: T[]; total: number };
 
-export function useEntityList(schemaName: string, tableName: string, limit: number, offset: number) {
+export type EntityListParams = {
+  limit: number;
+  offset: number;
+  q?: string;
+  filters?: Record<string, string>;
+  orderBy?: string;
+  order?: "asc" | "desc";
+};
+
+export function useEntityList(schemaName: string, tableName: string, params: EntityListParams) {
+  const { limit, offset, q = "", filters = {}, orderBy, order } = params;
+  const filterEntries = Object.entries(filters).sort(([a], [b]) => a.localeCompare(b));
+
   return useQuery({
-    queryKey: ["entities", schemaName, tableName, limit, offset],
-    queryFn: () =>
-      apiFetch<ListResult>(`/api/${schemaName}/${tableName}/?limit=${limit}&offset=${offset}`),
+    queryKey: ["entities", schemaName, tableName, limit, offset, q, filterEntries, orderBy ?? "", order ?? ""],
+    queryFn: () => {
+      const search = new URLSearchParams();
+      search.set("limit", String(limit));
+      search.set("offset", String(offset));
+      if (q) search.set("q", q);
+      if (orderBy) search.set("order_by", orderBy);
+      if (order) search.set("order", order);
+      for (const [key, value] of filterEntries) {
+        search.set(`f_${key}`, value);
+      }
+      return apiFetch<ListResult>(`/api/${schemaName}/${tableName}/?${search.toString()}`);
+    },
     enabled: Boolean(schemaName && tableName),
   });
 }

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/client";
+import { formatApiError } from "../api/errors";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -14,8 +15,8 @@ export default function Login() {
     try {
       await login(username, password);
       navigate("/");
-    } catch {
-      setError("Invalid username or password");
+    } catch (err) {
+      setError(formatApiError(err));
     }
   }
 

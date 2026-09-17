@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import EntityForm from "../components/EntityForm";
+import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
 
@@ -17,6 +18,14 @@ export default function EntityDetail() {
   const createEntity = useCreateEntity(schemaName, tableName);
   const updateEntity = useUpdateEntity(schemaName, tableName, id ?? "");
 
+  if (tables && !table) {
+    return (
+      <p className="text-sm text-slate-400">
+        Unknown table {schemaName}.{tableName}
+      </p>
+    );
+  }
+
   if (!table || (!isNew && !existing)) {
     return <p className="text-sm text-slate-400">Loading…</p>;
   }
@@ -31,7 +40,7 @@ export default function EntityDetail() {
       }
       navigate(`/${schemaName}/${tableName}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save. Please check your input and try again.");
+      setError(formatApiError(err));
     }
   }
 

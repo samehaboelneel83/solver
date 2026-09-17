@@ -1,25 +1,130 @@
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DataTable from "../components/DataTable";
+import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
 
 const PAGE_SIZE = 20;
+const FILTER_PREFIX = "f_";
+const SEARCH_DEBOUNCE_MS = 300;
 
 export default function EntityList() {
   const { schemaName = "", tableName = "" } = useParams();
-  const [offset, setOffset] = useState(0);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: tables } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
 
-  const { data, isLoading, error } = useEntityList(schemaName, tableName, PAGE_SIZE, offset);
+  const q = searchParams.get("q") ?? "";
+  const offset = Number(searchParams.get("offset") ?? "0") || 0;
+  const orderBy = searchParams.get("order_by") ?? undefined;
+  const orderParam = searchParams.get("order");
+  const order = orderParam === "asc" || orderParam === "desc" ? orderParam : undefined;
+
+  const filters = useMemo(() => {
+    const result: Record<string, string> = {};
+    for (const [key, value] of searchParams.entries()) {
+      if (key.startsWith(FILTER_PREFIX)) {
+        result[key.slice(FILTER_PREFIX.length)] = value;
+      }
+    }
+    return result;
+  }, [searchParams]);
+
+  const [searchInput, setSearchInput] = useState(q);
+
+  // Keep the input in sync when the URL changes from elsewhere (back/forward).
+  useEffect(() => {
+    setSearchInput(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  // Debounce the search box before it hits the URL/request.
+  useEffect(() => {
+    if (searchInput === q) return;
+    const timer = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (searchInput) {
+        next.set("q", searchInput);
+      } else {
+        next.delete("q");
+      }
+      next.delete("offset");
+      setSearchParams(next, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]);
+
+  const { data, isLoading, error } = useEntityList(schemaName, tableName, {
+    limit: PAGE_SIZE,
+    offset,
+    q,
+    filters,
+    orderBy,
+    order,
+  });
   const deleteEntity = useDeleteEntity(schemaName, tableName);
+
+  if (tables && !table) {
+    return (
+      <p className="text-sm text-slate-400">
+        Unknown table {schemaName}.{tableName}
+      </p>
+    );
+  }
 
   if (!table) {
     return <p className="text-sm text-slate-400">Loading table definition…</p>;
   }
+
+  function updateParams(mutator: (params: URLSearchParams) => void) {
+    const next = new URLSearchParams(searchParams);
+    mutator(next);
+    setSearchParams(next);
+  }
+
+  function handlePageChange(newOffset: number) {
+    updateParams((params) => {
+      if (newOffset > 0) {
+        params.set("offset", String(newOffset));
+      } else {
+        params.delete("offset");
+      }
+    });
+  }
+
+  function handleSort(column: string) {
+    updateParams((params) => {
+      if (orderBy === column && order === "asc") {
+        params.set("order_by", column);
+        params.set("order", "desc");
+      } else if (orderBy === column && order === "desc") {
+        params.delete("order_by");
+        params.delete("order");
+      } else {
+        params.set("order_by", column);
+        params.set("order", "asc");
+      }
+      params.delete("offset");
+    });
+  }
+
+  function removeFilter(key: string) {
+    updateParams((params) => {
+      params.delete(`${FILTER_PREFIX}${key}`);
+      params.delete("offset");
+    });
+  }
+
+  const newLinkParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    newLinkParams.set(key, value);
+  }
+  const newLinkQuery = newLinkParams.toString();
 
   return (
     <div>
@@ -28,23 +133,61 @@ export default function EntityList() {
           {schemaName}.{tableName}
         </h1>
         <Link
-          to={`/${schemaName}/${tableName}/new`}
+          to={`/${schemaName}/${tableName}/new${newLinkQuery ? `?${newLinkQuery}` : ""}`}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
         >
           New
         </Link>
       </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          data-testid="list-search"
+          value={searchInput}
+          onChange={(event) => setSearchInput(event.target.value)}
+          placeholder="Search…"
+          className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+        />
+        {Object.entries(filters).map(([key, value]) => (
+          <span
+            key={key}
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600"
+          >
+            <span>
+              {key} = {value}
+            </span>
+            <button
+              type="button"
+              onClick={() => removeFilter(key)}
+              aria-label={`Remove filter ${key}`}
+              className="text-slate-400 hover:text-slate-700"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
       {isLoading && <p className="text-sm text-slate-400">Loading…</p>}
-      {error && <p className="text-sm text-red-600">Failed to load rows</p>}
+      {error && <p className="text-sm text-red-600">{formatApiError(error)}</p>}
       {data && (
         <DataTable
+          key={`${schemaName}.${tableName}`}
           fields={table.fields}
           rows={data.items}
           total={data.total}
           limit={PAGE_SIZE}
           offset={offset}
-          onPageChange={setOffset}
-          onDelete={(id) => deleteEntity.mutate(id)}
+          orderBy={orderBy}
+          order={order}
+          onSort={handleSort}
+          onPageChange={handlePageChange}
+          onDelete={(id) => {
+            setDeleteError(null);
+            deleteEntity.mutate(id, {
+              onError: (err) => setDeleteError(formatApiError(err)),
+            });
+          }}
           onRowClick={(id) => navigate(`/${schemaName}/${tableName}/${id}`)}
         />
       )}
