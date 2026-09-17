@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
@@ -8,7 +10,6 @@ from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
 from app.seed import seed_admin
-import logging
 
 logger = logging.getLogger(__name__)
 
