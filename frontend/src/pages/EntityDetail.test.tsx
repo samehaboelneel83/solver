@@ -158,6 +158,45 @@ describe("EntityDetail (missing record)", () => {
   });
 });
 
+describe("EntityDetail (load error other than 404)", () => {
+  it("shows the formatted error and a link back to the list on a 500", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/broken-id") {
+        return Promise.reject(new ApiError(500, "internal error"));
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    // retry: false so the error state settles immediately instead of going
+    // through react-query's default retry/backoff.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/broken-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Server error (500). Please try again.")).toBeInTheDocument();
+    expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
+  });
+});
+
 describe("EntityDetail (create mode with query-string prefill)", () => {
   it("prefills a foreign-key field from the query string and resolves its label", async () => {
     (apiFetch as any).mockImplementation((path: string) => {

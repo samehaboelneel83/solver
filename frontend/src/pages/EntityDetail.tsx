@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import EntityForm from "../components/EntityForm";
+import RelatedRecords from "../components/RelatedRecords";
 import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
@@ -47,10 +48,20 @@ export default function EntityDetail() {
     );
   }
 
-  if (!isNew && isEntityError && entityError instanceof ApiError && entityError.status === 404) {
+  if (!isNew && isEntityError) {
+    if (entityError instanceof ApiError && entityError.status === 404) {
+      return (
+        <div>
+          <p className="text-sm text-slate-400">Record not found</p>
+          <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
+            Back to list
+          </Link>
+        </div>
+      );
+    }
     return (
       <div>
-        <p className="text-sm text-slate-400">Record not found</p>
+        <p className="text-sm text-red-600">{formatApiError(entityError)}</p>
         <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
           Back to list
         </Link>
@@ -88,6 +99,7 @@ export default function EntityDetail() {
         onSubmit={handleSubmit}
         submitLabel={isNew ? "Create" : "Save"}
       />
+      {!isNew && id && <RelatedRecords schema={schemaName} table={tableName} id={id} />}
     </div>
   );
 }

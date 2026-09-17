@@ -29,7 +29,7 @@ export default function FkPicker({ fkTable, value, onChange, required, testId }:
     return () => clearTimeout(handle);
   }, [query]);
 
-  const search = useOptions(fkTable, debouncedQuery);
+  const search = useOptions(fkTable, debouncedQuery, { enabled: isOpen || debouncedQuery.length > 0 });
   const options = query ? (search.data ?? []) : [];
 
   const labels = useQuery(optionLabelsQuery(fkTable, value ? [value] : []));

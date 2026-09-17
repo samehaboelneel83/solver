@@ -19,8 +19,11 @@ function chunk<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-/** Search options for an FK dropdown. */
-export function useOptions(fkTable: string, q: string) {
+/** Search options for an FK dropdown. `enabled` (default true) additionally
+ * gates the request -- callers pass e.g. `isOpen || query.length > 0` so a
+ * mounted-but-unopened picker doesn't fire a search on every render. */
+export function useOptions(fkTable: string, q: string, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   return useQuery({
     queryKey: ["options", fkTable, "q", q],
     queryFn: () => {
@@ -29,7 +32,7 @@ export function useOptions(fkTable: string, q: string) {
       const qs = params.toString();
       return apiFetch<Option[]>(`${optionsPath(fkTable)}${qs ? `?${qs}` : ""}`);
     },
-    enabled: Boolean(fkTable),
+    enabled: Boolean(fkTable) && enabled,
   });
 }
 

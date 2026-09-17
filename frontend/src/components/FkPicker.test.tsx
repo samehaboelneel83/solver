@@ -88,6 +88,14 @@ describe("FkPicker", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
+  it("does not query /options?q= before the picker is opened", async () => {
+    (apiFetch as any).mockClear();
+    renderPicker();
+
+    await screen.findByTestId("field-organization_id");
+    expect(apiFetch).not.toHaveBeenCalledWith(expect.stringContaining("/options?q="));
+  });
+
   it("shows a prompt before typing and 'No matches' when a search is empty", async () => {
     renderPicker();
 
