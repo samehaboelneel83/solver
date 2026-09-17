@@ -75,8 +75,13 @@ export function AttributeInput({ def, defaultValue }: { def: AttributeDefinition
  *   "clear", so it always sets rather than ever clearing.
  * - everything else: an empty/whitespace-only input becomes `null` ("clear this attribute",
  *   per Task 7's explicit-null semantics), `number` becomes a JS number (sent as a real JSON
- *   number), `json` is parsed (throwing a plain Error with a field-naming message on invalid
- *   JSON), and date/datetime/string are passed through as the string the input gave.
+ *   number -- throwing a plain Error, rather than letting a non-finite result through, when the
+ *   text isn't a finite number: `Number("abc")` is `NaN` and `Number("1e400")` is `Infinity`,
+ *   and `JSON.stringify` silently turns either into `null` in the request body, which would
+ *   otherwise look identical to the user explicitly clearing the attribute -- a 200 that quietly
+ *   deletes data instead of the 422 a bad value should produce), `json` is parsed (throwing a
+ *   plain Error with a field-naming message on invalid JSON), and date/datetime/string are
+ *   passed through as the string the input gave.
  */
 export function attributeValueFromForm(form: FormData, def: AttributeDefinitionOption): unknown {
   const name = `attr:${def.code}`;
@@ -89,7 +94,11 @@ export function attributeValueFromForm(form: FormData, def: AttributeDefinitionO
     return null;
   }
   if (def.data_type === "number") {
-    return Number(rawStr);
+    const num = Number(rawStr);
+    if (!Number.isFinite(num)) {
+      throw new Error(`${def.name}: expects a number`);
+    }
+    return num;
   }
   if (def.data_type === "json") {
     try {

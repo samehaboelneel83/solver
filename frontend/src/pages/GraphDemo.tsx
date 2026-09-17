@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import GraphEditor from "../components/GraphEditor";
@@ -32,6 +32,14 @@ export default function GraphDemo() {
 
   const { data: graph } = useGraph(organizationId ?? "", hierarchyId);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
+  // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every node/edge's
+  // display/highlight classes) only reruns when the criteria actually change, not on every
+  // GraphDemo render (e.g. a selection change unrelated to filtering) -- deriveFilterCriteria
+  // returns a fresh object identity each call otherwise.
+  const filter = useMemo(
+    () => (graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined),
+    [filterState, selectedNodeId, graph?.edges]
+  );
 
   if (orgLoading || !organizationId) {
     return <p className="text-sm text-slate-400">Loading organization…</p>;
@@ -55,7 +63,7 @@ export default function GraphDemo() {
             organizationId={organizationId}
             hierarchyId={hierarchyId}
             onHierarchyChange={setHierarchyId}
-            filter={graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined}
+            filter={filter}
             onSelectionChange={setSelection}
           />
         </div>

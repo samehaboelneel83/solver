@@ -50,6 +50,11 @@ export function deriveFilterCriteria(
   return { selectedTypes: state.selectedTypes, search: state.search, highlightIds };
 }
 
+// `edges` is part of FilterBar's props contract (task-9-brief.md) and is what GraphDemo passes
+// through to `deriveFilterCriteria` for the highlight computation -- but that derivation now
+// happens in GraphDemo itself (not inside this component), so `edges` isn't read here. Kept on
+// the signature rather than dropped so the prop list matches the documented contract and stays
+// available to any future in-component use (e.g. showing edge counts in the type panel).
 export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, value, onChange }: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
