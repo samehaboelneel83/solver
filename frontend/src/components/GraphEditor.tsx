@@ -6,6 +6,7 @@ import elk from "cytoscape-elk";
 import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
 import type { GraphResponse, RelationshipTypeOption } from "../types/graph";
+import type { FilterCriteria } from "./FilterBar";
 
 cytoscape.use(elk);
 cytoscape.use(edgehandles);
@@ -14,6 +15,9 @@ type Selection = { kind: "node" | "edge"; id: string } | null;
 
 type GraphEditorProps = {
   organizationId: string;
+  hierarchyId: string | null;
+  onHierarchyChange: (id: string | null) => void;
+  filter?: FilterCriteria;
   onSelectionChange?: (selection: Selection) => void;
 };
 
@@ -40,10 +44,15 @@ function toElements(graph: GraphResponse) {
 
 const ELK_LAYOUT = { name: "elk", elk: { algorithm: "layered" } } as const;
 
-export default function GraphEditor({ organizationId, onSelectionChange }: GraphEditorProps) {
+export default function GraphEditor({
+  organizationId,
+  hierarchyId,
+  onHierarchyChange,
+  filter,
+  onSelectionChange,
+}: GraphEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  const [hierarchyId, setHierarchyId] = useState<string | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
 
@@ -92,12 +101,13 @@ export default function GraphEditor({ organizationId, onSelectionChange }: Graph
             "curve-style": "bezier",
           },
         },
+        { selector: ".graph-highlighted", style: { "border-width": 3, "border-color": "#2563eb" } },
+        { selector: ".graph-dimmed", style: { opacity: 0.25 } },
       ],
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.layout(ELK_LAYOUT as any).run();
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const eh = (cy as any).edgehandles({});
 
@@ -124,6 +134,41 @@ export default function GraphEditor({ organizationId, onSelectionChange }: Graph
       cyRef.current = null;
     };
   }, [data]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !data) {
+      return;
+    }
+    const searchLower = (filter?.search ?? "").toLowerCase();
+    const selectedTypes = filter?.selectedTypes ?? null;
+    const highlightIds = filter?.highlightIds ?? null;
+
+    cy.nodes().forEach((node) => {
+      const graphNode = data.nodes.find((n) => n.id === node.id());
+      if (!graphNode) {
+        return;
+      }
+      const typeOk = selectedTypes === null || selectedTypes.includes(graphNode.type);
+      const searchOk = !searchLower || graphNode.label.toLowerCase().includes(searchLower);
+      node.style("display", typeOk && searchOk ? "element" : "none");
+    });
+
+    cy.edges().forEach((edge) => {
+      const source = cy.getElementById(edge.data("source"));
+      const target = cy.getElementById(edge.data("target"));
+      const visible = source.style("display") !== "none" && target.style("display") !== "none";
+      edge.style("display", visible ? "element" : "none");
+    });
+
+    cy.elements().removeClass("graph-highlighted graph-dimmed");
+    if (highlightIds) {
+      const highlightSet = new Set(highlightIds);
+      cy.nodes().forEach((node) => {
+        node.addClass(highlightSet.has(node.id()) ? "graph-highlighted" : "graph-dimmed");
+      });
+    }
+  }, [filter, data]);
 
   function runLayout() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,7 +232,7 @@ export default function GraphEditor({ organizationId, onSelectionChange }: Graph
         <select
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
           value={hierarchyId ?? ""}
-          onChange={(e) => setHierarchyId(e.target.value || null)}
+          onChange={(e) => onHierarchyChange(e.target.value || null)}
           data-testid="hierarchy-select"
         >
           <option value="">No hierarchy nesting</option>

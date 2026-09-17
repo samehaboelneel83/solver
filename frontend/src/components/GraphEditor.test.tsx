@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,10 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef } = vi.hoist
         handlersRef.current[`${event}:${selectorOrHandler}`] = maybeHandler;
       }
     }),
+    nodes: vi.fn(() => ({ forEach: vi.fn() })),
+    edges: vi.fn(() => ({ forEach: vi.fn() })),
+    elements: vi.fn(() => ({ removeClass: vi.fn() })),
+    getElementById: vi.fn(() => ({ style: vi.fn(() => "element") })),
   };
   const constructor: any = vi.fn(() => instance);
   constructor.use = vi.fn();
@@ -34,11 +39,11 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderWithProviders(organizationId = "org-1") {
+function renderWithProviders(props: Partial<ComponentProps<typeof GraphEditor>> = {}) {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <GraphEditor organizationId={organizationId} />
+      <GraphEditor organizationId="org-1" hierarchyId={null} onHierarchyChange={vi.fn()} {...props} />
     </QueryClientProvider>
   );
 }
