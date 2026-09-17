@@ -5,7 +5,8 @@ import elk from "cytoscape-elk";
 // @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
 import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
-import type { GraphResponse, RelationshipTypeOption } from "../types/graph";
+import { formatApiError } from "../api/errors";
+import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
 
 cytoscape.use(elk);
@@ -21,28 +22,102 @@ type GraphEditorProps = {
   onSelectionChange?: (selection: Selection) => void;
 };
 
-function toElements(graph: GraphResponse) {
-  const nodeElements = graph.nodes.map((node) => ({
-    data: {
-      id: node.id,
-      label: node.label,
-      type: node.type,
-      parent: node.parent ?? undefined,
-    },
-  }));
-  const edgeElements = graph.edges.map((edge) => ({
-    data: {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      label: edge.label,
-      type: edge.type,
-    },
-  }));
-  return [...nodeElements, ...edgeElements];
-}
+const ELK_LAYOUT = {
+  name: "elk",
+  elk: { algorithm: "layered", "elk.hierarchyHandling": "INCLUDE_CHILDREN" },
+} as const;
 
-const ELK_LAYOUT = { name: "elk", elk: { algorithm: "layered" } } as const;
+/**
+ * Diffs `graph` against the elements already present in `cy` and applies the
+ * minimal set of changes: removes ids no longer present, adds new ones
+ * (positioned at the centre of the current viewport), updates `data` on
+ * existing ones, and moves nodes whose `parent` changed.
+ *
+ * `structureChanged` is true only when a node was added/removed or a node's
+ * parent changed -- adding/removing an edge, or changing only a label/type,
+ * does not warrant a relayout.
+ */
+export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChanged: boolean } {
+  let structureChanged = false;
+
+  const desiredNodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const desiredEdges = new Map(graph.edges.map((e) => [e.id, e]));
+
+  const existingNodeIds = new Set<string>();
+  const existingEdgeIds = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (cy as any)
+    .nodes()
+    .forEach((ele: any) => existingNodeIds.add(ele.id()));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (cy as any)
+    .edges()
+    .forEach((ele: any) => existingEdgeIds.add(ele.id()));
+
+  existingNodeIds.forEach((id) => {
+    if (!desiredNodes.has(id)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (cy as any).remove?.((cy as any).getElementById(id));
+      structureChanged = true;
+    }
+  });
+  existingEdgeIds.forEach((id) => {
+    if (!desiredEdges.has(id)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (cy as any).remove?.((cy as any).getElementById(id));
+    }
+  });
+
+  const newNodes: GraphNode[] = [];
+  desiredNodes.forEach((node, id) => {
+    if (existingNodeIds.has(id)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ele = (cy as any).getElementById(id);
+      ele.data({ label: node.label, type: node.type });
+      const currentParent = ele.data("parent") ?? undefined;
+      const desiredParent = node.parent ?? undefined;
+      if (currentParent !== desiredParent) {
+        ele.move({ parent: desiredParent ?? null });
+        structureChanged = true;
+      }
+    } else {
+      newNodes.push(node);
+    }
+  });
+
+  const newEdges: GraphEdge[] = [];
+  desiredEdges.forEach((edge, id) => {
+    if (existingEdgeIds.has(id)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ele = (cy as any).getElementById(id);
+      ele.data({ label: edge.label, type: edge.type });
+    } else {
+      newEdges.push(edge);
+    }
+  });
+
+  if (newNodes.length > 0 || newEdges.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const extent = (cy as any).extent?.() ?? { x1: 0, y1: 0, x2: 0, y2: 0 };
+    const center = { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
+    const elementsToAdd = [
+      ...newNodes.map((node) => ({
+        data: { id: node.id, label: node.label, type: node.type, parent: node.parent ?? undefined },
+        position: center,
+      })),
+      ...newEdges.map((edge) => ({
+        data: { id: edge.id, source: edge.source, target: edge.target, label: edge.label, type: edge.type },
+      })),
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (cy as any).add?.(elementsToAdd);
+    if (newNodes.length > 0) {
+      structureChanged = true;
+    }
+  }
+
+  return { structureChanged };
+}
 
 export default function GraphEditor({
   organizationId,
@@ -53,21 +128,32 @@ export default function GraphEditor({
 }: GraphEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ehRef = useRef<any>(null);
+  const graphRef = useRef<GraphResponse | null>(null);
+  const hasLaidOutRef = useRef(false);
+
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useGraph(organizationId, hierarchyId);
+  const { data, isLoading, error: loadError } = useGraph(organizationId, hierarchyId);
   const createNode = useCreateNode(organizationId, hierarchyId);
   const createEdge = useCreateEdge(organizationId, hierarchyId);
 
+  // Create the cytoscape instance exactly once per mount. Data is applied
+  // (and the instance kept alive across refetches/mutations) by the effect
+  // below, so zoom/pan/dragged positions survive data changes.
   useEffect(() => {
-    if (!containerRef.current || !data) {
+    if (!containerRef.current) {
       return;
     }
 
     const cy = cytoscape({
       container: containerRef.current,
-      elements: toElements(data),
+      elements: [],
       style: [
         {
           selector: "node",
@@ -107,16 +193,18 @@ export default function GraphEditor({
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cy.layout(ELK_LAYOUT as any).run();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const eh = (cy as any).edgehandles({});
+    ehRef.current = eh;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "node", (evt: any) => {
       onSelectionChange?.({ kind: "node", id: evt.target.id() });
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "edge", (evt: any) => {
       onSelectionChange?.({ kind: "edge", id: evt.target.id() });
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", (evt: any) => {
       if (evt.target === cy) {
         onSelectionChange?.(null);
@@ -132,7 +220,23 @@ export default function GraphEditor({
       eh.destroy();
       cy.destroy();
       cyRef.current = null;
+      ehRef.current = null;
+      hasLaidOutRef.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !data) {
+      return;
+    }
+    const { structureChanged } = applyGraphToCy(cy, data);
+    graphRef.current = data;
+    if (structureChanged || !hasLaidOutRef.current) {
+      hasLaidOutRef.current = true;
+      startLayout(cy);
+    }
   }, [data]);
 
   useEffect(() => {
@@ -170,17 +274,60 @@ export default function GraphEditor({
     }
   }, [filter, data]);
 
+  function startLayout(cy: Core) {
+    const fail = () => {
+      setLayoutStatus(null);
+      setError("Layout failed");
+    };
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const lay: any = cy.layout(ELK_LAYOUT as any);
+      lay.on?.("layoutstart", () => setLayoutStatus("Laying out…"));
+      lay.on?.("layoutstop", () => setLayoutStatus(null));
+      const runResult = lay.run();
+      Promise.resolve(runResult).catch(fail);
+      lay.promiseOn?.("layoutstop")?.catch(fail);
+    } catch {
+      fail();
+    }
+  }
+
   function runLayout() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    cyRef.current?.layout(ELK_LAYOUT as any).run();
+    if (cyRef.current) {
+      startLayout(cyRef.current);
+    }
   }
 
   function fit() {
     cyRef.current?.fit();
   }
 
+  function toggleConnect() {
+    const cy = cyRef.current;
+    const eh = ehRef.current;
+    if (!cy || !eh) {
+      return;
+    }
+    const next = !connecting;
+    setConnecting(next);
+    if (next) {
+      eh.enableDrawMode?.();
+    } else {
+      eh.disableDrawMode?.();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (cy as any).autoungrabify?.(next);
+  }
+
   function nodeEntityType(entityId: string): string | undefined {
     return data?.nodes.find((n) => n.id === entityId)?.type;
+  }
+
+  function entityTypeName(code: string | undefined): string {
+    if (!code) {
+      return "?";
+    }
+    return data?.entity_types.find((et) => et.code === code)?.name ?? code;
   }
 
   function validRelationshipTypesFor(sourceId: string, targetId: string): RelationshipTypeOption[] {
@@ -197,11 +344,14 @@ export default function GraphEditor({
     if (!pendingEdge) {
       return;
     }
-    createEdge.mutate({
-      relationship_type_id: relationshipTypeId,
-      source_entity_id: pendingEdge.sourceId,
-      target_entity_id: pendingEdge.targetId,
-    });
+    createEdge.mutate(
+      {
+        relationship_type_id: relationshipTypeId,
+        source_entity_id: pendingEdge.sourceId,
+        target_entity_id: pendingEdge.targetId,
+      },
+      { onError: (e) => setError(formatApiError(e)) }
+    );
     setPendingEdge(null);
   }
 
@@ -215,20 +365,23 @@ export default function GraphEditor({
     if (!entityTypeId || !name) {
       return;
     }
-    createNode.mutate({
-      organization_id: organizationId,
-      entity_type_id: entityTypeId,
-      name,
-      code,
-      hierarchy_id: hierarchyId ?? undefined,
-      parent_entity_id: parentEntityId,
-    });
+    createNode.mutate(
+      {
+        organization_id: organizationId,
+        entity_type_id: entityTypeId,
+        name,
+        code,
+        hierarchy_id: hierarchyId ?? undefined,
+        parent_entity_id: parentEntityId,
+      },
+      { onError: (e) => setError(formatApiError(e)) }
+    );
     setShowCreateNode(false);
   }
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <select
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
           value={hierarchyId ?? ""}
@@ -250,13 +403,40 @@ export default function GraphEditor({
         </button>
         <button
           type="button"
+          onClick={toggleConnect}
+          className={`rounded-md border px-2 py-1 text-sm ${
+            connecting ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-300"
+          }`}
+          data-testid="toggle-connect"
+        >
+          {connecting ? "Connecting: drag from one node to another" : "Connect"}
+        </button>
+        <button
+          type="button"
           onClick={() => setShowCreateNode((v) => !v)}
           className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white"
           data-testid="toggle-create-node"
         >
           + New Node
         </button>
+        {layoutStatus && (
+          <span data-testid="layout-status" className="text-xs text-slate-400">
+            {layoutStatus}
+          </span>
+        )}
       </div>
+
+      {error && (
+        <div
+          data-testid="graph-error"
+          className="mb-2 flex items-start justify-between gap-2 rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700"
+        >
+          <span className="whitespace-pre-line">{error}</span>
+          <button type="button" onClick={() => setError(null)} className="text-red-700" aria-label="Dismiss error">
+            ×
+          </button>
+        </div>
+      )}
 
       {showCreateNode && data && (
         <form
@@ -305,16 +485,28 @@ export default function GraphEditor({
       {pendingEdge && data && (
         <div className="mb-2 rounded-md border border-slate-200 p-2" data-testid="edge-type-picker">
           <p className="mb-1 text-xs text-slate-600">Choose a relationship type:</p>
-          {validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId).map((rt) => (
-            <button
-              key={rt.id}
-              type="button"
-              onClick={() => handleConfirmEdge(rt.id)}
-              className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm"
-            >
-              {rt.name}
-            </button>
-          ))}
+          {(() => {
+            const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
+            if (validTypes.length === 0) {
+              const sourceTypeName = entityTypeName(nodeEntityType(pendingEdge.sourceId));
+              const targetTypeName = entityTypeName(nodeEntityType(pendingEdge.targetId));
+              return (
+                <p className="mb-1 text-xs text-slate-500">
+                  No relationship type allows {sourceTypeName} → {targetTypeName}
+                </p>
+              );
+            }
+            return validTypes.map((rt) => (
+              <button
+                key={rt.id}
+                type="button"
+                onClick={() => handleConfirmEdge(rt.id)}
+                className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              >
+                {rt.name}
+              </button>
+            ));
+          })()}
           <button type="button" onClick={() => setPendingEdge(null)} className="text-sm text-slate-500">
             Cancel
           </button>
@@ -322,7 +514,7 @@ export default function GraphEditor({
       )}
 
       {isLoading && <p className="text-sm text-slate-400">Loading graph…</p>}
-      {error && <p className="text-sm text-red-600">Failed to load graph</p>}
+      {loadError && <p className="text-sm text-red-600">Failed to load graph</p>}
       <div ref={containerRef} data-testid="cytoscape-container" style={{ width: "100%", height: "600px" }} />
     </div>
   );

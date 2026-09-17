@@ -72,9 +72,10 @@ describe("GraphDemo", () => {
   it("resolves the default organization and renders the graph editor, filter bar, and property panel", async () => {
     renderWithProviders();
 
-    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
-
-    expect(screen.getByTestId("filter-search")).toBeInTheDocument();
+    // The cytoscape instance is created on mount, before the graph query
+    // resolves, so wait on the data-dependent FilterBar instead.
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+    expect(mockCytoscape).toHaveBeenCalled();
     expect(screen.getByText(/select a node or edge/i)).toBeInTheDocument();
   });
 
