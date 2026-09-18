@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { MouseEvent, useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
 import { useSchema } from "../api/meta";
+import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import { tableLabelPlural } from "../lib/labels";
 import type { TableMeta } from "../types/meta";
 
@@ -16,11 +17,24 @@ const tableLinkClassName = ({ isActive }: { isActive: boolean }) =>
   }`;
 
 export default function AppShell() {
+  // Wraps the whole shell (nav + <Outlet />) in one shared "does the
+  // currently-open form have unsaved changes?" guard (C-3): a routed page's
+  // form registers itself via useUnsavedChangesGuard, and this component's
+  // own nav links below consult it via useConfirmLeave before navigating.
+  return (
+    <UnsavedChangesProvider>
+      <AppShellContent />
+    </UnsavedChangesProvider>
+  );
+}
+
+function AppShellContent() {
   const { data: tables, isLoading, error } = useSchema();
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const isFirstRender = useRef(true);
+  const confirmLeave = useConfirmLeave();
 
   const grouped: Record<string, TableMeta[]> = {};
   for (const t of tables ?? []) {
@@ -30,6 +44,14 @@ export default function AppShell() {
   function handleLogout() {
     setToken(null);
     navigate("/login");
+  }
+
+  // C-3: a click on any sidebar link first asks the active form (if any)
+  // whether it's OK to leave a dirty edit behind.
+  function handleNavClick(event: MouseEvent) {
+    if (!confirmLeave()) {
+      event.preventDefault();
+    }
   }
 
   // Move focus to the main content region on every route change so keyboard/screen-reader
@@ -58,10 +80,10 @@ export default function AppShell() {
             Sign out
           </button>
         </div>
-        <NavLink to="/" end className={navLinkClassName}>
+        <NavLink to="/" end className={navLinkClassName} onClick={handleNavClick}>
           Dashboard
         </NavLink>
-        <NavLink to="/graph" className={navLinkClassName}>
+        <NavLink to="/graph" className={navLinkClassName} onClick={handleNavClick}>
           Domain Graph
         </NavLink>
         {isLoading && <p className="text-sm text-slate-500">Loading navigation…</p>}
@@ -74,7 +96,7 @@ export default function AppShell() {
             <ul>
               {schemaTables.map((t) => (
                 <li key={`${t.schema}.${t.table}`}>
-                  <NavLink to={`/${t.schema}/${t.table}`} className={tableLinkClassName}>
+                  <NavLink to={`/${t.schema}/${t.table}`} className={tableLinkClassName} onClick={handleNavClick}>
                     {tableLabelPlural(t)}
                   </NavLink>
                 </li>

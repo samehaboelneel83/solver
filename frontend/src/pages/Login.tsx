@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useId, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { login } from "../api/client";
 import { formatApiError } from "../api/errors";
@@ -35,6 +35,9 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const expired = searchParams.get("reason") === "expired";
+  const formId = useId();
+  const usernameId = `${formId}-username`;
+  const passwordId = `${formId}-password`;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -59,8 +62,13 @@ export default function Login() {
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div>
-          <label className="block text-sm font-medium text-slate-700">Username</label>
+          <label htmlFor={usernameId} className="block text-sm font-medium text-slate-700">
+            Username
+          </label>
           <input
+            id={usernameId}
+            name="username"
+            autoComplete="username"
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -68,9 +76,14 @@ export default function Login() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Password</label>
+          <label htmlFor={passwordId} className="block text-sm font-medium text-slate-700">
+            Password
+          </label>
           <input
+            id={passwordId}
+            name="password"
             type="password"
+            autoComplete="current-password"
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

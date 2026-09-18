@@ -118,3 +118,24 @@ describe("Login page", () => {
     }
   );
 });
+
+describe("Login accessible fields (H-8)", () => {
+  it("associates each <label> with its input via htmlFor/id, findable by getByLabelText", () => {
+    renderAt("/login");
+
+    expect(screen.getByLabelText("Username")).toBe(screen.getByTestId("username"));
+    expect(screen.getByLabelText("Password")).toBe(screen.getByTestId("password"));
+  });
+
+  it("gives each input a name and the right autocomplete token so a password manager can fill them", () => {
+    renderAt("/login");
+
+    const usernameField = screen.getByTestId("username");
+    expect(usernameField).toHaveAttribute("name", "username");
+    expect(usernameField).toHaveAttribute("autocomplete", "username");
+
+    const passwordField = screen.getByTestId("password");
+    expect(passwordField).toHaveAttribute("name", "password");
+    expect(passwordField).toHaveAttribute("autocomplete", "current-password");
+  });
+});

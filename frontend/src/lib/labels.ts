@@ -33,3 +33,35 @@ export function fieldLabel(field: Pick<FieldMeta, "name" | "label">): string {
 export function lowerFirst(value: string): string {
   return value ? value[0].toLowerCase() + value.slice(1) : value;
 }
+
+/**
+ * A human-readable name for one record, e.g. "acme — Acme Corp" or just
+ * "acme". Mirrors the backend's own `_default_label` (used for FK-dropdown
+ * option labels): prefers a "code — name" pair when both are present,
+ * otherwise the first non-empty value among the table's `label_field`
+ * columns, in the order the backend reports them.
+ *
+ * Used by the edit page's heading (C-6): "Edit entity type" is identical
+ * for every row, so the heading needs the record's own name, not just the
+ * table's.  Returns `undefined` when nothing usable is available (no
+ * `label_field` columns, or the record hasn't loaded yet) so callers can
+ * fall back to the generic table label.
+ */
+export function recordLabel(
+  table: Pick<TableMeta, "fields">,
+  record: Record<string, unknown> | undefined | null
+): string | undefined {
+  if (!record) return undefined;
+  const labelFieldNames = table.fields.filter((f) => f.label_field).map((f) => f.name);
+  if (labelFieldNames.length === 0) return undefined;
+
+  const code = labelFieldNames.includes("code") ? record.code : undefined;
+  const name = labelFieldNames.includes("name") ? record.name : undefined;
+  if (code && name) return `${code} — ${name}`;
+
+  for (const fieldName of labelFieldNames) {
+    const value = record[fieldName];
+    if (value !== null && value !== undefined && value !== "") return String(value);
+  }
+  return undefined;
+}

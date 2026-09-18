@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntityForm from "./EntityForm";
+import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -165,7 +166,7 @@ describe("EntityForm JSON validation", () => {
     fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a":' } });
     fireEvent.click(screen.getByText("Save"));
 
-    expect(screen.getByText("expression: invalid JSON")).toBeInTheDocument();
+    expect(screen.getByText("expression: invalid JSON", { selector: "p" })).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -174,7 +175,7 @@ describe("EntityForm JSON validation", () => {
 
     fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a":' } });
     fireEvent.click(screen.getByText("Save"));
-    expect(screen.getByText("expression: invalid JSON")).toBeInTheDocument();
+    expect(screen.getByText("expression: invalid JSON", { selector: "p" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("field-expression"), { target: { value: '{"a": 1}' } });
     fireEvent.click(screen.getByText("Save"));
@@ -256,7 +257,7 @@ describe("EntityForm numeric finite guard", () => {
     fireEvent.change(screen.getByTestId("field-score"), { target: { value: "1e400" } });
     fireEvent.click(screen.getByText("Save"));
 
-    expect(screen.getByText("score: expects a number")).toBeInTheDocument();
+    expect(screen.getByText("score: expects a number", { selector: "p" })).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -265,7 +266,7 @@ describe("EntityForm numeric finite guard", () => {
 
     fireEvent.change(screen.getByTestId("field-score"), { target: { value: "1e400" } });
     fireEvent.click(screen.getByText("Save"));
-    expect(screen.getByText("score: expects a number")).toBeInTheDocument();
+    expect(screen.getByText("score: expects a number", { selector: "p" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("field-score"), { target: { value: "42" } });
     fireEvent.click(screen.getByText("Save"));
@@ -402,5 +403,222 @@ describe("EntityForm hints", () => {
     renderRichForm();
 
     expect(screen.getByTestId("field-priority")).toHaveAttribute("placeholder", "default: DRAFT");
+  });
+});
+
+describe("EntityForm accessible labelling (H-3)", () => {
+  it("associates a plain field's <label> with its control via htmlFor/id -- findable by getByLabelText", () => {
+    renderWithProviders();
+
+    // `{ exact: false }`: "code" is `required`, so its accessible name is
+    // "code *" (the visible asterisk, hidden from AT via aria-hidden but
+    // still part of the label's rendered text) -- a substring match keeps
+    // the assertion independent of that decoration.
+    expect(screen.getByLabelText("code", { exact: false })).toBe(screen.getByTestId("field-code"));
+  });
+
+  it("associates a checkbox's <label> with the checkbox via htmlFor/id", () => {
+    renderWithProviders();
+
+    expect(screen.getByLabelText("is_active", { exact: false })).toBe(screen.getByTestId("field-is_active"));
+  });
+
+  it("labels an FK field by wrapping it in the <label> (FkPicker's own internals aren't ours to change here) -- still findable by getByLabelText", () => {
+    renderWithProviders();
+
+    expect(screen.getByLabelText("organization_id")).toBe(screen.getByTestId("field-organization_id"));
+  });
+});
+
+describe("EntityForm one validation path (C-9, C-7, H-5)", () => {
+  it("carries noValidate so the browser's own required-field popup never pre-empts the app's validation", () => {
+    renderWithProviders();
+
+    expect(document.querySelector("form")).toHaveAttribute("novalidate");
+  });
+
+  const combinedValidationFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    {
+      name: "code",
+      type: "string" as const,
+      required: true,
+      writable: true,
+      is_fk: false,
+      fk_table: null,
+      label: "Code",
+    },
+    { name: "value", type: "json" as const, required: false, writable: true, is_fk: false, fk_table: null },
+  ];
+
+  function renderCombinedValidation(onSubmit = vi.fn()) {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={combinedValidationFields} onSubmit={onSubmit} submitLabel="Save" />
+      </QueryClientProvider>
+    );
+    return onSubmit;
+  }
+
+  it("an empty required field plus invalid JSON both show in one summary, both get aria-invalid, and nothing is submitted", () => {
+    const onSubmit = renderCombinedValidation();
+
+    fireEvent.change(screen.getByTestId("field-value"), { target: { value: '{"a":' } });
+    fireEvent.click(screen.getByText("Save"));
+
+    const summary = screen.getByTestId("form-errors");
+    expect(summary).toHaveAttribute("role", "alert");
+    expect(summary).toHaveTextContent("Code is required.");
+    expect(summary).toHaveTextContent("value: invalid JSON");
+
+    expect(screen.getByTestId("field-code")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("field-value")).toHaveAttribute("aria-invalid", "true");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("moves focus to the error summary after a failed submit", () => {
+    renderCombinedValidation();
+
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(screen.getByTestId("form-errors")).toHaveFocus();
+  });
+
+  it("does not move focus to the summary from blur-only JSON validation (only a real submit attempt should steal focus)", () => {
+    renderRichForm();
+
+    fireEvent.change(screen.getByTestId("field-expression"), { target: { value: "{" } });
+    fireEvent.blur(screen.getByTestId("field-expression"));
+
+    // The summary does show the blur-set error (it's driven off the same
+    // fieldErrors state as a submit failure), but blur alone must not yank
+    // focus away from the field the user is still working in.
+    expect(screen.getByTestId("form-errors")).toBeInTheDocument();
+    expect(screen.getByTestId("form-errors")).not.toHaveFocus();
+  });
+
+  const fkRequiredFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    {
+      name: "organization_id",
+      type: "uuid" as const,
+      required: true,
+      writable: true,
+      is_fk: true,
+      fk_table: "iam.organization",
+      label: "Organization",
+    },
+  ];
+
+  it("a required FK left empty is validated in-app (not just by the native required attribute) and blocks the request", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={fkRequiredFields} onSubmit={onSubmit} submitLabel="Create" />
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(screen.getByTestId("form-errors")).toHaveTextContent("Organization is required.");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("EntityForm JSON blur validation (C-10)", () => {
+  it("flags invalid JSON on blur, without waiting for submit", () => {
+    const onSubmit = renderRichForm();
+
+    const field = screen.getByTestId("field-expression");
+    fireEvent.change(field, { target: { value: "{" } });
+    fireEvent.blur(field);
+
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("expression: invalid JSON", { selector: "p" })).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("clears the blur-set error once the JSON is fixed and the field is blurred again", () => {
+    renderRichForm();
+
+    const field = screen.getByTestId("field-expression");
+    fireEvent.change(field, { target: { value: "{" } });
+    fireEvent.blur(field);
+    expect(field).toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.change(field, { target: { value: "{}" } });
+    fireEvent.blur(field);
+
+    expect(field).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("expression: invalid JSON", { selector: "p" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EntityForm required-field explanation (C-7)", () => {
+  it("marks every required field's control with the native required attribute", () => {
+    renderWithProviders();
+
+    // is_active (required boolean) is deliberately exempt -- a plain
+    // checkbox's `required` means "must be checked", which would wrongly
+    // forbid a legitimate `false` value.
+    expect(screen.getByTestId("field-code")).toHaveAttribute("required");
+  });
+
+  it("explains what the red asterisk means", () => {
+    renderWithProviders();
+
+    expect(screen.getByText("Required")).toBeInTheDocument();
+  });
+});
+
+function LeaveButton() {
+  const confirmLeave = useConfirmLeave();
+  return (
+    <button type="button" onClick={() => confirmLeave()}>
+      Leave
+    </button>
+  );
+}
+
+describe("EntityForm unsaved-changes guard (C-3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prompts window.confirm before an in-app navigation once a field has been edited", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UnsavedChangesProvider>
+          <EntityForm fields={fields} onSubmit={vi.fn()} submitLabel="Create" />
+          <LeaveButton />
+        </UnsavedChangesProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByTestId("field-code"), { target: { value: "employee" } });
+    fireEvent.click(screen.getByText("Leave"));
+
+    expect(confirmSpy).toHaveBeenCalled();
+  });
+
+  it("does not prompt when nothing has been edited yet", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <UnsavedChangesProvider>
+          <EntityForm fields={fields} onSubmit={vi.fn()} submitLabel="Create" />
+          <LeaveButton />
+        </UnsavedChangesProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText("Leave"));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

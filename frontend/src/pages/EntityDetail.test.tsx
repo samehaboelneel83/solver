@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import EntityDetail from "./EntityDetail";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import EntityDetail, { mapConstraintError } from "./EntityDetail";
 import { ToastProvider } from "../components/ToastProvider";
+import { UnsavedChangesProvider } from "../hooks/useUnsavedChangesGuard";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -320,7 +321,15 @@ describe("EntityDetail human-readable titles (B-1)", () => {
       label_plural: "Entity types",
       fields: [
         { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
-        { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+        {
+          name: "code",
+          type: "string",
+          required: true,
+          writable: true,
+          is_fk: false,
+          fk_table: null,
+          label_field: true,
+        },
       ],
     },
   ];
@@ -346,7 +355,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     await waitFor(() => expect(document.title).toBe("New entity type · Problem Solver"));
   });
 
-  it("renders the edit page's <h1> using the table's own label (Task 5 finishes the record-name part)", async () => {
+  it("renders the edit page's <h1> using the record's own name, not the generic table label (C-6)", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
       if (path === "/api/domain/entity_type/existing-id") {
@@ -365,9 +374,13 @@ describe("EntityDetail human-readable titles (B-1)", () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByRole("heading", { name: "Edit entity type" })).toBeInTheDocument();
+    // Every edit page used to be headed "Edit entity type" -- identical for
+    // every row, with nothing telling the two apart. It now names the
+    // record itself (its `label_field` column, "existing-code"); the
+    // generic table name is still available in the subtitle/breadcrumb.
+    expect(await screen.findByRole("heading", { name: "Edit existing-code" })).toBeInTheDocument();
     expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
-    await waitFor(() => expect(document.title).toBe("Edit entity type · Problem Solver"));
+    await waitFor(() => expect(document.title).toBe("Edit existing-code · Problem Solver"));
   });
 
   it("shows an 'Entity type created' toast after a successful create (D-1)", async () => {
@@ -472,5 +485,170 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
     await waitFor(() => {
       expect((screen.getByTestId("field-organization_id") as HTMLInputElement).value).toBe("Acme");
     });
+  });
+});
+
+describe("EntityDetail breadcrumb and Cancel (C-6, C-8)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            label_plural: "Entity types",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/existing-id") {
+        return Promise.resolve({ id: "existing-id", code: "existing-code" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+  });
+
+  it("shows a breadcrumb link and a Cancel link, both back to the list -- the only controls used to be Save/Create", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByTestId("field-code");
+
+    expect(screen.getByRole("link", { name: "Entity types" })).toHaveAttribute("href", "/domain/entity_type");
+    expect(screen.getByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/domain/entity_type");
+  });
+});
+
+describe("EntityDetail unsaved-changes guard (C-3)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderNewWithGuard() {
+    const queryClient = new QueryClient();
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <UnsavedChangesProvider>
+          <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+              <Route path=":schemaName/:tableName" element={<div>Entity type list page</div>} />
+            </Routes>
+          </MemoryRouter>
+        </UnsavedChangesProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it("confirms before the Cancel link discards an edited, unsaved form (C-3) -- a sidebar/Cancel click used to discard silently", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderNewWithGuard();
+
+    fireEvent.change(await screen.findByTestId("field-code"), { target: { value: "employee" } });
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    // window.confirm returned false ("stay") -- still on the form.
+    expect(screen.getByTestId("field-code")).toBeInTheDocument();
+  });
+
+  it("navigates without prompting when nothing has been edited", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderNewWithGuard();
+
+    await screen.findByTestId("field-code");
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(screen.getByText("Entity type list page")).toBeInTheDocument());
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("EntityDetail duplicate-value error mapping (C-5)", () => {
+  const fieldsWithFk = [
+    { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+    { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+    {
+      name: "organization_id",
+      type: "uuid",
+      required: false,
+      writable: true,
+      is_fk: true,
+      fk_table: "iam.organization",
+    },
+  ] as Parameters<typeof mapConstraintError>[1];
+
+  it("mapConstraintError picks the non-FK field named in the constraint over an FK field that also matches", () => {
+    const mapped = mapConstraintError(
+      "a entity_type row with the same organization_id_code already exists",
+      fieldsWithFk
+    );
+
+    expect(mapped).toEqual({ field: "code", label: "code" });
+  });
+
+  it("mapConstraintError returns null when no writable field name appears in the detail text", () => {
+    expect(mapConstraintError("something went wrong", fieldsWithFk)).toBeNull();
+  });
+
+  it("marks the mapped field and does not leak the raw constraint name, on a 409 from Create", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: fieldsWithFk,
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/" && options?.method === "POST") {
+        return Promise.reject(
+          new ApiError(
+            409,
+            JSON.stringify({ detail: "a entity_type row with the same organization_id_code already exists" })
+          )
+        );
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderAtNew();
+
+    fireEvent.change(await screen.findByTestId("field-code"), { target: { value: "acme" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    const summary = await screen.findByTestId("form-errors");
+    expect(summary.textContent).toContain("code");
+    expect(summary.textContent).not.toContain("organization_id_code");
+    expect(screen.getByTestId("field-code")).toHaveAttribute("aria-invalid", "true");
   });
 });
