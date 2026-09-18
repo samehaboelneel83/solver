@@ -665,7 +665,11 @@ export default function GraphEditor({
   }
 
   return (
-    <div>
+    // Carried forward from Task 8: fills whatever height its flex-column
+    // parent (GraphDemo) hands it, and hands the remainder down to the
+    // canvas via the flex-1/min-h-0 pair below -- see the cytoscape
+    // container's comment for why this replaced a `100vh - 320px` guess.
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <select
           ref={firstControlRef}
@@ -904,19 +908,24 @@ export default function GraphEditor({
           </button>
         </div>
       )}
-      <div className="relative">
+      <div className="relative min-h-0 flex-1">
         {/* Cytoscape caches this container's bounding rect when the instance is created (and
             otherwise only recomputes it on its own triggers), so if the page scrolls afterward --
             or in a headless/automated browser test that scrolls or resizes the window after mount
             -- rendered node positions and hit-testing (tap/drag) go stale against the old rect.
             Call cy.resize() before relying on them in that situation.
-            F-4: sized to the available viewport height (with a floor so a short window doesn't
-            collapse it) instead of a fixed 600px that either strands the canvas in a tiny column
-            on a short screen or leaves a large empty band beneath it on a tall one. */}
+            F-4, revised: sized to fill whatever space flexbox leaves after the toolbar/banners
+            above it (with a floor so a short window doesn't collapse it), instead of the fixed
+            600px this replaced originally, or the `100vh - 320px` guess that replaced *that* --
+            320 was a static assumption about how tall the chrome above the canvas would be, but
+            at narrow widths the toolbar wraps onto many lines and blew right past it, starting
+            the canvas ~800px down the page. `h-full` here (with `flex-1 min-h-0` on this parent
+            and every ancestor up to GraphDemo's own flex column) derives the real remaining
+            height from the DOM on every render instead of assuming one. */}
         <div
           ref={containerRef}
           data-testid="cytoscape-container"
-          className="h-[calc(100vh-320px)] min-h-[420px] w-full"
+          className="h-full min-h-[420px] w-full"
           tabIndex={0}
           aria-label={`Graph canvas, ${data?.nodes.length ?? 0} nodes — use the arrow keys to move between nodes`}
           onKeyDown={handleCanvasKeyDown}

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityList from "./EntityList";
@@ -53,13 +53,15 @@ describe("EntityList", () => {
   it("renders rows using the metadata field list", async () => {
     renderWithProviders("/domain/entity_type");
 
-    expect(await screen.findByText("employee")).toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    // Also rendered in the small-screen card layout (G-4) -- scope to the table.
+    expect(within(table).getByText("employee")).toBeInTheDocument();
     expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
   });
 
   it("updates the URL and request when typing in the search box", async () => {
     renderWithProviders("/domain/entity_type");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     fireEvent.change(screen.getByTestId("list-search"), { target: { value: "alpha" } });
 
@@ -76,7 +78,7 @@ describe("EntityList", () => {
 
   it("puts offset=20 in the URL when Next is clicked", async () => {
     renderWithProviders("/domain/entity_type");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     fireEvent.click(screen.getByText("Next"));
 
@@ -90,7 +92,7 @@ describe("EntityList", () => {
 
   it("keeps the row-count live region as the same DOM node across a sort change, instead of flashing the skeleton (H-9, fix round 2)", async () => {
     renderWithProviders("/domain/entity_type");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     const before = screen.getByText("1-20 of 50");
 
@@ -114,7 +116,7 @@ describe("EntityList", () => {
 
   it("renders a filter chip from the URL and includes it in the request", async () => {
     renderWithProviders("/domain/entity_type?f_entity_type_id=abc");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     expect(screen.getByText("entity_type_id = abc")).toBeInTheDocument();
 
@@ -128,7 +130,7 @@ describe("EntityList", () => {
 
   it("removes a filter chip when its × is clicked", async () => {
     renderWithProviders("/domain/entity_type?f_entity_type_id=abc");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
     (apiFetch as any).mockClear();
 
     fireEvent.click(screen.getByLabelText("Remove filter entity_type_id"));
@@ -156,7 +158,7 @@ describe("EntityList", () => {
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders("/domain/entity_type");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     fireEvent.click(screen.getByTestId("row-actions"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -178,7 +180,7 @@ describe("EntityList", () => {
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders("/domain/entity_type");
-    await screen.findByText("employee");
+    await screen.findByRole("table");
 
     fireEvent.click(screen.getByTestId("row-actions"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -305,10 +307,14 @@ describe("EntityList human-readable titles and headers (B-1)", () => {
     // can assert its label independently of that toggle.
     renderWithProviders("/domain/entity_type?ids=1");
     await screen.findByRole("heading", { name: "Entity types" });
+    const table = await screen.findByRole("table");
 
-    expect(screen.getByText("Organization")).toBeInTheDocument();
-    expect(screen.getByText("Code")).toBeInTheDocument();
-    expect(screen.getByText("Abstract type")).toBeInTheDocument();
+    // With ?ids=1, `id` becomes the first (linked) column, so organization_id/
+    // code/is_abstract are all "rest" fields -- rendered as labelled pairs in
+    // the small-screen card layout too (G-4). Scope to the table.
+    expect(within(table).getByText("Organization")).toBeInTheDocument();
+    expect(within(table).getByText("Code")).toBeInTheDocument();
+    expect(within(table).getByText("Abstract type")).toBeInTheDocument();
     expect(screen.queryByText("organization_id")).not.toBeInTheDocument();
     expect(screen.queryByText("is_abstract")).not.toBeInTheDocument();
   });

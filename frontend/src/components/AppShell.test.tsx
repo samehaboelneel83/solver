@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell from "./AppShell";
@@ -24,6 +24,7 @@ function renderWithProviders(initialEntries: string[] = ["/"]) {
 
 describe("AppShell", () => {
   beforeEach(() => {
+    localStorage.clear();
     (apiFetch as any).mockResolvedValue([
       { schema: "iam", table: "organization", fields: [] },
       { schema: "domain", table: "entity", fields: [] },
@@ -75,5 +76,96 @@ describe("AppShell", () => {
 
     expect(await screen.findByText("Entity types")).toBeInTheDocument();
     expect(screen.queryByText("entity_type")).not.toBeInTheDocument();
+  });
+
+  describe("collapsible groups (A-4)", () => {
+    it("hides a group's tables when its heading is clicked, and shows them again on a second click", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      const heading = screen.getByRole("button", { name: /iam/i });
+      expect(screen.getByRole("link", { name: "organization" })).toBeInTheDocument();
+
+      fireEvent.click(heading);
+      expect(screen.queryByRole("link", { name: "organization" })).not.toBeInTheDocument();
+      // The other group is untouched.
+      expect(screen.getByRole("link", { name: "entity" })).toBeInTheDocument();
+
+      fireEvent.click(heading);
+      expect(screen.getByRole("link", { name: "organization" })).toBeInTheDocument();
+    });
+
+    it("persists a collapsed group's state in localStorage and restores it on the next mount", async () => {
+      const { unmount } = renderWithProviders();
+      await screen.findByText("organization");
+
+      fireEvent.click(screen.getByRole("button", { name: /iam/i }));
+      expect(screen.queryByRole("link", { name: "organization" })).not.toBeInTheDocument();
+
+      const stored = JSON.parse(localStorage.getItem("solver_nav_open_groups") ?? "{}");
+      expect(stored.iam).toBe(false);
+
+      unmount();
+
+      renderWithProviders();
+      await screen.findByText("entity");
+      // Restored collapsed -- the table link stays hidden without clicking again.
+      expect(screen.queryByRole("link", { name: "organization" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("narrows the visible tables via the filter box", async () => {
+    renderWithProviders();
+    await screen.findByText("organization");
+
+    fireEvent.change(screen.getByPlaceholderText("Filter tables…"), { target: { value: "entity" } });
+
+    expect(screen.getByRole("link", { name: "entity" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "organization" })).not.toBeInTheDocument();
+  });
+
+  it("scrolls the table nav region independently of the rest of the sidebar", async () => {
+    renderWithProviders();
+    await screen.findByText("organization");
+
+    const nav = screen.getByRole("navigation", { name: "Tables" });
+    expect(nav.className).toContain("overflow-y-auto");
+  });
+
+  describe("drawer below the lg breakpoint (G-2/G-5)", () => {
+    it("always renders a menu toggle button, hidden above the drawer breakpoint via a responsive class", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      const toggle = screen.getByTestId("menu-toggle");
+      expect(toggle).toBeInTheDocument();
+      expect(toggle.className).toContain("lg:hidden");
+    });
+
+    it("opens the sidebar via the menu button and closes it again on Escape", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      const toggle = screen.getByTestId("menu-toggle");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("closes the drawer on route change", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      const toggle = screen.getByTestId("menu-toggle");
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+      fireEvent.click(screen.getByRole("link", { name: "entity" }));
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
   });
 });

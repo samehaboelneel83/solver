@@ -111,7 +111,13 @@ export default function GraphDemo() {
   }
 
   return (
-    <div>
+    // F-4/carried-forward from Task 8: a flex column filling AppShell's
+    // <main> (itself bounded to the viewport height -- see AppShell.tsx),
+    // so the canvas below derives its height from actual layout instead of
+    // a `100vh - <guessed chrome height>` calculation. `min-h-0` lets this
+    // column shrink below its content's natural height so the flex-1 row
+    // further down actually gets to claim the remaining space.
+    <div className="flex h-full min-h-0 flex-col">
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
       <div className="mb-4">
         <label htmlFor="org-select" className="mb-1 block text-xs font-medium text-slate-600">
@@ -145,8 +151,8 @@ export default function GraphDemo() {
           width and refused to shrink, squeezing the canvas down to an unusable ~167px column.
           Stacking the panel under the canvas on narrow screens, instead of forcing them to share
           one row, keeps the canvas at the full viewport width there. */}
-      <div className="flex flex-col gap-4 lg:flex-row" data-testid="graph-layout">
-        <div className="flex-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row" data-testid="graph-layout">
+        <div className="flex min-h-0 flex-1 flex-col">
           {/* Keyed by organizationId: an org switch is rare and its graph is unrelated to the
               previous one, so the simplest correct fix is to fully rebuild the canvas (a fresh
               cytoscape instance) rather than diff across organisations -- otherwise a failed or

@@ -72,7 +72,7 @@ function isIdentifierColumn(field: FieldMeta): boolean {
  * navigated the current tab, because the row handler doesn't understand
  * "open in a new tab" clicks the way the link's own click handler does.
  */
-function shouldIgnoreRowClick(event: React.MouseEvent<HTMLTableRowElement>): boolean {
+function shouldIgnoreRowClick(event: React.MouseEvent<HTMLElement>): boolean {
   if (event.defaultPrevented) return true;
   if (event.button !== 0) return true;
   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return true;
@@ -171,6 +171,27 @@ export default function DataTable({
     }
   }
 
+  /**
+   * One cell's rendered content and title, shared between the table markup
+   * and the small-screen card markup below (G-4) so the two never resolve a
+   * foreign key or format a value differently.
+   */
+  function cellContent(field: FieldMeta, row: Row): { content: React.ReactNode; title?: string } {
+    const value = row[field.name];
+    const isFk = fkFields.some((f) => f.name === field.name);
+    if (isFk && value !== null && value !== undefined && value !== "") {
+      const id = String(value);
+      return { content: labelFor(field.name, id), title: id };
+    }
+    const formatted = formatCellValue(field, value);
+    const content = formatted.ariaLabel ? (
+      <span aria-label={formatted.ariaLabel}>{formatted.text}</span>
+    ) : (
+      formatted.text
+    );
+    return { content, title: formatted.title };
+  }
+
   if (total === 0) {
     return (
       <div>
@@ -196,7 +217,56 @@ export default function DataTable({
           {showIds ? "Hide identifiers" : "Show identifiers"}
         </button>
       </div>
-      <div className="overflow-x-auto">
+      {/* G-4: below `md` the table used to force horizontal scrolling to read
+          a row -- at a 200% zoom equivalent (640x400) it overflowed by
+          812px. Below `md` each row now renders as a labelled-pair card
+          instead (CSS-only switch, no JS viewport listener); at `md` and up
+          the table below takes over. Both markups are always in the DOM --
+          only one is visible at a time via the `md:` classes. */}
+      <div className="grid grid-cols-1 gap-3 md:hidden" data-testid="datatable-cards">
+        {rows.map((row) => {
+          const rowId = String(row.id);
+          const rowHref = `/${schema}/${table}/${rowId}`;
+          const firstField = displayFields[0];
+          const restFields = displayFields.slice(1);
+          const first = firstField ? cellContent(firstField, row) : null;
+          return (
+            <div
+              key={rowId}
+              data-testid="datatable-card"
+              onClick={(event) => {
+                if (shouldIgnoreRowClick(event)) return;
+                onRowClick?.(rowId);
+              }}
+              className={`rounded-md border border-slate-200 bg-white p-3 ${onRowClick ? "cursor-pointer" : ""}`}
+            >
+              {firstField && (
+                <Link
+                  to={rowHref}
+                  title={first?.title}
+                  className="mb-2 block font-medium text-blue-700 hover:underline"
+                >
+                  {first?.content}
+                </Link>
+              )}
+              {restFields.length > 0 && (
+                <dl className="space-y-1 text-sm">
+                  {restFields.map((field) => {
+                    const { content, title } = cellContent(field, row);
+                    return (
+                      <div key={field.name} title={title} className="flex items-baseline justify-between gap-3">
+                        <dt className="text-slate-500">{fieldLabel(field)}</dt>
+                        <dd className="text-right text-slate-900">{content}</dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full border-collapse text-sm">
           <caption className="sr-only">{tableLabel}</caption>
           <thead>
@@ -260,23 +330,7 @@ export default function DataTable({
                   className={`border-b border-slate-100 hover:bg-slate-50 ${onRowClick ? "cursor-pointer" : ""}`}
                 >
                   {displayFields.map((field, index) => {
-                    const value = row[field.name];
-                    const isFk = fkFields.some((f) => f.name === field.name);
-                    let content: React.ReactNode;
-                    let title: string | undefined;
-                    if (isFk && value !== null && value !== undefined && value !== "") {
-                      const id = String(value);
-                      content = labelFor(field.name, id);
-                      title = id;
-                    } else {
-                      const formatted = formatCellValue(field, value);
-                      title = formatted.title;
-                      content = formatted.ariaLabel ? (
-                        <span aria-label={formatted.ariaLabel}>{formatted.text}</span>
-                      ) : (
-                        formatted.text
-                      );
-                    }
+                    const { content, title } = cellContent(field, row);
                     if (index === 0) {
                       return (
                         <td key={field.name} className="px-3 py-2" title={title}>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DataTable from "./DataTable";
@@ -49,7 +49,9 @@ describe("DataTable", () => {
       />
     );
 
-    expect(screen.getByText("employee")).toBeInTheDocument();
+    // The record renders in both the table row and the small-screen card
+    // markup (G-4) -- scope to the table for the row-content assertion.
+    expect(within(screen.getByRole("table")).getByText("employee")).toBeInTheDocument();
     expect(screen.getByText("1-1 of 1")).toBeInTheDocument();
   });
 
@@ -115,7 +117,9 @@ describe("DataTable", () => {
         />
       );
 
-      const link = screen.getByRole("link", { name: "employee" });
+      // Rendered in both the table row and the small-screen card markup
+      // (G-4) -- scope to the table, which is what this test targets.
+      const link = within(screen.getByRole("table")).getByRole("link", { name: "employee" });
       expect(link).toHaveAttribute("href", "/domain/entity_type/1");
     });
 
@@ -135,7 +139,7 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByRole("link", { name: "employee" }));
+      fireEvent.click(within(screen.getByRole("table")).getByRole("link", { name: "employee" }));
 
       // The link's own navigation is the only navigation for this click --
       // the row handler must not also call onRowClick for the same click
@@ -159,7 +163,7 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByRole("link", { name: "employee" }), { ctrlKey: true });
+      fireEvent.click(within(screen.getByRole("table")).getByRole("link", { name: "employee" }), { ctrlKey: true });
 
       expect(onRowClick).not.toHaveBeenCalled();
     });
@@ -180,7 +184,7 @@ describe("DataTable", () => {
         />
       );
 
-      const link = screen.getByRole("link", { name: "employee" });
+      const link = within(screen.getByRole("table")).getByRole("link", { name: "employee" });
       fireEvent.click(link, { metaKey: true });
       fireEvent.click(link, { shiftKey: true });
       fireEvent.click(link, { altKey: true });
@@ -205,7 +209,7 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByText("Employee"));
+      fireEvent.click(within(screen.getByRole("table")).getByText("Employee"));
 
       expect(onRowClick).toHaveBeenCalledWith("1");
     });
@@ -626,7 +630,9 @@ describe("DataTable", () => {
       // not tucked away just because its name ends in `_id`.
       expect(screen.getByText("Organization")).toBeInTheDocument();
       await waitFor(() => {
-        expect(screen.getByText("Default Organization")).toBeInTheDocument();
+        // Also rendered as the small-screen card's heading link (G-4) --
+        // scope to the table, which is what this assertion targets.
+        expect(within(screen.getByRole("table")).getByText("Default Organization")).toBeInTheDocument();
       });
 
       // Toggling "Show identifiers" reveals the id column too.
@@ -688,7 +694,9 @@ describe("DataTable", () => {
       // organization_id is a labelled FK column, visible without toggling
       // identifiers (fix round 1) -- only the raw `id` column is hidden.
       expect(screen.getByText("Organization")).toBeInTheDocument();
-      expect(screen.getByText("Code")).toBeInTheDocument();
+      // Also rendered as the small-screen card's field label (G-4), since
+      // "code" isn't the first (linked) column here -- scope to the table.
+      expect(within(screen.getByRole("table")).getByText("Code")).toBeInTheDocument();
       expect(screen.queryByText("organization_id")).not.toBeInTheDocument();
     });
 
@@ -752,10 +760,14 @@ describe("DataTable", () => {
         // exercise the FK-label resolution behavior under test.
       );
 
-      expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
+      // Also rendered in the small-screen card markup (G-4) as the row's
+      // heading link, since organization_id is the sole/first displayed
+      // column here -- scope every query below to the table.
+      const table = screen.getByRole("table");
+      expect(within(table).getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
 
       await waitFor(() => {
-        expect(screen.getByText("Acme Corp")).toBeInTheDocument();
+        expect(within(table).getByText("Acme Corp")).toBeInTheDocument();
       });
 
       const call = (apiFetch as any).mock.calls.find(([path]: [string]) => path.includes("/options"));
@@ -765,7 +777,7 @@ describe("DataTable", () => {
       // organization_id is now the first *visible* column (since `id` is
       // hidden by default), so its cell wraps the resolved label in the
       // row's link -- the raw id lives in `title` on the containing <td>.
-      const cell = screen.getByText("Acme Corp").closest("td");
+      const cell = within(table).getByText("Acme Corp").closest("td");
       expect(cell).toHaveAttribute("title", "11111111-1111-1111-1111-111111111111");
     });
 
@@ -841,11 +853,53 @@ describe("DataTable", () => {
       }).not.toThrow();
 
       // The FK ids render (falling back to the raw id, since the mock
-      // resolves no labels) once the new queries settle.
+      // resolves no labels) once the new queries settle. Also rendered in
+      // the small-screen card markup (G-4) -- scope to the table.
+      const table = screen.getByRole("table");
       await waitFor(() => {
-        expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
-        expect(screen.getByText("22222222-2222-2222-2222-222222222222")).toBeInTheDocument();
+        expect(within(table).getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
+        expect(within(table).getByText("22222222-2222-2222-2222-222222222222")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("small-screen card layout (G-4)", () => {
+    const twoColumnFields = [
+      { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+      { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label: "Code" },
+      { name: "name", type: "string" as const, required: false, writable: true, is_fk: false, fk_table: null, label: "Name" },
+    ];
+    const twoColumnRows = [{ id: "1", code: "employee", name: "Employee" }];
+
+    it("renders each row as a card with labelled field/value pairs, in a CSS-only responsive block", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoColumnFields}
+          rows={twoColumnRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      // A dedicated small-screen block, hidden at `md` and up via a plain
+      // Tailwind class -- no JS viewport listener involved.
+      const cards = screen.getByTestId("datatable-cards");
+      expect(cards.className).toContain("md:hidden");
+
+      const card = within(cards).getByTestId("datatable-card");
+      // The first field is the record's link/heading...
+      expect(within(card).getByRole("link", { name: "employee" })).toHaveAttribute(
+        "href",
+        "/domain/entity_type/1"
+      );
+      // ...and the remaining fields render as labelled field/value pairs.
+      const nameRow = within(card).getByText("Name").closest("div");
+      expect(nameRow).not.toBeNull();
+      expect(within(nameRow as HTMLElement).getByText("Employee")).toBeInTheDocument();
     });
   });
 });

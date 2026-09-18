@@ -850,7 +850,13 @@ describe("GraphEditor", () => {
     const container = await screen.findByTestId("cytoscape-container");
 
     expect(container.getAttribute("style") ?? "").not.toContain("600px");
-    expect(container.className).toMatch(/h-\[calc\(/);
+    // F-4, carried forward from Task 8: no more `100vh - <guessed chrome
+    // height>` calc either -- the canvas fills whatever space flexbox
+    // leaves it (h-full on a flex-1/min-h-0 chain up to the page), a floor
+    // still guards against collapsing on a short window.
+    expect(container.className).not.toMatch(/calc\(100vh/);
+    expect(container.className).toContain("h-full");
+    expect(container.className).toContain("min-h-[420px]");
   });
 
   it("shows an empty-state overlay with a 'Create the first node' button when the graph has no nodes", async () => {
