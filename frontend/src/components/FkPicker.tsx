@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { optionLabelsQuery, useOptions } from "../api/options";
 import { useSchema } from "../api/meta";
@@ -83,11 +83,16 @@ export default function FkPicker({
   const targetTable = tables.find((t) => `${t.schema}.${t.table}` === fkTable);
   const placeholder = targetTable ? `Search ${lowerFirst(tableLabelPlural(targetTable))}…` : "Search…";
 
-  // Forget the locally-known label once the value is cleared (from here or
-  // from outside, e.g. a form reset) so a later selection doesn't briefly
-  // show a stale label.
+  // Forget the locally-known label whenever the value changes underneath us
+  // -- cleared by a form reset, or swapped to a different id by a parent that
+  // reuses this instance. `selectedLabel` wins over the resolved one, so
+  // keeping it across such a change would display the previous record's label
+  // beside the new record's id: exactly the display/value divergence the blur
+  // handling below exists to prevent.
+  const lastSelectedIdRef = useRef(value);
   useEffect(() => {
-    if (!value) {
+    if (value !== lastSelectedIdRef.current) {
+      lastSelectedIdRef.current = value;
       setSelectedLabel(null);
       setNoMatch(false);
       setRevertedQuery(null);
@@ -119,6 +124,10 @@ export default function FkPicker({
   }
 
   function selectOption(option: { id: string; label: string }) {
+    // Claim the new id before the parent echoes it back, so the effect above
+    // treats this as our own selection rather than an external swap and keeps
+    // the label we just set.
+    lastSelectedIdRef.current = option.id;
     setSelectedLabel(option.label);
     onChange(option.id);
     setIsOpen(false);
@@ -129,6 +138,7 @@ export default function FkPicker({
   }
 
   function handleClear() {
+    lastSelectedIdRef.current = "";
     onChange("");
     setSelectedLabel(null);
     setQuery("");
