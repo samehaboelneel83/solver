@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import EntityForm, { type ServerFieldError } from "../components/EntityForm";
+import OfflineNotice from "../components/OfflineNotice";
 import RelatedRecords from "../components/RelatedRecords";
 import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
@@ -9,6 +10,7 @@ import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { fieldLabel, lowerFirst, recordLabel, tableLabel, tableLabelPlural } from "../lib/labels";
 import type { FieldMeta } from "../types/meta";
 
@@ -44,18 +46,38 @@ export default function EntityDetail() {
   const toast = useToast();
   const confirmLeave = useConfirmLeave();
 
-  const { data: tables } = useSchema();
+  const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
   const listUrl = `/${schemaName}/${tableName}`;
+  const [showIds, toggleShowIds] = useShowIdentifiers();
 
   const {
     data: existing,
     error: entityError,
     isError: isEntityError,
     refetch: refetchEntity,
+    fetchStatus: entityFetchStatus,
   } = useEntity(schemaName, tableName, isNew ? undefined : id);
   const createEntity = useCreateEntity(schemaName, tableName);
   const updateEntity = useUpdateEntity(schemaName, tableName, id ?? "");
+
+  // D-7: same reasoning as EntityList -- offline, these queries pause rather than fail, so
+  // without this the "Loading…" state below would never resolve or explain itself.
+  const isOffline =
+    (schemaFetchStatus === "paused" && !tables) ||
+    (!isNew && entityFetchStatus === "paused" && !existing);
+
+  // B-3: a domain.entity record IS a graph node (same id) -- the graph filters strictly by
+  // organization_id (see backend/app/graph/service.py get_domain_graph), so a deep link needs
+  // both. Only domain.entity rows back a graph node at all (entity_type, hierarchy, etc. do
+  // not), so this is scoped to that one table rather than showing a dead link everywhere.
+  const isDomainEntity = schemaName === "domain" && tableName === "entity";
+  const entityOrganizationId =
+    existing && typeof existing.organization_id === "string" ? existing.organization_id : undefined;
+  const graphHref =
+    isDomainEntity && !isNew && id && entityOrganizationId
+      ? `/graph?focus=${encodeURIComponent(id)}&org=${encodeURIComponent(entityOrganizationId)}`
+      : null;
 
   // C-6: "Edit entity type" used to be identical for every row. On edit,
   // name the actual record (its `label_field` columns, e.g. "acme") when
@@ -88,6 +110,10 @@ export default function EntityDetail() {
     return Object.keys(values).length > 0 ? values : undefined;
   }, [isNew, table, searchParams]);
 
+  if (isOffline) {
+    return <OfflineNotice subject="This page" />;
+  }
+
   if (tables && !table) {
     return (
       <p className="text-sm text-slate-500">
@@ -101,7 +127,10 @@ export default function EntityDetail() {
       return (
         <div>
           <p className="text-sm text-slate-500">{table ? tableLabel(table) : "Record"} not found</p>
-          <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
+          {/* H-9: a full target-size sweep found these standalone "Back to list" links --
+              plain text-sm with no padding -- at 20px tall, still under the 24px floor.
+              inline-block + py-1 brings them to 28px without changing their visual style. */}
+          <Link to={`/${schemaName}/${tableName}`} className="inline-block rounded py-1 text-sm text-blue-600 underline">
             Back to list
           </Link>
         </div>
@@ -119,7 +148,7 @@ export default function EntityDetail() {
             Retry
           </button>
         </div>
-        <Link to={`/${schemaName}/${tableName}`} className="text-sm text-blue-600 underline">
+        <Link to={`/${schemaName}/${tableName}`} className="inline-block rounded py-1 text-sm text-blue-600 underline">
           Back to list
         </Link>
       </div>
@@ -166,14 +195,31 @@ export default function EntityDetail() {
   return (
     <div>
       <nav aria-label="Breadcrumb" className="mb-2 text-sm">
-        <Link to={listUrl} onClick={handleNavClick} className="text-blue-600 underline">
+        {/* H-9: was plain text-sm with no padding (20px tall) -- inline-block + py-1 clears
+            the 24px Target Size floor. */}
+        <Link to={listUrl} onClick={handleNavClick} className="inline-block rounded py-1 text-blue-600 underline">
           {table ? tableLabelPlural(table) : `${schemaName}.${tableName}`}
         </Link>
       </nav>
-      <h1 className="text-lg font-semibold text-slate-900">{pageTitle}</h1>
-      <p className="mb-4 text-xs text-slate-500">
-        {schemaName}.{tableName}
-      </p>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold text-slate-900">{pageTitle}</h1>
+        {/* B-1: same "Show identifiers" flag as the list page's DataTable, so this page's own
+            schema.table subtitle is gated too -- there was no toggle here before this fix, which
+            is why the raw pair used to render unconditionally. */}
+        <button
+          type="button"
+          onClick={toggleShowIds}
+          aria-pressed={showIds}
+          className="rounded px-2 py-2 text-xs text-slate-500 underline hover:text-slate-700"
+        >
+          {showIds ? "Hide identifiers" : "Show identifiers"}
+        </button>
+      </div>
+      {showIds && (
+        <p className="mb-4 text-xs text-slate-500" data-testid="schema-subtitle">
+          {schemaName}.{tableName}
+        </p>
+      )}
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <EntityForm
         fields={table.fields}
@@ -184,14 +230,28 @@ export default function EntityDetail() {
         isSubmitting={createEntity.isPending || updateEntity.isPending}
         serverError={serverFieldError}
       />
-      <div className="mt-2 max-w-xl">
+      <div className="mt-2 flex max-w-xl items-center gap-4">
+        {/* H-9: same fix as the breadcrumb above -- inline-block + py-1 for a 24px+ tall target. */}
         <Link
           to={listUrl}
           onClick={handleNavClick}
-          className="text-sm text-slate-600 underline hover:text-slate-900"
+          className="inline-block rounded py-1 text-sm text-slate-600 underline hover:text-slate-900"
         >
           Cancel
         </Link>
+        {/* B-3: the other half of the finding -- the admin form's vocabulary already matched
+            the graph panel's, but there was no way to get from a record to the graph at all.
+            Reuses GraphDemo's existing focus/selection mechanism (searchFocus/focusRequest)
+            via a plain deep-link query string rather than inventing a second selection path. */}
+        {graphHref && (
+          <Link
+            to={graphHref}
+            className="inline-block rounded py-1 text-sm text-blue-600 underline hover:text-blue-800"
+            data-testid="open-in-graph-link"
+          >
+            Open in graph
+          </Link>
+        )}
       </div>
       {!isNew && id && <RelatedRecords schema={schemaName} table={tableName} id={id} />}
     </div>

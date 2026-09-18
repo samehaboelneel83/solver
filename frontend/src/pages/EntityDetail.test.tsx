@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -351,7 +351,9 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "New entity type" })).toBeInTheDocument();
-    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+    // B-1: the raw schema.table pair is now hidden by default -- see the dedicated
+    // "Show identifiers" describe block below for the gated-visibility coverage.
+    expect(screen.queryByText("domain.entity_type")).not.toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe("New entity type · Problem Solver"));
   });
 
@@ -379,7 +381,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     // record itself (its `label_field` column, "existing-code"); the
     // generic table name is still available in the subtitle/breadcrumb.
     expect(await screen.findByRole("heading", { name: "Edit existing-code" })).toBeInTheDocument();
-    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+    expect(screen.queryByText("domain.entity_type")).not.toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe("Edit existing-code · Problem Solver"));
   });
 
@@ -650,5 +652,186 @@ describe("EntityDetail duplicate-value error mapping (C-5)", () => {
     expect(summary.textContent).toContain("code");
     expect(summary.textContent).not.toContain("organization_id_code");
     expect(screen.getByTestId("field-code")).toHaveAttribute("aria-invalid", "true");
+  });
+});
+
+describe("EntityDetail 'Show identifiers' toggle (B-1)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            label: "Entity type",
+            label_plural: "Entity types",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+  });
+
+  it("hides the schema.table subtitle by default and shows it after clicking 'Show identifiers'", async () => {
+    renderAtNew();
+
+    await screen.findByTestId("field-code");
+    expect(screen.queryByTestId("schema-subtitle")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show identifiers" }));
+
+    expect(screen.getByTestId("schema-subtitle")).toHaveTextContent("domain.entity_type");
+    expect(screen.getByRole("button", { name: "Hide identifiers" })).toBeInTheDocument();
+  });
+
+  it("reads the toggle's initial state from ?ids=1, matching the list page's toggle (E-4)", async () => {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/domain/entity_type/new?ids=1"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByTestId("field-code");
+    expect(screen.getByTestId("schema-subtitle")).toHaveTextContent("domain.entity_type");
+  });
+});
+
+describe("EntityDetail 'Open in graph' link (B-3)", () => {
+  const entitySchema = [
+    {
+      schema: "domain",
+      table: "entity",
+      label: "Entity",
+      label_plural: "Entities",
+      fields: [
+        { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+        {
+          name: "organization_id",
+          type: "uuid",
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "iam.organization",
+        },
+      ],
+    },
+  ];
+
+  it("links to the graph page with the entity id and its organization in the query string", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") return Promise.resolve(entitySchema);
+      if (path === "/api/domain/entity/entity-1") {
+        return Promise.resolve({ id: "entity-1", code: "acme", organization_id: "org-1" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity/entity-1"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const link = await screen.findByTestId("open-in-graph-link");
+    expect(link).toHaveAttribute("href", "/graph?focus=entity-1&org=org-1");
+  });
+
+  it("does not render the link for a table other than domain.entity", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/domain/entity_type/existing-id") {
+        return Promise.resolve({ id: "existing-id", code: "existing-code" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByTestId("field-code");
+    expect(screen.queryByTestId("open-in-graph-link")).not.toBeInTheDocument();
+  });
+
+  it("does not render the link on the create ('new') page, which has no record yet", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") return Promise.resolve(entitySchema);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/domain/entity/new"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByTestId("field-code");
+    expect(screen.queryByTestId("open-in-graph-link")).not.toBeInTheDocument();
+  });
+});
+
+describe("EntityDetail goes offline (D-7)", () => {
+  afterEach(() => {
+    onlineManager.setOnline(true);
+  });
+
+  it("shows an offline notice instead of an indefinite 'Loading…' when the entity query is paused", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "domain",
+            table: "entity_type",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      // Never resolves -- a genuinely paused query never calls this at all.
+      return new Promise(() => {});
+    });
+    onlineManager.setOnline(false);
+
+    renderAtId("existing-id");
+
+    expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
   });
 });

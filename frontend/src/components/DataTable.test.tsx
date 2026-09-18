@@ -743,6 +743,8 @@ describe("DataTable", () => {
       expect(screen.queryByText("id")).not.toBeInTheDocument();
 
       const toggle = screen.getByRole("button", { name: "Show identifiers" });
+      // H-9: was text-only with no padding (84x16px, under the 24x24 Target Size minimum).
+      expect(toggle.className).toMatch(/py-2/);
       fireEvent.click(toggle);
 
       expect(screen.getByText("id")).toBeInTheDocument();

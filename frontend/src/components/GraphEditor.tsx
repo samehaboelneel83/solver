@@ -7,6 +7,7 @@ import edgehandles from "cytoscape-edgehandles";
 import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
 import { formatApiError } from "../api/errors";
 import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
+import OfflineNotice from "./OfflineNotice";
 import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
@@ -226,7 +227,16 @@ export default function GraphEditor({
     }
   }
 
-  const { data, isLoading, error: loadError, refetch: refetchGraph } = useGraph(organizationId, hierarchyId);
+  const {
+    data,
+    isLoading,
+    error: loadError,
+    refetch: refetchGraph,
+    fetchStatus: graphFetchStatus,
+  } = useGraph(organizationId, hierarchyId);
+  // D-7: offline, this query pauses instead of failing -- `isLoading` never resolves, so
+  // without this the "Loading graph…" text below would sit there forever.
+  const isOffline = graphFetchStatus === "paused" && !data;
   const createNode = useCreateNode(organizationId, hierarchyId);
   const createEdge = useCreateEdge(organizationId, hierarchyId);
   const toast = useToast();
@@ -838,7 +848,8 @@ export default function GraphEditor({
           >
             {createNode.isPending ? "Creating…" : "Create"}
           </button>
-          <button type="button" onClick={closeCreateNodeForm} className="text-sm text-slate-500">
+          {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
+          <button type="button" onClick={closeCreateNodeForm} className="rounded px-2 py-1 text-sm text-slate-500">
             Cancel
           </button>
         </form>
@@ -889,14 +900,15 @@ export default function GraphEditor({
               </>
             );
           })()}
-          <button type="button" onClick={() => setPendingEdge(null)} className="text-sm text-slate-500">
+          <button type="button" onClick={() => setPendingEdge(null)} className="rounded px-2 py-1 text-sm text-slate-500">
             Cancel
           </button>
         </div>
       )}
 
-      {isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
-      {loadError && (
+      {isOffline && <OfflineNotice subject="The graph" />}
+      {!isOffline && isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
+      {!isOffline && loadError && (
         <div className="mb-2 flex items-center gap-3 text-sm text-red-600">
           <p>Failed to load graph</p>
           <button

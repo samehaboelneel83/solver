@@ -10,7 +10,8 @@ export default function NotFound() {
       <p className="mb-4 text-sm text-slate-600">
         The page you're looking for doesn't exist or may have been moved.
       </p>
-      <Link to="/" className="text-sm text-blue-600 underline">
+      {/* H-9: was 20px tall with no padding -- inline-block + py-1 clears the 24px floor. */}
+      <Link to="/" className="inline-block rounded py-1 text-sm text-blue-600 underline">
         Back to dashboard
       </Link>
     </div>

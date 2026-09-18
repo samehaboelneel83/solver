@@ -1,7 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntityList from "./EntityList";
 import { ToastProvider } from "../components/ToastProvider";
 
@@ -56,7 +56,6 @@ describe("EntityList", () => {
     const table = await screen.findByRole("table");
     // Also rendered in the small-screen card layout (G-4) -- scope to the table.
     expect(within(table).getByText("employee")).toBeInTheDocument();
-    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
   });
 
   it("updates the URL and request when typing in the search box", async () => {
@@ -253,6 +252,25 @@ describe("EntityList", () => {
 
     expect(await screen.findByText("Unknown table domain.does_not_exist")).toBeInTheDocument();
   });
+
+  describe("goes offline (D-7)", () => {
+    afterEach(() => {
+      onlineManager.setOnline(true);
+    });
+
+    it("shows an offline notice instead of an indefinite skeleton when the list query is paused", async () => {
+      // React Query's default networkMode pauses a query (never calling queryFn, so it never
+      // errors) whenever the shared onlineManager reports offline -- the real cause of the
+      // "silent spinner" finding. Drive it directly rather than faking fetchStatus.
+      onlineManager.setOnline(false);
+      (apiFetch as any).mockImplementation(() => new Promise(() => {}));
+
+      renderWithProviders("/domain/entity_type");
+
+      expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
+      expect(screen.queryAllByTestId("skeleton-row")).toHaveLength(0);
+    });
+  });
 });
 
 describe("EntityList human-readable titles and headers (B-1)", () => {
@@ -296,11 +314,19 @@ describe("EntityList human-readable titles and headers (B-1)", () => {
     });
   });
 
-  it("renders the <h1> as the plural label with the raw schema.table kept as a subtitle", async () => {
+  it("renders the <h1> as the plural label, with the raw schema.table hidden by default (B-1)", async () => {
     renderWithProviders("/domain/entity_type");
 
     expect(await screen.findByRole("heading", { name: "Entity types" })).toBeInTheDocument();
-    expect(screen.getByText("domain.entity_type")).toBeInTheDocument();
+    // B-1: the jargon scan's central complaint -- this used to render unconditionally.
+    expect(screen.queryByText("domain.entity_type")).not.toBeInTheDocument();
+  });
+
+  it("shows the raw schema.table subtitle once 'Show identifiers' is on, via ?ids=1 (B-1)", async () => {
+    renderWithProviders("/domain/entity_type?ids=1");
+
+    expect(await screen.findByRole("heading", { name: "Entity types" })).toBeInTheDocument();
+    expect(screen.getByTestId("schema-subtitle")).toHaveTextContent("domain.entity_type");
   });
 
   it("renders column headers using field labels instead of raw snake_case names", async () => {

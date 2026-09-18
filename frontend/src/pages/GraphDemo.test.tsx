@@ -1,6 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GraphDemo from "./GraphDemo";
 
 const { mockCytoscape, registeredHandlersRef } = vi.hoisted(() => {
@@ -38,11 +39,13 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderWithProviders() {
+function renderWithProviders(initialEntries: string[] = ["/graph"]) {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <GraphDemo />
+      <MemoryRouter initialEntries={initialEntries}>
+        <GraphDemo />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -296,5 +299,68 @@ describe("GraphDemo", () => {
 
     await waitFor(() => expect(screen.getByText(/no organizations/i)).toBeInTheDocument());
     expect(screen.queryByTestId("org-select")).not.toBeInTheDocument();
+  });
+
+  describe("deep-linked focus from an entity's detail page (B-3)", () => {
+    it("selects the organization and node named by ?focus=&org=, then clears them from the URL", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.startsWith("/api/iam/organization/")) {
+          return Promise.resolve({
+            items: [
+              { id: "org-1", code: "default", name: "Default Org" },
+              { id: "org-2", code: "north-clinic", name: "North Clinic" },
+            ],
+            total: 2,
+          });
+        }
+        if (path.startsWith("/api/graph/domain?")) {
+          // Only org-2's graph contains e2 -- proves the org from the deep link (not the
+          // default org) is what's actually queried.
+          const isOrgTwo = path.includes("organization_id=org-2");
+          return Promise.resolve({
+            nodes: isOrgTwo
+              ? [{ id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} }]
+              : [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+            edges: [],
+            entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+            relationship_types: [],
+            hierarchies: [],
+            attribute_definitions: [],
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      renderWithProviders(["/graph?focus=e2&org=org-2"]);
+
+      expect(await screen.findByTestId("org-select")).toHaveValue("org-2");
+      // The deep-linked node's own property panel opens, same as a manual selection.
+      await waitFor(() => expect(screen.getByDisplayValue("Sara")).toBeInTheDocument());
+    });
+
+    it("leaves the graph on its default organization/selection when the focused node isn't found there", async () => {
+      renderWithProviders(["/graph?focus=does-not-exist&org=org-1"]);
+
+      await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+      expect(screen.getByText(/select a node or edge/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("goes offline (D-7)", () => {
+    afterEach(() => {
+      onlineManager.setOnline(true);
+    });
+
+    it("shows an offline notice instead of an indefinite 'Loading organization…' when the organizations query is paused", async () => {
+      // The organizations query gates the whole page (GraphEditor never even mounts until it
+      // resolves) -- this was the one query in this file with no offline handling at all.
+      onlineManager.setOnline(false);
+      (apiFetch as any).mockImplementation(() => new Promise(() => {}));
+
+      renderWithProviders();
+
+      expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
+      expect(screen.queryByText("Loading organization…")).not.toBeInTheDocument();
+    });
   });
 });

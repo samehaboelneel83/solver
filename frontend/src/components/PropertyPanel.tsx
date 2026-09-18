@@ -83,9 +83,13 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
 
     return (
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">
+        {/* N-3: this used to be an <h3> with no preceding <h2> anywhere on the graph page --
+            axe's heading-order check flagged the skipped level. GraphDemo's only other heading
+            is the page's own <h1>, so this panel is the page's one subsection and belongs at
+            <h2>, not nested three levels deep under a heading that doesn't exist. */}
+        <h2 className="mb-2 text-sm font-semibold text-slate-900">
           {entityType?.name ?? node.type}: {node.label}
-        </h3>
+        </h2>
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
         <form onSubmit={handleSubmit} className="space-y-2" data-testid="node-property-form">
           <label className="block text-xs">
@@ -139,7 +143,8 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
             >
               Delete
             </button>
-            <button type="button" onClick={onClose} className="text-sm text-slate-500">
+            {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
+            <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-500">
               Close
             </button>
           </div>
@@ -186,7 +191,8 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
 
   return (
     <div>
-      <h3 className="mb-2 text-sm font-semibold text-slate-900">{edge.type}</h3>
+      {/* N-3: same heading-order fix as the node branch above. */}
+      <h2 className="mb-2 text-sm font-semibold text-slate-900">{edge.type}</h2>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <form onSubmit={handleEdgeSubmit} className="space-y-2" data-testid="edge-property-form">
         <label className="block text-xs">
@@ -214,7 +220,7 @@ export default function PropertyPanel({ organizationId, hierarchyId, graph, sele
           >
             Delete
           </button>
-          <button type="button" onClick={onClose} className="text-sm text-slate-500">
+          <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-500">
             Close
           </button>
         </div>

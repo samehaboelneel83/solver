@@ -121,6 +121,18 @@ describe("PropertyPanel", () => {
     expect(screen.getByText("Employee: Ahmed")).toBeInTheDocument();
   });
 
+  // N-3: this was an <h3> with no preceding <h2> anywhere on the graph page (GraphDemo's only
+  // other heading is its own <h1>) -- axe's heading-order check flagged the skipped level.
+  it("renders the node heading at level 2, not level 3, so the document outline has no skipped level (N-3)", () => {
+    renderWithProviders();
+    expect(screen.getByRole("heading", { level: 2, name: "Employee: Ahmed" })).toBeInTheDocument();
+  });
+
+  it("renders the edge heading at level 2 too (N-3)", () => {
+    renderWithProviders({ selection: { kind: "edge", id: "r1" } });
+    expect(screen.getByRole("heading", { level: 2, name: "self" })).toBeInTheDocument();
+  });
+
   it("falls back to the type code in the heading when no matching entity_type is found", () => {
     renderWithProviders({ graph: { ...graph, entity_types: [] } as any });
     expect(screen.getByText("employee: Ahmed")).toBeInTheDocument();

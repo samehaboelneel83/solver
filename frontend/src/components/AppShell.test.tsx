@@ -1,7 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell from "./AppShell";
 
 vi.mock("../api/client", async () => {
@@ -36,8 +36,12 @@ describe("AppShell", () => {
 
     expect(await screen.findByText("organization")).toBeInTheDocument();
     expect(screen.getByText("entity")).toBeInTheDocument();
-    expect(screen.getByText("iam")).toBeInTheDocument();
-    expect(screen.getByText("domain")).toBeInTheDocument();
+    // B-1: the group heading is a human label ("Access"/"Domain model"), not the raw
+    // postgres schema name -- see the dedicated describe block below for direct coverage.
+    expect(screen.getByText("Access")).toBeInTheDocument();
+    expect(screen.getByText("Domain model")).toBeInTheDocument();
+    expect(screen.queryByText("iam")).not.toBeInTheDocument();
+    expect(screen.queryByText("domain")).not.toBeInTheDocument();
   });
 
   it("renders a 'Skip to content' link as the first focusable element, targeting #main", async () => {
@@ -78,12 +82,40 @@ describe("AppShell", () => {
     expect(screen.queryByText("entity_type")).not.toBeInTheDocument();
   });
 
+  describe("nav group headings are human labels, not raw schema names (B-1)", () => {
+    it("maps known schemas to their human label and falls back to a capitalised name for an unknown one", async () => {
+      (apiFetch as any).mockResolvedValue([
+        { schema: "iam", table: "organization", fields: [] },
+        { schema: "domain", table: "entity", fields: [] },
+        { schema: "problem", table: "problem", fields: [] },
+        { schema: "scratch", table: "widget", fields: [] },
+      ]);
+      renderWithProviders();
+
+      expect(await screen.findByText("Access")).toBeInTheDocument();
+      expect(screen.getByText("Domain model")).toBeInTheDocument();
+      expect(screen.getByText("Problem")).toBeInTheDocument();
+      // Unmapped schema: falls back to a capitalised raw name, not a crash or blank heading.
+      expect(screen.getByText("Scratch")).toBeInTheDocument();
+    });
+
+    it("still filters by the raw schema name even though it's no longer shown", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      fireEvent.change(screen.getByPlaceholderText("Filter tables…"), { target: { value: "iam" } });
+
+      expect(screen.getByRole("link", { name: "organization" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "entity" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("collapsible groups (A-4)", () => {
     it("hides a group's tables when its heading is clicked, and shows them again on a second click", async () => {
       renderWithProviders();
       await screen.findByText("organization");
 
-      const heading = screen.getByRole("button", { name: /iam/i });
+      const heading = screen.getByRole("button", { name: "Access" });
       expect(screen.getByRole("link", { name: "organization" })).toBeInTheDocument();
 
       fireEvent.click(heading);
@@ -99,7 +131,7 @@ describe("AppShell", () => {
       const { unmount } = renderWithProviders();
       await screen.findByText("organization");
 
-      fireEvent.click(screen.getByRole("button", { name: /iam/i }));
+      fireEvent.click(screen.getByRole("button", { name: "Access" }));
       expect(screen.queryByRole("link", { name: "organization" })).not.toBeInTheDocument();
 
       const stored = JSON.parse(localStorage.getItem("solver_nav_open_groups") ?? "{}");
@@ -370,5 +402,42 @@ describe("AppShell", () => {
 
     expect(main).toHaveFocus();
     expect(main.scrollTop).toBe(0);
+  });
+
+  // H-9: both controls used to be text with zero vertical padding (Sign out 44x16px, each nav
+  // group toggle 223x16px) -- under the WCAG 2.2 24x24 Target Size minimum. jsdom has no layout,
+  // so real pixel measurement happens in the Playwright harness (fw_h9_target_sizes.js); this
+  // guards the regression at the class level so a future edit can't silently drop the padding.
+  it("gives Sign out and the nav group toggles enough vertical padding to clear the 24px Target Size floor", async () => {
+    renderWithProviders();
+    await screen.findByText("organization");
+
+    const signOut = screen.getByRole("button", { name: "Sign out" });
+    expect(signOut.className).toMatch(/py-2/);
+
+    const groupToggle = screen.getByRole("button", { name: "Access" });
+    expect(groupToggle.className).toMatch(/py-2/);
+  });
+
+  describe("nav goes offline (D-7)", () => {
+    afterEach(() => {
+      onlineManager.setOnline(true);
+    });
+
+    it("shows an offline notice instead of an indefinite 'Loading navigation…' when the schema query is paused", async () => {
+      // React Query's default networkMode ("online") pauses a query -- rather than running its
+      // queryFn and failing -- whenever the shared onlineManager reports offline (which, in a
+      // real browser, tracks the window 'online'/'offline' events driven by navigator.onLine).
+      // Drive that directly instead of faking fetchStatus, so this exercises the real pause path.
+      onlineManager.setOnline(false);
+      // Never resolves -- a genuinely paused query never calls queryFn at all, so this would
+      // never resolve for real offline either; the mock just has to not resolve on its own.
+      (apiFetch as any).mockImplementation(() => new Promise(() => {}));
+
+      renderWithProviders();
+
+      expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
+      expect(screen.queryByText("Loading navigation…")).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueries } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { optionLabelsQuery } from "../api/options";
+import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { fieldLabel, lowerFirst } from "../lib/labels";
 import { formatCellValue } from "../lib/format";
 import type { FieldMeta } from "../types/meta";
@@ -270,18 +271,9 @@ export default function DataTable({
   onDelete,
   onRowClick,
 }: DataTableProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const showIds = searchParams.get("ids") === "1";
-
-  function toggleShowIds() {
-    const next = new URLSearchParams(searchParams);
-    if (showIds) {
-      next.delete("ids");
-    } else {
-      next.set("ids", "1");
-    }
-    setSearchParams(next);
-  }
+  // B-1/E-4: shared with EntityList's and EntityDetail's schema.table subtitle -- one "?ids=1"
+  // flag gates every raw-identifier surface on a page, not just this table's own id column.
+  const [showIds, toggleShowIds] = useShowIdentifiers();
 
   const displayFields = showIds ? fields : fields.filter((f) => !isIdentifierColumn(f));
 
@@ -342,7 +334,8 @@ export default function DataTable({
       <div>
         <div className="rounded-md border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
           <p>{`No ${lowerFirst(tableLabel)} yet`}</p>
-          <Link to={newHref} className="mt-2 inline-block text-sm font-medium text-blue-700 hover:underline">
+          {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
+          <Link to={newHref} className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline">
             New
           </Link>
         </div>
@@ -353,11 +346,13 @@ export default function DataTable({
   return (
     <div>
       <div className="mb-2 flex justify-end">
+        {/* H-9: was text-only with no padding (84x16px, under the 24x24 Target Size minimum) --
+            py-2 brings it to 32px tall. */}
         <button
           type="button"
           onClick={toggleShowIds}
           aria-pressed={showIds}
-          className="text-xs text-slate-500 underline hover:text-slate-700"
+          className="rounded px-2 py-2 text-xs text-slate-500 underline hover:text-slate-700"
         >
           {showIds ? "Hide identifiers" : "Show identifiers"}
         </button>

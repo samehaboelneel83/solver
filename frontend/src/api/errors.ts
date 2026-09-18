@@ -63,6 +63,17 @@ export function formatApiError(err: unknown): string {
   }
 
   if (err instanceof Error) {
+    // D-7: a network-level failure (fetch itself rejecting, e.g. the
+    // connection dropping mid-request) surfaces here as a plain Error with
+    // a browser-specific, not-very-human message ("Failed to fetch",
+    // "NetworkError when attempting to fetch resource…"). When the browser
+    // itself reports offline, that's almost certainly why -- say so plainly
+    // instead of the raw browser string. (A query that never gets far
+    // enough to fail at all -- React Query pausing it while offline -- is a
+    // separate case, handled by OfflineNotice where each query is read.)
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return "You appear to be offline. Check your connection and try again.";
+    }
     return err.message;
   }
 

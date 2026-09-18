@@ -3,11 +3,17 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
 import { useSchema } from "../api/meta";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
-import { tableLabelPlural } from "../lib/labels";
+import { schemaLabel, tableLabelPlural } from "../lib/labels";
+import OfflineNotice from "./OfflineNotice";
 import type { TableMeta } from "../types/meta";
 
+// H-9: a full app-wide target-size sweep (beyond the three controls the finding named) turned
+// up these two links themselves at 223x20px -- text-sm's 20px line-height with no padding,
+// still under the 24px floor even after Sign out/the group toggles/Show identifiers were fixed.
+// py-1 brings them to 28px without disturbing the sidebar's own vertical rhythm (mb-4 is
+// unchanged, so the gap between links stays the same).
 const navLinkClassName = ({ isActive }: { isActive: boolean }) =>
-  `mb-4 block text-sm ${
+  `mb-4 block rounded py-1 text-sm ${
     isActive ? "font-medium text-slate-900" : "text-slate-600 hover:text-slate-900"
   }`;
 
@@ -83,7 +89,12 @@ export default function AppShell() {
 }
 
 function AppShellContent() {
-  const { data: tables, isLoading, error } = useSchema();
+  const { data: tables, isLoading, error, fetchStatus: schemaFetchStatus } = useSchema();
+  // D-7: the schema query backs the entire nav -- offline on a cold load, it never resolves
+  // and never errors (React Query pauses it instead), so `isLoading` stayed true forever with
+  // no explanation. `!tables` guards against hiding an already-loaded nav during a background
+  // refetch that happens to get paused (e.g. connectivity drops after the app is already up).
+  const navPaused = schemaFetchStatus === "paused" && !tables;
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
@@ -294,7 +305,13 @@ function AppShellContent() {
           <h2 ref={drawerHeadingRef} tabIndex={-1} className="font-semibold text-slate-900">
             Problem Solver
           </h2>
-          <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-slate-900">
+          {/* H-9: was text with no padding at all (44x16px) -- under the WCAG 2.2 24x24
+              Target Size minimum. py-2 brings it to a full 32px tall without changing its
+              position in the header row (items-center keeps it aligned with the heading). */}
+          <button
+            onClick={handleLogout}
+            className="rounded px-2 py-2 text-xs text-slate-500 hover:text-slate-900"
+          >
             Sign out
           </button>
         </div>
@@ -316,8 +333,9 @@ function AppShellContent() {
           />
         </label>
 
-        {isLoading && <p className="text-sm text-slate-500">Loading navigation…</p>}
-        {error && <p className="text-sm text-red-600">Failed to load navigation</p>}
+        {navPaused && <OfflineNotice subject="Navigation" />}
+        {!navPaused && isLoading && <p className="text-sm text-slate-500">Loading navigation…</p>}
+        {!navPaused && error && <p className="text-sm text-red-600">Failed to load navigation</p>}
 
         {/* A-4: this is the region that used to run 1120px tall with no scroll
             cue of its own -- it now scrolls independently of the rest of the
@@ -329,13 +347,21 @@ function AppShellContent() {
             if (filterText && visibleTables.length === 0) return null;
             return (
               <div key={schemaName} className="mb-4">
+                {/* B-1: this heading used to render the raw postgres schema name
+                    ("domain", "problem", "iam") -- exactly the schema-detail jargon a planner
+                    shouldn't need to know. schemaLabel() gives it a human name; the raw name is
+                    still what the filter box above matches against (matchesFilter), so power-user
+                    search-by-schema-name still works even though it's no longer shown.
+                    H-9: was text-only with no padding (223x16px, under the 24x24 Target Size
+                    minimum) -- py-2 brings it to 32px tall without widening the group (it's
+                    already full-width via justify-between). */}
                 <button
                   type="button"
                   onClick={() => toggleGroup(schemaName)}
                   aria-expanded={isOpen}
-                  className="mb-1 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700"
+                  className="mb-1 flex w-full items-center justify-between rounded px-1 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700"
                 >
-                  <span>{schemaName}</span>
+                  <span>{schemaLabel(schemaName)}</span>
                   <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
                 </button>
                 {isOpen && (

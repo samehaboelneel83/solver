@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import { formatApiError } from "./errors";
 
@@ -55,5 +55,34 @@ describe("formatApiError", () => {
   it("falls back to the raw message for a plain Error", () => {
     const err = new Error("boom");
     expect(formatApiError(err)).toBe("boom");
+  });
+
+  describe("offline branching (D-7)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("shows a plain-English offline message for a network-level Error when navigator.onLine is false", () => {
+      vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+      // The real browser message for a dropped connection is something like "Failed to fetch" --
+      // opaque to an end user, and distinct per browser.
+      const err = new Error("Failed to fetch");
+
+      expect(formatApiError(err)).toBe("You appear to be offline. Check your connection and try again.");
+    });
+
+    it("still shows the raw message when navigator.onLine is true (D-2's status-code branching is untouched)", () => {
+      vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(true);
+      const err = new Error("Failed to fetch");
+
+      expect(formatApiError(err)).toBe("Failed to fetch");
+    });
+
+    it("does not apply the offline branch to an ApiError -- 5xx/4xx formatting is unchanged offline", () => {
+      vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+      const err = new ApiError(500, "Internal Server Error");
+
+      expect(formatApiError(err)).toBe("Server error (500). Please try again.");
+    });
   });
 });

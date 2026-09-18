@@ -26,6 +26,26 @@ export function fieldLabel(field: Pick<FieldMeta, "name" | "label">): string {
 }
 
 /**
+ * Human-readable name for a schema/namespace, e.g. "Domain model" for
+ * "domain" (B-1): the sidebar's nav group headings used to render the raw
+ * postgres schema name verbatim ("domain", "problem", "iam") -- exactly the
+ * kind of `schema.table` jargon the rest of this file exists to hide from a
+ * planner who shouldn't need to know the schema to use the product. Falls
+ * back to capitalising the raw name for any schema not listed here, so a
+ * future schema still renders *something* readable instead of the bare
+ * lowercase identifier.
+ */
+const SCHEMA_LABELS: Record<string, string> = {
+  domain: "Domain model",
+  problem: "Problem",
+  iam: "Access",
+};
+
+export function schemaLabel(schemaName: string): string {
+  return SCHEMA_LABELS[schemaName] ?? (schemaName ? schemaName[0].toUpperCase() + schemaName.slice(1) : schemaName);
+}
+
+/**
  * Lower-cases just the first character, so a table label like "Entity type"
  * reads naturally mid-sentence: "New entity type" rather than the shoutier
  * "New Entity type".

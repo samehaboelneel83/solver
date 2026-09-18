@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import GraphEditor from "../components/GraphEditor";
+import OfflineNotice from "../components/OfflineNotice";
 import PropertyPanel from "../components/PropertyPanel";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
 import type { FilterState } from "../components/FilterBar";
@@ -26,11 +28,21 @@ function useOrganizations() {
 
 export default function GraphDemo() {
   useDocumentTitle("Domain Graph");
-  const { data: organizations, isLoading: orgsLoading } = useOrganizations();
-  // Only set once the user explicitly picks an org; the effective organizationId below
-  // falls back to the org coded "default" (or the first org, alphabetically by name) until
-  // then, so there's no separate effect-driven state update to initialize it.
-  const [organizationOverride, setOrganizationOverride] = useState<string | null>(null);
+  const { data: organizations, isLoading: orgsLoading, fetchStatus: orgsFetchStatus } = useOrganizations();
+  // D-7: this query gates the entire page -- everything below (including GraphEditor's own
+  // offline handling) never even mounts until it resolves. Offline, it pauses rather than
+  // failing, so without this the page would show "Loading organization…" forever.
+  const orgsOffline = orgsFetchStatus === "paused" && !organizations;
+  // B-3: a domain entity's detail page deep-links here with `?focus=<entityId>&org=<orgId>`
+  // (see EntityDetail's "Open in graph" link) -- read once on mount, not tracked reactively,
+  // since consuming the link below clears these params from the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Only set once the user explicitly picks an org (or a deep link names one); the effective
+  // organizationId below falls back to the org coded "default" (or the first org, alphabetically
+  // by name) until then, so there's no separate effect-driven state update to initialize it.
+  const [organizationOverride, setOrganizationOverride] = useState<string | null>(
+    () => searchParams.get("org")
+  );
   const [hierarchyId, setHierarchyId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   // Owned here (not inside FilterBar) so it survives GraphEditor's hierarchy-driven data
@@ -57,6 +69,38 @@ export default function GraphDemo() {
 
   const { data: graph } = useGraph(organizationId ?? "", hierarchyId);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
+
+  // B-3: consume a deep-link "focus" once its target node shows up in the loaded graph --
+  // selects it and routes it through the same searchFocus/focusRequest mechanism GraphEditor's
+  // own roving-keyboard-focus and the in-page search box (handleSearchSubmit, below) already
+  // use, rather than a second selection path. Guarded by a ref (not just clearing the URL
+  // param) so a graph that's still loading -- or briefly missing the node mid-refetch -- doesn't
+  // get treated as "not found" and silently drop the request before it's had a chance to arrive.
+  const consumedFocusRef = useRef(false);
+  useEffect(() => {
+    const focusEntityId = searchParams.get("focus");
+    if (!focusEntityId || consumedFocusRef.current || !graph) {
+      return;
+    }
+    const match = graph.nodes.find((node) => node.id === focusEntityId);
+    if (!match) {
+      return;
+    }
+    consumedFocusRef.current = true;
+    setSelection({ kind: "node", id: match.id });
+    searchFocusTokenRef.current += 1;
+    setSearchFocus({ nodeId: match.id, token: searchFocusTokenRef.current });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("focus");
+        next.delete("org");
+        return next;
+      },
+      { replace: true }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, searchParams]);
   // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every node/edge's
   // display/highlight classes) only reruns when the criteria actually change, not on every
   // GraphDemo render (e.g. a selection change unrelated to filtering) -- deriveFilterCriteria
@@ -96,6 +140,10 @@ export default function GraphDemo() {
     // focus-request effect runs afresh. Left set, a search from the previous
     // organization would be replayed against a graph that has no such node.
     setSearchFocus(null);
+  }
+
+  if (orgsOffline) {
+    return <OfflineNotice subject="The graph" />;
   }
 
   if (orgsLoading || !organizations) {

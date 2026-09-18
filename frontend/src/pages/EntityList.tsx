@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DataTable from "../components/DataTable";
+import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { tableLabelPlural } from "../lib/labels";
 
 const PAGE_SIZE = 20;
@@ -20,8 +22,9 @@ export default function EntityList() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const toast = useToast();
 
-  const { data: tables } = useSchema();
+  const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+  const [showIds] = useShowIdentifiers();
 
   // Shared fallback while the schema is still loading (or for a route with
   // no params at all): the raw "schema.table" pair, so there's always a
@@ -72,7 +75,13 @@ export default function EntityList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  const { data, isLoading, error, refetch } = useEntityList(schemaName, tableName, {
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    fetchStatus: listFetchStatus,
+  } = useEntityList(schemaName, tableName, {
     limit: PAGE_SIZE,
     offset,
     q,
@@ -81,6 +90,13 @@ export default function EntityList() {
     order,
   });
   const deleteEntity = useDeleteEntity(schemaName, tableName);
+
+  // D-7: offline, React Query *pauses* these queries rather than failing them -- neither
+  // `isLoading` nor `error` ever resolves, so without this the skeleton below would spin
+  // forever with no explanation. `!data`/`!tables` guards against hiding an already-loaded
+  // list during a background refetch that happens to get paused.
+  const isOffline =
+    (schemaFetchStatus === "paused" && !tables) || (listFetchStatus === "paused" && !data);
 
   // "meta loaded, no match" is a terminal state distinct from loading --
   // keep it as an early return so it's never confused with the skeleton
@@ -144,9 +160,15 @@ export default function EntityList() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-slate-900">{headingLabel}</h1>
-          <p className="text-xs text-slate-500">
-            {schemaName}.{tableName}
-          </p>
+          {/* B-1: the raw schema.table pair is gated behind the same "Show identifiers"
+              toggle as the table's own id column (below, in DataTable) -- real information
+              for a power user mapping this page to its REST path, but not something a
+              planner should have to see (or understand) just to use the product. */}
+          {showIds && (
+            <p className="text-xs text-slate-500" data-testid="schema-subtitle">
+              {schemaName}.{tableName}
+            </p>
+          )}
         </div>
         <Link
           to={newHref}
@@ -177,11 +199,13 @@ export default function EntityList() {
             <span>
               {key} = {value}
             </span>
+            {/* H-9: was an unpadded glyph well under the 24px floor -- a fixed 24x24 hit area
+                keeps the visible "×" small while the actual target meets the minimum. */}
             <button
               type="button"
               onClick={() => removeFilter(key)}
               aria-label={`Remove filter ${key}`}
-              className="text-slate-500 hover:text-slate-700"
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:text-slate-700"
             >
               ×
             </button>
@@ -189,15 +213,16 @@ export default function EntityList() {
         ))}
       </div>
       {deleteError && <p className="mb-3 text-sm text-red-600">{deleteError}</p>}
+      {isOffline && <OfflineNotice subject="This list" />}
       {/* Covers both "list still loading" AND "schema (table.fields) hasn't
           resolved yet" -- the two queries run concurrently, so on a cold
           navigation there is no window where `table` is known but the list
           is still loading (or vice versa) without this OR. Skipped once an
           error has already replaced the loading state below. */}
-      {(isLoading || !table) && !error && (
+      {!isOffline && (isLoading || !table) && !error && (
         <Skeleton rows={PAGE_SIZE > 10 ? 8 : PAGE_SIZE} cols={table ? table.fields.length + 1 : 4} />
       )}
-      {error && (
+      {!isOffline && error && (
         <div className="mb-3 flex items-center gap-3 text-sm text-red-600">
           <p>{formatApiError(error)}</p>
           <button

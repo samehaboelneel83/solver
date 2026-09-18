@@ -110,10 +110,11 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
     const newHref = `/${child.schema}/${child.table}/new?${child.field}=${encodeURIComponent(id)}`;
     return (
       <li key={`${child.schema}.${child.table}.${child.field}`} className="flex items-center gap-3 text-sm">
-        <Link to={listHref} className="text-blue-600 underline">
+        {/* H-9: were 20px tall with no padding -- inline-block + py-1 clears the 24px floor. */}
+        <Link to={listHref} className="inline-block rounded py-1 text-blue-600 underline">
           {child.label} ({countNode})
         </Link>
-        <Link to={newHref} className="text-slate-500 underline">
+        <Link to={newHref} className="inline-block rounded py-1 text-slate-500 underline">
           New
         </Link>
       </li>

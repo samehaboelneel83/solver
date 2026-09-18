@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useEntityList } from "../api/entities";
 import { useCounts } from "../api/counts";
 import { useHealth } from "../api/health";
+import OfflineNotice from "../components/OfflineNotice";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 /**
@@ -37,12 +38,22 @@ function problemDisplayName(problem: Record<string, unknown>): string {
 export default function Dashboard() {
   useDocumentTitle("Dashboard");
   const { data: health, isLoading: healthLoading } = useHealth();
-  const { data: counts, isLoading: countsLoading, isError: countsError } = useCounts();
+  const {
+    data: counts,
+    isLoading: countsLoading,
+    isError: countsError,
+    fetchStatus: countsFetchStatus,
+  } = useCounts();
   const {
     data: recentProblems,
     isLoading: problemsLoading,
     isError: problemsError,
+    fetchStatus: problemsFetchStatus,
   } = useEntityList("problem", "problem", { limit: 5, offset: 0, orderBy: "created_at", order: "desc" });
+  // D-7: offline, these queries pause instead of failing -- `isLoading` never resolves, so
+  // without this each section below would show "Loading…" forever with no explanation.
+  const countsOffline = countsFetchStatus === "paused" && !counts;
+  const problemsOffline = problemsFetchStatus === "paused" && !recentProblems;
 
   return (
     <div>
@@ -66,7 +77,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <section className="lg:col-span-2">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Recent problems</h2>
-          {problemsLoading ? (
+          {problemsOffline ? (
+            <OfflineNotice subject="Recent problems" />
+          ) : problemsLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : problemsError ? (
             <p className="text-sm text-red-600">Failed to load recent problems</p>
@@ -94,9 +107,10 @@ export default function Dashboard() {
             // start" rather than looking indistinguishable from a broken fetch.
             <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
               <p>No problems yet</p>
+              {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
               <Link
                 to="/problem/problem/new"
-                className="mt-2 inline-block text-sm font-medium text-blue-700 hover:underline"
+                className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline"
               >
                 New problem
               </Link>
@@ -123,7 +137,9 @@ export default function Dashboard() {
           </p>
 
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Row counts</h2>
-          {countsLoading ? (
+          {countsOffline ? (
+            <OfflineNotice subject="Row counts" />
+          ) : countsLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : countsError ? (
             <p className="text-sm text-red-600">Failed to load row counts</p>

@@ -51,7 +51,12 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50">
+    // H-12: the only page in the app with no `main` landmark -- axe flagged
+    // both `landmark-one-main` and `region` (its content wasn't contained in
+    // any landmark at all) here specifically. Every other page state gets
+    // `<main>` for free from AppShell; this one renders outside AppShell
+    // (there's no signed-in shell to render yet), so it needs its own.
+    <main className="flex min-h-screen items-center justify-center bg-slate-50">
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
@@ -97,6 +102,6 @@ export default function Login() {
           Sign in
         </button>
       </form>
-    </div>
+    </main>
   );
 }

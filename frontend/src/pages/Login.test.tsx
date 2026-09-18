@@ -119,6 +119,15 @@ describe("Login page", () => {
   );
 });
 
+describe("Login landmark (H-12)", () => {
+  it("renders the form inside a <main> landmark -- the only page that used to have none", () => {
+    renderAt("/login");
+
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toContainElement(screen.getByText("Welcome back"));
+  });
+});
+
 describe("Login accessible fields (H-8)", () => {
   it("associates each <label> with its input via htmlFor/id, findable by getByLabelText", () => {
     renderAt("/login");

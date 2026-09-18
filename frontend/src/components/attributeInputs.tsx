@@ -41,7 +41,11 @@ export function AttributeInput({ def, defaultValue }: { def: AttributeDefinition
   const name = `attr:${def.code}`;
 
   if (def.data_type === "boolean") {
-    return <input type="checkbox" name={name} defaultChecked={Boolean(defaultValue)} />;
+    // H-9: a bare native checkbox renders at the browser default (~13x13px in Chromium), well
+    // under the 24px Target Size floor -- found by a full app-wide sweep (the audit's own named
+    // controls didn't include this one, since it only appears once a node/edge with a boolean
+    // attribute is selected). h-6/w-6 sizes the checkbox itself to a full 24x24 hit area.
+    return <input type="checkbox" name={name} defaultChecked={Boolean(defaultValue)} className="h-6 w-6" />;
   }
   if (def.data_type === "number") {
     return (
