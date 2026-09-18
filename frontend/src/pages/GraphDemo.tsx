@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import GraphEditor from "../components/GraphEditor";
@@ -36,6 +36,13 @@ export default function GraphDemo() {
   // Owned here (not inside FilterBar) so it survives GraphEditor's hierarchy-driven data
   // reload and FilterBar no longer needs a remount key to "reset" on hierarchy switch.
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER_STATE);
+  // H-1 fix round 1: the one search box on this page (FilterBar's) both filters (existing
+  // behaviour, via filterState.search above) and, on Enter, selects the first matching node --
+  // this used to be a documented keyboard workaround that selected nothing. `token` is a
+  // strictly-increasing counter (not just the matched node id) so GraphEditor's roving-focus
+  // effect fires even when the same node is searched for twice in a row.
+  const [searchFocus, setSearchFocus] = useState<{ nodeId: string; token: number } | null>(null);
+  const searchFocusTokenRef = useRef(0);
 
   const organizationId = useMemo(() => {
     if (!organizations || organizations.length === 0) {
@@ -58,6 +65,27 @@ export default function GraphDemo() {
     () => (graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined),
     [filterState, selectedNodeId, graph?.edges]
   );
+
+  // H-1 fix round 1: the audit finding was about this exact search box -- typing a node's label
+  // and pressing Enter selected nothing. Same case-insensitive label-or-code match GraphEditor's
+  // own filter uses, first match in the graph's node order; a miss leaves the filter applied and
+  // the selection untouched (no error, nothing cleared).
+  function handleSearchSubmit(query: string) {
+    const q = query.trim().toLowerCase();
+    if (!q || !graph) {
+      return;
+    }
+    const match = graph.nodes.find((node) => {
+      const code = node.attributes?.code;
+      return node.label.toLowerCase().includes(q) || (typeof code === "string" && code.toLowerCase().includes(q));
+    });
+    if (!match) {
+      return;
+    }
+    setSelection({ kind: "node", id: match.id });
+    searchFocusTokenRef.current += 1;
+    setSearchFocus({ nodeId: match.id, token: searchFocusTokenRef.current });
+  }
 
   function handleOrganizationChange(id: string) {
     setOrganizationOverride(id);
@@ -106,6 +134,7 @@ export default function GraphDemo() {
           selectedNodeId={selectedNodeId}
           value={filterState}
           onChange={setFilterState}
+          onSubmitSearch={handleSearchSubmit}
         />
       )}
       {/* F-1: below 1024px (Tailwind's `lg` breakpoint) the property panel kept its own minimum
@@ -127,6 +156,7 @@ export default function GraphDemo() {
             onHierarchyChange={setHierarchyId}
             filter={filter}
             onSelectionChange={setSelection}
+            focusRequest={searchFocus}
           />
         </div>
         {/* F-5: `self-start` keeps this box only as tall as its own content (a couple of lines

@@ -22,6 +22,11 @@ type GraphEditorProps = {
   onHierarchyChange: (id: string | null) => void;
   filter?: FilterCriteria;
   onSelectionChange?: (selection: Selection) => void;
+  // H-1 fix round 1: an external request to move the canvas's own roving keyboard focus to a
+  // node -- e.g. GraphDemo's search-select (Enter in FilterBar's search box). `token` is a
+  // strictly-increasing counter so the same `nodeId` requested twice (or a request that follows
+  // a plain mouse tap, which does NOT go through this prop) still re-centres/re-announces it.
+  focusRequest?: { nodeId: string; token: number } | null;
 };
 
 const ELK_LAYOUT = {
@@ -170,6 +175,7 @@ export default function GraphEditor({
   onHierarchyChange,
   filter,
   onSelectionChange,
+  focusRequest,
 }: GraphEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
@@ -195,7 +201,6 @@ export default function GraphEditor({
   // stays correct as nodes are added/removed/relaid-out.
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
-  const [nodeSearch, setNodeSearch] = useState("");
   // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
   // closes it and returns focus here, rather than dropping focus back to the document body.
   const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -389,6 +394,20 @@ export default function GraphEditor({
     }
   }, [filter, data]);
 
+  // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
+  // FilterBar's search box) to move the canvas's own roving keyboard focus to a node, so the
+  // property panel it just opened and the canvas's `.kb-focus` ring/live-region stay in step.
+  // Keyed on `focusRequest.token` (not `.nodeId`) so a repeat request for the same node still
+  // re-centres/re-announces it; a plain mouse tap does NOT flow through this effect, since
+  // GraphDemo only bumps the token from its search handler, not from every selection change.
+  useEffect(() => {
+    if (!focusRequest || !cyRef.current) {
+      return;
+    }
+    focusNode(focusRequest.nodeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest?.token]);
+
   function startLayout(cy: Core) {
     const fail = () => {
       setLayoutStatus(null);
@@ -548,35 +567,6 @@ export default function GraphEditor({
     }
   }
 
-  // H-1: the documented keyboard workaround for "I know the node's label but can't click it" --
-  // typing into this box and pressing Enter used to select nothing at all. Enter now moves
-  // keyboard focus (and the property-panel selection) to the first node whose label contains
-  // the typed text, in the same left-to-right/top-to-bottom order Arrow-key traversal uses.
-  function handleNodeSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    const cy = cyRef.current;
-    const query = nodeSearch.trim().toLowerCase();
-    if (!cy || !query) {
-      return;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const anyCy = cy as any;
-    const ids = orderedNodeIds(cy);
-    const match = ids.find((id) => {
-      const label = anyCy.getElementById?.(id)?.data?.("label");
-      return typeof label === "string" && label.toLowerCase().includes(query);
-    });
-    if (!match) {
-      return;
-    }
-    focusNode(match);
-    onSelectionChangeRef.current?.({ kind: "node", id: match });
-    containerRef.current?.focus();
-  }
-
   function nodeEntityType(entityId: string): string | undefined {
     return data?.nodes.find((n) => n.id === entityId)?.type;
   }
@@ -685,20 +675,6 @@ export default function GraphEditor({
             </option>
           ))}
         </select>
-        {/* H-1: the keyboard workaround for selecting a node without a mouse -- Enter here
-            moves keyboard focus (and the property-panel selection) to the first matching node,
-            same order Arrow-key traversal on the canvas uses. */}
-        <input
-          type="text"
-          value={nodeSearch}
-          onChange={(e) => setNodeSearch(e.target.value)}
-          onKeyDown={handleNodeSearchKeyDown}
-          placeholder="Search nodes by label…"
-          title="Type a node's label and press Enter to select it"
-          aria-label="Search nodes by label"
-          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-          data-testid="graph-search"
-        />
         <button
           onClick={runLayout}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"

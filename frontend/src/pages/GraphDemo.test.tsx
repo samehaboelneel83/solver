@@ -117,6 +117,53 @@ describe("GraphDemo", () => {
     expect(screen.queryByDisplayValue("ACTIVE")).not.toBeInTheDocument();
   });
 
+  it("selects the first node matching the typed search when Enter is pressed in the filter search box, opening its property panel (H-1 fix round 1)", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/iam/organization/")) {
+        return Promise.resolve({ items: [{ id: "org-1", code: "default" }], total: 1 });
+      }
+      if (path.startsWith("/api/graph/domain?")) {
+        return Promise.resolve({
+          nodes: [
+            { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+            { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+          ],
+          edges: [],
+          entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+          relationship_types: [],
+          hierarchies: [],
+          attribute_definitions: [],
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+
+    // The audit finding: typing a node's label into this exact box and pressing Enter used to
+    // select nothing at all -- it only filtered. "sar" matches "Sara", not "Ahmed".
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sar" } });
+    fireEvent.keyDown(screen.getByTestId("filter-search"), { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByDisplayValue("Sara")).toBeInTheDocument());
+    expect(screen.queryByDisplayValue("Ahmed")).not.toBeInTheDocument();
+  });
+
+  it("leaves the selection untouched when Enter is pressed in the filter search box and nothing matches (H-1 fix round 1)", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+
+    const tapNodeHandler = registeredHandlersRef.current["tap:node"];
+    tapNodeHandler({ target: { id: () => "e1" } });
+    await waitFor(() => expect(screen.getByDisplayValue("Ahmed")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "no-such-node" } });
+    fireEvent.keyDown(screen.getByTestId("filter-search"), { key: "Enter" });
+
+    expect(screen.getByDisplayValue("Ahmed")).toBeInTheDocument();
+  });
+
   it("keeps the filter bar's search text when the hierarchy is switched (state now lives in GraphDemo, not FilterBar)", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/iam/organization/")) {

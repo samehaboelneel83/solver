@@ -204,6 +204,61 @@ describe("FilterBar", () => {
     }
   });
 
+  it("calls onSubmitSearch with the current query when Enter is pressed in the search box, flushing any pending debounce first (H-1 fix round 1)", () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      const onSubmitSearch = vi.fn();
+      render(
+        <FilterBar
+          entityTypes={entityTypes}
+          edges={edges}
+          selectedNodeId={null}
+          value={DEFAULT_FILTER_STATE}
+          onChange={onChange}
+          onSubmitSearch={onSubmitSearch}
+        />
+      );
+
+      const input = screen.getByTestId("filter-search");
+      fireEvent.change(input, { target: { value: "sara" } });
+      // Enter fires immediately -- well within the ~200ms debounce window, so onChange has not
+      // fired yet from the debounce timer on its own.
+      expect(onChange).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onSubmitSearch).toHaveBeenCalledWith("sara");
+      // The pending debounce is flushed immediately by Enter, not left to fire ~200ms later.
+      expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_FILTER_STATE, search: "sara" });
+
+      onChange.mockClear();
+      vi.advanceTimersByTime(200);
+      // Nothing further fires later -- the debounce timer was actually cleared, not just raced.
+      expect(onChange).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not call onSubmitSearch on a key other than Enter", () => {
+    const onSubmitSearch = vi.fn();
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        edges={edges}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={vi.fn()}
+        onSubmitSearch={onSubmitSearch}
+      />
+    );
+
+    fireEvent.keyDown(screen.getByTestId("filter-search"), { key: "a" });
+
+    expect(onSubmitSearch).not.toHaveBeenCalled();
+  });
+
   it("disables the highlight toggle when nothing is selected", () => {
     render(
       <FilterBar

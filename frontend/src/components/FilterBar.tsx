@@ -24,6 +24,12 @@ type FilterBarProps = {
   selectedNodeId: string | null;
   value: FilterState;
   onChange: (value: FilterState) => void;
+  // H-1 fix round 1: fired with the search box's current text when Enter is pressed in it. This
+  // is the audit's documented keyboard workaround ("type a node's label, press Enter") -- it
+  // used to select nothing at all, because filtering (what this component already did) is not
+  // the same as selecting. The caller (GraphDemo) owns the graph data and the selection, so it
+  // resolves the match and opens the property panel; this component only reports the query.
+  onSubmitSearch?: (query: string) => void;
 };
 
 /**
@@ -59,7 +65,14 @@ const SEARCH_DEBOUNCE_MS = 200;
 
 const TYPES_PANEL_ID = "filter-types-panel";
 
-export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, value, onChange }: FilterBarProps) {
+export default function FilterBar({
+  entityTypes,
+  edges: _edges,
+  selectedNodeId,
+  value,
+  onChange,
+  onSubmitSearch,
+}: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
   const typesToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -117,6 +130,23 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
     };
   }, []);
 
+  // H-1 fix round 1: Enter in the search box flushes any pending debounce immediately (so the
+  // filter and the search-select below land in the same tick, instead of racing the trailing
+  // ~200ms debounce timer) and reports the current text to the caller via onSubmitSearch.
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+      pendingSearchRef.current = null;
+      onChangeRef.current({ ...valueRef.current, search: searchDraft });
+    }
+    onSubmitSearch?.(searchDraft);
+  }
+
   function handleSearchChange(next: string) {
     setSearchDraft(next);
     pendingSearchRef.current = next;
@@ -162,10 +192,11 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
       <input
         type="text"
         placeholder="Search by label or code…"
-        title="Search nodes by label or code"
-        aria-label="Search nodes by label or code"
+        title="Search nodes by label or code -- press Enter to select the first match"
+        aria-label="Search nodes by label or code -- press Enter to select the first match"
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
+        onKeyDown={handleSearchKeyDown}
         className="rounded-md border border-slate-300 px-2 py-1 text-sm"
         data-testid="filter-search"
       />

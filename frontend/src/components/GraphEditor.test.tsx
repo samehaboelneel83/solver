@@ -1037,7 +1037,7 @@ describe("GraphEditor", () => {
     expect(document.activeElement).toBe(screen.getByTestId("hierarchy-select"));
   });
 
-  it("selects the first node matching the typed label when Enter is pressed in the search box -- the workaround that used to select nothing (H-1)", async () => {
+  it("moves the roving keyboard focus to a node when focusRequest's token changes -- e.g. after an external (search) selection (H-1 fix round 1)", async () => {
     (apiFetch as any).mockResolvedValue({
       nodes: [
         { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
@@ -1050,15 +1050,50 @@ describe("GraphEditor", () => {
       attribute_definitions: [],
     });
 
-    const onSelectionChange = vi.fn();
-    renderWithProviders({ onSelectionChange });
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor organizationId="org-1" hierarchyId={null} onHierarchyChange={vi.fn()} />
+      </QueryClientProvider>
+    );
     await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(false);
 
-    const search = screen.getByTestId("graph-search");
-    fireEvent.change(search, { target: { value: "sar" } });
-    fireEvent.keyDown(search, { key: "Enter" });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor
+          organizationId="org-1"
+          hierarchyId={null}
+          onHierarchyChange={vi.fn()}
+          focusRequest={{ nodeId: "e2", token: 1 }}
+        />
+      </QueryClientProvider>
+    );
 
-    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "node", id: "e2" });
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(true);
+    expect(mockCytoscapeInstance.center).toHaveBeenCalled();
+    expect(screen.getByTestId("graph-live")).toHaveTextContent("Sara");
+
+    // A repeat request for the *same* node (a fresh token) still re-fires -- e.g. searching the
+    // same label again after having since moved keyboard focus elsewhere.
+    fireEvent.keyDown(screen.getByTestId("cytoscape-container"), { key: "ArrowLeft" });
+    expect(elementStore.get("e1")?.classes.has("kb-focus")).toBe(true);
+
+    mockCytoscapeInstance.center.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GraphEditor
+          organizationId="org-1"
+          hierarchyId={null}
+          onHierarchyChange={vi.fn()}
+          focusRequest={{ nodeId: "e2", token: 2 }}
+        />
+      </QueryClientProvider>
+    );
+
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(true);
+    expect(elementStore.get("e1")?.classes.has("kb-focus")).toBe(false);
+    expect(mockCytoscapeInstance.center).toHaveBeenCalled();
   });
 
   it("announces the keyboard-focused node's label in a polite live region as the selection moves (H-1)", async () => {
