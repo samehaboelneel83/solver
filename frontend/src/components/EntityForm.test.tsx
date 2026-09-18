@@ -626,3 +626,60 @@ describe("EntityForm unsaved-changes guard (C-3)", () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
+
+// Fix round 1: a reviewer reproduced FkPicker's blur handler leaving `value`
+// untouched while displaying newly-typed, unmatched text once a prior
+// selection existed -- the screen showed one row while the form still held
+// another row's id, and a submit at that point would silently save the
+// wrong FK. Whatever a submit sends for an FK field must match what the
+// field displayed at the moment of submission.
+describe("EntityForm FK display can never disagree with what it submits (fix round 1)", () => {
+  it("submits the original selection's id, unchanged, after an unmatched query is typed and blurred", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/iam/organization/options?ids=org-1") {
+        return Promise.resolve([{ id: "org-1", label: "Acme" }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm
+          fields={fields}
+          initialValues={{ code: "acme", organization_id: "org-1" }}
+          onSubmit={onSubmit}
+          submitLabel="Save"
+          isEdit
+        />
+      </QueryClientProvider>
+    );
+
+    const input = screen.getByTestId("field-organization_id") as HTMLInputElement;
+    await waitFor(() => {
+      expect(input.value).toBe("Acme");
+    });
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "zzz-t6-probe-nomatch" } });
+    await waitFor(
+      () => {
+        expect(screen.getByText("No matches")).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+    fireEvent.blur(input);
+
+    // The display reverted to the original selection instead of keeping
+    // text that pointed nowhere -- so what's on screen and what's about to
+    // be submitted agree.
+    expect(input.value).toBe("Acme");
+
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ organization_id: "org-1" }));
+    });
+  });
+});

@@ -219,6 +219,95 @@ describe("FkPicker keeps typed text instead of silently discarding it (C-1)", ()
   });
 });
 
+// Fix round 1: a reviewer found that once a prior selection existed,
+// blurring on unmatched text left `value`/`onChange` untouched while
+// displaying the newly-typed text -- so the screen showed one row (e.g.
+// "zzz-t6-probe-nomatch") while the stored id still pointed at the
+// previously selected row (e.g. Alpha). A submit at that point saved the
+// old id under new-looking text. The display must never be able to
+// disagree with `value`.
+describe("FkPicker reverts to the prior selection instead of showing unmatched text (fix round 1)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/iam/organization/options?ids=org-1") {
+        return Promise.resolve([{ id: "org-1", label: "Acme" }]);
+      }
+      const q = new URL(path, "http://example.test").searchParams.get("q") ?? "";
+      if (q.toLowerCase() === "nur") {
+        return Promise.resolve([{ id: "org-2", label: "Nur Hospital" }]);
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  async function selectAcmeThenTypeUnmatched(onChange = vi.fn()) {
+    renderPicker("org-1", onChange);
+    const input = screen.getByTestId("field-organization_id") as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("Acme"));
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "zzz-t6-probe-nomatch" } });
+    await waitFor(
+      () => {
+        expect(screen.getByText("No matches")).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+    fireEvent.blur(input);
+    return { input, onChange };
+  }
+
+  it("(a) leaves onChange uncalled and reverts the displayed value to the original label", async () => {
+    const { input, onChange } = await selectAcmeThenTypeUnmatched();
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("Acme");
+  });
+
+  it("(b) names both the failed query and the kept selection in the message", async () => {
+    await selectAcmeThenTypeUnmatched();
+
+    expect(
+      screen.getByText('No match for "zzz-t6-probe-nomatch" — keeping "Acme"')
+    ).toBeInTheDocument();
+  });
+
+  it("(c) still allows picking a different option after an unmatched blur reverted the display", async () => {
+    const { input, onChange } = await selectAcmeThenTypeUnmatched();
+    expect(input.value).toBe("Acme");
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "nur" } });
+    const option = await screen.findByRole("option", { name: "Nur Hospital" });
+    fireEvent.mouseDown(option);
+
+    expect(onChange).toHaveBeenCalledWith("org-2");
+    await waitFor(() => {
+      expect(input.value).toBe("Nur Hospital");
+    });
+  });
+
+  it("(d) still keeps the typed text (not a revert) when there was no prior selection to fall back to", async () => {
+    const onChange = vi.fn();
+    renderPicker("", onChange);
+    const input = screen.getByTestId("field-organization_id") as HTMLInputElement;
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "zzz-t6-probe-nomatch" } });
+    await waitFor(
+      () => {
+        expect(screen.getByText("No matches")).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+    fireEvent.blur(input);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("zzz-t6-probe-nomatch");
+    expect(screen.getByText("No match — choose from the list")).toBeInTheDocument();
+  });
+});
+
 // H-12 (combobox half): aria-activedescendant was never set, so a
 // screen-reader user arrowing through options was never told which option
 // was highlighted, and aria-controls pointed at a listbox id that didn't

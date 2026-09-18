@@ -32,10 +32,15 @@ const DEBOUNCE_MS = 250;
  *
  * C-1/C-2: the field now announces itself (placeholder + chevron), shows a
  * chosen value as a token rather than plain typed-looking text, and never
- * silently discards text the user typed but didn't pick from the list --
- * blurring with unmatched text keeps it and shows an explanatory message
- * (unless exactly one option matches the typed text exactly, which is
- * selected instead). */
+ * silently discards text the user typed but didn't pick from the list.
+ * Blurring with unmatched text either (a) selects the one option whose
+ * label matches the typed text exactly, (b) if no selection existed yet,
+ * keeps the typed text and says it didn't match, or (c) if a selection
+ * already existed, reverts the display back to that selection's label and
+ * names both in a message -- never (b) while `value` still points at an
+ * unrelated row, which would let the screen and the saved record disagree
+ * (fix round 1: this was the shape of the original C-1 bug, just moved one
+ * step later). */
 export default function FkPicker({
   fkTable,
   value,
@@ -52,6 +57,12 @@ export default function FkPicker({
   const [activeIndex, setActiveIndex] = useState(-1);
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [noMatch, setNoMatch] = useState(false);
+  // Set instead of `noMatch` when an unmatched blur happens while a prior
+  // selection exists: holds the text that didn't match, purely for the
+  // "kept your old selection" message. The display itself reverts to the
+  // existing selection's label (see `inputValue`) so what's on screen can
+  // never disagree with `value` -- see the fix-round-1 note below.
+  const [revertedQuery, setRevertedQuery] = useState<string | null>(null);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(query), DEBOUNCE_MS);
@@ -79,23 +90,29 @@ export default function FkPicker({
     if (!value) {
       setSelectedLabel(null);
       setNoMatch(false);
+      setRevertedQuery(null);
     }
   }, [value]);
 
   const displayLabel = selectedLabel ?? resolvedLabel ?? "";
-  // While there's unmatched typed text (blurred without a pick), keep
-  // showing it instead of snapping back to the last selected label -- that
-  // silent revert-to-empty is exactly C-1.
+  // While there's unmatched typed text AND no prior selection exists
+  // (blurred without ever picking anything), keep showing it instead of
+  // snapping back to empty -- that silent revert-to-empty is C-1. But once
+  // a selection DOES exist, `query` is reset on an unmatched blur (below)
+  // so this always falls through to `displayLabel` -- the screen can never
+  // show text that doesn't match the stored `value`.
   const inputValue = isOpen ? query : noMatch ? query : displayLabel;
   const hasToken = Boolean(value) && !isOpen && !noMatch;
 
   function openFresh() {
     setIsOpen(true);
     setActiveIndex(-1);
+    setRevertedQuery(null);
     if (!noMatch) {
       // Starting a fresh search rather than continuing to filter by the
-      // previously selected label. An unmatched query is the opposite case
-      // -- keep it so the user can pick up editing where they left off.
+      // previously selected label. An unmatched query (no prior selection)
+      // is the opposite case -- keep it so the user can pick up editing
+      // where they left off.
       setQuery("");
       setDebouncedQuery("");
     }
@@ -108,6 +125,7 @@ export default function FkPicker({
     setQuery("");
     setActiveIndex(-1);
     setNoMatch(false);
+    setRevertedQuery(null);
   }
 
   function handleClear() {
@@ -116,6 +134,7 @@ export default function FkPicker({
     setQuery("");
     setIsOpen(false);
     setNoMatch(false);
+    setRevertedQuery(null);
   }
 
   function handleBlur() {
@@ -128,10 +147,19 @@ export default function FkPicker({
       selectOption(exactMatches[0]);
       return;
     }
-    // C-1: don't silently empty the field. Leave `value`/`onChange` alone,
-    // keep what was typed, and say so.
     setIsOpen(false);
-    setNoMatch(true);
+    if (value) {
+      // A selection already exists -- do NOT leave the typed text on
+      // screen next to an unrelated stored id (that's the "displays Nurse,
+      // saves Ward" regression). Revert the display to the existing
+      // selection and say so; `value`/`onChange` are untouched either way.
+      setRevertedQuery(query);
+      setQuery("");
+    } else {
+      // C-1: nothing was ever selected, so there's nothing to disagree
+      // with -- keep what was typed and say it didn't match.
+      setNoMatch(true);
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -152,16 +180,25 @@ export default function FkPicker({
       setIsOpen(false);
       setQuery("");
       setNoMatch(false);
+      setRevertedQuery(null);
     }
   }
 
   const listId = testId ? `${testId}-listbox` : undefined;
   const noMatchId = testId ? `${testId}-no-match` : undefined;
+  const revertedId = testId ? `${testId}-reverted` : undefined;
   const showNoMatchMessage = noMatch && !isOpen;
+  const showRevertedMessage = revertedQuery !== null && !isOpen;
   const optionId = (index: number) => (listId ? `${listId}-option-${index}` : undefined);
   const activeDescendant = isOpen && activeIndex >= 0 ? optionId(activeIndex) : undefined;
   const combinedDescribedBy =
-    [ariaDescribedBy, showNoMatchMessage ? noMatchId : undefined].filter(Boolean).join(" ") || undefined;
+    [
+      ariaDescribedBy,
+      showNoMatchMessage ? noMatchId : undefined,
+      showRevertedMessage ? revertedId : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   return (
     <div className="relative">
@@ -189,6 +226,7 @@ export default function FkPicker({
               setIsOpen(true);
               setActiveIndex(-1);
               setNoMatch(false);
+              setRevertedQuery(null);
             }}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
@@ -219,6 +257,11 @@ export default function FkPicker({
       {showNoMatchMessage && (
         <p id={noMatchId} className="mt-1 text-xs text-red-600" data-testid={noMatchId}>
           No match — choose from the list
+        </p>
+      )}
+      {showRevertedMessage && (
+        <p id={revertedId} className="mt-1 text-xs text-amber-600" data-testid={revertedId}>
+          {`No match for "${revertedQuery}" — keeping "${displayLabel}"`}
         </p>
       )}
       {isOpen && (
