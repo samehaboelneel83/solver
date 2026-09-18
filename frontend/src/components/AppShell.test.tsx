@@ -167,5 +167,126 @@ describe("AppShell", () => {
       fireEvent.click(screen.getByRole("link", { name: "entity" }));
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
+
+    // fix round 1: a closed drawer used to stay fully in the tab order and
+    // the accessibility tree while only translated off-screen -- measured
+    // in a real browser at 375px, 11 of the first 12 tab stops were
+    // off-screen sidebar controls before a keyboard user ever reached page
+    // content. `axe` doesn't catch this (nothing here is an axe violation on
+    // its own), so this has to be asserted directly rather than left to an
+    // automated scan.
+    describe("keyboard/AT reachability (fix round 1)", () => {
+      it("makes the closed drawer's contents inert below the lg breakpoint", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+
+        // The default jsdom matchMedia stub reports "not desktop".
+        const aside = document.getElementById("sidebar-nav");
+        expect(aside).toHaveAttribute("inert");
+      });
+
+      it("removes inert and moves focus into the drawer when it opens", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+
+        const aside = document.getElementById("sidebar-nav") as HTMLElement;
+        fireEvent.click(screen.getByTestId("menu-toggle"));
+
+        expect(aside).not.toHaveAttribute("inert");
+        // Focus lands on the first focusable control inside the drawer
+        // (Sign out, the first element in source order) instead of staying
+        // on the Menu button or falling through to page content behind the
+        // backdrop.
+        expect(screen.getByRole("button", { name: "Sign out" })).toHaveFocus();
+      });
+
+      it("restores inert and returns focus to the Menu button when the drawer closes via Escape", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+
+        const aside = document.getElementById("sidebar-nav") as HTMLElement;
+        const toggle = screen.getByTestId("menu-toggle");
+        fireEvent.click(toggle);
+        expect(aside).not.toHaveAttribute("inert");
+
+        fireEvent.keyDown(document, { key: "Escape" });
+
+        expect(aside).toHaveAttribute("inert");
+        expect(toggle).toHaveFocus();
+      });
+
+      it("restores inert and returns focus to the Menu button when the backdrop is clicked", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+
+        const aside = document.getElementById("sidebar-nav") as HTMLElement;
+        const toggle = screen.getByTestId("menu-toggle");
+        fireEvent.click(toggle);
+        expect(aside).not.toHaveAttribute("inert");
+
+        fireEvent.click(screen.getByTestId("sidebar-backdrop"));
+
+        expect(aside).toHaveAttribute("inert");
+        expect(toggle).toHaveFocus();
+      });
+
+      it("keeps the sidebar reachable (never inert) at the lg breakpoint regardless of drawer state", async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) =>
+          ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+        try {
+          renderWithProviders();
+          await screen.findByText("organization");
+
+          // The drawer is "closed" (never opened), but at the desktop
+          // breakpoint the sidebar is the static one and must stay reachable.
+          const aside = document.getElementById("sidebar-nav");
+          expect(aside).not.toHaveAttribute("inert");
+        } finally {
+          window.matchMedia = originalMatchMedia;
+        }
+      });
+    });
+
+    it("the backdrop is a real interactive element with an accessible name, not a div with an onClick (fix round 1)", async () => {
+      renderWithProviders();
+      await screen.findByText("organization");
+
+      const backdrop = screen.getByTestId("sidebar-backdrop");
+      expect(backdrop.tagName).toBe("BUTTON");
+      expect(backdrop).toHaveAccessibleName("Close navigation menu");
+      // Not a stop on the normal Tab sequence -- it's meant to be
+      // clicked/tapped, not tabbed to.
+      expect(backdrop).toHaveAttribute("tabIndex", "-1");
+    });
+  });
+
+  // fix round 1: <main> is now the shell's own scroll container (see the
+  // h-screen/overflow-y-auto layout above), so the browser's native
+  // href="#main" jump -- which scrolls the target's ancestors into view --
+  // found main already filling the viewport and left its internal
+  // scrollTop untouched, even though focus landed correctly.
+  it("resets main's own scroll position (not just focus) when the skip link is activated", async () => {
+    renderWithProviders();
+    await screen.findByText("organization");
+
+    const main = document.getElementById("main") as HTMLElement;
+    main.scrollTop = 305;
+    expect(main.scrollTop).toBe(305);
+
+    fireEvent.click(screen.getByRole("link", { name: "Skip to content" }));
+
+    expect(main).toHaveFocus();
+    expect(main.scrollTop).toBe(0);
   });
 });

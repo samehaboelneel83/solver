@@ -51,6 +51,24 @@ function matchesFilter(table: TableMeta, filter: string): boolean {
   );
 }
 
+// Matches the `lg` breakpoint in tailwind.config.js (also em-based, for the
+// same reflow reasons -- see that file). Written in em here too so this JS
+// check tracks the CSS one even when the root font size changes, instead of
+// silently diverging from it at a raw pixel value.
+const DESKTOP_QUERY = "(min-width: 64em)";
+
+function getIsDesktop(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(DESKTOP_QUERY).matches;
+}
+
+/** The first element inside `root` that a keyboard user could Tab to. */
+function firstFocusable(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+}
+
 export default function AppShell() {
   // Wraps the whole shell (nav + <Outlet />) in one shared "does the
   // currently-open form have unsaved changes?" guard (C-3): a routed page's
@@ -68,6 +86,8 @@ function AppShellContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
   const isFirstRender = useRef(true);
   const confirmLeave = useConfirmLeave();
 
@@ -77,6 +97,12 @@ function AppShellContent() {
   // 375px to 1920px, eating 68.3% of a 375px screen. Below the `lg`
   // breakpoint it's now a drawer, hidden off-canvas until this opens it.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // G-2 fix round 1: whether the sidebar is currently the static, always-
+  // reachable desktop one (`lg`+) or the off-canvas drawer. Needed in JS
+  // (not just CSS) because the two states have different accessibility
+  // requirements below -- a *closed* drawer must be unreachable by keyboard/
+  // AT, but the *static* sidebar must never be, regardless of `drawerOpen`.
+  const [isDesktop, setIsDesktop] = useState(getIsDesktop);
 
   const grouped: Record<string, TableMeta[]> = {};
   for (const t of tables ?? []) {
@@ -107,6 +133,16 @@ function AppShellContent() {
     });
   }
 
+  // G-2 fix round 1: closing the drawer via Escape or the backdrop (as
+  // opposed to a nav-link click, which navigates -- the existing H-11 effect
+  // below already sends focus to <main> for that case) leaves focus with
+  // nowhere sensible to land unless we send it back to the control that
+  // opened the drawer.
+  function closeDrawer() {
+    setDrawerOpen(false);
+    menuToggleRef.current?.focus();
+  }
+
   // Move focus to the main content region on every route change so keyboard/screen-reader
   // users land somewhere sensible instead of focus falling back to <body> (H-11). Skipped on
   // first mount so loading the app doesn't yank focus away from wherever the browser put it.
@@ -128,32 +164,94 @@ function AppShellContent() {
     if (!drawerOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setDrawerOpen(false);
+        closeDrawer();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawerOpen]);
 
+  // G-2 fix round 1: track the `lg` breakpoint in JS so the drawer's
+  // accessibility state (below) can tell "closed drawer, below lg" (must be
+  // unreachable) apart from "static sidebar, lg+" (must always be reachable,
+  // independent of `drawerOpen`).
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(DESKTOP_QUERY);
+    function handleChange(event: MediaQueryListEvent) {
+      setIsDesktop(event.matches);
+    }
+    setIsDesktop(mql.matches);
+    mql.addEventListener?.("change", handleChange);
+    return () => mql.removeEventListener?.("change", handleChange);
+  }, []);
+
+  // G-2 fix round 1: below `lg`, a *closed* drawer used to stay fully in the
+  // tab order and the accessibility tree while only translated off-screen --
+  // measured at 375px, 11 of the first 12 tab stops were off-screen controls
+  // (Sign out, Dashboard, Domain Graph, the filter input, every group
+  // heading...) before a keyboard user ever reached page content. `inert`
+  // removes the whole subtree from both while it applies.
+  const drawerInert = !isDesktop && !drawerOpen;
+
+  // ...and the reverse direction: when the drawer opens, move focus into it
+  // (previously Tab from the Menu button went straight into the page content
+  // behind the backdrop -- focus never entered the drawer at all).
+  useEffect(() => {
+    if (isDesktop || !drawerOpen) return;
+    const target = asideRef.current && firstFocusable(asideRef.current);
+    target?.focus();
+  }, [drawerOpen, isDesktop]);
+
+  // A-11/skip-link fix round 1: `<main>` is now the scroll container (see
+  // the h-screen/overflow-y-auto shell below), so the browser's native
+  // href="#main" jump -- which scrolls the target's *ancestors* into view --
+  // finds main already filling the viewport and leaves its own internal
+  // scrollTop untouched. Handling the click directly resets that scroll
+  // position as well as moving focus, instead of just the latter.
+  function handleSkipLinkClick(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    mainRef.current?.focus();
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+    }
+  }
+
   return (
+    // G-4/WCAG 1.4.10 Reflow, fix round 1: the actual page-level
+    // horizontal-scroll backstop lives in index.css (`html { overflow-x:
+    // hidden }`) -- see that file's comment for why it has to be on <html>
+    // specifically, not a class here or on <main>/the table's own wrapper.
     <div className="flex h-screen">
       <a
         href="#main"
+        onClick={handleSkipLinkClick}
         className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2"
       >
         Skip to content
       </a>
 
-      {/* G-2/G-5: backdrop behind the drawer on small screens, closing it on click. */}
-      <div
+      {/* G-2/G-5: backdrop behind the drawer on small screens, closing it on
+          click. A real (if unusual) button rather than a div+onClick (fix
+          round 1) -- `tabIndex={-1}` keeps it out of the normal Tab
+          sequence (it's not meant to be tabbed to, just clicked/tapped),
+          while still being a genuine interactive element with its own
+          accessible name instead of a non-interactive node with a click
+          handler bolted on. */}
+      <button
+        type="button"
         data-testid="sidebar-backdrop"
-        aria-hidden="true"
-        onClick={() => setDrawerOpen(false)}
-        className={`fixed inset-0 z-30 bg-slate-900/50 lg:hidden ${drawerOpen ? "block" : "hidden"}`}
+        tabIndex={-1}
+        aria-label="Close navigation menu"
+        onClick={closeDrawer}
+        className={`fixed inset-0 z-30 cursor-default bg-slate-900/50 lg:hidden ${drawerOpen ? "block" : "hidden"}`}
       />
 
       <aside
         id="sidebar-nav"
+        ref={asideRef}
+        inert={drawerInert ? "" : undefined}
         className={`fixed inset-y-0 left-0 z-40 flex h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-4 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 ${
           drawerOpen ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -221,13 +319,30 @@ function AppShellContent() {
         </nav>
       </aside>
 
-      <main id="main" tabIndex={-1} ref={mainRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-slate-50 p-6">
+      <main
+        id="main"
+        tabIndex={-1}
+        ref={mainRef}
+        // G-4/WCAG 1.4.10 Reflow, fix round 1: `contain-layout` (CSS
+        // `contain: layout`) is the confirmed real fix for a wide table
+        // (DataTable.tsx's own `overflow-x-auto` wrapper) inflating the
+        // *document's* scrollWidth at a 150% root font size -- verified in
+        // a real browser that this stops it and that neither `overflow-y-
+        // auto` above nor forcing `overflow: hidden` on this element or the
+        // table's wrapper (even with !important) did. Containment makes
+        // `main` a genuinely independent formatting context, so its
+        // internal content categorically cannot affect an ancestor's
+        // layout or scrolling area -- see index.css for the accompanying
+        // `html { overflow-x: hidden }` backstop.
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto contain-layout bg-slate-50 p-6"
+      >
         {/* G-2/G-5: below `lg` the sidebar is a drawer, hidden until this
             toggles it -- always rendered (data-testid always present) so a
             small-screen user always has a way to open navigation, but hidden
             above the breakpoint via `lg:hidden` where the sidebar is static. */}
         <button
           type="button"
+          ref={menuToggleRef}
           data-testid="menu-toggle"
           aria-expanded={drawerOpen}
           aria-controls="sidebar-nav"

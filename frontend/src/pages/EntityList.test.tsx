@@ -158,10 +158,11 @@ describe("EntityList", () => {
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders("/domain/entity_type");
-    await screen.findByRole("table");
+    const table = within(await screen.findByRole("table"));
 
-    fireEvent.click(screen.getByTestId("row-actions"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    // The card layout (G-4) renders an equivalent trigger -- scope to the table.
+    fireEvent.click(table.getByTestId("row-actions"));
+    fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
 
     expect(await screen.findByText("row is referenced elsewhere")).toBeInTheDocument();
     (window.confirm as any).mockRestore();
@@ -180,10 +181,11 @@ describe("EntityList", () => {
 
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders("/domain/entity_type");
-    await screen.findByRole("table");
+    const table = within(await screen.findByRole("table"));
 
-    fireEvent.click(screen.getByTestId("row-actions"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    // The card layout (G-4) renders an equivalent trigger -- scope to the table.
+    fireEvent.click(table.getByTestId("row-actions"));
+    fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
 
     const status = await screen.findByText("employee deleted");
     expect(status).toBeInTheDocument();

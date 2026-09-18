@@ -220,6 +220,13 @@ describe("DataTable", () => {
       vi.restoreAllMocks();
     });
 
+    // The table now renders its own delete trigger *and* the small-screen
+    // card renders an equivalent one (fix round 1 for G-4 -- below 768px the
+    // table is `hidden`, and the card previously had no actions trigger at
+    // all, leaving no way to delete a record on a narrow screen). Both are
+    // always in the DOM, so these tests scope to the table's copy, which is
+    // what they were written to exercise; the card's copy gets its own
+    // dedicated test below.
     it("keeps Delete out of the tab sequence except through a >=32px menu trigger, and the confirm still names the record (D-6)", () => {
       const onDelete = vi.fn();
       vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -236,16 +243,17 @@ describe("DataTable", () => {
         />
       );
 
-      expect(screen.queryByText("Delete")).not.toBeInTheDocument();
+      const table = within(screen.getByRole("table"));
+      expect(table.queryByText("Delete")).not.toBeInTheDocument();
 
-      const trigger = screen.getByTestId("row-actions");
+      const trigger = table.getByTestId("row-actions");
       expect(trigger).toHaveAccessibleName("Actions for employee");
       const rect = trigger.className;
       expect(rect).toContain("h-8");
       expect(rect).toContain("w-8");
 
       fireEvent.click(trigger);
-      const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+      const deleteItem = table.getByRole("menuitem", { name: "Delete" });
       fireEvent.click(deleteItem);
 
       expect(window.confirm).toHaveBeenCalledWith('Delete "employee"? This cannot be undone.');
@@ -270,10 +278,11 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByTestId("row-actions"));
+      const table = within(screen.getByRole("table"));
+      fireEvent.click(table.getByTestId("row-actions"));
       expect(onRowClick).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
       expect(onRowClick).not.toHaveBeenCalled();
       expect(onDelete).toHaveBeenCalledWith("1", "employee");
     });
@@ -293,14 +302,16 @@ describe("DataTable", () => {
           onDelete={onDelete}
         />
       );
-      fireEvent.click(screen.getByTestId("row-actions"));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
+      fireEvent.click(within(screen.getByRole("table")).getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "Acme Corp"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("2", "Acme Corp");
 
       (window.confirm as any).mockClear();
       onDelete.mockClear();
-      renderTable(
+      // Not unmounted from the render above, so two <table>s now coexist in
+      // the document -- scope to this render's own container.
+      const { container: secondContainer } = renderTable(
         <DataTable
           {...baseProps}
           fields={fields}
@@ -312,8 +323,9 @@ describe("DataTable", () => {
           onDelete={onDelete}
         />
       );
-      fireEvent.click(screen.getByRole("button", { name: "Actions for this row" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      const secondTable = within(within(secondContainer).getByRole("table"));
+      fireEvent.click(secondTable.getByRole("button", { name: "Actions for this row" }));
+      fireEvent.click(secondTable.getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "this row"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("3", "this row");
     });
@@ -334,8 +346,9 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByTestId("row-actions"));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      const table = within(screen.getByRole("table"));
+      fireEvent.click(table.getByTestId("row-actions"));
+      fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
 
       expect(window.confirm).toHaveBeenCalled();
       expect(onDelete).not.toHaveBeenCalled();
@@ -355,11 +368,12 @@ describe("DataTable", () => {
         />
       );
 
-      fireEvent.click(screen.getByTestId("row-actions"));
-      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      const table = within(screen.getByRole("table"));
+      fireEvent.click(table.getByTestId("row-actions"));
+      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
       fireEvent.mouseDown(document.body);
-      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
     });
 
     it("closes the menu on Escape and returns focus to the trigger (fix round 2)", () => {
@@ -376,13 +390,14 @@ describe("DataTable", () => {
         />
       );
 
-      const trigger = screen.getByTestId("row-actions");
+      const table = within(screen.getByRole("table"));
+      const trigger = table.getByTestId("row-actions");
       fireEvent.click(trigger);
-      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
-      fireEvent.keyDown(screen.getByRole("menuitem", { name: "Delete" }), { key: "Escape" });
+      fireEvent.keyDown(table.getByRole("menuitem", { name: "Delete" }), { key: "Escape" });
 
-      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
 
@@ -400,14 +415,45 @@ describe("DataTable", () => {
         />
       );
 
-      const trigger = screen.getByTestId("row-actions");
+      const table = within(screen.getByRole("table"));
+      const trigger = table.getByTestId("row-actions");
       fireEvent.click(trigger);
-      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
       fireEvent.keyDown(trigger, { key: "Escape" });
 
-      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
+    });
+
+    it("the small-screen card renders its own delete trigger, independent of the table's (fix round 1, G-4)", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+
+      const card = within(screen.getByTestId("datatable-card"));
+      const trigger = card.getByTestId("row-actions");
+      expect(trigger).toHaveAccessibleName("Actions for employee");
+
+      fireEvent.click(trigger);
+      // Opening the card's menu doesn't also open the table's (independent
+      // per-instance state, not a single table-wide "open row" ref).
+      expect(within(screen.getByRole("table")).queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+
+      fireEvent.click(card.getByRole("menuitem", { name: "Delete" }));
+      expect(window.confirm).toHaveBeenCalledWith('Delete "employee"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("1", "employee");
     });
   });
 

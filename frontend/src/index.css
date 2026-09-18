@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* G-4/WCAG 1.4.10 Reflow, fix round 1: a defensive backstop against
+   page-level horizontal scroll, on top of `contain-layout` on <main>
+   (AppShell.tsx), which is the real fix for the specific bug this round
+   found (a wide table inflating the *document's* scrollWidth at a 150%
+   root font size -- see that component's comment for the full story).
+   This backstop is deliberately on <html> itself rather than a wrapper div
+   -- a real-browser check found that `overflow-x: hidden` on a component
+   root div, or even `overflow: hidden` with `!important` on <main> or the
+   table's own wrapper, did *not* reliably stop it, only `contain: layout`
+   on <main> or `overflow-x: hidden` on <html> did. Nothing on this site
+   should ever need page-level horizontal scroll -- any component that
+   needs its own horizontal scroll (the table) already manages it
+   internally. */
+html {
+  overflow-x: hidden;
+}
+
 @layer utilities {
   @keyframes toast-in {
     from {

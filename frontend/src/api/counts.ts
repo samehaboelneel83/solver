@@ -13,8 +13,9 @@ export type TableCount = {
  * the dashboard's row-counts panel, which used to fire one
  * `/api/<schema>/<table>/?limit=1` request per table (34 requests on a
  * freshly migrated database) just to show a count. The backend's dedicated
- * `/api/meta/counts` endpoint (added alongside this fix) returns every
- * table's `{schema, table, label_plural, total}` in one round trip instead.
+ * `/api/meta/counts` endpoint (added by an earlier task, ahead of this
+ * frontend-only change) returns every table's `{schema, table, label_plural,
+ * total}` in one round trip instead.
  */
 export function useCounts() {
   return useQuery({
