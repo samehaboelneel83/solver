@@ -12,6 +12,7 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
     isNode: boolean;
     styles: Record<string, any>;
     classes: Set<string>;
+    position: { x: number; y: number };
   };
   const store = new Map<string, EleEntry>();
 
@@ -37,6 +38,16 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
         if (!entry) return undefined;
         if (value === undefined) return entry.styles[key];
         entry.styles[key] = value;
+        return undefined;
+      },
+      // H-1: position getter/setter -- Arrow-key traversal orders nodes by this, and tests set
+      // it explicitly (rather than relying on layout, which the mock never actually runs) to
+      // exercise the left-to-right/top-to-bottom ordering.
+      position: (val?: { x: number; y: number }) => {
+        const entry = store.get(id);
+        if (!entry) return undefined;
+        if (val === undefined) return { ...entry.position };
+        entry.position = { ...val };
         return undefined;
       },
       addClass: (cls: string) => store.get(id)?.classes.add(cls),
@@ -71,7 +82,13 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
       const added: string[] = [];
       (elements ?? []).forEach((el: any) => {
         const isNode = !("source" in el.data);
-        store.set(el.data.id, { data: { ...el.data }, isNode, styles: {}, classes: new Set() });
+        store.set(el.data.id, {
+          data: { ...el.data },
+          isNode,
+          styles: {},
+          classes: new Set(),
+          position: el.position ? { ...el.position } : { x: 0, y: 0 },
+        });
         added.push(el.data.id);
       });
       return makeCollection(added);
@@ -88,6 +105,7 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
     ),
     elements: vi.fn(() => makeCollection([...store.keys()])),
     extent: vi.fn(() => ({ x1: 0, y1: 0, x2: 100, y2: 100 })),
+    center: vi.fn(),
     autoungrabify: vi.fn(),
     layout: vi.fn(() => ({
       run: vi.fn(),
@@ -145,6 +163,7 @@ describe("GraphEditor", () => {
     mockCytoscapeInstance.edges.mockClear();
     mockCytoscapeInstance.elements.mockClear();
     mockCytoscapeInstance.extent.mockClear();
+    mockCytoscapeInstance.center.mockClear();
     mockCytoscapeInstance.autoungrabify.mockClear();
     mockCytoscapeInstance.on.mockClear();
     mockCytoscapeInstance.edgehandles.mockClear();
@@ -921,6 +940,148 @@ describe("GraphEditor", () => {
     fireEvent.click(retryButton);
 
     await waitFor(() => expect(graphCallCount).toBe(2));
+  });
+
+  it("makes the canvas focusable with an accessible name naming the node count and arrow-key usage (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+      ],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    const container = await screen.findByTestId("cytoscape-container");
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    expect(container).toHaveAttribute("tabIndex", "0");
+    const label = container.getAttribute("aria-label") ?? "";
+    expect(label).toContain("2 nodes");
+    expect(label.toLowerCase()).toContain("arrow keys");
+  });
+
+  it("moves a roving keyboard focus between nodes with ArrowRight/ArrowLeft, ringed by .kb-focus, and centres the viewport (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+      ],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    const container = await screen.findByTestId("cytoscape-container");
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    expect(elementStore.get("e1")?.classes.has("kb-focus")).toBe(true);
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(false);
+    expect(mockCytoscapeInstance.center).toHaveBeenCalled();
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    expect(elementStore.get("e1")?.classes.has("kb-focus")).toBe(false);
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(true);
+
+    fireEvent.keyDown(container, { key: "ArrowLeft" });
+    expect(elementStore.get("e1")?.classes.has("kb-focus")).toBe(true);
+    expect(elementStore.get("e2")?.classes.has("kb-focus")).toBe(false);
+  });
+
+  it("calls onSelectionChange for the keyboard-focused node when Enter is pressed on the canvas, same path as a tap (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    const onSelectionChange = vi.fn();
+    renderWithProviders({ onSelectionChange });
+    const container = await screen.findByTestId("cytoscape-container");
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "Enter" });
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "node", id: "e1" });
+  });
+
+  it("returns focus to the toolbar's first control (hierarchy select) when Escape is pressed on the canvas (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    const container = await screen.findByTestId("cytoscape-container");
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "Escape" });
+
+    expect(document.activeElement).toBe(screen.getByTestId("hierarchy-select"));
+  });
+
+  it("selects the first node matching the typed label when Enter is pressed in the search box -- the workaround that used to select nothing (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [
+        { id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} },
+        { id: "e2", type: "employee", label: "Sara", parent: null, attributes: {} },
+      ],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    const onSelectionChange = vi.fn();
+    renderWithProviders({ onSelectionChange });
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    const search = screen.getByTestId("graph-search");
+    fireEvent.change(search, { target: { value: "sar" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "node", id: "e2" });
+  });
+
+  it("announces the keyboard-focused node's label in a polite live region as the selection moves (H-1)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    const container = await screen.findByTestId("cytoscape-container");
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    const live = screen.getByTestId("graph-live");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toHaveTextContent("");
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+
+    expect(live).toHaveTextContent("Ahmed");
   });
 });
 

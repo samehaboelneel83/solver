@@ -189,9 +189,19 @@ export default function GraphEditor({
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // H-1: the roving keyboard selection on the canvas -- which node last received Arrow-key
+  // focus, and the text a polite live region announces as it moves. Derived fresh from the
+  // live cytoscape instance at each keypress (see orderedNodeIds) rather than cached, so it
+  // stays correct as nodes are added/removed/relaid-out.
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [liveMessage, setLiveMessage] = useState("");
+  const [nodeSearch, setNodeSearch] = useState("");
   // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
   // closes it and returns focus here, rather than dropping focus back to the document body.
   const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
+  // H-1: Escape on the canvas returns focus to the toolbar's first control (the hierarchy
+  // select) rather than dropping it back to the document body.
+  const firstControlRef = useRef<HTMLSelectElement | null>(null);
 
   function closeCreateNodeForm() {
     setShowCreateNode(false);
@@ -268,6 +278,8 @@ export default function GraphEditor({
         },
         { selector: ".graph-highlighted", style: { "border-width": 3, "border-color": "#2563eb" } },
         { selector: ".graph-dimmed", style: { opacity: 0.25 } },
+        // H-1: the visible ring for the node currently holding keyboard (roving) focus.
+        { selector: ".kb-focus", style: { "border-width": 4, "border-color": "#f59e0b", "border-style": "solid" } },
       ],
     });
 
@@ -447,6 +459,124 @@ export default function GraphEditor({
     (cy as any).autoungrabify?.(next);
   }
 
+  // H-1: node ids ordered left-to-right, then top-to-bottom by current on-canvas position, so
+  // Arrow-key traversal is predictable. Recomputed from the live `cy` instance on every
+  // keypress rather than cached, so it stays correct after nodes are added/removed/relaid-out.
+  function orderedNodeIds(cy: Core): string[] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nodesColl: any = (cy as any).nodes?.();
+    const items: { id: string; x: number; y: number }[] =
+      nodesColl && typeof nodesColl.map === "function"
+        ? nodesColl.map((n: any) => {
+            const pos = typeof n.position === "function" ? n.position() : undefined;
+            return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0 };
+          })
+        : [];
+    items.sort((a, b) => a.x - b.x || a.y - b.y);
+    return items.map((item) => item.id);
+  }
+
+  // H-1: moves the roving keyboard selection to `id` -- clears the previous node's `.kb-focus`
+  // ring, applies it to the new one, centres the viewport on it, and updates the live region so
+  // a screen-reader user knows where focus landed.
+  function focusNode(id: string) {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyCy = cy as any;
+    if (focusedNodeId && focusedNodeId !== id) {
+      anyCy.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
+    }
+    const node = anyCy.getElementById?.(id);
+    node?.addClass?.("kb-focus");
+    anyCy.center?.(node);
+    setFocusedNodeId(id);
+    const label = node?.data?.("label");
+    setLiveMessage(typeof label === "string" && label ? label : id);
+  }
+
+  function moveFocus(direction: 1 | -1) {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    const ids = orderedNodeIds(cy);
+    if (ids.length === 0) {
+      return;
+    }
+    const currentIndex = focusedNodeId ? ids.indexOf(focusedNodeId) : -1;
+    const nextIndex =
+      currentIndex === -1
+        ? direction === 1
+          ? 0
+          : ids.length - 1
+        : Math.min(ids.length - 1, Math.max(0, currentIndex + direction));
+    focusNode(ids[nextIndex]);
+  }
+
+  // H-1: the canvas container's own keydown handler -- this is the keyboard path the graph
+  // editor previously had none of at all (tabIndex was -1 and refused focus). Arrow keys move
+  // the roving selection, Enter opens the property panel for the focused node via the same
+  // onSelectionChange path a tap takes, and Escape returns focus to the toolbar. Creating an
+  // edge by keyboard is explicitly out of scope -- that stays a pointer (drag) gesture.
+  function handleCanvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    switch (event.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        event.preventDefault();
+        moveFocus(1);
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        event.preventDefault();
+        moveFocus(-1);
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (focusedNodeId) {
+          onSelectionChangeRef.current?.({ kind: "node", id: focusedNodeId });
+        }
+        break;
+      case "Escape":
+        event.preventDefault();
+        firstControlRef.current?.focus();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // H-1: the documented keyboard workaround for "I know the node's label but can't click it" --
+  // typing into this box and pressing Enter used to select nothing at all. Enter now moves
+  // keyboard focus (and the property-panel selection) to the first node whose label contains
+  // the typed text, in the same left-to-right/top-to-bottom order Arrow-key traversal uses.
+  function handleNodeSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    const cy = cyRef.current;
+    const query = nodeSearch.trim().toLowerCase();
+    if (!cy || !query) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyCy = cy as any;
+    const ids = orderedNodeIds(cy);
+    const match = ids.find((id) => {
+      const label = anyCy.getElementById?.(id)?.data?.("label");
+      return typeof label === "string" && label.toLowerCase().includes(query);
+    });
+    if (!match) {
+      return;
+    }
+    focusNode(match);
+    onSelectionChangeRef.current?.({ kind: "node", id: match });
+    containerRef.current?.focus();
+  }
+
   function nodeEntityType(entityId: string): string | undefined {
     return data?.nodes.find((n) => n.id === entityId)?.type;
   }
@@ -540,6 +670,7 @@ export default function GraphEditor({
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <select
+          ref={firstControlRef}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
           value={hierarchyId ?? ""}
           onChange={(e) => onHierarchyChange(e.target.value || null)}
@@ -554,6 +685,20 @@ export default function GraphEditor({
             </option>
           ))}
         </select>
+        {/* H-1: the keyboard workaround for selecting a node without a mouse -- Enter here
+            moves keyboard focus (and the property-panel selection) to the first matching node,
+            same order Arrow-key traversal on the canvas uses. */}
+        <input
+          type="text"
+          value={nodeSearch}
+          onChange={(e) => setNodeSearch(e.target.value)}
+          onKeyDown={handleNodeSearchKeyDown}
+          placeholder="Search nodes by label…"
+          title="Type a node's label and press Enter to select it"
+          aria-label="Search nodes by label"
+          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          data-testid="graph-search"
+        />
         <button
           onClick={runLayout}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -788,7 +933,16 @@ export default function GraphEditor({
           ref={containerRef}
           data-testid="cytoscape-container"
           className="h-[calc(100vh-320px)] min-h-[420px] w-full"
+          tabIndex={0}
+          aria-label={`Graph canvas, ${data?.nodes.length ?? 0} nodes — use the arrow keys to move between nodes`}
+          onKeyDown={handleCanvasKeyDown}
         />
+        {/* H-1: a polite live region announcing the label of whichever node keyboard focus is
+            currently on, so a screen-reader user knows where the roving selection landed. Visually
+            hidden (sr-only) -- its content is for assistive tech, not sighted users. */}
+        <div data-testid="graph-live" aria-live="polite" className="sr-only">
+          {liveMessage}
+        </div>
         {/* A-6: with no nodes at all, the canvas was just an empty rectangle under the toolbar
             with nothing explaining why -- this overlay names the state and gives the one action
             that gets out of it. */}
