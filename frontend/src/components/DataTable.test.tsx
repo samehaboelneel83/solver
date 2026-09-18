@@ -244,7 +244,7 @@ describe("DataTable", () => {
       );
 
       const table = within(screen.getByRole("table"));
-      expect(table.queryByText("Delete")).not.toBeInTheDocument();
+      expect(screen.queryByText("Delete")).not.toBeInTheDocument();
 
       const trigger = table.getByTestId("row-actions");
       expect(trigger).toHaveAccessibleName("Actions for employee");
@@ -253,7 +253,10 @@ describe("DataTable", () => {
       expect(rect).toContain("w-8");
 
       fireEvent.click(trigger);
-      const deleteItem = table.getByRole("menuitem", { name: "Delete" });
+      // fix round 2: the menu itself now renders in a portal (outside the
+      // table, to escape its overflow clipping -- see DataTable.tsx), so
+      // it's queried unscoped rather than via `table`.
+      const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
       fireEvent.click(deleteItem);
 
       expect(window.confirm).toHaveBeenCalledWith('Delete "employee"? This cannot be undone.');
@@ -282,7 +285,7 @@ describe("DataTable", () => {
       fireEvent.click(table.getByTestId("row-actions"));
       expect(onRowClick).not.toHaveBeenCalled();
 
-      fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(onRowClick).not.toHaveBeenCalled();
       expect(onDelete).toHaveBeenCalledWith("1", "employee");
     });
@@ -303,7 +306,7 @@ describe("DataTable", () => {
         />
       );
       fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
-      fireEvent.click(within(screen.getByRole("table")).getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "Acme Corp"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("2", "Acme Corp");
 
@@ -325,7 +328,7 @@ describe("DataTable", () => {
       );
       const secondTable = within(within(secondContainer).getByRole("table"));
       fireEvent.click(secondTable.getByRole("button", { name: "Actions for this row" }));
-      fireEvent.click(secondTable.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "this row"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("3", "this row");
     });
@@ -348,7 +351,7 @@ describe("DataTable", () => {
 
       const table = within(screen.getByRole("table"));
       fireEvent.click(table.getByTestId("row-actions"));
-      fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
       expect(window.confirm).toHaveBeenCalled();
       expect(onDelete).not.toHaveBeenCalled();
@@ -370,10 +373,10 @@ describe("DataTable", () => {
 
       const table = within(screen.getByRole("table"));
       fireEvent.click(table.getByTestId("row-actions"));
-      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
       fireEvent.mouseDown(document.body);
-      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
     });
 
     it("closes the menu on Escape and returns focus to the trigger (fix round 2)", () => {
@@ -393,11 +396,11 @@ describe("DataTable", () => {
       const table = within(screen.getByRole("table"));
       const trigger = table.getByTestId("row-actions");
       fireEvent.click(trigger);
-      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
-      fireEvent.keyDown(table.getByRole("menuitem", { name: "Delete" }), { key: "Escape" });
+      fireEvent.keyDown(screen.getByRole("menuitem", { name: "Delete" }), { key: "Escape" });
 
-      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
 
@@ -418,11 +421,11 @@ describe("DataTable", () => {
       const table = within(screen.getByRole("table"));
       const trigger = table.getByTestId("row-actions");
       fireEvent.click(trigger);
-      expect(table.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
       fireEvent.keyDown(trigger, { key: "Escape" });
 
-      expect(table.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
       expect(trigger).toHaveFocus();
     });
 
@@ -448,12 +451,87 @@ describe("DataTable", () => {
 
       fireEvent.click(trigger);
       // Opening the card's menu doesn't also open the table's (independent
-      // per-instance state, not a single table-wide "open row" ref).
-      expect(within(screen.getByRole("table")).queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      // per-instance state, not a single table-wide "open row" ref) -- both
+      // instances' menus portal to the same document.body (fix round 2), so
+      // this is asserted by count rather than by DOM position: exactly one
+      // "Delete" menu item exists, not two.
+      expect(screen.getAllByRole("menuitem", { name: "Delete" })).toHaveLength(1);
 
-      fireEvent.click(card.getByRole("menuitem", { name: "Delete" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "employee"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("1", "employee");
+    });
+
+    // fix round 2: the menu used to be `absolute` inside the table's own
+    // `overflow-x-auto` wrapper, which clipped it vertically for a row near
+    // the bottom of the scrollable area -- CSS requires a non-`visible`
+    // `overflow-x` to make `overflow-y` compute to `auto` too, even though
+    // the wrapper only ever wanted horizontal scrolling. Confirmed live
+    // with `elementFromPoint` (not a Playwright click, which auto-scrolls a
+    // target into view and would hide this) that Delete was physically
+    // unreachable there. These two tests exercise the actual escape
+    // mechanism -- a portal at `position: fixed` -- rather than real
+    // browser layout, which jsdom doesn't compute.
+    it("renders the dropdown via a portal outside the table, at a fixed position, so the wrapper's overflow can't clip it (fix round 2, G-3)", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
+
+      const menu = screen.getByRole("menu");
+      expect(menu.parentElement).toBe(document.body);
+      expect(menu.closest("table")).toBeNull();
+      expect(menu.closest(".overflow-x-auto")).toBeNull();
+      expect(menu.style.position).toBe("fixed");
+    });
+
+    it("flips the dropdown to open upward when there isn't room below the trigger (fix round 2, G-3)", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const trigger = within(screen.getByRole("table")).getByTestId("row-actions");
+      // Simulate a trigger sitting right at the bottom of a short viewport
+      // -- the exact "last row of the scroll area" scenario that was
+      // clipped before this fix.
+      vi.spyOn(window, "innerHeight", "get").mockReturnValue(200);
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+        top: 190,
+        bottom: 198,
+        left: 10,
+        right: 42,
+        width: 32,
+        height: 8,
+        x: 10,
+        y: 190,
+        toJSON: () => {},
+      } as DOMRect);
+
+      fireEvent.click(trigger);
+
+      const menu = screen.getByRole("menu");
+      // Opens upward -- above the trigger's own top edge -- instead of the
+      // usual few pixels below its bottom edge.
+      expect(parseFloat(menu.style.top)).toBeLessThan(190);
     });
   });
 

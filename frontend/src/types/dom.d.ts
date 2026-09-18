@@ -6,10 +6,18 @@
 // Passed as a string (`""` / `undefined`) rather than a boolean because
 // React 18 doesn't recognize `inert` as one of its known boolean HTML
 // attributes and drops a literal `true` instead of rendering it.
+//
+// Typed as `"" | undefined` rather than a general `string` (fix round 2):
+// `inert` is a boolean HTML attribute, so `inert="false"` still *activates*
+// it -- a plain `string` type would let that typecheck while doing the
+// opposite of what it says. This also means the eventual `@types/react` 19
+// upgrade (which declares `inert?: boolean`) won't collide with this
+// module augmentation as a TS2717 duplicate/incompatible property error;
+// this file can simply be deleted once that upgrade happens.
 import "react";
 
 declare module "react" {
   interface HTMLAttributes<T> {
-    inert?: string;
+    inert?: "" | undefined;
   }
 }

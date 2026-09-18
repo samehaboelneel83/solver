@@ -162,7 +162,7 @@ describe("EntityList", () => {
 
     // The card layout (G-4) renders an equivalent trigger -- scope to the table.
     fireEvent.click(table.getByTestId("row-actions"));
-    fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     expect(await screen.findByText("row is referenced elsewhere")).toBeInTheDocument();
     (window.confirm as any).mockRestore();
@@ -185,7 +185,7 @@ describe("EntityList", () => {
 
     // The card layout (G-4) renders an equivalent trigger -- scope to the table.
     fireEvent.click(table.getByTestId("row-actions"));
-    fireEvent.click(table.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     const status = await screen.findByText("employee deleted");
     expect(status).toBeInTheDocument();

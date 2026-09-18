@@ -193,11 +193,11 @@ describe("AppShell", () => {
         fireEvent.click(screen.getByTestId("menu-toggle"));
 
         expect(aside).not.toHaveAttribute("inert");
-        // Focus lands on the first focusable control inside the drawer
-        // (Sign out, the first element in source order) instead of staying
-        // on the Menu button or falling through to page content behind the
-        // backdrop.
-        expect(screen.getByRole("button", { name: "Sign out" })).toHaveFocus();
+        // Focus lands on the drawer's own (non-interactive) heading, not on
+        // "Sign out" (fix round 2) -- it used to be first in DOM order,
+        // which left a user one Enter press from logging out the instant
+        // the drawer opened.
+        expect(screen.getByRole("heading", { name: "Problem Solver" })).toHaveFocus();
       });
 
       it("restores inert and returns focus to the Menu button when the drawer closes via Escape", async () => {
@@ -268,6 +268,88 @@ describe("AppShell", () => {
       // Not a stop on the normal Tab sequence -- it's meant to be
       // clicked/tapped, not tabbed to.
       expect(backdrop).toHaveAttribute("tabIndex", "-1");
+    });
+
+    // fix round 2: opening the drawer moved focus in (fix round 1), but
+    // nothing stopped Tab from walking back *out* of it -- measured at
+    // 375px, tabbing forward from the drawer landed on the Menu button,
+    // which the open drawer's own backdrop visually covers (a real click
+    // there hits the backdrop, not the button), and past it onto page
+    // content entirely. `axe` doesn't catch this either direction, so it's
+    // asserted directly rather than left to an automated scan.
+    describe("focus trap while open and off-canvas (fix round 2)", () => {
+      function lastFocusable(aside: HTMLElement): HTMLElement {
+        const all = aside.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        return all[all.length - 1];
+      }
+
+      it("wraps Tab forward from the drawer's last focusable control back to its first", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+        fireEvent.click(screen.getByTestId("menu-toggle"));
+
+        const aside = document.getElementById("sidebar-nav") as HTMLElement;
+        const last = lastFocusable(aside);
+        last.focus();
+        expect(last).toHaveFocus();
+
+        fireEvent.keyDown(document, { key: "Tab" });
+
+        // First tabbable control in the drawer (the heading itself is
+        // tabindex=-1 and not part of the normal sequence).
+        expect(screen.getByRole("button", { name: "Sign out" })).toHaveFocus();
+      });
+
+      it("wraps Shift+Tab backward from the drawer's first focusable control to its last", async () => {
+        renderWithProviders();
+        await screen.findByText("organization");
+        fireEvent.click(screen.getByTestId("menu-toggle"));
+
+        const aside = document.getElementById("sidebar-nav") as HTMLElement;
+        const signOut = screen.getByRole("button", { name: "Sign out" });
+        signOut.focus();
+        expect(signOut).toHaveFocus();
+
+        fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+
+        expect(lastFocusable(aside)).toHaveFocus();
+      });
+
+      it("does not trap Tab at the lg breakpoint, even if drawerOpen is somehow true", async () => {
+        const originalMatchMedia = window.matchMedia;
+        window.matchMedia = ((query: string) =>
+          ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+        try {
+          renderWithProviders();
+          await screen.findByText("organization");
+          // The toggle button is only visually hidden (lg:hidden) at this
+          // breakpoint, not removed -- clicking it still flips drawerOpen.
+          fireEvent.click(screen.getByTestId("menu-toggle"));
+
+          const aside = document.getElementById("sidebar-nav") as HTMLElement;
+          const last = lastFocusable(aside);
+          last.focus();
+
+          fireEvent.keyDown(document, { key: "Tab" });
+
+          // Not wrapped -- the static sidebar is never a focus trap.
+          expect(last).toHaveFocus();
+        } finally {
+          window.matchMedia = originalMatchMedia;
+        }
+      });
     });
   });
 

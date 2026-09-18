@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueries } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { optionLabelsQuery } from "../api/options";
@@ -92,6 +93,14 @@ function idsForColumns(rows: Row[], columns: string[]): string[] {
   return Array.from(values);
 }
 
+// G-3 fix round 2: a single "Delete" item is ~44px tall (the menu's own
+// `py-1` plus one item's `py-1.5` + text) -- used as a fallback estimate
+// for the very first layout pass, before the menu has actually rendered
+// into the portal and can report its own real height (see the comment on
+// RowActionsMenu below for why a two-pass measurement isn't worth the
+// complexity here).
+const MENU_HEIGHT_ESTIMATE = 44;
+
 /**
  * The row's delete affordance (G-3), factored out so it can be rendered once
  * in the table row and once in the small-screen card (fix round 1 for G-4) --
@@ -108,30 +117,85 @@ function RowActionsMenu({ row, label, onDelete }: { row: Row; label: string; onD
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [placement, setPlacement] = useState<{ top: number; right: number } | null>(null);
 
-  // Close this menu on an outside click.
+  // G-3 fix round 2: this menu used to be `absolute` inside the table's own
+  // `overflow-x-auto` wrapper. CSS requires a non-`visible` `overflow-x` to
+  // make `overflow-y` compute to `auto` too (per spec) even though the
+  // wrapper only ever wanted horizontal scrolling, so that wrapper clipped
+  // the dropdown vertically for any row near the bottom of the scrollable
+  // area -- Delete was physically unreachable there (confirmed with
+  // `elementFromPoint`, not a Playwright click, since Playwright
+  // auto-scrolls a target into view before clicking and would hide this).
+  // Rendering the dropdown into a portal at `position: fixed`, positioned
+  // from the trigger's own bounding rect, escapes every ancestor's overflow
+  // clipping -- including `<main>`'s `contain: layout`, which *is* a
+  // containing block for `position: fixed` descendants, but only for ones
+  // still inside it; portaling straight to `document.body` sidesteps that
+  // entirely. Flips upward when there isn't room below.
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPlacement(null);
+      return;
+    }
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUpward = spaceBelow < MENU_HEIGHT_ESTIMATE + 8;
+    setPlacement({
+      top: openUpward ? rect.top - MENU_HEIGHT_ESTIMATE - 4 : rect.bottom + 4,
+      right: window.innerWidth - rect.right,
+    });
+  }, [isOpen]);
+
+  // Close this menu on an outside click. The trigger is excluded explicitly
+  // now -- it's no longer a DOM ancestor of the (portaled) menu, so without
+  // this a click on the trigger to close an open menu would also be seen as
+  // an "outside" click and race with the trigger's own toggle handler.
   useEffect(() => {
     if (!isOpen) return;
     function handleClick(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setIsOpen(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [isOpen]);
 
-  return (
-    <div
-      className="relative inline-block"
-      ref={menuRef}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !isOpen) return;
-        event.stopPropagation();
+  // Escape closes the menu and returns focus to the trigger. A document
+  // listener (rather than onKeyDown on a wrapper) since the portaled menu
+  // is no longer a shared DOM subtree with the trigger to attach one to.
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
         setIsOpen(false);
         triggerRef.current?.focus();
-      }}
-    >
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
+  // Scrolling the table's horizontal-scroll wrapper would leave the
+  // portaled (viewport-fixed) menu visually detached from its trigger --
+  // simplest safe behaviour is to close it, same as any other outside
+  // interaction.
+  useEffect(() => {
+    if (!isOpen) return;
+    const scrollParent = triggerRef.current?.closest(".overflow-x-auto");
+    if (!scrollParent) return;
+    function handleScroll() {
+      setIsOpen(false);
+    }
+    scrollParent.addEventListener("scroll", handleScroll);
+    return () => scrollParent.removeEventListener("scroll", handleScroll);
+  }, [isOpen]);
+
+  return (
+    <>
       <button
         type="button"
         data-testid="row-actions"
@@ -147,26 +211,31 @@ function RowActionsMenu({ row, label, onDelete }: { row: Row; label: string; onD
       >
         <span aria-hidden="true">⋮</span>
       </button>
-      {isOpen && (
-        <div
-          role="menu"
-          className="absolute right-0 z-10 mt-1 min-w-[8rem] rounded-md border border-slate-200 bg-white py-1 shadow-md"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsOpen(false);
-              onDelete(row);
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+      {isOpen &&
+        placement &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: "fixed", top: placement.top, right: placement.right }}
+            className="z-10 min-w-[8rem] rounded-md border border-slate-200 bg-white py-1 shadow-md"
           >
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsOpen(false);
+                onDelete(row);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+            >
+              Delete
+            </button>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 

@@ -62,11 +62,12 @@ function getIsDesktop(): boolean {
   return window.matchMedia(DESKTOP_QUERY).matches;
 }
 
-/** The first element inside `root` that a keyboard user could Tab to. */
-function firstFocusable(root: HTMLElement): HTMLElement | null {
-  return root.querySelector<HTMLElement>(
-    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  );
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Every element inside `root` that a keyboard user could Tab to, in order. */
+function focusableElements(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
 }
 
 export default function AppShell() {
@@ -88,6 +89,7 @@ function AppShellContent() {
   const mainRef = useRef<HTMLElement>(null);
   const asideRef = useRef<HTMLElement>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const drawerHeadingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
   const confirmLeave = useConfirmLeave();
 
@@ -160,17 +162,40 @@ function AppShellContent() {
     setDrawerOpen(false);
   }, [location.pathname]);
 
+  // G-2 fix round 2: Escape closes the drawer as before; Tab/Shift+Tab are
+  // now trapped within it while it's open *and* off-canvas (below `lg`) --
+  // measured at 375px, tabbing forward from the drawer used to walk out
+  // onto the Menu button, which the open drawer's own backdrop visually
+  // covers (a real mouse click there hits the backdrop, not the button --
+  // confirmed with elementFromPoint -- so keyboard and pointer disagreed
+  // about what was reachable), and past it onto page content behind the
+  // backdrop entirely. The static `lg`+ sidebar is not a modal and must
+  // never trap Tab, hence the `isDesktop` guard -- matches `drawerInert`
+  // below in spirit (that gate is JS-tracked for the same reason).
   useEffect(() => {
     if (!drawerOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         closeDrawer();
+        return;
+      }
+      if (event.key !== "Tab" || isDesktop || !asideRef.current) return;
+      const focusable = focusableElements(asideRef.current);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerOpen]);
+  }, [drawerOpen, isDesktop]);
 
   // G-2 fix round 1: track the `lg` breakpoint in JS so the drawer's
   // accessibility state (below) can tell "closed drawer, below lg" (must be
@@ -197,11 +222,16 @@ function AppShellContent() {
 
   // ...and the reverse direction: when the drawer opens, move focus into it
   // (previously Tab from the Menu button went straight into the page content
-  // behind the backdrop -- focus never entered the drawer at all).
+  // behind the backdrop -- focus never entered the drawer at all). Targets
+  // the drawer's own (non-interactive, tabindex=-1) heading rather than the
+  // first focusable control -- fix round 2: that used to be "Sign out",
+  // which is merely first in DOM order, leaving a user one Enter press from
+  // logging out the moment the drawer opened. Tab from here still reaches
+  // Sign out next, same as before -- this only changes what receives focus
+  // *before* the user has pressed anything.
   useEffect(() => {
     if (isDesktop || !drawerOpen) return;
-    const target = asideRef.current && firstFocusable(asideRef.current);
-    target?.focus();
+    drawerHeadingRef.current?.focus();
   }, [drawerOpen, isDesktop]);
 
   // A-11/skip-link fix round 1: `<main>` is now the scroll container (see
@@ -257,7 +287,13 @@ function AppShellContent() {
         }`}
       >
         <div className="mb-4 flex items-center justify-between">
-          <span className="font-semibold text-slate-900">Problem Solver</span>
+          {/* fix round 2: focus target when the drawer opens (see the effect
+              above) -- non-interactive and `tabIndex={-1}` on purpose, so it
+              never joins the normal Tab sequence itself, it's just somewhere
+              safe to land focus before the user has pressed anything. */}
+          <h2 ref={drawerHeadingRef} tabIndex={-1} className="font-semibold text-slate-900">
+            Problem Solver
+          </h2>
           <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-slate-900">
             Sign out
           </button>
@@ -334,6 +370,15 @@ function AppShellContent() {
         // internal content categorically cannot affect an ancestor's
         // layout or scrolling area -- see index.css for the accompanying
         // `html { overflow-x: hidden }` backstop.
+        // fix round 2: `contain: layout` is not *only* an overflow fix --
+        // per spec it also makes this element a containing block for any
+        // `position: fixed`/`absolute` descendant and a new stacking
+        // context. That's safe today only because nothing inside `<main>`
+        // is fixed-positioned; the first one added later (a modal, a
+        // sticky toolbar) will silently size/position itself relative to
+        // `<main>` instead of the viewport, with no error to flag it.
+        // (DataTable.tsx's own row-actions menu portals to `document.body`
+        // specifically to stay outside this containing block.)
         className="min-h-0 min-w-0 flex-1 overflow-y-auto contain-layout bg-slate-50 p-6"
       >
         {/* G-2/G-5: below `lg` the sidebar is a drawer, hidden until this

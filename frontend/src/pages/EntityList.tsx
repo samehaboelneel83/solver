@@ -162,7 +162,12 @@ export default function EntityList() {
           value={searchInput}
           onChange={(event) => setSearchInput(event.target.value)}
           placeholder="Search…"
-          className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          // G-4 fix round 2: `w-64` is a fixed 16rem -- the one place left
+          // that didn't reflow, confirmed at 320px with a 32px browser
+          // default font (16rem*32px = 512px, pushing main's scrollWidth to
+          // 417 against a 320px client width). `max-w-full` lets it shrink
+          // to the container instead of forcing it wider.
+          className="w-64 max-w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
         />
         {Object.entries(filters).map(([key, value]) => (
           <span
