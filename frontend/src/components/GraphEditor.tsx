@@ -401,7 +401,15 @@ export default function GraphEditor({
   // re-centres/re-announces it; a plain mouse tap does NOT flow through this effect, since
   // GraphDemo only bumps the token from its search handler, not from every selection change.
   useEffect(() => {
-    if (!focusRequest || !cyRef.current) {
+    const cy = cyRef.current;
+    if (!focusRequest || !cy) {
+      return;
+    }
+    // Only act on a node this graph actually holds. The effect also runs on a
+    // fresh mount, so a request left over from a previous instance (switching
+    // organization remounts this component) would otherwise ring and announce
+    // an id that no longer exists here.
+    if ((cy as any).getElementById?.(focusRequest.nodeId)?.length === 0) {
       return;
     }
     focusNode(focusRequest.nodeId);

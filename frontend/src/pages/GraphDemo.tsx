@@ -92,6 +92,10 @@ export default function GraphDemo() {
     setHierarchyId(null);
     setSelection(null);
     setFilterState(DEFAULT_FILTER_STATE);
+    // GraphEditor is keyed by organization, so it remounts here and its
+    // focus-request effect runs afresh. Left set, a search from the previous
+    // organization would be replayed against a graph that has no such node.
+    setSearchFocus(null);
   }
 
   if (orgsLoading || !organizations) {
