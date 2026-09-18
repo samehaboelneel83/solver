@@ -423,7 +423,7 @@ describe("EntityForm accessible labelling (H-3)", () => {
     expect(screen.getByLabelText("is_active", { exact: false })).toBe(screen.getByTestId("field-is_active"));
   });
 
-  it("labels an FK field by wrapping it in the <label> (FkPicker's own internals aren't ours to change here) -- still findable by getByLabelText", () => {
+  it("associates an FK field's <label> with its picker via htmlFor/id -- findable by getByLabelText", () => {
     renderWithProviders();
 
     expect(screen.getByLabelText("organization_id")).toBe(screen.getByTestId("field-organization_id"));
@@ -524,6 +524,10 @@ describe("EntityForm one validation path (C-9, C-7, H-5)", () => {
 
     expect(screen.getByTestId("form-errors")).toHaveTextContent("Organization is required.");
     expect(onSubmit).not.toHaveBeenCalled();
+    // Carried forward from Task 5: the field itself (not just the error
+    // summary) must be marked for a screen-reader user navigating field by
+    // field -- this requires FkPicker to accept and forward aria-invalid.
+    expect(screen.getByTestId("field-organization_id")).toHaveAttribute("aria-invalid", "true");
   });
 });
 

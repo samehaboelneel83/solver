@@ -378,27 +378,27 @@ export default function EntityForm({
         return (
           <div key={field.name}>
             {isFk ? (
-              // FkPicker doesn't accept an `id`/aria-* passthrough (its
-              // internals are Task 6's to change), so this field is
-              // labelled by wrapping it in the <label> instead of
-              // htmlFor/id -- an equally valid accessible-name mechanism
-              // (WCAG 4.1.2 / axe's `label` rule accept either).
-              <label className="block text-sm font-medium text-slate-700">
-                {fieldLabel(field)}
-                {field.required && (
-                  <span className="text-red-500" aria-hidden="true">
-                    {" "}
-                    *
-                  </span>
-                )}
+              <>
+                <label htmlFor={id} className="block text-sm font-medium text-slate-700">
+                  {fieldLabel(field)}
+                  {field.required && (
+                    <span className="text-red-500" aria-hidden="true">
+                      {" "}
+                      *
+                    </span>
+                  )}
+                </label>
                 <FkPicker
+                  id={id}
                   fkTable={field.fk_table as string}
                   value={String(values[field.name] ?? "")}
                   onChange={(v) => setField(field.name, v)}
                   required={field.required}
+                  aria-invalid={hasError ? "true" : undefined}
+                  aria-describedby={hasError ? errorId(field.name) : undefined}
                   testId={`field-${field.name}`}
                 />
-              </label>
+              </>
             ) : (
               <>
                 <label htmlFor={id} className="block text-sm font-medium text-slate-700">

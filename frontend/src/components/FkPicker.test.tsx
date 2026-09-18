@@ -10,11 +10,11 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderPicker(value = "", onChange = vi.fn()) {
+function renderPicker(value = "", onChange = vi.fn(), extraProps: Record<string, unknown> = {}) {
   const queryClient = new QueryClient();
   render(
     <QueryClientProvider client={queryClient}>
-      <FkPicker fkTable="iam.organization" value={value} onChange={onChange} testId="field-organization_id" />
+      <FkPicker fkTable="iam.organization" value={value} onChange={onChange} testId="field-organization_id" {...extraProps} />
     </QueryClientProvider>
   );
   return onChange;
@@ -110,5 +110,176 @@ describe("FkPicker", () => {
       },
       { timeout: 2000 }
     );
+  });
+});
+
+// C-2: the field used to look like a plain, unlabelled text box -- nothing
+// signalled that typing searches a list, which is exactly what made C-1
+// (below) reachable in the first place.
+describe("FkPicker affordances (C-2)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          { schema: "iam", table: "organization", fields: [], label: "Organization", label_plural: "Organizations" },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  it("has a placeholder that says what it searches, derived from the target table's label", async () => {
+    renderPicker();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("field-organization_id")).toHaveAttribute("placeholder", "Search organizations…");
+    });
+  });
+
+  it("falls back to a generic placeholder when the target table's label isn't known", async () => {
+    (apiFetch as any).mockImplementation(() => Promise.resolve([]));
+    renderPicker();
+
+    expect(screen.getByTestId("field-organization_id")).toHaveAttribute("placeholder", "Search…");
+  });
+
+  it("renders a chevron affordance", () => {
+    renderPicker();
+
+    expect(screen.getByTestId("field-organization_id-chevron")).toBeInTheDocument();
+  });
+
+  it("shows a chosen value styled as a token, alongside the existing clear button", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/iam/organization/options?ids=org-1") {
+        return Promise.resolve([{ id: "org-1", label: "Acme" }]);
+      }
+      return Promise.resolve([]);
+    });
+    renderPicker("org-1");
+
+    const input = await screen.findByDisplayValue("Acme");
+    expect(input.className).toMatch(/bg-slate-100/);
+    expect(screen.getByRole("button", { name: "Clear selection" })).toBeInTheDocument();
+  });
+});
+
+// C-1: typing into the field and clicking away without picking from the
+// list used to silently empty it -- no message, no mark, so a user could
+// submit believing the field was set.
+describe("FkPicker keeps typed text instead of silently discarding it (C-1)", () => {
+  beforeEach(() => {
+    // Matches on the decoded `q` param rather than the raw path string, so
+    // this survives URL-encoding of spaces/case in a typed query like "Nur
+    // Hospital" instead of silently never matching.
+    (apiFetch as any).mockImplementation((path: string) => {
+      const q = new URL(path, "http://example.test").searchParams.get("q") ?? "";
+      if (q.toLowerCase() === "nur hospital") {
+        return Promise.resolve([{ id: "org-2", label: "Nur Hospital" }]);
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  it("keeps the typed text and shows a 'no match' message on blur when nothing was selected", async () => {
+    const onChange = renderPicker();
+
+    const input = screen.getByTestId("field-organization_id");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "zzz" } });
+    await waitFor(
+      () => {
+        expect(screen.getByText("No matches")).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+
+    fireEvent.blur(input);
+
+    expect((input as HTMLInputElement).value).toBe("zzz");
+    expect(screen.getByText("No match — choose from the list")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("selects the option instead of showing 'no match' when exactly one option matches the typed text exactly", async () => {
+    const onChange = renderPicker();
+
+    const input = screen.getByTestId("field-organization_id");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Nur Hospital" } });
+    await screen.findByRole("option", { name: "Nur Hospital" });
+
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith("org-2");
+    await waitFor(() => {
+      expect((input as HTMLInputElement).value).toBe("Nur Hospital");
+    });
+    expect(screen.queryByText("No match — choose from the list")).not.toBeInTheDocument();
+  });
+});
+
+// H-12 (combobox half): aria-activedescendant was never set, so a
+// screen-reader user arrowing through options was never told which option
+// was highlighted, and aria-controls pointed at a listbox id that didn't
+// exist until the user typed.
+describe("FkPicker combobox accessibility (H-12)", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/iam/organization/options?q=nur")) {
+        return Promise.resolve([
+          { id: "org-2", label: "Nur Hospital" },
+          { id: "org-3", label: "Nurse Depot" },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+  });
+
+  it("has no aria-activedescendant until an option is highlighted, then tracks it while arrowing", async () => {
+    renderPicker();
+
+    const input = screen.getByTestId("field-organization_id");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "nur" } });
+    const first = await screen.findByRole("option", { name: "Nur Hospital" });
+    const second = screen.getByRole("option", { name: "Nurse Depot" });
+
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", first.id);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", second.id);
+  });
+
+  it("only sets aria-controls while the listbox is actually rendered", async () => {
+    renderPicker();
+
+    const input = screen.getByTestId("field-organization_id");
+    expect(input).not.toHaveAttribute("aria-controls");
+
+    fireEvent.focus(input);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-controls", screen.getByRole("listbox").id);
+
+    fireEvent.blur(input);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-controls");
+  });
+});
+
+// Carried forward from Task 5's review: EntityForm couldn't mark a
+// required-but-empty FK field because FkPicker didn't accept or forward
+// aria-invalid/aria-describedby/id.
+describe("FkPicker forwards id/aria-invalid/aria-describedby", () => {
+  it("passes id, aria-invalid and aria-describedby through to the input", () => {
+    renderPicker("", vi.fn(), { id: "my-fk-field", "aria-invalid": "true", "aria-describedby": "my-fk-field-error" });
+
+    const input = screen.getByTestId("field-organization_id");
+    expect(input).toHaveAttribute("id", "my-fk-field");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "my-fk-field-error");
   });
 });
