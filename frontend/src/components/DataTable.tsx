@@ -44,13 +44,23 @@ function recordLabel(row: Row): string {
 }
 
 /**
- * A column that shows a raw or resolved identifier rather than the record's
- * own business data: the primary key, and any `*_id` foreign-key field
- * (E-4). Hidden by default (behind "Show identifiers") so a wrapped
- * 36-character UUID doesn't push meaningful columns out of view.
+ * A column that can only ever show a bare, unreadable identifier: the
+ * primary key `id`, or a `uuid`-typed column with nowhere to resolve a
+ * label from (not a foreign key). Hidden by default (behind "Show
+ * identifiers") so a wrapped 36-character UUID doesn't push meaningful
+ * columns out of view (E-4).
+ *
+ * A foreign-key column is deliberately *not* an identifier column, even
+ * though its name typically ends in `_id`: Task 3 already resolves it to a
+ * human label ("Nurse", "Default Organization"), which is real information
+ * a planner scans the list for. If a given row's label lookup fails, that
+ * one cell falls back to showing its raw id -- the column itself stays
+ * visible rather than being hidden for the whole table over one failed
+ * lookup.
  */
-function isIdentifierColumn(name: string): boolean {
-  return name === "id" || name.endsWith("_id");
+function isIdentifierColumn(field: FieldMeta): boolean {
+  if (field.name === "id") return true;
+  return field.type === "uuid" && !field.is_fk;
 }
 
 function idsForColumns(rows: Row[], columns: string[]): string[] {
@@ -96,7 +106,7 @@ export default function DataTable({
     setSearchParams(next);
   }
 
-  const displayFields = showIds ? fields : fields.filter((f) => !isIdentifierColumn(f.name));
+  const displayFields = showIds ? fields : fields.filter((f) => !isIdentifierColumn(f));
 
   const [openMenuRowId, setOpenMenuRowId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);

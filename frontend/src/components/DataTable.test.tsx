@@ -404,6 +404,56 @@ describe("DataTable", () => {
       expect(screen.getByText("id")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Hide identifiers" })).toBeInTheDocument();
     });
+
+    it("keeps a labelled foreign-key column visible on the default view, hiding only the raw `id` column, and reveals `id` via ?ids=1 (fix round 1)", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.includes("/options")) {
+          return Promise.resolve([{ id: "org-1", label: "Default Organization" }]);
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+
+      const fieldsWithFk = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        {
+          name: "organization_id",
+          type: "uuid" as const,
+          required: true,
+          writable: true,
+          is_fk: true,
+          fk_table: "iam.organization",
+          label: "Organization",
+        },
+        { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label: "Code" },
+      ];
+      const rowsWithFk = [{ id: "1", organization_id: "org-1", code: "employee" }];
+
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fieldsWithFk}
+          rows={rowsWithFk}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      // The raw primary key is hidden by default...
+      expect(screen.queryByText("id")).not.toBeInTheDocument();
+      // ...but the labelled FK column is shown and resolves to its label,
+      // not tucked away just because its name ends in `_id`.
+      expect(screen.getByText("Organization")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Default Organization")).toBeInTheDocument();
+      });
+
+      // Toggling "Show identifiers" reveals the id column too.
+      fireEvent.click(screen.getByRole("button", { name: "Show identifiers" }));
+      expect(screen.getByText("id")).toBeInTheDocument();
+    });
   });
 
   describe("empty state (A-5)", () => {
@@ -453,10 +503,11 @@ describe("DataTable", () => {
           offset={0}
           onPageChange={vi.fn()}
           onDelete={vi.fn()}
-        />,
-        "/?ids=1"
+        />
       );
 
+      // organization_id is a labelled FK column, visible without toggling
+      // identifiers (fix round 1) -- only the raw `id` column is hidden.
       expect(screen.getByText("Organization")).toBeInTheDocument();
       expect(screen.getByText("Code")).toBeInTheDocument();
       expect(screen.queryByText("organization_id")).not.toBeInTheDocument();
@@ -516,11 +567,10 @@ describe("DataTable", () => {
           offset={0}
           onPageChange={vi.fn()}
           onDelete={vi.fn()}
-        />,
-        // organization_id is an identifier-shaped column, so show it: the
-        // FK-label resolution behavior under test is independent of the
-        // show/hide-identifiers toggle.
-        "/?ids=1"
+        />
+        // organization_id is a labelled FK column, so it's visible on the
+        // default view (fix round 1) -- no need to toggle identifiers to
+        // exercise the FK-label resolution behavior under test.
       );
 
       expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeInTheDocument();
@@ -533,8 +583,11 @@ describe("DataTable", () => {
       expect(call[0]).toContain("/api/iam/organization/options");
       expect(call[0]).toContain("ids=11111111-1111-1111-1111-111111111111");
 
-      const cell = screen.getByText("Acme Corp");
-      expect(cell.getAttribute("title")).toBe("11111111-1111-1111-1111-111111111111");
+      // organization_id is now the first *visible* column (since `id` is
+      // hidden by default), so its cell wraps the resolved label in the
+      // row's link -- the raw id lives in `title` on the containing <td>.
+      const cell = screen.getByText("Acme Corp").closest("td");
+      expect(cell).toHaveAttribute("title", "11111111-1111-1111-1111-111111111111");
     });
 
     it("does not throw when the number of FK tables changes between renders without a key change", async () => {
