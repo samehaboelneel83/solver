@@ -849,6 +849,14 @@ describe("GraphEditor", () => {
     renderWithProviders();
     const container = await screen.findByTestId("cytoscape-container");
 
+    // T11: `aria-label` is prohibited on a bare <div> (implicit role
+    // `generic`) -- axe reported `aria-prohibited-attr` (serious) on every
+    // graph page state, meaning the accessible name below was discarded.
+    // `application` permits the name and keeps the advertised arrow-key
+    // navigation reachable instead of being swallowed by browse mode.
+    expect(container).toHaveAttribute("role", "application");
+    expect(container.getAttribute("aria-label") ?? "").toMatch(/arrow keys/i);
+
     expect(container.getAttribute("style") ?? "").not.toContain("600px");
     // F-4, carried forward from Task 8: no more `100vh - <guessed chrome
     // height>` calc either -- the canvas fills whatever space flexbox

@@ -927,6 +927,13 @@ export default function GraphEditor({
           data-testid="cytoscape-container"
           className="h-full min-h-[420px] w-full"
           tabIndex={0}
+          // T11: a bare <div> has the implicit role `generic`, which prohibits
+          // `aria-label` -- axe flagged this as `aria-prohibited-attr` (serious)
+          // on every graph page state, so the name below was being discarded.
+          // `application` is also what makes the arrow-key roving selection this
+          // label advertises actually reachable: without it a screen reader stays
+          // in browse mode and swallows the arrow keys before `onKeyDown` sees them.
+          role="application"
           aria-label={`Graph canvas, ${data?.nodes.length ?? 0} nodes — use the arrow keys to move between nodes`}
           onKeyDown={handleCanvasKeyDown}
         />

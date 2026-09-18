@@ -179,19 +179,33 @@ function RowActionsMenu({ row, label, onDelete }: { row: Row; label: string; onD
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Scrolling the table's horizontal-scroll wrapper would leave the
-  // portaled (viewport-fixed) menu visually detached from its trigger --
-  // simplest safe behaviour is to close it, same as any other outside
-  // interaction.
+  // The menu is `position: fixed`, positioned once from the trigger's rect in
+  // the layout effect above, so anything that moves the trigger afterwards
+  // leaves it stranded at stale viewport coordinates.
+  //
+  // T11 fix: this previously listened only on the table's own
+  // `.overflow-x-auto` wrapper, which missed the two cases that actually
+  // happen. `<main>` is the app's scroll container, so scrolling the page
+  // slid the row out from under the menu -- measured at 150px of drift
+  // (trigger moved 217 -> 67 while the menu stayed pinned at 253), leaving
+  // a Delete floating over an unrelated row. A window resize stranded it
+  // too (124px horizontal offset), since the stored `right` is an offset
+  // from the old viewport width.
+  //
+  // `scroll` doesn't bubble, so the listener is registered in the capture
+  // phase on `window` to catch it from *any* scrolling ancestor -- `<main>`,
+  // the table wrapper, or any future one -- rather than naming a class.
   useEffect(() => {
     if (!isOpen) return;
-    const scrollParent = triggerRef.current?.closest(".overflow-x-auto");
-    if (!scrollParent) return;
-    function handleScroll() {
+    function dismiss() {
       setIsOpen(false);
     }
-    scrollParent.addEventListener("scroll", handleScroll);
-    return () => scrollParent.removeEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [isOpen]);
 
   return (

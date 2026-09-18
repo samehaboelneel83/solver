@@ -379,6 +379,62 @@ describe("DataTable", () => {
       expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
     });
 
+    // T11: the menu is `position: fixed`, placed once from the trigger's rect,
+    // so anything that moves the trigger afterwards strands it. `<main>` is the
+    // app's scroll container; measured live, scrolling it 150px left the menu
+    // pinned at its old coordinates while its row moved out from under it
+    // (150px drift), and a 1280->900 resize stranded it 124px sideways. jsdom
+    // has no layout, so these assert the dismissal contract rather than pixels.
+    it("closes the menu when an ancestor scrolls, so it cannot strand at stale coordinates (T11)", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      fireEvent.click(table.getByTestId("row-actions"));
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+      // `scroll` does not bubble, so this only reaches the handler if it is
+      // registered in the capture phase on window -- which is the fix.
+      const main = document.createElement("main");
+      document.body.appendChild(main);
+      fireEvent.scroll(main);
+
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+    });
+
+    it("closes the menu on a window resize (T11)", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      fireEvent.click(table.getByTestId("row-actions"));
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+      fireEvent.resize(window);
+
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+    });
+
     it("closes the menu on Escape and returns focus to the trigger (fix round 2)", () => {
       renderTable(
         <DataTable
