@@ -96,34 +96,55 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
     return null;
   }
 
+  function renderChild(child: ChildRef, index: number) {
+    const result = counts[index];
+    const count = result?.data?.total;
+    const countNode = result?.isError ? (
+      <span title="Count unavailable">?</span>
+    ) : count === undefined ? (
+      "…"
+    ) : (
+      count
+    );
+    const listHref = `/${child.schema}/${child.table}?f_${child.field}=${encodeURIComponent(id)}`;
+    const newHref = `/${child.schema}/${child.table}/new?${child.field}=${encodeURIComponent(id)}`;
+    return (
+      <li key={`${child.schema}.${child.table}.${child.field}`} className="flex items-center gap-3 text-sm">
+        <Link to={listHref} className="text-blue-600 underline">
+          {child.label} ({countNode})
+        </Link>
+        <Link to={newHref} className="text-slate-500 underline">
+          New
+        </Link>
+      </li>
+    );
+  }
+
+  // E-6: a problem with one non-empty child and several empty ones used to
+  // list every "(0)" child at equal weight, burying the one that matters.
+  // A child only counts as "empty" once its count has actually resolved to
+  // zero -- still-loading ("…") and errored ("?") rows stay in the main
+  // list rather than being provisionally hidden.
+  const nonEmpty: { child: ChildRef; index: number }[] = [];
+  const empty: { child: ChildRef; index: number }[] = [];
+  children.forEach((child, index) => {
+    const result = counts[index];
+    const isConfirmedEmpty = !result?.isError && result?.data?.total === 0;
+    (isConfirmedEmpty ? empty : nonEmpty).push({ child, index });
+  });
+
   return (
     <div className="mt-6 border-t border-slate-200 pt-4">
       <h2 className="mb-2 text-sm font-semibold text-slate-900">Related records</h2>
-      <ul className="space-y-1">
-        {children.map((child, index) => {
-          const result = counts[index];
-          const count = result?.data?.total;
-          const countNode = result?.isError ? (
-            <span title="Count unavailable">?</span>
-          ) : count === undefined ? (
-            "…"
-          ) : (
-            count
-          );
-          const listHref = `/${child.schema}/${child.table}?f_${child.field}=${encodeURIComponent(id)}`;
-          const newHref = `/${child.schema}/${child.table}/new?${child.field}=${encodeURIComponent(id)}`;
-          return (
-            <li key={`${child.schema}.${child.table}.${child.field}`} className="flex items-center gap-3 text-sm">
-              <Link to={listHref} className="text-blue-600 underline">
-                {child.label} ({countNode})
-              </Link>
-              <Link to={newHref} className="text-slate-500 underline">
-                New
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+      <ul className="space-y-1">{nonEmpty.map(({ child, index }) => renderChild(child, index))}</ul>
+      {empty.length > 0 && (
+        <details className="mt-2 text-sm text-slate-500">
+          <summary className="cursor-pointer select-none hover:text-slate-700">
+            Show {empty.length} empty
+          </summary>
+          <ul className="mt-1 space-y-1">{empty.map(({ child, index }) => renderChild(child, index))}</ul>
+        </details>
+      )}
     </div>
   );
 }

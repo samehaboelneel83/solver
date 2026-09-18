@@ -275,6 +275,55 @@ describe("RelatedRecords", () => {
     expect(screen.queryByText(/variable_definition \(/)).not.toBeInTheDocument();
   });
 
+  it("sorts non-empty children first and collapses confirmed-empty ones behind a 'Show N empty' disclosure (E-6)", async () => {
+    renderRelated("problem", "problem", "p1");
+
+    const nonEmptyLink = await screen.findByText("variable_definition (3)");
+    const summary = await screen.findByText("Show 1 empty");
+
+    // The non-empty child appears before the disclosure in document order.
+    // eslint-disable-next-line no-bitwise
+    expect(nonEmptyLink.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const details = summary.closest("details") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+
+    // The empty child is still in the DOM (available to assistive tech and
+    // to this assertion), just tucked behind the closed disclosure.
+    expect(screen.getByText("constraint_definition (0)")).toBeInTheDocument();
+  });
+
+  it("keeps a still-loading child in the main list rather than provisionally hiding it", async () => {
+    let resolveCount: ((value: { items: unknown[]; total: number }) => void) | undefined;
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(SCHEMA_WITH_CHILDREN);
+      }
+      if (path === "/api/problem/variable_definition/?f_problem_id=p1&limit=1") {
+        return new Promise((resolve) => {
+          resolveCount = resolve;
+        });
+      }
+      if (path === "/api/problem/constraint_definition/?f_problem_id=p1&limit=1") {
+        return Promise.resolve({ items: [], total: 0 });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderRelated("problem", "problem", "p1");
+
+    // The still-loading child (variable_definition) is not behind the
+    // disclosure -- only the confirmed-empty constraint_definition is.
+    expect(await screen.findByText("variable_definition (…)")).toBeInTheDocument();
+    expect(await screen.findByText("Show 1 empty")).toBeInTheDocument();
+
+    resolveCount?.({ items: [{ id: "v1" }], total: 2 });
+    await waitFor(() => {
+      expect(screen.getByText("variable_definition (2)")).toBeInTheDocument();
+    });
+  });
+
   it("shows a '?' with a title when a count query fails, instead of the loading placeholder forever", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/meta/schema") {

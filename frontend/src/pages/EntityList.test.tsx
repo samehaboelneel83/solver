@@ -134,7 +134,8 @@ describe("EntityList", () => {
     renderWithProviders("/domain/entity_type");
     await screen.findByText("employee");
 
-    fireEvent.click(screen.getByText("Delete"));
+    fireEvent.click(screen.getByTestId("row-actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     expect(await screen.findByText("row is referenced elsewhere")).toBeInTheDocument();
     (window.confirm as any).mockRestore();
@@ -155,10 +156,11 @@ describe("EntityList", () => {
     renderWithProviders("/domain/entity_type");
     await screen.findByText("employee");
 
-    fireEvent.click(screen.getByText("Delete"));
+    fireEvent.click(screen.getByTestId("row-actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
-    const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent("employee deleted");
+    const status = await screen.findByText("employee deleted");
+    expect(status).toBeInTheDocument();
     (window.confirm as any).mockRestore();
   });
 
@@ -274,7 +276,10 @@ describe("EntityList human-readable titles and headers (B-1)", () => {
   });
 
   it("renders column headers using field labels instead of raw snake_case names", async () => {
-    renderWithProviders("/domain/entity_type");
+    // organization_id is an identifier-shaped column (E-4), hidden by
+    // default behind "Show identifiers" -- show it via the URL so this test
+    // can assert its label independently of that toggle.
+    renderWithProviders("/domain/entity_type?ids=1");
     await screen.findByRole("heading", { name: "Entity types" });
 
     expect(screen.getByText("Organization")).toBeInTheDocument();

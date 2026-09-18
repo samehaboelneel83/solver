@@ -137,6 +137,7 @@ export default function EntityList() {
     newLinkParams.set(key, value);
   }
   const newLinkQuery = newLinkParams.toString();
+  const newHref = `/${schemaName}/${tableName}/new${newLinkQuery ? `?${newLinkQuery}` : ""}`;
 
   return (
     <div>
@@ -148,7 +149,7 @@ export default function EntityList() {
           </p>
         </div>
         <Link
-          to={`/${schemaName}/${tableName}/new${newLinkQuery ? `?${newLinkQuery}` : ""}`}
+          to={newHref}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
         >
           New
@@ -206,6 +207,10 @@ export default function EntityList() {
       {data && table && (
         <DataTable
           key={`${schemaName}.${tableName}`}
+          schema={schemaName}
+          table={tableName}
+          tableLabel={headingLabel}
+          newHref={newHref}
           fields={table.fields}
           rows={data.items}
           total={data.total}
