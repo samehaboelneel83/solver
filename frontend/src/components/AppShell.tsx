@@ -61,7 +61,14 @@ function matchesFilter(table: TableMeta, filter: string): boolean {
 // same reflow reasons -- see that file). Written in em here too so this JS
 // check tracks the CSS one even when the root font size changes, instead of
 // silently diverging from it at a raw pixel value.
-const DESKTOP_QUERY = "(min-width: 64em)";
+//
+// This and tailwind.config.js's `lg` value are two independent string
+// literals -- nothing at build time ties them together, since the Tailwind
+// config is loaded by Node/PostCSS outside the app's own TS/Vite pipeline
+// and can't cleanly import from `src`. Exported so AppShell.breakpoint.test.tsx
+// can read tailwind.config.js's own source and assert the two values still
+// agree; that test is the actual guard against drift, not this comment.
+export const DESKTOP_QUERY = "(min-width: 64em)";
 
 function getIsDesktop(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
@@ -165,6 +172,13 @@ function AppShellContent() {
       return;
     }
     mainRef.current?.focus();
+    // Same fix as the skip link's own handler below (see its comment): focus()
+    // alone scrolls *ancestors* of the focused element into view, not main's
+    // own internal scrollTop. Without this, navigating away from a scrolled
+    // list opened the new route mid-content instead of at the top.
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+    }
   }, [location.pathname]);
 
   // The drawer closes on every route change (a nav click already closes it via

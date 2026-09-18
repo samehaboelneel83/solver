@@ -4,7 +4,7 @@ import { useQueries } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { optionLabelsQuery } from "../api/options";
 import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
-import { fieldLabel, lowerFirst } from "../lib/labels";
+import { fieldLabel, lowerFirst, recordLabel } from "../lib/labels";
 import { formatCellValue } from "../lib/format";
 import type { FieldMeta } from "../types/meta";
 
@@ -31,19 +31,6 @@ type DataTableProps = {
   onDelete: (id: string, label: string) => void;
   onRowClick?: (id: string) => void;
 };
-
-/**
- * Human-readable name for a row, so the delete confirmation (D-6) can say
- * "Delete "employee"?" instead of the anonymous "Delete this row?" that reads
- * identically for every row in the table. Prefers `code` (usually the
- * stable, human-assigned identifier) over `name`, then falls back to a
- * generic phrase when neither is present.
- */
-function recordLabel(row: Row): string {
-  if (typeof row.code === "string" && row.code) return row.code;
-  if (typeof row.name === "string" && row.name) return row.name;
-  return "this row";
-}
 
 /**
  * A column that can only ever show a bare, unreadable identifier: the
@@ -79,6 +66,19 @@ function shouldIgnoreRowClick(event: React.MouseEvent<HTMLElement>): boolean {
   if (event.button !== 0) return true;
   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return true;
   return Boolean((event.target as HTMLElement).closest("a"));
+}
+
+/**
+ * Whether a row's `id` is usable for building a real `<a href>`/navigation
+ * target. On master this was only ever read inside an `onClick`, so a
+ * missing id silently degraded to a no-op click; it's now built into a real
+ * `<a href="…">` rendered twice per row (here and in the small-screen card),
+ * so an unguarded `String(row.id)` would instead render a live link to
+ * "…/undefined". Defensive ahead of the next project's move to composite
+ * primary keys, where a single `id` column may not exist at all.
+ */
+function hasUsableId(row: Row): boolean {
+  return row.id !== null && row.id !== undefined && row.id !== "";
 }
 
 function idsForColumns(rows: Row[], columns: string[]): string[] {
@@ -229,24 +229,48 @@ function RowActionsMenu({ row, label, onDelete }: { row: Row; label: string; onD
       {isOpen &&
         placement &&
         createPortal(
+          // axe's "region" best-practice rule flags any visible node with real
+          // content whose own role isn't a landmark/aria-live role (or button/
+          // iframe/skip-link) -- role="menu" on the menu itself does not exempt
+          // it, so this portal (a direct child of <body>, outside every
+          // landmark) was the violation's own target, not some ancestor
+          // missing a landmark. Swapping role="menu" for a landmark role here
+          // isn't an option either: role="menuitem" below requires an
+          // ancestor with role="menu"/"menubar"/"group", so removing it would
+          // trade this moderate/best-practice finding for a WCAG-A
+          // aria-required-parent one. A role="region" wrapper around the
+          // existing, unchanged menu is itself exempt and stops axe's
+          // traversal before it reaches the menu -- the real menu/menuitem
+          // semantics stay exactly as they were.
           <div
-            ref={menuRef}
-            role="menu"
+            role="region"
+            aria-label="Row actions"
             style={{ position: "fixed", top: placement.top, right: placement.right }}
-            className="z-10 min-w-[8rem] rounded-md border border-slate-200 bg-white py-1 shadow-md"
+            // G-6: was z-10, the lowest of the app's four fixed layers (toast
+            // z-50, drawer z-40, backdrop z-30) -- a toast is pointer-events-
+            // auto, so overlap was geometrically possible at short viewports
+            // even though it couldn't be reproduced. z-[60] puts the menu
+            // above all of them.
+            className="z-[60]"
           >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={(event) => {
-                event.stopPropagation();
-                setIsOpen(false);
-                onDelete(row);
-              }}
-              className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+            <div
+              ref={menuRef}
+              role="menu"
+              className="min-w-[8rem] rounded-md border border-slate-200 bg-white py-1 shadow-md"
             >
-              Delete
-            </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsOpen(false);
+                  onDelete(row);
+                }}
+                className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+              >
+                Delete
+              </button>
+            </div>
           </div>,
           document.body
         )}
@@ -302,7 +326,7 @@ export default function DataTable({
   }
 
   function handleDeleteClick(row: Row) {
-    const label = recordLabel(row);
+    const label = recordLabel({ fields }, row) ?? "this row";
     if (window.confirm(`Delete "${label}"? This cannot be undone.`)) {
       onDelete(String(row.id), label);
     }
@@ -364,29 +388,34 @@ export default function DataTable({
           the table below takes over. Both markups are always in the DOM --
           only one is visible at a time via the `md:` classes. */}
       <div className="grid grid-cols-1 gap-3 md:hidden" data-testid="datatable-cards">
-        {rows.map((row) => {
-          const rowId = String(row.id);
-          const rowHref = `/${schema}/${table}/${rowId}`;
-          const label = recordLabel(row);
+        {rows.map((row, index) => {
+          const rowId = hasUsableId(row) ? String(row.id) : undefined;
+          const rowHref = rowId !== undefined ? `/${schema}/${table}/${rowId}` : undefined;
+          const label = recordLabel({ fields }, row) ?? "this row";
           const firstField = displayFields[0];
           const restFields = displayFields.slice(1);
           const first = firstField ? cellContent(firstField, row) : null;
           return (
             <div
-              key={rowId}
+              key={rowId ?? `row-${index}`}
               data-testid="datatable-card"
               onClick={(event) => {
                 if (shouldIgnoreRowClick(event)) return;
-                onRowClick?.(rowId);
+                if (rowId !== undefined) onRowClick?.(rowId);
               }}
               className={`rounded-md border border-slate-200 bg-white p-3 ${onRowClick ? "cursor-pointer" : ""}`}
             >
               <div className="mb-2 flex items-start justify-between gap-2">
-                {firstField && (
-                  <Link to={rowHref} title={first?.title} className="font-medium text-blue-700 hover:underline">
-                    {first?.content}
-                  </Link>
-                )}
+                {firstField &&
+                  (rowHref !== undefined ? (
+                    <Link to={rowHref} title={first?.title} className="font-medium text-blue-700 hover:underline">
+                      {first?.content}
+                    </Link>
+                  ) : (
+                    <span title={first?.title} className="font-medium text-slate-900">
+                      {first?.content}
+                    </span>
+                  ))}
                 {/* G-4 fix round 1: below 768px the table (and its only
                     actions trigger) is hidden -- without this, there was no
                     way to delete a record on a narrow screen at all. */}
@@ -459,16 +488,16 @@ export default function DataTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
-              const rowId = String(row.id);
-              const rowHref = `/${schema}/${table}/${rowId}`;
-              const label = recordLabel(row);
+            {rows.map((row, rowIndex) => {
+              const rowId = hasUsableId(row) ? String(row.id) : undefined;
+              const rowHref = rowId !== undefined ? `/${schema}/${table}/${rowId}` : undefined;
+              const label = recordLabel({ fields }, row) ?? "this row";
               return (
                 <tr
-                  key={rowId}
+                  key={rowId ?? `row-${rowIndex}`}
                   onClick={(event) => {
                     if (shouldIgnoreRowClick(event)) return;
-                    onRowClick?.(rowId);
+                    if (rowId !== undefined) onRowClick?.(rowId);
                   }}
                   className={`border-b border-slate-100 hover:bg-slate-50 ${onRowClick ? "cursor-pointer" : ""}`}
                 >
@@ -477,9 +506,13 @@ export default function DataTable({
                     if (index === 0) {
                       return (
                         <td key={field.name} className="px-3 py-2" title={title}>
-                          <Link to={rowHref} className="font-medium text-blue-700 hover:underline">
-                            {content}
-                          </Link>
+                          {rowHref !== undefined ? (
+                            <Link to={rowHref} className="font-medium text-blue-700 hover:underline">
+                              {content}
+                            </Link>
+                          ) : (
+                            <span className="font-medium text-slate-900">{content}</span>
+                          )}
                         </td>
                       );
                     }

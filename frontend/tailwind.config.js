@@ -14,6 +14,13 @@ export default {
     // to Tailwind's px defaults at the default 16px root (40em = 640px,
     // 48em = 768px, 64em = 1024px, 80em = 1280px), so nothing changes for a
     // default-zoom user.
+    // `lg` here and `DESKTOP_QUERY` in AppShell.tsx are two independent
+    // string literals with nothing but this comment linking them -- this
+    // config file is loaded by Node/PostCSS outside the app's own Vite/TS
+    // pipeline, so AppShell.tsx can't cleanly import the value from here.
+    // AppShell.breakpoint.test.tsx reads this file's own source and asserts
+    // `DESKTOP_QUERY` still agrees with `lg` below, so drift fails a test
+    // instead of only contradicting this comment.
     screens: {
       sm: "40em",
       md: "48em",

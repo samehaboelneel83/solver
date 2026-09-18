@@ -13,7 +13,11 @@ import { apiFetch } from "../api/client";
 
 const fields = [
   { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
-  { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null },
+  // label_field: true mirrors the backend's own metadata (backend/app/crud/labels.py's
+  // DEFAULT_LABEL_COLUMNS) -- recordLabel (lib/labels.ts) is metadata-driven, not
+  // hardcoded to `code`/`name`, so tests need to flag this explicitly, same as a real
+  // table's schema would.
+  { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label_field: true },
 ];
 
 const rows = [{ id: "1", code: "employee" }];
@@ -121,6 +125,32 @@ describe("DataTable", () => {
       // (G-4) -- scope to the table, which is what this test targets.
       const link = within(screen.getByRole("table")).getByRole("link", { name: "employee" });
       expect(link).toHaveAttribute("href", "/domain/entity_type/1");
+    });
+
+    // Defensive guard: the first cell's link/row-click target is built as a real
+    // `<a href="…">` from `String(row.id)`, now rendered twice per row (table +
+    // small-screen card). On master this id was only ever read inside an
+    // onClick, so a missing id silently degraded to a no-op; unguarded here it
+    // would instead render a live link to ".../undefined". Ahead of the next
+    // project's move to composite primary keys, where a row may have no single
+    // usable `id` at all.
+    it("renders plain text instead of a link when the row has no usable id", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={[{ code: "employee" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("employee")).toBeInTheDocument();
+      expect(table.queryByRole("link", { name: "employee" })).not.toBeInTheDocument();
     });
 
     it("a plain click on the link navigates once -- it does not also fire the row's onRowClick (fix round 2)", () => {
@@ -290,14 +320,26 @@ describe("DataTable", () => {
       expect(onDelete).toHaveBeenCalledWith("1", "employee");
     });
 
-    it("names the record from `name` when there is no `code`, and falls back to 'this row' when neither is present (D-6)", () => {
+    // D-6 fix round 2: DataTable used to have its own local recordLabel() hardcoded to
+    // `code` then `name`, so any table labelled by something else (iam.user_account by
+    // `username`, domain.entity_state by `state_value` -- see backend/app/crud/labels.py's
+    // DEFAULT_LABEL_COLUMNS) fell straight through to the generic "this row" for every
+    // single record. DataTable now calls the shared, metadata-driven recordLabel from
+    // lib/labels.ts (already used elsewhere, e.g. the edit page's heading) so there is one
+    // place that knows how to label a record, not two that can disagree.
+    it("labels the record from the table's own label_field metadata, combining code and name when both are flagged (D-6)", () => {
       const onDelete = vi.fn();
       vi.spyOn(window, "confirm").mockReturnValue(true);
+      const codeAndNameFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label_field: true },
+        { name: "name", type: "string" as const, required: false, writable: true, is_fk: false, fk_table: null, label_field: true },
+      ];
       renderTable(
         <DataTable
           {...baseProps}
-          fields={fields}
-          rows={[{ id: "2", name: "Acme Corp" }]}
+          fields={codeAndNameFields}
+          rows={[{ id: "2", code: "ACME", name: "Acme Corp" }]}
           total={1}
           limit={20}
           offset={0}
@@ -307,14 +349,39 @@ describe("DataTable", () => {
       );
       fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
       fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-      expect(window.confirm).toHaveBeenCalledWith('Delete "Acme Corp"? This cannot be undone.');
-      expect(onDelete).toHaveBeenCalledWith("2", "Acme Corp");
+      expect(window.confirm).toHaveBeenCalledWith('Delete "ACME — Acme Corp"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("2", "ACME — Acme Corp");
+    });
 
-      (window.confirm as any).mockClear();
-      onDelete.mockClear();
-      // Not unmounted from the render above, so two <table>s now coexist in
-      // the document -- scope to this render's own container.
-      const { container: secondContainer } = renderTable(
+    it("labels the record from a non-code/name label_field column, e.g. `username` (D-6: this is exactly what the old hardcoded helper missed)", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const usernameFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "username", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null, label_field: true },
+      ];
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={usernameFields}
+          rows={[{ id: "4", username: "jdoe" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+      fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(window.confirm).toHaveBeenCalledWith('Delete "jdoe"? This cannot be undone.');
+      expect(onDelete).toHaveBeenCalledWith("4", "jdoe");
+    });
+
+    it("falls back to 'this row' when no field is flagged label_field, or the row has no value for the ones that are", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderTable(
         <DataTable
           {...baseProps}
           fields={fields}
@@ -326,8 +393,8 @@ describe("DataTable", () => {
           onDelete={onDelete}
         />
       );
-      const secondTable = within(within(secondContainer).getByRole("table"));
-      fireEvent.click(secondTable.getByRole("button", { name: "Actions for this row" }));
+      const trigger = within(screen.getByRole("table")).getByRole("button", { name: "Actions for this row" });
+      fireEvent.click(trigger);
       fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(window.confirm).toHaveBeenCalledWith('Delete "this row"? This cannot be undone.');
       expect(onDelete).toHaveBeenCalledWith("3", "this row");
@@ -544,11 +611,18 @@ describe("DataTable", () => {
 
       fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
 
+      // The fixed-position portal root is now the role="region" landmark
+      // wrapper (added to resolve an axe "region" best-practice finding --
+      // see the comment in DataTable.tsx), one level outside the role="menu"
+      // element itself; the escape-the-clipping-wrapper mechanics this test
+      // covers are unchanged, just on that outer node now.
+      const region = screen.getByRole("region", { name: "Row actions" });
+      expect(region.parentElement).toBe(document.body);
+      expect(region.style.position).toBe("fixed");
+
       const menu = screen.getByRole("menu");
-      expect(menu.parentElement).toBe(document.body);
       expect(menu.closest("table")).toBeNull();
       expect(menu.closest(".overflow-x-auto")).toBeNull();
-      expect(menu.style.position).toBe("fixed");
     });
 
     it("flips the dropdown to open upward when there isn't room below the trigger (fix round 2, G-3)", () => {
@@ -584,10 +658,13 @@ describe("DataTable", () => {
 
       fireEvent.click(trigger);
 
-      const menu = screen.getByRole("menu");
+      // Positioning styles live on the role="region" portal root (see the
+      // comment above and in DataTable.tsx) -- the role="menu" element inside
+      // it no longer carries its own inline position.
+      const region = screen.getByRole("region", { name: "Row actions" });
       // Opens upward -- above the trigger's own top edge -- instead of the
       // usual few pixels below its bottom edge.
-      expect(parseFloat(menu.style.top)).toBeLessThan(190);
+      expect(parseFloat(region.style.top)).toBeLessThan(190);
     });
   });
 

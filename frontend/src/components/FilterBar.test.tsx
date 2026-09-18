@@ -15,7 +15,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -39,7 +38,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -62,7 +60,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -89,7 +86,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={unordered}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -109,7 +105,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={onChange}
@@ -127,7 +122,6 @@ describe("FilterBar", () => {
     const { rerender } = render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={onChange}
@@ -140,7 +134,7 @@ describe("FilterBar", () => {
 
     const narrowed: FilterState = { ...DEFAULT_FILTER_STATE, selectedTypes: [] };
     rerender(
-      <FilterBar entityTypes={entityTypes} edges={edges} selectedNodeId={null} value={narrowed} onChange={onChange} />
+      <FilterBar entityTypes={entityTypes} selectedNodeId={null} value={narrowed} onChange={onChange} />
     );
     fireEvent.click(screen.getByTestId("filter-types-all"));
     expect(onChange).toHaveBeenLastCalledWith({ ...DEFAULT_FILTER_STATE, selectedTypes: null });
@@ -153,7 +147,6 @@ describe("FilterBar", () => {
       render(
         <FilterBar
           entityTypes={entityTypes}
-          edges={edges}
           selectedNodeId={null}
           value={DEFAULT_FILTER_STATE}
           onChange={onChange}
@@ -182,7 +175,6 @@ describe("FilterBar", () => {
       render(
         <FilterBar
           entityTypes={entityTypes}
-          edges={edges}
           selectedNodeId={null}
           value={DEFAULT_FILTER_STATE}
           onChange={onChange}
@@ -212,7 +204,6 @@ describe("FilterBar", () => {
       render(
         <FilterBar
           entityTypes={entityTypes}
-          edges={edges}
           selectedNodeId={null}
           value={DEFAULT_FILTER_STATE}
           onChange={onChange}
@@ -246,7 +237,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -263,7 +253,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId={null}
         value={DEFAULT_FILTER_STATE}
         onChange={vi.fn()}
@@ -277,7 +266,6 @@ describe("FilterBar", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
-        edges={edges}
         selectedNodeId="e1"
         value={DEFAULT_FILTER_STATE}
         onChange={onChange}

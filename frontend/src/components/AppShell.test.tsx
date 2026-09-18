@@ -404,6 +404,25 @@ describe("AppShell", () => {
     expect(main.scrollTop).toBe(0);
   });
 
+  // Twin of the skip-link fix above, for the other place focus moves to
+  // <main>: the route-change effect used to call mainRef.current?.focus()
+  // alone, which (per the skip-link comment) scrolls *ancestors* into view,
+  // not main's own internal scrollTop -- so navigating away from a scrolled
+  // list opened the destination route mid-content instead of at the top.
+  it("resets main's own scroll position (not just focus) on a route change", async () => {
+    renderWithProviders(["/iam/organization"]);
+    await screen.findByText("organization");
+
+    const main = document.getElementById("main") as HTMLElement;
+    main.scrollTop = 240;
+    expect(main.scrollTop).toBe(240);
+
+    fireEvent.click(screen.getByRole("link", { name: "entity" }));
+
+    expect(main).toHaveFocus();
+    expect(main.scrollTop).toBe(0);
+  });
+
   // H-9: both controls used to be text with zero vertical padding (Sign out 44x16px, each nav
   // group toggle 223x16px) -- under the WCAG 2.2 24x24 Target Size minimum. jsdom has no layout,
   // so real pixel measurement happens in the Playwright harness (fw_h9_target_sizes.js); this

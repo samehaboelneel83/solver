@@ -188,7 +188,6 @@ export default function GraphDemo() {
       {graph && (
         <FilterBar
           entityTypes={graph.entity_types}
-          edges={graph.edges}
           selectedNodeId={selectedNodeId}
           value={filterState}
           onChange={setFilterState}

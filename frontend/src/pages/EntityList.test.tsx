@@ -18,7 +18,11 @@ const schemaResponse = [
     table: "entity_type",
     fields: [
       { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
-      { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+      // label_field: true mirrors real schema metadata -- DataTable's record label
+      // (D-6) is metadata-driven (lib/labels.ts's recordLabel), not hardcoded to
+      // `code`/`name`, so the fixture needs to flag it explicitly for the delete
+      // toast/confirm tests below to see "employee" rather than the generic fallback.
+      { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null, label_field: true },
     ],
   },
 ];
