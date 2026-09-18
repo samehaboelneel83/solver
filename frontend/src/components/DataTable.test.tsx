@@ -92,8 +92,16 @@ describe("DataTable", () => {
   });
 
   describe("the first cell as a link (E-1/H-2)", () => {
-    it("renders the first visible cell as a link to the record, and the row remains clickable as a convenience", () => {
-      const onRowClick = vi.fn();
+    // A second, non-link column so "click elsewhere in the row" has
+    // somewhere to click that isn't inside the <a>.
+    const twoColumnFields = [
+      { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+      { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null },
+      { name: "name", type: "string" as const, required: false, writable: true, is_fk: false, fk_table: null },
+    ];
+    const twoColumnRows = [{ id: "1", code: "employee", name: "Employee" }];
+
+    it("renders the first visible cell as a link to the record", () => {
       renderTable(
         <DataTable
           {...baseProps}
@@ -104,14 +112,101 @@ describe("DataTable", () => {
           offset={0}
           onPageChange={vi.fn()}
           onDelete={vi.fn()}
-          onRowClick={onRowClick}
         />
       );
 
       const link = screen.getByRole("link", { name: "employee" });
       expect(link).toHaveAttribute("href", "/domain/entity_type/1");
+    });
 
-      fireEvent.click(link);
+    it("a plain click on the link navigates once -- it does not also fire the row's onRowClick (fix round 2)", () => {
+      const onRowClick = vi.fn();
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoColumnFields}
+          rows={twoColumnRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+          onRowClick={onRowClick}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("link", { name: "employee" }));
+
+      // The link's own navigation is the only navigation for this click --
+      // the row handler must not also call onRowClick for the same click
+      // (that used to push a second history entry for one click).
+      expect(onRowClick).not.toHaveBeenCalled();
+    });
+
+    it("a ctrl-click on the link does not call onRowClick, so the current tab doesn't also navigate (fix round 2)", () => {
+      const onRowClick = vi.fn();
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoColumnFields}
+          rows={twoColumnRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+          onRowClick={onRowClick}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("link", { name: "employee" }), { ctrlKey: true });
+
+      expect(onRowClick).not.toHaveBeenCalled();
+    });
+
+    it("a meta/shift/alt-click or a non-primary-button click on the link also does not call onRowClick", () => {
+      const onRowClick = vi.fn();
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoColumnFields}
+          rows={twoColumnRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+          onRowClick={onRowClick}
+        />
+      );
+
+      const link = screen.getByRole("link", { name: "employee" });
+      fireEvent.click(link, { metaKey: true });
+      fireEvent.click(link, { shiftKey: true });
+      fireEvent.click(link, { altKey: true });
+      fireEvent.click(link, { button: 1 });
+
+      expect(onRowClick).not.toHaveBeenCalled();
+    });
+
+    it("a click on a non-link cell still opens the record, as a convenience", () => {
+      const onRowClick = vi.fn();
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoColumnFields}
+          rows={twoColumnRows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+          onRowClick={onRowClick}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Employee"));
+
       expect(onRowClick).toHaveBeenCalledWith("1");
     });
   });
@@ -262,6 +357,54 @@ describe("DataTable", () => {
       fireEvent.mouseDown(document.body);
       expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
     });
+
+    it("closes the menu on Escape and returns focus to the trigger (fix round 2)", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const trigger = screen.getByTestId("row-actions");
+      fireEvent.click(trigger);
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+      fireEvent.keyDown(screen.getByRole("menuitem", { name: "Delete" }), { key: "Escape" });
+
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it("also closes on Escape when it's pressed on the trigger itself, while the menu is open", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const trigger = screen.getByTestId("row-actions");
+      fireEvent.click(trigger);
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+
+      fireEvent.keyDown(trigger, { key: "Escape" });
+
+      expect(screen.queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
   });
 
   describe("sort affordance (E-2)", () => {
@@ -329,6 +472,42 @@ describe("DataTable", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Sort by code" }));
       expect(onSort).toHaveBeenCalledWith("code");
+    });
+
+    it("renders a caret on a non-active sortable column too, hidden until hover/focus (fix round 2)", () => {
+      const twoSortableFields = [
+        { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "code", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null },
+        { name: "name", type: "string" as const, required: false, writable: true, is_fk: false, fk_table: null },
+      ];
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={twoSortableFields}
+          rows={[{ id: "1", code: "employee", name: "Employee" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          orderBy="code"
+          order="asc"
+          onSort={vi.fn()}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      // "code" is active: its caret is fully visible by default.
+      const activeCaret = screen.getByRole("button", { name: "Sort by code" }).querySelector("span[aria-hidden]");
+      expect(activeCaret).not.toHaveClass("opacity-0");
+
+      // "name" is not active, but it still has a caret in the DOM -- just
+      // invisible (opacity-0) until hovered/focused -- rather than no caret
+      // at all until the column has already been clicked once.
+      const nameButton = screen.getByRole("button", { name: "Sort by name" });
+      const inactiveCaret = nameButton.querySelector("span[aria-hidden]") as HTMLElement;
+      expect(inactiveCaret).toBeInTheDocument();
+      expect(inactiveCaret).toHaveClass("opacity-0");
+      expect(inactiveCaret.className).toContain("group-hover:opacity-100");
     });
   });
 

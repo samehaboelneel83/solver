@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 
 export type ListResult<T = Record<string, unknown>> = { items: T[]; total: number };
@@ -31,6 +31,15 @@ export function useEntityList(schemaName: string, tableName: string, params: Ent
       return apiFetch<ListResult>(`/api/${schemaName}/${tableName}/?${search.toString()}`);
     },
     enabled: Boolean(schemaName && tableName),
+    // Keep the previous page's rows on screen while the next query (sort,
+    // page, or search) is in flight, instead of dropping straight to
+    // `isLoading` -- without this every sort/page/search click unmounted
+    // the whole table (skeleton flash) and, worse, destroyed and recreated
+    // the row-count `aria-live` region, so screen readers never got a
+    // reliable "1-20 of 50 -> 1-20 of 37" announcement. A genuine first
+    // load still has no previous data to keep, so the skeleton still shows
+    // then.
+    placeholderData: keepPreviousData,
   });
 }
 

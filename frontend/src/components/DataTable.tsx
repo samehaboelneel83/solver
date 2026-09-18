@@ -63,6 +63,22 @@ function isIdentifierColumn(field: FieldMeta): boolean {
   return field.type === "uuid" && !field.is_fk;
 }
 
+/**
+ * A plain click on the row's own link already navigates once, via the
+ * `<a>` itself; the `<tr>`'s onClick exists only as a convenience for
+ * clicks elsewhere in the row (E-1). Without this guard, clicking the link
+ * fired *both* navigations -- pushing two history entries for one click, and
+ * (worse) a ctrl/cmd/shift-click meant to open the record in a new tab also
+ * navigated the current tab, because the row handler doesn't understand
+ * "open in a new tab" clicks the way the link's own click handler does.
+ */
+function shouldIgnoreRowClick(event: React.MouseEvent<HTMLTableRowElement>): boolean {
+  if (event.defaultPrevented) return true;
+  if (event.button !== 0) return true;
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return true;
+  return Boolean((event.target as HTMLElement).closest("a"));
+}
+
 function idsForColumns(rows: Row[], columns: string[]): string[] {
   const values = new Set<string>();
   for (const row of rows) {
@@ -110,6 +126,7 @@ export default function DataTable({
 
   const [openMenuRowId, setOpenMenuRowId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // Close the open row-actions menu on an outside click.
   useEffect(() => {
@@ -199,10 +216,23 @@ export default function DataTable({
                         type="button"
                         onClick={() => onSort(field.name)}
                         aria-label={`Sort by ${label}`}
-                        className="flex h-6 items-center gap-1 px-1 hover:text-slate-900"
+                        className="group flex h-6 items-center gap-1 px-1 hover:text-slate-900"
                       >
                         <span>{label}</span>
-                        {isActive && <span aria-hidden="true">{order === "desc" ? "▼" : "▲"}</span>}
+                        {/* A caret always occupies the slot for a sortable column (E-2): full
+                            opacity on the active column, otherwise invisible until the header
+                            is hovered/focused -- so the sort affordance is discoverable before
+                            the first click, not just after it. */}
+                        <span
+                          aria-hidden="true"
+                          className={
+                            isActive
+                              ? "text-slate-700"
+                              : "text-slate-400 opacity-0 group-hover:opacity-100 group-focus:opacity-100"
+                          }
+                        >
+                          {isActive && order === "desc" ? "▼" : "▲"}
+                        </span>
                       </button>
                     ) : (
                       label
@@ -223,7 +253,10 @@ export default function DataTable({
               return (
                 <tr
                   key={rowId}
-                  onClick={() => onRowClick?.(rowId)}
+                  onClick={(event) => {
+                    if (shouldIgnoreRowClick(event)) return;
+                    onRowClick?.(rowId);
+                  }}
                   className={`border-b border-slate-100 hover:bg-slate-50 ${onRowClick ? "cursor-pointer" : ""}`}
                 >
                   {displayFields.map((field, index) => {
@@ -263,6 +296,12 @@ export default function DataTable({
                     <div
                       className="relative inline-block"
                       ref={rowId === openMenuRowId ? menuRef : undefined}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Escape" || rowId !== openMenuRowId) return;
+                        event.stopPropagation();
+                        setOpenMenuRowId(null);
+                        menuTriggerRef.current?.focus();
+                      }}
                     >
                       <button
                         type="button"
@@ -270,6 +309,7 @@ export default function DataTable({
                         aria-haspopup="menu"
                         aria-expanded={rowId === openMenuRowId}
                         aria-label={`Actions for ${label}`}
+                        ref={rowId === openMenuRowId ? menuTriggerRef : undefined}
                         onClick={(event) => {
                           event.stopPropagation();
                           setOpenMenuRowId((current) => (current === rowId ? null : rowId));

@@ -88,6 +88,30 @@ describe("EntityList", () => {
     });
   });
 
+  it("keeps the row-count live region as the same DOM node across a sort change, instead of flashing the skeleton (H-9, fix round 2)", async () => {
+    renderWithProviders("/domain/entity_type");
+    await screen.findByText("employee");
+
+    const before = screen.getByText("1-20 of 50");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by code" }));
+
+    await waitFor(() => {
+      const call = (apiFetch as any).mock.calls.find(
+        ([path]: [string]) => path.startsWith("/api/domain/entity_type/") && path.includes("order_by=code")
+      );
+      expect(call).toBeTruthy();
+    });
+
+    // Same DOM node, not destroyed and recreated -- `keepPreviousData` keeps
+    // the previous rows (and this element) mounted while the new page/sort
+    // fetches, instead of dropping into the loading skeleton on every
+    // sort/page/search and starting a fresh aria-live region each time.
+    const after = screen.getByText("1-20 of 50");
+    expect(after).toBe(before);
+    expect(screen.queryAllByTestId("skeleton-row")).toHaveLength(0);
+  });
+
   it("renders a filter chip from the URL and includes it in the request", async () => {
     renderWithProviders("/domain/entity_type?f_entity_type_id=abc");
     await screen.findByText("employee");
