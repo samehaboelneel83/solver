@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import cytoscape, { Core, NodeSingular } from "cytoscape";
 // @ts-expect-error -- cytoscape-elk ships no bundled type declarations
 import elk from "cytoscape-elk";
@@ -189,6 +189,27 @@ export default function GraphEditor({
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
+  // closes it and returns focus here, rather than dropping focus back to the document body.
+  const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
+
+  function closeCreateNodeForm() {
+    setShowCreateNode(false);
+    setCreateEntityTypeId("");
+    createNodeToggleRef.current?.focus();
+  }
+
+  function openCreateNodeForm() {
+    setShowCreateNode(true);
+    setCreateEntityTypeId("");
+  }
+
+  function handleCreateNodeFormKeyDown(event: ReactKeyboardEvent<HTMLFormElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeCreateNodeForm();
+    }
+  }
 
   const { data, isLoading, error: loadError, refetch: refetchGraph } = useGraph(organizationId, hierarchyId);
   const createNode = useCreateNode(organizationId, hierarchyId);
@@ -212,7 +233,13 @@ export default function GraphEditor({
           style: {
             label: "data(label)",
             "background-color": "#0f172a",
-            color: "#0f172a",
+            // F-3: the label used to match the node fill exactly (both #0f172a), so it was
+            // legible only while it happened to sit above the circle -- any label drifting over
+            // a neighbouring node's fill disappeared into it. A near-white label plus a dark
+            // outline reads over both the light canvas background and any node's dark fill.
+            color: "#f8fafc",
+            "text-outline-width": 2,
+            "text-outline-color": "#0f172a",
             "font-size": "10px",
             width: 30,
             height: 30,
@@ -516,6 +543,8 @@ export default function GraphEditor({
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
           value={hierarchyId ?? ""}
           onChange={(e) => onHierarchyChange(e.target.value || null)}
+          title="Nest nodes under a hierarchy"
+          aria-label="Hierarchy nesting"
           data-testid="hierarchy-select"
         >
           <option value="">No hierarchy nesting</option>
@@ -525,10 +554,22 @@ export default function GraphEditor({
             </option>
           ))}
         </select>
-        <button onClick={runLayout} className="rounded-md border border-slate-300 px-2 py-1 text-sm" type="button">
+        <button
+          onClick={runLayout}
+          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          type="button"
+          title="Re-run automatic layout"
+          aria-label="Re-run automatic layout"
+        >
           Layout
         </button>
-        <button onClick={fit} className="rounded-md border border-slate-300 px-2 py-1 text-sm" type="button">
+        <button
+          onClick={fit}
+          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          type="button"
+          title="Fit the whole graph in view"
+          aria-label="Fit the whole graph in view"
+        >
           Fit
         </button>
         <button
@@ -537,17 +578,27 @@ export default function GraphEditor({
           className={`rounded-md border px-2 py-1 text-sm ${
             connecting ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-300"
           }`}
+          title={
+            connecting
+              ? "Connect mode is on -- drag from one node to another to create a relationship"
+              : "Turn on Connect mode, then drag from one node to another to create a relationship"
+          }
+          aria-pressed={connecting}
           data-testid="toggle-connect"
         >
           {connecting ? "Connecting: drag from one node to another" : "Connect"}
         </button>
         <button
+          ref={createNodeToggleRef}
           type="button"
           onClick={() => {
             setShowCreateNode((v) => !v);
             setCreateEntityTypeId("");
           }}
           className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white"
+          title="Create a new node"
+          aria-expanded={showCreateNode}
+          aria-controls="create-node-form"
           data-testid="toggle-create-node"
         >
           + New Node
@@ -558,6 +609,16 @@ export default function GraphEditor({
           </span>
         )}
       </div>
+
+      {/* F-2/A-6: nothing else on the page explains how the canvas works -- boxes group nodes
+          by hierarchy, arrows show relationship direction, and drag-to-connect only works once
+          Connect mode is switched on. The text swaps to a focused instruction the moment Connect
+          mode is actually on, so the mode is self-explanatory rather than a mystery toggle. */}
+      <p data-testid="graph-help" className="mb-2 text-xs text-slate-500">
+        {connecting
+          ? "Drag from one node to another to connect them."
+          : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."}
+      </p>
 
       {error && (
         <div
@@ -573,7 +634,9 @@ export default function GraphEditor({
 
       {showCreateNode && data && (
         <form
+          id="create-node-form"
           onSubmit={handleCreateNode}
+          onKeyDown={handleCreateNodeFormKeyDown}
           className="mb-2 flex flex-wrap items-end gap-2 rounded-md border border-slate-200 p-2"
           data-testid="create-node-form"
         >
@@ -642,6 +705,9 @@ export default function GraphEditor({
           >
             {createNode.isPending ? "Creating…" : "Create"}
           </button>
+          <button type="button" onClick={closeCreateNodeForm} className="text-sm text-slate-500">
+            Cancel
+          </button>
         </form>
       )}
 
@@ -709,12 +775,39 @@ export default function GraphEditor({
           </button>
         </div>
       )}
-      {/* Cytoscape caches this container's bounding rect when the instance is created (and
-          otherwise only recomputes it on its own triggers), so if the page scrolls afterward --
-          or in a headless/automated browser test that scrolls or resizes the window after mount
-          -- rendered node positions and hit-testing (tap/drag) go stale against the old rect.
-          Call cy.resize() before relying on them in that situation. */}
-      <div ref={containerRef} data-testid="cytoscape-container" style={{ width: "100%", height: "600px" }} />
+      <div className="relative">
+        {/* Cytoscape caches this container's bounding rect when the instance is created (and
+            otherwise only recomputes it on its own triggers), so if the page scrolls afterward --
+            or in a headless/automated browser test that scrolls or resizes the window after mount
+            -- rendered node positions and hit-testing (tap/drag) go stale against the old rect.
+            Call cy.resize() before relying on them in that situation.
+            F-4: sized to the available viewport height (with a floor so a short window doesn't
+            collapse it) instead of a fixed 600px that either strands the canvas in a tiny column
+            on a short screen or leaves a large empty band beneath it on a tall one. */}
+        <div
+          ref={containerRef}
+          data-testid="cytoscape-container"
+          className="h-[calc(100vh-320px)] min-h-[420px] w-full"
+        />
+        {/* A-6: with no nodes at all, the canvas was just an empty rectangle under the toolbar
+            with nothing explaining why -- this overlay names the state and gives the one action
+            that gets out of it. */}
+        {!isLoading && !loadError && data && data.nodes.length === 0 && (
+          <div
+            data-testid="graph-empty-state"
+            className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-slate-500"
+          >
+            <p>No nodes yet.</p>
+            <button
+              type="button"
+              onClick={openCreateNodeForm}
+              className="pointer-events-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
+            >
+              Create the first node
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GraphEditor, { applyGraphToCy, positionsAreDegenerate } from "./GraphEditor";
 
@@ -759,6 +759,142 @@ describe("GraphEditor", () => {
     await waitFor(() => expect(screen.getByText("Failed to load graph")).toBeInTheDocument());
     expect(mockCytoscapeInstance.remove).not.toHaveBeenCalled(); // elements() batch-removed, not per-id remove
     expect(elementStore.size).toBe(0);
+  });
+
+  it("gives every toolbar control an accessible name and a title, and renders a help line that changes with Connect (F-2)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    const controls = [
+      screen.getByTestId("hierarchy-select"),
+      screen.getByText("Layout"),
+      screen.getByText("Fit"),
+      screen.getByTestId("toggle-connect"),
+      screen.getByTestId("toggle-create-node"),
+    ];
+    for (const control of controls) {
+      const accessibleName = control.getAttribute("aria-label") ?? control.textContent;
+      expect(accessibleName).toBeTruthy();
+      expect(control).toHaveAttribute("title");
+    }
+
+    const help = screen.getByTestId("graph-help");
+    const helpTextBefore = help.textContent;
+    expect(helpTextBefore).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("toggle-connect"));
+    expect(help.textContent).not.toBe(helpTextBefore);
+    expect(help.textContent).toMatch(/drag/i);
+  });
+
+  it("gives node labels their own colour (distinct from the node background) and a text outline (F-3)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    const styleArg = mockCytoscape.mock.calls[0][0].style;
+    const nodeStyle = styleArg.find((rule: any) => rule.selector === "node").style;
+    expect(nodeStyle.color).toBeTruthy();
+    expect(nodeStyle.color).not.toBe(nodeStyle["background-color"]);
+    expect(nodeStyle["text-outline-width"]).toBeGreaterThan(0);
+    expect(nodeStyle["text-outline-color"]).toBeTruthy();
+  });
+
+  it("sizes the canvas container with something other than a fixed 600px (F-4)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    const container = await screen.findByTestId("cytoscape-container");
+
+    expect(container.getAttribute("style") ?? "").not.toContain("600px");
+    expect(container.className).toMatch(/h-\[calc\(/);
+  });
+
+  it("shows an empty-state overlay with a 'Create the first node' button when the graph has no nodes", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [],
+      edges: [],
+      entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    const emptyState = await screen.findByTestId("graph-empty-state");
+    const createButton = within(emptyState).getByRole("button", { name: /create the first node/i });
+
+    fireEvent.click(createButton);
+    await waitFor(() => expect(screen.getByTestId("create-node-form")).toBeInTheDocument());
+  });
+
+  it("does not show the empty-state overlay once the graph has nodes", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [{ id: "e1", type: "employee", label: "Ahmed", parent: null, attributes: {} }],
+      edges: [],
+      entity_types: [],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
+
+    expect(screen.queryByTestId("graph-empty-state")).not.toBeInTheDocument();
+  });
+
+  it("closes the create-node form on Escape and returns focus to the '+ New Node' trigger (H-7)", async () => {
+    (apiFetch as any).mockResolvedValue({
+      nodes: [],
+      edges: [],
+      entity_types: [{ id: "t1", code: "employee", name: "Employee", is_abstract: false }],
+      relationship_types: [],
+      hierarchies: [],
+      attribute_definitions: [],
+    });
+
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    const toggle = screen.getByTestId("toggle-create-node");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId("create-node-form")).toBeInTheDocument());
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(screen.getByTestId("create-node-form"), { key: "Escape" });
+
+    expect(screen.queryByTestId("create-node-form")).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(toggle);
   });
 
   it("shows a Retry button next to a failed graph load that re-issues the request (D-4)", async () => {

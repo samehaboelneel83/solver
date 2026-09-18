@@ -35,6 +35,75 @@ describe("FilterBar", () => {
     expect(screen.getByText("Unit (unit)")).toBeInTheDocument();
   });
 
+  it("wires aria-expanded/aria-haspopup/aria-controls on the Types toggle, reflecting panel state (H-7)", () => {
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        edges={edges}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={vi.fn()}
+      />
+    );
+
+    const toggle = screen.getByTestId("filter-types-toggle");
+    expect(toggle).toHaveAttribute("aria-haspopup");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.getAttribute("aria-controls")).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const controlsId = toggle.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+    expect(screen.getByTestId("filter-types-panel")).toHaveAttribute("id", controlsId as string);
+  });
+
+  it("closes the Types panel on Escape and returns focus to the toggle (H-7)", () => {
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        edges={edges}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={vi.fn()}
+      />
+    );
+
+    const toggle = screen.getByTestId("filter-types-toggle");
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("filter-types-panel")).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByTestId("filter-types-panel"), { key: "Escape" });
+
+    expect(screen.queryByTestId("filter-types-panel")).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("lists types alphabetically by name regardless of the entityTypes order given (F-6)", () => {
+    const unordered = [
+      { id: "t3", code: "zebra", name: "Zebra Type", is_abstract: false },
+      { id: "t1", code: "alpha", name: "Alpha Type", is_abstract: false },
+      { id: "t2", code: "mid", name: "Mid Type", is_abstract: false },
+    ];
+    render(
+      <FilterBar
+        entityTypes={unordered}
+        edges={edges}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("filter-types-toggle"));
+
+    const labels = screen
+      .getAllByText(/Type \((alpha|mid|zebra)\)/)
+      .map((el) => el.textContent);
+    expect(labels).toEqual(["Alpha Type (alpha)", "Mid Type (mid)", "Zebra Type (zebra)"]);
+  });
+
   it("calls onChange with the updated selectedTypes when a type checkbox is toggled", () => {
     const onChange = vi.fn();
     render(

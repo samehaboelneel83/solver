@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { EntityTypeOption, GraphEdge } from "../types/graph";
 
 export type FilterCriteria = {
@@ -57,9 +57,24 @@ export function deriveFilterCriteria(
 // available to any future in-component use (e.g. showing edge counts in the type panel).
 const SEARCH_DEBOUNCE_MS = 200;
 
+const TYPES_PANEL_ID = "filter-types-panel";
+
 export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, value, onChange }: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
+  const typesToggleRef = useRef<HTMLButtonElement | null>(null);
+
+  function closeTypesPanel() {
+    setPanelOpen(false);
+    typesToggleRef.current?.focus();
+  }
+
+  function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeTypesPanel();
+    }
+  }
 
   // The search box's own text is local state so typing stays instant and
   // responsive; the (expensive, re-styles every node/edge) onChange call up
@@ -132,27 +147,38 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
     onChange({ ...value, selectedTypes: allSelected ? null : Array.from(next) });
   }
 
-  const visibleTypes = entityTypes.filter((et) => {
-    const q = typeSearch.trim().toLowerCase();
-    if (!q) return true;
-    return et.name.toLowerCase().includes(q) || et.code.toLowerCase().includes(q);
-  });
+  const visibleTypes = entityTypes
+    .filter((et) => {
+      const q = typeSearch.trim().toLowerCase();
+      if (!q) return true;
+      return et.name.toLowerCase().includes(q) || et.code.toLowerCase().includes(q);
+    })
+    // F-6: types were previously listed in insertion order, which forces a linear scan on a
+    // large model -- alphabetical by name makes a specific type findable at a glance.
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 p-2 text-sm">
       <input
         type="text"
         placeholder="Search by label or code…"
+        title="Search nodes by label or code"
+        aria-label="Search nodes by label or code"
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
         className="rounded-md border border-slate-300 px-2 py-1 text-sm"
         data-testid="filter-search"
       />
 
-      <div className="relative">
+      <div className="relative" onKeyDown={handlePanelKeyDown}>
         <button
+          ref={typesToggleRef}
           type="button"
           onClick={() => setPanelOpen((v) => !v)}
+          title="Show or hide node types"
+          aria-haspopup="true"
+          aria-expanded={panelOpen}
+          aria-controls={TYPES_PANEL_ID}
           className="rounded-md border border-slate-300 px-2 py-1 text-xs"
           data-testid="filter-types-toggle"
         >
@@ -160,12 +186,15 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
         </button>
         {panelOpen && (
           <div
+            id={TYPES_PANEL_ID}
             className="absolute z-10 mt-1 max-h-72 w-64 overflow-auto rounded-md border border-slate-300 bg-white p-2 shadow-md"
             data-testid="filter-types-panel"
           >
             <input
               type="text"
               placeholder="Filter types…"
+              title="Filter the type list"
+              aria-label="Filter the type list"
               value={typeSearch}
               onChange={(e) => setTypeSearch(e.target.value)}
               className="mb-2 block w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -175,6 +204,7 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: null })}
+                title="Select all types"
                 className="text-xs text-blue-600"
                 data-testid="filter-types-all"
               >
@@ -183,6 +213,7 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: [] })}
+                title="Deselect all types"
                 className="text-xs text-blue-600"
                 data-testid="filter-types-none"
               >
@@ -208,6 +239,11 @@ export default function FilterBar({ entityTypes, edges: _edges, selectedNodeId, 
         type="button"
         disabled={!selectedNodeId}
         onClick={() => onChange({ ...value, highlighting: !value.highlighting })}
+        title={
+          selectedNodeId
+            ? "Highlight the selected node's direct connections and dim the rest"
+            : "Select a node first to highlight its connections"
+        }
         className="rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-40"
         data-testid="filter-highlight-toggle"
       >

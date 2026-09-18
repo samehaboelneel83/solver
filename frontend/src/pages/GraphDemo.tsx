@@ -108,7 +108,11 @@ export default function GraphDemo() {
           onChange={setFilterState}
         />
       )}
-      <div className="flex gap-4">
+      {/* F-1: below 1024px (Tailwind's `lg` breakpoint) the property panel kept its own minimum
+          width and refused to shrink, squeezing the canvas down to an unusable ~167px column.
+          Stacking the panel under the canvas on narrow screens, instead of forcing them to share
+          one row, keeps the canvas at the full viewport width there. */}
+      <div className="flex flex-col gap-4 lg:flex-row" data-testid="graph-layout">
         <div className="flex-1">
           {/* Keyed by organizationId: an org switch is rare and its graph is unrelated to the
               previous one, so the simplest correct fix is to fully rebuild the canvas (a fresh
@@ -125,7 +129,10 @@ export default function GraphDemo() {
             onSelectionChange={setSelection}
           />
         </div>
-        <div className="w-72 shrink-0 rounded-md border border-slate-200 p-3">
+        {/* F-5: `self-start` keeps this box only as tall as its own content (a couple of lines
+            when nothing is selected) instead of stretching to match the much taller canvas next
+            to it in the flex row, which used to leave a large empty rectangle. */}
+        <div className="w-full self-start rounded-md border border-slate-200 p-3 lg:w-72 lg:shrink-0">
           {graph && (
             <PropertyPanel
               key={selection ? `${selection.kind}-${selection.id}` : "none"}

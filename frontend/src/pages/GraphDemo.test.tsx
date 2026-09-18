@@ -227,6 +227,16 @@ describe("GraphDemo", () => {
     });
   });
 
+  it("stacks the canvas and property panel in a column below lg:, and shares a row at lg: and up (F-1)", async () => {
+    renderWithProviders();
+
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+
+    const layout = screen.getByTestId("graph-layout");
+    expect(layout.className).toMatch(/flex-col/);
+    expect(layout.className).toMatch(/lg:flex-row/);
+  });
+
   it("shows a message instead of a blank page when no organizations exist", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/iam/organization/")) {
