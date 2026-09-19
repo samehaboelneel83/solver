@@ -7,6 +7,8 @@ import Dashboard from "./pages/Dashboard";
 import GraphDemo from "./pages/GraphDemo";
 import EntityTypes from "./pages/EntityTypes";
 import EntityTypeDetail from "./pages/EntityTypeDetail";
+import Entities from "./pages/Entities";
+import EntityRecord from "./pages/EntityRecord";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -37,6 +39,11 @@ export default function App() {
             so `/entity-types/5` reaches the type editor, not a table named "5". */}
         <Route path="entity-types" element={<EntityTypes />} />
         <Route path="entity-types/:id" element={<EntityTypeDetail />} />
+        {/* `entities/new` before `entities/:id`: the literal segment has to win,
+            or a new entity would be looked up as the entity whose id is "new". */}
+        <Route path="entities" element={<Entities />} />
+        <Route path="entities/new" element={<EntityRecord />} />
+        <Route path="entities/:id" element={<EntityRecord />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />

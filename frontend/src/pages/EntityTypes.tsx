@@ -12,7 +12,7 @@ import {
   serverFieldErrors,
   useFieldErrors,
   type FieldErrors,
-} from "../components/AttributeDefEditor";
+} from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";

@@ -94,3 +94,48 @@ describe("entity type routes (Task 11)", () => {
     expect(screen.queryByText(/unknown table/i)).not.toBeInTheDocument();
   });
 });
+
+describe("entity routes (Task 12)", () => {
+  beforeEach(() => {
+    setToken("test-token");
+    localStorage.removeItem("solver_domain_id");
+    (apiFetch as any).mockReset();
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/v1/entity-types/5") {
+        return Promise.resolve({ id: 5, domain_id: 7, name: "employee", role: "agent", attributes: [] });
+      }
+      if (path === "/api/v1/entities/42") {
+        return Promise.resolve({ id: 42, entity_type_id: 5, key: "ahmed", label: null, sort_order: 0, active: true, attrs: {} });
+      }
+      if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+  });
+
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("/entities renders the entity list, not the generic table page for a table named 'entities'", async () => {
+    renderAt("/entities");
+    expect(await screen.findByRole("heading", { level: 1, name: "Entities" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("/entities/new renders the new-entity form rather than matching the :id route", async () => {
+    renderAt("/entities/new?type=5");
+    expect(await screen.findByRole("heading", { level: 1, name: /new entity/i })).toBeInTheDocument();
+  });
+
+  it("/entities/:id renders the entity record", async () => {
+    renderAt("/entities/42");
+    expect(await screen.findByRole("heading", { level: 1, name: /ahmed/ })).toBeInTheDocument();
+  });
+});

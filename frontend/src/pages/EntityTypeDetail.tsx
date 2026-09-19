@@ -1,7 +1,7 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import AttributeDefEditor, {
-  ATTRIBUTE_FIELDS,
+import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
+import {
   ErrorSummary,
   dataTypeLabel,
   formatDefault,
@@ -9,7 +9,7 @@ import AttributeDefEditor, {
   serverFieldErrors,
   useFieldErrors,
   type FieldErrors,
-} from "../components/AttributeDefEditor";
+} from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
 import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
@@ -27,14 +27,8 @@ import {
   type EntityType,
 } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { parseRouteId } from "../lib/routeId";
 import { ENTITY_TYPE_FIELDS, EntityTypeFields } from "./EntityTypes";
-
-/** A route id is a bigint key: a plain positive decimal integer, or nothing. */
-function parseRouteId(raw: string | undefined): number | null {
-  if (!raw || !/^[1-9][0-9]*$/.test(raw)) return null;
-  const id = Number(raw);
-  return Number.isSafeInteger(id) ? id : null;
-}
 
 const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
 

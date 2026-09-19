@@ -1,0 +1,457 @@
+import { FormEvent, useId, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
+import OfflineNotice from "../components/OfflineNotice";
+import { useToast } from "../components/ToastProvider";
+import {
+  ErrorSummary,
+  FieldError,
+  FieldLabel,
+  INPUT_CLASS,
+  describedBy,
+  parseAttrValue,
+  useFieldErrors,
+  type FieldErrors,
+} from "../components/attrTypes";
+import { ApiError } from "../api/client";
+import { formatApiError } from "../api/errors";
+import {
+  useCreateEntity,
+  useDeleteEntity,
+  useEntityRecord,
+  useEntityType,
+  useUpdateEntity,
+  validationErrors,
+  type AttributeDef,
+  type Entity,
+  type EntityType,
+} from "../api/v1";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { parseRouteId } from "../lib/routeId";
+
+/**
+ * One entity: its four columns (`key`, `label`, `sort_order`, `active`)
+ * and a control per attribute of its type, generated from `attribute_def`
+ * rather than from table metadata -- the shape the spec calls for and the
+ * reason `attrs` is a free-form JSONB column on the server.
+ *
+ * `entity_type_id` is chosen once, on the new-entity route, and never
+ * shown as an editable field: the API does not accept it in a PATCH, and
+ * changing it would invalidate every attribute value at once.
+ */
+
+const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
+
+const COLUMN_FIELDS = ["key", "label", "sort_order", "active"];
+
+/** The trigger kinds that name an attribute the form has a control for.
+ * `unknown_attribute` also carries an attribute name, but by definition it
+ * is one with no definition and so no control -- it becomes a general
+ * message instead of being attached to nothing. */
+const ATTRIBUTE_KINDS = new Set(["required_attribute", "attribute_type"]);
+
+/**
+ * Splits a refused save into per-control messages and a general one.
+ *
+ * The wire gives one 422 shape (Ruling 19) for two different sources, and
+ * `kind` is the only thing that tells them apart: `["body", "key"]` with no
+ * `kind` is the *column* `key`, while the same `loc` with
+ * `kind="attribute_type"` is an *attribute* named `key` -- which is legal,
+ * since `attribute_def.name` only forbids `id`. That is why attribute
+ * errors are namespaced with `attrField()` rather than sharing the column
+ * namespace.
+ *
+ * A 409 here is the one unique constraint the table has,
+ * `UNIQUE (entity_type_id, key)`; `conflict_detail` words it after the
+ * constraint name, so it is reworded and pointed at the key field.
+ */
+export function entityServerErrors(
+  err: unknown,
+  attributeNames: string[]
+): { fields: FieldErrors; general: string | null } {
+  const items = validationErrors(err);
+  if (items.length > 0) {
+    const fields: FieldErrors = {};
+    const rest: string[] = [];
+    for (const item of items) {
+      const field = item.loc?.[1];
+      if (typeof field === "string") {
+        if (item.kind && ATTRIBUTE_KINDS.has(item.kind) && attributeNames.includes(field)) {
+          if (!(attrField(field) in fields)) fields[attrField(field)] = item.msg;
+          continue;
+        }
+        if (!item.kind && COLUMN_FIELDS.includes(field) && !(field in fields)) {
+          fields[field] = item.msg;
+          continue;
+        }
+      }
+      rest.push(item.msg);
+    }
+    return { fields, general: rest.length > 0 ? rest.join("\n") : null };
+  }
+  const message = formatApiError(err);
+  if (err instanceof ApiError && err.status === 409 && /already exists/.test(message)) {
+    return {
+      fields: { key: "Key: another entity of this type already has this key." },
+      general: null,
+    };
+  }
+  return { fields: {}, general: message };
+}
+
+export default function EntityRecord() {
+  const { id: rawId } = useParams();
+  const [searchParams] = useSearchParams();
+  const isNew = rawId === undefined;
+  const entityId = isNew ? null : parseRouteId(rawId);
+  const queryTypeId = parseRouteId(searchParams.get("type"));
+
+  const entityQuery = useEntityRecord(entityId);
+  const entity = entityQuery.data ?? null;
+  const typeId = isNew ? queryTypeId : (entity?.entity_type_id ?? null);
+  const typeQuery = useEntityType(typeId);
+
+  useDocumentTitle(isNew ? "New entity" : entity ? `Entity ${entity.key}` : "Entity");
+
+  if (isNew && queryTypeId === null) {
+    return (
+      <div>
+        <p className="text-sm text-slate-600">
+          Choose an entity type first: a new entity belongs to exactly one, and its type is what says which
+          attributes it has.
+        </p>
+        <Link to="/entities" className={BACK_LINK}>
+          Back to entities
+        </Link>
+      </div>
+    );
+  }
+
+  const notFound =
+    (!isNew && entityId === null) ||
+    (entityQuery.isError && entityQuery.error instanceof ApiError && entityQuery.error.status === 404) ||
+    (typeQuery.isError && typeQuery.error instanceof ApiError && typeQuery.error.status === 404);
+  if (notFound) {
+    return (
+      <div>
+        <p className="text-sm text-slate-600">Entity not found.</p>
+        <Link to="/entities" className={BACK_LINK}>
+          Back to entities
+        </Link>
+      </div>
+    );
+  }
+
+  const paused = entityQuery.fetchStatus === "paused" || typeQuery.fetchStatus === "paused";
+  if (paused && !typeQuery.data) return <OfflineNotice subject="This entity" />;
+
+  const failed = (entityQuery.isError && !entity) || (typeQuery.isError && !typeQuery.data);
+  if (failed) {
+    return (
+      <div>
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-red-600">{formatApiError(entityQuery.error ?? typeQuery.error)}</p>
+          <button
+            type="button"
+            onClick={() => {
+              entityQuery.refetch();
+              typeQuery.refetch();
+            }}
+            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+          >
+            Retry
+          </button>
+        </div>
+        <Link to="/entities" className={BACK_LINK}>
+          Back to entities
+        </Link>
+      </div>
+    );
+  }
+
+  if (!typeQuery.data || (!isNew && !entity)) return <p className="text-sm text-slate-500">Loading…</p>;
+
+  return <RecordForm key={entity?.id ?? "new"} type={typeQuery.data} entity={entity} />;
+}
+
+function sortedFieldOrder(attributes: AttributeDef[]): string[] {
+  return [...COLUMN_FIELDS, ...attributes.map((attribute) => attrField(attribute.name))];
+}
+
+function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null }) {
+  const attributes = type.attributes;
+  const [key, setKey] = useState(entity?.key ?? "");
+  const [label, setLabel] = useState(entity?.label ?? "");
+  const [sortOrder, setSortOrder] = useState(String(entity?.sort_order ?? 0));
+  const [active, setActive] = useState(entity?.active ?? true);
+  const [drafts, setDrafts] = useState<AttrDrafts>(() => draftsFromAttrs(attributes, entity?.attrs ?? {}));
+  const [stored, setStored] = useState<Record<string, unknown>>(entity?.attrs ?? {});
+  const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
+  const [general, setGeneral] = useState<string | null>(null);
+  const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
+
+  const createEntity = useCreateEntity();
+  const updateEntity = useUpdateEntity();
+  const deleteEntity = useDeleteEntity();
+  const toast = useToast();
+  const navigate = useNavigate();
+
+  const baseId = useId();
+  const id = (field: string) => `${baseId}-${field}`;
+  const errorId = (field: string) => `${baseId}-${field}-error`;
+  const isSubmitting = createEntity.isPending || updateEntity.isPending;
+  const staleKeys = staleAttrKeys(attributes, stored);
+
+  function clearError(field: string) {
+    if (errors[field]) {
+      const next = { ...errors };
+      delete next[field];
+      replace(next);
+    }
+  }
+
+  /** Re-seed from what the server stored, which is not what was sent: the
+   * `entity_validate` trigger materialises defaults into `attrs` on write,
+   * so an attribute left empty comes back populated. */
+  function resetFrom(saved: Entity) {
+    setKey(saved.key);
+    setLabel(saved.label ?? "");
+    setSortOrder(String(saved.sort_order));
+    setActive(saved.active);
+    setDrafts(draftsFromAttrs(attributes, saved.attrs));
+    setStored(saved.attrs);
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setGeneral(null);
+    const next: FieldErrors = {};
+
+    // The server has no CHECK on `entity.key` (Task 6's deferred item), so
+    // this is the only guard: the key feeds IR expressions and
+    // `snapshot_dataset()`, where an empty one would be unaddressable.
+    const trimmedKey = key.trim();
+    if (trimmedKey === "") next.key = "Key: a key is required -- it is how model expressions refer to this entity.";
+
+    const order =
+      sortOrder.trim() === ""
+        ? ({ ok: true, value: 0 } as const)
+        : parseAttrValue("integer", sortOrder, [], "Sort order");
+    if (!order.ok) next.sort_order = order.message;
+
+    const built = buildAttrs(attributes, drafts);
+    if (!built.ok) Object.assign(next, built.errors);
+
+    replace(next);
+    if (Object.keys(next).length > 0) return;
+
+    const body = {
+      key: trimmedKey,
+      label: label.trim() === "" ? null : label,
+      sort_order: order.ok ? (order.value as number) : 0,
+      active,
+      attrs: built.ok ? built.attrs : {},
+    };
+
+    try {
+      if (entity) {
+        const saved = await updateEntity.mutateAsync({ id: entity.id, body });
+        resetFrom(saved);
+        toast.success(`Entity "${saved.key}" saved`);
+      } else {
+        const created = await createEntity.mutateAsync({ entity_type_id: type.id, ...body });
+        toast.success(`Entity "${created.key}" created`);
+        navigate(`/entities/${created.id}`);
+      }
+    } catch (err) {
+      const result = entityServerErrors(err, attributes.map((attribute) => attribute.name));
+      setServerErrors(result.fields);
+      setGeneral(result.general);
+    }
+  }
+
+  async function handleDelete() {
+    if (!entity) return;
+    const confirmed = window.confirm(
+      `Delete entity "${entity.key}"? This also deletes every relationship it takes part in and every parameter ` +
+        `value indexed by it. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    try {
+      await deleteEntity.mutateAsync(entity.id);
+      toast.success(`Entity "${entity.key}" deleted`);
+      navigate("/entities");
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div>
+        <nav aria-label="Breadcrumb" className="mb-2 text-sm">
+          <Link to={`/entities?type=${type.id}`} className={BACK_LINK}>
+            Entities
+          </Link>
+        </nav>
+        <h1 className="text-lg font-semibold text-slate-900">
+          {entity ? (
+            <>
+              <span className="sr-only">Entity </span>
+              <span className="font-mono">{entity.key}</span>
+            </>
+          ) : (
+            "New entity"
+          )}
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Type <span className="font-mono">{type.name}</span>
+        </p>
+      </div>
+
+      <section aria-labelledby="entity-heading" className="rounded-md border border-slate-200 bg-white p-4">
+        <h2 id="entity-heading" className="mb-3 text-base font-semibold text-slate-900">
+          Record
+        </h2>
+        <form
+          aria-label={entity ? `Entity ${entity.key}` : "New entity"}
+          onSubmit={handleSubmit}
+          noValidate
+          className="space-y-4"
+        >
+          <ErrorSummary errors={errors} order={sortedFieldOrder(attributes)} summaryRef={summaryRef} />
+          {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <FieldLabel htmlFor={id("key")} required>
+                Key
+              </FieldLabel>
+              <input
+                id={id("key")}
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                className={`${INPUT_CLASS} font-mono`}
+                value={key}
+                aria-invalid={errors.key ? "true" : undefined}
+                aria-describedby={describedBy(id("key-hint"), errors.key && errorId("key"))}
+                onChange={(e) => {
+                  setKey(e.target.value);
+                  clearError("key");
+                }}
+              />
+              <p id={id("key-hint")} className="mt-1 text-xs text-slate-500">
+                How model expressions refer to this entity, e.g. <code>ahmed</code> or <code>mon</code>. Unique
+                within the type.
+              </p>
+              <FieldError id={errorId("key")} message={errors.key} />
+            </div>
+
+            <div>
+              <FieldLabel htmlFor={id("label")}>Label</FieldLabel>
+              <input
+                id={id("label")}
+                type="text"
+                autoComplete="off"
+                className={INPUT_CLASS}
+                value={label}
+                aria-invalid={errors.label ? "true" : undefined}
+                aria-describedby={describedBy(id("label-hint"), errors.label && errorId("label"))}
+                onChange={(e) => {
+                  setLabel(e.target.value);
+                  clearError("label");
+                }}
+              />
+              <p id={id("label-hint")} className="mt-1 text-xs text-slate-500">
+                Shown on screens instead of the key. Optional.
+              </p>
+              <FieldError id={errorId("label")} message={errors.label} />
+            </div>
+
+            <div>
+              <FieldLabel htmlFor={id("sort_order")}>Sort order</FieldLabel>
+              <input
+                id={id("sort_order")}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                className={INPUT_CLASS}
+                value={sortOrder}
+                aria-invalid={errors.sort_order ? "true" : undefined}
+                aria-describedby={describedBy(id("sort_order-hint"), errors.sort_order && errorId("sort_order"))}
+                onChange={(e) => {
+                  setSortOrder(e.target.value);
+                  clearError("sort_order");
+                }}
+              />
+              <p id={id("sort_order-hint")} className="mt-1 text-xs text-slate-500">
+                Lists are ordered by this first, then by key -- what puts Monday before Tuesday.
+              </p>
+              <FieldError id={errorId("sort_order")} message={errors.sort_order} />
+            </div>
+
+            <div className="flex items-center gap-2 sm:mt-7">
+              <input
+                id={id("active")}
+                type="checkbox"
+                className="h-6 w-6"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+              />
+              <label htmlFor={id("active")} className="text-sm font-medium text-slate-700">
+                Active
+              </label>
+            </div>
+          </div>
+
+          <fieldset className="border-t border-slate-200 pt-4">
+            <legend className="text-sm font-semibold text-slate-900">Attributes</legend>
+            <AttrsForm
+              attributes={attributes}
+              drafts={drafts}
+              errors={errors}
+              staleKeys={staleKeys}
+              onChange={(name, value) => {
+                setDrafts((prev) => ({ ...prev, [name]: value }));
+                clearError(attrField(name));
+              }}
+            />
+          </fieldset>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? "Saving…" : entity ? "Save entity" : "Create entity"}
+            </button>
+            <Link to={`/entities?type=${type.id}`} className="rounded px-3 py-2 text-sm text-slate-600 underline hover:text-slate-900">
+              Cancel
+            </Link>
+          </div>
+        </form>
+      </section>
+
+      {entity && (
+        <section aria-labelledby="delete-entity-heading" className="rounded-md border border-red-200 bg-white p-4">
+          <h2 id="delete-entity-heading" className="mb-2 text-base font-semibold text-slate-900">
+            Delete this entity
+          </h2>
+          <p className="mb-3 text-sm text-slate-600">
+            Its relationships and any parameter values indexed by it go with it.
+          </p>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleteEntity.isPending}
+            className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+          >
+            Delete entity
+          </button>
+        </section>
+      )}
+    </div>
+  );
+}

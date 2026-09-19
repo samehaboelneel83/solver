@@ -79,6 +79,19 @@ describe("AppShell", () => {
       expect(link.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it("links Entities from the Domain group, after Entity types (Task 12)", async () => {
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const entities = within(nav).getByRole("link", { name: "Entities" });
+      expect(entities).toHaveAttribute("href", "/entities");
+      const types = within(nav).getByRole("link", { name: "Entity types" });
+      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
+      // The types define the shape, the entities fill it in: that order.
+      expect(types.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(entities.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("says plainly that runs have no screens yet, rather than rendering an empty group", async () => {
       renderWithProviders();
       await settled();

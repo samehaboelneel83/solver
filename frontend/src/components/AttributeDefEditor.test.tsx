@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import AttributeDefEditor, { parseDefaultValue, serverFieldErrors } from "./AttributeDefEditor";
+import AttributeDefEditor from "./AttributeDefEditor";
+import { parseDefaultValue, serverFieldErrors } from "./attrTypes";
 import { ApiError } from "../api/client";
 import type { AttrType, AttributeDef, AttributeDefCreate } from "../api/v1";
 
