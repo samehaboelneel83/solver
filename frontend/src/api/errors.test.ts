@@ -32,61 +32,95 @@ describe("formatApiError", () => {
     expect(formatApiError(err)).toBe("attributes.rank: Invalid value");
   });
 
-  describe("422 with an object detail (a database validation trigger)", () => {
-    // Schema v1's `entity_validate` trigger raises a structured error that
-    // the backend turns into a 422 whose `detail` is an object rather than
-    // FastAPI's list. These are real response bodies, copied from
-    // backend/tests/test_api_entities.py.
+  describe("422 from a database validation trigger (Ruling 19's single shape)", () => {
+    // Schema v1's validation triggers (`entity_validate`,
+    // `relationship_validate`, `parameter_value_validate`) are turned by the
+    // backend's `translate_db_error` into a 422 in FastAPI's own list shape,
+    // with the trigger's `kind` as a sibling key on the entry. Task 3 had
+    // emitted an *object* detail instead; Ruling 19 normalised it, so the
+    // list branch now renders every 422. These bodies are copied verbatim
+    // from real backend responses (task 7, captured over HTTP).
 
-    it('renders a trigger 422 as "<field>: <message>", like the list branch', () => {
+    it('renders an entity trigger 422 as "<field>: <msg>"', () => {
       const err = new ApiError(
         422,
         JSON.stringify({
-          detail: {
-            message: 'entity ahmed: attribute "rank" must be integer',
-            field: "rank",
-            kind: "attribute_type",
-          },
+          detail: [
+            {
+              type: "value_error",
+              loc: ["body", "nope"],
+              msg: 'entity ahmed: unknown attribute "nope"',
+              kind: "unknown_attribute",
+            },
+          ],
         })
       );
-      expect(formatApiError(err)).toBe('rank: entity ahmed: attribute "rank" must be integer');
+      expect(formatApiError(err)).toBe('nope: entity ahmed: unknown attribute "nope"');
     });
 
-    it("does not show the user raw JSON", () => {
-      // The defect this branch fixes: before it, the object fell through to
-      // JSON.stringify and `kind`/`field` were shown as machine vocabulary.
+    it("renders a relationship trigger 422, whose field is the relationship type's name", () => {
+      // `relationship_validate` blames the relationship *type* by name, not
+      // a column -- so the prefix is "reports_to", which is what a user
+      // needs in order to know which kind of link they broke.
       const err = new ApiError(
         422,
         JSON.stringify({
-          detail: {
-            message: 'entity ahmed: unknown attribute "nope"',
-            field: "nope",
-            kind: "unknown_attribute",
-          },
+          detail: [
+            {
+              type: "value_error",
+              loc: ["body", "reports_to"],
+              msg: 'relationship "reports_to": would create a cycle',
+              kind: "cycle",
+            },
+          ],
+        })
+      );
+      expect(formatApiError(err)).toBe('reports_to: relationship "reports_to": would create a cycle');
+    });
+
+    it("never shows the user the machine-readable kind or raw JSON", () => {
+      const err = new ApiError(
+        422,
+        JSON.stringify({
+          detail: [
+            {
+              type: "value_error",
+              loc: ["body", "entity_ids"],
+              msg: "parameter_value: index does not match",
+              kind: "parameter_index",
+            },
+          ],
         })
       );
       const text = formatApiError(err);
+      expect(text).toBe("entity_ids: parameter_value: index does not match");
       expect(text).not.toContain("{");
-      expect(text).not.toContain("kind");
+      expect(text).not.toContain("parameter_index");
     });
 
-    it("falls back to the message alone when the failure names no field", () => {
-      // `translate_db_error` reads `field` off the trigger's payload, and
-      // the `parameter_index` kind carries `entity_ids` instead -- so
-      // `field` arrives null and must not be printed as a prefix.
+    it("renders the message alone when loc names no field beyond the request part", () => {
+      // `translate_db_error` blames `["body"]` when a trigger payload names
+      // no field (none does today, but the branch exists), and FastAPI does
+      // the same for a model-level validator. "body: ..." is request-part
+      // plumbing, not a field name, and must not be shown as one.
       const err = new ApiError(
         422,
         JSON.stringify({
-          detail: { message: "parameter_value: index does not match", field: null, kind: "x" },
+          detail: [{ type: "value_error", loc: ["body"], msg: "the row as a whole is invalid", kind: "x" }],
         })
       );
-      expect(formatApiError(err)).toBe("parameter_value: index does not match");
+      expect(formatApiError(err)).toBe("the row as a whole is invalid");
     });
 
-    it("still JSON-stringifies a 422 object that is not the trigger shape", () => {
-      // No `message`, so there is nothing better to show than the body.
-      const err = new ApiError(422, JSON.stringify({ detail: { code: "weird" } }));
-      expect(formatApiError(err)).toBe(JSON.stringify({ code: "weird" }));
+    it("no longer special-cases the retired object shape", () => {
+      // Pins that task 6's object branch is gone, not merely unused: an
+      // object `detail` now takes the generic non-array path like any other
+      // unrecognised body. No backend route emits this shape any more.
+      const err = new ApiError(
+        422,
+        JSON.stringify({ detail: { message: "m", field: "f", kind: "k" } })
+      );
+      expect(formatApiError(err)).toBe(JSON.stringify({ message: "m", field: "f", kind: "k" }));
     });
   });
 

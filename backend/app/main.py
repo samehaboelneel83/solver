@@ -5,9 +5,11 @@ from fastapi import FastAPI
 from app.api.auth import router as auth_router
 from app.api.entities import router as entities_router
 from app.api.entity_types import router as entity_types_router
+from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.meta import router as meta_router
 from app.api.options import router as options_router
+from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
@@ -30,10 +32,13 @@ app.include_router(options_router)
 # routers' literal /api/{table} and /api/iam/{table} prefixes.
 app.include_router(entity_types_router)
 app.include_router(entities_router)
+app.include_router(relationships_router)
+# Re-mounted in Task 7. Task 1 had unmounted it because every query behind
+# it read the v0 domain.* tables that migration 0006_schema_v1_domain
+# dropped; app/graph/service.py is now written against schema v1, and the
+# route moved from /api/graph/domain to /api/v1/graph with it.
+app.include_router(graph_router)
 app.include_router(crud_router)
-# The /api/graph/domain router is not mounted: it reads the v0 domain.*
-# tables that migration 0006_schema_v1_domain dropped. Rewritten against
-# schema v1 and remounted here -- restored in Task 7.
 
 
 @app.on_event("startup")

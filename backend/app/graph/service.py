@@ -1,24 +1,73 @@
-"""DISABLED for schema v1 -- restored in Task 7.
+"""Assemble one domain's graph for the editor, over schema v1.
 
-Every query below targets the v0 `domain.*` tables that migration
-0006_schema_v1_domain dropped, and `app.models.domain` no longer exists.
-The module is kept intact rather than deleted because Task 7 rewrites it
-against `app.models.v1_domain`; nothing imports it in the meantime
-(`app.main` no longer mounts the graph router). The explicit raise below
-makes an accidental import fail with this explanation instead of a bare
-ModuleNotFoundError on `app.models.domain`.
+This module answers a single question -- "what should the canvas draw?" --
+and it is read-only. Every write that used to live here now belongs to a
+purpose-built router: nodes to `app/api/entities.py`, edges and edge types
+to `app/api/relationships.py`. Keeping a second set of write paths here
+would mean a second implementation of rules the database already owns.
+
+What replaced what
+------------------
+v0 had `hierarchy` and `hierarchy_node` tables: a hierarchy was a named
+object, and each node in it carried a `parent_node_id`. Schema v1 has
+neither. A hierarchy is a `relationship_type` with `is_hierarchy = true`,
+and the nesting is just its `relationship` rows, read as **from_entity is
+the parent of to_entity**. So the compound-parent map, which v0 built by
+joining `hierarchy_node` to itself, is now one query over `relationship`
+filtered to the selected type -- and `hierarchies[]` on the wire is the
+list of `is_hierarchy` relationship types in the domain, whose ids are
+what `hierarchy_type_id` takes back.
+
+The wire contract (`app/graph/schemas.py`, mirrored by
+`frontend/src/types/graph.ts`) is deliberately unchanged, because task 14
+owns the frontend types and changing them here would break that
+sequencing. Four of its fields have no v1 column behind them, so the
+mapping below is a decision rather than a translation. Stated once, here,
+because a wrong choice renders wrong labels in the UI without failing any
+backend test:
+
+=========================  ==================================================
+wire field                 v1 source
+=========================  ==================================================
+GraphNode.type             entity_type.name
+GraphNode.label            entity.label, falling back to entity.key
+GraphNode.attributes       entity.attrs verbatim (see below)
+GraphEdge.type / .label    relationship_type.name (v1 has no display name)
+GraphEdge.attributes       relationship.attrs verbatim
+EntityTypeOption.code      entity_type.name -- v1's machine identifier
+EntityTypeOption.name      entity_type.name -- v1 has no separate label
+EntityTypeOption.is_abstract  **hardcoded False**: v1 dropped the column and
+                           has no notion of a type that cannot be instantiated
+RelationshipTypeOption.code / .name     relationship_type.name
+RelationshipTypeOption.is_directed      **hardcoded True**: every v1
+                           relationship is directed (from -> to), which is
+                           what the hierarchy and cardinality rules read
+RelationshipTypeOption.source_entity_type / .target_entity_type
+                           entity_type.name of from_type_id / to_type_id.
+                           NOT NULL in v1, so never v0's nullable "any"
+HierarchyOption            one per relationship_type with is_hierarchy = true;
+                           id/code/name from that row
+AttributeDefinitionOption.code / .name  attribute_def.name
+AttributeDefinitionOption.data_type     attribute_def.data_type verbatim, so
+                           these are v1's attr_type labels (integer, number,
+                           text, boolean, enum, time, date), not v0's
+ids                        str(bigint) -- the wire contract is strings
+=========================  ==================================================
+
+`GraphNode.attributes` is `entity.attrs` and nothing else. v0 folded the
+entity's own `code`/`status`/`description` columns in on top of the EAV
+values, because those columns had no other way to reach the client. v1 has
+no such columns, and `attrs` already *is* the complete declared attribute
+set -- so folding `key`/`active`/`sort_order` in would only create the
+shadowing hazard v0's M-9 fix was about, in reverse: an entity type is
+entitled to declare an attribute named `key`.
+
+Two v1 columns have no home in this contract and are therefore not
+returned: `relationship.valid_from` / `valid_to`. They are available from
+`GET /api/v1/relationships`, and folding them into `attributes` would
+shadow a relationship attribute of the same name.
 """
 
-raise ImportError(
-    "app.graph.service targets the removed v0 domain schema; restored in Task 7"
-)
-
-import math
-import uuid
-from datetime import date, datetime
-from typing import Any
-
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.graph.schemas import (
@@ -30,653 +79,182 @@ from app.graph.schemas import (
     HierarchyOption,
     RelationshipTypeOption,
 )
-from app.models.domain import (
-    AttributeDefinition,
+from app.models.v1_domain import (
+    AttributeDef,
     Entity,
-    EntityAttribute,
     EntityType,
-    Hierarchy,
-    HierarchyNode,
     Relationship,
     RelationshipType,
 )
 
 
+class HierarchyTypeNotFound(Exception):
+    """`hierarchy_type_id` names nothing, names a relationship type in a
+    different domain, or names one whose `is_hierarchy` is false. Mapped to
+    HTTP 404 by the route layer -- it is a bad reference to a resource, not
+    a malformed request body."""
+
+
 def _node_label(entity: Entity) -> str:
-    return entity.name or entity.code or str(entity.id)
-
-
-def _attribute_value(row: EntityAttribute) -> Any:
-    if row.value_number is not None:
-        # value_number is a Numeric/Decimal column -- left as Decimal, it
-        # serializes over JSON as a string (e.g. "3.0") rather than a number,
-        # which is surprising for anything reading GraphNode.attributes as
-        # typed JSON. Cast to float so it round-trips as a real JSON number.
-        return float(row.value_number)
-    for column in ("value_string", "value_boolean", "value_date", "value_datetime", "value_json"):
-        value = getattr(row, column)
-        if value is not None:
-            return value
-    return None
-
-
-class _Unset:
-    """Sentinel type distinct from None, so update_node can tell "field not
-    given in the request" (leave column alone) apart from "field explicitly
-    set to null" (clear the column)."""
-
-    def __repr__(self) -> str:
-        return "UNSET"
-
-
-UNSET: Any = _Unset()
-
-
-_TRUE_STRINGS = {"true", "1", "yes"}
-_FALSE_STRINGS = {"false", "0", "no"}
-
-
-def coerce_attribute_value(data_type: str, code: str, value: Any) -> Any:
-    """Coerce a raw JSON value into the Python type appropriate for storing
-    it in the entity_attribute row matching `data_type`. Raises
-    GraphValidationError with a message naming the attribute `code` when the
-    value doesn't fit the declared type."""
-    if data_type == "number":
-        if isinstance(value, bool):
-            raise GraphValidationError(f"attribute {code} expects a number")
-        if isinstance(value, (int, float, str)):
-            try:
-                coerced = float(value)
-            except (TypeError, ValueError):
-                raise GraphValidationError(f"attribute {code} expects a number")
-            if not math.isfinite(coerced):
-                raise GraphValidationError(f"attribute {code} expects a finite number")
-            return coerced
-        raise GraphValidationError(f"attribute {code} expects a number")
-
-    if data_type == "boolean":
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value.strip().lower() in _TRUE_STRINGS | _FALSE_STRINGS:
-            return value.strip().lower() in _TRUE_STRINGS
-        raise GraphValidationError(f"attribute {code} expects a boolean")
-
-    if data_type == "date":
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        if isinstance(value, str):
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                raise GraphValidationError(f"attribute {code} expects a date")
-        raise GraphValidationError(f"attribute {code} expects a date")
-
-    if data_type == "datetime":
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-            try:
-                return datetime.fromisoformat(normalized)
-            except ValueError:
-                raise GraphValidationError(f"attribute {code} expects a datetime")
-        raise GraphValidationError(f"attribute {code} expects a datetime")
-
-    if data_type == "string":
-        return str(value)
-
-    # json (or any other/unrecognized data_type): stored as-is.
-    return value
+    """`label` is the human name and `key` the stable identifier; an entity
+    may have only the latter, and a node with no text at all is unusable on
+    a canvas."""
+    return entity.label or entity.key
 
 
 def get_domain_graph(
-    db: Session, *, organization_id: uuid.UUID, hierarchy_id: uuid.UUID | None = None
+    db: Session, *, domain_id: int, hierarchy_type_id: int | None = None
 ) -> GraphResponse:
-    """Assemble the full domain graph for one organization.
+    """Assemble the full graph for one domain.
 
-    hierarchy_id, if given, determines each node's `parent` (for Cytoscape
-    compound-node nesting) from that hierarchy's hierarchy_node rows.
-    relationship_type has no organization_id column (verified against the
-    model) -- it is a global taxonomy, so all relationship types are
-    returned regardless of organization.
+    `hierarchy_type_id`, when given, determines each node's `parent` (for
+    Cytoscape compound-node nesting) from that relationship type's rows.
+    Rows of *other* relationship types never set a parent, whether or not
+    they are hierarchies themselves -- only one nesting can be drawn at a
+    time, which is why the parameter exists.
+
+    An unknown `domain_id` is an empty graph rather than a 404: the client
+    picks a domain from a list it was given, and an empty canvas is a
+    better answer to a stale selection than an error dialog.
     """
-    entities = db.query(Entity).filter(Entity.organization_id == organization_id).all()
-    entity_type_by_id = {
-        et.id: et for et in db.query(EntityType).filter(EntityType.organization_id == organization_id).all()
-    }
-    entity_ids = [e.id for e in entities]
+    entity_types = (
+        db.query(EntityType)
+        .filter(EntityType.domain_id == domain_id)
+        .order_by(EntityType.name.asc(), EntityType.id.asc())
+        .all()
+    )
+    entity_type_by_id = {et.id: et for et in entity_types}
 
-    parent_by_entity_id: dict[uuid.UUID, uuid.UUID | None] = {}
-    if hierarchy_id is not None and entity_ids:
-        nodes_in_hierarchy = (
-            db.query(HierarchyNode)
-            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id.in_(entity_ids))
+    relationship_types = (
+        db.query(RelationshipType)
+        .filter(RelationshipType.domain_id == domain_id)
+        .order_by(RelationshipType.name.asc(), RelationshipType.id.asc())
+        .all()
+    )
+    relationship_type_by_id = {rt.id: rt for rt in relationship_types}
+
+    if hierarchy_type_id is not None:
+        selected = relationship_type_by_id.get(hierarchy_type_id)
+        if selected is None or not selected.is_hierarchy:
+            raise HierarchyTypeNotFound(
+                f"relationship type {hierarchy_type_id} is not a hierarchy of this domain"
+            )
+
+    entities: list[Entity] = []
+    if entity_type_by_id:
+        entities = (
+            db.query(Entity)
+            .filter(Entity.entity_type_id.in_(entity_type_by_id.keys()))
+            # Same order as GET /api/v1/entities: `sort_order` is what makes
+            # mon..sun come back in week order rather than alphabetically,
+            # and `key`/`id` complete the total order.
+            .order_by(Entity.sort_order.asc(), Entity.key.asc(), Entity.id.asc())
             .all()
         )
-        node_by_id = {n.id: n for n in nodes_in_hierarchy}
-        for n in nodes_in_hierarchy:
-            parent_entity_id = None
-            if n.parent_node_id is not None:
-                parent_node = node_by_id.get(n.parent_node_id)
-                if parent_node is not None:
-                    parent_entity_id = parent_node.entity_id
-            parent_by_entity_id[n.entity_id] = parent_entity_id
+    entity_ids = {e.id for e in entities}
 
-    attributes_by_entity_id: dict[uuid.UUID, dict] = {}
-    if entity_ids:
-        attr_rows = db.query(EntityAttribute).filter(EntityAttribute.entity_id.in_(entity_ids)).all()
-        attr_def_ids = {row.attribute_id for row in attr_rows}
-        attribute_defs_by_id = {}
-        if attr_def_ids:
-            attribute_defs_by_id = {
-                d.id: d for d in db.query(AttributeDefinition).filter(AttributeDefinition.id.in_(attr_def_ids)).all()
-            }
-        for row in attr_rows:
-            definition = attribute_defs_by_id.get(row.attribute_id)
-            if definition is None:
-                continue
-            attributes_by_entity_id.setdefault(row.entity_id, {})[definition.code] = _attribute_value(row)
-
-    nodes = []
-    for entity in entities:
-        entity_type = entity_type_by_id.get(entity.entity_type_id)
-        # Built-ins are applied AFTER the EAV values, not before: an
-        # attribute_definition whose code happens to collide with one of
-        # these (e.g. a custom "status" attribute) must never shadow the
-        # entity's own column -- the built-in value always wins (M-9).
-        attrs: dict[str, Any] = dict(attributes_by_entity_id.get(entity.id, {}))
-        attrs["code"] = entity.code
-        attrs["status"] = entity.status
-        attrs["description"] = entity.description
-        parent_entity_id = parent_by_entity_id.get(entity.id)
-        nodes.append(
-            GraphNode(
-                id=str(entity.id),
-                type=entity_type.code if entity_type else "",
-                label=_node_label(entity),
-                parent=str(parent_entity_id) if parent_entity_id else None,
-                attributes=attrs,
-            )
-        )
-
-    entity_id_set = set(entity_ids)
-    relationships = []
-    if entity_id_set:
+    relationships: list[Relationship] = []
+    if relationship_type_by_id and entity_ids:
         relationships = (
             db.query(Relationship)
             .filter(
-                Relationship.source_entity_id.in_(entity_id_set),
-                Relationship.target_entity_id.in_(entity_id_set),
+                Relationship.relationship_type_id.in_(relationship_type_by_id.keys()),
+                # A relationship_type's from_type_id/to_type_id are plain FKs
+                # to entity_type with no same-domain constraint, so an edge
+                # could in principle reach outside this domain's nodes.
+                # Cytoscape cannot draw an edge to a node it was not given,
+                # so those are excluded rather than returned dangling.
+                Relationship.from_entity_id.in_(entity_ids),
+                Relationship.to_entity_id.in_(entity_ids),
             )
+            .order_by(Relationship.id.asc())
             .all()
         )
-    relationship_type_by_id = {rt.id: rt for rt in db.query(RelationshipType).all()}
 
-    # relationship_type is a global taxonomy (no organization_id column), so its
-    # source_entity_type/target_entity_type constraint can legitimately name an
-    # entity_type belonging to a DIFFERENT organization than the one being
-    # viewed. Resolving those ids only against entity_type_by_id (org-scoped,
-    # for the nodes/attribute_definitions below) silently turned such a
-    # constraint into "any" (None) -- the picker then offered, and create then
-    # 422'd on, a combination it should have excluded outright. Look the
-    # referenced entity_types up globally instead.
-    referenced_entity_type_ids = {
-        rt.source_entity_type for rt in relationship_type_by_id.values() if rt.source_entity_type is not None
-    } | {rt.target_entity_type for rt in relationship_type_by_id.values() if rt.target_entity_type is not None}
-    global_entity_type_by_id = entity_type_by_id
-    if referenced_entity_type_ids - entity_type_by_id.keys():
-        global_entity_type_by_id = {
-            **entity_type_by_id,
-            **{
-                et.id: et
-                for et in db.query(EntityType).filter(EntityType.id.in_(referenced_entity_type_ids)).all()
-            },
+    parent_by_entity_id: dict[int, int] = {}
+    if hierarchy_type_id is not None:
+        parent_by_entity_id = {
+            rel.to_entity_id: rel.from_entity_id
+            for rel in relationships
+            if rel.relationship_type_id == hierarchy_type_id
         }
 
-    edges = []
-    for rel in relationships:
-        rel_type = relationship_type_by_id.get(rel.relationship_type_id)
-        edges.append(
-            GraphEdge(
-                id=str(rel.id),
-                source=str(rel.source_entity_id),
-                target=str(rel.target_entity_id),
-                type=rel_type.code if rel_type else "",
-                label=rel_type.name if rel_type else "",
-                attributes=rel.attributes or {},
-            )
+    attribute_defs: list[AttributeDef] = []
+    if entity_type_by_id:
+        attribute_defs = (
+            db.query(AttributeDef)
+            .filter(AttributeDef.entity_type_id.in_(entity_type_by_id.keys()))
+            .order_by(AttributeDef.entity_type_id.asc(), AttributeDef.name.asc())
+            .all()
         )
 
-    entity_types = [
-        EntityTypeOption(id=str(et.id), code=et.code, name=et.name, is_abstract=et.is_abstract)
-        for et in entity_type_by_id.values()
-    ]
-    relationship_types = [
-        RelationshipTypeOption(
-            id=str(rt.id),
-            code=rt.code,
-            name=rt.name,
-            is_directed=rt.is_directed,
-            source_entity_type=(
-                global_entity_type_by_id[rt.source_entity_type].code
-                if rt.source_entity_type in global_entity_type_by_id
+    nodes = [
+        GraphNode(
+            id=str(entity.id),
+            type=entity_type_by_id[entity.entity_type_id].name,
+            label=_node_label(entity),
+            parent=(
+                str(parent_by_entity_id[entity.id])
+                if entity.id in parent_by_entity_id
                 else None
             ),
-            target_entity_type=(
-                global_entity_type_by_id[rt.target_entity_type].code
-                if rt.target_entity_type in global_entity_type_by_id
-                else None
-            ),
+            attributes=entity.attrs or {},
         )
-        for rt in relationship_type_by_id.values()
+        for entity in entities
     ]
-    hierarchies = [
-        HierarchyOption(id=str(h.id), code=h.code, name=h.name)
-        for h in db.query(Hierarchy).filter(Hierarchy.organization_id == organization_id).all()
+
+    edges = [
+        GraphEdge(
+            id=str(rel.id),
+            source=str(rel.from_entity_id),
+            target=str(rel.to_entity_id),
+            type=relationship_type_by_id[rel.relationship_type_id].name,
+            label=relationship_type_by_id[rel.relationship_type_id].name,
+            attributes=rel.attrs or {},
+        )
+        for rel in relationships
     ]
-    attribute_definitions = []
-    if entity_type_by_id:
-        attribute_definitions = [
-            AttributeDefinitionOption(
-                id=str(d.id), entity_type_id=str(d.entity_type_id), code=d.code, name=d.name, data_type=d.data_type
-            )
-            for d in db.query(AttributeDefinition)
-            .filter(AttributeDefinition.entity_type_id.in_(entity_type_by_id.keys()))
-            .all()
-        ]
+
+    def _type_name(entity_type_id: int) -> str | None:
+        entity_type = entity_type_by_id.get(entity_type_id)
+        return entity_type.name if entity_type is not None else None
 
     return GraphResponse(
         nodes=nodes,
         edges=edges,
-        entity_types=entity_types,
-        relationship_types=relationship_types,
-        hierarchies=hierarchies,
-        attribute_definitions=attribute_definitions,
-    )
-
-
-class GraphNotFoundError(Exception):
-    """Raised when a write targets an entity/relationship id that doesn't
-    exist. Mapped to HTTP 404 by the route layer."""
-
-
-class GraphConflictError(Exception):
-    """Raised when a write would violate a DB relationship (e.g. deleting
-    a still-referenced entity). Mapped to HTTP 409 by the route layer."""
-
-
-class GraphValidationError(Exception):
-    """Raised when a write fails a domain-level validation (e.g. an
-    edge's relationship_type doesn't match the two entities' types).
-    Mapped to HTTP 422 by the route layer."""
-
-
-def _entity_to_node(db: Session, entity: Entity, *, hierarchy_id: uuid.UUID | None) -> GraphNode:
-    entity_type = db.get(EntityType, entity.entity_type_id)
-    # EAV values are collected first, then the built-ins are applied on top
-    # -- an attribute_definition whose code collides with one of these
-    # (e.g. a custom "status" attribute) must never shadow the entity's own
-    # column, so the built-in value always wins (M-9).
-    attrs: dict[str, Any] = {}
-    attr_rows = db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity.id).all()
-    for row in attr_rows:
-        definition = db.get(AttributeDefinition, row.attribute_id)
-        if definition is not None:
-            attrs[definition.code] = _attribute_value(row)
-    attrs["code"] = entity.code
-    attrs["status"] = entity.status
-    attrs["description"] = entity.description
-
-    parent_entity_id = None
-    if hierarchy_id is not None:
-        node = (
-            db.query(HierarchyNode)
-            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
-            .first()
-        )
-        if node is not None and node.parent_node_id is not None:
-            parent_node = db.get(HierarchyNode, node.parent_node_id)
-            if parent_node is not None:
-                parent_entity_id = parent_node.entity_id
-
-    return GraphNode(
-        id=str(entity.id),
-        type=entity_type.code if entity_type else "",
-        label=_node_label(entity),
-        parent=str(parent_entity_id) if parent_entity_id else None,
-        attributes=attrs,
-    )
-
-
-def _clear_attribute_values(row: EntityAttribute) -> None:
-    """Null out all of an entity_attribute row's typed value_* columns, so
-    only the one matching its definition's data_type ends up set. Shared by
-    the write path here and by seed_graph_demo, which writes EAV rows
-    directly rather than through create_node/update_node."""
-    row.value_string = None
-    row.value_number = None
-    row.value_boolean = None
-    row.value_date = None
-    row.value_datetime = None
-    row.value_json = None
-
-
-def _write_entity_attributes(
-    db: Session, *, entity_id: uuid.UUID, entity_type_id: uuid.UUID, attributes: dict[str, Any]
-) -> None:
-    if not attributes:
-        return
-    definitions = {
-        d.code: d
-        for d in db.query(AttributeDefinition).filter(AttributeDefinition.entity_type_id == entity_type_id).all()
-    }
-    for code, value in attributes.items():
-        definition = definitions.get(code)
-        if definition is None:
-            raise GraphValidationError(f"unknown attribute {code} for this entity type")
-        existing = (
-            db.query(EntityAttribute)
-            .filter(EntityAttribute.entity_id == entity_id, EntityAttribute.attribute_id == definition.id)
-            .first()
-        )
-        if value is None:
-            # Explicit null clears the attribute -- delete the row if it exists.
-            if existing is not None:
-                db.delete(existing)
-            continue
-        coerced = coerce_attribute_value(definition.data_type, code, value)
-        row = existing or EntityAttribute(entity_id=entity_id, attribute_id=definition.id)
-        _clear_attribute_values(row)
-        if definition.data_type == "string":
-            row.value_string = coerced
-        elif definition.data_type == "number":
-            row.value_number = coerced
-        elif definition.data_type == "boolean":
-            row.value_boolean = coerced
-        elif definition.data_type == "date":
-            row.value_date = coerced
-        elif definition.data_type == "datetime":
-            row.value_datetime = coerced
-        else:
-            row.value_json = coerced
-        if existing is None:
-            db.add(row)
-
-
-def create_node(
-    db: Session,
-    *,
-    organization_id: uuid.UUID,
-    entity_type_id: uuid.UUID,
-    name: str,
-    code: str | None = None,
-    status: str | None = None,
-    description: str | None = None,
-    attributes: dict[str, Any] | None = None,
-    hierarchy_id: uuid.UUID | None = None,
-    parent_entity_id: uuid.UUID | None = None,
-) -> GraphNode:
-    parent_node_id = None
-    if hierarchy_id is not None and parent_entity_id is not None:
-        parent_node = (
-            db.query(HierarchyNode)
-            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
-            .first()
-        )
-        if parent_node is None:
-            raise GraphNotFoundError(
-                f"parent_entity_id {parent_entity_id} has no placement in hierarchy {hierarchy_id}"
+        entity_types=[
+            EntityTypeOption(
+                id=str(et.id),
+                code=et.name,
+                name=et.name,
+                is_abstract=False,
             )
-        parent_node_id = parent_node.id
-
-    entity = Entity(
-        organization_id=organization_id,
-        entity_type_id=entity_type_id,
-        name=name,
-        code=code,
-        status=status,
-        description=description,
-    )
-    db.add(entity)
-    try:
-        # domain.entity has UNIQUE (organization_id, entity_type_id, code); the flush
-        # below (needed to populate entity.id) is where a duplicate code trips that
-        # constraint, so it -- like the commit -- must stay inside this guard rather
-        # than surfacing as an unhandled 500.
-        db.flush()  # populate entity.id before using it below
-
-        _write_entity_attributes(db, entity_id=entity.id, entity_type_id=entity_type_id, attributes=attributes or {})
-
-        if hierarchy_id is not None:
-            db.add(
-                HierarchyNode(hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0)
+            for et in entity_types
+        ],
+        relationship_types=[
+            RelationshipTypeOption(
+                id=str(rt.id),
+                code=rt.name,
+                name=rt.name,
+                is_directed=True,
+                source_entity_type=_type_name(rt.from_type_id),
+                target_entity_type=_type_name(rt.to_type_id),
             )
-
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise GraphConflictError("an entity with this code already exists for this type")
-    except GraphValidationError:
-        db.rollback()
-        raise
-    db.refresh(entity)
-    return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
-
-
-def update_node(
-    db: Session,
-    entity_id: uuid.UUID,
-    *,
-    name: str | None | _Unset = UNSET,
-    code: str | None | _Unset = UNSET,
-    status: str | None | _Unset = UNSET,
-    description: str | None | _Unset = UNSET,
-    attributes: dict[str, Any] | None = None,
-    hierarchy_id: uuid.UUID | None = None,
-    parent_entity_id: uuid.UUID | None = None,
-) -> GraphNode:
-    """Update an entity's node fields. `name`/`code`/`status`/`description`
-    default to the UNSET sentinel: leave the column untouched when the field
-    wasn't part of the request at all, but honor an explicit `None` as "clear
-    this column" (name is the one exception -- an entity must have a name,
-    so an explicit null there is a validation error rather than a clear)."""
-    entity = db.get(Entity, entity_id)
-    if entity is None:
-        raise GraphNotFoundError(f"entity {entity_id} not found")
-
-    parent_node_id = None
-    if hierarchy_id is not None and parent_entity_id is not None:
-        parent_node = (
-            db.query(HierarchyNode)
-            .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == parent_entity_id)
-            .first()
-        )
-        if parent_node is None:
-            raise GraphNotFoundError(
-                f"parent_entity_id {parent_entity_id} has no placement in hierarchy {hierarchy_id}"
+            for rt in relationship_types
+        ],
+        hierarchies=[
+            HierarchyOption(id=str(rt.id), code=rt.name, name=rt.name)
+            for rt in relationship_types
+            if rt.is_hierarchy
+        ],
+        attribute_definitions=[
+            AttributeDefinitionOption(
+                id=str(ad.id),
+                entity_type_id=str(ad.entity_type_id),
+                code=ad.name,
+                name=ad.name,
+                data_type=ad.data_type,
             )
-        parent_node_id = parent_node.id
-
-    if name is not UNSET:
-        if name is None:
-            raise GraphValidationError("name cannot be empty")
-        entity.name = name
-    if code is not UNSET:
-        entity.code = code
-    if status is not UNSET:
-        entity.status = status
-    if description is not UNSET:
-        entity.description = description
-
-    try:
-        # domain.entity has UNIQUE (organization_id, entity_type_id, code). The
-        # entity.code assignment above is only staged in memory; a query below
-        # (or the commit itself) can trigger the autoflush that actually sends
-        # the UPDATE and trips that constraint, so everything from here to the
-        # commit stays inside this guard rather than surfacing as an unhandled 500.
-        if attributes:
-            _write_entity_attributes(
-                db, entity_id=entity.id, entity_type_id=entity.entity_type_id, attributes=attributes
-            )
-
-        if hierarchy_id is not None:
-            # hierarchy_id being given at all is the "touch placement" signal;
-            # parent_entity_id=None within that means "move to root".
-            node = (
-                db.query(HierarchyNode)
-                .filter(HierarchyNode.hierarchy_id == hierarchy_id, HierarchyNode.entity_id == entity.id)
-                .first()
-            )
-            if node is None:
-                db.add(
-                    HierarchyNode(
-                        hierarchy_id=hierarchy_id, entity_id=entity.id, parent_node_id=parent_node_id, level=0
-                    )
-                )
-            else:
-                node.parent_node_id = parent_node_id
-
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise GraphConflictError("an entity with this code already exists for this type")
-    except GraphValidationError:
-        db.rollback()
-        raise
-    db.refresh(entity)
-    return _entity_to_node(db, entity, hierarchy_id=hierarchy_id)
-
-
-def delete_node(db: Session, entity_id: uuid.UUID) -> None:
-    entity = db.get(Entity, entity_id)
-    if entity is None:
-        raise GraphNotFoundError(f"entity {entity_id} not found")
-
-    relationship_count = (
-        db.query(Relationship)
-        .filter((Relationship.source_entity_id == entity_id) | (Relationship.target_entity_id == entity_id))
-        .count()
+            for ad in attribute_defs
+        ],
     )
-    hierarchy_node_rows = db.query(HierarchyNode).filter(HierarchyNode.entity_id == entity_id).all()
-    child_count = 0
-    for node in hierarchy_node_rows:
-        child_count += db.query(HierarchyNode).filter(HierarchyNode.parent_node_id == node.id).count()
-
-    if relationship_count or child_count:
-        parts = []
-        if relationship_count:
-            parts.append(f"{relationship_count} relationship(s)")
-        if child_count:
-            parts.append(f"{child_count} child hierarchy placement(s)")
-        raise GraphConflictError(f"entity still has {' and '.join(parts)} — remove them first")
-
-    # entity_attribute rows are the entity's own data, not a connection to
-    # something else -- delete them automatically rather than blocking on them.
-    db.query(EntityAttribute).filter(EntityAttribute.entity_id == entity_id).delete()
-    for node in hierarchy_node_rows:
-        db.delete(node)
-    try:
-        # Flush the child-row deletes before deleting the entity itself: these
-        # models have no ORM relationship() links (plain FK columns only), so
-        # the unit of work cannot infer that hierarchy_node/entity_attribute
-        # must be deleted before entity, and may otherwise attempt the entity
-        # DELETE first, tripping hierarchy_node_entity_id_fkey even though the
-        # referencing rows are already staged for deletion in the same flush.
-        # This flush (like the commit below) can itself raise IntegrityError
-        # if a concurrent request inserted a new child hierarchy placement or
-        # relationship in the window between the precheck above and here --
-        # keeping it inside this try/except preserves the 409-on-conflict
-        # behavior for that race instead of letting it surface as a 500.
-        db.flush()
-        db.delete(entity)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise GraphConflictError(
-            "entity became referenced by a new relationship or hierarchy placement during deletion — try again"
-        )
-
-
-def _relationship_to_edge(db: Session, relationship: Relationship) -> GraphEdge:
-    rel_type = db.get(RelationshipType, relationship.relationship_type_id)
-    return GraphEdge(
-        id=str(relationship.id),
-        source=str(relationship.source_entity_id),
-        target=str(relationship.target_entity_id),
-        type=rel_type.code if rel_type else "",
-        label=rel_type.name if rel_type else "",
-        attributes=relationship.attributes or {},
-    )
-
-
-def create_edge(
-    db: Session,
-    *,
-    relationship_type_id: uuid.UUID,
-    source_entity_id: uuid.UUID,
-    target_entity_id: uuid.UUID,
-    attributes: dict[str, Any] | None = None,
-) -> GraphEdge:
-    relationship_type = db.get(RelationshipType, relationship_type_id)
-    if relationship_type is None:
-        raise GraphNotFoundError(f"relationship_type {relationship_type_id} not found")
-
-    source_entity = db.get(Entity, source_entity_id)
-    target_entity = db.get(Entity, target_entity_id)
-    if source_entity is None or target_entity is None:
-        raise GraphNotFoundError("source or target entity not found")
-
-    if (
-        relationship_type.source_entity_type is not None
-        and relationship_type.source_entity_type != source_entity.entity_type_id
-    ):
-        raise GraphValidationError(
-            "source entity's type does not match this relationship type's required source type"
-        )
-    if (
-        relationship_type.target_entity_type is not None
-        and relationship_type.target_entity_type != target_entity.entity_type_id
-    ):
-        raise GraphValidationError(
-            "target entity's type does not match this relationship type's required target type"
-        )
-
-    relationship = Relationship(
-        relationship_type_id=relationship_type_id,
-        source_entity_id=source_entity_id,
-        target_entity_id=target_entity_id,
-        attributes=attributes or {},
-    )
-    db.add(relationship)
-    try:
-        # domain.relationship has UNIQUE (relationship_type_id, source_entity_id,
-        # target_entity_id) -- creating an edge that already exists trips this at
-        # commit time, so it must stay inside this guard rather than surfacing as
-        # an unhandled 500.
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise GraphConflictError("this relationship already exists")
-    db.refresh(relationship)
-    return _relationship_to_edge(db, relationship)
-
-
-def update_edge(db: Session, relationship_id: uuid.UUID, *, attributes: dict[str, Any] | None = None) -> GraphEdge:
-    relationship = db.get(Relationship, relationship_id)
-    if relationship is None:
-        raise GraphNotFoundError(f"relationship {relationship_id} not found")
-    if attributes is not None:
-        relationship.attributes = attributes
-    db.commit()
-    db.refresh(relationship)
-    return _relationship_to_edge(db, relationship)
-
-
-def delete_edge(db: Session, relationship_id: uuid.UUID) -> None:
-    relationship = db.get(Relationship, relationship_id)
-    if relationship is None:
-        raise GraphNotFoundError(f"relationship {relationship_id} not found")
-    db.delete(relationship)
-    db.commit()

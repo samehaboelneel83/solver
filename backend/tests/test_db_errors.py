@@ -156,9 +156,13 @@ def test_real_unknown_attribute_check_violation_becomes_422(db):
     http = translate_db_error(exc_info.value, table="entity")
 
     assert http.status_code == 422
-    assert http.detail["field"] == "nope"
-    assert http.detail["kind"] == "unknown_attribute"
-    assert isinstance(http.detail["message"], str) and http.detail["message"]
+    # Ruling 19: FastAPI's list shape, one entry, `kind` as a sibling key.
+    assert isinstance(http.detail, list) and len(http.detail) == 1, http.detail
+    entry = http.detail[0]
+    assert set(entry) == {"type", "loc", "msg", "kind"}, entry
+    assert entry["loc"] == ["body", "nope"]
+    assert entry["kind"] == "unknown_attribute"
+    assert isinstance(entry["msg"], str) and entry["msg"]
 
 
 def test_real_required_attribute_check_violation_becomes_422(db):
@@ -173,8 +177,53 @@ def test_real_required_attribute_check_violation_becomes_422(db):
     http = translate_db_error(exc_info.value, table="entity")
 
     assert http.status_code == 422
-    assert http.detail["field"] == "badge"
-    assert http.detail["kind"] == "required_attribute"
+    assert isinstance(http.detail, list) and len(http.detail) == 1, http.detail
+    assert http.detail[0]["loc"] == ["body", "badge"]
+    assert http.detail[0]["kind"] == "required_attribute"
+
+
+def test_real_parameter_index_violation_becomes_a_list_422_with_kind(db):
+    """The kind task 8 depends on, provoked through the real
+    `parameter_value_validate` trigger rather than a fake.
+
+    Worth its own test for two reasons. `kind` is the only machine-readable
+    discriminator a client gets for a trigger failure, and Ruling 19 moved
+    it from a top-level `detail` key onto the list entry -- a place a
+    careless reshaping could drop it from. And, contrary to what this
+    module's docstring and `errors.ts` used to claim, `parameter_index`
+    **does** name a field: the trigger's DETAIL carries `'field',
+    'entity_ids'` (migration 0006). So the `loc` is `["body",
+    "entity_ids"]`, not a bare `["body"]`.
+    """
+    domain_id = make_domain(db, "dberr")
+    day = make_entity_type(db, domain_id, "day")
+    shift = make_entity_type(db, domain_id, "shift")
+    mon = make_entity(db, day, "mon")
+    pd_id = db.execute(
+        text(
+            "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
+            "VALUES (:d, 'demand', ARRAY[:day, :shift]::bigint[]) RETURNING id"
+        ),
+        {"d": domain_id, "day": day, "shift": shift},
+    ).scalar_one()
+
+    with pytest.raises(IntegrityError) as exc_info:
+        db.execute(
+            text(
+                "INSERT INTO parameter_value (parameter_def_id, entity_ids, value) "
+                "VALUES (:p, ARRAY[:e]::bigint[], 3)"
+            ),
+            {"p": pd_id, "e": mon},
+        )
+    db.rollback()
+
+    http = translate_db_error(exc_info.value, table="parameter_value")
+
+    assert http.status_code == 422
+    assert isinstance(http.detail, list) and len(http.detail) == 1, http.detail
+    entry = http.detail[0]
+    assert entry["kind"] == "parameter_index"
+    assert entry["loc"] == ["body", "entity_ids"]
 
 
 # --------------------------------------------------------------------------
@@ -234,6 +283,29 @@ def test_check_violation_with_json_but_no_kind_falls_back_to_409():
     exc = fake_dbapi_error(pgcode="23514", message_detail=json.dumps({"field": "x"}))
     http = translate_db_error(exc, table="entity")
     assert http.status_code == 409
+
+
+def test_trigger_payload_without_a_field_blames_the_body_as_a_whole():
+    """No trigger in migrations 0006/0007 omits `field` today -- every one
+    of the seven kinds sets it -- so this branch is reachable only by a
+    fake. It is pinned anyway because the frontend renders a `loc` of bare
+    `["body"]` as the message alone, and a `loc` of `["body", None]` would
+    reach the user as the literal text "None: ..."."""
+    exc = fake_dbapi_error(
+        pgcode="23514",
+        message_detail=json.dumps({"kind": "some_future_kind"}),
+        message_primary="the row as a whole is invalid",
+    )
+    http = translate_db_error(exc, table="entity")
+    assert http.status_code == 422
+    assert http.detail == [
+        {
+            "type": "value_error",
+            "loc": ["body"],
+            "msg": "the row as a whole is invalid",
+            "kind": "some_future_kind",
+        }
+    ]
 
 
 def test_check_violation_with_no_detail_at_all_falls_back_to_409():

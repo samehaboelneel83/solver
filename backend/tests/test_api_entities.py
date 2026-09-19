@@ -4,9 +4,12 @@ decides whether a payload is valid (`app/api/entities.py`).
 `entity.attrs` is free-form JSONB. Nothing in the request layer knows what
 attributes an entity type declares, so `attrs` is validated by the
 `entity_validate` trigger (migration 0006), which raises SQLSTATE 23514
-with a JSON `DETAIL` carrying `kind`/`field`/`record`. Task 3's
-`translate_db_error` turns that into a **422 with an object `detail`**:
-`{"message", "field", "kind"}`.
+with a JSON `DETAIL` carrying `kind`/`field`/`record`. `translate_db_error`
+turns that into a **422 in FastAPI's own list shape** -- one entry,
+`loc: ["body", <field>]`, the message in `msg`, and the trigger's `kind`
+as a sibling key. (Task 3 originally emitted an *object* `detail`
+`{"message", "field", "kind"}`; Ruling 19 normalised it onto the list
+shape in task 7, so the platform has exactly one 422 body.)
 
 **This file is where that contract is proven over real HTTP.** Task 5 was
 expected to do it and could not: neither `entity_type` nor `attribute_def`
@@ -24,13 +27,16 @@ fourth for the `enum_values` case and a fifth for a `default_value` that
 does not match its own `data_type` -- the failure Task 5 deliberately left
 for this task to surface (its Concern 4).
 
-Three response shapes are in play and `_trigger_error`, `_validation_errors`
-and `_conflict` pin one each:
+Three response *sources* are in play and `_trigger_error`,
+`_validation_errors` and `_conflict` pin one each. The first two now share
+a body shape, so what tells them apart is the `kind` key -- present on a
+trigger's entry, absent from FastAPI's:
 
-- **422, object `detail`** -- `entity_validate`, via `translate_db_error`.
-- **422, list `detail`** -- FastAPI's own body validation, for what the
-  request layer can decide alone (`attrs` not being an object at all,
-  `sort_order` not being an integer).
+- **422, list `detail` with `kind`** -- `entity_validate`, via
+  `translate_db_error`.
+- **422, list `detail` without `kind`** -- FastAPI's own body validation,
+  for what the request layer can decide alone (`attrs` not being an object
+  at all, `sort_order` not being an integer).
 - **409, string `detail`** -- `translate_db_error`'s other branch: the
   `UNIQUE (entity_type_id, key)` violation and the `entity_type_id` FK.
 
@@ -109,25 +115,46 @@ def entity_type_id(auth_headers, domain_id):
 
 
 def _trigger_error(response) -> dict:
-    """Assert `response` is task 3's 422: an **object** `detail` carrying
-    exactly `message`, `field` and `kind`.
+    """Assert `response` is a database trigger's 422 and return it
+    normalised to `{message, field, kind}` for the tests below to read.
 
-    The shape assertion is the whole point. FastAPI's own 422 uses the same
-    status with a *list* of `{loc, msg, type}`, so a test that checked only
-    the number could not tell a trigger refusal from a Pydantic one -- and
-    would keep passing if `translate_db_error` stopped emitting `kind`.
+    Since Ruling 19 (task 7) the wire shape is FastAPI's list: exactly one
+    entry, whose keys are exactly `type`, `loc`, `msg` and `kind`, with
+    `loc == ["body", <field>]`. Every one of those is asserted here, not
+    merely the status: a test that checked only the number could not tell
+    a trigger refusal from a Pydantic one, and would keep passing if
+    `translate_db_error` stopped emitting `kind` -- the one machine-readable
+    discriminator a client has (task 8 depends on `kind="parameter_index"`).
+
+    The normalised return keeps the eight tests below about *which* kind
+    and field, which did not change, rather than about the envelope, which
+    did.
     """
     assert response.status_code == 422, response.text
     body = response.json()
     detail = body.get("detail")
-    assert isinstance(detail, dict), f"expected an object detail, got {body!r}"
-    assert set(detail) == {"message", "field", "kind"}, detail
-    assert isinstance(detail["message"], str) and detail["message"], detail
-    return detail
+    assert isinstance(detail, list), f"expected a list detail, got {body!r}"
+    assert len(detail) == 1, f"a trigger blames exactly one thing, got {detail!r}"
+    entry = detail[0]
+    assert set(entry) == {"type", "loc", "msg", "kind"}, entry
+    assert isinstance(entry["msg"], str) and entry["msg"], entry
+    loc = [str(part) for part in entry["loc"]]
+    assert loc[0] == "body", entry
+    assert len(loc) <= 2, entry
+    return {
+        "message": entry["msg"],
+        "field": loc[1] if len(loc) > 1 else None,
+        "kind": entry["kind"],
+    }
 
 
 def _validation_errors(response) -> list[dict]:
-    """Assert `response` is FastAPI's 422 -- the *other* 422 shape."""
+    """Assert `response` is FastAPI's own 422 -- the request layer's answer.
+
+    Since Ruling 19 a trigger's 422 has the same list envelope, so the
+    envelope alone no longer says who answered. The absence of `kind` does:
+    only `translate_db_error` adds it.
+    """
     assert response.status_code == 422, response.text
     body = response.json()
     detail = body.get("detail")
@@ -136,6 +163,7 @@ def _validation_errors(response) -> list[dict]:
     for entry in detail:
         assert isinstance(entry, dict), entry
         assert "loc" in entry and "msg" in entry and "type" in entry, entry
+        assert "kind" not in entry, f"a database trigger answered, not the request layer: {entry!r}"
     return detail
 
 
@@ -175,7 +203,7 @@ def _make_entity(client, auth_headers, entity_type_id, key, **extra) -> dict:
     return response.json()
 
 
-# --- the Task 3 422 contract: one test per `kind` --------------------------
+# --- the trigger 422 contract: one test per `kind` ------------------------
 
 
 def test_unknown_attribute_is_422_naming_the_attribute(auth_headers, entity_type_id):

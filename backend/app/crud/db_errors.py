@@ -6,10 +6,34 @@ Schema v1's DOMAIN validation triggers (``entity_validate``,
 JSON ``DETAIL`` payload naming exactly which field failed and why (see
 ``backend/tests/test_v1_domain_triggers.py`` for the payload shapes: `kind`
 one of `unknown_attribute`, `required_attribute`, `attribute_type`,
-`type_mismatch`, `cardinality`, `cycle`, `parameter_index`; `field` the
-attribute or relationship-type name, or absent for `parameter_index` which
-carries `entity_ids` instead). psycopg2 raises `CheckViolation`, a subclass
-of `IntegrityError`, and SQLAlchemy wraps it as `sqlalchemy.exc.IntegrityError`.
+`type_mismatch`, `cardinality`, `cycle`, `parameter_index`). `field` is set
+by **every** one of those seven: the attribute name for `entity_validate`'s
+kinds, the relationship type's *name* (not a column) for
+`relationship_validate`'s, and the literal ``'entity_ids'`` for
+`parameter_index`. (An earlier version of this docstring said
+`parameter_index` omitted `field`; migration 0006 line 315 says otherwise.)
+psycopg2 raises `CheckViolation`, a subclass of `IntegrityError`, and
+SQLAlchemy wraps it as `sqlalchemy.exc.IntegrityError`.
+
+One 422 body shape (Ruling 19)
+------------------------------
+A trigger's 422 is emitted in **FastAPI's own validation-error shape** --
+a list of ``{"type", "loc", "msg"}`` entries -- with the trigger's `kind`
+carried as a fourth, sibling key on the entry:
+
+    {"detail": [{"type": "value_error",
+                 "loc":  ["body", "<field>"],
+                 "msg":  "<the trigger's message>",
+                 "kind": "<kind>"}]}
+
+Task 3 originally emitted a bare object ``{"message", "field", "kind"}``.
+That gave the API two incompatible bodies under one status code -- every
+client had to sniff ``Array.isArray(detail)`` before reading either -- so
+it was normalised at this edge rather than in each consumer. `kind` is
+kept because it is the only machine-readable discriminator a client has
+for a trigger failure (task 8 surfaces `kind="parameter_index"`), and its
+presence is also what distinguishes a database refusal from a request-
+layer one now that the envelopes match.
 
 The immutability trigger (``forbid_update``, migration
 ``0007_schema_v1_problem_run``) and ``snapshot_dataset()``'s IR-resolution
@@ -54,8 +78,9 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
     """Map a DBAPIError raised by a v1 trigger (or a plain constraint) to an
     HTTPException, or re-raise `exc` unchanged if none of the known cases apply.
 
-    - 23514 (check_violation) with a well-formed JSON DETAIL -> 422 naming
-      the field and kind, per the Task 1 DETAIL contract.
+    - 23514 (check_violation) with a well-formed JSON DETAIL -> 422 in the
+      list shape described in the module docstring, one entry whose `loc`
+      names the field and which carries the trigger's `kind`.
     - 23514 without a parseable JSON DETAIL -> falls through to the 409
       path below. conflict_detail() has no bespoke branch for "23514", so
       this returns its generic catch-all message rather than a tailored
@@ -82,13 +107,22 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
                 payload = None
             if isinstance(payload, dict) and "kind" in payload:
                 message = getattr(diag, "message_primary", None) or str(exc.orig).strip()
+                field = payload.get("field")
+                # No trigger omits `field` today, but a missing one must
+                # blame the body as a whole (`["body"]`), never produce
+                # `["body", None]` -- which a client would render as the
+                # literal text "None: ...".
+                loc = ["body", str(field)] if field not in (None, "") else ["body"]
                 return HTTPException(
                     status_code=422,
-                    detail={
-                        "message": message,
-                        "field": payload.get("field"),
-                        "kind": payload.get("kind"),
-                    },
+                    detail=[
+                        {
+                            "type": "value_error",
+                            "loc": loc,
+                            "msg": message,
+                            "kind": payload.get("kind"),
+                        }
+                    ],
                 )
         # No parseable JSON DETAIL -- fall through to the generic 409 path.
         return HTTPException(status_code=409, detail=conflict_detail(exc, table))
