@@ -1,12 +1,20 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import cytoscape, { Core, NodeSingular } from "cytoscape";
 // @ts-expect-error -- cytoscape-elk ships no bundled type declarations
 import elk from "cytoscape-elk";
 // @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
 import edgehandles from "cytoscape-edgehandles";
-import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
-import { formatApiError } from "../api/errors";
-import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
+import { relationshipErrorMessage, useGraph } from "../api/graph";
+import {
+  useCreateEntity,
+  useCreateRelationship,
+  useEntityTypes,
+  useRelationshipTypes,
+  type Id,
+} from "../api/v1";
+import AttrsForm, { buildAttrs, type AttrDrafts } from "./AttrsForm";
+import { FieldError, FieldLabel, INPUT_CLASS, type FieldErrors } from "./attrTypes";
+import { entityServerErrors } from "../pages/EntityRecord";
 import OfflineNotice from "./OfflineNotice";
 import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
@@ -18,9 +26,11 @@ cytoscape.use(edgehandles);
 type Selection = { kind: "node" | "edge"; id: string } | null;
 
 type GraphEditorProps = {
-  organizationId: string;
-  hierarchyId: string | null;
-  onHierarchyChange: (id: string | null) => void;
+  domainId: Id;
+  /** A `relationship_type` with `is_hierarchy = true`, whose rows become the
+   * nodes' compound parents. Null draws the graph flat. */
+  hierarchyTypeId: Id | null;
+  onHierarchyTypeChange: (id: Id | null) => void;
   filter?: FilterCriteria;
   onSelectionChange?: (selection: Selection) => void;
   // H-1 fix round 1: an external request to move the canvas's own roving keyboard focus to a
@@ -171,9 +181,9 @@ export function positionsAreDegenerate(positions: { x: number; y: number }[]): b
 }
 
 export default function GraphEditor({
-  organizationId,
-  hierarchyId,
-  onHierarchyChange,
+  domainId,
+  hierarchyTypeId,
+  onHierarchyTypeChange,
   filter,
   onSelectionChange,
   focusRequest,
@@ -192,7 +202,16 @@ export default function GraphEditor({
 
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
-  const [createEntityTypeId, setCreateEntityTypeId] = useState("");
+  // The create-node form is a small `entity` form: a key, an optional label
+  // and one control per `attribute_def` of the chosen type (Task 12's
+  // AttrsForm), plus a parent when a hierarchy is selected.
+  const [createTypeId, setCreateTypeId] = useState<Id | "">("");
+  const [createKey, setCreateKey] = useState("");
+  const [createLabel, setCreateLabel] = useState("");
+  const [createParentId, setCreateParentId] = useState("");
+  const [createDrafts, setCreateDrafts] = useState<AttrDrafts>({});
+  const [createErrors, setCreateErrors] = useState<FieldErrors>({});
+  const createFormId = useId();
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -209,15 +228,24 @@ export default function GraphEditor({
   // select) rather than dropping it back to the document body.
   const firstControlRef = useRef<HTMLSelectElement | null>(null);
 
+  function resetCreateNodeForm() {
+    setCreateTypeId("");
+    setCreateKey("");
+    setCreateLabel("");
+    setCreateParentId("");
+    setCreateDrafts({});
+    setCreateErrors({});
+  }
+
   function closeCreateNodeForm() {
     setShowCreateNode(false);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
     createNodeToggleRef.current?.focus();
   }
 
   function openCreateNodeForm() {
     setShowCreateNode(true);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
   }
 
   function handleCreateNodeFormKeyDown(event: ReactKeyboardEvent<HTMLFormElement>) {
@@ -233,13 +261,24 @@ export default function GraphEditor({
     error: loadError,
     refetch: refetchGraph,
     fetchStatus: graphFetchStatus,
-  } = useGraph(organizationId, hierarchyId);
+  } = useGraph(domainId, hierarchyTypeId);
   // D-7: offline, this query pauses instead of failing -- `isLoading` never resolves, so
   // without this the "Loading graph…" text below would sit there forever.
   const isOffline = graphFetchStatus === "paused" && !data;
-  const createNode = useCreateNode(organizationId, hierarchyId);
-  const createEdge = useCreateEdge(organizationId, hierarchyId);
+  // The hierarchy picker is filtered SERVER-side: `is_hierarchy` is a column
+  // on `relationship_type`, and Task 7 added the filter for exactly this.
+  const hierarchyTypes = useRelationshipTypes(domainId, { isHierarchy: true, limit: 500 });
+  // The graph payload's `attribute_definitions` carry only id/name/data_type;
+  // AttrsForm needs `required`, `enum_values`, `unit` and `default_value` as
+  // well, which the entity-type list route carries in full. Same query the
+  // property panel runs, so React Query serves it once.
+  const entityTypes = useEntityTypes(domainId, { limit: 500 });
+  const createEntity = useCreateEntity();
+  const createRelationship = useCreateRelationship();
   const toast = useToast();
+
+  const createType = createTypeId === "" ? undefined : entityTypes.data?.items.find((t) => t.id === createTypeId);
+  const createAttributes = createType?.attributes ?? [];
 
   // Create the cytoscape instance exactly once per mount. Data is applied
   // (and the instance kept alive across refetches/mutations) by the effect
@@ -380,11 +419,11 @@ export default function GraphEditor({
         return;
       }
       const typeOk = selectedTypesSet === null || selectedTypesSet.has(graphNode.type);
-      const codeValue = graphNode.attributes?.code;
-      const searchOk =
-        !searchLower ||
-        graphNode.label.toLowerCase().includes(searchLower) ||
-        (typeof codeValue === "string" && codeValue.toLowerCase().includes(searchLower));
+      // Label only. v0 also matched `attributes.code`, which was the entity's
+      // own `code` COLUMN; v1 has no such column -- `code` there would be an
+      // ordinary attribute that a type may or may not declare, so matching it
+      // would make search mean something different per entity type.
+      const searchOk = !searchLower || graphNode.label.toLowerCase().includes(searchLower);
       node.style("display", typeOk && searchOk ? "element" : "none");
     });
 
@@ -589,13 +628,6 @@ export default function GraphEditor({
     return data?.nodes.find((n) => n.id === entityId)?.type;
   }
 
-  function entityTypeName(code: string | undefined): string {
-    if (!code) {
-      return "?";
-    }
-    return data?.entity_types.find((et) => et.code === code)?.name ?? code;
-  }
-
   function validRelationshipTypesFor(sourceId: string, targetId: string): RelationshipTypeOption[] {
     const sourceType = nodeEntityType(sourceId);
     const targetType = nodeEntityType(targetId);
@@ -612,66 +644,88 @@ export default function GraphEditor({
     }
     const relationshipTypeName =
       data?.relationship_types.find((rt) => rt.id === relationshipTypeId)?.name ?? "Relationship";
-    createEdge.mutate(
+    createRelationship.mutate(
       {
-        relationship_type_id: relationshipTypeId,
-        source_entity_id: pendingEdge.sourceId,
-        target_entity_id: pendingEdge.targetId,
+        relationship_type_id: Number(relationshipTypeId),
+        // from -> to is the direction the cardinality, type and cycle rules
+        // are judged in; for a hierarchy, `from` is the parent.
+        from_entity_id: Number(pendingEdge.sourceId),
+        to_entity_id: Number(pendingEdge.targetId),
       },
       {
         onSuccess: () => toast.success(`${relationshipTypeName} created`),
-        onError: (e) => setError(formatApiError(e)),
+        // A cardinality, cycle or type_mismatch 422 names the relationship
+        // TYPE in `loc`, not a body field -- see relationshipErrorMessage.
+        onError: (e) => setError(relationshipErrorMessage(e)),
       }
     );
     setPendingEdge(null);
   }
 
-  function handleCreateNode(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateNode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    const form = new FormData(event.currentTarget);
-    const entityTypeId = String(form.get("entity_type_id") ?? "");
-    const name = String(form.get("name") ?? "");
-    const code = String(form.get("code") ?? "") || undefined;
-    const parentEntityId = String(form.get("parent_entity_id") ?? "") || undefined;
-    if (!entityTypeId || !name) {
+    if (createTypeId === "") {
       return;
     }
-    // Attribute definitions that collide with a built-in field (code/status/
-    // description/name) are hidden from the form and never sent -- see
-    // splitBuiltinCollisions.
-    const { visible: definitions } = splitBuiltinCollisions(
-      data?.attribute_definitions.filter((d) => d.entity_type_id === entityTypeId) ?? []
-    );
-    const attributes: Record<string, unknown> = {};
+    const next: FieldErrors = {};
+    const key = createKey.trim();
+    // The server has no CHECK on `entity.key` (Task 6's deferred item), and
+    // the key is what model expressions address the entity by.
+    if (key === "") {
+      next.key = "Key: a key is required -- it is how model expressions refer to this entity.";
+    }
+    const built = buildAttrs(createAttributes, createDrafts);
+    if (!built.ok) {
+      Object.assign(next, built.errors);
+    }
+    setCreateErrors(next);
+    if (Object.keys(next).length > 0) {
+      return;
+    }
+
+    let created;
     try {
-      for (const def of definitions) {
-        const value = attributeValueFromForm(form, def);
-        if (value !== null) {
-          attributes[def.code] = value;
-        }
-      }
+      created = await createEntity.mutateAsync({
+        entity_type_id: createTypeId,
+        key,
+        label: createLabel.trim() === "" ? null : createLabel,
+        // Every value is built from the definitions, so an omitted control
+        // sends no key at all and the trigger materialises the default.
+        attrs: built.ok ? built.attrs : {},
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid attribute value");
+      const result = entityServerErrors(err, createAttributes.map((attribute) => attribute.name));
+      setCreateErrors(result.fields);
+      setError(result.general);
       return;
     }
-    createNode.mutate(
-      {
-        organization_id: organizationId,
-        entity_type_id: entityTypeId,
-        name,
-        code,
-        attributes,
-        hierarchy_id: hierarchyId ?? undefined,
-        parent_entity_id: parentEntityId,
-      },
-      {
-        onSuccess: () => toast.success(`${name} created`),
-        onError: (e) => setError(formatApiError(e)),
+
+    // Placing the node under a parent is a second write: in v1 the nesting IS
+    // a relationship of the selected hierarchy type, read as from_entity =
+    // parent of to_entity. There is no combined endpoint, so the entity
+    // exists even if this half fails -- which the message has to say.
+    if (hierarchyTypeId !== null && createParentId !== "") {
+      try {
+        await createRelationship.mutateAsync({
+          relationship_type_id: hierarchyTypeId,
+          from_entity_id: Number(createParentId),
+          to_entity_id: created.id,
+        });
+      } catch (err) {
+        setError(
+          `${created.label ?? created.key} was created, but could not be placed under the chosen parent: ` +
+            relationshipErrorMessage(err)
+        );
+        setShowCreateNode(false);
+        resetCreateNodeForm();
+        return;
       }
-    );
+    }
+
+    toast.success(`${created.label ?? created.key} created`);
     setShowCreateNode(false);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
   }
 
   return (
@@ -684,16 +738,18 @@ export default function GraphEditor({
         <select
           ref={firstControlRef}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-          value={hierarchyId ?? ""}
-          onChange={(e) => onHierarchyChange(e.target.value || null)}
+          value={hierarchyTypeId ?? ""}
+          onChange={(e) => onHierarchyTypeChange(e.target.value === "" ? null : Number(e.target.value))}
           title="Nest nodes under a hierarchy"
           aria-label="Hierarchy nesting"
           data-testid="hierarchy-select"
         >
           <option value="">No hierarchy nesting</option>
-          {data?.hierarchies.map((h) => (
-            <option key={h.id} value={h.id}>
-              {h.name} ({h.code})
+          {/* One `relationship_type` per option, filtered to is_hierarchy by
+              the server. Its name, once: v1 has a single name per type. */}
+          {hierarchyTypes.data?.items.map((type) => (
+            <option key={type.id} value={type.id}>
+              {type.name}
             </option>
           ))}
         </select>
@@ -736,7 +792,7 @@ export default function GraphEditor({
           type="button"
           onClick={() => {
             setShowCreateNode((v) => !v);
-            setCreateEntityTypeId("");
+            resetCreateNodeForm();
           }}
           className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white"
           title="Create a new node"
@@ -780,78 +836,104 @@ export default function GraphEditor({
           id="create-node-form"
           onSubmit={handleCreateNode}
           onKeyDown={handleCreateNodeFormKeyDown}
-          className="mb-2 flex flex-wrap items-end gap-2 rounded-md border border-slate-200 p-2"
+          className="mb-2 space-y-3 rounded-md border border-slate-200 p-2"
           data-testid="create-node-form"
         >
-          <label className="text-xs">
-            Type
-            <select
-              name="entity_type_id"
-              required
-              value={createEntityTypeId}
-              onChange={(e) => setCreateEntityTypeId(e.target.value)}
-              className="block rounded-md border border-slate-300 px-2 py-1 text-sm"
-            >
-              <option value="">—</option>
-              {data.entity_types.map((et) => (
-                <option key={et.id} value={et.id}>
-                  {et.name} ({et.code})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs">
-            Name
-            <input name="name" required className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          </label>
-          <label className="text-xs">
-            Code
-            <input name="code" className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          </label>
-          {(() => {
-            const { visible, hidden } = splitBuiltinCollisions(
-              data.attribute_definitions.filter((def) => def.entity_type_id === createEntityTypeId)
-            );
-            return (
-              <>
-                {visible.map((def) => (
-                  <label key={def.id} className="text-xs">
-                    {def.name}
-                    <AttributeInput def={def} />
-                  </label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-type`} required>
+                Entity type
+              </FieldLabel>
+              <select
+                id={`${createFormId}-type`}
+                required
+                value={createTypeId}
+                onChange={(e) => {
+                  setCreateTypeId(e.target.value === "" ? "" : Number(e.target.value));
+                  // Drafts belong to the previous type's attributes; keeping
+                  // them would carry a value across to an unrelated name.
+                  setCreateDrafts({});
+                  setCreateErrors({});
+                }}
+                className={INPUT_CLASS}
+              >
+                <option value="">—</option>
+                {/* The type's name, once: v1 has one name per entity type. */}
+                {entityTypes.data?.items.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
                 ))}
-                {hidden.map((def) => (
-                  <p key={def.id} className="basis-full text-xs text-slate-500">
-                    attribute {def.code} hidden: collides with a built-in field
-                  </p>
-                ))}
-              </>
-            );
-          })()}
-          {hierarchyId && (
-            <label className="text-xs">
-              Parent (any node placed in this hierarchy will be used; others get an error)
-              <select name="parent_entity_id" className="block rounded-md border border-slate-300 px-2 py-1 text-sm">
-                <option value="">(root)</option>
+              </select>
+            </div>
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-key`} required>
+                Key
+              </FieldLabel>
+              <input
+                id={`${createFormId}-key`}
+                className={INPUT_CLASS}
+                value={createKey}
+                onChange={(e) => setCreateKey(e.target.value)}
+                aria-invalid={createErrors.key ? "true" : undefined}
+                aria-describedby={createErrors.key ? `${createFormId}-key-error` : undefined}
+                autoComplete="off"
+              />
+              <FieldError id={`${createFormId}-key-error`} message={createErrors.key} />
+            </div>
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-label`}>Label</FieldLabel>
+              <input
+                id={`${createFormId}-label`}
+                className={INPUT_CLASS}
+                value={createLabel}
+                onChange={(e) => setCreateLabel(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+          {createTypeId !== "" && (
+            <AttrsForm
+              attributes={createAttributes}
+              drafts={createDrafts}
+              errors={createErrors}
+              onChange={(name, value) => setCreateDrafts((prev) => ({ ...prev, [name]: value }))}
+            />
+          )}
+          {hierarchyTypeId !== null && (
+            <div className="sm:max-w-xs">
+              <FieldLabel htmlFor={`${createFormId}-parent`}>Parent</FieldLabel>
+              <select
+                id={`${createFormId}-parent`}
+                value={createParentId}
+                onChange={(e) => setCreateParentId(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="">(no parent)</option>
                 {data.nodes.map((n) => (
                   <option key={n.id} value={n.id}>
                     {n.label}
                   </option>
                 ))}
               </select>
-            </label>
+              <p className="mt-1 text-xs text-slate-500">
+                Places the new node under this one, as a relationship of the selected hierarchy.
+              </p>
+            </div>
           )}
-          <button
-            type="submit"
-            disabled={createNode.isPending}
-            className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {createNode.isPending ? "Creating…" : "Create"}
-          </button>
-          {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
-          <button type="button" onClick={closeCreateNodeForm} className="rounded px-2 py-1 text-sm text-slate-500">
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={createEntity.isPending || createRelationship.isPending}
+              className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {createEntity.isPending ? "Creating…" : "Create"}
+            </button>
+            {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
+            <button type="button" onClick={closeCreateNodeForm} className="rounded px-2 py-1 text-sm text-slate-500">
+              Cancel
+            </button>
+          </div>
         </form>
       )}
 
@@ -861,44 +943,29 @@ export default function GraphEditor({
           {(() => {
             const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
             if (validTypes.length === 0) {
-              const sourceTypeName = entityTypeName(nodeEntityType(pendingEdge.sourceId));
-              const targetTypeName = entityTypeName(nodeEntityType(pendingEdge.targetId));
+              // A node's `type` IS the entity type's name in v1, so there is
+              // nothing to look up to name it.
               return (
                 <p className="mb-1 text-xs text-slate-500">
-                  No relationship type allows {sourceTypeName} → {targetTypeName}
+                  No relationship type allows {nodeEntityType(pendingEdge.sourceId) ?? "?"} →{" "}
+                  {nodeEntityType(pendingEdge.targetId) ?? "?"}
                 </p>
               );
             }
-            // Type-constrained matches (naming a specific source and/or target type) first,
-            // since they're almost always what the user meant for this dragged pair; fully
-            // unconstrained ("any -> any") types are the generic catch-alls, listed after a
-            // divider so they read as a separate, lower-priority group.
-            const constrained = validTypes.filter(
-              (rt) => rt.source_entity_type !== null || rt.target_entity_type !== null
-            );
-            const unconstrained = validTypes.filter(
-              (rt) => rt.source_entity_type === null && rt.target_entity_type === null
-            );
-            const button = (rt: RelationshipTypeOption) => (
+            // v0 grouped "any -> any" types after a divider. v1 has none:
+            // `from_type_id`/`to_type_id` are NOT NULL, so every relationship
+            // type names both ends and the group could never be non-empty.
+            return validTypes.map((rt: RelationshipTypeOption) => (
               <button
                 key={rt.id}
                 type="button"
                 onClick={() => handleConfirmEdge(rt.id)}
-                disabled={createEdge.isPending}
+                disabled={createRelationship.isPending}
                 className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {rt.name} ({rt.code})
+                {rt.name}
               </button>
-            );
-            return (
-              <>
-                {constrained.map(button)}
-                {constrained.length > 0 && unconstrained.length > 0 && (
-                  <hr data-testid="picker-divider" className="my-1 border-slate-200" />
-                )}
-                {unconstrained.map(button)}
-              </>
-            );
+            ));
           })()}
           <button type="button" onClick={() => setPendingEdge(null)} className="rounded px-2 py-1 text-sm text-slate-500">
             Cancel

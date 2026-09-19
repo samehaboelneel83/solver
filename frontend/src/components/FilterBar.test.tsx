@@ -3,15 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "./FilterBar";
 import type { FilterState } from "./FilterBar";
 
+// v1 shape: `code` and `name` are both `entity_type.name`, so they are always
+// the SAME string (Task 7's mapping). A fixture where they differ would let
+// "{name} ({code})" pass as "Unit (unit)" and never show the real defect.
 const entityTypes = [
-  { id: "t1", code: "employee", name: "Employee", is_abstract: false },
-  { id: "t2", code: "unit", name: "Unit", is_abstract: false },
+  { id: "1", code: "employee", name: "employee", is_abstract: false },
+  { id: "2", code: "unit", name: "unit", is_abstract: false },
 ];
 
 const edges = [{ id: "r1", source: "e1", target: "e2", type: "works_for", label: "Works For", attributes: {} }];
 
 describe("FilterBar", () => {
-  it("renders a 'Types: n of m' button that opens a panel with a search box and name (code) checkboxes plus All/None", () => {
+  it("renders a 'Types: n of m' button that opens a panel with a search box, one checkbox per type and All/None", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
@@ -30,8 +33,12 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-type-search")).toBeInTheDocument();
     expect(screen.getByTestId("filter-types-all")).toBeInTheDocument();
     expect(screen.getByTestId("filter-types-none")).toBeInTheDocument();
-    expect(screen.getByText("Employee (employee)")).toBeInTheDocument();
-    expect(screen.getByText("Unit (unit)")).toBeInTheDocument();
+    // The type's name, once. v1 has one name per type -- "unit (unit)" is the
+    // v0 "{name} ({code})" template rendering the same string twice.
+    expect(screen.getByText("employee")).toBeInTheDocument();
+    expect(screen.getByText("unit")).toBeInTheDocument();
+    expect(screen.queryByText("unit (unit)")).not.toBeInTheDocument();
+    expect(screen.queryByText("employee (employee)")).not.toBeInTheDocument();
   });
 
   it("wires aria-expanded/aria-haspopup/aria-controls on the Types toggle, reflecting panel state (H-7)", () => {
@@ -79,9 +86,9 @@ describe("FilterBar", () => {
 
   it("lists types alphabetically by name regardless of the entityTypes order given (F-6)", () => {
     const unordered = [
-      { id: "t3", code: "zebra", name: "Zebra Type", is_abstract: false },
-      { id: "t1", code: "alpha", name: "Alpha Type", is_abstract: false },
-      { id: "t2", code: "mid", name: "Mid Type", is_abstract: false },
+      { id: "3", code: "zebra_type", name: "zebra_type", is_abstract: false },
+      { id: "1", code: "alpha_type", name: "alpha_type", is_abstract: false },
+      { id: "2", code: "mid_type", name: "mid_type", is_abstract: false },
     ];
     render(
       <FilterBar
@@ -94,10 +101,8 @@ describe("FilterBar", () => {
 
     fireEvent.click(screen.getByTestId("filter-types-toggle"));
 
-    const labels = screen
-      .getAllByText(/Type \((alpha|mid|zebra)\)/)
-      .map((el) => el.textContent);
-    expect(labels).toEqual(["Alpha Type (alpha)", "Mid Type (mid)", "Zebra Type (zebra)"]);
+    const labels = screen.getAllByText(/^(alpha|mid|zebra)_type$/).map((el) => el.textContent);
+    expect(labels).toEqual(["alpha_type", "mid_type", "zebra_type"]);
   });
 
   it("calls onChange with the updated selectedTypes when a type checkbox is toggled", () => {

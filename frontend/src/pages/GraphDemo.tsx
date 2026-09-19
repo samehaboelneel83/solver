@@ -1,81 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
-import { apiFetch } from "../api/client";
+import { Link, useSearchParams } from "react-router-dom";
 import GraphEditor from "../components/GraphEditor";
-import OfflineNotice from "../components/OfflineNotice";
 import PropertyPanel from "../components/PropertyPanel";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
 import type { FilterState } from "../components/FilterBar";
 import { useGraph } from "../api/graph";
+import type { Id } from "../api/v1";
+import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+
+/**
+ * One domain's entities and relationships, drawn.
+ *
+ * The scope is the domain chosen in the sidebar, like every other v1 screen
+ * -- v0 scoped this page by `organization`, which schema v1 does not have.
+ * The nesting is a `relationship_type` with `is_hierarchy = true`, chosen in
+ * the canvas's own toolbar; without one the graph is drawn flat.
+ */
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
 
-type Organization = { id: string; code: string; name: string };
-
-function useOrganizations() {
-  return useQuery({
-    queryKey: ["organizations", "list"],
-    queryFn: async () => {
-      const result = await apiFetch<{ items: Organization[]; total: number }>(
-        "/api/iam/organization/?limit=200&offset=0"
-      );
-      return [...result.items].sort((a, b) => a.name.localeCompare(b.name));
-    },
-  });
-}
-
 export default function GraphDemo() {
   useDocumentTitle("Domain Graph");
-  const { data: organizations, isLoading: orgsLoading, fetchStatus: orgsFetchStatus } = useOrganizations();
-  // D-7: this query gates the entire page -- everything below (including GraphEditor's own
-  // offline handling) never even mounts until it resolves. Offline, it pauses rather than
-  // failing, so without this the page would show "Loading organization…" forever.
-  const orgsOffline = orgsFetchStatus === "paused" && !organizations;
-  // B-3: a domain entity's detail page deep-links here with `?focus=<entityId>&org=<orgId>`
-  // (see EntityDetail's "Open in graph" link) -- read once on mount, not tracked reactively,
-  // since consuming the link below clears these params from the URL.
+  const { domainId } = useDomain();
+  // B-3: an entity page can deep-link here with `?focus=<entityId>` -- read
+  // once on mount, not tracked reactively, since consuming the link clears it.
   const [searchParams, setSearchParams] = useSearchParams();
-  // Only set once the user explicitly picks an org (or a deep link names one); the effective
-  // organizationId below falls back to the org coded "default" (or the first org, alphabetically
-  // by name) until then, so there's no separate effect-driven state update to initialize it.
-  const [organizationOverride, setOrganizationOverride] = useState<string | null>(
-    () => searchParams.get("org")
-  );
-  const [hierarchyId, setHierarchyId] = useState<string | null>(null);
+  const [hierarchyTypeId, setHierarchyTypeId] = useState<Id | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
-  // Owned here (not inside FilterBar) so it survives GraphEditor's hierarchy-driven data
-  // reload and FilterBar no longer needs a remount key to "reset" on hierarchy switch.
+  // Owned here (not inside FilterBar) so it survives GraphEditor's
+  // hierarchy-driven data reload.
   const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER_STATE);
-  // H-1 fix round 1: the one search box on this page (FilterBar's) both filters (existing
-  // behaviour, via filterState.search above) and, on Enter, selects the first matching node --
-  // this used to be a documented keyboard workaround that selected nothing. `token` is a
-  // strictly-increasing counter (not just the matched node id) so GraphEditor's roving-focus
-  // effect fires even when the same node is searched for twice in a row.
+  // H-1 fix round 1: FilterBar's search box both filters and, on Enter,
+  // selects the first matching node. `token` is a strictly-increasing counter
+  // (not just the node id) so GraphEditor's roving-focus effect fires even
+  // when the same node is searched for twice in a row.
   const [searchFocus, setSearchFocus] = useState<{ nodeId: string; token: number } | null>(null);
   const searchFocusTokenRef = useRef(0);
 
-  const organizationId = useMemo(() => {
-    if (!organizations || organizations.length === 0) {
-      return null;
-    }
-    if (organizationOverride && organizations.some((org) => org.id === organizationOverride)) {
-      return organizationOverride;
-    }
-    const defaultOrg = organizations.find((org) => org.code === "default") ?? organizations[0];
-    return defaultOrg.id;
-  }, [organizations, organizationOverride]);
-
-  const { data: graph } = useGraph(organizationId ?? "", hierarchyId);
+  const { data: graph } = useGraph(domainId, hierarchyTypeId);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
 
-  // B-3: consume a deep-link "focus" once its target node shows up in the loaded graph --
-  // selects it and routes it through the same searchFocus/focusRequest mechanism GraphEditor's
-  // own roving-keyboard-focus and the in-page search box (handleSearchSubmit, below) already
-  // use, rather than a second selection path. Guarded by a ref (not just clearing the URL
-  // param) so a graph that's still loading -- or briefly missing the node mid-refetch -- doesn't
-  // get treated as "not found" and silently drop the request before it's had a chance to arrive.
+  // B-3: consume a deep-link "focus" once its target shows up in the loaded
+  // graph. Guarded by a ref (not just by clearing the URL param) so a graph
+  // still loading -- or briefly missing the node mid-refetch -- isn't treated
+  // as "not found".
   const consumedFocusRef = useRef(false);
   useEffect(() => {
     const focusEntityId = searchParams.get("focus");
@@ -94,35 +63,30 @@ export default function GraphDemo() {
       (prev) => {
         const next = new URLSearchParams(prev);
         next.delete("focus");
-        next.delete("org");
         return next;
       },
       { replace: true }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, searchParams]);
-  // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every node/edge's
-  // display/highlight classes) only reruns when the criteria actually change, not on every
-  // GraphDemo render (e.g. a selection change unrelated to filtering) -- deriveFilterCriteria
-  // returns a fresh object identity each call otherwise.
+
+  // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every
+  // node/edge) only reruns when the criteria actually change.
   const filter = useMemo(
     () => (graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined),
     [filterState, selectedNodeId, graph?.edges]
   );
 
-  // H-1 fix round 1: the audit finding was about this exact search box -- typing a node's label
-  // and pressing Enter selected nothing. Same case-insensitive label-or-code match GraphEditor's
-  // own filter uses, first match in the graph's node order; a miss leaves the filter applied and
-  // the selection untouched (no error, nothing cleared).
+  // H-1 fix round 1: typing a node's label and pressing Enter selects it.
+  // A v1 node's only text is its label (which already falls back to the
+  // entity's key), so that is what is matched -- the same rule GraphEditor's
+  // own filter applies.
   function handleSearchSubmit(query: string) {
     const q = query.trim().toLowerCase();
     if (!q || !graph) {
       return;
     }
-    const match = graph.nodes.find((node) => {
-      const code = node.attributes?.code;
-      return node.label.toLowerCase().includes(q) || (typeof code === "string" && code.toLowerCase().includes(q));
-    });
+    const match = graph.nodes.find((node) => node.label.toLowerCase().includes(q));
     if (!match) {
       return;
     }
@@ -131,60 +95,34 @@ export default function GraphDemo() {
     setSearchFocus({ nodeId: match.id, token: searchFocusTokenRef.current });
   }
 
-  function handleOrganizationChange(id: string) {
-    setOrganizationOverride(id);
-    setHierarchyId(null);
-    setSelection(null);
-    setFilterState(DEFAULT_FILTER_STATE);
-    // GraphEditor is keyed by organization, so it remounts here and its
-    // focus-request effect runs afresh. Left set, a search from the previous
-    // organization would be replayed against a graph that has no such node.
-    setSearchFocus(null);
-  }
-
-  if (orgsOffline) {
-    return <OfflineNotice subject="The graph" />;
-  }
-
-  if (orgsLoading || !organizations) {
-    return <p className="text-sm text-slate-500">Loading organization…</p>;
-  }
-
-  if (organizations.length === 0) {
-    return <p className="text-sm text-slate-500">No organizations found. Create one to view the graph.</p>;
-  }
-
-  if (!organizationId) {
-    return <p className="text-sm text-slate-500">Loading organization…</p>;
+  if (domainId === null) {
+    return (
+      <div className="max-w-2xl">
+        <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <p>
+            Choose a domain in the sidebar&rsquo;s Domain selector (under Menu on a small screen) to draw its graph.
+          </p>
+          <p className="mt-1">
+            No domain yet?{" "}
+            <Link to="/public/domain" className="inline-block rounded py-1 text-blue-600 underline">
+              Create one on the Domains page
+            </Link>
+            .
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
     // F-4/carried-forward from Task 8: a flex column filling AppShell's
-    // <main> (itself bounded to the viewport height -- see AppShell.tsx),
-    // so the canvas below derives its height from actual layout instead of
-    // a `100vh - <guessed chrome height>` calculation. `min-h-0` lets this
-    // column shrink below its content's natural height so the flex-1 row
-    // further down actually gets to claim the remaining space.
+    // <main> (itself bounded to the viewport height), so the canvas derives
+    // its height from actual layout instead of a `100vh - <guess>`
+    // calculation. `min-h-0` lets this column shrink below its content's
+    // natural height so the flex-1 row further down claims the rest.
     <div className="flex h-full min-h-0 flex-col">
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Domain Graph</h1>
-      <div className="mb-4">
-        <label htmlFor="org-select" className="mb-1 block text-xs font-medium text-slate-600">
-          Organization
-        </label>
-        <select
-          id="org-select"
-          data-testid="org-select"
-          value={organizationId}
-          onChange={(event) => handleOrganizationChange(event.target.value)}
-          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-        >
-          {organizations.map((org) => (
-            <option key={org.id} value={org.id}>
-              {`${org.name} (${org.code})`}
-            </option>
-          ))}
-        </select>
-      </div>
       {graph && (
         <FilterBar
           entityTypes={graph.entity_types}
@@ -194,37 +132,35 @@ export default function GraphDemo() {
           onSubmitSearch={handleSearchSubmit}
         />
       )}
-      {/* F-1: below 1024px (Tailwind's `lg` breakpoint) the property panel kept its own minimum
-          width and refused to shrink, squeezing the canvas down to an unusable ~167px column.
-          Stacking the panel under the canvas on narrow screens, instead of forcing them to share
-          one row, keeps the canvas at the full viewport width there. */}
+      {/* F-1: below 1024px the property panel kept its own minimum width and
+          squeezed the canvas to an unusable column. Stacking them keeps the
+          canvas at full viewport width there. */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row" data-testid="graph-layout">
         <div className="flex min-h-0 flex-1 flex-col">
-          {/* Keyed by organizationId: an org switch is rare and its graph is unrelated to the
-              previous one, so the simplest correct fix is to fully rebuild the canvas (a fresh
-              cytoscape instance) rather than diff across organisations -- otherwise a failed or
-              still-in-flight refetch after switching orgs could leave the previous org's nodes
-              drawn and actionable. Hierarchy switches within the same org stay incremental, via
-              GraphEditor's own diffing effect. */}
+          {/* Keyed by domainId: a domain switch is rare and its graph is
+              unrelated to the previous one, so the simplest correct fix is to
+              rebuild the canvas rather than diff across domains. Hierarchy
+              switches within a domain stay incremental. */}
           <GraphEditor
-            key={organizationId}
-            organizationId={organizationId}
-            hierarchyId={hierarchyId}
-            onHierarchyChange={setHierarchyId}
+            key={domainId}
+            domainId={domainId}
+            hierarchyTypeId={hierarchyTypeId}
+            onHierarchyTypeChange={(id) => {
+              setHierarchyTypeId(id);
+              setSelection(null);
+            }}
             filter={filter}
             onSelectionChange={setSelection}
             focusRequest={searchFocus}
           />
         </div>
-        {/* F-5: `self-start` keeps this box only as tall as its own content (a couple of lines
-            when nothing is selected) instead of stretching to match the much taller canvas next
-            to it in the flex row, which used to leave a large empty rectangle. */}
+        {/* F-5: `self-start` keeps this box only as tall as its own content
+            instead of stretching to match the canvas beside it. */}
         <div className="w-full self-start rounded-md border border-slate-200 p-3 lg:w-72 lg:shrink-0">
           {graph && (
             <PropertyPanel
               key={selection ? `${selection.kind}-${selection.id}` : "none"}
-              organizationId={organizationId}
-              hierarchyId={hierarchyId}
+              domainId={domainId}
               graph={graph}
               selection={selection}
               onClose={() => setSelection(null)}

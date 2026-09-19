@@ -153,18 +153,21 @@ export default function FilterBar({
   }
 
   const selectedSet = useMemo(
-    () => (value.selectedTypes === null ? new Set(entityTypes.map((et) => et.code)) : new Set(value.selectedTypes)),
+    // Keyed by NAME, because that is what a node's `type` is
+    // (`entity_type.name`). `code` holds the same string, but only by way of
+    // Task 7's mapping.
+    () => (value.selectedTypes === null ? new Set(entityTypes.map((et) => et.name)) : new Set(value.selectedTypes)),
     [value.selectedTypes, entityTypes]
   );
   const totalCount = entityTypes.length;
   const selectedCount = selectedSet.size;
 
-  function toggleType(code: string) {
+  function toggleType(name: string) {
     const next = new Set(selectedSet);
-    if (next.has(code)) {
-      next.delete(code);
+    if (next.has(name)) {
+      next.delete(name);
     } else {
-      next.add(code);
+      next.add(name);
     }
     const allSelected = next.size === totalCount;
     onChange({ ...value, selectedTypes: allSelected ? null : Array.from(next) });
@@ -174,7 +177,9 @@ export default function FilterBar({
     .filter((et) => {
       const q = typeSearch.trim().toLowerCase();
       if (!q) return true;
-      return et.name.toLowerCase().includes(q) || et.code.toLowerCase().includes(q);
+      // `code` is the same string as `name` in v1 (both are
+      // `entity_type.name`), so matching it too would be matching twice.
+      return et.name.toLowerCase().includes(q);
     })
     // F-6: types were previously listed in insertion order, which forces a linear scan on a
     // large model -- alphabetical by name makes a specific type findable at a glance.
@@ -184,9 +189,9 @@ export default function FilterBar({
     <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 p-2 text-sm">
       <input
         type="text"
-        placeholder="Search by label or code…"
-        title="Search nodes by label or code -- press Enter to select the first match"
-        aria-label="Search nodes by label or code -- press Enter to select the first match"
+        placeholder="Search by label…"
+        title="Search nodes by label -- press Enter to select the first match"
+        aria-label="Search nodes by label -- press Enter to select the first match"
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
         onKeyDown={handleSearchKeyDown}
@@ -248,11 +253,14 @@ export default function FilterBar({
               <label key={et.id} className="flex items-center gap-1 py-0.5 text-xs">
                 <input
                   type="checkbox"
-                  checked={selectedSet.has(et.code)}
-                  onChange={() => toggleType(et.code)}
-                  data-testid={`filter-type-${et.code}`}
+                  checked={selectedSet.has(et.name)}
+                  onChange={() => toggleType(et.name)}
+                  data-testid={`filter-type-${et.name}`}
                 />
-                {et.name} ({et.code})
+                {/* The type's name, once: v1 has a single `name` column, and
+                    the wire's `code` is that same string (Task 7's mapping),
+                    so "{name} ({code})" rendered every type as "unit (unit)". */}
+                {et.name}
               </label>
             ))}
           </div>
