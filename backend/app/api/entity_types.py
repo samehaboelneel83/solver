@@ -37,8 +37,9 @@ picks one and applies it to **every** field with a database-level CHECK:
    as 409s with a string `detail`.
 
 Why not leave (1) to the database and let `translate_db_error` shape it?
-Because it cannot produce a 422 for these at all. Task 3's 422 contract
-(`{"message", "field", "kind"}`) is driven by a JSON `DETAIL` payload that
+Because it cannot produce a 422 for these at all. `translate_db_error`'s
+422 (a list-shaped item carrying `kind`, since Ruling 19) is driven by a
+JSON `DETAIL` payload that
 only the three DOMAIN validation *triggers* emit (`entity_validate`,
 `relationship_validate`, `parameter_value_validate` -- migration 0006).
 Neither `entity_type` nor `attribute_def` has a trigger: their rules are

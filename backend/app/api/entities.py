@@ -26,17 +26,20 @@ place the rules can live exactly once.
 
 Which layer answers which failure
 ---------------------------------
-Three shapes are reachable from this router, and the split is by who can
+Two shapes are reachable from this router, and the split is by who can
 possibly know:
 
-1. **422, object `detail`** (``{"message", "field", "kind"}``) -- the
-   trigger, via Task 3's :func:`translate_db_error`. `kind` is one of
+1. **422, list `detail`, from the trigger** -- via Task 3's
+   :func:`translate_db_error`, which (since Task 7, Ruling 19) emits
+   FastAPI's own list shape with ``loc: ["body", <field>]`` and ``kind``
+   carried as a sibling key on the item. `kind` is one of
    ``unknown_attribute``, ``required_attribute``, ``attribute_type``; the
    three the trigger emits. This is the first router on the platform from
    which that contract is reachable at all: Task 5's tables carry no
    trigger, so their CHECK failures arrive with no `DETAIL` and come back
    as a 409 (Ruling 16).
-2. **422, list `detail`** -- FastAPI's own body validation, for what this
+2. **422, list `detail`, from the request layer** -- FastAPI's own body
+   validation (no ``kind`` key), for what this
    module can decide without the database: `attrs` being an object at all
    (the table's ``CHECK (jsonb_typeof(attrs) = 'object')`` is a plain
    CHECK with no `DETAIL`, so leaving it to the database would produce a
@@ -47,9 +50,9 @@ possibly know:
    bad one is a conflict with the data, not a missing resource -- the same
    answer Task 5 gives for a bad `domain_id`.
 
-Two of those are 422 with different bodies, which a client has to branch
-on. That asymmetry is inherited from the spec, not chosen here; see the
-task 6 report.
+Both 422 sources share one body shape, so a client never branches on it;
+``kind`` is present exactly when the database's trigger answered. Until
+Task 7 the trigger's 422 was an object instead -- see Ruling 19.
 
 `key` deliberately carries no request-layer pattern: unlike
 `entity_type.name` and `attribute_def.name`, `entity.key` has no CHECK in

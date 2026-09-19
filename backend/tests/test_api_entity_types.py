@@ -87,9 +87,10 @@ def _validation_errors(response) -> list[dict]:
     """Assert `response` is a 422 in FastAPI's validation-error shape and
     return its error list.
 
-    The shape assertion is the point: the other 422 shape available on this
-    platform is task 3's `{"message", "field", "kind"}` object. A test that
-    only checked the status number could not tell the two apart.
+    The shape assertion is the point. Since Ruling 19 every 422 on the
+    platform is list-shaped; what distinguishes a trigger answer is the
+    `kind` key on the item. A test that only checked the status number
+    could not tell a request-layer rejection from a database one.
     """
     assert response.status_code == 422, response.text
     body = response.json()
