@@ -379,11 +379,16 @@ def test_hierarchy_multi_hop_cycle_rejected(db, hierarchy):
 
 
 def test_legal_repoint_of_an_existing_hierarchy_edge_succeeds(db, hierarchy):
-    """Amendment (c). The trigger fires on UPDATE while the row's
-    pre-update version is still in the table, so without excluding it from
-    the recursive walk this legal re-point is rejected as a cycle:
+    """Amendment (c), anchor term. The trigger fires on UPDATE while the
+    row's pre-update version is still in the table, so without excluding it
+    from the recursive walk this legal re-point is rejected as a cycle:
     walking down from the new parent `a` still finds the old edge a -> b,
-    then b -> c, and concludes the new child `c` is an ancestor."""
+    then b -> c, and concludes the new child `c` is an ancestor.
+
+    Note this 3-node case is discriminated by the *anchor* exclusion alone:
+    the only row with from_entity_id = a is the row under update, so
+    excluding it empties the CTE and the recursive term never runs. The
+    4-node test below is what pins the exclusion in the recursive term."""
     _, unit, rt = hierarchy
     a = make_entity(db, unit, "a")
     b = make_entity(db, unit, "b")
@@ -405,6 +410,48 @@ def test_legal_repoint_of_an_existing_hierarchy_edge_succeeds(db, hierarchy):
     ).one()
     assert row.from_entity_id == c
     assert row.to_entity_id == a
+
+
+def test_legal_repoint_reached_through_a_longer_path_succeeds(db, hierarchy):
+    """Amendment (c), recursive term. The row under validation must be
+    excluded from *both* terms of the walk, not just the anchor.
+
+    Chain w -> x -> y -> z; re-point the x -> y edge to z -> w. The result
+    (y -> z -> w -> x) is acyclic, so this must succeed. Walking down from
+    the new parent `w`: the anchor finds w -> x (a different row, so the
+    anchor exclusion does not help here), and the recursive step from `x`
+    then finds the *pre-update* x -> y edge and continues to `z` -- which
+    is the new child, so an implementation that excludes NEW.id only in
+    the anchor reports a cycle that re-pointing would not create."""
+    _, unit, rt = hierarchy
+    w = make_entity(db, unit, "w")
+    x = make_entity(db, unit, "x")
+    y = make_entity(db, unit, "y")
+    z = make_entity(db, unit, "z")
+    make_relationship(db, rt, w, x)  # w -> x
+    edge = make_relationship(db, rt, x, y)  # x -> y  (the row re-pointed below)
+    make_relationship(db, rt, y, z)  # y -> z
+
+    db.execute(
+        text(
+            "UPDATE relationship SET from_entity_id = :f, to_entity_id = :t WHERE id = :i"
+        ),
+        {"f": z, "t": w, "i": edge},
+    )
+
+    row = db.execute(
+        text("SELECT from_entity_id, to_entity_id FROM relationship WHERE id = :i"),
+        {"i": edge},
+    ).one()
+    assert row.from_entity_id == z
+    assert row.to_entity_id == w
+
+    # The surviving shape really is the acyclic chain y -> z -> w -> x.
+    rows = db.execute(
+        text("SELECT entity_id, depth FROM entity_descendants(:e, :rt)"),
+        {"e": y, "rt": rt},
+    ).all()
+    assert set(rows) == {(y, 0), (z, 1), (w, 2), (x, 3)}
 
 
 # --------------------------------------------------------------------------
@@ -490,6 +537,10 @@ def test_parameter_value_rejects_wrong_arity(db, demand):
     detail = _detail(exc)
     assert detail["kind"] == "parameter_index"
     assert detail["field"] == "entity_ids"
+    # Task 3 renders these: `expected` is the parameter's declared index
+    # types, `record` the index that was offered.
+    assert detail["expected"] == [day, shift]
+    assert detail["record"] == [mon]
 
 
 def test_parameter_value_rejects_wrong_entity_types(db, demand):
@@ -502,6 +553,8 @@ def test_parameter_value_rejects_wrong_entity_types(db, demand):
     detail = _detail(exc)
     assert detail["kind"] == "parameter_index"
     assert detail["field"] == "entity_ids"
+    assert detail["expected"] == [day, shift]
+    assert detail["record"] == [mon, tue]
 
 
 def test_deleting_an_entity_removes_its_parameter_values(db, demand):
