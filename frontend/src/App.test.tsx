@@ -56,3 +56,41 @@ describe("catch-all route", () => {
     expect(screen.getByRole("link", { name: /back to dashboard/i })).toHaveAttribute("href", "/");
   });
 });
+
+describe("entity type routes (Task 11)", () => {
+  beforeEach(() => {
+    setToken("test-token");
+    localStorage.removeItem("solver_domain_id");
+    (apiFetch as any).mockReset();
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/v1/entity-types/5") {
+        return Promise.resolve({ id: 5, domain_id: 7, name: "employee", role: "agent", attributes: [] });
+      }
+      if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+  });
+
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("/entity-types renders the entity type list, not the not-found page", async () => {
+    renderAt("/entity-types");
+    expect(await screen.findByRole("heading", { level: 1, name: "Entity types" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("/entity-types/:id renders the type editor, not the generic table page it would otherwise match", async () => {
+    renderAt("/entity-types/5");
+    expect(await screen.findByRole("heading", { level: 1, name: /employee/ })).toBeInTheDocument();
+    expect(screen.queryByText(/unknown table/i)).not.toBeInTheDocument();
+  });
+});

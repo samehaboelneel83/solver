@@ -72,7 +72,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     key: "domain",
     label: "Domain",
-    items: [{ to: "/public/domain", label: "Domains" }],
+    items: [
+      { to: "/public/domain", label: "Domains" },
+      { to: "/entity-types", label: "Entity types" },
+    ],
   },
   {
     key: "problem",

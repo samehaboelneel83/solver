@@ -5,6 +5,8 @@ import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import GraphDemo from "./pages/GraphDemo";
+import EntityTypes from "./pages/EntityTypes";
+import EntityTypeDetail from "./pages/EntityTypeDetail";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -31,6 +33,10 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="graph" element={<GraphDemo />} />
+        {/* Static segments outrank the generic `:schemaName/:tableName` pair below,
+            so `/entity-types/5` reaches the type editor, not a table named "5". */}
+        <Route path="entity-types" element={<EntityTypes />} />
+        <Route path="entity-types/:id" element={<EntityTypeDetail />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />

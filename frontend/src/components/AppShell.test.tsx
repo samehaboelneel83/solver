@@ -66,6 +66,19 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/iam/user_account");
     });
 
+    it("links Entity types from the Domain group (Task 11)", async () => {
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const link = within(nav).getByRole("link", { name: "Entity types" });
+      expect(link).toHaveAttribute("href", "/entity-types");
+      const domainToggle = within(nav).getByRole("button", { name: /^Domain/ });
+      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
+      // Inside the Domain group: after its heading, before the Problem group's.
+      expect(domainToggle.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(link.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("says plainly that runs have no screens yet, rather than rendering an empty group", async () => {
       renderWithProviders();
       await settled();
