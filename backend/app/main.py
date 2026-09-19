@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
+from app.api.entity_types import router as entity_types_router
 from app.api.health import router as health_router
 from app.api.meta import router as meta_router
 from app.api.options import router as options_router
@@ -23,6 +24,10 @@ app.include_router(meta_router)
 # swallow /options requests, answering 422 "invalid uuid" for the literal
 # path segment "options".
 app.include_router(options_router)
+# Purpose-built schema v1 routers. Mounted before crud_router purely for
+# readability -- their /api/v1/... prefix cannot collide with the generic
+# routers' literal /api/{table} and /api/iam/{table} prefixes.
+app.include_router(entity_types_router)
 app.include_router(crud_router)
 # The /api/graph/domain router is not mounted: it reads the v0 domain.*
 # tables that migration 0006_schema_v1_domain dropped. Rewritten against
