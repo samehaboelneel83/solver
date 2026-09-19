@@ -672,6 +672,108 @@ describe("GraphEditor", () => {
     expect(elementStore.get("3")?.styles.display).toBe("none");
   });
 
+  // --- Task 14c: the expression filter, and how it composes ---------------
+
+  it("hides the nodes an expression does not match, the same way the other filters hide them", async () => {
+    // Same `display: none` convention, so the two are indistinguishable to
+    // everything downstream (edges, hit-testing, the empty-state overlay).
+    renderWithProviders({
+      filter: { selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: new Set(["1", "3"]) },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    await waitFor(() => expect(elementStore.get("1")?.styles.display).toBe("element"));
+    expect(elementStore.get("3")?.styles.display).toBe("element");
+    expect(elementStore.get("2")?.styles.display).toBe("none");
+  });
+
+  it("filters nothing when there is no expression, so an empty one cannot blank the canvas", async () => {
+    renderWithProviders({
+      filter: { selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: null },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    for (const id of ["1", "2", "3"]) {
+      await waitFor(() => expect(elementStore.get(id)?.styles.display).toBe("element"));
+    }
+  });
+
+  it("ANDs the expression with the type checkboxes: a node must satisfy both", async () => {
+    // Nodes 1 and 2 are units; the expression matches 2 and 3. Only node 2
+    // is in both, and each of the other two would survive if either filter
+    // were being ignored.
+    renderWithProviders({
+      filter: { selectedTypes: ["unit"], search: "", highlightIds: null, expressionMatchIds: new Set(["2", "3"]) },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    await waitFor(() => expect(elementStore.get("2")?.styles.display).toBe("element"));
+    expect(elementStore.get("1")?.styles.display).toBe("none");
+    expect(elementStore.get("3")?.styles.display).toBe("none");
+  });
+
+  it("ANDs the expression with the search box: a node must satisfy both", async () => {
+    // "o" matches "ops" (2) only; the expression matches 1 and 2.
+    renderWithProviders({
+      filter: { selectedTypes: null, search: "op", highlightIds: null, expressionMatchIds: new Set(["1", "2"]) },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    await waitFor(() => expect(elementStore.get("2")?.styles.display).toBe("element"));
+    expect(elementStore.get("1")?.styles.display).toBe("none");
+    expect(elementStore.get("3")?.styles.display).toBe("none");
+  });
+
+  it("still highlights the selected node's connections while an expression is filtering", async () => {
+    renderWithProviders({
+      filter: {
+        selectedTypes: null,
+        search: "",
+        highlightIds: ["1", "2"],
+        expressionMatchIds: new Set(["1", "2"]),
+      },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    await waitFor(() => expect(elementStore.get("1")?.classes.has("graph-highlighted")).toBe(true));
+    expect(elementStore.get("3")?.classes.has("graph-dimmed")).toBe(true);
+    expect(elementStore.get("3")?.styles.display).toBe("none");
+  });
+
+  it("hides an edge whose endpoint an expression hid", async () => {
+    // Edge 10 runs 1 -> 2. The expression keeps 1 and drops 2.
+    renderWithProviders({
+      filter: { selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: new Set(["1", "3"]) },
+    });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+    await waitFor(() => expect(elementStore.get("10")?.styles.display).toBe("none"));
+  });
+
+  it("announces how many nodes an expression left showing, and says nothing when there is none", async () => {
+    const queryClient = client();
+    const tree = (filter: ComponentProps<typeof GraphEditor>["filter"]) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <GraphEditor
+            domainId={1}
+            mode="objects"
+            onModeChange={vi.fn()}
+            hierarchyTypeId={null}
+            onHierarchyTypeChange={vi.fn()}
+            filter={filter}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree({ selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: null }));
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    expect(screen.getByTestId("graph-live")).not.toHaveTextContent(/condition/i);
+
+    rerender(tree({ selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: new Set(["1"]) }));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+  });
+
   // --- behaviour carried over from the v0 editor --------------------------
 
   it("calls the latest onSelectionChange after a rerender, not the one captured at mount", async () => {

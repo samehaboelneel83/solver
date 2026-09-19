@@ -5,7 +5,10 @@ import PropertyPanel from "../components/PropertyPanel";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
 import type { FilterState } from "../components/FilterBar";
 import { useGraphView } from "../api/graph";
-import type { Id } from "../api/v1";
+import { useEntityTypes, type Id } from "../api/v1";
+import { isEmptyDocument } from "../expressions/document";
+import { graphCatalogue, matchingNodeIds } from "../expressions/graphFilter";
+import { validateExpression } from "../expressions/validate";
 import { useDomain } from "../hooks/useDomain";
 import { parseGraphMode, useGraphMode } from "../hooks/useGraphMode";
 import { parseRouteId } from "../lib/routeId";
@@ -134,6 +137,38 @@ export default function GraphDemo() {
   const { data: graph } = useGraphView(domainId, hierarchyTypeId, mode);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
 
+  // Task 14c. The expression's FIELDS come from the entity types, because
+  // the graph payload's `attribute_definitions` carry no `enum_values` and
+  // no `required` -- this is the same query GraphEditor and PropertyPanel
+  // already make, so React Query serves it once. The relationship types
+  // for `count(...)` come out of the graph payload itself, which already
+  // lists them, so the expression builder costs no extra request at all.
+  const entityTypes = useEntityTypes(domainId, { limit: 500 }, { enabled: mode === "objects" });
+  const expressionCatalogue = useMemo(
+    () =>
+      mode === "objects" && graph && entityTypes.data
+        ? graphCatalogue(entityTypes.data.items, graph.relationship_types)
+        : null,
+    [mode, graph, entityTypes.data]
+  );
+
+  /**
+   * The nodes the expression matches, or null for "no expression
+   * constraint".
+   *
+   * Null for an EMPTY document and for an INVALID one alike: an expression
+   * half-written must not blank the canvas. What is wrong with it is shown
+   * in the builder, by the builder, from the same validator.
+   */
+  const expressionMatchIds = useMemo(() => {
+    const document = filterState.expression ?? null;
+    if (!graph || !expressionCatalogue || isEmptyDocument(document)) {
+      return null;
+    }
+    const result = validateExpression(document, expressionCatalogue);
+    return result.valid ? matchingNodeIds(graph, expressionCatalogue, result.document) : null;
+  }, [graph, expressionCatalogue, filterState.expression]);
+
   // B-3: consume a deep-link "focus" once its target shows up in the loaded
   // graph. Guarded by a ref (not just by clearing the URL param) so a graph
   // still loading -- or briefly missing the node mid-refetch -- isn't treated
@@ -169,8 +204,11 @@ export default function GraphDemo() {
   // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every
   // node/edge) only reruns when the criteria actually change.
   const filter = useMemo(
-    () => (graph ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges) : undefined),
-    [filterState, selectedNodeId, graph?.edges]
+    () =>
+      graph
+        ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges, expressionMatchIds)
+        : undefined,
+    [filterState, selectedNodeId, graph?.edges, expressionMatchIds]
   );
 
   // H-1 fix round 1: typing a node's label and pressing Enter selects it.
@@ -235,6 +273,9 @@ export default function GraphDemo() {
           searchLabel={
             mode === "types" ? "Search types by name" : "Search nodes by label"
           }
+          // Only in the objects view: the fields are an entity's
+          // attributes, and a types node IS an entity type, not an entity.
+          expressionCatalogue={expressionCatalogue ?? undefined}
         />
       )}
       {/* F-1: below 1024px the property panel kept its own minimum width and

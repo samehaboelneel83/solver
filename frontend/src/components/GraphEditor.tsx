@@ -527,6 +527,9 @@ export default function GraphEditor({
     const nodeById = new Map(data.nodes.map((n) => [n.id, n]));
     const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
     const highlightIds = filter?.highlightIds ?? null;
+    // Task 14c. Null means "no expression constraint" -- an empty or
+    // invalid expression filters nothing rather than blanking the canvas.
+    const expressionMatchIds = filter?.expressionMatchIds ?? null;
 
     cy.nodes().forEach((node) => {
       const graphNode = nodeById.get(node.id());
@@ -539,7 +542,11 @@ export default function GraphEditor({
       // ordinary attribute that a type may or may not declare, so matching it
       // would make search mean something different per entity type.
       const searchOk = !searchLower || graphNode.label.toLowerCase().includes(searchLower);
-      node.style("display", typeOk && searchOk ? "element" : "none");
+      // AND, and the same `display: none` the other two use -- so a node an
+      // expression hid is indistinguishable downstream (edges, hit-testing,
+      // the empty-state overlay) from one a checkbox hid.
+      const expressionOk = expressionMatchIds === null || expressionMatchIds.has(graphNode.id);
+      node.style("display", typeOk && searchOk && expressionOk ? "element" : "none");
     });
 
     cy.edges().forEach((edge) => {
@@ -556,6 +563,37 @@ export default function GraphEditor({
         node.addClass(highlightSet.has(node.id()) ? "graph-highlighted" : "graph-dimmed");
       });
     }
+  }, [filter, data]);
+
+  // Task 14c: the expression's result, announced in the same live region
+  // the rest of this canvas uses. Derived from the graph DATA rather than
+  // from cytoscape, so what is announced is what was decided, not what a
+  // style write happened to leave behind. Only while an expression is
+  // active: announcing on every keystroke in the search box would be
+  // noise, and the type checkboxes have never announced either.
+  const announcedExpressionRef = useRef(false);
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    const matchIds = filter?.expressionMatchIds ?? null;
+    if (!matchIds) {
+      if (announcedExpressionRef.current) {
+        announcedExpressionRef.current = false;
+        setLiveMessage("Filter conditions cleared");
+      }
+      return;
+    }
+    announcedExpressionRef.current = true;
+    const searchLower = (filter?.search ?? "").toLowerCase();
+    const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
+    const shown = data.nodes.filter(
+      (node) =>
+        (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
+        (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
+        matchIds.has(node.id)
+    ).length;
+    setLiveMessage(`Filter conditions: ${shown} of ${data.nodes.length} nodes shown`);
   }, [filter, data]);
 
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GraphDemo from "./GraphDemo";
@@ -395,5 +395,131 @@ describe("GraphDemo view mode", () => {
     await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
     registeredHandlersRef.current["tap:node"]({ target: { id: () => "type-1" } });
     expect(await screen.findByTestId("entity-type-panel")).toHaveTextContent("employee");
+  });
+});
+
+// --- Task 14c: the expression filter, end to end through the page --------
+
+describe("GraphDemo expression filter", () => {
+  beforeEach(() => {
+    mockCytoscape.mockClear();
+    registeredHandlersRef.current = {};
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
+    localStorage.removeItem(GRAPH_MODE_STORAGE_KEY);
+    (apiFetch as any).mockReset();
+    stubApi();
+  });
+
+  const GRADE = "attr:1:grade";
+
+  async function openBuilder() {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("filter-expression-toggle"));
+    // The builder is code-split, so it arrives a tick after the panel opens.
+    fireEvent.click(await screen.findByTestId("expression-add-rule"));
+    await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1));
+  }
+
+  /** Sets the one rule on screen to `grade <op> <value>`. */
+  function setRule(operator: string, value: string) {
+    fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
+    fireEvent.change(screen.getAllByTestId("expression-operator")[0], { target: { value: operator } });
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value } });
+  }
+
+  it("offers the builder in the objects view and not in the types view", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
+    cleanup();
+
+    renderWithProviders(["/graph?mode=types"]);
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+    expect(screen.queryByTestId("filter-expression-toggle")).not.toBeInTheDocument();
+  });
+
+  it("builds the field list from the domain's attribute definitions", async () => {
+    await openBuilder();
+    const options = Array.from(screen.getAllByTestId("expression-field")[0].querySelectorAll("option")).map(
+      (o) => o.getAttribute("value")
+    );
+    expect(options).toContain(GRADE);
+  });
+
+  it("filters the canvas by the expression and announces how many nodes are left", async () => {
+    await openBuilder();
+    setRule(">", "3");
+    // Of hq (a unit), ahmed (grade 3) and sara (grade 4), only sara matches.
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+  });
+
+  it("filters nothing and says what is wrong when the expression is invalid", async () => {
+    await openBuilder();
+    setRule(">", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "abc" } });
+
+    expect(screen.getByTestId("expression-problems")).toHaveTextContent(/whole number/i);
+    await waitFor(() => expect(screen.getByTestId("graph-live")).not.toHaveTextContent(/of 3/));
+  });
+
+  it("stops filtering when the last condition is removed, not only when there is no document", async () => {
+    // Removing the rule leaves a document that is present but EMPTY. A
+    // consumer that only checked for null would go on filtering by it.
+    await openBuilder();
+    setRule(">", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.click(screen.getAllByTestId("expression-remove-rule")[0]);
+
+    await waitFor(() => expect(screen.getByTestId("graph-live")).not.toHaveTextContent(/of 3/));
+    expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent(/no conditions/i);
+  });
+
+  it("ANDs the expression with the entity-type checkboxes", async () => {
+    await openBuilder();
+    setRule(">", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.click(screen.getByTestId("filter-types-toggle"));
+    fireEvent.click(screen.getByTestId("filter-type-employee"));
+
+    // sara is an employee; with employees hidden nothing is left, and the
+    // count changes only if both filters are being applied.
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("0 of 3"));
+  });
+
+  it("ANDs the expression with the search box", async () => {
+    await openBuilder();
+    setRule(">=", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+  });
+
+  it("keeps Enter-to-select working while an expression is active", async () => {
+    await openBuilder();
+    setRule(">", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
+    fireEvent.keyDown(screen.getByTestId("filter-search"), { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByLabelText(/^Label/)).toHaveValue("Sara Q"));
+  });
+
+  it("drops the expression when the view is switched, so it cannot filter a canvas it was not written for", async () => {
+    await openBuilder();
+    setRule(">", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Types$/ }));
+
+    await waitFor(() => expect(screen.queryByTestId("filter-expression-toggle")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Objects$/ }));
+    await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
+    expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent(/no conditions/i);
   });
 });
