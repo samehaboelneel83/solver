@@ -15,11 +15,19 @@ from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
+from app.core.nul_guard import NulByteGuard
 from app.seed import seed_admin
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Problem Solver Platform API")
+
+# Before routing, and so before authentication: a NUL (U+0000) anywhere in
+# a query string or a JSON/form body is a 422 naming the field, not the
+# unhandled 500 psycopg2's adapter would otherwise produce. Deliberately
+# one edge-level guard rather than a rule per field -- see the module
+# docstring for why `translate_db_error` cannot cover this case.
+app.add_middleware(NulByteGuard)
 
 app.include_router(health_router)
 app.include_router(auth_router)
