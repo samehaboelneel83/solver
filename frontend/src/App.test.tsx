@@ -139,3 +139,38 @@ describe("entity routes (Task 12)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: /ahmed/ })).toBeInTheDocument();
   });
 });
+
+describe("parameter and version routes (Task 13)", () => {
+  beforeEach(() => {
+    setToken("test-token");
+    localStorage.removeItem("solver_domain_id");
+    (apiFetch as any).mockReset();
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+  });
+
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("/parameters renders the parameter list, not the generic table page", async () => {
+    renderAt("/parameters");
+    expect(await screen.findByRole("heading", { level: 1, name: "Parameters" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("/versions renders the model version list", async () => {
+    renderAt("/versions");
+    expect(await screen.findByRole("heading", { level: 1, name: "Model versions" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+});

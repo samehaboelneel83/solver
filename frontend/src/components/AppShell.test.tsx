@@ -92,6 +92,34 @@ describe("AppShell", () => {
       expect(entities.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it("links Parameters from the Domain group, after Entities (Task 13)", async () => {
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const parameters = within(nav).getByRole("link", { name: "Parameters" });
+      expect(parameters).toHaveAttribute("href", "/parameters");
+      const entities = within(nav).getByRole("link", { name: "Entities" });
+      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
+      // Parameters are indexed by entity types and filled with entities, so
+      // they come after both -- and still inside the Domain group.
+      expect(entities.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(parameters.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("links Model versions from the Problem group, after Problems (Task 13)", async () => {
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const versions = within(nav).getByRole("link", { name: "Model versions" });
+      expect(versions).toHaveAttribute("href", "/versions");
+      const problems = within(nav).getByRole("link", { name: "Problems" });
+      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
+      const runsToggle = within(nav).getByRole("button", { name: /^Runs/ });
+      expect(problemToggle.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(problems.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(versions.compareDocumentPosition(runsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("says plainly that runs have no screens yet, rather than rendering an empty group", async () => {
       renderWithProviders();
       await settled();

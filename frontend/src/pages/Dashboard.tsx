@@ -4,6 +4,7 @@ import { useCounts } from "../api/counts";
 import { useHealth } from "../api/health";
 import OfflineNotice from "../components/OfflineNotice";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { useDomain } from "../hooks/useDomain";
 
 /**
  * The three places a new user actually starts (A-1): the audit's landing
@@ -13,12 +14,16 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  */
 const ENTRY_POINTS = [
   {
-    href: "/domain/entity",
+    // Schema v1: the v0 `domain.entity` table is gone. Entity types are
+    // where a domain model starts -- an entity cannot exist without one.
+    href: "/entity-types",
     title: "Domain model",
-    description: "Entities, types and the relationships between them.",
+    description: "Entity types, their attributes, and the entities themselves.",
   },
   {
-    href: "/problem/problem",
+    // `problem` is a public-schema table in v1, so its generic route is
+    // `/public/problem`, not the v0 `/problem/problem` (Ruling 27).
+    href: "/public/problem",
     title: "Problems",
     description: "The problems this workspace is set up to solve.",
   },
@@ -29,9 +34,10 @@ const ENTRY_POINTS = [
   },
 ] as const;
 
+/** v1's `problem` has `name`, `owner` and `created_at` -- no `code` and no
+ * `status`, both of which were v0 columns this panel used to render. */
 function problemDisplayName(problem: Record<string, unknown>): string {
   if (typeof problem.name === "string" && problem.name) return problem.name;
-  if (typeof problem.code === "string" && problem.code) return problem.code;
   return String(problem.id ?? "Untitled problem");
 }
 
@@ -44,12 +50,21 @@ export default function Dashboard() {
     isError: countsError,
     fetchStatus: countsFetchStatus,
   } = useCounts();
+  const { domainId } = useDomain();
   const {
     data: recentProblems,
     isLoading: problemsLoading,
     isError: problemsError,
     fetchStatus: problemsFetchStatus,
-  } = useEntityList("problem", "problem", { limit: 5, offset: 0, orderBy: "created_at", order: "desc" });
+  } = useEntityList("public", "problem", {
+    limit: 5,
+    offset: 0,
+    orderBy: "created_at",
+    order: "desc",
+    // Scoped to the domain in the sidebar when there is one; every domain's
+    // problems when there is not, so a fresh session still shows something.
+    filters: domainId === null ? {} : { domain_id: String(domainId) },
+  });
   // D-7: offline, these queries pause instead of failing -- `isLoading` never resolves, so
   // without this each section below would show "Loading…" forever with no explanation.
   const countsOffline = countsFetchStatus === "paused" && !counts;
@@ -90,12 +105,12 @@ export default function Dashboard() {
                 return (
                   <li key={id}>
                     <Link
-                      to={`/problem/problem/${id}`}
+                      to={`/public/problem/${id}`}
                       className="flex items-center justify-between gap-2 px-4 py-2 text-sm hover:bg-slate-50"
                     >
                       <span className="font-medium text-blue-700">{problemDisplayName(problem)}</span>
-                      {typeof problem.status === "string" && (
-                        <span className="text-xs uppercase text-slate-500">{problem.status}</span>
+                      {typeof problem.owner === "string" && problem.owner !== "" && (
+                        <span className="text-xs text-slate-500">{problem.owner}</span>
                       )}
                     </Link>
                   </li>
@@ -109,7 +124,7 @@ export default function Dashboard() {
               <p>No problems yet</p>
               {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
               <Link
-                to="/problem/problem/new"
+                to="/public/problem/new"
                 className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline"
               >
                 New problem

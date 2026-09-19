@@ -189,7 +189,7 @@ export type FieldErrors = Record<string, string>;
  *   its field in `loc[1]`; entries for a field in `fields` go to that
  *   field, the rest become the general message.
  * - A 409 whose string `detail` says "already exists" is the only unique
- *   constraint either table has -- `(domain_id, name)` or
+ *   constraint any of these tables has -- `(domain_id, name)` or
  *   `(entity_type_id, name)` -- so it goes to `name`, reworded: the raw
  *   text names the constraint ("...the same entity_type_id_name...").
  * - Anything else is `formatApiError`'s text.
@@ -197,7 +197,7 @@ export type FieldErrors = Record<string, string>;
 export function serverFieldErrors(
   err: unknown,
   fields: string[],
-  noun: "attribute" | "entity type"
+  noun: "attribute" | "entity type" | "parameter"
 ): { fields: FieldErrors; general: string | null } {
   const items = validationErrors(err);
   if (items.length > 0) {
@@ -218,7 +218,9 @@ export function serverFieldErrors(
     const text =
       noun === "attribute"
         ? "Name: this entity type already has an attribute with this name."
-        : "Name: this domain already has an entity type with this name.";
+        : noun === "parameter"
+          ? "Name: this domain already has a parameter with this name."
+          : "Name: this domain already has an entity type with this name.";
     return { fields: { name: text }, general: null };
   }
   return { fields: {}, general: message };
