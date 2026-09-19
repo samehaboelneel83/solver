@@ -101,7 +101,17 @@ class AttributeDef(Base):
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
     # NOT NULL exactly when data_type = 'enum' (CHECK in the DDL).
     enum_values: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
-    default_value: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # none_as_null=True is load-bearing, not tidiness. SQLAlchemy's JSONB
+    # persists an explicit Python None as jsonb 'null', which is NOT NULL --
+    # and `entity_validate` materialises a default whenever
+    # `default_value IS NOT NULL`. Without this, every attribute_def created
+    # through the API (the router passes `**model_dump()`, so the key is
+    # always present and explicitly None) would carry a jsonb 'null'
+    # default, and every entity of that type would get `{"<attr>": null}`
+    # materialised into `attrs` -- which then flows into the solver's data
+    # contract via snapshot_dataset()'s `jsonb_build_object('id', e.key) ||
+    # e.attrs`. "No default" has to be expressible through the API.
+    default_value: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
 
 class Entity(Base):

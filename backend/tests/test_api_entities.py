@@ -556,6 +556,28 @@ def test_an_attribute_whose_default_is_sql_null_adds_no_key(auth_headers, entity
     assert created["attrs"] == {}
 
 
+def test_an_attribute_created_through_the_api_with_no_default_adds_no_key(
+    auth_headers, entity_type_id
+):
+    """The router builds the row with `**payload.model_dump()`, so
+    `default_value` is always *present* and explicitly `None` -- never
+    simply absent. `JSONB(none_as_null=True)` on the column is what makes
+    that store as SQL NULL instead of jsonb 'null'; without it the trigger
+    sees `IS NOT NULL` and materialises `{"note": null}` into every entity
+    of the type, and that flows on into snapshot_dataset()'s set rows.
+
+    The sibling test above pins the same contract through raw SQL, which
+    passed even while the router was broken. This one covers the path the
+    API actually takes, so it fails if the mapping regresses.
+    """
+    client = TestClient(app)
+    _make_attribute(client, auth_headers, entity_type_id, "note", "text")
+
+    created = _make_entity(client, auth_headers, entity_type_id, "ahmed", attrs={})
+
+    assert created["attrs"] == {}, created["attrs"]
+
+
 def test_delete_entity(auth_headers, entity_type_id):
     client = TestClient(app)
     entity = _make_entity(client, auth_headers, entity_type_id, "ahmed")
