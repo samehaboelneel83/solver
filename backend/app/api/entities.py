@@ -82,6 +82,7 @@ not shadow, so an empty or whitespace-only key arrives as
 `translate_db_error`'s 409 rather than a 422.
 """
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -90,6 +91,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user
 from app.api.validation import field_error
 from app.core.db import get_db
@@ -116,6 +118,10 @@ class EntityRead(BaseModel):
     # Always the **stored** object, which may carry defaults the request
     # never mentioned -- see the module docstring.
     attrs: dict[str, Any]
+    # Migration 0010, Ruling 42. Send it back on PATCH and a save built on
+    # a superseded read is refused with a 409 instead of silently reverting
+    # whatever another client changed in the meantime.
+    updated_at: datetime
 
 
 class EntityCreate(BaseModel):
@@ -134,7 +140,9 @@ class EntityUpdate(BaseModel):
 
     `attrs` is one JSONB column and is replaced wholesale, not merged: a
     merge would make it impossible to remove an attribute, and would mean
-    the value the trigger validates is one no request ever stated.
+    the value the trigger validates is one no request ever stated. That
+    is exactly why `updated_at` exists: wholesale replacement is what
+    makes a concurrent edit recoverable only by detecting it.
     """
 
     key: str | None = None
@@ -142,6 +150,12 @@ class EntityUpdate(BaseModel):
     sort_order: int | None = None
     active: bool | None = None
     attrs: dict[str, Any] | None = None
+    # Ruling 42: the `updated_at` the client last read. It is NOT a
+    # column update -- `update_entity` pops it before assigning the rest,
+    # and the database's trigger is the only writer of that column.
+    # Omitted means "no check", which is what keeps every pre-0010 caller
+    # working; see `app/api/concurrency.py`.
+    updated_at: datetime | None = None
 
 
 class EntityList(BaseModel):
@@ -152,8 +166,12 @@ class EntityList(BaseModel):
 # --- helpers ---------------------------------------------------------------
 
 
-def _get_entity(db: Session, entity_id: int) -> Entity:
-    entity = db.get(Entity, entity_id)
+def _get_entity(db: Session, entity_id: int, *, for_update: bool = False) -> Entity:
+    # `for_update` is passed only when the caller supplied an `updated_at`
+    # to check against: reading, comparing and writing are three steps, and
+    # without the lock a second client can commit between the second and
+    # the third. See `app/api/concurrency.py`.
+    entity = db.get(Entity, entity_id, with_for_update=True) if for_update else db.get(Entity, entity_id)
     if entity is None:
         raise HTTPException(status_code=404, detail="entity not found")
     return entity
@@ -276,8 +294,11 @@ def update_entity(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> EntityRead:
-    entity = _get_entity(db, entity_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    expected = changes.pop("updated_at", None)
+    entity = _get_entity(db, entity_id, for_update=expected is not None)
+    check_not_stale("entity", entity.updated_at, expected)
+    for field, value in changes.items():
         setattr(entity, field, value)
     # `entity_validate` is BEFORE INSERT **OR UPDATE**, so this path gets
     # the identical contract -- including defaults being materialised into

@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import RelationshipTypeFields, {
   RELATIONSHIP_TYPE_FIELDS,
@@ -7,9 +7,10 @@ import RelationshipTypeFields, {
 } from "../components/RelationshipTypeFields";
 import { ErrorSummary, nameProblem, serverFieldErrors, useFieldErrors, type FieldErrors } from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
+import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
   useDeleteRelationshipType,
   useEntityTypes,
@@ -21,6 +22,7 @@ import {
 } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 
 const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
 
@@ -69,10 +71,23 @@ export default function RelationshipTypeDetail() {
 
   // Keyed on the row, so switching types re-seeds the form rather than
   // editing one type's draft into another's -- `EntityTypeDetail`'s rule.
-  return <Editor key={data.id} type={data} />;
+  return (
+    <Editor
+      key={data.id}
+      type={data}
+      // Ruling 42: the read behind "Reload and keep my changes".
+      reload={async () => (await refetch()).data ?? null}
+    />
+  );
 }
 
-function Editor({ type }: { type: RelationshipType }) {
+function Editor({
+  type,
+  reload,
+}: {
+  type: RelationshipType;
+  reload: () => Promise<RelationshipType | null>;
+}) {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
@@ -86,13 +101,19 @@ function Editor({ type }: { type: RelationshipType }) {
           <span className="font-mono">{type.name}</span>
         </h1>
       </div>
-      <TypeForm type={type} />
+      <TypeForm type={type} reload={reload} />
       <DeleteType type={type} />
     </div>
   );
 }
 
-function TypeForm({ type }: { type: RelationshipType }) {
+function TypeForm({
+  type,
+  reload,
+}: {
+  type: RelationshipType;
+  reload: () => Promise<RelationshipType | null>;
+}) {
   const [draft, setDraft] = useState<RelationshipTypeDraft>(() => draftFromType(type));
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
@@ -100,8 +121,45 @@ function TypeForm({ type }: { type: RelationshipType }) {
   // The type's own domain, not the sidebar's selection: this page is
   // reachable by URL, and rule 3 scopes the ends to the *row's* domain.
   const entityTypes = useEntityTypes(type.domain_id, { limit: 500 });
+  // Ruling 42 -- the same defect and the same remedy as the entity form;
+  // `RelationshipTypeDraft` already is the whole set of controls, so the
+  // merge needs no separate shape here.
+  const [updatedAt, setUpdatedAt] = useState(type.updated_at);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+  const seeded = useRef<RelationshipTypeDraft>(draftFromType(type));
   const updateType = useUpdateRelationshipType();
   const toast = useToast();
+
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const fresh = await reload();
+      if (!fresh) return;
+      const freshDraft = draftFromType(fresh);
+      const merged = mergeReload(
+        seeded.current as unknown as Record<string, unknown>,
+        draft as unknown as Record<string, unknown>,
+        freshDraft as unknown as Record<string, unknown>
+      ) as unknown as RelationshipTypeDraft;
+      const brought = reloadedKeys(
+        seeded.current as unknown as Record<string, unknown>,
+        draft as unknown as Record<string, unknown>,
+        freshDraft as unknown as Record<string, unknown>
+      );
+      setDraft(merged);
+      setUpdatedAt(fresh.updated_at);
+      setStale(null);
+      seeded.current = freshDraft;
+      toast.success(
+        brought.length > 0
+          ? `Reloaded, keeping your edits. Updated from the other change: ${brought.join(", ")}.`
+          : "Reloaded, keeping your edits."
+      );
+    } finally {
+      setReloading(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -114,7 +172,7 @@ function TypeForm({ type }: { type: RelationshipType }) {
     replace(problems);
     if (Object.keys(problems).length > 0) return;
     try {
-      await updateType.mutateAsync({
+      const saved = await updateType.mutateAsync({
         id: type.id,
         body: {
           name: draft.name,
@@ -123,10 +181,19 @@ function TypeForm({ type }: { type: RelationshipType }) {
           cardinality: draft.cardinality,
           is_hierarchy: draft.is_hierarchy,
           colour: draft.colour,
+          updated_at: updatedAt,
         },
       });
+      setUpdatedAt(saved.updated_at);
+      seeded.current = draftFromType(saved);
       toast.success("Relationship type saved");
     } catch (err) {
+      if (isStaleRecordError(err)) {
+        setServerErrors(null);
+        setGeneral(null);
+        setStale(formatApiError(err));
+        return;
+      }
       const result = serverFieldErrors(err, RELATIONSHIP_TYPE_FIELDS, "relationship type");
       setServerErrors(result.fields);
       setGeneral(result.general);
@@ -140,6 +207,7 @@ function TypeForm({ type }: { type: RelationshipType }) {
       </h2>
       <form aria-label="Relationship type" onSubmit={handleSubmit} noValidate className="space-y-4">
         <ErrorSummary errors={errors} order={RELATIONSHIP_TYPE_FIELDS} summaryRef={summaryRef} />
+        {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
         {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
         <RelationshipTypeFields
           draft={draft}

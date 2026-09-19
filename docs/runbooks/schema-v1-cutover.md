@@ -91,11 +91,17 @@ you create them or run the seed.
 
 ## The downgrade will not undo this
 
-`alembic downgrade 0005` runs `0007.downgrade()` then `0006.downgrade()`.
-Both are pure `DROP`s:
+`alembic downgrade 0005` runs every migration above `0005` in reverse.
+`0008`, `0009` and `0010` each undo themselves cleanly — `0010` in
+particular drops three triggers, one function and three columns, and a
+`downgrade 0009` / `upgrade 0010` round trip leaves the schema as it was,
+losing only the stored timestamps (which are re-established at
+`clock_timestamp()` by the column default on the way back up). The two
+that matter are pure `DROP`s:
 
 | Migration | `downgrade()` does | `downgrade()` does **not** do |
 |---|---|---|
+| `0010` | drops `set_updated_at()`, the three `*_set_updated_at` triggers and the three `updated_at` columns | keep the modification history those columns held (nothing else reads it, and a fresh `clock_timestamp()` on the way back up only means every open form must reload once) |
 | `0007` | drops the 8 v1 PROBLEM/RUN tables, the `run_overview` view, `run_status`, and the hash/immutability/version functions and triggers | recreate anything |
 | `0006` | drops the 8 v1 DOMAIN tables, `entity_role`/`attr_type`, and the validation functions and triggers | recreate the v0 `domain` and `problem` schemas, or their 27 tables, or a single row of their data |
 

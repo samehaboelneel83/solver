@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityRecord, { entityServerErrors } from "./EntityRecord";
@@ -55,6 +55,9 @@ const ENTITY = {
     // today's definitions (Task 11's probe, binding on this task).
     retired: "left over",
   },
+  // Migration 0010 (Ruling 42). Every entity read carries it; the form
+  // sends it back so a save built on a superseded read is refused.
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 function requests(): { path: string; method: string; body: any }[] {
@@ -426,6 +429,151 @@ describe("EntityRecord: a refusal from the server", () => {
     save(/create entity/i);
     await waitFor(() => expect(screen.getByLabelText(/^Key/)).toHaveAttribute("aria-invalid", "true"));
     expect((await screen.findByTestId("form-errors")).textContent).toMatch(/key/i);
+  });
+});
+
+describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
+  const STALE = {
+    detail:
+      "This entity was changed by someone else after this form loaded it. " +
+      "Reload the entity and apply your changes to the current version.",
+  };
+
+  async function openEdit() {
+    reads("/entities/42");
+    expect(await screen.findByLabelText("grade")).toBeInTheDocument();
+  }
+
+  /** What the other client left behind: a different label and two
+   * different attribute values, and a moved `updated_at`. */
+  const CHANGED = {
+    ...ENTITY,
+    label: "Ahmed (changed by the other client)",
+    attrs: { ...ENTITY.attrs, grade: 9, note: "written by the other client" },
+    updated_at: "2026-09-20T09:05:00+00:00",
+  };
+
+  it("sends the updated_at it read, which is what lets the server refuse", async () => {
+    await openEdit();
+    mockFetch.mockResolvedValueOnce(ENTITY);
+    save(/save entity/i);
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0].body.updated_at).toBe(ENTITY.updated_at);
+  });
+
+  it("does not send updated_at when creating, because there is nothing to compare", async () => {
+    reads("/entities/new?type=5");
+    expect(await screen.findByLabelText("grade")).toBeInTheDocument();
+    setField(/^Key/, "ahmed");
+    mockFetch.mockResolvedValueOnce({ ...ENTITY, id: 99 });
+    save(/create entity/i);
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0].body).not.toHaveProperty("updated_at");
+  });
+
+  it("shows the refusal with a way out instead of a red line under a control", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    setField(/^Label/, "Ahmed (edited here)");
+    save(/save entity/i);
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice.textContent).toContain("changed by someone else");
+    expect(within(notice).getByRole("button", { name: /reload and keep my changes/i })).toBeInTheDocument();
+    // Not a field error: nothing in the payload is wrong, so nothing is
+    // marked invalid and the summary stays empty.
+    expect(screen.getByLabelText(/^Label/)).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByTestId("form-errors")).toBeNull();
+  });
+
+  it("keeps what the user typed when it reloads, and takes the other change for what they did not touch", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    setField(/^Label/, "Ahmed (edited here)");
+    setField("grade", "5");
+    save(/save entity/i);
+    await screen.findByTestId("stale-record");
+
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    // Touched here: kept exactly as typed, even though the other client
+    // wrote different values for both.
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^Label/) as HTMLInputElement).value).toBe("Ahmed (edited here)")
+    );
+    expect((screen.getByLabelText("grade") as HTMLInputElement).value).toBe("5");
+    // Not touched here: the other client's value arrives, which is the
+    // whole point -- the next save no longer reverts it.
+    expect((screen.getByLabelText("note") as HTMLInputElement).value).toBe("written by the other client");
+    expect(screen.queryByTestId("stale-record")).toBeNull();
+  });
+
+  it("names what the reload brought in, so the other change is not invisible either", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    save(/save entity/i);
+    await screen.findByTestId("stale-record");
+
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/keeping your edits/i));
+    expect(screen.getByRole("status").textContent).toContain("note");
+  });
+
+  it("saves against the reloaded timestamp afterwards, and still sends the whole attribute set", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    setField(/^Label/, "Ahmed (edited here)");
+    save(/save entity/i);
+    await screen.findByTestId("stale-record");
+
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+    await waitFor(() =>
+      expect((screen.getByLabelText("note") as HTMLInputElement).value).toBe("written by the other client")
+    );
+
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    save(/save entity/i);
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    const retry = writes()[1].body;
+    expect(retry.updated_at).toBe(CHANGED.updated_at);
+    expect(retry.label).toBe("Ahmed (edited here)");
+    expect(retry.attrs.note).toBe("written by the other client");
+    // `grade` was never touched here, so the reload brought the other
+    // client's 9 in and the retry carries it -- the reversion the whole
+    // ruling is about, not happening.
+    expect(retry.attrs.grade).toBe(9);
+    // Tasks 11/12 are untouched: the payload is still the whole set, and
+    // the stale key is still dropped.
+    expect(retry.attrs).not.toHaveProperty("retired");
+  });
+
+  it("does not resurrect an attribute whose definition was deleted while the form was open", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    save(/save entity/i);
+    await screen.findByTestId("stale-record");
+
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+    await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
+    mockFetch.mockResolvedValueOnce(CHANGED);
+    save(/save entity/i);
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    expect(writes()[1].body.attrs).not.toHaveProperty("retired");
+  });
+
+  it("still marks the key field for the OTHER 409 a save can get", async () => {
+    await openEdit();
+    mockFetch.mockRejectedValueOnce(
+      new ApiError(409, JSON.stringify({ detail: "a entity row with the same type_id already exists" }))
+    );
+    save(/save entity/i);
+    await waitFor(() => expect(screen.getByLabelText(/^Key/)).toHaveAttribute("aria-invalid", "true"));
+    expect(screen.queryByTestId("stale-record")).toBeNull();
   });
 });
 

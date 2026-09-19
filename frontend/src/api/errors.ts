@@ -1,5 +1,30 @@
 import { ApiError } from "./client";
 
+/**
+ * The phrase `app/api/concurrency.py` puts in the 409 it refuses a save
+ * built on a superseded read with (Ruling 42). It is a wire contract:
+ * `backend/app/api/concurrency.py::STALE_PREFIX` holds the same string and
+ * both sides' tests assert it.
+ *
+ * Matching on text is not the first choice, but a 409 body is
+ * `{"detail": "<text>"}` and has nowhere else to carry a discriminator --
+ * only the 422 list shape has `kind` (Ruling 19), and giving this one case
+ * an object `detail` would leave the API with a third body shape for a
+ * client to sniff. The precedent is already here: the entity form tells
+ * `UNIQUE (entity_type_id, key)` apart the same way.
+ */
+export const STALE_RECORD_PHRASE = "changed by someone else";
+
+/**
+ * True when a save was refused because the record moved on since it was
+ * read -- as opposed to the other 409 a save can get, a unique-key
+ * collision, which is a field error the form pins to a control.
+ */
+export function isStaleRecordError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  return formatApiError(err).includes(STALE_RECORD_PHRASE);
+}
+
 /** One entry of a 422's `detail` list. Every 422 the backend sends has
  * this shape (Ruling 19): FastAPI's own validation errors, and schema v1's
  * database validation triggers, which `translate_db_error` emits in the

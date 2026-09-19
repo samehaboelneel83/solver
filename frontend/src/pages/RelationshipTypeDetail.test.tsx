@@ -31,6 +31,7 @@ const TYPE: RelationshipType = {
   cardinality: "many_to_one",
   is_hierarchy: false,
   colour: "#2ca02c",
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 type Handler = (path: string, init?: RequestInit) => Promise<unknown> | undefined;
@@ -151,6 +152,8 @@ describe("RelationshipTypeDetail", () => {
           cardinality: "many_to_one",
           is_hierarchy: false,
           colour: "#2ca02c",
+          // Ruling 42 -- see EntityTypeDetail.test.tsx.
+          updated_at: "2026-09-20T09:00:00+00:00",
         },
       },
     ]);
@@ -287,5 +290,42 @@ describe("RelationshipTypeDetail", () => {
       await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/relationship-types$/));
       expect(writes().map((w) => `${w.method} ${w.path}`)).toEqual(["DELETE /api/v1/relationship-types/21"]);
     });
+  });
+});
+
+describe("RelationshipTypeDetail: a concurrent edit (Ruling 42)", () => {
+  const STALE = new ApiError(409, JSON.stringify({ detail: "This relationship type was changed by someone else after this form loaded it. Reload the relationship type and apply your changes to the current version." }));
+  const CHANGED: RelationshipType = {
+    ...TYPE,
+    cardinality: "one_to_many",
+    updated_at: "2026-09-20T09:05:00+00:00",
+  };
+
+  function answerGetsWith(type: RelationshipType) {
+    mockFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") !== "GET") return Promise.reject(STALE);
+      if (path === "/api/v1/relationship-types/21") return Promise.resolve(type);
+      if (path.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
+      if (path.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 3 });
+      return Promise.reject(new ApiError(404, JSON.stringify({ detail: "relationship type not found" })));
+    });
+  }
+
+  it("refuses with a reload offer, then keeps the typed name and takes the other cardinality", async () => {
+    answerGetsWith(TYPE);
+    renderPage();
+    await screen.findByDisplayValue("works_on");
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "assigned_to" } });
+    fireEvent.click(save());
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+
+    answerGetsWith(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    await waitFor(() => expect(screen.getByLabelText(/^Cardinality/)).toHaveValue("one_to_many"));
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("assigned_to");
+    expect(screen.queryByTestId("stale-record")).toBeNull();
   });
 });

@@ -58,7 +58,7 @@ Python would mean a second implementation of a recursive walk that has to
 agree with the trigger under concurrency, which it cannot.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -66,6 +66,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user
 # Shared rather than re-derived: `relationship_type.name` carries the
 # identical `^[a-z][a-z0-9_]*$` CHECK as the two names Task 5 validates,
@@ -148,6 +149,9 @@ class RelationshipTypeRead(BaseModel):
     # Migration 0009. NULL means "not chosen"; the graph assigns a
     # deterministic fallback rather than the wire inventing one.
     colour: str | None
+    # Migration 0010, Ruling 42. Sent back on PATCH to have a save built
+    # on a superseded read refused with a 409.
+    updated_at: datetime
 
 
 class RelationshipTypeCreate(BaseModel):
@@ -176,6 +180,9 @@ class RelationshipTypeUpdate(BaseModel):
     cardinality: Cardinality | None = None
     is_hierarchy: bool | None = None
     colour: str | None = None
+    # Ruling 42 -- the `updated_at` the client last read, popped before
+    # the rest are assigned. See `app/api/concurrency.py`.
+    updated_at: datetime | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_colour = field_validator("colour")(validate_colour)
@@ -236,8 +243,15 @@ class RelationshipList(BaseModel):
 # --- helpers ---------------------------------------------------------------
 
 
-def _get_relationship_type(db: Session, relationship_type_id: int) -> RelationshipType:
-    row = db.get(RelationshipType, relationship_type_id)
+def _get_relationship_type(
+    db: Session, relationship_type_id: int, *, for_update: bool = False
+) -> RelationshipType:
+    # See `entities.py::_get_entity` for why the lock is conditional.
+    row = (
+        db.get(RelationshipType, relationship_type_id, with_for_update=True)
+        if for_update
+        else db.get(RelationshipType, relationship_type_id)
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="relationship type not found")
     return row
@@ -321,8 +335,10 @@ def update_relationship_type(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> RelationshipTypeRead:
-    row = _get_relationship_type(db, relationship_type_id)
     changes = payload.model_dump(exclude_unset=True)
+    expected = changes.pop("updated_at", None)
+    row = _get_relationship_type(db, relationship_type_id, for_update=expected is not None)
+    check_not_stale("relationship type", row.updated_at, expected)
     _check_hierarchy_rules(
         changes.get("from_type_id", row.from_type_id),
         changes.get("to_type_id", row.to_type_id),

@@ -43,6 +43,7 @@ export const UNIT_TYPE: EntityType = {
   name: "unit",
   role: "resource",
   colour: "#1f77b4",
+  updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     attr(1, "active", "boolean"),
     attr(1, "band", "enum", { enum_values: ["low", "high"] }),
@@ -61,6 +62,7 @@ export const SHIFT_TYPE: EntityType = {
   name: "shift",
   role: "time",
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     // Same NAME as unit's, different DATA TYPE -- on purpose.
     attr(2, "capacity", "number"),
@@ -79,6 +81,7 @@ export const WORKS_FOR: RelationshipType = {
   cardinality: "many_to_one",
   is_hierarchy: false,
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 export const REPORTS_TO: RelationshipType = {
@@ -90,6 +93,7 @@ export const REPORTS_TO: RelationshipType = {
   cardinality: "many_to_one",
   is_hierarchy: true,
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 export const RELATIONSHIP_TYPES: RelationshipType[] = [WORKS_FOR, REPORTS_TO];

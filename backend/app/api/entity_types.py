@@ -67,6 +67,7 @@ dropped later. The request-layer rules are deliberately at least as strict
 as the CHECKs they shadow (see `app.api.validation.validate_name`).
 """
 
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -74,6 +75,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user
 from app.api.validation import field_error, validate_colour, validate_name
 from app.core.db import get_db
@@ -256,6 +258,11 @@ class EntityTypeRead(BaseModel):
     # carries both -- on the list route too, which is what lets the UI show
     # "employee (3 attributes)" without an N+1 of follow-up requests.
     attributes: list[AttributeDefRead]
+    # Migration 0010, Ruling 42. The type's OWN row only: an attribute
+    # definition is created, edited and deleted through its own routes,
+    # each of which is a single-field write the form issues immediately,
+    # so nothing about them is built on a stale read of this row.
+    updated_at: datetime
 
 
 class EntityTypeCreate(BaseModel):
@@ -277,6 +284,9 @@ class EntityTypeUpdate(BaseModel):
     name: str | None = None
     role: EntityRole | None = None
     colour: str | None = None
+    # Ruling 42 -- the `updated_at` the client last read, popped before
+    # the rest are assigned. See `app/api/concurrency.py`.
+    updated_at: datetime | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_colour = field_validator("colour")(validate_colour)
@@ -315,6 +325,7 @@ def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityType
         name=entity_type.name,
         role=entity_type.role,
         colour=entity_type.colour,
+        updated_at=entity_type.updated_at,
         attributes=[AttributeDefRead.model_validate(a) for a in attributes],
     )
 
@@ -323,8 +334,13 @@ def _read_one(db: Session, entity_type: EntityType) -> EntityTypeRead:
     return _read(entity_type, _attributes_for(db, [entity_type.id]).get(entity_type.id, []))
 
 
-def _get_entity_type(db: Session, entity_type_id: int) -> EntityType:
-    entity_type = db.get(EntityType, entity_type_id)
+def _get_entity_type(db: Session, entity_type_id: int, *, for_update: bool = False) -> EntityType:
+    # See `entities.py::_get_entity` for why the lock is conditional.
+    entity_type = (
+        db.get(EntityType, entity_type_id, with_for_update=True)
+        if for_update
+        else db.get(EntityType, entity_type_id)
+    )
     if entity_type is None:
         raise HTTPException(status_code=404, detail="entity type not found")
     return entity_type
@@ -404,8 +420,11 @@ def update_entity_type(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> EntityTypeRead:
-    entity_type = _get_entity_type(db, entity_type_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    expected = changes.pop("updated_at", None)
+    entity_type = _get_entity_type(db, entity_type_id, for_update=expected is not None)
+    check_not_stale("entity type", entity_type.updated_at, expected)
+    for field, value in changes.items():
         setattr(entity_type, field, value)
     _commit(db, "entity_type")
     db.refresh(entity_type)

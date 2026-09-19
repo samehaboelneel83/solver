@@ -11,9 +11,10 @@ import {
   type FieldErrors,
 } from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
+import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
   useCreateAttribute,
   useDeleteAttribute,
@@ -28,6 +29,7 @@ import {
 } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 import { ENTITY_TYPE_FIELDS, EntityTypeFields } from "./EntityTypes";
 
 const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
@@ -78,10 +80,17 @@ export default function EntityTypeDetail() {
   }
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
 
-  return <Editor key={data.id} type={data} />;
+  return (
+    <Editor
+      key={data.id}
+      type={data}
+      // Ruling 42: the read behind "Reload and keep my changes".
+      reload={async () => (await refetch()).data ?? null}
+    />
+  );
 }
 
-function Editor({ type }: { type: EntityType }) {
+function Editor({ type, reload }: { type: EntityType; reload: () => Promise<EntityType | null> }) {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
@@ -95,22 +104,65 @@ function Editor({ type }: { type: EntityType }) {
           <span className="font-mono">{type.name}</span>
         </h1>
       </div>
-      <TypeForm type={type} />
+      <TypeForm type={type} reload={reload} />
       <Attributes type={type} />
       <DeleteType type={type} />
     </div>
   );
 }
 
-function TypeForm({ type }: { type: EntityType }) {
+/** The three controls this form holds, as the reload merge compares
+ * them. The attributes below are edited through their own routes and are
+ * not part of the type's own row -- see `test_api_concurrency.py`. */
+type TypeDrafts = { name: string; role: EntityRole; colour: string | null };
+
+const typeDraftsOf = (type: EntityType): TypeDrafts => ({
+  name: type.name,
+  role: type.role,
+  colour: type.colour,
+});
+
+function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<EntityType | null> }) {
   const [name, setName] = useState(type.name);
   const [role, setRole] = useState<EntityRole>(type.role);
   const [colour, setColour] = useState<string | null>(type.colour);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
+  // Ruling 42 -- see `EntityRecord.tsx` for the full reasoning; this form
+  // has the same defect and the same remedy, with three controls instead
+  // of four plus a generated set.
+  const [updatedAt, setUpdatedAt] = useState(type.updated_at);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+  const seeded = useRef<TypeDrafts>(typeDraftsOf(type));
   const updateType = useUpdateEntityType();
   const toast = useToast();
+
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const fresh = await reload();
+      if (!fresh) return;
+      const freshDrafts = typeDraftsOf(fresh);
+      const current: TypeDrafts = { name, role, colour };
+      const merged = mergeReload(seeded.current, current, freshDrafts);
+      setName(merged.name);
+      setRole(merged.role);
+      setColour(merged.colour);
+      const brought = reloadedKeys(seeded.current, current, freshDrafts);
+      setUpdatedAt(fresh.updated_at);
+      setStale(null);
+      seeded.current = freshDrafts;
+      toast.success(
+        brought.length > 0
+          ? `Reloaded, keeping your edits. Updated from the other change: ${brought.join(", ")}.`
+          : "Reloaded, keeping your edits."
+      );
+    } finally {
+      setReloading(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -119,9 +171,20 @@ function TypeForm({ type }: { type: EntityType }) {
     replace(problem ? { name: problem } : {});
     if (problem) return;
     try {
-      await updateType.mutateAsync({ id: type.id, body: { name, role, colour } });
+      const saved = await updateType.mutateAsync({
+        id: type.id,
+        body: { name, role, colour, updated_at: updatedAt },
+      });
+      setUpdatedAt(saved.updated_at);
+      seeded.current = typeDraftsOf(saved);
       toast.success("Entity type saved");
     } catch (err) {
+      if (isStaleRecordError(err)) {
+        setServerErrors(null);
+        setGeneral(null);
+        setStale(formatApiError(err));
+        return;
+      }
       const result = serverFieldErrors(err, ENTITY_TYPE_FIELDS, "entity type");
       setServerErrors(result.fields);
       setGeneral(result.general);
@@ -135,6 +198,7 @@ function TypeForm({ type }: { type: EntityType }) {
       </h2>
       <form aria-label="Entity type" onSubmit={handleSubmit} noValidate className="space-y-4">
         <ErrorSummary errors={errors} order={ENTITY_TYPE_FIELDS} summaryRef={summaryRef} />
+        {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
         {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
         <EntityTypeFields
           name={name}

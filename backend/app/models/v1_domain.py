@@ -94,6 +94,14 @@ class EntityType(Base):
     # Migration 0009: lowercase '#rrggbb' (CHECK entity_type_colour_hex);
     # NULL means "not chosen", and the UI assigns a fallback.
     colour: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0010. Maintained by the `entity_type_set_updated_at`
+    # trigger, never by this application: `server_default` plus
+    # `server_onupdate` would only describe what the database does, and
+    # the ORM must re-read it rather than predict it, which is why every
+    # write path calls `db.refresh()` already.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class AttributeDef(Base):
@@ -140,6 +148,10 @@ class Entity(Base):
     # Validated against attribute_def by the `entity_validate` trigger, which
     # also materialises attribute_def.default_value into this object on write.
     attrs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # Migration 0010 -- see EntityType.updated_at.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class RelationshipType(Base):
@@ -183,6 +195,10 @@ class RelationshipType(Base):
     # Migration 0009: lowercase '#rrggbb' (CHECK relationship_type_colour_hex);
     # NULL means "not chosen", and the UI assigns a fallback.
     colour: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0010 -- see EntityType.updated_at.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class Relationship(Base):

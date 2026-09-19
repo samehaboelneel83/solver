@@ -147,6 +147,11 @@ export type EntityType = {
   colour: string | null;
   /** Ordered by name. Carried on the list route too. */
   attributes: AttributeDef[];
+  /** Migration 0010, Ruling 42. An opaque token, never parsed here: it is
+   * sent back verbatim on PATCH and the server refuses a save built on a
+   * superseded read with a 409. Parsing it into a `Date` would lose the
+   * microseconds Postgres stores and make every save look stale. */
+  updated_at: string;
 };
 
 export type EntityTypeCreate = {
@@ -155,8 +160,15 @@ export type EntityTypeCreate = {
   role?: EntityRole;
   colour?: string | null;
 };
-/** An explicit `null` clears the colour; an omitted key leaves it alone. */
-export type EntityTypeUpdate = { name?: string; role?: EntityRole; colour?: string | null };
+/** An explicit `null` clears the colour; an omitted key leaves it alone.
+ * `updated_at` is the value the form last read -- it is compared, never
+ * stored (Ruling 42); omitting it means "no conflict check". */
+export type EntityTypeUpdate = {
+  name?: string;
+  role?: EntityRole;
+  colour?: string | null;
+  updated_at?: string;
+};
 
 export function listEntityTypes(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<EntityType>> {
   const { domainId, limit, offset } = params;
@@ -186,6 +198,11 @@ export type Entity = {
   sort_order: number;
   active: boolean;
   attrs: Record<string, unknown>;
+  /** Migration 0010, Ruling 42. An opaque token, never parsed here: it is
+   * sent back verbatim on PATCH and the server refuses a save built on a
+   * superseded read with a 409. Parsing it into a `Date` would lose the
+   * microseconds Postgres stores and make every save look stale. */
+  updated_at: string;
 };
 
 export type EntityCreate = {
@@ -197,8 +214,10 @@ export type EntityCreate = {
   attrs?: Record<string, unknown>;
 };
 
-/** `entity_type_id` is not patchable. `attrs` replaces the whole object. */
-export type EntityUpdate = Partial<Omit<EntityCreate, "entity_type_id">>;
+/** `entity_type_id` is not patchable. `attrs` replaces the whole object.
+ * `updated_at` is the value the form last read -- it is compared, never
+ * stored (Ruling 42); omitting it means "no conflict check". */
+export type EntityUpdate = Partial<Omit<EntityCreate, "entity_type_id">> & { updated_at?: string };
 
 /**
  * Ordered by `sort_order`, then `key`. `q` matches key or label.
@@ -244,6 +263,11 @@ export type RelationshipType = {
   is_hierarchy: boolean;
   /** Same rules as `EntityType.colour`. */
   colour: string | null;
+  /** Migration 0010, Ruling 42. An opaque token, never parsed here: it is
+   * sent back verbatim on PATCH and the server refuses a save built on a
+   * superseded read with a 409. Parsing it into a `Date` would lose the
+   * microseconds Postgres stores and make every save look stale. */
+  updated_at: string;
 };
 
 export type RelationshipTypeCreate = {
@@ -256,8 +280,11 @@ export type RelationshipTypeCreate = {
   colour?: string | null;
 };
 
-/** `domain_id` is not patchable. */
-export type RelationshipTypeUpdate = Partial<Omit<RelationshipTypeCreate, "domain_id">>;
+/** `domain_id` is not patchable. `updated_at` is the value the form last
+ * read -- compared, never stored (Ruling 42). */
+export type RelationshipTypeUpdate = Partial<Omit<RelationshipTypeCreate, "domain_id">> & {
+  updated_at?: string;
+};
 
 export type Relationship = {
   id: Id;

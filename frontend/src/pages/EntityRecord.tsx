@@ -1,7 +1,8 @@
-import { FormEvent, useId, useState } from "react";
+import { FormEvent, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
 import OfflineNotice from "../components/OfflineNotice";
+import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
 import {
   ErrorSummary,
@@ -14,7 +15,7 @@ import {
   type FieldErrors,
 } from "../components/attrTypes";
 import { ApiError } from "../api/client";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
   useCreateEntity,
   useDeleteEntity,
@@ -28,6 +29,7 @@ import {
 } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 
 /**
  * One entity: its four columns (`key`, `label`, `sort_order`, `active`)
@@ -63,7 +65,10 @@ const ATTRIBUTE_KINDS = new Set(["required_attribute", "attribute_type"]);
  *
  * A 409 here is the one unique constraint the table has,
  * `UNIQUE (entity_type_id, key)`; `conflict_detail` words it after the
- * constraint name, so it is reworded and pointed at the key field.
+ * constraint name, so it is reworded and pointed at the key field. The
+ * OTHER 409 a save can get -- the record changed underneath the form
+ * (Ruling 42) -- never reaches here: `handleSubmit` recognises it first,
+ * because it is not a field problem and its remedy is not an edit.
  */
 export function entityServerErrors(
   err: unknown,
@@ -175,14 +180,46 @@ export default function EntityRecord() {
 
   if (!typeQuery.data || (!isNew && !entity)) return <p className="text-sm text-slate-500">Loading…</p>;
 
-  return <RecordForm key={entity?.id ?? "new"} type={typeQuery.data} entity={entity} />;
+  return (
+    <RecordForm
+      key={entity?.id ?? "new"}
+      type={typeQuery.data}
+      entity={entity}
+      // Ruling 42: what "Reload and keep my changes" reads. It goes through
+      // the page's own query, so the reload also refreshes everything else
+      // rendered from that entity rather than holding a second copy.
+      reload={async () => (await entityQuery.refetch()).data ?? null}
+    />
+  );
 }
 
 function sortedFieldOrder(attributes: AttributeDef[]): string[] {
   return [...COLUMN_FIELDS, ...attributes.map((attribute) => attrField(attribute.name))];
 }
 
-function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null }) {
+/** The four column controls, exactly as they hold their values, so the
+ * reload merge compares what the person sees rather than a re-derived
+ * version of it. */
+type ColumnDrafts = { key: string; label: string; sortOrder: string; active: boolean };
+
+function columnDraftsOf(entity: Entity): ColumnDrafts {
+  return {
+    key: entity.key,
+    label: entity.label ?? "",
+    sortOrder: String(entity.sort_order),
+    active: entity.active,
+  };
+}
+
+function RecordForm({
+  type,
+  entity,
+  reload,
+}: {
+  type: EntityType;
+  entity: Entity | null;
+  reload: () => Promise<Entity | null>;
+}) {
   const attributes = type.attributes;
   const [key, setKey] = useState(entity?.key ?? "");
   const [label, setLabel] = useState(entity?.label ?? "");
@@ -193,6 +230,19 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
+  // Ruling 42. What this form read; it goes back with every save, and the
+  // server refuses a save built on a read another client has superseded.
+  const [updatedAt, setUpdatedAt] = useState<string | null>(entity?.updated_at ?? null);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+  // What the controls were SEEDED with -- the third input the reload merge
+  // needs to tell "the person typed this" from "the person left it alone".
+  // A ref, not state: nothing renders from it, and the handler that reads
+  // it is the same one that replaces it.
+  const seeded = useRef({
+    columns: entity ? columnDraftsOf(entity) : { key: "", label: "", sortOrder: "0", active: true },
+    drafts: draftsFromAttrs(attributes, entity?.attrs ?? {}),
+  });
 
   const createEntity = useCreateEntity();
   const updateEntity = useUpdateEntity();
@@ -222,8 +272,58 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
     setLabel(saved.label ?? "");
     setSortOrder(String(saved.sort_order));
     setActive(saved.active);
-    setDrafts(draftsFromAttrs(attributes, saved.attrs));
+    const savedDrafts = draftsFromAttrs(attributes, saved.attrs);
+    setDrafts(savedDrafts);
     setStored(saved.attrs);
+    setUpdatedAt(saved.updated_at);
+    setStale(null);
+    seeded.current = { columns: columnDraftsOf(saved), drafts: savedDrafts };
+  }
+
+  /**
+   * Ruling 42: re-read the record and take the other client's value for
+   * every control this person has not touched, leaving the ones they have
+   * exactly as typed. Nothing they wrote is lost, which is what makes the
+   * offer safe to accept without weighing it up.
+   *
+   * The save that follows still sends the whole `attrs` object: the merge
+   * decides what the CONTROLS hold, not what the payload carries, so Tasks
+   * 11/12's stale-key clearing is untouched.
+   */
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const fresh = await reload();
+      if (!fresh) return;
+      const freshColumns = columnDraftsOf(fresh);
+      const current: ColumnDrafts = { key, label, sortOrder, active };
+      const mergedColumns = mergeReload(seeded.current.columns, current, freshColumns);
+      setKey(mergedColumns.key);
+      setLabel(mergedColumns.label);
+      setSortOrder(mergedColumns.sortOrder);
+      setActive(mergedColumns.active);
+
+      const freshDrafts = draftsFromAttrs(attributes, fresh.attrs);
+      setDrafts(mergeReload(seeded.current.drafts, drafts, freshDrafts));
+
+      // Named rather than left to be spotted: the whole complaint was that
+      // a concurrent change was invisible.
+      const brought = [
+        ...reloadedKeys(seeded.current.columns, current, freshColumns),
+        ...reloadedKeys(seeded.current.drafts, drafts, freshDrafts),
+      ];
+      setStored(fresh.attrs);
+      setUpdatedAt(fresh.updated_at);
+      setStale(null);
+      seeded.current = { columns: freshColumns, drafts: freshDrafts };
+      toast.success(
+        brought.length > 0
+          ? `Reloaded, keeping your edits. Updated from the other change: ${brought.join(", ")}.`
+          : "Reloaded, keeping your edits."
+      );
+    } finally {
+      setReloading(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -259,7 +359,13 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
 
     try {
       if (entity) {
-        const saved = await updateEntity.mutateAsync({ id: entity.id, body });
+        const saved = await updateEntity.mutateAsync({
+          id: entity.id,
+          // Ruling 42. Sent to be compared, never to be stored: a save
+          // built on a superseded read is refused rather than silently
+          // reverting whatever the other client wrote.
+          body: updatedAt === null ? body : { ...body, updated_at: updatedAt },
+        });
         resetFrom(saved);
         toast.success(`Entity "${saved.key}" saved`);
       } else {
@@ -268,6 +374,15 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
         navigate(`/entities/${created.id}`);
       }
     } catch (err) {
+      // Ruling 42: not a field problem, and re-sending the same payload
+      // would be refused again -- so it gets its own state and its own
+      // remedy rather than a red line under a control.
+      if (isStaleRecordError(err)) {
+        setServerErrors(null);
+        setGeneral(null);
+        setStale(formatApiError(err));
+        return;
+      }
       const result = entityServerErrors(err, attributes.map((attribute) => attribute.name));
       setServerErrors(result.fields);
       setGeneral(result.general);
@@ -339,6 +454,7 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
           className="space-y-4"
         >
           <ErrorSummary errors={errors} order={sortedFieldOrder(attributes)} summaryRef={summaryRef} />
+          {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
           {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
 
           <div className="grid gap-4 sm:grid-cols-2">

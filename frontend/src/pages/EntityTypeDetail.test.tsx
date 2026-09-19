@@ -21,6 +21,7 @@ const TYPE: EntityType = {
   name: "employee",
   role: "agent",
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 3 },
     { id: 12, entity_type_id: 5, name: "on_call", data_type: "boolean", required: false, unit: null, enum_values: null, default_value: false },
@@ -139,7 +140,13 @@ describe("EntityTypeDetail", () => {
     fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0]).toEqual({ method: "PATCH", path: "/api/v1/entity-types/5", body: { name: "staff", role: "resource", colour: null } });
+    expect(writes()[0]).toEqual({
+      method: "PATCH",
+      path: "/api/v1/entity-types/5",
+      // Ruling 42: the `updated_at` the form read goes back with every
+      // save, so the server can refuse one built on a superseded read.
+      body: { name: "staff", role: "resource", colour: null, updated_at: "2026-09-20T09:00:00+00:00" },
+    });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type saved/i));
   });
 
@@ -356,7 +363,7 @@ describe("EntityTypeDetail", () => {
       method: "PATCH",
       path: "/api/v1/entity-types/5",
       // Lower case, whatever was typed: the column only ever holds that form.
-      body: { name: "employee", role: "agent", colour: "#ff8800" },
+      body: { name: "employee", role: "agent", colour: "#ff8800", updated_at: "2026-09-20T09:00:00+00:00" },
     });
   });
 
@@ -385,5 +392,52 @@ describe("EntityTypeDetail", () => {
     // good colour rather than the junk in the box, and the box says why.
     expect(within(typeForm()).getByText(/six-digit hex colour/i)).toBeInTheDocument();
     expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
+  });
+});
+
+describe("EntityTypeDetail: a concurrent edit (Ruling 42)", () => {
+  const STALE = new ApiError(409, JSON.stringify({ detail: "This entity type was changed by someone else after this form loaded it. Reload the entity type and apply your changes to the current version." }));
+  /** What the other client left behind: a different role and a colour. */
+  const CHANGED: EntityType = {
+    ...TYPE,
+    role: "resource",
+    colour: "#ff8800",
+    updated_at: "2026-09-20T09:05:00+00:00",
+  };
+
+  function answerGetsWith(type: EntityType) {
+    mockFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") !== "GET") return Promise.reject(STALE);
+      if (path === "/api/v1/entity-types/5") return Promise.resolve(type);
+      return Promise.reject(new ApiError(404, JSON.stringify({ detail: "entity type not found" })));
+    });
+  }
+
+  it("refuses with a reload offer rather than a field error", async () => {
+    answerGetsWith(TYPE);
+    renderPage();
+    await loaded();
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice.textContent).toContain("changed by someone else");
+    expect(within(typeForm()).getByLabelText(/^Name/)).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps the name being typed and takes the other client's role", async () => {
+    answerGetsWith(TYPE);
+    renderPage();
+    await loaded();
+    fireEvent.change(within(typeForm()).getByLabelText(/^Name/), { target: { value: "staff" } });
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    await screen.findByTestId("stale-record");
+
+    answerGetsWith(CHANGED);
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    await waitFor(() => expect(within(typeForm()).getByLabelText(/^Role/)).toHaveValue("resource"));
+    expect(within(typeForm()).getByLabelText(/^Name/)).toHaveValue("staff");
+    expect(screen.queryByTestId("stale-record")).toBeNull();
   });
 });

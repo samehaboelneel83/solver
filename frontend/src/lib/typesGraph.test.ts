@@ -31,6 +31,7 @@ const EMPLOYEE: EntityType = {
   name: "employee",
   role: "agent",
   colour: "#1f77b4",
+  updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     {
       id: 1,
@@ -52,6 +53,7 @@ const UNIT: EntityType = {
   role: "org",
   // No colour: this is the one that must get a deterministic fallback.
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [],
 };
 
@@ -64,6 +66,7 @@ const REPORTS_TO: RelationshipType = {
   cardinality: "one_to_many",
   is_hierarchy: true,
   colour: "#2ca02c",
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 const WORKS_FOR: RelationshipType = {
@@ -75,6 +78,7 @@ const WORKS_FOR: RelationshipType = {
   cardinality: "many_to_one",
   is_hierarchy: false,
   colour: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
 };
 
 describe("types-mode ids", () => {
