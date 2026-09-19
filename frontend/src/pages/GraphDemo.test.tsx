@@ -416,9 +416,16 @@ describe("GraphDemo expression filter", () => {
     renderWithProviders();
     await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("filter-expression-toggle"));
-    // The builder is code-split, so it arrives a tick after the panel opens.
-    fireEvent.click(await screen.findByTestId("expression-add-rule"));
-    await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1));
+    // The builder is code-split, so it arrives a tick after the panel
+    // opens -- a dynamic import, resolved by vite, not a microtask. On a
+    // loaded machine that can take longer than testing-library's 1000 ms
+    // default, which is what made this helper flake (once in eleven full
+    // runs). `EntitiesExpression.test.tsx` already waits 3000 ms in four
+    // places for the same boundary; match it rather than invent a number.
+    fireEvent.click(await screen.findByTestId("expression-add-rule", undefined, { timeout: 3000 }));
+    await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1), {
+      timeout: 3000,
+    });
   }
 
   /** Sets the one rule on screen to `grade <op> <value>`. */
