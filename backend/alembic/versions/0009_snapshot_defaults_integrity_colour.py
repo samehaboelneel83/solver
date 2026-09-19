@@ -51,12 +51,23 @@ array's elements or another table.
    carry a foreign key. The referenced types are locked FOR KEY SHARE, so
    a concurrent delete or move of one of them waits for this transaction
    and then meets rule 5.
-5. Trigger `entity_type_guard`, kind **`index_type_in_use`** -- an entity
-   type named by some `parameter_def.index_type_ids` cannot be deleted
-   (refused, not cascaded) or moved to another domain. The one exception
-   is a cascade from its own `domain`: that statement deletes the
-   parameters too, so nothing is left dangling, and refusing it would make
-   every domain with a parameter undeletable.
+5. Trigger `entity_type_guard` -- an entity type named by some
+   `parameter_def.index_type_ids` cannot be deleted (refused, not
+   cascaded) or moved to another domain. The one exception is a cascade
+   from its own `domain`: that statement deletes the parameters too, so
+   nothing is left dangling, and refusing it would make every domain with
+   a parameter undeletable.
+
+   The two verbs answer differently, on purpose. The **DELETE** carries no
+   request body, so amendment (a)'s field-naming 422 would blame a field
+   the request does not have; it raises SQLSTATE **23503** with
+   `TABLE = 'parameter_def'` instead -- exactly the shape a real
+   ON DELETE RESTRICT would produce -- and `translate_db_error` answers
+   with `conflict_detail()`'s 409 "entity_type row is still referenced by
+   parameter_def records". The **UPDATE** of `domain_id` does carry a
+   body, so it follows amendment (a) with kind **`index_type_in_use`** and
+   `field` **`domain_id`** -- the column the statement changed, not
+   `index_type_ids`, which it never touched.
 6. Trigger `parameter_def_validate`, kind **`parameter_reindex`** --
    `index_type_ids` cannot change while the parameter has stored
    `parameter_value` rows (they were validated against the old index, and
@@ -73,11 +84,14 @@ array's elements or another table.
    Because it is a CHECK it is re-judged when `data_type` or
    `enum_values` change, so a default cannot be orphaned that way either.
 
-Both triggers follow amendment (a) from 0006: ERRCODE '23514' and a JSON
-DETAIL carrying `kind` and `field` (here always `'index_type_ids'`), so
-`translate_db_error` answers with a 422 naming the field. The CHECK- and
-FK-backed rules arrive as `translate_db_error`'s 409 with a string detail,
-as every plain constraint does (Ruling 16).
+Every trigger path that judges a *request body* follows amendment (a)
+from 0006: ERRCODE '23514' and a JSON DETAIL carrying `kind` and the
+`field` the statement actually wrote (`index_type_ids` for rules 4 and 6,
+`domain_id` for rule 5's move), so `translate_db_error` answers with a 422
+naming that field. Rule 5's DELETE is the exception, and deliberately so
+(above): a body-less verb gets the platform's referenced-row 409. The
+CHECK- and FK-backed rules arrive as `translate_db_error`'s 409 with a
+string detail, as every plain constraint does (Ruling 16).
 
 Part 3 -- `colour` on entity_type and relationship_type (user request (B))
 ---------------------------------------------------------------------------
@@ -377,14 +391,31 @@ def upgrade() -> None:
               FROM parameter_def pd
              WHERE OLD.id = ANY (pd.index_type_ids);
             IF v_params IS NOT NULL THEN
+                -- Two verbs, two answers. A DELETE carries no request body,
+                -- so amendment (a)'s 422 would name a field the request does
+                -- not have; it is a referenced-row conflict, and it is
+                -- raised the way the database itself raises one -- SQLSTATE
+                -- 23503 naming the referencing table -- so
+                -- `translate_db_error` gives it conflict_detail()'s 409,
+                -- reading like every other "still referenced by" refusal.
+                IF TG_OP = 'DELETE' THEN
+                    RAISE EXCEPTION
+                        'entity type "%" is an index type of parameter %; delete or re-index % first',
+                        OLD.name, array_to_string(v_params, ', '),
+                        CASE WHEN cardinality(v_params) = 1 THEN 'it' ELSE 'them' END
+                        USING ERRCODE = '23503',
+                              TABLE   = 'parameter_def';
+                END IF;
+                -- An UPDATE does carry a body, and the field at fault is the
+                -- one the request changed: `domain_id`, not `index_type_ids`
+                -- (which this statement never touched). Amendment (a) applies.
                 RAISE EXCEPTION
-                    'entity type "%" is an index type of parameter %; delete or re-index % first',
-                    OLD.name, array_to_string(v_params, ', '),
-                    CASE WHEN cardinality(v_params) = 1 THEN 'it' ELSE 'them' END
+                    'entity type "%" cannot move to another domain: it is an index type of parameter %',
+                    OLD.name, array_to_string(v_params, ', ')
                     USING ERRCODE = '23514',
                           DETAIL  = jsonb_build_object(
                               'kind',       'index_type_in_use',
-                              'field',      'index_type_ids',
+                              'field',      'domain_id',
                               'record',     OLD.name,
                               'parameters', to_jsonb(v_params))::text;
             END IF;

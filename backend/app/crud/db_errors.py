@@ -1,19 +1,34 @@
 """Translate structured database trigger errors into HTTP responses.
 
-Schema v1's DOMAIN validation triggers (``entity_validate``,
-``relationship_validate``, ``parameter_value_validate`` -- migration
-``0006_schema_v1_domain``) raise SQLSTATE **23514** (check_violation) with a
-JSON ``DETAIL`` payload naming exactly which field failed and why (see
-``backend/tests/test_v1_domain_triggers.py`` for the payload shapes: `kind`
-one of `unknown_attribute`, `required_attribute`, `attribute_type`,
-`type_mismatch`, `cardinality`, `cycle`, `parameter_index`). `field` is set
-by **every** one of those seven: the attribute name for `entity_validate`'s
-kinds, the relationship type's *name* (not a column) for
-`relationship_validate`'s, and the literal ``'entity_ids'`` for
-`parameter_index`. (An earlier version of this docstring said
-`parameter_index` omitted `field`; migration 0006 line 315 says otherwise.)
-psycopg2 raises `CheckViolation`, a subclass of `IntegrityError`, and
-SQLAlchemy wraps it as `sqlalchemy.exc.IntegrityError`.
+Schema v1's validation triggers raise SQLSTATE **23514**
+(check_violation) with a JSON ``DETAIL`` payload naming exactly which field
+failed and why (see ``backend/tests/test_v1_domain_triggers.py`` and
+``test_v1_integrity_rules.py`` for the payload shapes). Ten `kind` values
+exist, from two migrations:
+
+``0006_schema_v1_domain`` -- `entity_validate`: `unknown_attribute`,
+`required_attribute`, `attribute_type`; `relationship_validate`:
+`type_mismatch`, `cardinality`, `cycle`; `parameter_value_validate`:
+`parameter_index`.
+
+``0009_snapshot_defaults_integrity_colour`` -- `parameter_def_validate`:
+`index_type_domain`, `parameter_reindex` (both with ``field =
+'index_type_ids'``); `entity_type_guard`: `index_type_in_use`, with
+``field = 'domain_id'`` -- it is raised only for an UPDATE that moves an
+entity type between domains. That trigger's **DELETE** path deliberately
+does not use this shape: a DELETE has no request body to blame a field in,
+so it raises **23503** naming ``parameter_def`` as the referencing table
+and lands on the conflict branch below, like any other referenced-row
+refusal.
+
+`field` is set by **every** one of the ten: the attribute name for
+`entity_validate`'s kinds, the relationship type's *name* (not a column)
+for `relationship_validate`'s, the literal ``'entity_ids'`` for
+`parameter_index`, and a real column name for 0009's three. (An earlier
+version of this docstring said `parameter_index` omitted `field`;
+migration 0006 line 315 says otherwise.) psycopg2 raises `CheckViolation`,
+a subclass of `IntegrityError`, and SQLAlchemy wraps it as
+`sqlalchemy.exc.IntegrityError`.
 
 One 422 body shape (Ruling 19)
 ------------------------------
@@ -86,7 +101,10 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
       this returns its generic catch-all message rather than a tailored
       one -- still a reasonable 409, just not a field-specific one.
     - 23503 / 23505 / 23502 -> 409 via the existing conflict_detail(),
-      reused unchanged.
+      reused unchanged. Migration 0009's `entity_type_guard` raises a
+      23503 of its own (with ``TABLE = 'parameter_def'``) for a refused
+      DELETE, so conflict_detail()'s "still referenced by" branch answers
+      it exactly as it answers a real foreign key.
     - P0001 (bare RAISE EXCEPTION: forbid_update immutability,
       snapshot_dataset IR-resolution failures) -> 409 with the trigger's
       own human message. Not a 422: there's no single field the caller can

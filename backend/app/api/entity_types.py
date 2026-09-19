@@ -42,11 +42,22 @@ Because it cannot produce a 422 for these at all. `translate_db_error`'s
 JSON `DETAIL` payload that
 only the three DOMAIN validation *triggers* emit (`entity_validate`,
 `relationship_validate`, `parameter_value_validate` -- migration 0006).
-Neither `entity_type` nor `attribute_def` has a trigger: their rules are
+Neither table has a trigger that judges a *write* to it: their rules are
 plain table CHECKs, which arrive as SQLSTATE 23514 with **no** DETAIL, and
 `translate_db_error` maps those to a generic **409**. Letting the database
 answer would therefore mean `name="Employee"` returns 409 with a message
-about a constraint name, not a 422 naming the field.
+about a constraint name, not a 422 naming the field. (Migration 0009 put
+one trigger *on* `entity_type` -- `entity_type_guard` -- but it judges
+DELETEs and domain moves, not the column values this section is about; see
+the DELETE route below.)
+
+Migration 0009 also added two CHECKs this router does not shadow, so both
+reach the client as that generic 409: `attribute_def_enum_values_not_empty`
+(an `enum` with an empty list) and
+`attribute_def_default_value_matches_type` (a `default_value` that its own
+`data_type` would reject -- Task 11's editor is what gives a user a
+readable message today). Shadowing the second one here would be the single
+biggest improvement to this router's error surface.
 
 The cost is that this router no longer reaches those CHECKs. They remain
 the backstop for every other writer -- the seed, a migration, psql, a
@@ -325,6 +336,14 @@ def delete_entity_type(
     # attribute_def, entity and everything below cascade in the database
     # (ON DELETE CASCADE); no ORM relationship is declared, so SQLAlchemy
     # issues the single DELETE and Postgres does the rest.
+    #
+    # One thing does not cascade: `parameter_def.index_type_ids` is an
+    # array and cannot carry a foreign key, so migration 0009's
+    # `entity_type_guard` refuses the DELETE instead of leaving a parameter
+    # that can never take a value. That arrives here as SQLSTATE 23503
+    # naming `parameter_def`, i.e. a **409** "entity_type row is still
+    # referenced by parameter_def records" -- delete or re-index the
+    # parameter first.
     db.delete(_get_entity_type(db, entity_type_id))
     _commit(db, "entity_type")
 

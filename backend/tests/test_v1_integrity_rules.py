@@ -21,8 +21,11 @@ rule  mechanism                                   asserted
       (id, domain_id)
 4     trigger parameter_def_validate              23514 + JSON DETAIL,
                                                   kind index_type_domain
-5     trigger entity_type_guard                   23514 + JSON DETAIL,
-                                                  kind index_type_in_use
+5     trigger entity_type_guard: 23503 for the    DELETE: 23503 + the
+      body-less DELETE, amendment (a) for the     referencing table name;
+      UPDATE that moves domain_id                 UPDATE: JSON DETAIL,
+                                                  kind index_type_in_use,
+                                                  field domain_id
 6     trigger parameter_def_validate              23514 + JSON DETAIL,
                                                   kind parameter_reindex
 7     composite FK scenario_version_same_problem  23503 + constraint name
@@ -102,6 +105,14 @@ def _check(orig, constraint: str) -> None:
 def _foreign_key(orig, constraint: str) -> None:
     assert orig.pgcode == "23503", f"expected foreign_key_violation, got {orig.pgcode}: {orig}"
     assert orig.diag.constraint_name == constraint, orig.diag.constraint_name
+
+
+def _referenced(orig, referencing_table: str) -> None:
+    """A referenced-row refusal: SQLSTATE 23503 naming the table that still
+    references the row. `conflict_detail()` reads exactly `diag.table_name`
+    to build its 409, so this is the field the API contract turns on."""
+    assert orig.pgcode == "23503", f"expected foreign_key_violation, got {orig.pgcode}: {orig}"
+    assert orig.diag.table_name == referencing_table, orig.diag.table_name
 
 
 def _trigger(orig, kind: str, field: str) -> dict:
@@ -454,29 +465,44 @@ def test_rule4_same_domain_index_types_are_accepted(db, two_domains):
 
 
 def test_rule5_deleting_an_index_type_is_refused(db, two_domains):
+    """A DELETE has no request body, so this path deliberately does *not*
+    use amendment (a): it raises `foreign_key_violation` naming the
+    referencing table, the shape a real ON DELETE RESTRICT would produce,
+    which `translate_db_error` answers with conflict_detail()'s 409
+    (round 2; the first cut returned a 422 blaming `index_type_ids`, a
+    field a DELETE cannot carry)."""
     parameter = make_parameter_def(
         db, two_domains["mine"], "demand", [two_domains["day"], two_domains["shift"]]
     )
     # Second position only, so a guard that looked at index_type_ids[1]
     # alone would let it through.
     orig = _refused(db, "DELETE FROM entity_type WHERE id = :t", {"t": two_domains["shift"]})
-    detail = _trigger(orig, "index_type_in_use", "index_type_ids")
-    assert detail["record"] == "shift", detail
-    assert detail["parameters"] == ["demand"], detail
+    _referenced(orig, "parameter_def")
+    assert orig.diag.message_primary == (
+        'entity type "shift" is an index type of parameter demand; '
+        "delete or re-index it first"
+    ), orig.diag.message_primary
     # Refused, not cascaded: both rows are still there.
     assert _count(db, "SELECT count(*) FROM entity_type WHERE id = :t", {"t": two_domains["shift"]}) == 1
     assert _count(db, "SELECT count(*) FROM parameter_def WHERE id = :p", {"p": parameter}) == 1
 
 
 def test_rule5_moving_an_index_type_to_another_domain_is_refused(db, two_domains):
-    """Otherwise rule 4 could be broken from the entity_type side."""
+    """Otherwise rule 4 could be broken from the entity_type side.
+
+    Unlike the DELETE above, an UPDATE does carry a body, so amendment (a)
+    applies -- and the field it blames is the one the statement wrote,
+    `domain_id`, not `index_type_ids` (untouched here, and in another
+    table's row)."""
     make_parameter_def(db, two_domains["mine"], "demand", [two_domains["day"]])
     orig = _refused(
         db,
         "UPDATE entity_type SET domain_id = :o, name = 'moved' WHERE id = :t",
         {"o": two_domains["other"], "t": two_domains["day"]},
     )
-    _trigger(orig, "index_type_in_use", "index_type_ids")
+    detail = _trigger(orig, "index_type_in_use", "domain_id")
+    assert detail["record"] == "day", detail
+    assert detail["parameters"] == ["demand"], detail
 
 
 def test_rule5_deleting_an_unreferenced_type_is_accepted(db, two_domains):
@@ -852,12 +878,15 @@ def test_colour_columns_are_mirrored_in_the_orm(db, two_domains):
 # --------------------------------------------------------------------------
 
 
-def test_deleting_an_index_type_through_the_api_is_a_422_naming_the_field():
+def test_deleting_an_index_type_through_the_api_is_a_409_naming_the_table():
     """The routers were not changed, so the entity-type DELETE reaches the
-    database, and the trigger's JSON DETAIL must come back through
-    `translate_db_error` as a readable 422 (Rulings 19/21) -- not a 500,
-    and not a 204 that leaves `index_type_ids` dangling as it did before
-    0009."""
+    database. The trigger's refusal must come back through
+    `translate_db_error` as a readable 409 -- not a 500, and not the 204
+    that left `index_type_ids` dangling before 0009.
+
+    409, not 422, because a DELETE has no body to blame a field in; this
+    is `conflict_detail()`'s referenced-row sentence, the same one a
+    genuine foreign key produces."""
     session = SessionLocal()
     seed_admin(session)
     session.close()
@@ -885,11 +914,9 @@ def test_deleting_an_index_type_through_the_api_is_a_422_naming_the_field():
 
         response = client.delete(f"/api/v1/entity-types/{day}", headers=headers)
 
-        assert response.status_code == 422, response.text
-        (entry,) = response.json()["detail"]
-        assert entry["kind"] == "index_type_in_use"
-        assert entry["loc"] == ["body", "index_type_ids"]
-        assert "demand" in entry["msg"], entry
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert detail == "entity_type row is still referenced by parameter_def records", detail
         assert client.get(f"/api/v1/entity-types/{day}", headers=headers).status_code == 200
     finally:
         deleted = client.delete(f"/api/domain/{domain}", headers=headers)

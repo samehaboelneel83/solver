@@ -54,10 +54,14 @@ Both 422 sources share one body shape, so a client never branches on it;
 ``kind`` is present exactly when the database's trigger answered. Until
 Task 7 the trigger's 422 was an object instead -- see Ruling 19.
 
-`key` deliberately carries no request-layer pattern: unlike
-`entity_type.name` and `attribute_def.name`, `entity.key` has no CHECK in
-the DDL, and inventing a rule the database does not have is what makes the
-two layers drift (the reasoning Task 5 recorded for `enum_values`).
+`key` deliberately carries no request-layer *pattern*: unlike
+`entity_type.name` and `attribute_def.name`, `entity.key` has no shape
+rule in the DDL, and inventing one the database does not have is what
+makes the two layers drift (the reasoning Task 5 recorded for
+`enum_values`). Migration 0009 (rule 2) does add one CHECK --
+`entity_key_not_blank`, `key ~ '[^[:space:]]'` -- which this router does
+not shadow, so an empty or whitespace-only key arrives as
+`translate_db_error`'s 409 rather than a 422.
 """
 
 from typing import Any

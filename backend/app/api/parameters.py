@@ -23,10 +23,14 @@ value equals the default **deletes** the row rather than writing it, so
 takes the new default, and a stored cell that now happens to equal it is
 merely redundant, not wrong.
 
-(Known gap, not fixed here: `snapshot_dataset()` emits only stored rows and
-never ``default_value``, so a solver reading a dataset cannot recover the
-value of an absent cell. See `test_snapshot_loses_a_cell_reset_to_the_default`
-and the Task 8 report; the fix is a contract decision for the user.)
+Task 8 raised the obvious gap in that -- a dataset that carries only
+stored rows cannot say what an absent cell is worth -- and Ruling 28 is the
+user's answer: storage stays sparse, and `snapshot_dataset()` (migration
+0009) emits a sibling ``parameter_defaults`` object, one entry per
+parameter the IR references. The solver's rule is "look the cell up; if it
+is absent, use the default". Pinned by
+`test_snapshot_resolves_a_cell_reset_to_the_default` here and by
+`test_v1_problem_run.py`'s snapshot tests.
 
 Which layer answers which failure
 ---------------------------------

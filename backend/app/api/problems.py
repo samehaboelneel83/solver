@@ -61,10 +61,14 @@ Scenarios
 A scenario is a patch over one model version. Two rules the database does
 not state are enforced here, as 422s:
 
-1. **The version must belong to the scenario's problem.** `scenario` has
-   `problem_id` and `model_version_id` as two independent foreign keys, so
-   the database accepts a scenario pointing at another problem's version
-   (pinned as a KNOWN GAP in the tests, and queued for a migration). The
+1. **The version must belong to the scenario's problem.** `scenario`'s
+   `problem_id` and `model_version_id` started as two independent foreign
+   keys, so the database accepted a scenario pointing at another problem's
+   version; migration 0009 (rule 7) closed that with `UNIQUE (id,
+   problem_id)` on `model_version` plus the composite FK
+   `scenario_version_same_problem_fkey`, which is what the seed and any
+   other non-HTTP writer meet. This check is kept because it is the one
+   that produces a 422 naming the field rather than a 409. The
    check is race-free in practice: a version's `problem_id` can never
    change (the row is immutable) and this API cannot delete a version.
    `problem_id` is not patchable, for the same reason `domain_id` is not
