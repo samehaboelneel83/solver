@@ -1,3 +1,18 @@
+"""DISABLED for schema v1 -- restored in Task 7.
+
+Every query below targets the v0 `domain.*` tables that migration
+0006_schema_v1_domain dropped, and `app.models.domain` no longer exists.
+The module is kept intact rather than deleted because Task 7 rewrites it
+against `app.models.v1_domain`; nothing imports it in the meantime
+(`app.main` no longer mounts the graph router). The explicit raise below
+makes an accidental import fail with this explanation instead of a bare
+ModuleNotFoundError on `app.models.domain`.
+"""
+
+raise ImportError(
+    "app.graph.service targets the removed v0 domain schema; restored in Task 7"
+)
+
 import math
 import uuid
 from datetime import date, datetime

@@ -3,7 +3,6 @@ import logging
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
-from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.meta import router as meta_router
 from app.api.options import router as options_router
@@ -25,7 +24,9 @@ app.include_router(meta_router)
 # path segment "options".
 app.include_router(options_router)
 app.include_router(crud_router)
-app.include_router(graph_router)
+# The /api/graph/domain router is not mounted: it reads the v0 domain.*
+# tables that migration 0006_schema_v1_domain dropped. Rewritten against
+# schema v1 and remounted here -- restored in Task 7.
 
 
 @app.on_event("startup")

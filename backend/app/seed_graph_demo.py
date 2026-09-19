@@ -1,3 +1,15 @@
+"""DISABLED for schema v1 -- restored in Task 15.
+
+Seeds the graph demo into the v0 `domain.*` tables that migration
+0006_schema_v1_domain dropped. Task 15 rewrites it against schema v1
+(domain/entity_type/entity/relationship); until then nothing imports it
+and its test (tests/test_seed_graph_demo.py) is deleted.
+"""
+
+raise ImportError(
+    "app.seed_graph_demo targets the removed v0 domain schema; restored in Task 15"
+)
+
 from sqlalchemy.orm import Session
 
 from app.core.db import SessionLocal

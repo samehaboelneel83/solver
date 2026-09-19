@@ -1,3 +1,15 @@
+"""DISABLED for schema v1 -- restored in Task 7.
+
+The /api/graph/domain routes below are built on `app.graph.service`, which
+reads the v0 `domain.*` tables dropped by migration 0006_schema_v1_domain.
+`app.main` no longer mounts this router. Task 7 rewrites both modules
+against schema v1; the routes are kept here as the spec for that rewrite.
+"""
+
+raise ImportError(
+    "app.api.graph targets the removed v0 domain schema; restored in Task 7"
+)
+
 import uuid
 from typing import Any
 
