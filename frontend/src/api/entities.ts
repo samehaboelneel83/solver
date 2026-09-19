@@ -1,4 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { tableApiPath } from "./paths";
 import { apiFetch } from "./client";
 
 export type ListResult<T = Record<string, unknown>> = { items: T[]; total: number };
@@ -28,7 +29,7 @@ export function useEntityList(schemaName: string, tableName: string, params: Ent
       for (const [key, value] of filterEntries) {
         search.set(`f_${key}`, value);
       }
-      return apiFetch<ListResult>(`/api/${schemaName}/${tableName}/?${search.toString()}`);
+      return apiFetch<ListResult>(`${tableApiPath(schemaName, tableName)}/?${search.toString()}`);
     },
     enabled: Boolean(schemaName && tableName),
     // Keep the previous page's rows on screen while the next query (sort,
@@ -46,7 +47,7 @@ export function useEntityList(schemaName: string, tableName: string, params: Ent
 export function useDeleteEntity(schemaName: string, tableName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/${schemaName}/${tableName}/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => apiFetch(`${tableApiPath(schemaName, tableName)}/${id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["entities", schemaName, tableName] }),
   });
 }
@@ -54,7 +55,7 @@ export function useDeleteEntity(schemaName: string, tableName: string) {
 export function useEntity(schemaName: string, tableName: string, id: string | undefined) {
   return useQuery({
     queryKey: ["entity", schemaName, tableName, id],
-    queryFn: () => apiFetch<Record<string, unknown>>(`/api/${schemaName}/${tableName}/${id}`),
+    queryFn: () => apiFetch<Record<string, unknown>>(`${tableApiPath(schemaName, tableName)}/${id}`),
     enabled: Boolean(schemaName && tableName && id),
   });
 }
@@ -63,7 +64,7 @@ export function useCreateEntity(schemaName: string, tableName: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      apiFetch(`/api/${schemaName}/${tableName}/`, {
+      apiFetch(`${tableApiPath(schemaName, tableName)}/`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
@@ -75,7 +76,7 @@ export function useUpdateEntity(schemaName: string, tableName: string, id: strin
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      apiFetch(`/api/${schemaName}/${tableName}/${id}`, {
+      apiFetch(`${tableApiPath(schemaName, tableName)}/${id}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
