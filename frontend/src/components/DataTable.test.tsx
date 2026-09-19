@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import DataTable from "./DataTable";
+import DataTable, { isIdentifierColumn } from "./DataTable";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -1159,6 +1159,207 @@ describe("DataTable", () => {
       const nameRow = within(card).getByText("Name").closest("div");
       expect(nameRow).not.toBeNull();
       expect(within(nameRow as HTMLElement).getByText("Employee")).toBeInTheDocument();
+    });
+  });
+
+  describe("schema v1 identifiers (Task 10)", () => {
+    // Shapes the backend's meta layer actually reports for v1's generic
+    // tables: `bigint` keys arrive as JSON numbers typed "integer", and a
+    // foreign key to another v1 table is an "integer" too.
+    const intId = { name: "id", type: "integer" as const, required: true, writable: false, is_fk: false, fk_table: null };
+    const uuidId = { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null };
+    const domainFk = {
+      name: "domain_id",
+      type: "integer" as const,
+      required: true,
+      writable: true,
+      is_fk: true,
+      fk_table: "public.domain",
+      label: "Domain",
+    };
+    const nameField = {
+      name: "name",
+      type: "string" as const,
+      required: true,
+      writable: true,
+      is_fk: false,
+      fk_table: null,
+      label: "Name",
+      label_field: true,
+    };
+    const problemFields = [intId, domainFk, nameField];
+
+    describe("isIdentifierColumn", () => {
+      it("hides an integer surrogate key named id", () => {
+        expect(isIdentifierColumn(intId)).toBe(true);
+      });
+
+      it("hides a uuid surrogate key named id", () => {
+        expect(isIdentifierColumn(uuidId)).toBe(true);
+      });
+
+      it("hides a uuid column that has no label to resolve (not a foreign key)", () => {
+        expect(isIdentifierColumn({ ...uuidId, name: "token" })).toBe(true);
+      });
+
+      it("keeps an integer foreign key visible -- it resolves to a label", () => {
+        expect(isIdentifierColumn(domainFk)).toBe(false);
+      });
+
+      it("keeps a uuid foreign key visible", () => {
+        expect(
+          isIdentifierColumn({ ...uuidId, name: "organization_id", is_fk: true, fk_table: "iam.organization" })
+        ).toBe(false);
+      });
+
+      it("keeps an ordinary integer column visible", () => {
+        expect(isIdentifierColumn({ ...intId, name: "sort_order", writable: true })).toBe(false);
+      });
+
+      it("keeps a key named id visible when it is itself a foreign key (a shared primary key resolves to a label)", () => {
+        expect(isIdentifierColumn({ ...intId, is_fk: true, fk_table: "public.problem" })).toBe(false);
+      });
+    });
+
+    it("hides the integer id column by default but keeps the integer foreign key column", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.includes("/options")) return Promise.resolve([{ id: "7", label: "Rostering" }]);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      renderTable(
+        <DataTable
+          {...baseProps}
+          schema="public"
+          table="problem"
+          fields={problemFields}
+          rows={[{ id: 42, domain_id: 7, name: "week 38" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      const headers = table.getAllByRole("columnheader").map((th) => th.textContent);
+      expect(headers).toContain("Domain");
+      expect(headers).toContain("Name");
+      expect(headers).not.toContain("id");
+      await waitFor(() => expect(table.getByText("Rostering")).toBeInTheDocument());
+    });
+
+    it("renders a row link built from a numeric id, in the table and the card", () => {
+      const onDelete = vi.fn();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderTable(
+        <DataTable
+          {...baseProps}
+          schema="public"
+          table="domain"
+          fields={[intId, nameField]}
+          rows={[{ id: 42, name: "rostering" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={onDelete}
+        />
+      );
+
+      const tableLink = within(screen.getByRole("table")).getByRole("link", { name: "rostering" });
+      expect(tableLink).toHaveAttribute("href", "/public/domain/42");
+      const card = screen.getByTestId("datatable-card");
+      expect(within(card).getByRole("link", { name: "rostering" })).toHaveAttribute("href", "/public/domain/42");
+
+      // Delete hands the caller the id as the string its URL needs.
+      fireEvent.click(within(screen.getByRole("table")).getByTestId("row-actions"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(onDelete).toHaveBeenCalledWith("42", "rostering");
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ["no id key at all", { name: "rostering" }],
+      ["a null id", { id: null, name: "rostering" }],
+    ])("renders plain text, not a link, for a row with %s -- in the table and the card", (_label, row) => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          schema="public"
+          table="domain"
+          fields={[intId, nameField]}
+          rows={[row]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      expect(within(screen.getByRole("table")).getByText("rostering")).toBeInTheDocument();
+      expect(screen.queryAllByRole("link", { name: "rostering" })).toHaveLength(0);
+      // Guards the specific failure: a live link to ".../undefined" or ".../null".
+      for (const link of screen.queryAllByRole("link")) {
+        expect(link.getAttribute("href")).not.toMatch(/\/(undefined|null)$/);
+      }
+    });
+
+    it("gives the row link an accessible name when the first visible cell is empty (axe link-name)", () => {
+      const parentFk = {
+        name: "parent_id",
+        type: "uuid" as const,
+        required: false,
+        writable: true,
+        is_fk: true,
+        fk_table: "iam.organization",
+        label: "Parent",
+      };
+      const codeField = { ...nameField, name: "code", label: "Code" };
+      renderTable(
+        <DataTable
+          {...baseProps}
+          schema="iam"
+          table="organization"
+          fields={[parentFk, codeField, uuidId]}
+          rows={[{ parent_id: null, code: "default", id: "482f374a" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      const tableLink = within(screen.getByRole("table")).getByRole("link", { name: "Open default" });
+      expect(tableLink).toHaveAttribute("href", "/iam/organization/482f374a");
+      // Something visible to click, too -- an aria-label alone leaves a
+      // zero-width link that a sighted keyboard user tabs onto blind.
+      expect(tableLink).toHaveTextContent("—");
+      const card = screen.getByTestId("datatable-card");
+      expect(within(card).getByRole("link", { name: "Open default" })).toHaveAttribute(
+        "href",
+        "/iam/organization/482f374a"
+      );
+      expect(within(card).getByRole("link", { name: "Open default" })).toHaveTextContent("—");
+    });
+
+    it("leaves a non-empty first cell's link named by its own content", () => {
+      renderTable(
+        <DataTable
+          {...baseProps}
+          fields={fields}
+          rows={rows}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+      const link = within(screen.getByRole("table")).getByRole("link", { name: "employee" });
+      expect(link).not.toHaveAttribute("aria-label");
     });
   });
 });

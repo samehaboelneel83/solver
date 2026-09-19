@@ -34,22 +34,32 @@ type DataTableProps = {
 
 /**
  * A column that can only ever show a bare, unreadable identifier: the
- * primary key `id`, or a `uuid`-typed column with nowhere to resolve a
- * label from (not a foreign key). Hidden by default (behind "Show
- * identifiers") so a wrapped 36-character UUID doesn't push meaningful
- * columns out of view (E-4).
+ * primary key `id` (a `uuid` on the `iam` tables, a `bigint` -- reported as
+ * `integer` -- on every schema v1 table), or a `uuid`-typed column with
+ * nowhere to resolve a label from. Hidden by default (behind "Show
+ * identifiers") so a raw key doesn't push meaningful columns out of view
+ * (E-4).
  *
- * A foreign-key column is deliberately *not* an identifier column, even
- * though its name typically ends in `_id`: Task 3 already resolves it to a
- * human label ("Nurse", "Default Organization"), which is real information
- * a planner scans the list for. If a given row's label lookup fails, that
- * one cell falls back to showing its raw id -- the column itself stays
- * visible rather than being hidden for the whole table over one failed
- * lookup.
+ * A foreign-key column is never an identifier column, even though its name
+ * typically ends in `_id` and, under v1, it is an `integer` just like the
+ * surrogate key: it resolves to a human label ("Rostering", "Default
+ * Organization"), which is real information a planner scans the list for.
+ * That holds for a key *named* `id` too, when it is itself a foreign key (a
+ * shared primary key). Keying on `is_fk` rather than on the column's type
+ * is what keeps this right under identity keys, where the type no longer
+ * tells a surrogate key from a reference. If a given row's label lookup
+ * fails, that one cell falls back to showing its raw id -- the column
+ * itself stays visible rather than being hidden for the whole table over
+ * one failed lookup.
  */
-function isIdentifierColumn(field: FieldMeta): boolean {
-  if (field.name === "id") return true;
-  return field.type === "uuid" && !field.is_fk;
+export function isIdentifierColumn(field: FieldMeta): boolean {
+  if (field.is_fk) return false;
+  return field.name === "id" || field.type === "uuid";
+}
+
+/** A cell with nothing to show (the same test `formatCellValue` uses). */
+function isEmptyValue(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
 }
 
 /**
@@ -79,6 +89,38 @@ function shouldIgnoreRowClick(event: React.MouseEvent<HTMLElement>): boolean {
  */
 function hasUsableId(row: Row): boolean {
   return row.id !== null && row.id !== undefined && row.id !== "";
+}
+
+/**
+ * The link to a row's own record, rendered on its first visible cell. That
+ * cell can legitimately be empty -- `iam.organization`'s first column is a
+ * nullable `parent_id` -- and an `<a>` with no text has no accessible name
+ * (axe `link-name`, serious) and nothing visible to click. In that case it
+ * shows a dash and takes its name from the record's own label instead.
+ */
+function RowLink({
+  to,
+  title,
+  empty,
+  recordLabel,
+  children,
+}: {
+  to: string;
+  title?: string;
+  empty: boolean;
+  recordLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      title={title}
+      aria-label={empty ? `Open ${recordLabel}` : undefined}
+      className="font-medium text-blue-700 hover:underline"
+    >
+      {empty ? <span aria-hidden="true">—</span> : children}
+    </Link>
+  );
 }
 
 function idsForColumns(rows: Row[], columns: string[]): string[] {
@@ -408,9 +450,14 @@ export default function DataTable({
               <div className="mb-2 flex items-start justify-between gap-2">
                 {firstField &&
                   (rowHref !== undefined ? (
-                    <Link to={rowHref} title={first?.title} className="font-medium text-blue-700 hover:underline">
+                    <RowLink
+                      to={rowHref}
+                      title={first?.title}
+                      empty={isEmptyValue(row[firstField.name])}
+                      recordLabel={label}
+                    >
                       {first?.content}
-                    </Link>
+                    </RowLink>
                   ) : (
                     <span title={first?.title} className="font-medium text-slate-900">
                       {first?.content}
@@ -507,9 +554,9 @@ export default function DataTable({
                       return (
                         <td key={field.name} className="px-3 py-2" title={title}>
                           {rowHref !== undefined ? (
-                            <Link to={rowHref} className="font-medium text-blue-700 hover:underline">
+                            <RowLink to={rowHref} empty={isEmptyValue(row[field.name])} recordLabel={label}>
                               {content}
-                            </Link>
+                            </RowLink>
                           ) : (
                             <span className="font-medium text-slate-900">{content}</span>
                           )}
