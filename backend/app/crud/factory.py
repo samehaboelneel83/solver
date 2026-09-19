@@ -7,12 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import String, Text, inspect, or_
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.db import get_db
-from app.crud.errors import conflict_detail
+from app.crud.db_errors import translate_db_error
 from app.crud.registry import register_table
 from app.models.iam import UserAccount
 
@@ -190,9 +190,9 @@ def build_crud_router(
         db.add(item)
         try:
             db.commit()
-        except IntegrityError as exc:
+        except DBAPIError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail=conflict_detail(exc, table_name)) from exc
+            raise translate_db_error(exc, table_name) from exc
         db.refresh(item)
         return item
 
@@ -210,9 +210,9 @@ def build_crud_router(
             setattr(item, field, value)
         try:
             db.commit()
-        except IntegrityError as exc:
+        except DBAPIError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail=conflict_detail(exc, table_name)) from exc
+            raise translate_db_error(exc, table_name) from exc
         db.refresh(item)
         return item
 
@@ -226,8 +226,8 @@ def build_crud_router(
         db.delete(item)
         try:
             db.commit()
-        except IntegrityError as exc:
+        except DBAPIError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail=conflict_detail(exc, table_name)) from exc
+            raise translate_db_error(exc, table_name) from exc
 
     return router
