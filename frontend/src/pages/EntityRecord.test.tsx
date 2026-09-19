@@ -361,6 +361,26 @@ describe("EntityRecord: editing an entity", () => {
   });
 });
 
+describe("EntityRecord: deep link to the graph (B-3)", () => {
+  it("links to the graph focused on this entity, in the entity's own domain", async () => {
+    // Domain 7, type 5 and entity 42 are all different, so a link built from
+    // the wrong id cannot pass by coincidence. The domain comes from the
+    // entity's *type* -- entities carry no domain of their own -- because
+    // the graph only looks for the focused node in the domain it has loaded.
+    reads("/entities/42");
+
+    const link = await screen.findByRole("link", { name: /open in graph/i });
+    expect(link).toHaveAttribute("href", "/graph?domain=7&focus=42");
+  });
+
+  it("offers no graph link for an entity that has not been created yet", async () => {
+    reads("/entities/new?type=5");
+    expect(await screen.findByLabelText("grade")).toBeInTheDocument();
+
+    expect(screen.queryByRole("link", { name: /open in graph/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("EntityRecord: a refusal from the server", () => {
   async function openNew() {
     reads("/entities/new?type=5");

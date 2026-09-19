@@ -307,6 +307,21 @@ function RecordForm({ type, entity }: { type: EntityType; entity: Entity | null 
         <p className="mt-1 text-sm text-slate-600">
           Type <span className="font-mono">{type.name}</span>
         </p>
+        {entity && (
+          // B-3: restored for v1 (the v0 link lived on the generic
+          // EntityDetail page and carried `&org=`). `domain` comes from the
+          // entity's type -- entities have no domain of their own -- and the
+          // graph switches to it before resolving `focus`, since the node is
+          // only looked for in the loaded domain's graph.
+          <p className="mt-1 text-sm">
+            <Link
+              to={`/graph?domain=${type.domain_id}&focus=${entity.id}`}
+              className="inline-block rounded py-1 text-blue-600 underline hover:text-blue-800"
+            >
+              Open in graph
+            </Link>
+          </p>
+        )}
       </div>
 
       <section aria-labelledby="entity-heading" className="rounded-md border border-slate-200 bg-white p-4">

@@ -214,6 +214,26 @@ describe("GraphDemo", () => {
       await waitFor(() => expect(screen.getByLabelText(/^Label/)).toHaveValue("Sara Q"));
     });
 
+    it("switches to the domain named by ?domain= before resolving the focus", async () => {
+      // The v1 successor of v0's `&org=`: an entity page links here with its
+      // own domain, which may not be the one currently selected. Without the
+      // switch, the focused node is looked for in the wrong domain's graph and
+      // the link silently does nothing.
+      renderWithProviders(["/graph?domain=2&focus=3"]);
+
+      await waitFor(() => expect(graphCalls()).toContain("/api/v1/graph?domain_id=2"));
+      expect(graphCalls()).not.toContain("/api/v1/graph?domain_id=1");
+      expect(localStorage.getItem(DOMAIN_STORAGE_KEY)).toBe("2");
+      await waitFor(() => expect(screen.getByLabelText(/^Label/)).toHaveValue("Sara Q"));
+    });
+
+    it("ignores a ?domain= that is not a positive integer", async () => {
+      renderWithProviders(["/graph?domain=abc"]);
+
+      await waitFor(() => expect(graphCalls()).toContain("/api/v1/graph?domain_id=1"));
+      expect(localStorage.getItem(DOMAIN_STORAGE_KEY)).toBe("1");
+    });
+
     it("leaves the selection alone when the focused node is not in this domain's graph", async () => {
       renderWithProviders(["/graph?focus=999"]);
 

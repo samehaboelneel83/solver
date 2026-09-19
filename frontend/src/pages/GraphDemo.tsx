@@ -7,6 +7,7 @@ import type { FilterState } from "../components/FilterBar";
 import { useGraph } from "../api/graph";
 import type { Id } from "../api/v1";
 import { useDomain } from "../hooks/useDomain";
+import { parseRouteId } from "../lib/routeId";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 /**
@@ -22,10 +23,39 @@ type Selection = { kind: "node" | "edge"; id: string } | null;
 
 export default function GraphDemo() {
   useDocumentTitle("Domain Graph");
-  const { domainId } = useDomain();
+  const { domainId: selectedDomainId, setDomainId } = useDomain();
   // B-3: an entity page can deep-link here with `?focus=<entityId>` -- read
   // once on mount, not tracked reactively, since consuming the link clears it.
   const [searchParams, setSearchParams] = useSearchParams();
+  // `?domain=<id>` travels with `focus` (the v1 successor of v0's `&org=`):
+  // the entity may live in a domain other than the one selected, and the
+  // focused node is only ever looked for in the loaded domain's graph. Read
+  // once at mount and used *in place of* the selection until it has been
+  // written through `setDomainId`, so the very first graph request already
+  // targets the linked domain -- no wasted fetch of the old one.
+  const [linkedDomainId, setLinkedDomainId] = useState<number | null>(() =>
+    parseRouteId(searchParams.get("domain"))
+  );
+  const domainId = linkedDomainId ?? selectedDomainId;
+  useEffect(() => {
+    if (!searchParams.has("domain")) {
+      return;
+    }
+    if (linkedDomainId !== null) {
+      setDomainId(linkedDomainId);
+      setLinkedDomainId(null);
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("domain");
+        return next;
+      },
+      { replace: true }
+    );
+    // Mount-only, like `focus`: consuming the link clears it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [hierarchyTypeId, setHierarchyTypeId] = useState<Id | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   // Owned here (not inside FilterBar) so it survives GraphEditor's
