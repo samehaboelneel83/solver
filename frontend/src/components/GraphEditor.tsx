@@ -167,7 +167,9 @@ export function applyGraphToCy(
   const edgeStyle = (id: string) => ({ colour: palette.edgeColour[id] ?? FALLBACK_EDGE });
 
   const desiredNodes = new Map(graph.nodes.map((n) => [n.id, n]));
-  const desiredEdges = new Map(graph.edges.map((e) => [e.id, e]));
+  // Keyed by CANVAS id -- see `cyEdgeId`. `edge.id` (the wire id) is still
+  // what styles are resolved by and what travels as `graphId`.
+  const desiredEdges = new Map(graph.edges.map((e) => [cyEdgeId(e.id), e]));
 
   const existingNodeIds = new Set<string>();
   const existingEdgeIds = new Set<string>();
@@ -257,7 +259,8 @@ export function applyGraphToCy(
       })),
       ...newEdges.map((edge) => ({
         data: {
-          id: edge.id,
+          id: cyEdgeId(edge.id),
+          graphId: edge.id,
           source: edge.source,
           target: edge.target,
           label: edge.label,
@@ -277,6 +280,29 @@ export function applyGraphToCy(
 }
 
 const GRID_LAYOUT = { name: "grid" } as const;
+
+/**
+ * The canvas id for a wire edge.
+ *
+ * Cytoscape keeps nodes and edges in **one** id space, and answers an
+ * `add()` whose id is already taken by silently doing nothing -- no throw,
+ * no console message, the element simply never appears. The objects view's
+ * node ids are `entity.id` and its edge ids are `relationship.id`: two
+ * independent bigint identity sequences, so in any database seeded from
+ * empty they overlap from the first row, and the overlapping edges vanish.
+ * Measured on the seeded demo: 23 nodes drawn, 10 relationships on the
+ * wire, **0** edges on the canvas.
+ *
+ * The types view already avoids this by minting `type-`/`reltype-` ids
+ * (`lib/typesGraph.ts`); this is the same idea for the objects view, but
+ * applied at the canvas boundary rather than on the wire, so the payload
+ * contract in `types/graph.ts` is untouched. The wire id travels on the
+ * element as `graphId`, because that is what the property panel and
+ * `DELETE /api/v1/relationships/{id}` need.
+ */
+export function cyEdgeId(wireId: string): string {
+  return `edge:${wireId}`;
+}
 
 /**
  * True when `positions` has 2+ points that are all within 1px of each other in both x and y --
@@ -433,7 +459,11 @@ export default function GraphEditor({
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "edge", (evt: any) => {
-      onSelectionChangeRef.current?.({ kind: "edge", id: evt.target.id() });
+      // The wire id, not the canvas id -- see `cyEdgeId`.
+      onSelectionChangeRef.current?.({
+        kind: "edge",
+        id: evt.target.data("graphId") ?? evt.target.id(),
+      });
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", (evt: any) => {

@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { fallbackColour, labelForeground } from "../lib/colour";
-import GraphEditor, { applyGraphToCy, graphStylesheet, positionsAreDegenerate } from "./GraphEditor";
+import GraphEditor, { applyGraphToCy, cyEdgeId, graphStylesheet, positionsAreDegenerate } from "./GraphEditor";
 
 const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore } = vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
@@ -383,7 +383,7 @@ describe("GraphEditor", () => {
     // Two generations deep, not one.
     expect(nodes.find((el: any) => el.data.id === "2").data.parent).toBe("1");
     expect(nodes.find((el: any) => el.data.id === "3").data.parent).toBe("2");
-    expect(added.filter((el: any) => "source" in el.data).map((el: any) => el.data.id)).toEqual(["10"]);
+    expect(added.filter((el: any) => "source" in el.data).map((el: any) => el.data.id)).toEqual([cyEdgeId("10")]);
   });
 
   // --- the hierarchy picker ---------------------------------------------
@@ -747,7 +747,7 @@ describe("GraphEditor", () => {
     });
     await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
 
-    await waitFor(() => expect(elementStore.get("10")?.styles.display).toBe("none"));
+    await waitFor(() => expect(elementStore.get(cyEdgeId("10"))?.styles.display).toBe("none"));
   });
 
   it("announces how many nodes an expression left showing, and says nothing when there is none", async () => {
@@ -775,6 +775,29 @@ describe("GraphEditor", () => {
   });
 
   // --- behaviour carried over from the v0 editor --------------------------
+
+  it("reports the wire id when an edge is tapped, not the namespaced canvas id", async () => {
+    // The property panel looks the selection up in `graph.edges`, and
+    // deleting one calls DELETE /api/v1/relationships/{id}. Both need
+    // `relationship.id`, so the prefix that keeps the canvas id out of the
+    // nodes' id space must not leak past this boundary.
+    const onSelectionChange = vi.fn();
+    render(
+      <QueryClientProvider client={client()}>
+        <MemoryRouter><GraphEditor domainId={1} mode="objects" onModeChange={vi.fn()} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} onSelectionChange={onSelectionChange} /></MemoryRouter>
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    await waitFor(() => expect(elementStore.has(cyEdgeId("10"))).toBe(true));
+
+    act(() =>
+      registeredHandlersRef.current["tap:edge"]({
+        target: mockCytoscapeInstance.getElementById(cyEdgeId("10")),
+      })
+    );
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "edge", id: "10" });
+  });
 
   it("calls the latest onSelectionChange after a rerender, not the one captured at mount", async () => {
     const first = vi.fn();
@@ -1075,7 +1098,7 @@ describe("GraphEditor", () => {
     it("colours an edge from its relationship type", () => {
       const cy = mockCytoscapeInstance as unknown as any;
       applyGraphToCy(cy, GRAPH as any);
-      expect(elementStore.get("10")?.data.colour).toBe("#2ca02c");
+      expect(elementStore.get(cyEdgeId("10"))?.data.colour).toBe("#2ca02c");
     });
 
     it("repaints existing elements when a type's colour changes", () => {
@@ -1153,11 +1176,11 @@ describe("GraphEditor", () => {
       expect(edges).toEqual(
         expect.arrayContaining([
           // reports_to: unit -> unit, a loop on one node.
-          ["reltype-5", "type-2", "type-2"],
+          [cyEdgeId("reltype-5"), "type-2", "type-2"],
           // works_for: employee -> unit. A swapped from/to would read
-          // ["reltype-6", "type-2", "type-1"] here, which the loop alone
+          // [cyEdgeId("reltype-6"), "type-2", "type-1"] here, which the loop alone
           // could never reveal.
-          ["reltype-6", "type-1", "type-2"],
+          [cyEdgeId("reltype-6"), "type-1", "type-2"],
         ])
       );
       expect(edges).toHaveLength(2);
@@ -1166,8 +1189,8 @@ describe("GraphEditor", () => {
     it("labels a types edge with its cardinality and hierarchy flag", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
-      expect(elementStore.get("reltype-5")?.data.label).toBe("reports_to\n1 → n · hierarchy");
-      expect(elementStore.get("reltype-6")?.data.label).toBe("works_for\nn → 1");
+      expect(elementStore.get(cyEdgeId("reltype-5"))?.data.label).toBe("reports_to\n1 → n · hierarchy");
+      expect(elementStore.get(cyEdgeId("reltype-6"))?.data.label).toBe("works_for\nn → 1");
     });
 
     it("colours types nodes and edges from the types' own colours", async () => {
@@ -1176,7 +1199,7 @@ describe("GraphEditor", () => {
       expect(elementStore.get("type-1")?.data.colour).toBe("#1f77b4");
       expect(elementStore.get("type-2")?.data.colour).toBe(fallbackColour("2"));
       expect(elementStore.get("type-1")?.data.labelColour).toBe(labelForeground("#1f77b4"));
-      expect(elementStore.get("reltype-5")?.data.colour).toBe("#2ca02c");
+      expect(elementStore.get(cyEdgeId("reltype-5"))?.data.colour).toBe("#2ca02c");
     });
 
     it("does not request the objects graph while the types view is showing", async () => {
@@ -1389,7 +1412,102 @@ describe("applyGraphToCy", () => {
       edges: [{ id: "10", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} }],
     } as any);
     expect(result.structureChanged).toBe(false);
-    expect(cy._edges.has("10")).toBe(true);
+    expect(cy._edges.has(cyEdgeId("10"))).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------
+  // Cytoscape keeps nodes and edges in ONE id space. In schema v1 the
+  // objects view's node ids are `entity.id` and its edge ids are
+  // `relationship.id` -- two independent bigint identity sequences, so in
+  // any database seeded from empty they overlap from the very first row.
+  //
+  // Real cytoscape answers `cy.add()` for an id that already exists by
+  // silently doing nothing: no throw, no console message, the element just
+  // never appears. Measured on the seeded demo (23 entities, 10
+  // relationships), the canvas drew 23 nodes and **0** edges.
+  //
+  // The double above stores nodes and edges in two separate maps, which is
+  // exactly why no existing test could see this -- it is more permissive
+  // than the thing it stands for. `cyDoubleOneIdSpace` reproduces the real
+  // rule.
+  // ---------------------------------------------------------------------
+
+  function cyDoubleOneIdSpace() {
+    const cy = cyDouble();
+    const add = cy.add;
+    cy.add = (elements: any[]) => {
+      const taken = new Set<string>([...cy._nodes.keys(), ...cy._edges.keys()]);
+      // One at a time, so an element added earlier in the same call takes
+      // its id -- which is what cytoscape does.
+      elements.forEach((el) => {
+        if (taken.has(el.data.id)) {
+          cy.refused.push(el.data.id);
+          return;
+        }
+        taken.add(el.data.id);
+        add([el]);
+      });
+    };
+    cy.refused = [] as string[];
+    return cy;
+  }
+
+  const COLLIDING = {
+    ...base,
+    nodes: [
+      { id: "1", type: "unit", label: "Head Office", parent: null, attributes: {} },
+      { id: "2", type: "unit", label: "North Region", parent: null, attributes: {} },
+    ],
+    // `relationship.id = 1`, the same number as `entity.id = 1`.
+    edges: [
+      { id: "1", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} },
+    ],
+  };
+
+  it("draws an edge whose id collides with a node's id", () => {
+    const cy = cyDoubleOneIdSpace();
+    applyGraphToCy(cy, COLLIDING as any);
+
+    expect(cy.refused).toEqual([]);
+    expect(cy._nodes.size).toBe(2);
+    expect(cy._edges.size).toBe(1);
+  });
+
+  it("namespaces edge element ids away from node element ids", () => {
+    const cy = cyDouble();
+    applyGraphToCy(cy, COLLIDING as any);
+
+    const edgeIds = [...cy._edges.keys()];
+    const nodeIds = [...cy._nodes.keys()];
+    expect(edgeIds).toEqual([cyEdgeId("1")]);
+    expect(nodeIds).not.toContain(cyEdgeId("1"));
+    // The wire id survives on the element, because that is what selection,
+    // the property panel and DELETE /api/v1/relationships/{id} need.
+    expect(cy._edges.get(cyEdgeId("1")).graphId).toBe("1");
+  });
+
+  it("updates, rather than duplicates, a colliding edge on a redraw", () => {
+    const cy = cyDoubleOneIdSpace();
+    applyGraphToCy(cy, COLLIDING as any);
+    applyGraphToCy(
+      cy,
+      { ...COLLIDING, edges: [{ ...COLLIDING.edges[0], label: "renamed" }] } as any
+    );
+
+    expect(cy._edges.size).toBe(1);
+    expect(cy._edges.get(cyEdgeId("1")).label).toBe("renamed");
+    // Not removed and re-added: a diff that failed to recognise the
+    // existing element would show up here as a refusal.
+    expect(cy.refused).toEqual([]);
+  });
+
+  it("removes a colliding edge that is no longer in the payload", () => {
+    const cy = cyDoubleOneIdSpace();
+    applyGraphToCy(cy, COLLIDING as any);
+    applyGraphToCy(cy, { ...COLLIDING, edges: [] } as any);
+
+    expect(cy._edges.size).toBe(0);
+    expect(cy._nodes.size).toBe(2);
   });
 
   it("gives every newly-added node its own position object, even though their coordinates are equal (M-2)", () => {
