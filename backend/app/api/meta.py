@@ -24,10 +24,13 @@ CHOICES: dict[tuple[str | None, str], list[str]] = {
     (None, "objective_type"): ["minimize", "maximize"],
     (None, "variable_type"): ["binary", "integer", "continuous"],
     (None, "dimension_type"): ["entity", "time", "set"],
-    (None, "cardinality"): ["one_to_one", "one_to_many", "many_to_many"],
+    # one_to_one | one_to_many | many_to_one | many_to_many -- matches the
+    # CHECK constraint on v1's relationship_type.cardinality.
+    (None, "cardinality"): ["one_to_one", "one_to_many", "many_to_one", "many_to_many"],
     (None, "problem_type"): ["scheduling", "assignment", "routing", "other"],
     (None, "data_type"): ["string", "number", "boolean", "date", "datetime", "json"],
-    ("attribute_definition", "data_type"): [
+    # v1's table is `attribute_def` (v0 was `attribute_definition`).
+    ("attribute_def", "data_type"): [
         "string",
         "number",
         "boolean",
@@ -50,21 +53,23 @@ def _choices_for(table: str, field: str) -> list[str] | None:
 # otherwise humanise to "Entity type", which reads oddly as a field
 # label on the entity/hierarchy/etc. rows that carry it).
 FIELD_LABELS: dict[tuple[str | None, str], str] = {
-    (None, "source_entity_id"): "From",
-    (None, "target_entity_id"): "To",
+    # v1's relationship table names these from_entity_id/to_entity_id (v0
+    # was source_entity_id/target_entity_id).
+    (None, "from_entity_id"): "From",
+    (None, "to_entity_id"): "To",
     (None, "entity_type_id"): "Type",
     (None, "organization_id"): "Organization",
-    (None, "is_abstract"): "Abstract type",
 }
 
 # Table labels (singular, plural) for tables whose plural isn't just
-# humanise(table) + "s". Every one of the 31 registered tables was
-# checked; only "entity" and "hierarchy" need an override -- the rest
-# (including "parameter", "scenario", "objective") pluralise correctly
-# with a trailing "s".
+# humanise(table) + "s". Every one of v1's 16 tables was checked; only
+# "entity" needs an override -- the rest (including "parameter_def",
+# "scenario", "constraint_result") pluralise correctly with a trailing
+# "s". v0's "hierarchy" table has no v1 equivalent (hierarchies are now
+# `relationship` rows with `is_hierarchy=true`), so that override is gone
+# rather than retargeted.
 TABLE_LABELS: dict[str, tuple[str, str]] = {
     "entity": ("Entity", "Entities"),
-    "hierarchy": ("Hierarchy", "Hierarchies"),
 }
 
 
@@ -208,6 +213,9 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
                 "label": label,
                 "label_plural": label_plural,
                 "fields": fields,
+                "creatable": meta.creatable,
+                "updatable": meta.updatable,
+                "deletable": meta.deletable,
             }
         )
 

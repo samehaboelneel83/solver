@@ -203,7 +203,8 @@ def test_user_account_label_is_username(auth_headers):
 
 def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
     """The positive `choices` half of this test is gone with its tables: no
-    field on the four remaining registered tables matches meta.py's CHOICES
+    field on any of the seven registered tables (the four `iam` tables plus
+    schema v1's `domain`/`template`/`problem`) matches meta.py's CHOICES
     map. What is still checked is the `default` reporting and that plain
     text fields report neither a default nor choices."""
     client = TestClient(app)

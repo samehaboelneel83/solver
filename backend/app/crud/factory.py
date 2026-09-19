@@ -2,7 +2,6 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Type
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -95,15 +94,51 @@ def build_crud_router(
     read_schema: Type[BaseModel],
     schema_name: str,
     table_name: str,
+    creatable: bool = True,
+    updatable: bool = True,
+    deletable: bool = True,
 ) -> APIRouter:
     """Build a generic list/get/create/update/delete router for one table.
 
     Registers the table in TABLE_REGISTRY as a side effect, so Task 18's
     /api/meta/schema endpoint picks it up automatically without a second
     bookkeeping step.
+
+    `creatable`/`updatable`/`deletable` (all default True) suppress the
+    corresponding write route entirely when False -- used for tables a
+    trigger makes read-only at the DB level (see IMMUTABLE_TABLES), so the
+    API doesn't advertise a route the database will reject anyway.
+
+    The path param type for the single-item routes is derived from the
+    model's own primary key column rather than hardcoded: schema v1's flat
+    tables (domain, template, problem, ...) use `bigint` surrogate keys,
+    while the untouched `iam` tables still use `UUID`. Deriving it keeps
+    both working through the same generic factory.
+
+    `schema_name == "public"` (schema v1's flat tables all live there) is
+    special-cased to drop the schema segment from the URL, so these read as
+    flat resources (`/api/domain/1`) rather than `/api/public/domain/1`;
+    every other schema (e.g. `iam`) keeps its qualified prefix.
     """
-    router = APIRouter(prefix=f"/api/{schema_name}/{table_name}", tags=[f"{schema_name}.{table_name}"])
-    register_table(schema_name, table_name, model, create_schema, read_schema)
+    if schema_name == "public":
+        prefix = f"/api/{table_name}"
+        tags = [table_name]
+    else:
+        prefix = f"/api/{schema_name}/{table_name}"
+        tags = [f"{schema_name}.{table_name}"]
+    router = APIRouter(prefix=prefix, tags=tags)
+    register_table(
+        schema_name,
+        table_name,
+        model,
+        create_schema,
+        read_schema,
+        creatable=creatable,
+        updatable=updatable,
+        deletable=deletable,
+    )
+
+    item_id_type = _python_type(inspect(model).primary_key[0])
 
     @router.get("/")
     def list_items(
@@ -147,8 +182,9 @@ def build_crud_router(
         # all -- without one, Postgres is free to return rows in a different
         # order across two otherwise-identical queries (e.g. after a
         # concurrent write, or just because it felt like it), which can skip
-        # or repeat rows across pages. `id` (every model's UUID primary key)
-        # is unique and never null, so it's always a valid sort key: the sole
+        # or repeat rows across pages. `id` (every model's primary key,
+        # UUID for `iam` tables and bigint elsewhere) is unique and never
+        # null, so it's always a valid sort key: the sole
         # order when none was requested, and a tiebreaker appended after any
         # requested order_by (whose own column may not be unique).
         if order_by is not None:
@@ -173,61 +209,67 @@ def build_crud_router(
 
     @router.get("/{item_id}")
     def get_item(
-        item_id: UUID, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
+        item_id: item_id_type, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
     ) -> read_schema:
         item = db.get(model, item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="not found")
         return item
 
-    @router.post("/", status_code=201)
-    def create_item(
-        payload: create_schema,
-        db: Session = Depends(get_db),
-        _: UserAccount = Depends(get_current_user),
-    ) -> read_schema:
-        item = model(**payload.model_dump())
-        db.add(item)
-        try:
-            db.commit()
-        except DBAPIError as exc:
-            db.rollback()
-            raise translate_db_error(exc, table_name) from exc
-        db.refresh(item)
-        return item
+    if creatable:
 
-    @router.put("/{item_id}")
-    def update_item(
-        item_id: UUID,
-        payload: update_schema,
-        db: Session = Depends(get_db),
-        _: UserAccount = Depends(get_current_user),
-    ) -> read_schema:
-        item = db.get(model, item_id)
-        if item is None:
-            raise HTTPException(status_code=404, detail="not found")
-        for field, value in payload.model_dump(exclude_unset=True).items():
-            setattr(item, field, value)
-        try:
-            db.commit()
-        except DBAPIError as exc:
-            db.rollback()
-            raise translate_db_error(exc, table_name) from exc
-        db.refresh(item)
-        return item
+        @router.post("/", status_code=201)
+        def create_item(
+            payload: create_schema,
+            db: Session = Depends(get_db),
+            _: UserAccount = Depends(get_current_user),
+        ) -> read_schema:
+            item = model(**payload.model_dump())
+            db.add(item)
+            try:
+                db.commit()
+            except DBAPIError as exc:
+                db.rollback()
+                raise translate_db_error(exc, table_name) from exc
+            db.refresh(item)
+            return item
 
-    @router.delete("/{item_id}", status_code=204)
-    def delete_item(
-        item_id: UUID, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
-    ) -> None:
-        item = db.get(model, item_id)
-        if item is None:
-            raise HTTPException(status_code=404, detail="not found")
-        db.delete(item)
-        try:
-            db.commit()
-        except DBAPIError as exc:
-            db.rollback()
-            raise translate_db_error(exc, table_name) from exc
+    if updatable:
+
+        @router.put("/{item_id}")
+        def update_item(
+            item_id: item_id_type,
+            payload: update_schema,
+            db: Session = Depends(get_db),
+            _: UserAccount = Depends(get_current_user),
+        ) -> read_schema:
+            item = db.get(model, item_id)
+            if item is None:
+                raise HTTPException(status_code=404, detail="not found")
+            for field, value in payload.model_dump(exclude_unset=True).items():
+                setattr(item, field, value)
+            try:
+                db.commit()
+            except DBAPIError as exc:
+                db.rollback()
+                raise translate_db_error(exc, table_name) from exc
+            db.refresh(item)
+            return item
+
+    if deletable:
+
+        @router.delete("/{item_id}", status_code=204)
+        def delete_item(
+            item_id: item_id_type, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
+        ) -> None:
+            item = db.get(model, item_id)
+            if item is None:
+                raise HTTPException(status_code=404, detail="not found")
+            db.delete(item)
+            try:
+                db.commit()
+            except DBAPIError as exc:
+                db.rollback()
+                raise translate_db_error(exc, table_name) from exc
 
     return router

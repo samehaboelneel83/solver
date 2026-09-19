@@ -35,9 +35,11 @@ def test_meta_schema_requires_auth():
 
 def test_meta_schema_lists_exactly_the_registered_tables(auth_headers):
     """Was "lists all 31 tables". Schema v1 dropped the 27 domain.*/problem.*
-    tables (migration 0006) and unregistered them from the generic CRUD
-    factory, leaving only the four untouched `iam` tables. Pinning the exact
-    set is stronger than pinning the count."""
+    tables (migration 0006/0007) and replaced them with the four untouched
+    `iam` tables plus three flat v1 tables driven through the generic
+    factory (`domain`, `template`, `problem`); every other v1 table gets a
+    purpose-built router or (for the four IMMUTABLE_TABLES) none at all.
+    Pinning the exact set is stronger than pinning the count."""
     client = TestClient(app)
     response = client.get("/api/meta/schema", headers=auth_headers)
     assert response.status_code == 200
@@ -49,6 +51,9 @@ def test_meta_schema_lists_exactly_the_registered_tables(auth_headers):
         ("iam", "user_account"),
         ("iam", "role"),
         ("iam", "user_role"),
+        ("public", "domain"),
+        ("public", "template"),
+        ("public", "problem"),
     }
 
 
