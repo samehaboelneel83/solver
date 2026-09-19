@@ -141,9 +141,74 @@ def test_get_domain_by_int_id_succeeds_and_non_int_returns_422(auth_headers):
     domain_id = create_response.json()["id"]
     assert isinstance(domain_id, int)
 
-    get_response = client.get(f"/api/domain/{domain_id}", headers=auth_headers)
-    assert get_response.status_code == 200
-    assert get_response.json()["id"] == domain_id
+    try:
+        get_response = client.get(f"/api/domain/{domain_id}", headers=auth_headers)
+        assert get_response.status_code == 200
+        assert get_response.json()["id"] == domain_id
 
-    bad_response = client.get("/api/domain/not-an-int", headers=auth_headers)
-    assert bad_response.status_code == 422
+        bad_response = client.get("/api/domain/not-an-int", headers=auth_headers)
+        assert bad_response.status_code == 422
+    finally:
+        # The row was created through a real HTTP POST (a separate,
+        # already-committed session), so a local db.rollback() can't undo
+        # it -- delete it through the API instead, or it accumulates in
+        # the shared solver_test database across runs.
+        client.delete(f"/api/domain/{domain_id}", headers=auth_headers)
+
+
+def test_options_route_sits_at_the_collapsed_public_prefix_and_resolves_bigint_ids(auth_headers):
+    """`options.py` mints one FK-dropdown route per TABLE_REGISTRY entry.
+    For a `schema_name="public"` table that must land at the same
+    collapsed prefix as its CRUD sibling (`/api/domain/options`, not
+    `/api/public/domain/options`), and `ids=` must parse as the table's
+    real id type (bigint here) rather than assuming UUID for every table."""
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    create_response = client.post(
+        "/api/domain/",
+        json={"name": f"cap-test-options-domain-{suffix}"},
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    domain_id = create_response.json()["id"]
+
+    try:
+        options_response = client.get(
+            f"/api/domain/options?ids={domain_id}", headers=auth_headers
+        )
+        assert options_response.status_code == 200
+        items = options_response.json()
+        assert len(items) == 1
+        assert items[0]["id"] == str(domain_id)
+
+        bad_id_response = client.get(
+            "/api/domain/options?ids=not-an-int", headers=auth_headers
+        )
+        assert bad_id_response.status_code == 422
+    finally:
+        client.delete(f"/api/domain/{domain_id}", headers=auth_headers)
+
+
+def test_options_route_for_iam_table_still_resolves_uuid_ids(auth_headers):
+    """Regression guard for the fix above: deriving `ids=`'s cast from each
+    table's own primary-key type must not break the untouched, UUID-keyed
+    `iam` tables -- a blanket int cast here would be exactly as wrong as a
+    blanket UUID cast was."""
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:8]
+    create_response = client.post(
+        "/api/iam/role/",
+        json={"code": f"opt-cap-{suffix}", "name": "Options Capability Test"},
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201, create_response.text
+    role_id = create_response.json()["id"]
+
+    options_response = client.get(f"/api/iam/role/options?ids={role_id}", headers=auth_headers)
+    assert options_response.status_code == 200
+    items = options_response.json()
+    assert len(items) == 1
+    assert items[0]["id"] == role_id
+
+    bad_id_response = client.get("/api/iam/role/options?ids=not-a-uuid", headers=auth_headers)
+    assert bad_id_response.status_code == 422

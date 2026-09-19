@@ -5,20 +5,18 @@ in `app/api/routers.py`, which this module imports to guarantee the
 registry is populated before the loop below runs). Must be included in
 `app.main` *before* `crud_router` -- otherwise the CRUD router's
 `GET /api/{schema}/{table}/{item_id}` matches first (FastAPI matches
-routes in registration order) and "options" gets parsed as a UUID,
-answering 422 instead of resolving here.
+routes in registration order) and "options" gets parsed as the table's id
+type, answering 422 instead of resolving here.
 """
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import inspect, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.routers import router as crud_router  # noqa: F401  (populates TABLE_REGISTRY)
 from app.core.db import get_db
-from app.crud.factory import _column_attr_keys, searchable_columns
+from app.crud.factory import _column_attr_keys, _python_type, searchable_columns
 from app.crud.labels import label_for
 from app.crud.registry import TABLE_REGISTRY, TableMeta
 from app.models.iam import UserAccount
@@ -37,6 +35,11 @@ def _searchable_columns_for(meta: TableMeta) -> list:
 def _register_options_route(meta: TableMeta) -> None:
     model = meta.model
     columns = _searchable_columns_for(meta)
+    # Same per-model derivation `build_crud_router` uses for its own
+    # `item_id` path param (factory.py) -- bigint for schema v1's flat
+    # tables, UUID for the untouched `iam` ones -- so `ids=` parses each
+    # table's real id type instead of assuming UUID for everything.
+    id_type = _python_type(inspect(model).primary_key[0])
 
     def get_options(
         q: str | None = Query(None),
@@ -54,9 +57,9 @@ def _register_options_route(meta: TableMeta) -> None:
                 if not raw:
                     continue
                 try:
-                    id_values.append(uuid.UUID(raw))
+                    id_values.append(id_type(raw))
                 except ValueError:
-                    raise HTTPException(status_code=422, detail=f"invalid uuid {raw!r}")
+                    raise HTTPException(status_code=422, detail=f"invalid id {raw!r}")
             if len(id_values) > 200:
                 raise HTTPException(status_code=422, detail="too many ids (max 200)")
             if not id_values:
@@ -75,7 +78,15 @@ def _register_options_route(meta: TableMeta) -> None:
         return [{"id": str(row.id), "label": label_for(db, row, meta.schema, meta.table)} for row in rows]
 
     get_options.__name__ = f"get_options_{meta.schema}_{meta.table}"
-    router.get(f"/api/{meta.schema}/{meta.table}/options")(get_options)
+    # Mirrors factory.py's `schema_name == "public"` prefix collapse, so
+    # this route sits at the same URL as its CRUD sibling
+    # (`/api/domain/options`, not `/api/public/domain/options`).
+    path = (
+        f"/api/{meta.table}/options"
+        if meta.schema == "public"
+        else f"/api/{meta.schema}/{meta.table}/options"
+    )
+    router.get(path)(get_options)
 
 
 for _meta in TABLE_REGISTRY:
