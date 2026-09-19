@@ -38,10 +38,10 @@ each session instead starts from zero rows on a freshly migrated schema --
 accumulation across runs becomes structurally impossible rather than
 merely discouraged.
 
-The drop is guarded by an assertion that the target name actually ends in
-`_test` (see `_drop_database_if_exists` below): this is what makes it safe
-to point `DROP DATABASE` at a name derived from `DATABASE_URL`/
-`TEST_DATABASE_URL` at all. If that assertion ever failed here, the right
+The drop is guarded by an explicit check that the target name actually
+ends in `_test` (see `_drop_database_if_exists` below): this is what makes
+it safe to point `DROP DATABASE` at a name derived from `DATABASE_URL`/
+`TEST_DATABASE_URL` at all. If that check ever fails here, the right
 outcome is a crashed test session, not a dropped `solver` database.
 """
 
@@ -105,7 +105,7 @@ def _drop_database_if_exists(maintenance_url: str, database: str) -> None:
     migrated to head -- see the module docstring for why per-test teardown
     alone isn't enough.
 
-    The assertion below is the entire safety mechanism for this being a
+    The name check below is the entire safety mechanism for this being a
     destructive operation driven by a computed name: it makes it
     impossible for this function to ever drop anything that isn't a
     `..._test` database, regardless of how `DATABASE_URL`/
