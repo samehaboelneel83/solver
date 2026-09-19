@@ -102,6 +102,7 @@ function Editor({ type }: { type: EntityType }) {
 function TypeForm({ type }: { type: EntityType }) {
   const [name, setName] = useState(type.name);
   const [role, setRole] = useState<EntityRole>(type.role);
+  const [colour, setColour] = useState<string | null>(type.colour);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -115,7 +116,7 @@ function TypeForm({ type }: { type: EntityType }) {
     replace(problem ? { name: problem } : {});
     if (problem) return;
     try {
-      await updateType.mutateAsync({ id: type.id, body: { name, role } });
+      await updateType.mutateAsync({ id: type.id, body: { name, role, colour } });
       toast.success("Entity type saved");
     } catch (err) {
       const result = serverFieldErrors(err, ENTITY_TYPE_FIELDS, "entity type");
@@ -135,7 +136,10 @@ function TypeForm({ type }: { type: EntityType }) {
         <EntityTypeFields
           name={name}
           role={role}
+          colour={colour}
           errors={errors}
+          fallbackKey={String(type.id)}
+          onColour={setColour}
           onName={(value) => {
             setName(value);
             if (errors.name) {

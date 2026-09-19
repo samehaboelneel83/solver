@@ -28,6 +28,11 @@ class EntityTypeOption(BaseModel):
     code: str
     name: str
     is_abstract: bool
+    # Task 14b (user request B): `entity_type.colour`, a lowercase
+    # '#rrggbb' or None. The canvas draws a type's nodes in it, and derives
+    # a deterministic fallback from the type's id when it is None -- so
+    # None must stay expressible here rather than being defaulted away.
+    colour: str | None = None
 
 
 class RelationshipTypeOption(BaseModel):
@@ -37,6 +42,8 @@ class RelationshipTypeOption(BaseModel):
     is_directed: bool
     source_entity_type: str | None = None
     target_entity_type: str | None = None
+    # Task 14b: `relationship_type.colour`, same rules as above.
+    colour: str | None = None
 
 
 class HierarchyOption(BaseModel):

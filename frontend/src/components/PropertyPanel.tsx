@@ -1,21 +1,33 @@
 import { FormEvent, useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { formatApiError } from "../api/errors";
 import { relationshipErrorMessage } from "../api/graph";
 import {
   useDeleteEntity,
   useDeleteRelationship,
   useEntityRecord,
+  useEntityType,
   useEntityTypes,
+  useRelationshipType,
   useUpdateEntity,
+  useUpdateEntityType,
   useUpdateRelationship,
+  useUpdateRelationshipType,
   type AttributeDef,
   type Entity,
   type Id,
 } from "../api/v1";
 import AttrsForm, { buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "./AttrsForm";
-import { FieldLabel, INPUT_CLASS, useFieldErrors, type FieldErrors } from "./attrTypes";
+import ColourField from "./ColourField";
+import { FieldLabel, INPUT_CLASS, roleLabel, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
 import { useToast } from "./ToastProvider";
+import {
+  CARDINALITY_LABEL,
+  entityTypeIdFromNodeId,
+  relationshipTypeIdFromEdgeId,
+  type GraphMode,
+} from "../lib/typesGraph";
 import type { GraphResponse } from "../types/graph";
 
 /**
@@ -45,14 +57,31 @@ type Selection = { kind: "node" | "edge"; id: string } | null;
 
 type PropertyPanelProps = {
   domainId: Id;
+  /** Which view the canvas is drawing. In the types view a node is an
+   * `entity_type` and an edge is a `relationship_type`, so the panel edits
+   * something else entirely. */
+  mode: GraphMode;
   graph: GraphResponse;
   selection: Selection;
   onClose: () => void;
 };
 
-export default function PropertyPanel({ domainId, graph, selection, onClose }: PropertyPanelProps) {
+export default function PropertyPanel({
+  domainId,
+  mode,
+  graph,
+  selection,
+  onClose,
+}: PropertyPanelProps) {
   if (!selection) {
     return <p className="text-sm text-slate-500">Select a node or edge to see its properties.</p>;
+  }
+  if (mode === "types") {
+    return selection.kind === "node" ? (
+      <EntityTypePanel nodeId={selection.id} onClose={onClose} />
+    ) : (
+      <RelationshipTypePanel edgeId={selection.id} onClose={onClose} />
+    );
   }
   if (selection.kind === "node") {
     return <NodePanel domainId={domainId} graph={graph} nodeId={selection.id} onClose={onClose} />;
@@ -313,6 +342,156 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/**
+ * The types view's node panel: one `entity_type`.
+ *
+ * It edits exactly one thing -- the colour -- and links to the type's own
+ * page for everything else. That is deliberate: name, role and attribute
+ * definitions all have a full editor already (`EntityTypeDetail`, Task 11),
+ * and a second, smaller copy of it beside the canvas would be two forms
+ * that have to agree about the same validation.
+ *
+ * The row is fetched rather than read off the canvas, for the same reason
+ * `NodePanel` fetches its entity: the built graph carries only what the
+ * canvas draws, and saving from a projection would write back a projection.
+ */
+function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
+  const entityTypeId = entityTypeIdFromNodeId(nodeId);
+  const query = useEntityType(entityTypeId);
+  const update = useUpdateEntityType();
+  const toast = useToast();
+  const [error, setError] = useState<string | null>(null);
+
+  if (entityTypeId === null) return null;
+  if (query.error) return <p className="text-sm text-red-600">{formatApiError(query.error)}</p>;
+  if (!query.data) return <p className="text-sm text-slate-500">Loading…</p>;
+  const type = query.data;
+
+  async function save(colour: string | null) {
+    setError(null);
+    try {
+      await update.mutateAsync({ id: type.id, body: { colour } });
+      toast.success(`${type.name} saved`);
+    } catch (err) {
+      setError(formatApiError(err));
+    }
+  }
+
+  return (
+    <div data-testid="entity-type-panel">
+      <h2 className="mb-2 text-sm font-semibold text-slate-900">
+        Entity type: <span className="font-mono">{type.name}</span>
+      </h2>
+      {error && <p className="mb-2 whitespace-pre-line text-sm text-red-600">{error}</p>}
+      <dl className="mb-3 space-y-1 text-xs text-slate-600">
+        <div className="flex gap-2">
+          <dt className="font-medium">Role</dt>
+          <dd data-testid="entity-type-role">{roleLabel(type.role)}</dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="font-medium">Attributes</dt>
+          <dd data-testid="entity-type-attribute-count">{type.attributes.length}</dd>
+        </div>
+      </dl>
+      <ColourField
+        value={type.colour}
+        // The id the canvas hashes for the fallback, so the preview shows
+        // the colour the node is actually drawn in today.
+        fallbackKey={String(type.id)}
+        sampleText={type.name}
+        disabled={update.isPending}
+        onChange={save}
+      />
+      <div className={`${BUTTON_ROW} mt-3`}>
+        <Link
+          to={`/entity-types/${type.id}`}
+          className="rounded-md border border-slate-300 px-3 py-1 text-sm text-blue-600 underline"
+        >
+          Edit this type
+        </Link>
+        <button type="button" onClick={onClose} className={QUIET_BUTTON}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The types view's edge panel: one `relationship_type`.
+ *
+ * There is no relationship-type page in this app -- relationship types have
+ * only ever been created through the API -- so unlike `EntityTypePanel`
+ * this is the ONLY place a user can set one's colour. It still edits just
+ * the colour: changing `from_type_id`, `cardinality` or `is_hierarchy`
+ * re-judges every existing row through the trigger, which wants a real
+ * form with the trigger's errors mapped onto its fields, not a side panel.
+ */
+function RelationshipTypePanel({ edgeId, onClose }: { edgeId: string; onClose: () => void }) {
+  const relationshipTypeId = relationshipTypeIdFromEdgeId(edgeId);
+  const query = useRelationshipType(relationshipTypeId);
+  const typesQuery = useEntityTypes(query.data?.domain_id ?? null, { limit: 500 });
+  const update = useUpdateRelationshipType();
+  const toast = useToast();
+  const [error, setError] = useState<string | null>(null);
+
+  if (relationshipTypeId === null) return null;
+  if (query.error) return <p className="text-sm text-red-600">{formatApiError(query.error)}</p>;
+  if (!query.data) return <p className="text-sm text-slate-500">Loading…</p>;
+  const type = query.data;
+  const nameOf = (id: Id) =>
+    typesQuery.data?.items.find((candidate) => candidate.id === id)?.name ?? `#${id}`;
+
+  async function save(colour: string | null) {
+    setError(null);
+    try {
+      await update.mutateAsync({ id: type.id, body: { colour } });
+      toast.success(`${type.name} saved`);
+    } catch (err) {
+      setError(formatApiError(err));
+    }
+  }
+
+  return (
+    <div data-testid="relationship-type-panel">
+      <h2 className="mb-2 text-sm font-semibold text-slate-900">
+        Relationship type: <span className="font-mono">{type.name}</span>
+      </h2>
+      {error && <p className="mb-2 whitespace-pre-line text-sm text-red-600">{error}</p>}
+      <dl className="mb-3 space-y-1 text-xs text-slate-600">
+        <div className="flex gap-2">
+          <dt className="font-medium">From → to</dt>
+          <dd data-testid="relationship-type-ends" className="font-mono">
+            {nameOf(type.from_type_id)} → {nameOf(type.to_type_id)}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="font-medium">Cardinality</dt>
+          <dd data-testid="relationship-type-cardinality">
+            {CARDINALITY_LABEL[type.cardinality] ?? type.cardinality}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="font-medium">Hierarchy</dt>
+          <dd data-testid="relationship-type-hierarchy">{type.is_hierarchy ? "Yes" : "No"}</dd>
+        </div>
+      </dl>
+      <ColourField
+        value={type.colour}
+        fallbackKey={String(type.id)}
+        sampleText={type.name}
+        disabled={update.isPending}
+        onChange={save}
+      />
+      <div className={`${BUTTON_ROW} mt-3`}>
+        <button type="button" onClick={onClose} className={QUIET_BUTTON}>
+          Close
+        </button>
+      </div>
     </div>
   );
 }

@@ -4,11 +4,13 @@ import GraphEditor from "../components/GraphEditor";
 import PropertyPanel from "../components/PropertyPanel";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../components/FilterBar";
 import type { FilterState } from "../components/FilterBar";
-import { useGraph } from "../api/graph";
+import { useGraphView } from "../api/graph";
 import type { Id } from "../api/v1";
 import { useDomain } from "../hooks/useDomain";
+import { parseGraphMode, useGraphMode } from "../hooks/useGraphMode";
 import { parseRouteId } from "../lib/routeId";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import type { GraphMode } from "../lib/typesGraph";
 
 /**
  * One domain's entities and relationships, drawn.
@@ -17,6 +19,20 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  * -- v0 scoped this page by `organization`, which schema v1 does not have.
  * The nesting is a `relationship_type` with `is_hierarchy = true`, chosen in
  * the canvas's own toolbar; without one the graph is drawn flat.
+ *
+ * Two views (Task 14b): **objects** -- the entities and relationships above
+ * -- and **types**, the domain's schema. The choice lives in three places
+ * on purpose, and they are not redundant:
+ *
+ * - `useGraphMode` persists it, so a reload comes back where you were;
+ * - `?mode=types` makes a view **linkable**, and a link arriving with it
+ *   wins over the stored choice and is then written through to it;
+ * - the toggle in the canvas toolbar is what changes it.
+ *
+ * `?focus=` (Ruling 31's entity deep link) implies the objects view, since
+ * the thing it focuses is an entity, and it is honoured even if `?mode=types`
+ * is also present -- an entity link that landed on the schema would find
+ * nothing.
  */
 
 type Selection = { kind: "node" | "edge"; id: string } | null;
@@ -56,6 +72,53 @@ export default function GraphDemo() {
     // Mount-only, like `focus`: consuming the link clears it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // The view. Stored (survives a reload) and mirrored into the URL (so it
+  // can be linked). A `?mode=` on arrival wins over the stored value; a
+  // `?focus=` overrides both, because what it focuses is an entity.
+  const { mode: storedMode, setMode: setStoredMode } = useGraphMode();
+  const [linkedMode, setLinkedMode] = useState<GraphMode | null>(() => {
+    if (searchParams.has("focus")) return "objects";
+    return searchParams.has("mode") ? parseGraphMode(searchParams.get("mode")) : null;
+  });
+  const mode = linkedMode ?? storedMode;
+  useEffect(() => {
+    if (linkedMode !== null && linkedMode !== storedMode) {
+      setStoredMode(linkedMode);
+    }
+    if (linkedMode !== null) {
+      setLinkedMode(null);
+    }
+    // Mount-only, like `focus` and `domain`: consuming the link clears it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function changeMode(next: GraphMode) {
+    setStoredMode(next);
+    setLinkedMode(null);
+    setSelection(null);
+    setFilterState(DEFAULT_FILTER_STATE);
+  }
+
+  // Keep the URL showing the view, so the address bar is always a link to
+  // what is on screen. `objects` is the default and leaves no parameter,
+  // which keeps every existing link (and Ruling 31's `?focus=` one) intact.
+  useEffect(() => {
+    const current = searchParams.get("mode");
+    const wanted = mode === "types" ? "types" : null;
+    if (current === wanted) {
+      return;
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (wanted === null) next.delete("mode");
+        else next.set("mode", wanted);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [mode, searchParams, setSearchParams]);
+
   const [hierarchyTypeId, setHierarchyTypeId] = useState<Id | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   // Owned here (not inside FilterBar) so it survives GraphEditor's
@@ -68,7 +131,7 @@ export default function GraphDemo() {
   const [searchFocus, setSearchFocus] = useState<{ nodeId: string; token: number } | null>(null);
   const searchFocusTokenRef = useRef(0);
 
-  const { data: graph } = useGraph(domainId, hierarchyTypeId);
+  const { data: graph } = useGraphView(domainId, hierarchyTypeId, mode);
   const selectedNodeId = selection?.kind === "node" ? selection.id : null;
 
   // B-3: consume a deep-link "focus" once its target shows up in the loaded
@@ -78,7 +141,10 @@ export default function GraphDemo() {
   const consumedFocusRef = useRef(false);
   useEffect(() => {
     const focusEntityId = searchParams.get("focus");
-    if (!focusEntityId || consumedFocusRef.current || !graph) {
+    // A focus link names an ENTITY. Types-mode node ids are namespaced
+    // (`type-<id>`) so one could never match, but being explicit keeps the
+    // ref from being consumed by a graph that cannot hold the target.
+    if (!focusEntityId || consumedFocusRef.current || !graph || mode !== "objects") {
       return;
     }
     const match = graph.nodes.find((node) => node.id === focusEntityId);
@@ -98,7 +164,7 @@ export default function GraphDemo() {
       { replace: true }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, searchParams]);
+  }, [graph, searchParams, mode]);
 
   // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every
   // node/edge) only reruns when the criteria actually change.
@@ -160,6 +226,15 @@ export default function GraphDemo() {
           value={filterState}
           onChange={setFilterState}
           onSubmitSearch={handleSearchSubmit}
+          // The bar stays in both views, because search and
+          // highlight-connections are just as useful on a schema. What it
+          // groups by changes: a types node's `type` is its entity type's
+          // ROLE, so the checkbox list offers the roles present. Filtering
+          // types by their own names would only duplicate the search box.
+          typeNoun={mode === "types" ? "Roles" : "Types"}
+          searchLabel={
+            mode === "types" ? "Search types by name" : "Search nodes by label"
+          }
         />
       )}
       {/* F-1: below 1024px the property panel kept its own minimum width and
@@ -174,6 +249,8 @@ export default function GraphDemo() {
           <GraphEditor
             key={domainId}
             domainId={domainId}
+            mode={mode}
+            onModeChange={changeMode}
             hierarchyTypeId={hierarchyTypeId}
             onHierarchyTypeChange={(id) => {
               setHierarchyTypeId(id);
@@ -191,6 +268,7 @@ export default function GraphDemo() {
             <PropertyPanel
               key={selection ? `${selection.kind}-${selection.id}` : "none"}
               domainId={domainId}
+              mode={mode}
               graph={graph}
               selection={selection}
               onClose={() => setSelection(null)}

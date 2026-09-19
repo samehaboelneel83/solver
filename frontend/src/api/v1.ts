@@ -140,12 +140,22 @@ export type EntityType = {
   domain_id: Id;
   name: string;
   role: EntityRole;
+  /** Lowercase `#rrggbb`, or null for "not chosen" -- the graph then draws
+   * a deterministic fallback (`lib/colour.ts`). The API accepts either
+   * case and stores lower case. */
+  colour: string | null;
   /** Ordered by name. Carried on the list route too. */
   attributes: AttributeDef[];
 };
 
-export type EntityTypeCreate = { domain_id: Id; name: string; role?: EntityRole };
-export type EntityTypeUpdate = { name?: string; role?: EntityRole };
+export type EntityTypeCreate = {
+  domain_id: Id;
+  name: string;
+  role?: EntityRole;
+  colour?: string | null;
+};
+/** An explicit `null` clears the colour; an omitted key leaves it alone. */
+export type EntityTypeUpdate = { name?: string; role?: EntityRole; colour?: string | null };
 
 export function listEntityTypes(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<EntityType>> {
   const { domainId, limit, offset } = params;
@@ -213,6 +223,8 @@ export type RelationshipType = {
   to_type_id: Id;
   cardinality: Cardinality;
   is_hierarchy: boolean;
+  /** Same rules as `EntityType.colour`. */
+  colour: string | null;
 };
 
 export type RelationshipTypeCreate = {
@@ -222,6 +234,7 @@ export type RelationshipTypeCreate = {
   to_type_id: Id;
   cardinality?: Cardinality;
   is_hierarchy?: boolean;
+  colour?: string | null;
 };
 
 /** `domain_id` is not patchable. */
@@ -427,11 +440,17 @@ function useV1Mutation<TVars, TResult>(fn: (vars: TVars) => Promise<TResult>) {
 const isId = (id: Id | null | undefined): id is Id => id !== null && id !== undefined;
 
 // entity types
-export function useEntityTypes(domainId: Id | null, page: PageParams = {}) {
+export function useEntityTypes(
+  domainId: Id | null,
+  page: PageParams = {},
+  options: { enabled?: boolean } = {}
+) {
   return useQuery({
     queryKey: [V1, "entity-types", { domainId, ...page }],
     queryFn: () => listEntityTypes({ domainId, ...page }),
-    enabled: isId(domainId),
+    // `options.enabled` only ever *narrows*: a caller can switch a query
+    // off (the graph's inactive mode), never on for a null domain.
+    enabled: isId(domainId) && options.enabled !== false,
   });
 }
 export function useEntityType(id: Id | null | undefined) {
@@ -466,11 +485,15 @@ export const useUpdateEntity = () =>
 export const useDeleteEntity = () => useV1Mutation(deleteEntity);
 
 // relationship types and relationships
-export function useRelationshipTypes(domainId: Id | null, params: { isHierarchy?: boolean } & PageParams = {}) {
+export function useRelationshipTypes(
+  domainId: Id | null,
+  params: { isHierarchy?: boolean } & PageParams = {},
+  options: { enabled?: boolean } = {}
+) {
   return useQuery({
     queryKey: [V1, "relationship-types", { domainId, ...params }],
     queryFn: () => listRelationshipTypes({ domainId, ...params }),
-    enabled: isId(domainId),
+    enabled: isId(domainId) && options.enabled !== false,
   });
 }
 export function useRelationshipType(id: Id | null | undefined) {

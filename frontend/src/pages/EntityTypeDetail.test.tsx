@@ -20,6 +20,7 @@ const TYPE: EntityType = {
   domain_id: 7,
   name: "employee",
   role: "agent",
+  colour: null,
   attributes: [
     { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 3 },
     { id: 12, entity_type_id: 5, name: "on_call", data_type: "boolean", required: false, unit: null, enum_values: null, default_value: false },
@@ -138,7 +139,7 @@ describe("EntityTypeDetail", () => {
     fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0]).toEqual({ method: "PATCH", path: "/api/v1/entity-types/5", body: { name: "staff", role: "resource" } });
+    expect(writes()[0]).toEqual({ method: "PATCH", path: "/api/v1/entity-types/5", body: { name: "staff", role: "resource", colour: null } });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type saved/i));
   });
 
@@ -333,5 +334,52 @@ describe("EntityTypeDetail", () => {
     renderPage("/entity-types/999");
     expect(await screen.findByText(/entity type not found/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to entity types/i })).toHaveAttribute("href", "/entity-types");
+  });
+
+  // --- Task 14b: colour --------------------------------------------------
+
+  it("seeds the colour control from the stored value and saves a change", async () => {
+    serve((path, init) => (init?.method === "PATCH" ? Promise.resolve({ ...TYPE, colour: "#ff8800" }) : undefined));
+    renderPage();
+    await loaded();
+
+    expect(within(typeForm()).getByTestId("colour-hex")).toHaveValue("");
+    fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#FF8800" } });
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toEqual({
+      method: "PATCH",
+      path: "/api/v1/entity-types/5",
+      // Lower case, whatever was typed: the column only ever holds that form.
+      body: { name: "employee", role: "agent", colour: "#ff8800" },
+    });
+  });
+
+  it("clears a colour back to automatic", async () => {
+    serve((path, init) => (init?.method === "PATCH" ? Promise.resolve({ ...TYPE, colour: null }) : undefined));
+    renderPage();
+    await loaded();
+
+    fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#ff8800" } });
+    fireEvent.click(within(typeForm()).getByTestId("colour-clear"));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
+  });
+
+  it("refuses a malformed hex without sending anything", async () => {
+    serve();
+    renderPage();
+    await loaded();
+
+    fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#zzz" } });
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    await flush();
+    // The PATCH still goes (the name is valid), but it carries the last
+    // good colour rather than the junk in the box, and the box says why.
+    expect(within(typeForm()).getByText(/six-digit hex colour/i)).toBeInTheDocument();
+    expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
   });
 });

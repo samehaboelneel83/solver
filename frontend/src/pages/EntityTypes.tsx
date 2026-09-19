@@ -13,11 +13,13 @@ import {
   useFieldErrors,
   type FieldErrors,
 } from "../components/attrTypes";
+import ColourField from "../components/ColourField";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import { useCreateEntityType, useEntityTypes, type EntityRole, type Id } from "../api/v1";
+import { typeColour } from "../lib/colour";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -98,6 +100,9 @@ function TypeList({ domainId }: { domainId: Id }) {
               Name
             </th>
             <th scope="col" className="px-3 py-2 font-semibold">
+              Colour
+            </th>
+            <th scope="col" className="px-3 py-2 font-semibold">
               Role
             </th>
             <th scope="col" className="px-3 py-2 font-semibold">
@@ -113,6 +118,19 @@ function TypeList({ domainId }: { domainId: Id }) {
                   {type.name}
                 </Link>
               </th>
+              <td className="px-3 py-2 text-slate-700">
+                <span className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-4 w-4 rounded border border-slate-300"
+                    style={{ backgroundColor: typeColour({ id: String(type.id), colour: type.colour }) }}
+                    data-testid={`type-swatch-${type.name}`}
+                  />
+                  {/* The swatch is decorative; the text is what a screen
+                      reader and a colour-blind user actually read. */}
+                  <span className="font-mono text-xs">{type.colour ?? "automatic"}</span>
+                </span>
+              </td>
               <td className="px-3 py-2 text-slate-700">{roleLabel(type.role)}</td>
               <td className="px-3 py-2 text-slate-700">{type.attributes.length}</td>
             </tr>
@@ -123,21 +141,33 @@ function TypeList({ domainId }: { domainId: Id }) {
   );
 }
 
-const TYPE_FIELDS = ["name", "role"];
+const TYPE_FIELDS = ["name", "role", "colour"];
 
-/** The name + role form shared by "new type" (here) and the type editor. */
+/** The name + role + colour form shared by "new type" (here) and the type
+ * editor. `colour` is optional: null means the graph picks a stable one
+ * from the type's id, which is why the control has an explicit "use
+ * automatic" rather than only a swatch. */
 export function EntityTypeFields({
   name,
   role,
+  colour,
   onName,
   onRole,
+  onColour,
   errors,
+  fallbackKey,
 }: {
   name: string;
   role: EntityRole;
+  colour: string | null;
   onName: (value: string) => void;
   onRole: (value: EntityRole) => void;
+  onColour: (value: string | null) => void;
   errors: FieldErrors;
+  /** The id the graph hashes for the fallback colour. A type being created
+   * has none yet, so the preview uses its name -- honest about being a
+   * preview, and it is the only stable handle a new type has. */
+  fallbackKey: string;
 }) {
   const baseId = useId();
   const id = (field: string) => `${baseId}-${field}`;
@@ -187,6 +217,15 @@ export function EntityTypeFields({
         </p>
         <FieldError id={errorId("role")} message={errors.role} />
       </div>
+      <div className="sm:col-span-2">
+        <ColourField
+          value={colour}
+          onChange={onColour}
+          fallbackKey={fallbackKey}
+          sampleText={name.trim() === "" ? "employee" : name}
+        />
+        <FieldError id={errorId("colour")} message={errors.colour} />
+      </div>
     </div>
   );
 }
@@ -196,6 +235,7 @@ export const ENTITY_TYPE_FIELDS = TYPE_FIELDS;
 function CreateTypeForm({ domainId }: { domainId: Id }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<EntityRole>("other");
+  const [colour, setColour] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -210,7 +250,7 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
     replace(problem ? { name: problem } : {});
     if (problem) return;
     try {
-      const created = await createType.mutateAsync({ domain_id: domainId, name, role });
+      const created = await createType.mutateAsync({ domain_id: domainId, name, role, colour });
       toast.success(`Entity type "${created.name}" created`);
       navigate(`/entity-types/${created.id}`);
     } catch (err) {
@@ -231,7 +271,9 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
         <EntityTypeFields
           name={name}
           role={role}
+          colour={colour}
           errors={errors}
+          fallbackKey={name}
           onName={(value) => {
             setName(value);
             if (errors.name) {
@@ -240,6 +282,7 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
             }
           }}
           onRole={setRole}
+          onColour={setColour}
         />
         <button
           type="submit"

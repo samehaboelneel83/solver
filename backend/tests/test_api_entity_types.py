@@ -39,7 +39,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
-from app.models.v1_domain import EntityType
+from app.models.v1_domain import AttributeDef, EntityType
 from app.seed import seed_admin
 
 
@@ -578,6 +578,347 @@ def test_database_check_rejects_invalid_name_on_a_direct_insert(domain_id):
     db = SessionLocal()
     try:
         db.add(EntityType(domain_id=domain_id, name="Employee"))
+        with pytest.raises(IntegrityError) as excinfo:
+            db.flush()
+        assert excinfo.value.orig.pgcode == "23514", excinfo.value.orig.pgcode
+    finally:
+        db.rollback()
+        db.close()
+
+
+# --- colour (Task 14b, user request (B)) -----------------------------------
+#
+# Migration 0009 added `colour text NULL CHECK (colour ~ '^#[0-9a-f]{6}$')`
+# to `entity_type` and `relationship_type`. The router shadows that CHECK
+# for the same reason it shadows the name pattern (Ruling 16): a plain
+# table CHECK arrives with `DETAIL = None` and `translate_db_error` maps it
+# to a generic 409, which is useless for a correctable field error.
+#
+# Uppercase is NORMALISED, not refused -- hex is case-insensitive
+# everywhere a user meets it (CSS, `<input type="color">`, every design
+# tool's copy button), so a 422 on `#AABBCC` refuses a value that is not
+# ambiguous. The lowercase form is a storage rule, and the request layer is
+# where a storage format is imposed. The tests below therefore assert the
+# stored value, not only the response body: a router that echoed the
+# lowercase form while storing the uppercase one would pass a
+# response-only assertion and then violate the CHECK for the next writer.
+
+
+def _stored_colour(entity_type_id: int) -> str | None:
+    """The colour as it actually sits in the database, read outside the
+    router that wrote it."""
+    db = SessionLocal()
+    try:
+        return db.get(EntityType, entity_type_id).colour
+    finally:
+        db.close()
+
+
+def test_create_entity_type_without_a_colour_leaves_it_null(auth_headers, domain_id):
+    client = TestClient(app)
+    created = _make_entity_type(client, auth_headers, domain_id, "employee")
+    assert created["colour"] is None
+    assert _stored_colour(created["id"]) is None
+
+
+def test_create_entity_type_accepts_a_lowercase_colour(auth_headers, domain_id):
+    client = TestClient(app)
+    created = _make_entity_type(client, auth_headers, domain_id, "employee", colour="#1f77b4")
+    assert created["colour"] == "#1f77b4"
+    assert _stored_colour(created["id"]) == "#1f77b4"
+
+
+@pytest.mark.parametrize(
+    "sent,stored",
+    [
+        ("#AABBCC", "#aabbcc"),
+        ("#AaBbCc", "#aabbcc"),
+        ("#FFFFFF", "#ffffff"),
+        ("#000000", "#000000"),
+    ],
+)
+def test_create_entity_type_normalises_colour_case(auth_headers, domain_id, sent, stored):
+    """The decision: normalise rather than refuse. The database only ever
+    holds the lowercase form, which is what the second assertion pins."""
+    client = TestClient(app)
+    created = _make_entity_type(client, auth_headers, domain_id, "employee", colour=sent)
+    assert created["colour"] == stored
+    assert _stored_colour(created["id"]) == stored
+
+
+@pytest.mark.parametrize(
+    "colour",
+    [
+        "aabbcc",
+        "#abc",
+        "#gggggg",
+        "#aabbccdd",
+        "#aabbc",
+        "#aabbcc\n",
+        " #aabbcc",
+        "#aabbcc ",
+        "",
+        "red",
+        "rgb(1,2,3)",
+    ],
+)
+def test_create_entity_type_rejects_a_malformed_colour(auth_headers, domain_id, colour):
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/entity-types",
+        json={"domain_id": domain_id, "name": "employee", "colour": colour},
+        headers=auth_headers,
+    )
+    detail = _validation_errors(response)
+    _assert_blames_field(detail, "colour")
+
+
+def test_update_entity_type_sets_normalises_and_clears_colour(auth_headers, domain_id):
+    client = TestClient(app)
+    created = _make_entity_type(client, auth_headers, domain_id, "employee")
+
+    set_response = client.patch(
+        f"/api/v1/entity-types/{created['id']}",
+        json={"colour": "#FF8800"},
+        headers=auth_headers,
+    )
+    assert set_response.status_code == 200, set_response.text
+    assert set_response.json()["colour"] == "#ff8800"
+    assert _stored_colour(created["id"]) == "#ff8800"
+
+    # An omitted key means "unchanged" -- renaming must not drop the colour.
+    renamed = client.patch(
+        f"/api/v1/entity-types/{created['id']}", json={"name": "worker"}, headers=auth_headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["colour"] == "#ff8800"
+
+    # An explicit null clears it -- that is the only way back to "no colour".
+    cleared = client.patch(
+        f"/api/v1/entity-types/{created['id']}", json={"colour": None}, headers=auth_headers
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["colour"] is None
+    assert _stored_colour(created["id"]) is None
+
+
+def test_update_entity_type_rejects_a_malformed_colour(auth_headers, domain_id):
+    client = TestClient(app)
+    created = _make_entity_type(client, auth_headers, domain_id, "employee", colour="#1f77b4")
+    response = client.patch(
+        f"/api/v1/entity-types/{created['id']}", json={"colour": "#nope"}, headers=auth_headers
+    )
+    _assert_blames_field(_validation_errors(response), "colour")
+    # ... and the stored value is untouched.
+    assert _stored_colour(created["id"]) == "#1f77b4"
+
+
+def test_list_and_get_entity_types_carry_colour(auth_headers, domain_id):
+    client = TestClient(app)
+    employee = _make_entity_type(client, auth_headers, domain_id, "employee", colour="#1f77b4")
+    _make_entity_type(client, auth_headers, domain_id, "shift", role="time")
+
+    listed = client.get(f"/api/v1/entity-types?domain_id={domain_id}", headers=auth_headers)
+    assert listed.status_code == 200, listed.text
+    by_name = {row["name"]: row["colour"] for row in listed.json()["items"]}
+    assert by_name == {"employee": "#1f77b4", "shift": None}
+
+    fetched = client.get(f"/api/v1/entity-types/{employee['id']}", headers=auth_headers)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["colour"] == "#1f77b4"
+
+
+def test_database_check_still_rejects_an_uppercase_colour_on_a_direct_insert(domain_id):
+    """The router normalising is not the same as the CHECK being gone: the
+    seed, a migration or psql still get refused, which is what keeps
+    "lowercase only" true for every consumer."""
+    db = SessionLocal()
+    try:
+        db.add(EntityType(domain_id=domain_id, name="employee", colour="#AABBCC"))
+        with pytest.raises(IntegrityError) as excinfo:
+            db.flush()
+        assert excinfo.value.orig.pgcode == "23514", excinfo.value.orig.pgcode
+    finally:
+        db.rollback()
+        db.close()
+
+
+# --- rule 8 shadowed: default_value must match data_type (Task 14a carry) --
+#
+# Migration 0009's `attribute_def_default_value_matches_type` CHECK judges a
+# non-NULL `default_value` with `attr_value_matches_type(data_type,
+# enum_values, default_value)` -- the same judgement `entity_validate`
+# applies to a stored attribute. Unshadowed it arrives as a generic 409
+# naming a constraint, which tells a client nothing about which field to
+# fix. These tests pin the 422 and the field, and the accepted half pins
+# that `0` and `false` -- both falsy, both legal values -- are NOT refused
+# by whatever "is there a default?" test the router uses.
+
+
+@pytest.mark.parametrize(
+    "data_type,default_value,extra",
+    [
+        ("integer", 0, {}),
+        ("integer", 5, {}),
+        ("integer", -3, {}),
+        # jsonb `5.0` has no fractional part, which is what the SQL function
+        # tests -- not the JSON spelling.
+        ("integer", 5.0, {}),
+        ("number", 0, {}),
+        ("number", 2.5, {}),
+        ("number", -0.5, {}),
+        ("boolean", False, {}),
+        ("boolean", True, {}),
+        ("text", "", {}),
+        ("text", "banana", {}),
+        ("time", "08:00", {}),
+        ("date", "2026-01-01", {}),
+        ("enum", "active", {"enum_values": ["active", "leave"]}),
+    ],
+)
+def test_attribute_default_value_accepts_a_matching_value(
+    auth_headers, domain_id, data_type, default_value, extra
+):
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    created = _make_attribute(
+        client,
+        auth_headers,
+        entity_type["id"],
+        "field",
+        data_type,
+        default_value=default_value,
+        **extra,
+    )
+    assert created["default_value"] == default_value
+
+
+@pytest.mark.parametrize(
+    "data_type,default_value,extra",
+    [
+        ("integer", 2.5, {}),
+        ("integer", "5", {}),
+        ("integer", True, {}),
+        ("number", "2.5", {}),
+        ("number", False, {}),
+        ("boolean", "true", {}),
+        ("boolean", 1, {}),
+        ("boolean", 0, {}),
+        ("text", 5, {}),
+        ("text", True, {}),
+        ("text", ["a"], {}),
+        ("time", 7, {}),
+        ("date", False, {}),
+        ("enum", "retired", {"enum_values": ["active", "leave"]}),
+        ("enum", 1, {"enum_values": ["active", "leave"]}),
+    ],
+)
+def test_attribute_default_value_rejects_a_mismatched_value(
+    auth_headers, domain_id, data_type, default_value, extra
+):
+    """A 422 naming `default_value`, not the 409 the bare CHECK produces."""
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    response = client.post(
+        f"/api/v1/entity-types/{entity_type['id']}/attributes",
+        json={"name": "field", "data_type": data_type, "default_value": default_value, **extra},
+        headers=auth_headers,
+    )
+    _assert_blames_field(_validation_errors(response), "default_value")
+
+
+def test_attribute_default_value_null_means_no_default(auth_headers, domain_id):
+    """Ruling 18's path: an explicit `null` is SQL NULL, i.e. "no default",
+    and must not be judged against the data type."""
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    created = _make_attribute(
+        client, auth_headers, entity_type["id"], "rank", "integer", default_value=None
+    )
+    assert created["default_value"] is None
+
+
+def test_patching_data_type_rejudges_the_stored_default(auth_headers, domain_id):
+    """The CHECK is on the row, not the payload: a PATCH naming only
+    `data_type` still has to be judged against the stored `default_value`
+    (the same reasoning as `_check_enum_pairing`)."""
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    attribute = _make_attribute(
+        client, auth_headers, entity_type["id"], "grade", "text", default_value="banana"
+    )
+    response = client.patch(
+        f"/api/v1/attributes/{attribute['id']}",
+        json={"data_type": "integer"},
+        headers=auth_headers,
+    )
+    _assert_blames_field(_validation_errors(response), "default_value")
+
+    # The legal version of the same move is still allowed.
+    ok = client.patch(
+        f"/api/v1/attributes/{attribute['id']}",
+        json={"data_type": "integer", "default_value": 3},
+        headers=auth_headers,
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["default_value"] == 3
+
+
+def test_patching_enum_values_rejudges_the_stored_default(auth_headers, domain_id):
+    """Dropping the value the default names orphans it; the CHECK catches
+    that because `enum_values` is one of its inputs, and so must this."""
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    attribute = _make_attribute(
+        client,
+        auth_headers,
+        entity_type["id"],
+        "status",
+        "enum",
+        enum_values=["active", "leave"],
+        default_value="leave",
+    )
+    response = client.patch(
+        f"/api/v1/attributes/{attribute['id']}",
+        json={"enum_values": ["active"]},
+        headers=auth_headers,
+    )
+    _assert_blames_field(_validation_errors(response), "default_value")
+
+
+def test_patching_only_the_default_is_judged_against_the_stored_type(auth_headers, domain_id):
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    attribute = _make_attribute(client, auth_headers, entity_type["id"], "rank", "integer")
+    response = client.patch(
+        f"/api/v1/attributes/{attribute['id']}",
+        json={"default_value": "banana"},
+        headers=auth_headers,
+    )
+    _assert_blames_field(_validation_errors(response), "default_value")
+
+    accepted = client.patch(
+        f"/api/v1/attributes/{attribute['id']}", json={"default_value": 0}, headers=auth_headers
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["default_value"] == 0
+
+
+def test_database_check_still_rejects_a_mismatched_default_on_a_direct_insert(
+    auth_headers, domain_id
+):
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    db = SessionLocal()
+    try:
+        db.add(
+            AttributeDef(
+                entity_type_id=entity_type["id"],
+                name="rank",
+                data_type="integer",
+                default_value="banana",
+            )
+        )
         with pytest.raises(IntegrityError) as excinfo:
             db.flush()
         assert excinfo.value.orig.pgcode == "23514", excinfo.value.orig.pgcode

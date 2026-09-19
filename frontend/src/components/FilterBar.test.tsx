@@ -7,8 +7,8 @@ import type { FilterState } from "./FilterBar";
 // the SAME string (Task 7's mapping). A fixture where they differ would let
 // "{name} ({code})" pass as "Unit (unit)" and never show the real defect.
 const entityTypes = [
-  { id: "1", code: "employee", name: "employee", is_abstract: false },
-  { id: "2", code: "unit", name: "unit", is_abstract: false },
+  { id: "1", code: "employee", name: "employee", is_abstract: false, colour: null },
+  { id: "2", code: "unit", name: "unit", is_abstract: false, colour: "#1f77b4" },
 ];
 
 const edges = [{ id: "r1", source: "e1", target: "e2", type: "works_for", label: "Works For", attributes: {} }];
@@ -86,9 +86,9 @@ describe("FilterBar", () => {
 
   it("lists types alphabetically by name regardless of the entityTypes order given (F-6)", () => {
     const unordered = [
-      { id: "3", code: "zebra_type", name: "zebra_type", is_abstract: false },
-      { id: "1", code: "alpha_type", name: "alpha_type", is_abstract: false },
-      { id: "2", code: "mid_type", name: "mid_type", is_abstract: false },
+      { id: "3", code: "zebra_type", name: "zebra_type", is_abstract: false, colour: null },
+      { id: "1", code: "alpha_type", name: "alpha_type", is_abstract: false, colour: null },
+      { id: "2", code: "mid_type", name: "mid_type", is_abstract: false, colour: null },
     ];
     render(
       <FilterBar

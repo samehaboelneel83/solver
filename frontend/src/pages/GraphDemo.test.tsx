@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GraphDemo from "./GraphDemo";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
+import { GRAPH_MODE_STORAGE_KEY } from "../hooks/useGraphMode";
 
 const { mockCytoscape, registeredHandlersRef } = vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
@@ -51,8 +52,8 @@ const GRAPH = {
   ],
   edges: [],
   entity_types: [
-    { id: "1", code: "employee", name: "employee", is_abstract: false },
-    { id: "2", code: "unit", name: "unit", is_abstract: false },
+    { id: "1", code: "employee", name: "employee", is_abstract: false, colour: "#1f77b4" },
+    { id: "2", code: "unit", name: "unit", is_abstract: false, colour: null },
   ],
   relationship_types: [],
   hierarchies: [{ id: "5", code: "reports_to", name: "reports_to" }],
@@ -66,11 +67,12 @@ const ENTITY_TYPES = {
       domain_id: 1,
       name: "employee",
       role: "agent",
+      colour: "#1f77b4",
       attributes: [
         { id: 13, entity_type_id: 1, name: "grade", data_type: "integer", required: false, unit: null, enum_values: null, default_value: null },
       ],
     },
-    { id: 2, domain_id: 1, name: "unit", role: "org", attributes: [] },
+    { id: 2, domain_id: 1, name: "unit", role: "org", colour: null, attributes: [] },
   ],
   total: 2,
 };
@@ -85,6 +87,7 @@ const HIERARCHY_TYPES = {
       to_type_id: 2,
       cardinality: "one_to_many",
       is_hierarchy: true,
+      colour: null,
     },
   ],
   total: 1,
@@ -99,7 +102,22 @@ function stubApi() {
   (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
     if (options?.method && options.method !== "GET") return Promise.resolve({});
     if (path.startsWith("/api/v1/graph")) return Promise.resolve(GRAPH);
+    // The LIST route and the single-row route are different answers; a stub
+    // that returned the list for both would let a panel reading `.name` off
+    // a page object look like it worked.
+    const singleType = /^\/api\/v1\/entity-types\/(\d+)$/.exec(path);
+    if (singleType) {
+      return Promise.resolve(
+        ENTITY_TYPES.items.find((item) => String(item.id) === singleType[1]) ?? {}
+      );
+    }
     if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(ENTITY_TYPES);
+    const singleRelType = /^\/api\/v1\/relationship-types\/(\d+)$/.exec(path);
+    if (singleRelType) {
+      return Promise.resolve(
+        HIERARCHY_TYPES.items.find((item) => String(item.id) === singleRelType[1]) ?? {}
+      );
+    }
     if (path.startsWith("/api/v1/relationship-types")) return Promise.resolve(HIERARCHY_TYPES);
     if (path.startsWith("/api/v1/entities/")) {
       return Promise.resolve(ENTITIES[path.split("/").pop() as string] ?? {});
@@ -130,6 +148,7 @@ describe("GraphDemo", () => {
     mockCytoscape.mockClear();
     registeredHandlersRef.current = {};
     localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
+    localStorage.removeItem(GRAPH_MODE_STORAGE_KEY);
     (apiFetch as any).mockReset();
     stubApi();
   });
@@ -240,5 +259,141 @@ describe("GraphDemo", () => {
       await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
       expect(screen.getByText(/select a node or edge/i)).toBeInTheDocument();
     });
+  });
+});
+
+// --- Task 14b: the types/objects toggle, its URL and its persistence -----
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname + location.search}</div>;
+}
+
+function renderAt(initialEntries: string[] = ["/graph"]) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <GraphDemo />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+describe("GraphDemo view mode", () => {
+  beforeEach(() => {
+    mockCytoscape.mockClear();
+    registeredHandlersRef.current = {};
+    localStorage.clear();
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
+    (apiFetch as any).mockReset();
+    stubApi();
+  });
+
+  it("opens in the objects view and leaves the URL alone", async () => {
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-objects")).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/graph");
+    expect(screen.getByTestId("location").textContent).not.toContain("mode=");
+    expect(graphCalls().length).toBeGreaterThan(0);
+  });
+
+  it("puts the view in the URL when it is switched, so it can be linked", async () => {
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("graph-mode-types"));
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/graph?mode=types"));
+    expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true");
+    // `objects` is the default and leaves no parameter, so every existing
+    // link keeps working.
+    fireEvent.click(screen.getByTestId("graph-mode-objects"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).not.toContain("mode="));
+  });
+
+  it("honours ?mode=types on arrival and stops asking for the objects graph", async () => {
+    renderAt(["/graph?mode=types"]);
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true"));
+    // The types view is built from the two type lists, not from /api/v1/graph.
+    expect(graphCalls()).toHaveLength(0);
+    const typeCalls = (apiFetch as any).mock.calls
+      .map((call: any[]) => String(call[0]))
+      .filter((path: string) => path.startsWith("/api/v1/entity-types"));
+    expect(typeCalls.length).toBeGreaterThan(0);
+  });
+
+  it("ignores a mode it does not recognise rather than drawing nothing", async () => {
+    renderAt(["/graph?mode=schema"]);
+    await waitFor(() => expect(screen.getByTestId("graph-mode-objects")).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("remembers the view across a reload", async () => {
+    // A real reload: nothing but localStorage survives it, and this render
+    // has no `?mode=` to fall back on.
+    const first = renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("graph-mode-types"));
+    await waitFor(() => expect(localStorage.getItem(GRAPH_MODE_STORAGE_KEY)).toBe("types"));
+    first.unmount();
+
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/graph?mode=types");
+  });
+
+  it("a link's ?mode= wins over the stored choice, and is then stored", async () => {
+    localStorage.setItem(GRAPH_MODE_STORAGE_KEY, "objects");
+    renderAt(["/graph?mode=types"]);
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => expect(localStorage.getItem(GRAPH_MODE_STORAGE_KEY)).toBe("types"));
+  });
+
+  it("a ?focus= deep link lands in the objects view even if types was stored (Ruling 31)", async () => {
+    localStorage.setItem(GRAPH_MODE_STORAGE_KEY, "types");
+    renderAt(["/graph?focus=2"]);
+
+    await waitFor(() => expect(screen.getByTestId("graph-mode-objects")).toHaveAttribute("aria-pressed", "true"));
+    // The link still does what Ruling 31 restored: one graph request, the
+    // focused entity selected, and the parameter consumed.
+    expect(graphCalls()).toContain("/api/v1/graph?domain_id=1");
+    await waitFor(() => expect(screen.getByLabelText(/^Label/)).toHaveValue("Ahmed Z"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).not.toContain("focus="));
+  });
+
+  it("a ?focus= link beats an explicit ?mode=types, because what it focuses is an entity", async () => {
+    renderAt(["/graph?focus=2&mode=types"]);
+    await waitFor(() => expect(screen.getByTestId("graph-mode-objects")).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => expect(screen.getByLabelText(/^Label/)).toHaveValue("Ahmed Z"));
+  });
+
+  it("still consumes ?domain= alongside the view (Ruling 31)", async () => {
+    renderAt(["/graph?domain=2&mode=types"]);
+    await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => expect(localStorage.getItem(DOMAIN_STORAGE_KEY)).toBe("2"));
+    await waitFor(() => expect(screen.getByTestId("location").textContent).not.toContain("domain="));
+    expect(screen.getByTestId("location")).toHaveTextContent("mode=types");
+  });
+
+  it("filters by ROLE in the types view and by entity type in the objects view", async () => {
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("filter-types-toggle")).toHaveTextContent("Types: 2 of 2"));
+
+    fireEvent.click(screen.getByTestId("graph-mode-types"));
+    // The fixture's two entity types have different roles (agent, org), so
+    // the count is the same but the noun -- and what a checkbox means --
+    // is not.
+    await waitFor(() => expect(screen.getByTestId("filter-types-toggle")).toHaveTextContent("Roles: 2 of 2"));
+    fireEvent.click(screen.getByTestId("filter-types-toggle"));
+    expect(screen.getByTestId("filter-type-agent")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-type-org")).toBeInTheDocument();
+    expect(screen.queryByTestId("filter-type-employee")).not.toBeInTheDocument();
+  });
+
+  it("opens the entity type's panel when a types node is tapped", async () => {
+    renderAt(["/graph?mode=types"]);
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    registeredHandlersRef.current["tap:node"]({ target: { id: () => "type-1" } });
+    expect(await screen.findByTestId("entity-type-panel")).toHaveTextContent("employee");
   });
 });

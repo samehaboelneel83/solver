@@ -51,13 +51,13 @@ one trigger *on* `entity_type` -- `entity_type_guard` -- but it judges
 DELETEs and domain moves, not the column values this section is about; see
 the DELETE route below.)
 
-Migration 0009 also added two CHECKs this router does not shadow, so both
-reach the client as that generic 409: `attribute_def_enum_values_not_empty`
-(an `enum` with an empty list) and
-`attribute_def_default_value_matches_type` (a `default_value` that its own
-`data_type` would reject -- Task 11's editor is what gives a user a
-readable message today). Shadowing the second one here would be the single
-biggest improvement to this router's error surface.
+Migration 0009 added three more CHECKs. Two are shadowed here, so they are
+422s naming their field: `attribute_def_default_value_matches_type` (a
+`default_value` its own `data_type` would reject -- Task 14b, restated as
+`_check_default_value`) and the `colour ~ '^#[0-9a-f]{6}$'` pattern on
+`entity_type.colour` (`app.api.validation.validate_colour`, which also
+normalises case). One is not: `attribute_def_enum_values_not_empty` (an
+`enum` whose list is empty) still reaches the client as the generic 409.
 
 The cost is that this router no longer reaches those CHECKs. They remain
 the backstop for every other writer -- the seed, a migration, psql, a
@@ -75,7 +75,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.api.validation import field_error, validate_name
+from app.api.validation import field_error, validate_colour, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
@@ -129,6 +129,78 @@ def _check_enum_pairing(data_type: str, enum_values: list[str] | None) -> None:
         )
 
 
+def _default_value_matches(data_type: str, enum_values: list[str] | None, value: Any) -> bool:
+    """`attr_value_matches_type(data_type, enum_values, value)` from
+    migration 0009, restated in Python.
+
+    The SQL function judges the **jsonb** value, so the branches here are
+    about JSON types, not Python ones -- which is why `bool` is excluded
+    from the numeric branches: `jsonb_typeof(true)` is `'boolean'`, while
+    in Python `isinstance(True, int)` is True and an integer attribute
+    would silently accept `true`.
+    """
+    if isinstance(value, bool):
+        # Settled first, so the two numeric branches below cannot see it.
+        return data_type == "boolean"
+    if data_type == "boolean":
+        return False
+    if data_type in ("integer", "number"):
+        if not isinstance(value, (int, float)):
+            return False
+        # `'integer'` in SQL is `(value)::numeric % 1 = 0`, i.e. a whole
+        # number however it was spelled -- `5.0` passes, `2.5` does not.
+        return data_type == "number" or (value % 1 == 0)
+    if data_type == "enum":
+        return isinstance(value, str) and value in (enum_values or [])
+    # text, time and date are all `jsonb_typeof(value) = 'string'` in the
+    # SQL function's ELSE branch. It does not parse a time or a date, and
+    # neither does this: shadowing a CHECK more strictly than the CHECK
+    # would refuse values the database accepts from every other writer.
+    return isinstance(value, str)
+
+
+def _check_default_value(
+    data_type: str, enum_values: list[str] | None, default_value: Any
+) -> None:
+    """``CHECK (default_value IS NULL OR attr_value_matches_type(...))``
+    (migration 0009, Ruling 32 rule 8), shadowed here so a wrong default is
+    a **422 naming `default_value`** instead of the generic 409 a bare
+    CHECK produces -- Task 14a carried this over explicitly.
+
+    Judged on the merged row for the same reason as
+    :func:`_check_enum_pairing`: a PATCH naming only `data_type` still has
+    to be judged against the stored default, and a PATCH dropping a value
+    from `enum_values` can orphan one.
+
+    `None` is *not* a candidate: it is SQL NULL, i.e. "no default", which
+    the CHECK's own first branch exempts. Note the explicit `is None` --
+    `if not default_value` would refuse `0` and `false`, which are ordinary
+    legal defaults (Task 12's falsy round-trip).
+    """
+    if default_value is None:
+        return
+    if _default_value_matches(data_type, enum_values, default_value):
+        return
+    if data_type == "enum":
+        allowed = ", ".join(repr(v) for v in (enum_values or [])) or "(none listed)"
+        message = f"an enum attribute's default must be one of its allowed values: {allowed}"
+    else:
+        message = (
+            f"a default for a {data_type!r} attribute must be a {_DEFAULT_SHAPE[data_type]}"
+        )
+    raise field_error("default_value", message, default_value)
+
+
+_DEFAULT_SHAPE = {
+    "integer": "whole number",
+    "number": "number",
+    "boolean": "true or false",
+    "text": "string",
+    "time": "string",
+    "date": "string",
+}
+
+
 # --- schemas ---------------------------------------------------------------
 
 
@@ -176,6 +248,10 @@ class EntityTypeRead(BaseModel):
     domain_id: int
     name: str
     role: EntityRole
+    # Migration 0009. NULL means "not chosen": the graph assigns a
+    # deterministic fallback, and inventing one here would make "no colour"
+    # unexpressible on the wire.
+    colour: str | None
     # A type and its attributes are edited as one thing, so the read model
     # carries both -- on the list route too, which is what lets the UI show
     # "employee (3 attributes)" without an N+1 of follow-up requests.
@@ -187,15 +263,23 @@ class EntityTypeCreate(BaseModel):
     name: str
     # Mirrors the column's server default, so the field can be omitted.
     role: EntityRole = "other"
+    colour: str | None = None
 
     _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
 
 
 class EntityTypeUpdate(BaseModel):
+    """`model_dump(exclude_unset=True)` is what distinguishes "not
+    supplied" from an explicit `null`, which is the only way to clear a
+    colour."""
+
     name: str | None = None
     role: EntityRole | None = None
+    colour: str | None = None
 
     _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
 
 
 class EntityTypeList(BaseModel):
@@ -230,6 +314,7 @@ def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityType
         domain_id=entity_type.domain_id,
         name=entity_type.name,
         role=entity_type.role,
+        colour=entity_type.colour,
         attributes=[AttributeDefRead.model_validate(a) for a in attributes],
     )
 
@@ -373,6 +458,7 @@ def create_attribute(
 ) -> AttributeDefRead:
     _get_entity_type(db, entity_type_id)
     _check_enum_pairing(payload.data_type, payload.enum_values)
+    _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
     attribute = AttributeDef(entity_type_id=entity_type_id, **payload.model_dump())
     db.add(attribute)
     _commit(db, "attribute_def")
@@ -391,9 +477,15 @@ def update_attribute(
     changes = payload.model_dump(exclude_unset=True)
     # The pairing CHECK is on the row, not the payload: judge the values the
     # row will have once this patch is applied, not the ones it names.
-    _check_enum_pairing(
-        changes.get("data_type", attribute.data_type),
-        changes["enum_values"] if "enum_values" in changes else attribute.enum_values,
+    merged_data_type = changes.get("data_type", attribute.data_type)
+    merged_enum_values = (
+        changes["enum_values"] if "enum_values" in changes else attribute.enum_values
+    )
+    _check_enum_pairing(merged_data_type, merged_enum_values)
+    _check_default_value(
+        merged_data_type,
+        merged_enum_values,
+        changes["default_value"] if "default_value" in changes else attribute.default_value,
     )
     for field, value in changes.items():
         setattr(attribute, field, value)

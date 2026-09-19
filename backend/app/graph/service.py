@@ -19,9 +19,11 @@ list of `is_hierarchy` relationship types in the domain, whose ids are
 what `hierarchy_type_id` takes back.
 
 The wire contract (`app/graph/schemas.py`, mirrored by
-`frontend/src/types/graph.ts`) is deliberately unchanged, because task 14
-owns the frontend types and changing them here would break that
-sequencing. Four of its fields have no v1 column behind them, so the
+`frontend/src/types/graph.ts`) was deliberately unchanged through task 14,
+which owned the frontend types. Task 14b adds exactly one field to each of
+the two type-option models -- `colour` -- because the user asked for
+behaviour the old contract cannot express; `frontend/src/types/graph.ts`
+moved with it. Everything else below is as task 7 mapped it. Four of its fields have no v1 column behind them, so the
 mapping below is a decision rather than a translation. Stated once, here,
 because a wrong choice renders wrong labels in the UI without failing any
 backend test:
@@ -38,10 +40,14 @@ EntityTypeOption.code      entity_type.name -- v1's machine identifier
 EntityTypeOption.name      entity_type.name -- v1 has no separate label
 EntityTypeOption.is_abstract  **hardcoded False**: v1 dropped the column and
                            has no notion of a type that cannot be instantiated
+EntityTypeOption.colour    entity_type.colour (migration 0009) -- lowercase
+                           '#rrggbb' or None. Task 14b; the one field Task 7
+                           could not map because the column did not exist
 RelationshipTypeOption.code / .name     relationship_type.name
 RelationshipTypeOption.is_directed      **hardcoded True**: every v1
                            relationship is directed (from -> to), which is
                            what the hierarchy and cardinality rules read
+RelationshipTypeOption.colour           relationship_type.colour, as above
 RelationshipTypeOption.source_entity_type / .target_entity_type
                            entity_type.name of from_type_id / to_type_id.
                            NOT NULL in v1, so never v0's nullable "any"
@@ -228,6 +234,7 @@ def get_domain_graph(
                 code=et.name,
                 name=et.name,
                 is_abstract=False,
+                colour=et.colour,
             )
             for et in entity_types
         ],
@@ -239,6 +246,7 @@ def get_domain_graph(
                 is_directed=True,
                 source_entity_type=_type_name(rt.from_type_id),
                 target_entity_type=_type_name(rt.to_type_id),
+                colour=rt.colour,
             )
             for rt in relationship_types
         ],

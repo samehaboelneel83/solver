@@ -1,7 +1,15 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 import { formatApiError } from "./errors";
-import { validationErrors, type Id } from "./v1";
+import { useEntityTypes, useRelationshipTypes, validationErrors, type Id } from "./v1";
+import {
+  EMPTY_PALETTE,
+  buildTypesView,
+  objectsPalette,
+  type GraphMode,
+  type GraphPalette,
+} from "../lib/typesGraph";
 import type { GraphResponse } from "../types/graph";
 
 /**
@@ -32,12 +40,98 @@ export function graphQueryKey(domainId: Id | null, hierarchyTypeId: Id | null) {
   return ["v1", "graph", domainId, hierarchyTypeId] as const;
 }
 
-export function useGraph(domainId: Id | null, hierarchyTypeId: Id | null) {
+export function useGraph(
+  domainId: Id | null,
+  hierarchyTypeId: Id | null,
+  options: { enabled?: boolean } = {}
+) {
   return useQuery({
     queryKey: graphQueryKey(domainId, hierarchyTypeId),
     queryFn: () => apiFetch<GraphResponse>(graphQueryPath(domainId as Id, hierarchyTypeId)),
-    enabled: domainId !== null && domainId !== undefined,
+    // `enabled` is how the types view avoids requesting a graph it will not
+    // draw -- see `useGraphView`.
+    enabled: domainId !== null && domainId !== undefined && options.enabled !== false,
   });
+}
+
+/** What both halves of the graph page consume, whichever mode is showing:
+ * the same `GraphResponse` shape plus the colours to draw it in. Shaped
+ * like a React Query result so the page's loading/offline/error branches
+ * did not have to grow a second set. */
+export type GraphView = {
+  data: GraphResponse | undefined;
+  palette: GraphPalette;
+  isLoading: boolean;
+  error: Error | null;
+  fetchStatus: "fetching" | "paused" | "idle";
+  refetch: () => void;
+};
+
+/**
+ * The graph for `mode`.
+ *
+ * **Objects** is `GET /api/v1/graph`, unchanged. **Types** is built on the
+ * client from `useEntityTypes` and `useRelationshipTypes` -- the brief's
+ * "no new endpoint", and correct rather than merely cheap: those two
+ * queries are already in flight for the create-node form and the property
+ * panel, React Query serves them once, and every mutation that changes a
+ * type already invalidates them, so the schema view refreshes itself.
+ *
+ * Both hooks are called unconditionally (rules of hooks); only the
+ * inactive one's `enabled` is false, so the mode that is not showing costs
+ * no request.
+ */
+export function useGraphView(
+  domainId: Id | null,
+  hierarchyTypeId: Id | null,
+  mode: GraphMode
+): GraphView {
+  const isTypes = mode === "types";
+  const objects = useGraph(domainId, hierarchyTypeId, { enabled: !isTypes });
+  const entityTypes = useEntityTypes(domainId, { limit: 500 }, { enabled: isTypes });
+  const relationshipTypes = useRelationshipTypes(domainId, { limit: 500 }, { enabled: isTypes });
+
+  const objectsData = objects.data;
+  const typeItems = entityTypes.data?.items;
+  const relationshipItems = relationshipTypes.data?.items;
+
+  const built = useMemo(
+    () => (typeItems && relationshipItems ? buildTypesView(typeItems, relationshipItems) : null),
+    [typeItems, relationshipItems]
+  );
+  const objectsColours = useMemo(
+    () => (objectsData ? objectsPalette(objectsData) : null),
+    [objectsData]
+  );
+
+  if (!isTypes) {
+    return {
+      data: objectsData,
+      palette: objectsColours ?? EMPTY_PALETTE,
+      isLoading: objects.isLoading,
+      error: objects.error,
+      fetchStatus: objects.fetchStatus,
+      refetch: () => void objects.refetch(),
+    };
+  }
+  return {
+    data: built?.graph,
+    palette: built?.palette ?? EMPTY_PALETTE,
+    isLoading: entityTypes.isLoading || relationshipTypes.isLoading,
+    error: entityTypes.error ?? relationshipTypes.error ?? null,
+    // Offline, React Query pauses rather than fails; the page needs to know
+    // that about whichever query is actually paused.
+    fetchStatus:
+      entityTypes.fetchStatus === "paused" || relationshipTypes.fetchStatus === "paused"
+        ? "paused"
+        : entityTypes.fetchStatus === "fetching" || relationshipTypes.fetchStatus === "fetching"
+          ? "fetching"
+          : "idle",
+    refetch: () => {
+      void entityTypes.refetch();
+      void relationshipTypes.refetch();
+    },
+  };
 }
 
 /** The fields a relationship write actually carries in its body. Anything

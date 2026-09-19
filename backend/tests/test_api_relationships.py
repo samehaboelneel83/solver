@@ -38,10 +38,12 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
+from app.models.v1_domain import RelationshipType
 from app.seed import seed_admin
 
 
@@ -1280,3 +1282,223 @@ def test_a_relationship_type_straddling_domains_is_refused_so_no_graph_can_see_o
     assert [n["id"] for n in graph["nodes"]] == [str(mine)]
     assert "covers" not in [rt["code"] for rt in graph["relationship_types"]]
     assert graph["edges"] == []
+
+
+# --- colour on relationship_type, and colour in the graph payload ----------
+#
+# Task 14b. The same shadowed CHECK as `entity_type.colour`, and the same
+# decision (normalise case rather than refuse it); see
+# `test_api_entity_types.py` for the reasoning, which is not repeated here.
+#
+# The graph half is the part Task 7 deliberately held: `EntityTypeOption`
+# and `RelationshipTypeOption` gain `colour`, because the canvas cannot
+# draw a type's colour from a payload that does not carry it. Every other
+# field of the contract stays exactly as Task 7 mapped it, which the
+# existing tests above still pin.
+
+
+def _stored_rel_colour(relationship_type_id: int) -> str | None:
+    db = SessionLocal()
+    try:
+        return db.get(RelationshipType, relationship_type_id).colour
+    finally:
+        db.close()
+
+
+def test_create_relationship_type_without_a_colour_leaves_it_null(
+    auth_headers, domain_id, types
+):
+    client = TestClient(app)
+    response = _make_rel_type(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["colour"] is None
+    assert _stored_rel_colour(response.json()["id"]) is None
+
+
+def test_create_relationship_type_accepts_and_normalises_a_colour(
+    auth_headers, domain_id, types
+):
+    client = TestClient(app)
+    response = _make_rel_type(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+        colour="#2CA02C",
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["colour"] == "#2ca02c"
+    assert _stored_rel_colour(response.json()["id"]) == "#2ca02c"
+
+
+@pytest.mark.parametrize(
+    "colour", ["2ca02c", "#2ca", "#zzzzzz", "#2ca02c2c", "#2ca02c\n", "", "green"]
+)
+def test_create_relationship_type_rejects_a_malformed_colour(
+    auth_headers, domain_id, types, colour
+):
+    client = TestClient(app)
+    response = _make_rel_type(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+        colour=colour,
+    )
+    _assert_blames_field(_validation_errors(response), "colour")
+
+
+def test_update_relationship_type_sets_and_clears_colour(auth_headers, domain_id, types):
+    client = TestClient(app)
+    rel_type_id = _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+    )
+    set_response = client.patch(
+        f"/api/v1/relationship-types/{rel_type_id}",
+        json={"colour": "#D62728"},
+        headers=auth_headers,
+    )
+    assert set_response.status_code == 200, set_response.text
+    assert set_response.json()["colour"] == "#d62728"
+    assert _stored_rel_colour(rel_type_id) == "#d62728"
+
+    renamed = client.patch(
+        f"/api/v1/relationship-types/{rel_type_id}",
+        json={"name": "employed_by"},
+        headers=auth_headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["colour"] == "#d62728"
+
+    cleared = client.patch(
+        f"/api/v1/relationship-types/{rel_type_id}", json={"colour": None}, headers=auth_headers
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["colour"] is None
+    assert _stored_rel_colour(rel_type_id) is None
+
+
+def test_update_relationship_type_rejects_a_malformed_colour(auth_headers, domain_id, types):
+    client = TestClient(app)
+    rel_type_id = _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+        colour="#2ca02c",
+    )
+    response = client.patch(
+        f"/api/v1/relationship-types/{rel_type_id}", json={"colour": "#nope"}, headers=auth_headers
+    )
+    _assert_blames_field(_validation_errors(response), "colour")
+    assert _stored_rel_colour(rel_type_id) == "#2ca02c"
+
+
+def test_list_relationship_types_carries_colour(auth_headers, domain_id, types):
+    client = TestClient(app)
+    _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+        colour="#2ca02c",
+    )
+    _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="covers",
+        from_type_id=types["unit"],
+        to_type_id=types["unit"],
+    )
+    listed = client.get(
+        f"/api/v1/relationship-types?domain_id={domain_id}", headers=auth_headers
+    )
+    assert listed.status_code == 200, listed.text
+    assert {row["name"]: row["colour"] for row in listed.json()["items"]} == {
+        "works_for": "#2ca02c",
+        "covers": None,
+    }
+
+
+def test_database_check_still_rejects_an_uppercase_relationship_colour(
+    auth_headers, domain_id, types
+):
+    db = SessionLocal()
+    try:
+        db.add(
+            RelationshipType(
+                domain_id=domain_id,
+                name="works_for",
+                from_type_id=types["employee"],
+                to_type_id=types["unit"],
+                colour="#2CA02C",
+            )
+        )
+        with pytest.raises(IntegrityError) as excinfo:
+            db.flush()
+        assert excinfo.value.orig.pgcode == "23514", excinfo.value.orig.pgcode
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_graph_type_options_carry_colour(auth_headers, domain_id, types):
+    """The wire change this task makes, pinned on both option lists and in
+    both directions: a set colour arrives, an unset one arrives as null
+    (not as an invented default -- the fallback is the canvas's job, and
+    inventing one here would make "no colour chosen" unexpressible)."""
+    client = TestClient(app)
+    client.patch(
+        f"/api/v1/entity-types/{types['unit']}", json={"colour": "#1f77b4"}, headers=auth_headers
+    )
+    _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="works_for",
+        from_type_id=types["employee"],
+        to_type_id=types["unit"],
+        colour="#2ca02c",
+    )
+    _rel_type_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="covers",
+        from_type_id=types["unit"],
+        to_type_id=types["unit"],
+    )
+
+    graph = _graph(client, auth_headers, domain_id)
+    assert {row["name"]: row["colour"] for row in graph["entity_types"]} == {
+        "unit": "#1f77b4",
+        "employee": None,
+    }
+    assert {row["name"]: row["colour"] for row in graph["relationship_types"]} == {
+        "works_for": "#2ca02c",
+        "covers": None,
+    }
+    # Task 7's mapping is unchanged around it.
+    unit = next(row for row in graph["entity_types"] if row["name"] == "unit")
+    assert unit["code"] == "unit" and unit["is_abstract"] is False

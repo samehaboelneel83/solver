@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityTypes from "./EntityTypes";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
+import { typeColour } from "../lib/colour";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -24,12 +25,14 @@ const TYPES = [
     domain_id: 7,
     name: "employee",
     role: "agent",
+    colour: "#1f77b4",
     attributes: [
       { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: false, unit: null, enum_values: null, default_value: 3 },
       { id: 12, entity_type_id: 5, name: "kind", data_type: "enum", required: false, unit: null, enum_values: ["a"], default_value: null },
     ],
   },
-  { id: 9, domain_id: 7, name: "shift", role: "time", attributes: [] },
+  // No colour: the list has to show both a chosen colour and "automatic".
+  { id: 9, domain_id: 7, name: "shift", role: "time", colour: null, attributes: [] },
 ];
 
 function LocationDisplay() {
@@ -128,7 +131,7 @@ describe("EntityTypes list page", () => {
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/entity-types/44"));
     const post = mockFetch.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === "POST");
     expect(post?.[0]).toBe("/api/v1/entity-types");
-    expect(JSON.parse(post?.[1].body as string)).toEqual({ domain_id: 7, name: "unit", role: "org" });
+    expect(JSON.parse(post?.[1].body as string)).toEqual({ domain_id: 7, name: "unit", role: "org", colour: null });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type "unit" created/i));
   });
 
@@ -185,5 +188,49 @@ describe("EntityTypes list page", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/^Role/)).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByLabelText(/^Name/)).not.toHaveAttribute("aria-invalid");
+  });
+
+  // --- Task 14b: colour --------------------------------------------------
+
+  it("shows each type's colour, and says which are automatic", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    mockFetch.mockResolvedValue({ items: TYPES, total: 2 });
+    renderPage();
+    await screen.findByRole("link", { name: "employee" });
+
+    // The swatch is decorative (aria-hidden); the text beside it is what a
+    // screen reader -- or anyone who cannot tell two swatches apart --
+    // actually reads.
+    expect(screen.getByTestId("type-swatch-employee")).toHaveStyle({ backgroundColor: "#1f77b4" });
+    expect(screen.getByTestId("type-swatch-shift")).toHaveStyle({
+      backgroundColor: typeColour({ id: "9", colour: null }),
+    });
+    expect(screen.getByText("#1f77b4")).toBeInTheDocument();
+    expect(screen.getByText("automatic")).toBeInTheDocument();
+  });
+
+  it("creates a type with the colour chosen on the form", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    mockFetch.mockImplementation((_path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve({ id: 44, name: "unit" });
+      return Promise.resolve({ items: TYPES, total: 2 });
+    });
+    renderPage();
+    await screen.findByRole("link", { name: "employee" });
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#B8860B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+
+    await waitFor(() => {
+      const post = mockFetch.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === "POST");
+      expect(post).toBeDefined();
+      expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({
+        domain_id: 7,
+        name: "unit",
+        role: "other",
+        colour: "#b8860b",
+      });
+    });
   });
 });

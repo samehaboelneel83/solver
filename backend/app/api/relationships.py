@@ -72,7 +72,7 @@ from app.api.deps import get_current_user
 # including the trailing-newline subtlety that `re.fullmatch` closes and
 # `re.match` on an anchored pattern does not. (Imported privately from
 # `entity_types` until Task 8 moved them to `validation`, per Ruling 22.)
-from app.api.validation import NAME_PATTERN, field_error, validate_name
+from app.api.validation import NAME_PATTERN, field_error, validate_colour, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
@@ -145,6 +145,9 @@ class RelationshipTypeRead(BaseModel):
     to_type_id: int
     cardinality: Cardinality
     is_hierarchy: bool
+    # Migration 0009. NULL means "not chosen"; the graph assigns a
+    # deterministic fallback rather than the wire inventing one.
+    colour: str | None
 
 
 class RelationshipTypeCreate(BaseModel):
@@ -155,8 +158,10 @@ class RelationshipTypeCreate(BaseModel):
     # Both mirror the column server defaults, so the payload may omit them.
     cardinality: Cardinality = "many_to_many"
     is_hierarchy: bool = False
+    colour: str | None = None
 
     _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
 
 
 class RelationshipTypeUpdate(BaseModel):
@@ -170,8 +175,10 @@ class RelationshipTypeUpdate(BaseModel):
     to_type_id: int | None = None
     cardinality: Cardinality | None = None
     is_hierarchy: bool | None = None
+    colour: str | None = None
 
     _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
 
 
 class RelationshipTypeList(BaseModel):

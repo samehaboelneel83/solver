@@ -39,6 +39,45 @@ def validate_name(value: str | None) -> str | None:
     return value
 
 
+# `entity_type.colour` and `relationship_type.colour` (migration 0009) carry
+# CHECK (colour ~ '^#[0-9a-f]{6}$') -- lowercase six-digit hex, so every
+# consumer can rely on one format and NULL unambiguously means "not chosen".
+#
+# The request layer accepts either case and **normalises** to lowercase
+# rather than refusing an uppercase value. Hex is case-insensitive
+# everywhere a user meets it -- CSS, `<input type="color">`, the copy button
+# of every design tool -- so `#AABBCC` is not an ambiguous or mistaken
+# value, and a 422 there would refuse something the user got right. The
+# lowercase spelling is a storage rule, and the request layer is where a
+# storage format is imposed; the CHECK stays as the backstop for every
+# writer that is not this API (the seed, a migration, psql), which
+# `test_api_entity_types.py` asserts still fires.
+#
+# The shorthand `#abc` is NOT expanded: expanding is a guess about intent,
+# and the message says what form is wanted instead. `re.fullmatch` for the
+# same reason as the name pattern -- Python's `$` also matches before a
+# trailing newline, Postgres's does not, so a colour with one would
+# otherwise pass here and be refused by the database as a confusing 409.
+COLOUR_PATTERN = "^#[0-9a-f]{6}$"
+_COLOUR_RE = re.compile(r"#[0-9a-fA-F]{6}")
+
+_COLOUR_MESSAGE = (
+    "must be a six-digit hex colour such as #1f77b4 (upper case is accepted "
+    "and stored lower case; the three-digit form is not)"
+)
+
+
+def validate_colour(value: str | None) -> str | None:
+    """Pydantic field validator for the `colour` CHECK. `None` passes
+    through: on create it means "no colour", on PATCH an explicit null
+    clears one and an omitted key leaves it alone."""
+    if value is None:
+        return value
+    if _COLOUR_RE.fullmatch(value) is None:
+        raise ValueError(_COLOUR_MESSAGE)
+    return value.lower()
+
+
 def field_error(field: str | list[str | int], message: str, value: Any) -> RequestValidationError:
     """Build a refusal in exactly the shape FastAPI's own body validation
     produces, so a caller (and `formatApiError` in the frontend) does not

@@ -2,7 +2,9 @@ import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import GraphEditor, { applyGraphToCy, positionsAreDegenerate } from "./GraphEditor";
+import { MemoryRouter } from "react-router-dom";
+import { fallbackColour, labelForeground } from "../lib/colour";
+import GraphEditor, { applyGraphToCy, graphStylesheet, positionsAreDegenerate } from "./GraphEditor";
 
 const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore } = vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
@@ -162,8 +164,11 @@ const GRAPH = {
   ],
   edges: [{ id: "10", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} }],
   entity_types: [
-    { id: "1", code: "employee", name: "employee", is_abstract: false },
-    { id: "2", code: "unit", name: "unit", is_abstract: false },
+    // Task 14b: `colour` on the wire. `employee` has one, `unit` does not,
+    // so both the stored path and the deterministic fallback are exercised
+    // by the same fixture.
+    { id: "1", code: "employee", name: "employee", is_abstract: false, colour: "#1f77b4" },
+    { id: "2", code: "unit", name: "unit", is_abstract: false, colour: null },
   ],
   relationship_types: [
     {
@@ -173,6 +178,7 @@ const GRAPH = {
       is_directed: true,
       source_entity_type: "unit",
       target_entity_type: "unit",
+      colour: "#2ca02c",
     },
     {
       id: "6",
@@ -181,6 +187,7 @@ const GRAPH = {
       is_directed: true,
       source_entity_type: "employee",
       target_entity_type: "unit",
+      colour: null,
     },
   ],
   hierarchies: [{ id: "5", code: "reports_to", name: "reports_to" }],
@@ -209,6 +216,7 @@ const ENTITY_TYPES = {
       domain_id: 1,
       name: "employee",
       role: "agent",
+      colour: "#1f77b4",
       // `code` and `status` are ordinary v1 attribute names. v0 hid them as
       // "built-in collisions"; v1 has no built-ins for them to collide with.
       attributes: [
@@ -222,6 +230,7 @@ const ENTITY_TYPES = {
       domain_id: 1,
       name: "unit",
       role: "org",
+      colour: null,
       // Shares the attribute NAME `code` with employee, which is what makes a
       // value typed for one type able to leak into the other's control.
       attributes: [
@@ -232,10 +241,34 @@ const ENTITY_TYPES = {
   total: 2,
 };
 
+// Task 14b: every relationship type in the domain, which is what the TYPES
+// view draws (the hierarchy-filtered list above is only the nesting
+// picker). Two of them on purpose: `reports_to` is a self-referencing
+// hierarchy -- a LOOP on `unit` -- and `works_for` runs employee -> unit.
+// With only the loop, a builder that swapped `from` and `to` would still
+// look right.
+const ALL_RELATIONSHIP_TYPES = {
+  items: [
+    { ...HIERARCHY_TYPES.items[0], colour: "#2ca02c" },
+    {
+      id: 6,
+      domain_id: 1,
+      name: "works_for",
+      from_type_id: 1,
+      to_type_id: 2,
+      cardinality: "many_to_one",
+      is_hierarchy: false,
+      colour: null,
+    },
+  ],
+  total: 2,
+};
+
 type Stub = {
   graph?: unknown;
   graphError?: unknown;
   relationshipTypes?: unknown;
+  allRelationshipTypes?: unknown;
   entityTypes?: unknown;
   write?: (path: string, options: RequestInit) => unknown;
 };
@@ -249,7 +282,14 @@ function stubApi(stub: Stub = {}) {
       return stub.graphError ? Promise.reject(stub.graphError) : Promise.resolve(stub.graph ?? GRAPH);
     }
     if (path.startsWith("/api/v1/relationship-types")) {
-      return Promise.resolve(stub.relationshipTypes ?? HIERARCHY_TYPES);
+      // The hierarchy picker asks with `is_hierarchy=true`; the types view
+      // asks for all of them. They are different lists and a fixture that
+      // returned one for both could not tell them apart.
+      return Promise.resolve(
+        path.includes("is_hierarchy")
+          ? (stub.relationshipTypes ?? HIERARCHY_TYPES)
+          : (stub.allRelationshipTypes ?? ALL_RELATIONSHIP_TYPES)
+      );
     }
     if (path.startsWith("/api/v1/entity-types")) {
       return Promise.resolve(stub.entityTypes ?? ENTITY_TYPES);
@@ -275,7 +315,16 @@ function client() {
 function renderWithProviders(props: Partial<ComponentProps<typeof GraphEditor>> = {}) {
   return render(
     <QueryClientProvider client={client()}>
-      <GraphEditor domainId={1} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} {...props} />
+      <MemoryRouter>
+        <GraphEditor
+          domainId={1}
+          mode="objects"
+          onModeChange={vi.fn()}
+          hierarchyTypeId={null}
+          onHierarchyTypeChange={vi.fn()}
+          {...props}
+        />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -631,14 +680,14 @@ describe("GraphEditor", () => {
     const queryClient = client();
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <GraphEditor domainId={1} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} onSelectionChange={first} />
+        <MemoryRouter><GraphEditor domainId={1} mode="objects" onModeChange={vi.fn()} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} onSelectionChange={first} /></MemoryRouter>
       </QueryClientProvider>
     );
     await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <GraphEditor domainId={1} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} onSelectionChange={second} />
+        <MemoryRouter><GraphEditor domainId={1} mode="objects" onModeChange={vi.fn()} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} onSelectionChange={second} /></MemoryRouter>
       </QueryClientProvider>
     );
 
@@ -810,12 +859,16 @@ describe("GraphEditor", () => {
     function view(focusRequest: { nodeId: string; token: number } | null) {
       return (
         <QueryClientProvider client={queryClient}>
-          <GraphEditor
-            domainId={1}
-            hierarchyTypeId={null}
-            onHierarchyTypeChange={vi.fn()}
-            focusRequest={focusRequest}
-          />
+          <MemoryRouter>
+            <GraphEditor
+              domainId={1}
+              mode="objects"
+              onModeChange={vi.fn()}
+              hierarchyTypeId={null}
+              onHierarchyTypeChange={vi.fn()}
+              focusRequest={focusRequest}
+            />
+          </MemoryRouter>
         </QueryClientProvider>
       );
     }
@@ -850,7 +903,7 @@ describe("GraphEditor", () => {
     const queryClient = client();
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <GraphEditor domainId={1} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} />
+        <MemoryRouter><GraphEditor domainId={1} mode="objects" onModeChange={vi.fn()} hierarchyTypeId={null} onHierarchyTypeChange={vi.fn()} /></MemoryRouter>
       </QueryClientProvider>
     );
     await waitFor(() => expect(mockCytoscapeInstance.add).toHaveBeenCalled());
@@ -858,16 +911,271 @@ describe("GraphEditor", () => {
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <GraphEditor
-          domainId={1}
-          hierarchyTypeId={null}
-          onHierarchyTypeChange={vi.fn()}
-          filter={{ selectedTypes: null, search: "hq", highlightIds: null }}
-        />
+        <MemoryRouter>
+          <GraphEditor
+            domainId={1}
+            mode="objects"
+            onModeChange={vi.fn()}
+            hierarchyTypeId={null}
+            onHierarchyTypeChange={vi.fn()}
+            filter={{ selectedTypes: null, search: "hq", highlightIds: null }}
+          />
+        </MemoryRouter>
       </QueryClientProvider>
     );
     expect(mockCytoscape).toHaveBeenCalledTimes(1);
   });
+
+  // --- Task 14b: colours ------------------------------------------------
+
+  describe("type colours", () => {
+    it("drives every fill and label from element data, not from a fixed style", () => {
+      const style = graphStylesheet();
+      const node = style.find((rule: any) => rule.selector === "node") as any;
+      // The three that make a user-chosen colour reach the canvas at all.
+      expect(node.style["background-color"]).toBe("data(colour)");
+      expect(node.style.color).toBe("data(labelColour)");
+      // F-3's halo, now in the node's OWN colour: a label drifting over a
+      // neighbour still reads because its outline is its own node's fill.
+      expect(node.style["text-outline-color"]).toBe("data(colour)");
+
+      const edge = style.find((rule: any) => rule.selector === "edge") as any;
+      expect(edge.style["line-color"]).toBe("data(colour)");
+      expect(edge.style["target-arrow-color"]).toBe("data(colour)");
+      // The types view puts the cardinality on a second line.
+      expect(edge.style["text-wrap"]).toBe("wrap");
+
+      const compound = style.find((rule: any) => rule.selector === "$node > node") as any;
+      // A compound node is a 15% tint, so the label does NOT sit on the
+      // type's colour and the computed foreground would be the wrong
+      // answer. Fixed dark-on-white is correct for every tint.
+      expect(compound.style["background-opacity"]).toBe(0.15);
+      expect(compound.style.color).not.toBe("data(labelColour)");
+      expect(compound.style.color).toBe("#0f172a");
+    });
+
+    it("writes each node's fill and readable label colour into cytoscape data", () => {
+      const cy = mockCytoscapeInstance as unknown as any;
+      applyGraphToCy(cy, GRAPH as any);
+
+      // ahmed is an employee, which HAS a colour.
+      expect(elementStore.get("3")?.data.colour).toBe("#1f77b4");
+      expect(elementStore.get("3")?.data.labelColour).toBe(labelForeground("#1f77b4"));
+      // hq is a unit, which has none: the fallback is keyed on the entity
+      // TYPE's id (2 on the wire), not on the node or a list position.
+      expect(elementStore.get("1")?.data.colour).toBe(fallbackColour("2"));
+      expect(elementStore.get("1")?.data.labelColour).toBe(labelForeground(fallbackColour("2")));
+      // Two nodes of the same type share a colour; two types do not.
+      expect(elementStore.get("2")?.data.colour).toBe(elementStore.get("1")?.data.colour);
+      expect(elementStore.get("3")?.data.colour).not.toBe(elementStore.get("1")?.data.colour);
+    });
+
+    it("colours an edge from its relationship type", () => {
+      const cy = mockCytoscapeInstance as unknown as any;
+      applyGraphToCy(cy, GRAPH as any);
+      expect(elementStore.get("10")?.data.colour).toBe("#2ca02c");
+    });
+
+    it("repaints existing elements when a type's colour changes", () => {
+      // The update path, not just the add path: a colour changed in the
+      // property panel must reach a node cytoscape already holds.
+      const cy = mockCytoscapeInstance as unknown as any;
+      applyGraphToCy(cy, GRAPH as any);
+      expect(elementStore.get("3")?.data.colour).toBe("#1f77b4");
+
+      const recoloured = {
+        ...GRAPH,
+        entity_types: GRAPH.entity_types.map((option) =>
+          option.name === "employee" ? { ...option, colour: "#b8860b" } : option
+        ),
+      };
+      applyGraphToCy(cy, recoloured as any);
+      expect(elementStore.get("3")?.data.colour).toBe("#b8860b");
+      // #b8860b is the one palette-ish colour that takes the DARK label, so
+      // this also proves the label is recomputed rather than carried over.
+      expect(elementStore.get("3")?.data.labelColour).toBe(labelForeground("#b8860b"));
+      expect(elementStore.get("3")?.data.labelColour).not.toBe(labelForeground("#1f77b4"));
+    });
+
+    it("uses the palette it is given rather than re-deriving one", () => {
+      const cy = mockCytoscapeInstance as unknown as any;
+      applyGraphToCy(cy, GRAPH as any, {
+        nodeFill: { "3": "#000000" },
+        nodeLabel: { "3": "#ffffff" },
+        edgeColour: {},
+      });
+      expect(elementStore.get("3")?.data.colour).toBe("#000000");
+      expect(elementStore.get("3")?.data.labelColour).toBe("#ffffff");
+    });
+  });
+
+  // --- Task 14b: the types/objects toggle --------------------------------
+
+  describe("the types/objects toggle", () => {
+    it("offers both views and marks the current one pressed", async () => {
+      renderWithProviders({ mode: "objects" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      expect(screen.getByTestId("graph-mode-objects")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("group", { name: "Graph view" })).toBeInTheDocument();
+    });
+
+    it("asks its caller to change mode rather than changing it itself", async () => {
+      const onModeChange = vi.fn();
+      renderWithProviders({ mode: "objects", onModeChange });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("graph-mode-types"));
+      expect(onModeChange).toHaveBeenCalledWith("types");
+    });
+
+    it("draws the domain's ENTITY TYPES in the types view, not its entities", async () => {
+      // The fixture's two halves differ in both count and name -- 3 entities
+      // (hq, ops, ahmed) against 2 entity types (employee, unit) -- so a
+      // toggle that drew the same thing twice could not pass this.
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+      const nodes = [...elementStore.values()].filter((entry) => entry.isNode);
+      expect(nodes.map((entry) => entry.data.label).sort()).toEqual(["employee", "unit"]);
+      expect(nodes.map((entry) => entry.data.id).sort()).toEqual(["type-1", "type-2"]);
+      // ... and none of the objects view's nodes survived.
+      expect([...elementStore.keys()]).not.toContain("1");
+    });
+
+    it("draws relationship types as edges, including a self-referencing loop", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      const edges = [...elementStore.values()]
+        .filter((entry) => !entry.isNode)
+        .map((entry) => [entry.data.id, entry.data.source, entry.data.target]);
+      expect(edges).toEqual(
+        expect.arrayContaining([
+          // reports_to: unit -> unit, a loop on one node.
+          ["reltype-5", "type-2", "type-2"],
+          // works_for: employee -> unit. A swapped from/to would read
+          // ["reltype-6", "type-2", "type-1"] here, which the loop alone
+          // could never reveal.
+          ["reltype-6", "type-1", "type-2"],
+        ])
+      );
+      expect(edges).toHaveLength(2);
+    });
+
+    it("labels a types edge with its cardinality and hierarchy flag", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      expect(elementStore.get("reltype-5")?.data.label).toBe("reports_to\n1 → n · hierarchy");
+      expect(elementStore.get("reltype-6")?.data.label).toBe("works_for\nn → 1");
+    });
+
+    it("colours types nodes and edges from the types' own colours", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      expect(elementStore.get("type-1")?.data.colour).toBe("#1f77b4");
+      expect(elementStore.get("type-2")?.data.colour).toBe(fallbackColour("2"));
+      expect(elementStore.get("type-1")?.data.labelColour).toBe(labelForeground("#1f77b4"));
+      expect(elementStore.get("reltype-5")?.data.colour).toBe("#2ca02c");
+    });
+
+    it("does not request the objects graph while the types view is showing", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      const graphCalls = (apiFetch as any).mock.calls.filter((call: any[]) =>
+        String(call[0]).startsWith("/api/v1/graph")
+      );
+      expect(graphCalls).toHaveLength(0);
+    });
+
+    it("hides the controls that write entities and relationships", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      // All three create or nest ROWS, which a schema has none of.
+      expect(screen.queryByTestId("hierarchy-select")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("toggle-connect")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("toggle-create-node")).not.toBeInTheDocument();
+      // ... while the view-independent ones stay.
+      expect(screen.getByRole("button", { name: "Re-run automatic layout" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Fit the whole graph in view" })).toBeInTheDocument();
+    });
+
+    it("keeps them in the objects view", async () => {
+      renderWithProviders({ mode: "objects" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      expect(screen.getByTestId("hierarchy-select")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-connect")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-create-node")).toBeInTheDocument();
+    });
+
+    it("announces the change in the live region", async () => {
+      const queryClient = client();
+      const view = (mode: "objects" | "types") => (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <GraphEditor
+              domainId={1}
+              mode={mode}
+              onModeChange={vi.fn()}
+              hierarchyTypeId={null}
+              onHierarchyTypeChange={vi.fn()}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      const { rerender } = render(view("objects"));
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      // Arriving on the page is not a change, and must not announce one.
+      expect(screen.getByTestId("graph-live")).toHaveTextContent("");
+
+      rerender(view("types"));
+      await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent(/types view/i));
+      rerender(view("objects"));
+      await waitFor(() =>
+        expect(screen.getByTestId("graph-live")).toHaveTextContent(/objects view/i)
+      );
+    });
+
+    it("names the view in the canvas's accessible name", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      expect(screen.getByTestId("cytoscape-container")).toHaveAccessibleName(/types view/i);
+      expect(screen.getByTestId("cytoscape-container")).toHaveAttribute("role", "application");
+    });
+
+    it("still moves the roving keyboard selection with the arrow keys", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      elementStore.get("type-1")!.position = { x: 0, y: 0 };
+      elementStore.get("type-2")!.position = { x: 100, y: 0 };
+
+      const canvas = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(canvas, { key: "ArrowRight" });
+      expect(elementStore.get("type-1")?.classes.has("kb-focus")).toBe(true);
+      await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("employee"));
+      fireEvent.keyDown(canvas, { key: "ArrowRight" });
+      expect(elementStore.get("type-2")?.classes.has("kb-focus")).toBe(true);
+    });
+
+    it("returns focus to the first toolbar control on Escape, which is now the toggle", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      fireEvent.keyDown(screen.getByTestId("cytoscape-container"), { key: "Escape" });
+      // The hierarchy select is not rendered here, so the toggle is the
+      // first control and Escape must not drop focus onto the body.
+      expect(document.activeElement).toBe(screen.getByTestId("graph-mode-objects"));
+    });
+
+    it("points an empty schema at the entity types page rather than at a create form", async () => {
+      stubApi({ entityTypes: { items: [], total: 0 }, allRelationshipTypes: { items: [], total: 0 } });
+      renderWithProviders({ mode: "types" });
+      const empty = await screen.findByTestId("graph-empty-state");
+      expect(empty).toHaveTextContent(/No entity types/i);
+      expect(within(empty).getByRole("link", { name: /Define the first entity type/i })).toHaveAttribute(
+        "href",
+        "/entity-types"
+      );
+    });
+  });
+
 });
 
 describe("applyGraphToCy", () => {

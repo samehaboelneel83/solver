@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import PropertyPanel from "./PropertyPanel";
+import { fallbackColour } from "../lib/colour";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -21,8 +23,8 @@ const graph = {
   ],
   edges: [{ id: "10", source: "1", target: "2", type: "works_for", label: "works_for", attributes: { weight: 1 } }],
   entity_types: [
-    { id: "1", code: "employee", name: "employee", is_abstract: false },
-    { id: "2", code: "unit", name: "unit", is_abstract: false },
+    { id: "1", code: "employee", name: "employee", is_abstract: false, colour: "#1f77b4" },
+    { id: "2", code: "unit", name: "unit", is_abstract: false, colour: null },
   ],
   relationship_types: [],
   hierarchies: [],
@@ -36,6 +38,7 @@ const ENTITY_TYPES = {
       domain_id: 1,
       name: "employee",
       role: "agent",
+      colour: "#1f77b4",
       attributes: [
         { id: 11, entity_type_id: 1, name: "code", data_type: "text", required: false, unit: null, enum_values: null, default_value: null },
         { id: 12, entity_type_id: 1, name: "status", data_type: "enum", required: false, unit: null, enum_values: ["active", "leave"], default_value: null },
@@ -43,7 +46,7 @@ const ENTITY_TYPES = {
         { id: 14, entity_type_id: 1, name: "on_call", data_type: "boolean", required: false, unit: null, enum_values: null, default_value: null },
       ],
     },
-    { id: 2, domain_id: 1, name: "unit", role: "org", attributes: [] },
+    { id: 2, domain_id: 1, name: "unit", role: "org", colour: null, attributes: [] },
   ],
   total: 2,
 };
@@ -92,6 +95,7 @@ function renderWithProviders(props: Record<string, unknown> = {}) {
     <QueryClientProvider client={queryClient}>
       <PropertyPanel
         domainId={1}
+        mode="objects"
         graph={graph as any}
         selection={{ kind: "node", id: "2" }}
         onClose={vi.fn()}
@@ -320,5 +324,168 @@ describe("PropertyPanel", () => {
     renderWithProviders({ selection: { kind: "edge", id: "10" } });
     expect(await screen.findByRole("heading", { level: 2 })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
+  });
+});
+
+// --- Task 14b: the types view's panels ------------------------------------
+//
+// In the types view a node IS an `entity_type` and an edge IS a
+// `relationship_type`, so the panel edits something else entirely. Both
+// fetch the row rather than reading the canvas, for the reason the entity
+// panel does: the built graph carries only what is drawn.
+
+const EMPLOYEE_TYPE = {
+  id: 1,
+  domain_id: 1,
+  name: "employee",
+  role: "agent",
+  colour: "#1f77b4",
+  attributes: ENTITY_TYPES.items[0].attributes,
+};
+
+const WORKS_FOR_TYPE = {
+  id: 6,
+  domain_id: 1,
+  name: "works_for",
+  from_type_id: 1,
+  to_type_id: 2,
+  cardinality: "many_to_one",
+  is_hierarchy: false,
+  colour: null,
+};
+
+function stubTypesApi(write?: (path: string, options: RequestInit) => unknown) {
+  (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+    if (options?.method && options.method !== "GET") {
+      return write ? write(path, options) : Promise.resolve({});
+    }
+    if (path === "/api/v1/entity-types/1") return Promise.resolve(EMPLOYEE_TYPE);
+    if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(ENTITY_TYPES);
+    if (path === "/api/v1/relationship-types/6") return Promise.resolve(WORKS_FOR_TYPE);
+    return Promise.resolve({});
+  });
+}
+
+function renderTypesPanel(selection: { kind: "node" | "edge"; id: string }) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <PropertyPanel
+          domainId={1}
+          mode="types"
+          graph={graph as any}
+          selection={selection}
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+describe("PropertyPanel, types view", () => {
+  beforeEach(() => {
+    (apiFetch as any).mockReset();
+    stubTypesApi();
+  });
+
+  it("shows the entity type behind a node, fetched rather than read off the canvas", async () => {
+    renderTypesPanel({ kind: "node", id: "type-1" });
+    const panel = await screen.findByTestId("entity-type-panel");
+    expect(panel).toHaveTextContent("employee");
+    // Role and attribute count come from the row, not from the graph
+    // payload -- which carries neither.
+    expect(screen.getByTestId("entity-type-role")).toHaveTextContent(/agent/i);
+    expect(screen.getByTestId("entity-type-attribute-count")).toHaveTextContent("4");
+    expect(within(panel).getByRole("link", { name: /edit this type/i })).toHaveAttribute(
+      "href",
+      "/entity-types/1"
+    );
+  });
+
+  it("seeds the colour control from the stored colour", async () => {
+    renderTypesPanel({ kind: "node", id: "type-1" });
+    await screen.findByTestId("entity-type-panel");
+    expect(screen.getByTestId("colour-hex")).toHaveValue("#1f77b4");
+    expect(screen.getByTestId("colour-preview")).toHaveAttribute("data-fill", "#1f77b4");
+  });
+
+  it("saves an entity type's colour, lower case, as a PATCH naming only that field", async () => {
+    stubTypesApi(() => Promise.resolve({ ...EMPLOYEE_TYPE, colour: "#ff8800" }));
+    renderTypesPanel({ kind: "node", id: "type-1" });
+    await screen.findByTestId("entity-type-panel");
+
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#FF8800" } });
+    await waitFor(() => expect(callsTo("PATCH", "/api/v1/entity-types/1")).toHaveLength(1));
+    // Only `colour`: the name and role belong to the type's own editor, and
+    // sending them from here would overwrite a concurrent rename.
+    expect(bodyOf(callsTo("PATCH", "/api/v1/entity-types/1")[0])).toEqual({ colour: "#ff8800" });
+  });
+
+  it("clears an entity type's colour back to automatic", async () => {
+    stubTypesApi(() => Promise.resolve({ ...EMPLOYEE_TYPE, colour: null }));
+    renderTypesPanel({ kind: "node", id: "type-1" });
+    await screen.findByTestId("entity-type-panel");
+
+    fireEvent.click(screen.getByTestId("colour-clear"));
+    await waitFor(() => expect(callsTo("PATCH", "/api/v1/entity-types/1")).toHaveLength(1));
+    expect(bodyOf(callsTo("PATCH", "/api/v1/entity-types/1")[0])).toEqual({ colour: null });
+  });
+
+  it("surfaces the server's refusal instead of pretending it saved", async () => {
+    stubTypesApi(() =>
+      Promise.reject(
+        new ApiError(
+          422,
+          JSON.stringify({
+            detail: [
+              { loc: ["body", "colour"], msg: "must be a six-digit hex colour", type: "value_error" },
+            ],
+          })
+        )
+      )
+    );
+    renderTypesPanel({ kind: "node", id: "type-1" });
+    await screen.findByTestId("entity-type-panel");
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#ff8800" } });
+    expect(await screen.findByText(/six-digit hex colour/i)).toBeInTheDocument();
+  });
+
+  it("shows the relationship type behind an edge, with its shape", async () => {
+    renderTypesPanel({ kind: "edge", id: "reltype-6" });
+    const panel = await screen.findByTestId("relationship-type-panel");
+    expect(panel).toHaveTextContent("works_for");
+    await waitFor(() =>
+      expect(screen.getByTestId("relationship-type-ends")).toHaveTextContent("employee → unit")
+    );
+    expect(screen.getByTestId("relationship-type-cardinality")).toHaveTextContent("n → 1");
+    expect(screen.getByTestId("relationship-type-hierarchy")).toHaveTextContent("No");
+  });
+
+  it("is the only place a relationship type's colour can be set, and it works", async () => {
+    // There is no relationship-type page in this app; without this panel a
+    // relationship type could only be coloured through the API.
+    stubTypesApi(() => Promise.resolve({ ...WORKS_FOR_TYPE, colour: "#2ca02c" }));
+    renderTypesPanel({ kind: "edge", id: "reltype-6" });
+    await screen.findByTestId("relationship-type-panel");
+    // It has none stored, so the control previews the fallback the canvas
+    // uses -- keyed on the relationship type's id, not the edge id.
+    expect(screen.getByTestId("colour-preview")).toHaveAttribute("data-fill", fallbackColour("6"));
+
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#2CA02C" } });
+    await waitFor(() => expect(callsTo("PATCH", "/api/v1/relationship-types/6")).toHaveLength(1));
+    expect(bodyOf(callsTo("PATCH", "/api/v1/relationship-types/6")[0])).toEqual({ colour: "#2ca02c" });
+  });
+
+  it("renders nothing for an id that is not a types id", async () => {
+    // An objects-mode id can reach here only through a bug; it must not be
+    // parsed as a type id and fetch the wrong row.
+    const { container } = renderTypesPanel({ kind: "node", id: "2" });
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(
+      (apiFetch as any).mock.calls.filter((call: any[]) =>
+        /^\/api\/v1\/entity-types\/\d+$/.test(String(call[0]))
+      )
+    ).toHaveLength(0);
   });
 });

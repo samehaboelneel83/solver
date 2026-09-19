@@ -29,6 +29,16 @@ type FilterBarProps = {
   // the same as selecting. The caller (GraphDemo) owns the graph data and the selection, so it
   // resolves the match and opens the property panel; this component only reports the query.
   onSubmitSearch?: (query: string) => void;
+  /** What the checkbox list groups by, for the button and the panel's
+   * labels. "Types" in the objects view (a node's entity type); "Roles" in
+   * the types view, where a node IS an entity type and its `type` is that
+   * type's role. The matching itself is unchanged -- it is always
+   * `node.type` against the given options' `name`. */
+  typeNoun?: string;
+  /** The search box's accessible name, which differs by view for the same
+   * reason: it matches a node's label, which is an entity's label in one
+   * view and a type's name in the other. */
+  searchLabel?: string;
 };
 
 /**
@@ -65,6 +75,8 @@ export default function FilterBar({
   value,
   onChange,
   onSubmitSearch,
+  typeNoun = "Types",
+  searchLabel = "Search nodes by label",
 }: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
@@ -189,9 +201,9 @@ export default function FilterBar({
     <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 p-2 text-sm">
       <input
         type="text"
-        placeholder="Search by label…"
-        title="Search nodes by label -- press Enter to select the first match"
-        aria-label="Search nodes by label -- press Enter to select the first match"
+        placeholder="Search…"
+        title={`${searchLabel} -- press Enter to select the first match`}
+        aria-label={`${searchLabel} -- press Enter to select the first match`}
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
         onKeyDown={handleSearchKeyDown}
@@ -204,14 +216,14 @@ export default function FilterBar({
           ref={typesToggleRef}
           type="button"
           onClick={() => setPanelOpen((v) => !v)}
-          title="Show or hide node types"
+          title={`Show or hide nodes by ${typeNoun.toLowerCase()}`}
           aria-haspopup="true"
           aria-expanded={panelOpen}
           aria-controls={TYPES_PANEL_ID}
           className="rounded-md border border-slate-300 px-2 py-1 text-xs"
           data-testid="filter-types-toggle"
         >
-          Types: {selectedCount} of {totalCount}
+          {typeNoun}: {selectedCount} of {totalCount}
         </button>
         {panelOpen && (
           <div
@@ -221,9 +233,9 @@ export default function FilterBar({
           >
             <input
               type="text"
-              placeholder="Filter types…"
-              title="Filter the type list"
-              aria-label="Filter the type list"
+              placeholder={`Filter ${typeNoun.toLowerCase()}…`}
+              title={`Filter the ${typeNoun.toLowerCase()} list`}
+              aria-label={`Filter the ${typeNoun.toLowerCase()} list`}
               value={typeSearch}
               onChange={(e) => setTypeSearch(e.target.value)}
               className="mb-2 block w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -233,7 +245,7 @@ export default function FilterBar({
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: null })}
-                title="Select all types"
+                title={`Select all ${typeNoun.toLowerCase()}`}
                 className="text-xs text-blue-600"
                 data-testid="filter-types-all"
               >
@@ -242,7 +254,7 @@ export default function FilterBar({
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: [] })}
-                title="Deselect all types"
+                title={`Deselect all ${typeNoun.toLowerCase()}`}
                 className="text-xs text-blue-600"
                 data-testid="filter-types-none"
               >

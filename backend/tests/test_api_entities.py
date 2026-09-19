@@ -323,10 +323,11 @@ def test_default_value_that_contradicts_its_data_type_is_refused_at_definition(
     mentioned the attribute. This test used to pin that late failure.
 
     Now the CHECK `attribute_def_default_value_matches_type` refuses the
-    *definition*. The entity-type router does not shadow that CHECK, so it
-    arrives through `translate_db_error` as a 409 with a string detail
-    (a plain CHECK carries no JSON DETAIL -- Ruling 16), and nothing is
-    stored: the type's next entity is created cleanly.
+    *definition*. Task 14a recorded that the resulting generic 409 was
+    useless for a correctable field error, and Task 14b shadowed the CHECK
+    in the entity-type router, so it is now a **422 naming
+    `default_value`** (Ruling 16's pattern). Nothing is stored either way:
+    the type's next entity is created cleanly.
     """
     client = TestClient(app)
     response = client.post(
@@ -334,7 +335,7 @@ def test_default_value_that_contradicts_its_data_type_is_refused_at_definition(
         json={"name": "rank", "data_type": "integer", "default_value": "banana"},
         headers=auth_headers,
     )
-    _conflict(response)
+    _assert_blames_field(_validation_errors(response), "default_value")
     listed = client.get(
         f"/api/v1/entity-types/{entity_type_id}/attributes", headers=auth_headers
     )
