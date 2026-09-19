@@ -111,3 +111,51 @@ def test_entity_descendants_signature_is_stable():
     assert signature == (
         "p_entity bigint, p_rel_type bigint -> TABLE(entity_id bigint, depth integer)"
     )
+
+
+def _plan(conn, predicate: str) -> str:
+    """The plan Postgres chooses for `SELECT * FROM parameter_value WHERE
+    <predicate>`, with sequential scans penalised so the question asked is
+    "*can* this predicate reach the index", not "is the table big enough
+    today that the planner bothers". `solver_test` holds a handful of
+    cells, so without `enable_seqscan = off` both forms would seq-scan and
+    the test would pass either way -- i.e. prove nothing."""
+    conn.execute(text("SET LOCAL enable_seqscan = off"))
+    rows = conn.execute(
+        text(f"EXPLAIN (COSTS OFF) SELECT * FROM parameter_value WHERE {predicate}")
+    ).scalars()
+    return "\n".join(rows)
+
+
+def test_parameter_value_cleanup_can_use_the_gin_index():
+    """Amendment (d). `parameter_value_entities_gin` exists for exactly one
+    query -- the DELETE inside `parameter_value_cleanup`, which fires FOR
+    EACH ROW on entity delete -- and the supplied DDL's `OLD.id = ANY
+    (entity_ids)` cannot use it: `= ANY (<array column>)` has no GIN
+    `array_ops` strategy, so the index had no possible user and every
+    deleted entity scanned the whole table.
+
+    Two assertions, because either alone is weak. The first pins the
+    function body, which is what a future edit would change. The second
+    pins *why* the body has to say that, by showing the two predicates
+    reach different plans -- so the test still discriminates if someone
+    decides the operators are interchangeable and swaps one back."""
+    with _engine().connect() as conn:
+        body = conn.execute(
+            text(
+                "SELECT pg_get_functiondef(oid) FROM pg_proc "
+                "WHERE proname = 'parameter_value_cleanup'"
+            )
+        ).scalar_one()
+
+        indexable = _plan(conn, "entity_ids @> ARRAY[1::bigint]")
+        not_indexable = _plan(conn, "1 = ANY (entity_ids)")
+
+    assert "entity_ids @> ARRAY[OLD.id]" in body
+    assert "= ANY" not in body
+
+    assert "parameter_value_entities_gin" in indexable, indexable
+    # The old form, kept here as the discriminator: even with seq scans
+    # priced at 1e10 the planner has no index path for it.
+    assert "parameter_value_entities_gin" not in not_indexable, not_indexable
+    assert "Seq Scan" in not_indexable, not_indexable

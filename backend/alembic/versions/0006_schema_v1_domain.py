@@ -5,8 +5,8 @@ Drops the v0 `domain` and `problem` schemas wholesale and creates the eight
 v1 DOMAIN tables in `public`, together with the enums `entity_role` and
 `attr_type`, the validation triggers and the `entity_descendants` helper.
 
-The DDL is taken from `docs/schema/2026-09-18-schema-v1.sql` with the two
-amendments the design spec (§3) calls for:
+The DDL is taken from `docs/schema/2026-09-18-schema-v1.sql` with the
+amendments the design spec (§3) calls for, plus amendment (d) below:
 
   (a) every RAISE EXCEPTION in `entity_validate`, `relationship_validate`
       and `parameter_value_validate` carries ERRCODE '23514' (check_violation)
@@ -23,6 +23,28 @@ amendments the design spec (§3) calls for:
       validated (`id IS DISTINCT FROM NEW.id`) from both terms, so an UPDATE
       that re-points an existing hierarchy edge is not rejected by its own
       pre-update version still sitting in the table.
+
+  (d) `parameter_value_cleanup` deletes with `entity_ids @> ARRAY[OLD.id]`
+      instead of the supplied DDL's `OLD.id = ANY (entity_ids)`. NOT in the
+      design spec -- this is a fourth amendment, added in fix round 1 after
+      review. The two predicates are semantically identical for this
+      DELETE, but only `@>` is an indexable operator for GIN `array_ops`:
+      `= ANY (<array column>)` has no GIN strategy at all, so the
+      `parameter_value_entities_gin` index created two lines below it had
+      no possible user and every fired trigger scanned the whole table.
+      Measured with EXPLAIN on 365 000 cells: `= ANY` planned a parallel
+      seq scan (3763 buffers, 16.1 ms) and would not use the index even
+      with `enable_seqscan = off`; `@>` plans a Bitmap Index Scan on
+      `parameter_value_entities_gin` (262 buffers, 1.7 ms). The trigger is
+      FOR EACH ROW on `entity` DELETE, so deleting a 365-entity type
+      multiplies the difference by 365.
+
+      Equivalence: for a non-NULL scalar `x`, `x = ANY (a)` and
+      `a @> ARRAY[x]` select exactly the same rows. They differ only in
+      how a NULL *element* of `a` is treated -- `= ANY` yields NULL where
+      `@>` yields false -- and a DELETE keeps a row in neither case.
+      `OLD.id` is the deleted entity's identity column and can never be
+      NULL.
 
 The `iam` schema is untouched.
 
@@ -322,9 +344,11 @@ def upgrade() -> None:
         CREATE TRIGGER parameter_value_validate BEFORE INSERT OR UPDATE ON parameter_value
             FOR EACH ROW EXECUTE FUNCTION parameter_value_validate();
 
+        -- Amendment (d): `entity_ids @> ARRAY[OLD.id]`, not
+        -- `OLD.id = ANY (entity_ids)` -- see the module docstring.
         CREATE FUNCTION parameter_value_cleanup() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
-            DELETE FROM parameter_value WHERE OLD.id = ANY (entity_ids);
+            DELETE FROM parameter_value WHERE entity_ids @> ARRAY[OLD.id];
             RETURN OLD;
         END $$;
         CREATE TRIGGER parameter_value_cleanup BEFORE DELETE ON entity
