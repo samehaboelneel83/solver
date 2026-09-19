@@ -1,5 +1,6 @@
-"""Point the test run at an isolated `<db>_test` database and migrate it to
-head, *before* any test (or fixture) touches `app`.
+"""Point the test run at an isolated `<db>_test` database, **drop and
+recreate it from scratch**, and migrate it to head -- all *before* any test
+(or fixture) touches `app`.
 
 Why this runs at import time rather than in a (even session-scoped,
 autouse) fixture: `app.core.config.get_settings()` is `@lru_cache`d, and
@@ -22,6 +23,26 @@ This also means the app's own database is never touched by the test
 suite: `domain.entity` row counts (and everything else) in the database
 the running stack's admin UI and `/graph` demo page read stay exactly as
 they were before `pytest` ran.
+
+Why drop-and-recreate, not just migrate-to-head against whatever is
+already there: several tests commit real rows through HTTP POSTs (the app
+commits inside the request, so a test-side `db.rollback()` can't undo it),
+and at least one test's correctness silently depends on the table being
+small (`test_list_order_by` filters/orders a table with a default
+`limit=50` -- once enough leftover rows from *other* runs accumulated, the
+current run's own rows got paged off the end and the test failed for a
+reason with nothing to do with whatever change was actually being tested).
+Per-test teardown narrows this but doesn't close it (a crashed run, a
+`Ctrl-C`, or simply a test someone forgets to clean up still leaks), so
+each session instead starts from zero rows on a freshly migrated schema --
+accumulation across runs becomes structurally impossible rather than
+merely discouraged.
+
+The drop is guarded by an assertion that the target name actually ends in
+`_test` (see `_drop_database_if_exists` below): this is what makes it safe
+to point `DROP DATABASE` at a name derived from `DATABASE_URL`/
+`TEST_DATABASE_URL` at all. If that assertion ever failed here, the right
+outcome is a crashed test session, not a dropped `solver` database.
 """
 
 import os
@@ -60,14 +81,69 @@ def _ensure_database_exists(maintenance_url: str, database: str) -> None:
         conn.close()
 
 
+def _terminate_other_connections(maintenance_url: str, database: str) -> None:
+    """Terminate any other backend connected to `database`, so the DROP
+    DATABASE below doesn't fail with "database is being accessed by other
+    users" -- e.g. a previous test run that crashed mid-session, or a psql
+    session left open against `solver_test` while debugging."""
+    dsn = maintenance_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    conn = psycopg2.connect(dsn)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                " WHERE datname = %s AND pid <> pg_backend_pid()",
+                (database,),
+            )
+    finally:
+        conn.close()
+
+
+def _drop_database_if_exists(maintenance_url: str, database: str) -> None:
+    """Drop `database` so this session starts from zero rows on a schema
+    migrated to head -- see the module docstring for why per-test teardown
+    alone isn't enough.
+
+    The assertion below is the entire safety mechanism for this being a
+    destructive operation driven by a computed name: it makes it
+    impossible for this function to ever drop anything that isn't a
+    `..._test` database, regardless of how `DATABASE_URL`/
+    `TEST_DATABASE_URL` end up configured. The app's own database (e.g.
+    `solver`) can never satisfy it.
+    """
+    # Deliberately a raise and not an `assert`: assertions are stripped
+    # under `python -O`/`PYTHONOPTIMIZE`, and a guard whose entire job is
+    # to stand between this line and `DROP DATABASE solver` must not be
+    # removable by an interpreter flag. `database` is also checked for
+    # emptiness so a URL we failed to parse can't slip through.
+    if not database or not database.endswith("_test"):
+        raise RuntimeError(
+            f"refusing to drop database {database!r}: it does not end in "
+            "'_test', which is the only thing standing between this and "
+            "dropping the app's own database"
+        )
+    _terminate_other_connections(maintenance_url, database)
+    dsn = maintenance_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    conn = psycopg2.connect(dsn)
+    try:
+        conn.autocommit = True  # DROP DATABASE cannot run inside a transaction
+        with conn.cursor() as cur:
+            cur.execute(f'DROP DATABASE IF EXISTS "{database}"')
+    finally:
+        conn.close()
+
+
 _app_database_url = os.environ.get("DATABASE_URL", _DEFAULT_DATABASE_URL)
 _default_test_url = _with_database_name(
     _app_database_url, f"{_database_name(_app_database_url) or 'solver'}_test"
 )
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", _default_test_url)
+_TEST_DATABASE_NAME = _database_name(TEST_DATABASE_URL)
 
 _maintenance_url = _with_database_name(TEST_DATABASE_URL, "postgres")
-_ensure_database_exists(_maintenance_url, _database_name(TEST_DATABASE_URL))
+_drop_database_if_exists(_maintenance_url, _TEST_DATABASE_NAME)
+_ensure_database_exists(_maintenance_url, _TEST_DATABASE_NAME)
 
 # Must happen before the alembic upgrade below, since running migrations
 # imports app.core.config/app.core.db/app.models (see module docstring).
