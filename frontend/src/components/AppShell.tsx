@@ -63,7 +63,9 @@ type NavGroup = {
  *
  * Tasks 11-13 add their pages here (entity types, entities, parameters,
  * model versions) alongside their routes in `App.tsx` -- a link to a route
- * that doesn't exist yet would only lead to the not-found page.
+ * that doesn't exist yet would only lead to the not-found page. Task 14f
+ * adds relationship types beside entity types: the two halves of a
+ * domain's schema, before the rows that fill it in.
  *
  * `/public/<table>` is the generic list route for the three flat v1 tables;
  * `public` is the schema name `/api/meta/schema` reports for them.
@@ -75,6 +77,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/public/domain", label: "Domains" },
       { to: "/entity-types", label: "Entity types" },
+      { to: "/relationship-types", label: "Relationship types" },
       { to: "/entities", label: "Entities" },
       { to: "/parameters", label: "Parameters" },
     ],

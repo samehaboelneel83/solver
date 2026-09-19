@@ -31,6 +31,11 @@
  */
 
 import type { EntityType, RelationshipType, Cardinality } from "../api/v1";
+// Moved to `lib/cardinality` when the relationship-type form became its
+// third consumer (Task 14f); re-exported so the graph's own readers keep
+// importing it from the module that draws with it.
+import { CARDINALITY_LABEL } from "./cardinality";
+export { CARDINALITY_LABEL };
 import type { GraphResponse } from "../types/graph";
 import { labelForeground, typeColour } from "./colour";
 
@@ -82,14 +87,6 @@ function idAfter(value: string, prefix: string): number | null {
   const id = Number(rest);
   return Number.isSafeInteger(id) ? id : null;
 }
-
-/** How a relationship type's cardinality reads on an edge label. */
-export const CARDINALITY_LABEL: Record<Cardinality, string> = {
-  one_to_one: "1 → 1",
-  one_to_many: "1 → n",
-  many_to_one: "n → 1",
-  many_to_many: "n → n",
-};
 
 /** The second line of a types edge's label: what the model says about this
  * relationship, which is the whole reason to look at the schema. */

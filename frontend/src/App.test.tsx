@@ -95,6 +95,55 @@ describe("entity type routes (Task 11)", () => {
   });
 });
 
+describe("relationship type routes (Task 14f)", () => {
+  beforeEach(() => {
+    setToken("test-token");
+    localStorage.removeItem("solver_domain_id");
+    (apiFetch as any).mockReset();
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/v1/relationship-types/21") {
+        return Promise.resolve({
+          id: 21,
+          domain_id: 7,
+          name: "works_on",
+          from_type_id: 5,
+          to_type_id: 9,
+          cardinality: "many_to_many",
+          is_hierarchy: false,
+          colour: null,
+        });
+      }
+      if (path.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+  });
+
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("/relationship-types renders the list, not the not-found page", async () => {
+    renderAt("/relationship-types");
+    expect(await screen.findByRole("heading", { level: 1, name: "Relationship types" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("/relationship-types/:id renders the editor, not the generic table page it would otherwise match", async () => {
+    renderAt("/relationship-types/21");
+    expect(await screen.findByRole("heading", { level: 1, name: /works_on/ })).toBeInTheDocument();
+    expect(screen.queryByText(/unknown table/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("entity routes (Task 12)", () => {
   beforeEach(() => {
     setToken("test-token");

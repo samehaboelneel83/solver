@@ -79,6 +79,19 @@ describe("AppShell", () => {
       expect(link.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it("links Relationship types from the Domain group, after Entity types (Task 14f)", async () => {
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const link = within(nav).getByRole("link", { name: "Relationship types" });
+      expect(link).toHaveAttribute("href", "/relationship-types");
+      const types = within(nav).getByRole("link", { name: "Entity types" });
+      const entities = within(nav).getByRole("link", { name: "Entities" });
+      // Both halves of the schema, together and before the rows that fill it.
+      expect(types.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(link.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("links Entities from the Domain group, after Entity types (Task 12)", async () => {
       renderWithProviders();
       await settled();

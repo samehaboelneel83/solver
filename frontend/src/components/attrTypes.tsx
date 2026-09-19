@@ -197,7 +197,7 @@ export type FieldErrors = Record<string, string>;
 export function serverFieldErrors(
   err: unknown,
   fields: string[],
-  noun: "attribute" | "entity type" | "parameter"
+  noun: "attribute" | "entity type" | "parameter" | "relationship type"
 ): { fields: FieldErrors; general: string | null } {
   const items = validationErrors(err);
   if (items.length > 0) {
@@ -220,7 +220,9 @@ export function serverFieldErrors(
         ? "Name: this entity type already has an attribute with this name."
         : noun === "parameter"
           ? "Name: this domain already has a parameter with this name."
-          : "Name: this domain already has an entity type with this name.";
+          : noun === "relationship type"
+            ? "Name: this domain already has a relationship type with this name."
+            : "Name: this domain already has an entity type with this name.";
     return { fields: { name: text }, general: null };
   }
   return { fields: {}, general: message };
