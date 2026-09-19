@@ -51,3 +51,18 @@ def field_error(field: str | list[str | int], message: str, value: Any) -> Reque
     return RequestValidationError(
         [{"type": "value_error", "loc": ("body", *path), "msg": message, "input": value}]
     )
+
+
+def reject_null(value: Any, info) -> Any:
+    """Pydantic field validator for PATCH bodies: omitting a field means
+    "unchanged", but an explicit `null` for a NOT NULL column would
+    otherwise reach the database as a 409 (`23502`) rather than a 422
+    naming the field.
+
+    Pydantic does not run validators on defaults, so this fires only when
+    the client actually sent `null`. (`parameters.py` keeps an identical
+    private `_not_null` from Task 8; the two can be merged whenever that
+    module is next touched.)"""
+    if value is None:
+        raise ValueError(f"{info.field_name} cannot be null")
+    return value
