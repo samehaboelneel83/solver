@@ -204,11 +204,19 @@ def test_options_route_for_iam_table_still_resolves_uuid_ids(auth_headers):
     assert create_response.status_code == 201, create_response.text
     role_id = create_response.json()["id"]
 
-    options_response = client.get(f"/api/iam/role/options?ids={role_id}", headers=auth_headers)
-    assert options_response.status_code == 200
-    items = options_response.json()
-    assert len(items) == 1
-    assert items[0]["id"] == role_id
+    try:
+        options_response = client.get(
+            f"/api/iam/role/options?ids={role_id}", headers=auth_headers
+        )
+        assert options_response.status_code == 200
+        items = options_response.json()
+        assert len(items) == 1
+        assert items[0]["id"] == role_id
 
-    bad_id_response = client.get("/api/iam/role/options?ids=not-a-uuid", headers=auth_headers)
-    assert bad_id_response.status_code == 422
+        bad_id_response = client.get("/api/iam/role/options?ids=not-a-uuid", headers=auth_headers)
+        assert bad_id_response.status_code == 422
+    finally:
+        # Same shape as the domain test above: created via a real HTTP
+        # POST (a separate, already-committed session), so it must be
+        # deleted through the API rather than relied on to roll back.
+        client.delete(f"/api/iam/role/{role_id}", headers=auth_headers)
