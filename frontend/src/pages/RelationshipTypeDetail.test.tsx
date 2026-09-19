@@ -240,6 +240,9 @@ describe("RelationshipTypeDetail", () => {
     renderPage("/relationship-types/999");
     expect(await screen.findByText(/relationship type not found/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to relationship types/i })).toBeInTheDocument();
+    // Same page, no level-1 heading: an axe `page-has-heading-one`
+    // violation, and nothing for a screen-reader user to land on.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/relationship type not found/i);
   });
 
   describe("deleting", () => {

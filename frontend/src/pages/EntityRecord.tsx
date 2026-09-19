@@ -116,6 +116,8 @@ export default function EntityRecord() {
   if (isNew && queryTypeId === null) {
     return (
       <div>
+        {/* Reachable by typing or bookmarking /entities/new. Same rule. */}
+        <h1 className="mb-2 text-lg font-semibold text-slate-900">New entity</h1>
         <p className="text-sm text-slate-600">
           Choose an entity type first: a new entity belongs to exactly one, and its type is what says which
           attributes it has.
@@ -134,7 +136,9 @@ export default function EntityRecord() {
   if (notFound) {
     return (
       <div>
-        <p className="text-sm text-slate-600">Entity not found.</p>
+        {/* See EntityTypeDetail: a page with no <h1> is an axe
+            `page-has-heading-one` violation. */}
+        <h1 className="mb-2 text-lg font-semibold text-slate-900">Entity not found.</h1>
         <Link to="/entities" className={BACK_LINK}>
           Back to entities
         </Link>

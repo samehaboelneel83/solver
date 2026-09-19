@@ -239,6 +239,9 @@ describe("EntityRecord: creating an entity", () => {
     renderAt("/entities/new");
     expect(await screen.findByText(/choose an entity type/i)).toBeInTheDocument();
     expect(writes()).toHaveLength(0);
+    // Reachable by typing or bookmarking /entities/new, and it had no
+    // level-1 heading: an axe `page-has-heading-one` violation.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/new entity/i);
   });
 });
 
@@ -351,6 +354,9 @@ describe("EntityRecord: editing an entity", () => {
     expect(await screen.findByText("Entity not found.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to entities/i })).toHaveAttribute("href", "/entities");
+    // Same page, no level-1 heading: an axe `page-has-heading-one`
+    // violation, and nothing for a screen-reader user to land on.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Entity not found.");
   });
 
   it("says not found for an id that is not a bigint key, without asking the server for it", async () => {

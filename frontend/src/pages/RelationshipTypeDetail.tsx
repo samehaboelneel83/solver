@@ -36,7 +36,9 @@ export default function RelationshipTypeDetail() {
   if (id === null || (isError && error instanceof ApiError && error.status === 404)) {
     return (
       <div>
-        <p className="text-sm text-slate-600">Relationship type not found.</p>
+        {/* See EntityTypeDetail: a page with no <h1> is an axe
+            `page-has-heading-one` violation. */}
+        <h1 className="mb-2 text-lg font-semibold text-slate-900">Relationship type not found.</h1>
         <Link to="/relationship-types" className={BACK_LINK}>
           Back to relationship types
         </Link>

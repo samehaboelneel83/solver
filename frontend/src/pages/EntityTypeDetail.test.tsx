@@ -334,6 +334,10 @@ describe("EntityTypeDetail", () => {
     renderPage("/entity-types/999");
     expect(await screen.findByText(/entity type not found/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to entity types/i })).toHaveAttribute("href", "/entity-types");
+    // Every other state of this page has one; without it here the page has
+    // no level-1 heading at all, which is an axe `page-has-heading-one`
+    // violation and leaves a screen-reader user with nothing to land on.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/entity type not found/i);
   });
 
   // --- Task 14b: colour --------------------------------------------------

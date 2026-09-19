@@ -126,7 +126,11 @@ export default function EntityDetail() {
     if (entityError instanceof ApiError && entityError.status === 404) {
       return (
         <div>
-          <p className="text-sm text-slate-500">{table ? tableLabel(table) : "Record"} not found</p>
+          {/* See EntityTypeDetail: a page with no <h1> is an axe
+              `page-has-heading-one` violation. */}
+          <h1 className="mb-2 text-lg font-semibold text-slate-900">
+            {table ? tableLabel(table) : "Record"} not found
+          </h1>
           {/* H-9: a full target-size sweep found these standalone "Back to list" links --
               plain text-sm with no padding -- at 20px tall, still under the 24px floor.
               inline-block + py-1 brings them to 28px without changing their visual style. */}

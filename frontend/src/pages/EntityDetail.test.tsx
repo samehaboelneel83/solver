@@ -192,6 +192,9 @@ describe("EntityDetail (missing record)", () => {
 
     expect(await screen.findByText("entity_type not found")).toBeInTheDocument();
     expect(screen.getByText("Back to list")).toHaveAttribute("href", "/domain/entity_type");
+    // Same page, no level-1 heading: an axe `page-has-heading-one`
+    // violation, and nothing for a screen-reader user to land on.
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("entity_type not found");
   });
 
   it("shows '<table label> not found' when the backend has sent a label", async () => {

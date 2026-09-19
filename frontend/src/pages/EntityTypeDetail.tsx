@@ -46,7 +46,10 @@ export default function EntityTypeDetail() {
   if (id === null || (isError && error instanceof ApiError && error.status === 404)) {
     return (
       <div>
-        <p className="text-sm text-slate-600">Entity type not found.</p>
+        {/* Every page needs a level-1 heading, including this one: without
+            it the page has none at all (axe `page-has-heading-one`) and a
+            screen-reader user has nothing to land on. */}
+        <h1 className="mb-2 text-lg font-semibold text-slate-900">Entity type not found.</h1>
         <Link to="/entity-types" className={BACK_LINK}>
           Back to entity types
         </Link>
