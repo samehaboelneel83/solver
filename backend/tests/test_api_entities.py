@@ -23,9 +23,10 @@ under either shape and so would pin neither.
 `unknown_attribute`, `required_attribute`, `attribute_type` (grep the
 `RAISE EXCEPTION`s in `0006_schema_v1_domain.py`). There is one test per
 kind, each asserting on `detail["kind"]` **and** `detail["field"]`, plus a
-fourth for the `enum_values` case and a fifth for a `default_value` that
-does not match its own `data_type` -- the failure Task 5 deliberately left
-for this task to surface (its Concern 4).
+fourth for the `enum_values` case. A fifth used to pin a `default_value`
+that did not match its own `data_type` failing late, on the entity write
+(Task 5's Concern 4); since migration 0009 the database refuses the
+definition itself, and the test asserts that instead.
 
 Three response *sources* are in play and `_trigger_error`,
 `_validation_errors` and `_conflict` pin one each. The first two now share
@@ -309,40 +310,38 @@ def test_enum_value_outside_enum_values_is_422(auth_headers, entity_type_id):
     assert detail["field"] == "grade"
 
 
-def test_default_value_that_contradicts_its_data_type_fails_on_entity_write(
+def test_default_value_that_contradicts_its_data_type_is_refused_at_definition(
     auth_headers, entity_type_id
 ):
-    """Task 5's Concern 4, and this task's obligation (iii).
+    """Task 5's Concern 4, and this task's obligation (iii) -- resolved by
+    migration 0009's rule 8.
 
-    Nothing validates `attribute_def.default_value` against its own
-    `data_type`: `default_value` is bare `jsonb`, so an `integer`
-    attribute can be defined with a default of `"banana"` and the database
-    accepts the *definition*. It fails much later -- here, when
-    `entity_validate` materialises the default into `attrs` and then
-    type-checks it -- and it fails for an entity whose payload never
-    mentioned the attribute at all.
+    Until 0009 nothing validated `attribute_def.default_value` against its
+    own `data_type`, so an `integer` attribute could be defined with a
+    default of `"banana"`. The definition was accepted and the failure came
+    much later, from `entity_validate`, for an entity whose payload never
+    mentioned the attribute. This test used to pin that late failure.
 
-    The failure is therefore only diagnosable if the response identifies
-    the attribute, which is what this test pins: `field` names it, and so
-    does `message`.
+    Now the CHECK `attribute_def_default_value_matches_type` refuses the
+    *definition*. The entity-type router does not shadow that CHECK, so it
+    arrives through `translate_db_error` as a 409 with a string detail
+    (a plain CHECK carries no JSON DETAIL -- Ruling 16), and nothing is
+    stored: the type's next entity is created cleanly.
     """
     client = TestClient(app)
-    created = _make_attribute(
-        client, auth_headers, entity_type_id, "rank", "integer", default_value="banana"
-    )
-    # The definition really was accepted -- otherwise this test would be
-    # proving something about attribute_def validation instead.
-    assert created["default_value"] == "banana"
-
     response = client.post(
-        "/api/v1/entities",
-        json={"entity_type_id": entity_type_id, "key": "ahmed", "attrs": {}},
+        f"/api/v1/entity-types/{entity_type_id}/attributes",
+        json={"name": "rank", "data_type": "integer", "default_value": "banana"},
         headers=auth_headers,
     )
-    detail = _trigger_error(response)
-    assert detail["kind"] == "attribute_type"
-    assert detail["field"] == "rank"
-    assert "rank" in detail["message"], detail
+    _conflict(response)
+    listed = client.get(
+        f"/api/v1/entity-types/{entity_type_id}/attributes", headers=auth_headers
+    )
+    assert listed.status_code == 200 and listed.json() == [], listed.text
+
+    created = _make_entity(client, auth_headers, entity_type_id, "ahmed", attrs={})
+    assert created["attrs"] == {}
 
 
 def test_patch_attrs_is_validated_by_the_same_trigger(auth_headers, entity_type_id):

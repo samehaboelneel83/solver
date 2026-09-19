@@ -32,6 +32,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Integer,
     PrimaryKeyConstraint,
@@ -105,7 +106,11 @@ class ModelVersion(Base):
     """
 
     __tablename__ = "model_version"
-    __table_args__ = (UniqueConstraint("problem_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("problem_id", "version"),
+        # Migration 0009: what scenario_version_same_problem_fkey references.
+        UniqueConstraint("id", "problem_id", name="model_version_id_problem_id_key"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     problem_id: Mapped[int] = mapped_column(
@@ -132,7 +137,16 @@ class Scenario(Base):
     """
 
     __tablename__ = "scenario"
-    __table_args__ = (UniqueConstraint("problem_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("problem_id", "name"),
+        # Migration 0009, rule 7: the version belongs to this scenario's
+        # own problem.
+        ForeignKeyConstraint(
+            ["model_version_id", "problem_id"],
+            ["model_version.id", "model_version.problem_id"],
+            name="scenario_version_same_problem_fkey",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     problem_id: Mapped[int] = mapped_column(

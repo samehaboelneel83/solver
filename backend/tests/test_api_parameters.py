@@ -1,6 +1,6 @@
 """Parameter definitions and the sparse value grid (`app/api/parameters.py`),
-plus migration 0008's duplicate-index CHECK and one documented gap in
-`snapshot_dataset()`.
+plus migration 0008's duplicate-index CHECK and how `snapshot_dataset()`
+resolves a sparse grid (migration 0009).
 
 What is pinned here, and why each is shaped the way it is:
 
@@ -33,8 +33,9 @@ happened to match insertion would pass a weaker fixture and pin nothing.
 `index_type_ids` are refused by raw SQL, bypassing the router, so the
 constraint is proven to exist independently of the 422 that shadows it.
 
-**6. Obligation B.**  `test_snapshot_loses_a_cell_reset_to_the_default` is
-a *documentation* test: it pins a known gap as current behaviour.
+**6. Obligation B, resolved.**  `test_snapshot_resolves_a_cell_reset_to_the_default`
+was Task 8's KNOWN GAP test; since migration 0009 (Ruling 28) the snapshot
+carries `parameter_defaults`, and the test asserts the resolved behaviour.
 
 Test hygiene: rows made through HTTP are committed by the app, so a
 test-side rollback cannot undo them.  Everything hangs off one `domain`
@@ -680,29 +681,31 @@ def test_the_duplicate_check_also_guards_updates(db, domain_id, grid):
     assert exc.value.orig.diag.constraint_name == "parameter_def_index_type_ids_distinct"
 
 
-# --- Obligation B: a known gap, pinned as current behaviour ---------------
+# --- Obligation B, resolved: the snapshot carries the defaults (Ruling 28) --
 
 
-def test_snapshot_loses_a_cell_reset_to_the_default(client, auth_headers, db, domain_id, grid, demand):
-    """KNOWN GAP -- current behaviour, pinned so it cannot change unnoticed.
-    Awaiting the user's decision; do not "fix" by editing this test.
+def _resolve(data: dict, parameter: str, coordinates: dict) -> int:
+    """The solver's rule, as Ruling 28 states it: look the cell up; if it is
+    absent, use the parameter's default."""
+    for row in data["parameters"][parameter]:
+        if {k: v for k, v in row.items() if k != "value"} == coordinates:
+            return row["value"]
+    return data["parameter_defaults"][parameter]
 
-    Two rules combine badly:
 
-    * this router stores the grid **sparsely** -- a cell equal to
-      `default_value` is deleted, not stored;
-    * `snapshot_dataset()` (migration 0007, Task 2) emits only **stored**
-      `parameter_value` rows, and never emits `default_value`.
+def test_snapshot_resolves_a_cell_reset_to_the_default(client, auth_headers, db, domain_id, grid, demand):
+    """Task 8's KNOWN GAP, now closed by migration 0009.
 
-    So a cell a user explicitly set to the default is absent from the
-    frozen dataset, and nothing in the dataset says what an absent cell
-    means. The solver would have no way to recover `2` for (mon, morning)
-    below, and datasets are immutable once snapshotted.
+    This router stores the grid **sparsely** -- a cell reset to
+    `default_value` is deleted, not stored -- and `snapshot_dataset()`
+    emits only stored rows. Until 0009 nothing in the frozen dataset said
+    what an absent cell meant, so (mon, morning) below was unrecoverable.
+    The user chose (Ruling 28) to keep sparse storage and have the
+    snapshot carry `parameter_defaults` beside the unchanged `parameters`.
 
-    The fix is a contract decision, not a bug fix: either `snapshot_dataset`
-    emits `default_value` per parameter (changing the document shape that
-    `psp/data.py` will read), or parameters stop being stored sparsely.
-    When it is made, this test is expected to fail and be rewritten.
+    A second domain with its own `demand` (default 9, and a stored cell)
+    is present, so a snapshot that looked the default up by name alone
+    could pick it up.
     """
     mon, tue = grid["days"]["mon"], grid["days"]["tue"]
     morning = grid["shifts"]["morning"]
@@ -714,6 +717,32 @@ def test_snapshot_loses_a_cell_reset_to_the_default(client, auth_headers, db, do
     assert _put(
         client, auth_headers, demand, [{"entity_ids": [mon, morning], "value": 2}]
     ).status_code == 200
+
+    other = db.execute(
+        text("INSERT INTO domain (name) VALUES (:n) RETURNING id"),
+        {"n": f"param-other-{uuid.uuid4().hex[:8]}"},
+    ).scalar_one()
+    other_day = db.execute(
+        text("INSERT INTO entity_type (domain_id, name) VALUES (:d, 'day') RETURNING id"),
+        {"d": other},
+    ).scalar_one()
+    other_mon = db.execute(
+        text("INSERT INTO entity (entity_type_id, key) VALUES (:t, 'mon') RETURNING id"),
+        {"t": other_day},
+    ).scalar_one()
+    other_demand = db.execute(
+        text(
+            "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value) "
+            "VALUES (:d, 'demand', :i, 9) RETURNING id"
+        ),
+        {"d": other, "i": [other_day]},
+    ).scalar_one()
+    db.execute(
+        text(
+            "INSERT INTO parameter_value (parameter_def_id, entity_ids, value) VALUES (:p, :e, 4)"
+        ),
+        {"p": other_demand, "e": [other_mon]},
+    )
 
     problem = db.execute(
         text("INSERT INTO problem (domain_id, name) VALUES (:d, 'p') RETURNING id"),
@@ -729,7 +758,14 @@ def test_snapshot_loses_a_cell_reset_to_the_default(client, auth_headers, db, do
     dataset = db.execute(text("SELECT snapshot_dataset(:mv)"), {"mv": model_version}).scalar_one()
     data = db.execute(text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset}).scalar_one()
 
-    # The (mon, morning) cell is gone, and so is any trace of the default:
-    # the parameter's entire snapshot is this one row.
+    # `parameters` is unchanged in shape: still only the stored row.
     assert data["parameters"] == {"demand": [{"day": "tue", "shift": "morning", "value": 7}]}
-    assert set(data) == {"sets", "parameters"}  # no side channel for defaults either
+    # ... and the default now travels beside it -- this domain's, not 9.
+    assert data["parameter_defaults"] == {"demand": 2}
+    assert set(data) == {"sets", "parameters", "parameter_defaults"}
+
+    # So every cell resolves: the reset one to its default, the stored one
+    # to its value, and one never touched to the default too.
+    assert _resolve(data, "demand", {"day": "mon", "shift": "morning"}) == 2
+    assert _resolve(data, "demand", {"day": "tue", "shift": "morning"}) == 7
+    assert _resolve(data, "demand", {"day": "wed", "shift": "night"}) == 2

@@ -25,6 +25,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Integer,
     PrimaryKeyConstraint,
@@ -76,7 +77,12 @@ class Domain(Base):
 
 class EntityType(Base):
     __tablename__ = "entity_type"
-    __table_args__ = (UniqueConstraint("domain_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("domain_id", "name"),
+        # Migration 0009: redundant as a key (id is the primary key), but it
+        # is what relationship_type's same-domain composite FKs reference.
+        UniqueConstraint("id", "domain_id", name="entity_type_id_domain_id_key"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     domain_id: Mapped[int] = mapped_column(
@@ -85,6 +91,9 @@ class EntityType(Base):
     # Used verbatim in IR expressions, hence the ^[a-z][a-z0-9_]*$ CHECK in the DDL.
     name: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(ENTITY_ROLE, nullable=False, server_default="other")
+    # Migration 0009: lowercase '#rrggbb' (CHECK entity_type_colour_hex);
+    # NULL means "not chosen", and the UI assigns a fallback.
+    colour: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AttributeDef(Base):
@@ -135,7 +144,23 @@ class Entity(Base):
 
 class RelationshipType(Base):
     __tablename__ = "relationship_type"
-    __table_args__ = (UniqueConstraint("domain_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("domain_id", "name"),
+        # Migration 0009, rule 3: both endpoint types belong to this
+        # relationship type's own domain.
+        ForeignKeyConstraint(
+            ["from_type_id", "domain_id"],
+            ["entity_type.id", "entity_type.domain_id"],
+            name="relationship_type_from_type_same_domain_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["to_type_id", "domain_id"],
+            ["entity_type.id", "entity_type.domain_id"],
+            name="relationship_type_to_type_same_domain_fkey",
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     domain_id: Mapped[int] = mapped_column(
@@ -155,6 +180,9 @@ class RelationshipType(Base):
     # A hierarchy reads as: from_entity is the PARENT of to_entity. Requires
     # from_type_id = to_type_id and cardinality = 'one_to_many'.
     is_hierarchy: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Migration 0009: lowercase '#rrggbb' (CHECK relationship_type_colour_hex);
+    # NULL means "not chosen", and the UI assigns a fallback.
+    colour: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Relationship(Base):

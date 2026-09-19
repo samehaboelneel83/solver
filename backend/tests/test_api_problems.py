@@ -27,9 +27,9 @@ those methods on a version path.
 **5. Scenario/version consistency.**  The cross-problem fixture gives both
 problems a version numbered 1, and the scenario points at the *other*
 problem's version 1: a check that compared version numbers rather than
-ownership would accept it.  The database does not enforce this rule at all
--- `test_database_accepts_a_scenario_on_another_problems_version` pins that
-as a KNOWN GAP.
+ownership would accept it.  Since migration 0009 the database enforces the
+rule too (a composite FK); `test_database_refuses_a_scenario_on_another_problems_version`
+proves it with raw SQL, bypassing this router.
 
 **6. What only the platform reads is validated.**  `snapshot_dataset()`
 reads `ir.sets` as an array of names and `ir.parameters` as an object; any
@@ -741,47 +741,50 @@ def test_deleting_the_domain_cascades_cleanly(client, auth_headers):
 
 
 # --------------------------------------------------------------------------
-# KNOWN GAP: the database does not enforce scenario/version consistency
+# The database enforces scenario/version consistency (migration 0009, rule 7)
 # --------------------------------------------------------------------------
 
 
-def test_database_accepts_a_scenario_on_another_problems_version(db, crossed):
-    """KNOWN GAP -- current behaviour, pinned so it is not forgotten.
+def test_database_refuses_a_scenario_on_another_problems_version(db, crossed):
+    """Formerly Task 9's KNOWN GAP: `scenario.problem_id` and
+    `scenario.model_version_id` were independent foreign keys, so raw SQL
+    -- the Task 15 seed, a future worker -- could bypass the router's 422
+    (`test_scenario_on_another_problems_version_is_422`) and store a
+    scenario on another problem's version. That row also made problem B
+    undeletable, since B's version was then referenced from outside B's
+    cascade.
 
-    `scenario.problem_id` and `scenario.model_version_id` are independent
-    foreign keys, and nothing requires the version to belong to the
-    scenario's problem. The router refuses such a row with a 422
-    (`test_scenario_on_another_problems_version_is_422`), but raw SQL, the
-    Task 15 seed or a future worker bypass it. This joins the migration
-    queue with the other "cross-table consistency with no constraint"
-    items; a composite FK `(model_version_id, problem_id) REFERENCES
-    model_version (id, problem_id)` (with a UNIQUE on that pair) would
-    close it without a trigger.
-
-    It also has a consequence beyond the bad row: B's version is now
-    referenced from *outside* B's cascade, so deleting problem B fails on
-    the NO ACTION foreign key. When the gap is closed this test should be
-    rewritten to assert the INSERT is refused.
+    Migration 0009 adds `UNIQUE (id, problem_id)` on `model_version` and
+    the composite FK `scenario_version_same_problem_fkey`
+    `(model_version_id, problem_id) REFERENCES model_version (id,
+    problem_id)`, exactly the fix Task 9's mutant D2 proved. The crossed
+    fixture's versions are both *numbered* 1, so a rule comparing numbers
+    rather than ownership would still accept this row.
     """
+    nested = db.begin_nested()
+    with pytest.raises(IntegrityError) as exc:
+        db.execute(
+            text(
+                "INSERT INTO scenario (problem_id, model_version_id, name) "
+                "VALUES (:p, :m, 'inconsistent')"
+            ),
+            {"p": crossed["a"], "m": crossed["b1"]},
+        )
+    nested.rollback()
+    assert exc.value.orig.pgcode == "23503"
+    assert exc.value.orig.diag.constraint_name == "scenario_version_same_problem_fkey"
+
+    # The legal row still goes in, and B stays deletable.
     sid = db.execute(
         text(
             "INSERT INTO scenario (problem_id, model_version_id, name) "
-            "VALUES (:p, :m, 'inconsistent') RETURNING id"
+            "VALUES (:p, :m, 'consistent') RETURNING id"
         ),
-        {"p": crossed["a"], "m": crossed["b1"]},
+        {"p": crossed["a"], "m": crossed["a2"]},
     ).scalar_one()
-    row = _row(
-        db,
-        "SELECT s.problem_id AS scenario_problem, mv.problem_id AS version_problem "
-        "FROM scenario s JOIN model_version mv ON mv.id = s.model_version_id WHERE s.id = :i",
-        i=sid,
-    )
-    assert row["scenario_problem"] == crossed["a"]
-    assert row["version_problem"] == crossed["b"]
-
-    nested = db.begin_nested()
-    with pytest.raises(IntegrityError) as exc:
-        db.execute(text("DELETE FROM problem WHERE id = :p"), {"p": crossed["b"]})
-    nested.rollback()
-    assert exc.value.orig.pgcode == "23503"
+    assert _row(db, "SELECT problem_id FROM scenario WHERE id = :i", i=sid)["problem_id"] == crossed["a"]
+    db.execute(text("DELETE FROM problem WHERE id = :p"), {"p": crossed["b"]})
+    assert db.execute(
+        text("SELECT count(*) FROM model_version WHERE id = :m"), {"m": crossed["b1"]}
+    ).scalar_one() == 0
 

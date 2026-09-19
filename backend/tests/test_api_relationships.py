@@ -1241,20 +1241,23 @@ def test_graph_hierarchy_type_id_from_another_domain_is_404(
     assert response.status_code == 404, response.text
 
 
-def test_graph_never_returns_an_edge_to_a_node_it_did_not_return(
+def test_a_relationship_type_straddling_domains_is_refused_so_no_graph_can_see_one(
     auth_headers, domain_id, types, other_domain_id
 ):
-    """`relationship_type.from_type_id`/`to_type_id` are plain FKs to
-    `entity_type` with no same-domain constraint, so the DDL allows a
-    relationship type in one domain to join entity types of another. Its
-    rows would then be edges between nodes this domain's graph does not
-    contain, which Cytoscape cannot draw. Added after mutation testing
-    showed the endpoint filter in `get_domain_graph` was unguarded (the
-    mutant dropping it survived every other test).
+    """Until migration 0009, `relationship_type.from_type_id`/`to_type_id`
+    were plain FKs to `entity_type` with no same-domain constraint, so a
+    relationship type in this domain could join entity types of another.
+    Its rows would have been edges between nodes this domain's graph does
+    not contain, which Cytoscape cannot draw -- this test used to create
+    exactly that and assert `get_domain_graph`'s endpoint filter dropped
+    the edge (added after mutation testing showed the filter unguarded).
 
-    The domain needs a node of its own: with no nodes at all the
-    relationship query is skipped outright, and the first draft of this
-    test passed against the mutant for exactly that reason."""
+    0009's rule 3 makes the row impossible: composite FKs
+    `(from_type_id, domain_id)` / `(to_type_id, domain_id)` ->
+    `entity_type (id, domain_id)`. The router does not shadow them, so the
+    refusal is `translate_db_error`'s 409 with a string detail. The graph's
+    endpoint filter is left in place as defence in depth, but no data can
+    reach it any more (see the task 14a report)."""
     client = TestClient(app)
     mine = _entity(client, auth_headers, types["unit"], "mine")
     foreign_type = client.post(
@@ -1262,7 +1265,7 @@ def test_graph_never_returns_an_edge_to_a_node_it_did_not_return(
         json={"domain_id": other_domain_id, "name": "unit", "role": "org"},
         headers=auth_headers,
     ).json()["id"]
-    straddling = _rel_type_id(
+    response = _make_rel_type(
         client,
         auth_headers,
         domain_id,
@@ -1270,10 +1273,10 @@ def test_graph_never_returns_an_edge_to_a_node_it_did_not_return(
         from_type_id=foreign_type,
         to_type_id=foreign_type,
     )
-    a = _entity(client, auth_headers, foreign_type, "a")
-    b = _entity(client, auth_headers, foreign_type, "b")
-    _rel_id(client, auth_headers, straddling, a, b)
+    assert response.status_code == 409, response.text
+    assert isinstance(response.json()["detail"], str), response.text
 
     graph = _graph(client, auth_headers, domain_id)
     assert [n["id"] for n in graph["nodes"]] == [str(mine)]
+    assert "covers" not in [rt["code"] for rt in graph["relationship_types"]]
     assert graph["edges"] == []

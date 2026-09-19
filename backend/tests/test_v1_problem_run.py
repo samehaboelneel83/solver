@@ -108,13 +108,15 @@ def make_entity(
     ).scalar_one()
 
 
-def make_parameter_def(db, domain_id: int, name: str, index_type_ids: list[int]) -> int:
+def make_parameter_def(
+    db, domain_id: int, name: str, index_type_ids: list[int], default_value: int = 0
+) -> int:
     return db.execute(
         text(
-            "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
-            "VALUES (:d, :n, :i) RETURNING id"
+            "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value) "
+            "VALUES (:d, :n, :i, :dv) RETURNING id"
         ),
-        {"d": domain_id, "n": name, "i": index_type_ids},
+        {"d": domain_id, "n": name, "i": index_type_ids, "dv": default_value},
     ).scalar_one()
 
 
@@ -563,7 +565,9 @@ def snapshot_domain(db):
         "night": make_entity(db, shift, "night", sort_order=1),
     }
 
-    demand = make_parameter_def(db, domain, "demand", [day, shift])
+    # default 1, not the column's 0: a snapshot that emitted a constant 0
+    # (or coalesced a missing default to 0) must not match by accident.
+    demand = make_parameter_def(db, domain, "demand", [day, shift], default_value=1)
     make_parameter_value(db, demand, [entities["mon"], entities["morning"]], 3)
     make_parameter_value(db, demand, [entities["mon"], entities["night"]], 5)
     make_parameter_value(db, demand, [entities["tue"], entities["morning"]], 7)
@@ -630,11 +634,13 @@ def test_snapshot_shape_is_pinned(db, snapshot_domain):
                 {"day": "tue", "shift": "morning", "value": 7},
             ]
         },
+        # Ruling 28 (migration 0009): what an absent cell means.
+        "parameter_defaults": {"demand": 1},
     }
 
     # Spelled out again, so a future reader sees which facts the literal
     # above is pinning, and so a partial drift names itself.
-    assert set(data) == {"sets", "parameters"}
+    assert set(data) == {"sets", "parameters", "parameter_defaults"}
     assert data["sets"]["employee"][0]["id"] == "ahmed"  # entity.key -> "id"
     assert "key" not in data["sets"]["employee"][0]
     assert data["parameters"]["demand"][0] == {"day": "mon", "shift": "morning", "value": 3}
@@ -653,6 +659,7 @@ def test_snapshot_names_sets_present_in_the_ir_only(db, snapshot_domain):
     assert set(data["sets"]) == {"day", "location"}
     assert data["sets"]["location"] == []
     assert data["parameters"] == {}
+    assert data["parameter_defaults"] == {}
 
 
 def test_snapshot_raises_for_a_set_with_no_entity_type(db, snapshot_domain):
@@ -793,6 +800,92 @@ def test_snapshot_ignores_another_domains_identically_named_parameter(db, snapsh
         {"day": "mon", "shift": "night", "value": 5},
         {"day": "tue", "shift": "morning", "value": 7},
     ]
+    # Ruling 28's defaults are scoped the same way (the other one is 0).
+    assert data["parameter_defaults"] == {"demand": 1}
+
+
+# --------------------------------------------------------------------------
+# snapshot_dataset(): parameter defaults (Ruling 28, migration 0009)
+# --------------------------------------------------------------------------
+
+
+def test_snapshot_carries_the_default_of_a_parameter_with_no_stored_cells(db, snapshot_domain):
+    """Every cell at its default means no `parameter_value` rows at all --
+    the parameter's rows are `[]` and only `parameter_defaults` says what
+    any cell is worth."""
+    domain = snapshot_domain["domain"]
+    types = snapshot_domain["types"]
+    make_parameter_def(db, domain, "capacity", [types["day"]], default_value=6)
+    mv = make_model_version(
+        db,
+        snapshot_domain["problem"],
+        {"sets": ["day"], "parameters": {"demand": {}, "capacity": {}}},
+    )
+    data = _data(db, _snapshot(db, mv))
+
+    assert data["parameters"]["capacity"] == []
+    assert data["parameter_defaults"] == {"demand": 1, "capacity": 6}
+
+
+def test_snapshot_defaults_name_only_parameters_the_ir_references(db, snapshot_domain):
+    """Exactly the set the `parameters` loop resolves: a parameter_def the
+    IR does not name contributes neither rows nor a default."""
+    make_parameter_def(
+        db, snapshot_domain["domain"], "capacity", [snapshot_domain["types"]["day"]], 6
+    )
+    data = _data(db, _snapshot(db, snapshot_domain["model_version"]))
+    assert set(data["parameters"]) == {"demand"}
+    assert data["parameter_defaults"] == {"demand": 1}
+
+
+def test_snapshot_with_no_parameters_key_has_empty_defaults(db, snapshot_domain):
+    mv = make_model_version(db, snapshot_domain["problem"], {"sets": ["day"]})
+    data = _data(db, _snapshot(db, mv))
+    assert data["parameters"] == {}
+    assert data["parameter_defaults"] == {}
+
+
+def test_snapshot_defaults_are_scoped_to_the_problems_domain(db):
+    """Two domains, each with its own `demand` and a different default,
+    and each problem snapshotted. Both orders matter: whichever row an
+    unscoped lookup happened to pick -- first inserted or last -- one of
+    the two assertions sees the other domain's value. Neither parameter
+    has stored cells, so nothing but the default distinguishes them."""
+    defaults = {}
+    for label, default in (("first", 11), ("second", 22)):
+        domain = make_domain(db, label)
+        day = make_entity_type(db, domain, "day")
+        make_parameter_def(db, domain, "demand", [day], default_value=default)
+        problem = make_problem(db, domain, label)
+        mv = make_model_version(db, problem, {"sets": [], "parameters": {"demand": {}}})
+        defaults[label] = _data(db, _snapshot(db, mv))["parameter_defaults"]
+
+    assert defaults == {"first": {"demand": 11}, "second": {"demand": 22}}
+
+
+def test_snapshots_differing_only_in_a_default_hash_differently(db, snapshot_domain):
+    """Ruling 28: the default is part of the data, so changing it is a
+    new dataset -- not a dedup hit on the old one."""
+    first = _snapshot(db, snapshot_domain["model_version"])
+    db.execute(
+        text("UPDATE parameter_def SET default_value = 4 WHERE id = :p"),
+        {"p": snapshot_domain["demand"]},
+    )
+    second = _snapshot(db, snapshot_domain["model_version"])
+
+    assert second != first
+    hashes = db.execute(
+        text("SELECT id, data_hash FROM dataset WHERE id IN (:a, :b)"),
+        {"a": first, "b": second},
+    ).all()
+    assert len({h for _, h in hashes}) == 2
+    before, after = _data(db, first), _data(db, second)
+    assert before["parameters"] == after["parameters"]  # the cells did not change
+    assert before["sets"] == after["sets"]
+    assert (before["parameter_defaults"], after["parameter_defaults"]) == (
+        {"demand": 1},
+        {"demand": 4},
+    )
 
 
 # --------------------------------------------------------------------------
