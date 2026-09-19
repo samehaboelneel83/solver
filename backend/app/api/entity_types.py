@@ -53,19 +53,18 @@ the backstop for every other writer -- the seed, a migration, psql, a
 future worker -- and `test_api_entity_types.py` asserts one of them still
 fires on a direct insert, so a shadowed constraint cannot be quietly
 dropped later. The request-layer rules are deliberately at least as strict
-as the CHECKs they shadow (see `_validate_name`).
+as the CHECKs they shadow (see `app.api.validation.validate_name`).
 """
 
-import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.api.validation import field_error, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
@@ -81,32 +80,9 @@ router = APIRouter(prefix="/api/v1", tags=["entity types"])
 EntityRole = Literal["agent", "resource", "time", "location", "task", "org", "other"]
 AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date"]
 
-# `entity_type.name` and `attribute_def.name` both carry
-# CHECK (name ~ '^[a-z][a-z0-9_]*$') -- the names are used verbatim in IR
-# expressions. Quoted here for the error message; the match itself uses
-# `re.fullmatch` on the unanchored body rather than `re.match` on the
-# anchored form, because Python's `$` also matches just before a trailing
-# newline while Postgres's does not -- `"employee\n"` would otherwise pass
-# validation and then be rejected by the database as a confusing 409.
-NAME_PATTERN = "^[a-z][a-z0-9_]*$"
-_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
-
-_NAME_MESSAGE = (
-    f"must match {NAME_PATTERN}: a lowercase letter, then lowercase letters, "
-    "digits or underscores (it is used verbatim in model expressions)"
-)
-
-
-def _validate_name(value: str | None) -> str | None:
-    if value is None:  # PATCH: field simply not being changed
-        return value
-    if _NAME_RE.fullmatch(value) is None:
-        raise ValueError(_NAME_MESSAGE)
-    return value
-
 
 def _validate_attribute_name(value: str | None) -> str | None:
-    value = _validate_name(value)
+    value = validate_name(value)
     # attribute_def's CHECK is `name ~ '...' AND name <> 'id'`. 'id' matches
     # the pattern, so this half needs its own rejection.
     if value == "id":
@@ -115,15 +91,6 @@ def _validate_attribute_name(value: str | None) -> str | None:
             "attribute called 'id' would shadow it in model expressions"
         )
     return value
-
-
-def _field_error(field: str, message: str, value: Any) -> RequestValidationError:
-    """Build a refusal in exactly the shape FastAPI's own body validation
-    produces, so a caller (and `formatApiError` in the frontend) does not
-    have to special-case rules that happen to be checked by hand."""
-    return RequestValidationError(
-        [{"type": "value_error", "loc": ("body", field), "msg": message, "input": value}]
-    )
 
 
 def _check_enum_pairing(data_type: str, enum_values: list[str] | None) -> None:
@@ -138,13 +105,13 @@ def _check_enum_pairing(data_type: str, enum_values: list[str] | None) -> None:
     validator's `loc` is just `["body"]`.
     """
     if data_type == "enum" and enum_values is None:
-        raise _field_error(
+        raise field_error(
             "enum_values",
             "an attribute of type 'enum' must list its allowed values",
             enum_values,
         )
     if data_type != "enum" and enum_values is not None:
-        raise _field_error(
+        raise field_error(
             "enum_values",
             f"enum_values is only meaningful for data_type 'enum', not {data_type!r}",
             enum_values,
@@ -210,14 +177,14 @@ class EntityTypeCreate(BaseModel):
     # Mirrors the column's server default, so the field can be omitted.
     role: EntityRole = "other"
 
-    _check_name = field_validator("name")(_validate_name)
+    _check_name = field_validator("name")(validate_name)
 
 
 class EntityTypeUpdate(BaseModel):
     name: str | None = None
     role: EntityRole | None = None
 
-    _check_name = field_validator("name")(_validate_name)
+    _check_name = field_validator("name")(validate_name)
 
 
 class EntityTypeList(BaseModel):

@@ -770,6 +770,31 @@ def test_snapshot_ignores_another_domains_identically_named_type(db, snapshot_do
     assert [row["id"] for row in data["sets"]["day"]] == ["mon", "tue"]
 
 
+def test_snapshot_ignores_another_domains_identically_named_parameter(db, snapshot_domain):
+    """The parameters loop's twin of the test above: `pd.domain_id =
+    v_domain` scopes the rows, not only the existence check before them.
+
+    The other domain's `demand` is given *stored values* on purpose. A
+    same-named `parameter_def` with no `parameter_value` rows would add
+    nothing to the unscoped query either, and the mutant dropping the
+    predicate would survive (Task 2's deferred minor; closed in Task 8).
+    """
+    other = make_domain(db, "other")
+    other_day = make_entity_type(db, other, "day")
+    other_shift = make_entity_type(db, other, "shift")
+    sat = make_entity(db, other_day, "sat")
+    late = make_entity(db, other_shift, "late")
+    other_demand = make_parameter_def(db, other, "demand", [other_day, other_shift])
+    make_parameter_value(db, other_demand, [sat, late], 99)
+
+    data = _data(db, _snapshot(db, snapshot_domain["model_version"]))
+    assert data["parameters"]["demand"] == [
+        {"day": "mon", "shift": "morning", "value": 3},
+        {"day": "mon", "shift": "night", "value": 5},
+        {"day": "tue", "shift": "morning", "value": 7},
+    ]
+
+
 # --------------------------------------------------------------------------
 # run_overview
 # --------------------------------------------------------------------------

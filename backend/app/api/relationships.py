@@ -67,12 +67,12 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-# Imported rather than re-derived: `relationship_type.name` carries the
+# Shared rather than re-derived: `relationship_type.name` carries the
 # identical `^[a-z][a-z0-9_]*$` CHECK as the two names Task 5 validates,
 # including the trailing-newline subtlety that `re.fullmatch` closes and
-# `re.match` on an anchored pattern does not. A third copy of the regex is
-# a third thing that can drift.
-from app.api.entity_types import NAME_PATTERN, _field_error, _validate_name
+# `re.match` on an anchored pattern does not. (Imported privately from
+# `entity_types` until Task 8 moved them to `validation`, per Ruling 22.)
+from app.api.validation import NAME_PATTERN, field_error, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
@@ -105,14 +105,14 @@ def _check_hierarchy_rules(
     if not is_hierarchy:
         return
     if from_type_id != to_type_id:
-        raise _field_error(
+        raise field_error(
             "to_type_id",
             "a hierarchy nests one entity type inside itself, so from_type_id "
             "and to_type_id must name the same entity type",
             to_type_id,
         )
     if cardinality != "one_to_many":
-        raise _field_error(
+        raise field_error(
             "cardinality",
             "a hierarchy must be one_to_many, so that each child has at most "
             f"one parent (got {cardinality!r})",
@@ -124,7 +124,7 @@ def _check_validity_window(valid_from: date | None, valid_to: date | None) -> No
     """``CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >=
     valid_from)``. Judged on the merged row, for the same reason."""
     if valid_from is not None and valid_to is not None and valid_to < valid_from:
-        raise _field_error(
+        raise field_error(
             "valid_to",
             f"valid_to ({valid_to.isoformat()}) is before valid_from "
             f"({valid_from.isoformat()})",
@@ -156,7 +156,7 @@ class RelationshipTypeCreate(BaseModel):
     cardinality: Cardinality = "many_to_many"
     is_hierarchy: bool = False
 
-    _check_name = field_validator("name")(_validate_name)
+    _check_name = field_validator("name")(validate_name)
 
 
 class RelationshipTypeUpdate(BaseModel):
@@ -171,7 +171,7 @@ class RelationshipTypeUpdate(BaseModel):
     cardinality: Cardinality | None = None
     is_hierarchy: bool | None = None
 
-    _check_name = field_validator("name")(_validate_name)
+    _check_name = field_validator("name")(validate_name)
 
 
 class RelationshipTypeList(BaseModel):
