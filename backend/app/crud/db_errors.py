@@ -38,6 +38,15 @@ from app.crud.errors import conflict_detail
 
 # foreign_key_violation, unique_violation, not_null_violation -- the three
 # classes conflict_detail() already knows how to describe.
+#
+# Note: this is narrower than the old bare `except IntegrityError` in
+# factory.py, which caught every SQLSTATE class 23 (integrity_constraint_
+# violation) and gave it a generic 409. A class-23 code outside this set --
+# e.g. 23001 restrict_violation or 23P01 exclusion_violation -- now falls
+# through to the final `raise exc` below and surfaces as a 500 instead.
+# No table in this schema declares a RESTRICT FK action or an EXCLUDE
+# constraint today, so this is currently unreachable, but a future one
+# would need adding here (or a broader `code.startswith("23")` fallback).
 _CONFLICT_CODES = {"23503", "23505", "23502"}
 
 
@@ -48,8 +57,9 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
     - 23514 (check_violation) with a well-formed JSON DETAIL -> 422 naming
       the field and kind, per the Task 1 DETAIL contract.
     - 23514 without a parseable JSON DETAIL -> falls through to the 409
-      path below (conflict_detail() still produces a reasonable message
-      from pgcode "23514", even though it has no bespoke branch for it).
+      path below. conflict_detail() has no bespoke branch for "23514", so
+      this returns its generic catch-all message rather than a tailored
+      one -- still a reasonable 409, just not a field-specific one.
     - 23503 / 23505 / 23502 -> 409 via the existing conflict_detail(),
       reused unchanged.
     - P0001 (bare RAISE EXCEPTION: forbid_update immutability,

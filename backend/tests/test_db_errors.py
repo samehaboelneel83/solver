@@ -24,6 +24,7 @@ about at all (must re-raise, not swallow).
 """
 
 import json
+import uuid
 
 import pytest
 from sqlalchemy import text
@@ -43,13 +44,17 @@ def db():
         session.close()
 
 
-_counter = 0
+def _unique() -> str:
+    """A run-unique suffix.
 
-
-def _unique() -> int:
-    global _counter
-    _counter += 1
-    return _counter
+    `solver_test` is created once by `conftest.py` and never dropped, so
+    anything a test *commits* persists across pytest invocations. A
+    process-local counter (0, 1, 2, ... reset every run) is not unique
+    against that: it reliably regenerates the same name the next run picks,
+    colliding with a row a prior run left behind. uuid4 is unique across
+    runs, not just within one.
+    """
+    return uuid.uuid4().hex[:8]
 
 
 # --------------------------------------------------------------------------
@@ -197,13 +202,16 @@ def test_real_immutable_table_raise_exception_becomes_409(db):
 
 
 def test_real_unique_violation_becomes_409(db):
+    # No commit: Postgres checks a non-deferred UNIQUE constraint per
+    # statement, so the second INSERT raises inside this still-open
+    # transaction without either row ever reaching disk (same pattern as
+    # the other real-database tests here, which never commit either --
+    # only rely on `db.rollback()` in the fixture teardown).
     name = f"dup-{_unique()}"
     db.execute(text("INSERT INTO domain (name) VALUES (:n)"), {"n": name})
-    db.commit()
 
     with pytest.raises(IntegrityError) as exc_info:
         db.execute(text("INSERT INTO domain (name) VALUES (:n)"), {"n": name})
-        db.commit()
     db.rollback()
 
     http = translate_db_error(exc_info.value, table="domain")
