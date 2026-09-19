@@ -1,6 +1,6 @@
 """Entities -- rows of a domain's data, with database-validated attributes.
 
-    GET    /api/v1/entities            ?entity_type_id=&q=&limit=&offset=
+    GET    /api/v1/entities            ?entity_type_id=&q=&expr=&limit=&offset=
     POST   /api/v1/entities
     GET    /api/v1/entities/{id}
     PATCH  /api/v1/entities/{id}
@@ -54,6 +54,24 @@ Both 422 sources share one body shape, so a client never branches on it;
 ``kind`` is present exactly when the database's trigger answered. Until
 Task 7 the trigger's 422 was an object instead -- see Ruling 19.
 
+Filtering by an expression (Task 14d)
+-------------------------------------
+`expr` carries the same JSON document the browser's condition builder
+writes (`frontend/src/expressions/document.ts`), and
+`app/expressions/` compiles it to a parameterised predicate. Three
+properties are worth stating here rather than only there:
+
+- it **narrows**. The predicate is one more `filter()` on the query this
+  route had already built, so an expression can never return a row the
+  route would not have returned without it, and the route's
+  authentication and `entity_type_id` scoping are untouched.
+- a refusal is a **422 in the same list shape as every other** (Ruling
+  19), with `loc = ["query", "expr", ...<a path into the document>]` so
+  the builder can point at the rule that is wrong (Ruling 30).
+- nothing in the document becomes SQL text. Literals and attribute names
+  are bound parameters; column, function and direction names are dict
+  lookups that yield objects. See `app/expressions/compiler.py`.
+
 `key` deliberately carries no request-layer *pattern*: unlike
 `entity_type.name` and `attribute_def.name`, `entity.key` has no shape
 rule in the DDL, and inventing one the database does not have is what
@@ -73,8 +91,10 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.api.validation import field_error
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
+from app.expressions import ExpressionRefusal, compile_expression, parse_expression
 from app.models.iam import UserAccount
 from app.models.v1_domain import Entity
 
@@ -153,10 +173,40 @@ def _commit(db: Session) -> None:
 # --- routes ----------------------------------------------------------------
 
 
+def _expression_filter(db: Session, expr: str):
+    """`expr` as a predicate, or a 422 naming the rule that is wrong.
+
+    Two steps, and the order is the security property (see
+    `app/expressions/__init__.py`): `parse_expression` has no database in
+    scope, so everything it can refuse is refused before one is reachable;
+    `compile_expression` reads `attribute_def` and `relationship_type` and
+    nothing else, so even its refusals happen without `entity` being read.
+
+    The refusal's `path` points into the document, and becomes `loc`
+    beneath `["query", "expr"]` -- FastAPI's own list shape (Ruling 19's
+    single 422 body), keyed by `loc` rather than by a code (Ruling 30), so
+    the builder can highlight the offending rule.
+    """
+    try:
+        parsed = parse_expression(expr)
+        return compile_expression(db, parsed)
+    except ExpressionRefusal as refusal:
+        raise field_error(
+            ["expr", *refusal.path], refusal.message, None, where="query"
+        ) from refusal
+
+
 @router.get("/entities")
 def list_entities(
     entity_type_id: int | None = Query(None),
     q: str | None = Query(None, description="matches key or label, case-insensitively"),
+    expr: str | None = Query(
+        None,
+        description=(
+            "a JSON expression document (frontend/src/expressions/document.ts), "
+            "which narrows this list further -- it can never widen it"
+        ),
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -165,6 +215,12 @@ def list_entities(
     query = db.query(Entity)
     if entity_type_id is not None:
         query = query.filter(Entity.entity_type_id == entity_type_id)
+    # The expression is one more `filter()` on the query the route had
+    # already built, which is what makes "it cannot widen what a caller
+    # sees" structural rather than a promise: every predicate this adds is
+    # ANDed with the ones above and below it.
+    if expr is not None:
+        query = query.filter(_expression_filter(db, expr))
     if q:
         # `%` and `_` in the needle are escaped so a user typing them gets a
         # literal search rather than a silently wider one.

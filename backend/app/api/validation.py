@@ -78,17 +78,29 @@ def validate_colour(value: str | None) -> str | None:
     return value.lower()
 
 
-def field_error(field: str | list[str | int], message: str, value: Any) -> RequestValidationError:
+def field_error(
+    field: str | list[str | int],
+    message: str,
+    value: Any,
+    where: str = "body",
+) -> RequestValidationError:
     """Build a refusal in exactly the shape FastAPI's own body validation
     produces, so a caller (and `formatApiError` in the frontend) does not
     have to special-case rules that happen to be checked by hand.
 
     `field` is a single body field, or a path into the body such as
     ``["cells", 3, "entity_ids"]`` -- the same `loc` Pydantic would give a
-    failure inside a list item."""
+    failure inside a list item.
+
+    `where` is the first `loc` segment. It defaults to ``"body"``, which is
+    what every caller before Task 14d wanted; the expression filter arrives
+    as a query parameter, and Pydantic's own refusals for those say
+    ``"query"``, so a hand-raised one has to as well or a client keying on
+    `loc` (Ruling 30) would not recognise it.
+    """
     path = [field] if isinstance(field, str) else list(field)
     return RequestValidationError(
-        [{"type": "value_error", "loc": ("body", *path), "msg": message, "input": value}]
+        [{"type": "value_error", "loc": (where, *path), "msg": message, "input": value}]
     )
 
 

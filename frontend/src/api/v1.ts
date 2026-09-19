@@ -26,6 +26,7 @@
  *   client in `graph.ts` and its types belong to Task 14.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ExpressionDocument } from "../expressions/document";
 import { ApiError, apiFetch } from "./client";
 
 // --- shared -------------------------------------------------------------
@@ -199,12 +200,30 @@ export type EntityCreate = {
 /** `entity_type_id` is not patchable. `attrs` replaces the whole object. */
 export type EntityUpdate = Partial<Omit<EntityCreate, "entity_type_id">>;
 
-/** Ordered by `sort_order`, then `key`. `q` matches key or label. */
+/**
+ * Ordered by `sort_order`, then `key`. `q` matches key or label.
+ *
+ * `expression` is the condition builder's document (Task 14d). It is sent
+ * as JSON in the `expr` query parameter and compiled to SQL on the server,
+ * where it can only ever NARROW this list -- the predicate is ANDed with
+ * the `entity_type_id` and `q` filters, never substituted for them. Send
+ * only a document `validateExpression` accepts: the server validates it
+ * again against the same shared catalogue and answers 422 with
+ * `loc: ["query", "expr", ...]` pointing at the rule it could not use.
+ */
 export function listEntities(
-  params: { entityTypeId?: Id | null; q?: string } & PageParams = {}
+  params: { entityTypeId?: Id | null; q?: string; expression?: ExpressionDocument | null } & PageParams = {}
 ): Promise<Page<Entity>> {
-  const { entityTypeId, q, limit, offset } = params;
-  return apiFetch(`/api/v1/entities${query({ entity_type_id: entityTypeId, q, limit, offset })}`);
+  const { entityTypeId, q, expression, limit, offset } = params;
+  return apiFetch(
+    `/api/v1/entities${query({
+      entity_type_id: entityTypeId,
+      q,
+      expr: expression ? JSON.stringify(expression) : undefined,
+      limit,
+      offset,
+    })}`
+  );
 }
 export const getEntity = (id: Id) => apiFetch<Entity>(`/api/v1/entities/${id}`);
 export const createEntity = (body: EntityCreate) => send<Entity>("POST", "/api/v1/entities", body);
@@ -469,11 +488,19 @@ export const useUpdateAttribute = () =>
 export const useDeleteAttribute = () => useV1Mutation(deleteAttribute);
 
 // entities
-export function useEntities(entityTypeId: Id | null, params: { q?: string } & PageParams = {}) {
+export function useEntities(
+  entityTypeId: Id | null,
+  params: { q?: string; expression?: ExpressionDocument | null } & PageParams = {}
+) {
   return useQuery({
+    // The document goes into the key by value, so two different
+    // expressions are two cached lists and the same one is one request.
     queryKey: [V1, "entities", { entityTypeId, ...params }],
     queryFn: () => listEntities({ entityTypeId, ...params }),
     enabled: isId(entityTypeId),
+    // No `retry` override: the app's default (`lib/queryRetry.ts`) already
+    // gives up immediately on any 4xx, which is exactly right for the
+    // compiler's 422 -- the same document sent again gets the same answer.
   });
 }
 export function useEntityRecord(id: Id | null | undefined) {

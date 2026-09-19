@@ -69,6 +69,11 @@ function serve(over: Record<string, unknown> = {}) {
       }
     }
     if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(TYPES);
+    // Task 14d: the page asks for these to offer `count(...)` in the
+    // condition builder. Served rather than left to the reject below, so
+    // the suite does not carry fifteen rejected promises that outlive the
+    // tests that started them.
+    if (path.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: [], total: 0 });
     if (path.startsWith("/api/v1/entities")) return Promise.resolve(ENTITIES);
     return Promise.reject(new Error(`unexpected ${path}`));
   });

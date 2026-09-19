@@ -45,7 +45,9 @@ export type ExpressionProblemCode =
   | "bad_operator"
   | "bad_value_type"
   | "bad_enum_value"
-  | "empty_list";
+  | "empty_list"
+  | "too_many_rules"
+  | "list_too_long";
 
 export type ExpressionProblem = {
   /** The rule's position: the indices from the root group down. `[]` is
@@ -65,10 +67,29 @@ export type ValidationResult = {
   document: ExpressionDocument;
 };
 
-/** How deeply groups may nest. A guard on what arrives from the wire, not
- * a limit anybody will reach by clicking: the evaluator and Task 14d's
- * compiler both recurse. */
+/**
+ * The three size limits, shared with the server (Task 14d).
+ *
+ * They are guards on what arrives from the wire rather than limits anybody
+ * will reach by clicking: the evaluator and the server's SQL compiler both
+ * recurse over the document, and the server turns every rule into
+ * predicates and every list item into a bound parameter. They live in the
+ * shared catalogue (`backend/app/expressions/catalogue.json`,
+ * `parity.test.ts`) so the client refuses the same documents the server
+ * refuses, rather than sending one and being told 422.
+ *
+ * - `MAX_DEPTH` 10: the builder nests a group per click; ten is already
+ *   unreadable on screen, and a hand-written 200-deep document is not a
+ *   filter, it is a recursion test.
+ * - `MAX_RULES` 50: fifty conditions is far past the point at which a
+ *   person would use two filters instead, and it bounds the number of
+ *   predicates -- and of correlated `count` subqueries -- in one statement.
+ * - `MAX_LIST_LENGTH` 100: "is one of" is offered only on `enum`, and an
+ *   enum with more than a hundred values is not a list a person picks from.
+ */
 export const MAX_DEPTH = 10;
+export const MAX_RULES = 50;
+export const MAX_LIST_LENGTH = 100;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -170,6 +191,12 @@ function valueProblem(
     if (value.length === 0) {
       return { code: "empty_list", message: `${field.label}: choose at least one value.` };
     }
+    if (value.length > MAX_LIST_LENGTH) {
+      return {
+        code: "list_too_long",
+        message: `${field.label}: "is one of" takes at most ${MAX_LIST_LENGTH} values.`,
+      };
+    }
     for (const item of value) {
       const problem = scalarProblem(field, item);
       if (problem) {
@@ -195,6 +222,10 @@ type Walker = {
   problems: ExpressionProblem[];
   warnings: ExpressionWarning[];
   catalogue: FieldCatalogue;
+  /** Every rule met at any depth, counted during the walk rather than by a
+   * second pass, so a document too large to compile is refused by the same
+   * traversal that judges it. */
+  ruleCount: number;
 };
 
 function checkRule(w: Walker, rule: ExpressionRule, path: number[]): ExpressionField | null {
@@ -289,6 +320,7 @@ function checkGroup(w: Walker, group: unknown, path: number[], depth: number): S
       });
       return;
     }
+    w.ruleCount += 1;
     const field = checkRule(w, node as unknown as ExpressionRule, childPath);
     if (field) {
       const entityType = entityTypeOf(field);
@@ -330,8 +362,15 @@ export function validateExpression(input: unknown, catalogue: FieldCatalogue): V
     return fail("malformed", "An expression is an object with a version and a query.");
   }
 
-  const w: Walker = { problems: [], warnings: [], catalogue };
+  const w: Walker = { problems: [], warnings: [], catalogue, ruleCount: 0 };
   checkGroup(w, input.query, [], 1);
+  if (w.ruleCount > MAX_RULES) {
+    w.problems.push({
+      path: [],
+      code: "too_many_rules",
+      message: `An expression holds at most ${MAX_RULES} conditions; this one holds ${w.ruleCount}.`,
+    });
+  }
   return {
     valid: w.problems.length === 0,
     problems: w.problems,

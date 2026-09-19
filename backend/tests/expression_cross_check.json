@@ -1,0 +1,452 @@
+{
+  "//": [
+    "The SHARED cross-check fixture for Task 14d.",
+    "",
+    "Two implementations answer the same documents over the same data: the",
+    "client evaluator (frontend/src/expressions/evaluate.ts) and the server's",
+    "SQL compiler (backend/app/expressions/). Both read THIS file, and both",
+    "assert the keys in each case's `expect`.",
+    "",
+    "`expect` is derived BY HAND, from the semantics written down in",
+    "evaluate.ts's docstring -- never from running either implementation.",
+    "That is the whole point: two implementations that agree with each other",
+    "and disagree with the intent prove nothing. Each case carries `why`,",
+    "which is the derivation.",
+    "",
+    "Field ids name entity/relationship types by `@<name>`; each side",
+    "substitutes the ids it actually has (real bigints on the server,",
+    "synthetic ones in the browser test).",
+    "",
+    "Note `u3.hired`: the string 'not-a-date' is stored in a `date`",
+    "attribute. That is NOT a hole in the fixture -- `entity_validate`",
+    "(migration 0006) checks only `jsonb_typeof(v) = 'string'` for date and",
+    "time, so the database genuinely permits it, and any compiler that casts",
+    "an attribute to `date` errors on this row."
+  ],
+
+  "entityTypes": [
+    {
+      "name": "unit",
+      "role": "resource",
+      "attributes": [
+        { "name": "cap", "data_type": "integer" },
+        { "name": "code", "data_type": "text" },
+        { "name": "note", "data_type": "text" },
+        { "name": "hired", "data_type": "date" },
+        { "name": "starts", "data_type": "time" },
+        { "name": "ratio", "data_type": "number" },
+        { "name": "grade", "data_type": "enum", "enum_values": ["a", "b", "c"] },
+        { "name": "live", "data_type": "boolean" },
+        { "name": "tag", "data_type": "text" },
+        { "name": "ends", "data_type": "time" },
+        { "name": "left_on", "data_type": "date" }
+      ]
+    },
+    {
+      "name": "shift",
+      "role": "time",
+      "attributes": [
+        { "name": "cap", "data_type": "text" },
+        { "name": "starts", "data_type": "time" }
+      ]
+    }
+  ],
+
+  "relationshipTypes": [
+    { "name": "covers", "from": "unit", "to": "shift", "cardinality": "many_to_many" }
+  ],
+
+  "entities": [
+    {
+      "type": "unit", "key": "u1", "label": "Alice", "sort_order": 1, "active": true,
+      "attrs": {
+        "cap": 9, "code": "9", "note": null, "hired": "2024-03-05",
+        "starts": "09:30", "ratio": 2.5, "grade": "a", "live": true,
+        "tag": " a ", "ends": "09:30:00", "left_on": "2024-06-01"
+      }
+    },
+    {
+      "type": "unit", "key": "u2", "label": "alice", "sort_order": 2, "active": true,
+      "attrs": {
+        "cap": 10, "code": "10", "hired": "2023-12-31",
+        "starts": "09:30:00", "ratio": -2.5, "grade": "b", "live": false,
+        "tag": "ab", "ends": "9:5", "left_on": "20240105"
+      }
+    },
+    {
+      "type": "unit", "key": "u3", "label": null, "sort_order": 3, "active": false,
+      "attrs": {
+        "cap": 100, "code": "hello%world", "note": "hi", "hired": "not-a-date",
+        "starts": "23:59", "ratio": 0, "grade": "c", "live": true,
+        "tag": "abc"
+      }
+    },
+    {
+      "type": "shift", "key": "s1", "label": "Morning", "sort_order": 1, "active": true,
+      "attrs": { "cap": "9", "starts": "06:00" }
+    },
+    {
+      "type": "shift", "key": "s2", "label": "Night", "sort_order": 2, "active": true,
+      "attrs": { "cap": "10", "starts": "22:00" }
+    }
+  ],
+
+  "relationships": [
+    { "type": "covers", "from": "u1", "to": "s1" },
+    { "type": "covers", "from": "u1", "to": "s2" },
+    { "type": "covers", "from": "u2", "to": "s1" }
+  ],
+
+  "cases": [
+    {
+      "name": "integer_lt_compares_as_a_number_not_as_text",
+      "why": "cap is integer: 9 < 10, 10 and 100 are not. A text comparison would say '100' < '10' < '9' and answer u2,u3.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:cap", "operator": "<", "value": 10 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "integer_lt_separates_a_numeric_order_from_a_text_one",
+      "why": "The caps are 9, 10 and 100. As numbers, 9 and 10 are below 100. As TEXT they would order '10' < '100' < '9', so a text comparison against '100' would answer u2 alone -- a different, non-empty answer, which is what makes this case discriminate rather than merely pass. (v1's `text` type offers no ordering operators at all -- see OPERATORS_BY_TYPE in operators.ts -- so the reverse direction, text ordering, is pinned by the `date` cases below, which are ordered AS text by design.)",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:cap", "operator": "<", "value": 100 } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "at_most_on_an_integer_attribute",
+      "why": "9 and 10 are at most 10; 100 is not.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:cap", "operator": "<=", "value": 10 } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "time_equality_ignores_the_seconds_spelling",
+      "why": "Ruling 36. u1 stores '09:30' and u2 '09:30:00'; both ARE 09:30. A string equality would answer u1 alone.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:starts", "operator": "=", "value": "09:30" } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "a_missing_key_and_a_stored_null_are_both_absent",
+      "why": "u1 stores note: null, u2 has no note key at all. Both are absent, so both match 'is empty'. u3 has 'hi'. The shifts have no unit.note either, but the rule is about a unit, and a rule about another type's attribute is false whatever the operator.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:note", "operator": "null", "value": null } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "is_not_empty_is_the_exact_complement_within_the_type",
+      "why": "Only u3 has a note. The shifts are still excluded: the rule is about unit.note.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:note", "operator": "notNull", "value": null } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "an_absent_value_equals_nothing",
+      "why": "u1's note is a stored null and u2's is missing; neither equals 'hi'. Only u3 does.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:note", "operator": "=", "value": "hi" } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "text_equality_is_case_sensitive",
+      "why": "u1's label is 'Alice', u2's is 'alice'. SQL '=' on text is case sensitive.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:label", "operator": "=", "value": "Alice" } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "contains_is_case_insensitive",
+      "why": "'Alice' and 'alice' both contain 'ali' when case is folded. 'Morning'/'Night' do not; u3's label is null.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:label", "operator": "contains", "value": "ali" } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "a_percent_in_contains_is_a_character_not_a_wildcard",
+      "why": "Only u3's code contains a literal '%'. An unescaped LIKE pattern would be '%%%', which matches every unit.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:code", "operator": "contains", "value": "%" } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "an_underscore_in_contains_is_a_character_not_a_wildcard",
+      "why": "No code contains '_'. An unescaped LIKE pattern '%_%' matches every non-empty code.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:code", "operator": "contains", "value": "_" } ] } },
+      "expect": []
+    },
+    {
+      "name": "year_of_a_date",
+      "why": "u1 was hired in 2024, u2 in 2023, and u3's stored value is not a date at all, so it has no year.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:year:attr:@unit:hired", "operator": "=", "value": 2024 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "month_of_a_date",
+      "why": "Only u2's 2023-12-31 is in month 12.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:month:attr:@unit:hired", "operator": "=", "value": 12 } ] } },
+      "expect": ["u2"]
+    },
+    {
+      "name": "day_of_a_date",
+      "why": "u1 is the 5th.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:day:attr:@unit:hired", "operator": "=", "value": 5 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "a_date_comparison_is_a_text_comparison_including_for_a_non_date",
+      "why": "ISO dates are zero-padded, so ordering them as text IS chronological -- which is what the client does. u1's 2024-03-05 is after 2024-01-01; u2's 2023-12-31 is not; and u3's 'not-a-date' begins with 'n', which sorts after '2'. The third row is the point: a compiler that cast this column to date would raise, not answer.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:hired", "operator": ">=", "value": "2024-01-01" } ] } },
+      "expect": ["u1", "u3"]
+    },
+    {
+      "name": "hour_of_a_time",
+      "why": "u1 09:30 and u2 09:30:00 are both hour 9; u3 is 23.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:hour:attr:@unit:starts", "operator": "=", "value": 9 } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "minute_of_a_time",
+      "why": "Only u3's 23:59 has minute 59.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:minute:attr:@unit:starts", "operator": "=", "value": 59 } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "lower_of_a_column",
+      "why": "'Alice' and 'alice' both lower-case to 'alice'. u3's label is null, so lower() of it is absent.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:lower:col:label", "operator": "=", "value": "alice" } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "upper_of_a_column",
+      "why": "Only u1's key upper-cases to 'U1'.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:upper:col:key", "operator": "=", "value": "U1" } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "length_of_a_text_attribute",
+      "why": "'10' is two characters; '9' is one; 'hello%world' is eleven. The shifts have a cap too, and it is text, but this rule names unit.code.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:length:attr:@unit:code", "operator": "=", "value": 2 } ] } },
+      "expect": ["u2"]
+    },
+    {
+      "name": "abs_of_a_number_attribute",
+      "why": "2.5 and -2.5 both have absolute value 2.5; u3's ratio is 0.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:abs:attr:@unit:ratio", "operator": "=", "value": 2.5 } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "abs_of_an_integer_column_spans_both_types",
+      "why": "sort_order is a column every entity has, so this rule is not narrowed to one type: u1 and s1 are both 1.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:abs:col:sort_order", "operator": "=", "value": 1 } ] } },
+      "expect": ["s1", "u1"]
+    },
+    {
+      "name": "enum_is_one_of",
+      "why": "u1 is a, u2 is b, u3 is c.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:grade", "operator": "in", "value": ["a", "b"] } ] } },
+      "expect": ["u1", "u2"]
+    },
+    {
+      "name": "enum_is_not_one_of",
+      "why": "u3 is the only unit whose grade is outside {a,b}. The shifts have no grade at all and the rule is a unit's, so they are excluded -- 'is not one of' is not 'has no value'.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:grade", "operator": "notIn", "value": ["a", "b"] } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "boolean_attribute",
+      "why": "u1 and u3 are live; u2 is not.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:live", "operator": "=", "value": true } ] } },
+      "expect": ["u1", "u3"]
+    },
+    {
+      "name": "boolean_column_spans_both_types",
+      "why": "Only u3 is inactive.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:active", "operator": "=", "value": false } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "count_outgoing_relationships",
+      "why": "u1 covers s1 and s2 (2), u2 covers s1 (1), u3 covers nothing (0). A count is never narrowed to an entity type, but no shift is the FROM end of a covers row, so the shifts are 0.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:count:rel:@covers:outgoing", "operator": ">=", "value": 2 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "count_incoming_relationships",
+      "why": "s1 is covered twice, s2 once. Exactly one incoming is s2.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:count:rel:@covers:incoming", "operator": "=", "value": 1 } ] } },
+      "expect": ["s2"]
+    },
+    {
+      "name": "count_in_either_direction_is_zero_not_absent",
+      "why": "u3 is at neither end of any covers row. Zero is a count, not an absent value, so = 0 selects it rather than nothing.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:count:rel:@covers:any", "operator": "=", "value": 0 } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "not_inverts_a_false_rule_including_for_the_wrong_type",
+      "why": "The inner rule is true only for u1. Everything else is false -- u2 and u3 because 10 and 100 are not < 10, the shifts because a rule about unit.cap is false for a shift -- so the negation selects all four. In SQL this is the three-valued-logic trap: an absent value makes the inner predicate NULL, and NOT NULL is NULL, which would drop rows the client keeps.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "combinator": "and", "not": true, "rules": [
+          { "field": "attr:@unit:cap", "operator": "<", "value": 10 } ] } ] } },
+      "expect": ["s1", "s2", "u2", "u3"]
+    },
+    {
+      "name": "not_over_an_absent_value",
+      "why": "'note is empty' is true for u1 and u2 and false for everything else, so its negation is u3 and the two shifts.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "combinator": "and", "not": true, "rules": [
+          { "field": "attr:@unit:note", "operator": "null", "value": null } ] } ] } },
+      "expect": ["s1", "s2", "u3"]
+    },
+    {
+      "name": "not_over_an_empty_group_matches_nothing",
+      "why": "An empty group is no constraint, i.e. true, so its negation is false for every row.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "combinator": "and", "not": true, "rules": [] } ] } },
+      "expect": []
+    },
+    {
+      "name": "or_across_two_entity_types",
+      "why": "u1's cap is 9; s2's cap is the text '10'. The two rules name different types' attributes, which is fine under or.",
+      "document": { "version": 1, "query": { "combinator": "or", "rules": [
+        { "field": "attr:@unit:cap", "operator": "=", "value": 9 },
+        { "field": "attr:@shift:cap", "operator": "=", "value": "10" } ] } },
+      "expect": ["s2", "u1"]
+    },
+    {
+      "name": "and_across_two_entity_types_matches_nothing",
+      "why": "An entity has exactly one type, so no row can satisfy a unit rule and a shift rule at once. The client warns about this shape; it does not refuse it.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:cap", "operator": "=", "value": 9 },
+        { "field": "attr:@shift:cap", "operator": "=", "value": "9" } ] } },
+      "expect": []
+    },
+    {
+      "name": "the_same_attribute_name_on_two_types_is_two_fields",
+      "why": "unit.cap is an integer and shift.cap is text. This rule names the shift's, so it compares text: '9' and '10' are the two shifts, and only s1 is '9'.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@shift:cap", "operator": "=", "value": "9" } ] } },
+      "expect": ["s1"]
+    },
+    {
+      "name": "an_empty_document_constrains_nothing",
+      "why": "No rules means no filter, not an impossible one.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [] } },
+      "expect": ["s1", "s2", "u1", "u2", "u3"]
+    },
+    {
+      "name": "a_nested_group",
+      "why": "Active entities are u1, u2, s1, s2. Of those, u1 has cap 9 and s2 starts at 22:00, which is after 20:00; s1's 06:00 is not, and u2's cap is 10.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:active", "operator": "=", "value": true },
+        { "combinator": "or", "rules": [
+          { "field": "attr:@unit:cap", "operator": "=", "value": 9 },
+          { "field": "attr:@shift:starts", "operator": ">", "value": "20:00" } ] } ] } },
+      "expect": ["s2", "u1"]
+    },
+    {
+      "name": "not_equal_on_a_column",
+      "why": "Every key but u1.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:key", "operator": "!=", "value": "u1" } ] } },
+      "expect": ["s1", "s2", "u2", "u3"]
+    },
+    {
+      "name": "at_least_on_an_integer_column",
+      "why": "sort_order 2 or more: u2, u3, s2.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:sort_order", "operator": ">=", "value": 2 } ] } },
+      "expect": ["s2", "u2", "u3"]
+    },
+    {
+      "name": "a_negative_number_attribute",
+      "why": "Only u2's ratio is below zero.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:ratio", "operator": "<", "value": 0 } ] } },
+      "expect": ["u2"]
+    },
+    {
+      "name": "begins_with_is_case_insensitive",
+      "why": "The three unit keys begin with 'u'; folding case makes 'U' match them too.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:key", "operator": "beginsWith", "value": "U" } ] } },
+      "expect": ["u1", "u2", "u3"]
+    },
+    {
+      "name": "ends_with",
+      "why": "u1 and s1 end in '1'.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:key", "operator": "endsWith", "value": "1" } ] } },
+      "expect": ["s1", "u1"]
+    },
+    {
+      "name": "does_not_contain_on_a_non_null_column",
+      "why": "key is NOT NULL and never absent, so the complement of 'contains u' is exactly the two shifts.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "col:key", "operator": "doesNotContain", "value": "u" } ] } },
+      "expect": ["s1", "s2"]
+    },
+    {
+      "name": "not_equal_on_a_time_uses_the_time_comparison",
+      "why": "u1 and u2 both ARE 09:30, however they are spelled, so only u3 differs. A string != would wrongly include u2.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:starts", "operator": "!=", "value": "09:30" } ] } },
+      "expect": ["u3"]
+    },
+    {
+      "name": "not_over_a_comparison_whose_value_is_absent",
+      "why": "The inner rule is true only for u3. It is FALSE for u1 (note is a stored null), for u2 (no note key) and for the two shifts (a rule about a unit), so the negation selects those four. This is the exact three-valued-logic trap: in SQL the inner predicate is NULL for u1 and u2 -- the value is absent, so the comparison has no answer -- and NOT NULL is NULL, which drops both rows. The earlier `not` cases do not reach it: their inner predicate is false rather than null, because the entity-type narrowing is false or the compared value is present.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "combinator": "and", "not": true, "rules": [
+          { "field": "attr:@unit:note", "operator": "=", "value": "hi" } ] } ] } },
+      "expect": ["s1", "s2", "u1", "u2"]
+    },
+    {
+      "name": "length_counts_spaces",
+      "why": "The tags are ' a ', 'ab' and 'abc'. Three characters is u1 (with its two spaces) and u3. A length that trimmed first would answer u3 alone.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:length:attr:@unit:tag", "operator": "=", "value": 3 } ] } },
+      "expect": ["u1", "u3"]
+    },
+    {
+      "name": "hour_of_a_time_the_database_would_read_and_the_app_would_not",
+      "why": "u1's ends is 09:30:00. u2's is '9:5', which Postgres WOULD accept as 09:05 and the client would not accept at all (its clock regexp wants two digits in each field), so the two would disagree unless the server checks the spelling before it casts. u3 has no ends. entity_validate permits both, since it checks only that a time attribute is a string.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:hour:attr:@unit:ends", "operator": "=", "value": 9 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "year_of_a_date_the_database_would_read_and_the_app_would_not",
+      "why": "u1's left_on is 2024-06-01. u2's is '20240105', whose first four characters are '2024' -- so cutting the digits out without first checking the ISO spelling would call it 2024, while the client, whose date regexp wants the dashes, calls it absent. u3 has no left_on.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "fn:year:attr:@unit:left_on", "operator": "=", "value": 2024 } ] } },
+      "expect": ["u1"]
+    },
+    {
+      "name": "date_equality",
+      "why": "Only u1 was hired on 2024-03-05.",
+      "document": { "version": 1, "query": { "combinator": "and", "rules": [
+        { "field": "attr:@unit:hired", "operator": "=", "value": "2024-03-05" } ] } },
+      "expect": ["u1"]
+    }
+  ]
+}

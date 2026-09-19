@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EXPRESSION_VERSION, emptyDocument, type ExpressionDocument } from "./document";
 import { buildFieldCatalogue, encodeFieldId } from "./fields";
-import { MAX_DEPTH, validateExpression } from "./validate";
+import { MAX_DEPTH, MAX_LIST_LENGTH, MAX_RULES, validateExpression } from "./validate";
 import { ENTITY_TYPES, RELATIONSHIP_TYPES } from "./testFixtures";
 
 /**
@@ -363,5 +363,46 @@ describe("validateExpression — the result a consumer reads", () => {
     expect(
       codes(doc({ field: CODE, operator: "=", value: 1 }, { field: ACTIVE, operator: "=", value: "yes" }))
     ).toEqual(["bad_value_type", "bad_value_type"]);
+  });
+});
+
+/**
+ * The two size limits the client shares with Task 14d's compiler
+ * (`backend/app/expressions/catalogue.json`, `parity.test.ts` pins the
+ * numbers). They exist so the browser refuses what the server would refuse
+ * rather than sending it and being told 422 -- which means the boundary
+ * itself has to be tested, not just the numbers.
+ */
+describe("validateExpression — the shared size limits", () => {
+  const rules = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ field: CAPACITY, operator: "=", value: i }));
+
+  it("accepts exactly the rule limit and refuses one more", () => {
+    expect(codes({ version: 1, query: { combinator: "and", rules: rules(MAX_RULES) } })).toEqual([]);
+    expect(codes({ version: 1, query: { combinator: "and", rules: rules(MAX_RULES + 1) } })).toEqual([
+      "too_many_rules",
+    ]);
+  });
+
+  it("counts rules at every depth, not only the root group's", () => {
+    const nested = {
+      version: 1,
+      query: {
+        combinator: "and",
+        rules: [
+          { combinator: "or", rules: rules(MAX_RULES) },
+          { field: CAPACITY, operator: "=", value: 0 },
+        ],
+      },
+    };
+    expect(codes(nested)).toEqual(["too_many_rules"]);
+  });
+
+  it("accepts exactly the value-list limit and refuses one more", () => {
+    const list = (n: number) => Array.from({ length: n }, () => "low");
+    expect(codes(doc({ field: BAND, operator: "in", value: list(MAX_LIST_LENGTH) }))).toEqual([]);
+    expect(codes(doc({ field: BAND, operator: "in", value: list(MAX_LIST_LENGTH + 1) }))).toEqual([
+      "list_too_long",
+    ]);
   });
 });

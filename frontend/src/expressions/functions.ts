@@ -12,9 +12,15 @@ import type { AttrType } from "../api/v1";
  * a comment somewhere else -- a function that existed here and not there
  * would be a promise the product could not keep.
  *
- * `{arg}` is the already-cast argument expression: for an attribute,
- * `(attrs->>'<name>')::<type>`; for a column, the column. Task 14d binds
- * the name as a parameter and never interpolates user text.
+ * `{arg}` is the argument expression Task 14d has already built: a column,
+ * or an attribute read out of `attrs` and cast under a guard that makes the
+ * cast unfailable (`text`/`date` stay text, `integer`/`number` become
+ * numeric, `time` becomes `time`). The attribute NAME is a bound parameter
+ * there, never interpolated -- and neither is the `sql` below: the compiler
+ * keys a table of SQLAlchemy builders by these names, so no string in this
+ * file ever reaches a database. It is documentation that travels with the
+ * definition, and `backend/app/expressions/catalogue.json` carries a copy
+ * that a parity test pins to this one.
  *
  * Deliberately NOT here, and why:
  *
@@ -51,7 +57,21 @@ export type FunctionDef = {
   sql: string;
 };
 
-const DATE_PART = (part: string) => `EXTRACT(${part} FROM {arg})::int`;
+/**
+ * A date's parts are cut out of the ISO string, not EXTRACTed from a cast.
+ *
+ * `entity_validate` (migration 0006) checks only `jsonb_typeof(v) =
+ * 'string'` for a `date` attribute, so the database genuinely holds
+ * non-dates in date columns and `(attrs->>'d')::date` raises on them --
+ * a 500 on somebody else's row, from a filter that named neither. It would
+ * also disagree with the client, which reads the four/two/two digits of a
+ * well-formed ISO string and treats anything else as absent. Substring
+ * says exactly that, and cannot raise. Task 14d guards it with the same
+ * `^\d{4}-\d{2}-\d{2}$` this evaluator uses.
+ */
+const DATE_PART = (from: number) => `substring({arg} from ${from} for ${from === 1 ? 4 : 2})::int`;
+/** A `time` argument IS cast: Task 14d guards the cast with the same
+ * regexp `timeSeconds()` uses, under which `::time` cannot fail. */
 const TIME_PART = (part: string) => `EXTRACT(${part} FROM {arg})::int`;
 
 export const EXPRESSION_FUNCTIONS: Record<string, FunctionDef> = {
@@ -61,7 +81,7 @@ export const EXPRESSION_FUNCTIONS: Record<string, FunctionDef> = {
     argumentTypes: ["date"],
     returns: "integer",
     description: "the year of a date",
-    sql: DATE_PART("YEAR"),
+    sql: DATE_PART(1),
   },
   month: {
     name: "month",
@@ -69,7 +89,7 @@ export const EXPRESSION_FUNCTIONS: Record<string, FunctionDef> = {
     argumentTypes: ["date"],
     returns: "integer",
     description: "the month of a date, 1-12",
-    sql: DATE_PART("MONTH"),
+    sql: DATE_PART(6),
   },
   day: {
     name: "day",
@@ -77,7 +97,7 @@ export const EXPRESSION_FUNCTIONS: Record<string, FunctionDef> = {
     argumentTypes: ["date"],
     returns: "integer",
     description: "the day of the month, 1-31",
-    sql: DATE_PART("DAY"),
+    sql: DATE_PART(9),
   },
   hour: {
     name: "hour",

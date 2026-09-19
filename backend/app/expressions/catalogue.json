@@ -1,0 +1,149 @@
+{
+  "//": [
+    "THE SHARED EXPRESSION CATALOGUE -- one artefact, read by both languages.",
+    "",
+    "The server reads this file at import time (app/expressions/catalogue.py);",
+    "it is the only statement of what an expression may name that the compiler",
+    "has. The client keeps its catalogue as TypeScript modules, because the",
+    "builder needs types and tree-shaking, and a vitest parity test",
+    "(frontend/src/expressions/parity.test.ts) reads THIS file off disk and",
+    "deep-compares it with those modules. Change either side alone and that",
+    "test fails; see task-14d-report.md for the demonstration.",
+    "",
+    "`sql` is documentation that travels with the definition, not a template",
+    "anything formats: the compiler builds SQLAlchemy constructs from a",
+    "hard-coded table of Python builders keyed by these names, so no string",
+    "here ever reaches a database. A backend test asserts the two key sets are",
+    "equal, which is what stops an entry being added here without an",
+    "implementation, or implemented without being declared here."
+  ],
+
+  "version": 1,
+
+  "limits": {
+    "maxDepth": 10,
+    "maxRules": 50,
+    "maxListLength": 100
+  },
+
+  "relationshipDirections": ["outgoing", "incoming", "any"],
+
+  "columns": [
+    { "column": "key", "label": "key", "dataType": "text", "nullable": false },
+    { "column": "label", "label": "label", "dataType": "text", "nullable": true },
+    { "column": "sort_order", "label": "sort order", "dataType": "integer", "nullable": false },
+    { "column": "active", "label": "active", "dataType": "boolean", "nullable": false }
+  ],
+
+  "operators": {
+    "=": { "name": "=", "label": "is", "arity": "binary" },
+    "!=": { "name": "!=", "label": "is not", "arity": "binary" },
+    "<": { "name": "<", "label": "is less than", "arity": "binary" },
+    "<=": { "name": "<=", "label": "is at most", "arity": "binary" },
+    ">": { "name": ">", "label": "is greater than", "arity": "binary" },
+    ">=": { "name": ">=", "label": "is at least", "arity": "binary" },
+    "contains": { "name": "contains", "label": "contains", "arity": "binary" },
+    "doesNotContain": { "name": "doesNotContain", "label": "does not contain", "arity": "binary" },
+    "beginsWith": { "name": "beginsWith", "label": "starts with", "arity": "binary" },
+    "endsWith": { "name": "endsWith", "label": "ends with", "arity": "binary" },
+    "in": { "name": "in", "label": "is one of", "arity": "list" },
+    "notIn": { "name": "notIn", "label": "is not one of", "arity": "list" },
+    "null": { "name": "null", "label": "is empty", "arity": "unary" },
+    "notNull": { "name": "notNull", "label": "is not empty", "arity": "unary" }
+  },
+
+  "operatorsByType": {
+    "integer": ["=", "!=", "<", "<=", ">", ">="],
+    "number": ["=", "!=", "<", "<=", ">", ">="],
+    "date": ["=", "!=", "<", "<=", ">", ">="],
+    "time": ["=", "!=", "<", "<=", ">", ">="],
+    "text": ["=", "!=", "contains", "doesNotContain", "beginsWith", "endsWith"],
+    "boolean": ["=", "!="],
+    "enum": ["=", "!=", "in", "notIn"]
+  },
+
+  "nullOperators": ["null", "notNull"],
+
+  "functions": {
+    "year": {
+      "name": "year",
+      "argument": "field",
+      "argumentTypes": ["date"],
+      "returns": "integer",
+      "description": "the year of a date",
+      "sql": "substring({arg} from 1 for 4)::int"
+    },
+    "month": {
+      "name": "month",
+      "argument": "field",
+      "argumentTypes": ["date"],
+      "returns": "integer",
+      "description": "the month of a date, 1-12",
+      "sql": "substring({arg} from 6 for 2)::int"
+    },
+    "day": {
+      "name": "day",
+      "argument": "field",
+      "argumentTypes": ["date"],
+      "returns": "integer",
+      "description": "the day of the month, 1-31",
+      "sql": "substring({arg} from 9 for 2)::int"
+    },
+    "hour": {
+      "name": "hour",
+      "argument": "field",
+      "argumentTypes": ["time"],
+      "returns": "integer",
+      "description": "the hour of a time of day, 0-23",
+      "sql": "EXTRACT(HOUR FROM {arg})::int"
+    },
+    "minute": {
+      "name": "minute",
+      "argument": "field",
+      "argumentTypes": ["time"],
+      "returns": "integer",
+      "description": "the minute of a time of day, 0-59",
+      "sql": "EXTRACT(MINUTE FROM {arg})::int"
+    },
+    "lower": {
+      "name": "lower",
+      "argument": "field",
+      "argumentTypes": ["text"],
+      "returns": "text",
+      "description": "text in lower case",
+      "sql": "lower({arg})"
+    },
+    "upper": {
+      "name": "upper",
+      "argument": "field",
+      "argumentTypes": ["text"],
+      "returns": "text",
+      "description": "text in upper case",
+      "sql": "upper({arg})"
+    },
+    "length": {
+      "name": "length",
+      "argument": "field",
+      "argumentTypes": ["text"],
+      "returns": "integer",
+      "description": "how many characters a text has",
+      "sql": "length({arg})"
+    },
+    "abs": {
+      "name": "abs",
+      "argument": "field",
+      "argumentTypes": ["integer", "number"],
+      "returns": "argument",
+      "description": "a number without its sign",
+      "sql": "abs({arg})"
+    },
+    "count": {
+      "name": "count",
+      "argument": "relationship",
+      "argumentTypes": [],
+      "returns": "integer",
+      "description": "how many relationships of one type an entity has",
+      "sql": "(SELECT count(*) FROM relationship r WHERE r.relationship_type_id = :relationship_type_id AND {direction})  -- direction: outgoing => r.from_entity_id = entity.id | incoming => r.to_entity_id = entity.id | any => (r.from_entity_id = entity.id OR r.to_entity_id = entity.id)"
+    }
+  }
+}

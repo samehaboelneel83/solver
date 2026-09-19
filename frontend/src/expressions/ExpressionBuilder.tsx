@@ -400,13 +400,41 @@ export type ExpressionBuilderProps = {
   catalogue: FieldCatalogue;
   value: ExpressionDocument | null;
   onChange: (document: ExpressionDocument) => void;
+  /**
+   * Problems this component did not find -- in practice a server refusal
+   * of a document `validate.ts` accepted (Task 14d). They are rendered and
+   * highlighted exactly like its own, because to the person reading the
+   * screen there is no difference between "this condition is wrong" and
+   * "the server says this condition is wrong", and a second box in a
+   * second place would be the only thing that told them apart.
+   */
+  extraProblems?: readonly { path: number[]; message: string }[];
 };
 
-export default function ExpressionBuilder({ catalogue, value, onChange }: ExpressionBuilderProps) {
+export default function ExpressionBuilder({
+  catalogue,
+  value,
+  onChange,
+  extraProblems,
+}: ExpressionBuilderProps) {
   const query = useMemo(() => toQuery(value), [value]);
-  const result = useMemo(
+  const validation = useMemo(
     () => validateExpression(value ?? emptyDocument(), catalogue),
     [value, catalogue]
+  );
+  const result = useMemo(
+    () => ({
+      ...validation,
+      problems: [
+        ...validation.problems,
+        ...(extraProblems ?? []).map((problem) => ({
+          path: problem.path,
+          code: "malformed" as const,
+          message: problem.message,
+        })),
+      ],
+    }),
+    [validation, extraProblems]
   );
   const context = useMemo<CatalogueContext>(
     () => ({ catalogue, invalidPaths: new Set(result.problems.map((p) => pathKey(p.path))) }),
