@@ -32,6 +32,64 @@ describe("formatApiError", () => {
     expect(formatApiError(err)).toBe("attributes.rank: Invalid value");
   });
 
+  describe("422 with an object detail (a database validation trigger)", () => {
+    // Schema v1's `entity_validate` trigger raises a structured error that
+    // the backend turns into a 422 whose `detail` is an object rather than
+    // FastAPI's list. These are real response bodies, copied from
+    // backend/tests/test_api_entities.py.
+
+    it('renders a trigger 422 as "<field>: <message>", like the list branch', () => {
+      const err = new ApiError(
+        422,
+        JSON.stringify({
+          detail: {
+            message: 'entity ahmed: attribute "rank" must be integer',
+            field: "rank",
+            kind: "attribute_type",
+          },
+        })
+      );
+      expect(formatApiError(err)).toBe('rank: entity ahmed: attribute "rank" must be integer');
+    });
+
+    it("does not show the user raw JSON", () => {
+      // The defect this branch fixes: before it, the object fell through to
+      // JSON.stringify and `kind`/`field` were shown as machine vocabulary.
+      const err = new ApiError(
+        422,
+        JSON.stringify({
+          detail: {
+            message: 'entity ahmed: unknown attribute "nope"',
+            field: "nope",
+            kind: "unknown_attribute",
+          },
+        })
+      );
+      const text = formatApiError(err);
+      expect(text).not.toContain("{");
+      expect(text).not.toContain("kind");
+    });
+
+    it("falls back to the message alone when the failure names no field", () => {
+      // `translate_db_error` reads `field` off the trigger's payload, and
+      // the `parameter_index` kind carries `entity_ids` instead -- so
+      // `field` arrives null and must not be printed as a prefix.
+      const err = new ApiError(
+        422,
+        JSON.stringify({
+          detail: { message: "parameter_value: index does not match", field: null, kind: "x" },
+        })
+      );
+      expect(formatApiError(err)).toBe("parameter_value: index does not match");
+    });
+
+    it("still JSON-stringifies a 422 object that is not the trigger shape", () => {
+      // No `message`, so there is nothing better to show than the body.
+      const err = new ApiError(422, JSON.stringify({ detail: { code: "weird" } }));
+      expect(formatApiError(err)).toBe(JSON.stringify({ code: "weird" }));
+    });
+  });
+
   it("renders a non-string, non-array detail as JSON", () => {
     const err = new ApiError(400, JSON.stringify({ detail: { code: "conflict", reason: "locked" } }));
     expect(formatApiError(err)).toBe(JSON.stringify({ code: "conflict", reason: "locked" }));

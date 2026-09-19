@@ -2,6 +2,12 @@ import { ApiError } from "./client";
 
 type ValidationDetail = { loc?: (string | number)[]; msg?: string };
 
+/** Schema v1's DOMAIN validation triggers (`entity_validate`,
+ * `relationship_validate`, `parameter_value_validate`) raise a structured
+ * error that the backend's `translate_db_error` turns into a 422 whose
+ * `detail` is an **object**, not FastAPI's usual list. */
+type TriggerDetail = { message?: unknown; field?: unknown; kind?: unknown };
+
 function tryParseJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -26,6 +32,9 @@ function fieldNameFromLoc(loc: (string | number)[] | undefined): string {
 /**
  * The single place error objects get turned into user-facing text.
  * - 422 (validation): one line per field, "<field>: <msg>", joined with "\n".
+ * - 422 with an object `detail` (a database trigger's `{message, field,
+ *   kind}`): the same "<field>: <message>" form, or just the message when
+ *   the failure names no field.
  * - 409/404/400 with a string `detail`: that string verbatim.
  * - 5xx: a generic "try again" message (the raw body is not shown).
  * - anything else that is an ApiError with a non-string, non-array `detail`
@@ -48,6 +57,22 @@ export function formatApiError(err: unknown): string {
       );
       if (lines.length > 0) {
         return lines.join("\n");
+      }
+    }
+
+    // The *other* 422 shape: a single object `{message, field, kind}` from a
+    // database validation trigger, e.g. creating an entity whose `attrs`
+    // name an attribute its type does not declare. Without this branch it
+    // fell through to JSON.stringify below and reached the user as raw JSON.
+    // Rendered in the same "<field>: <message>" form as the list branch, so
+    // the two 422 shapes read identically to whoever is looking at them.
+    if (err.status === 422 && detail !== null && typeof detail === "object" && !Array.isArray(detail)) {
+      const { message, field } = detail as TriggerDetail;
+      if (typeof message === "string" && message.length > 0) {
+        // `field` is absent for kinds that blame no single field (the
+        // `parameter_index` trigger carries `entity_ids` instead), so the
+        // message stands alone rather than being prefixed with "undefined".
+        return typeof field === "string" && field.length > 0 ? `${field}: ${message}` : message;
       }
     }
 
