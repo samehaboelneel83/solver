@@ -7,3 +7,7 @@ node_modules/
 dist/
 .pytest_cache/
 *.tsbuildinfo
+
+# Superpowers SDD workspace: ledgers, briefs, task reports and review diffs.
+# Local working record, not project history (review diffs are regenerable from git).
+.superpowers/
