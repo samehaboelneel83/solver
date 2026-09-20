@@ -95,9 +95,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     key: "runs",
     label: "Runs",
-    items: [],
-    // The RUN tables exist but are deliberately not wired (plan, Global Constraints).
-    emptyNote: "No run screens yet: runs appear here once a solver is connected.",
+    items: [{ to: "/runs", label: "Runs" }],
   },
   {
     // Not one of the three workflow groups -- user and role administration,

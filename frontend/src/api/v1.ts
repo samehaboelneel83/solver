@@ -435,6 +435,59 @@ export type ScenarioCreate = { problem_id: Id; model_version_id: Id; name: strin
 /** `problem_id` is not patchable; the version must belong to the scenario's problem. */
 export type ScenarioUpdate = { name?: string; model_version_id?: Id; patch?: ScenarioPatch };
 
+
+// --- runs ------------------------------------------------------------------
+
+/** `run_status`, straight from the database's own enum. `optimal` and
+ * `feasible` are both answers; the schema keeps them apart, so the UI does
+ * too -- "a solution" and "the best solution" are different claims. */
+export type RunStatus = "queued" | "running" | "optimal" | "feasible" | "infeasible" | "unknown" | "error";
+
+export type ConstraintOutcome = {
+  constraint_id: string;
+  label: string;
+  hard: boolean;
+  satisfied: boolean;
+  total_violation: number;
+  penalty_paid: number;
+  /** Which instances broke, worst first: `[{index: ["thu","morning"], by: 4}]`. */
+  violations: { index: string[]; by: number }[];
+};
+
+export type RunSummary = {
+  id: Id;
+  scenario_id: Id;
+  dataset_id: Id;
+  status: RunStatus;
+  solver: string;
+  solver_version: string | null;
+  compiler_version: string | null;
+  objective: number | null;
+  wall_time_s: number | null;
+  error: string | null;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type Run = RunSummary & {
+  params: Record<string, unknown>;
+  /** Variable name -> the index tuples it took. Null when the run found
+   * nothing, which is not the same as an empty roster. */
+  assignments: Record<string, string[][]> | null;
+  constraints: ConstraintOutcome[];
+};
+
+export type RunRequest = { time_limit_s?: number; seed?: number };
+
+export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
+  const { scenarioId, limit, offset } = params;
+  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, limit, offset })}`);
+}
+export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
+export const createRun = (scenarioId: Id, body: RunRequest = {}) =>
+  send<Run>("POST", `/api/v1/scenarios/${scenarioId}/runs`, body);
+
 export function listVersions(problemId: Id, params: PageParams = {}): Promise<Page<ModelVersionSummary>> {
   return apiFetch(`/api/v1/problems/${problemId}/versions${query({ limit: params.limit, offset: params.offset })}`);
 }
@@ -683,6 +736,21 @@ export function useVersion(id: Id | null | undefined) {
 }
 export const useCreateVersion = () =>
   useV1Mutation(({ problemId, body }: { problemId: Id; body: ModelVersionCreate }) => createVersion(problemId, body));
+
+export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
+  return useQuery({
+    queryKey: [V1, "runs", { scenarioId, ...page }],
+    queryFn: () => listRuns({ scenarioId, ...page }),
+    enabled: isId(scenarioId),
+  });
+}
+export function useRun(id: Id | null | undefined) {
+  return useQuery({ queryKey: [V1, "run", id], queryFn: () => getRun(id as Id), enabled: isId(id) });
+}
+/** Solving happens in the request today (a queue is Phase 3), so this
+ * mutation is slow by nature -- callers should show it working. */
+export const useCreateRun = () =>
+  useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
 
 export function useScenarios(problemId: Id | null, params: { modelVersionId?: Id | null } & PageParams = {}) {
   return useQuery({

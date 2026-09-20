@@ -148,10 +148,14 @@ describe("AppShell", () => {
       expect(versions.compareDocumentPosition(runsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("says plainly that runs have no screens yet, rather than rendering an empty group", async () => {
+    it("links to the runs screen now that solving exists", async () => {
+      // This group carried "no run screens yet" for the whole migration,
+      // because the RUN tables were created and never wired. A solver and a
+      // run API exist now, so the note would be a lie.
       renderWithProviders();
       await settled();
-      expect(screen.getByText(/no run screens yet/i)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/runs");
+      expect(screen.queryByText(/no run screens yet/i)).not.toBeInTheDocument();
     });
 
     it("does not build the nav from /api/meta/schema", async () => {
