@@ -93,6 +93,22 @@ def test_the_filter_vocabulary_is_the_expression_catalogue_s():
     assert set(CONTRACT["filterOperators"]) <= offered
 
 
+def test_the_filter_vocabulary_excludes_the_null_operators():
+    """`is empty` / `is not empty` are the two operators `operators_for`
+    adds for a nullable field, and they are deliberately not in the IR's
+    filter vocabulary: a filter selects members of a set, and "the days
+    whose `is_weekend` is absent" is a question about the domain's
+    completeness rather than about the model.
+
+    This is also what makes `check_against_domain` able to ask
+    `operators_for(data_type, False)` -- with these two out, nullability
+    cannot change which operators an attribute offers.
+    """
+    null_operators = set(EXPRESSION_CATALOGUE["nullOperators"])
+    assert null_operators
+    assert set(CONTRACT["filterOperators"]) & null_operators == set()
+
+
 def test_names_follow_the_one_platform_name_rule():
     """`entity_type.name`, `attribute_def.name` and `parameter_def.name`
     all carry `^[a-z][a-z0-9_]*$` "because the names are used verbatim in

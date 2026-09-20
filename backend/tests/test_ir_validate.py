@@ -44,7 +44,7 @@ INVALID = FIXTURES["invalid"]
 
 
 def build_generated(spec: dict) -> dict:
-    """The three limit cases. Kept identical to `buildGenerated` in
+    """The four limit-case forms. Kept identical to `buildGenerated` in
     `frontend/src/ir/fixtures.test.ts`; an IR large enough to break a
     limit is not worth five hundred hand-written lines, and the shape it
     takes is still written down -- here and there."""
@@ -59,6 +59,12 @@ def build_generated(spec: dict) -> dict:
     elif kind == "padNote":
         term = {"const": 0}
         note = "x" * count
+    elif kind == "padNoteWide":
+        # Two bytes per character in UTF-8, one character in Python and
+        # one UTF-16 code unit in JavaScript: the padding that tells a
+        # byte count from a character count.
+        term = {"const": 0}
+        note = "\u00e9" * count
     else:  # pragma: no cover -- a fixture naming a form neither side has
         raise AssertionError(f"unknown generator {kind!r}")
     constraint = {
@@ -325,6 +331,17 @@ def test_a_document_at_the_depth_limit_is_accepted():
     is refused must pass, or the limit is off by one."""
     ir = build_generated({"kind": "nestedAdd", "count": MAX_DEPTH - 1})
     assert check_shape(ir) is None
+
+
+def test_the_byte_limit_is_measured_in_bytes_not_in_characters():
+    """`padNoteWide` in the fixture file is the case; this asserts the
+    NUMBER, which is what says which unit was counted. `len()` on the str
+    would report a little over 200000 here and the document would be
+    accepted by both validators for the wrong reason."""
+    refusal = check_shape(build_generated({"kind": "padNoteWide", "count": 200_000}))
+    assert refusal is not None
+    assert refusal.code == "ir_too_large"
+    assert 400_000 < int(refusal.message.split()[3]) < 500_000
 
 
 def test_a_document_at_the_term_limit_is_accepted():

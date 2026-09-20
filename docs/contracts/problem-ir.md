@@ -380,9 +380,13 @@ document against the same contract before sending, so a 422 from the server is
 either a hand-written request or a client that has not reloaded the contract,
 and naming one thing precisely beats listing several.
 
-The 65 rules are in `contract.json`, each marked `shape` (decidable from the
-document alone — both languages decide these) or `domain` (needs the domain's
-rows — the server only). The split mirrors `parse.py` / `compiler.py`.
+The 65 rules are in `contract.json`, each marked `shape` (58 of them: decidable
+from the document alone, and both languages decide those) or `domain` (7: needs
+the domain's rows, so the server only). The split mirrors `parse.py` /
+`compiler.py`. `ir_fixtures.json` carries 8 valid documents and 75 invalid ones
+— at least one per rule, several rules having more than one where the rule has
+two halves or where a fault has to be reached through a construct no other case
+goes through.
 
 **Two of those rules used to be 500s.** `snapshot_dataset()` refuses an
 unresolvable set or parameter with a bare `RAISE EXCEPTION`, i.e. SQLSTATE

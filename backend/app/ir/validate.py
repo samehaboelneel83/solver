@@ -769,7 +769,15 @@ def check_shape(ir: Any) -> Refusal | None:
     database. Returns None when the document is shape-valid."""
     # First, because every other rule walks the document.
     try:
-        size = len(json.dumps(ir, separators=(",", ":"), default=str).encode("utf-8"))
+        # `ensure_ascii=False` is load-bearing, not a preference: Python
+        # escapes a non-ASCII character to a six-byte `\uXXXX` by default,
+        # where `JSON.stringify` writes the character itself. With the
+        # default the two validators disagree about the size of the same
+        # document by a factor of three -- `padNoteWide` in
+        # `ir_fixtures.json` is the case that found it.
+        size = len(
+            json.dumps(ir, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
+        )
     except (TypeError, ValueError):  # pragma: no cover -- a decoded body is serialisable
         size = 0
     if size > MAX_IR_BYTES:
@@ -935,7 +943,14 @@ class _DomainChecker:
                         f"{binding['set']!r} declares no attribute {entry['attr']!r}, so no "
                         "snapshot row would carry one",
                     )
-                offered = operators_for(declared["data_type"], not declared["required"])
+                # `nullable=False`: the IR's filter vocabulary is the
+                # expression catalogue's MINUS the two null operators (a
+                # test asserts the two sets are disjoint), and those are
+                # the only operators `operators_for` adds for a nullable
+                # field. Passing the attribute's real nullability would
+                # therefore be a value that can never change the answer,
+                # and unpinnable by any fixture.
+                offered = operators_for(declared["data_type"], False)
                 if entry["op"] not in offered:
                     return Refusal(
                         "where_operator_not_offered",

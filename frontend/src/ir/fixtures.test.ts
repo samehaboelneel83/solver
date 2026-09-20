@@ -7,8 +7,8 @@ import { checkIrShape, isValidIrShape } from "./validate";
 /**
  * The browser half of the IR fixture set.
  *
- * `backend/tests/ir_fixtures.json` carries eight valid IRs and one
- * invalid one per rule, each wrong in exactly one way.
+ * `backend/tests/ir_fixtures.json` carries eight valid IRs and at least
+ * one invalid one per rule, each wrong in exactly one way.
  * `backend/tests/test_ir_validate.py` runs them through
  * `app/ir/validate.py`; this file runs them through `validate.ts`.
  *
@@ -35,7 +35,10 @@ const FIXTURE_PATH = (() => {
   }
 })();
 
-type Generate = { kind: "nestedAdd" | "wideAdd" | "padNote"; count: number };
+type Generate = {
+  kind: "nestedAdd" | "wideAdd" | "padNote" | "padNoteWide";
+  count: number;
+};
 type Fixture = {
   valid: { name: string; why: string; ir: unknown }[];
   invalid: {
@@ -49,7 +52,7 @@ type Fixture = {
 
 const FIXTURES = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as Fixture;
 
-/** The three limit cases. Kept identical to `build_generated` in
+/** The four limit-case forms. Kept identical to `build_generated` in
  * `backend/tests/test_ir_validate.py`; an IR large enough to break a
  * limit is not worth five hundred hand-written lines, and the shape it
  * takes is still written down -- here and there. */
@@ -63,7 +66,10 @@ function buildGenerated(spec: Generate): unknown {
     term = { add: Array.from({ length: spec.count }, () => ({ const: 1 })) };
   } else {
     term = { const: 0 };
-    note = "x".repeat(spec.count);
+    // Two bytes per character in UTF-8 for `padNoteWide`, one UTF-16 code
+    // unit either way: the padding that tells a byte count from a
+    // character count.
+    note = (spec.kind === "padNoteWide" ? "é" : "x").repeat(spec.count);
   }
   const constraint: Record<string, unknown> = {
     id: "c_one",
@@ -154,15 +160,11 @@ describe("the limits", () => {
   });
 
   it("measures the byte limit in bytes, not in characters", () => {
-    // A JavaScript string's `length` counts UTF-16 code units; the server
-    // counts UTF-8 bytes. A note of multi-byte characters is where the
-    // two answers would differ, and the two validators have to agree on
-    // which side of the limit a document is.
-    const almost = buildGenerated({ kind: "padNote", count: 1 }) as {
-      constraints: { note: string }[];
-    };
-    almost.constraints[0].note = "é".repeat(200_000);
-    const refusal = checkIrShape(almost);
+    // `padNoteWide` in the fixture file is the case; this asserts the
+    // NUMBER, which is what says which unit was counted. A JavaScript
+    // string's `length` would report a little over 200000 here, and the
+    // document would be accepted by both validators for the wrong reason.
+    const refusal = checkIrShape(buildGenerated({ kind: "padNoteWide", count: 200_000 }));
     expect(refusal?.code).toBe("ir_too_large");
     expect(refusal?.message).toMatch(/4\d{5} bytes/);
   });
