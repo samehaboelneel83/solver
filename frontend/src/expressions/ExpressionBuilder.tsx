@@ -16,6 +16,7 @@ import {
   toQuery,
   type ExpressionDocument,
 } from "./document";
+import { defaultFieldId, defaultOperatorFor, defaultValueFor } from "./defaults";
 import { groupFields, type ExpressionField, type FieldCatalogue } from "./fields";
 import { EXPRESSION_OPERATORS, operatorsForField } from "./operators";
 import { validateExpression } from "./validate";
@@ -63,40 +64,11 @@ const SELECT_CLASS = "rounded-md border border-slate-300 px-2 py-1 text-xs";
 
 // --- typed value editors ----------------------------------------------------
 
-/**
- * The value a NEW rule starts with, so that adding one does not produce an
- * error the user has to clear before they can do anything.
- *
- * Exported for its own test: the `list` branch is not reachable through
- * the UI today, because no data type's FIRST operator is a list one -- and
- * a mutant that returned a bare value there survived the whole suite.
- * Reordering `OPERATORS_BY_TYPE.enum` would reach it, so it is pinned here
- * rather than left to be discovered then.
- */
-export function defaultValueFor(field: ExpressionField | undefined, operator: string): unknown {
-  const arity = EXPRESSION_OPERATORS[operator]?.arity;
-  if (arity === "unary") return null;
-  if (!field) return "";
-  const single = (): unknown => {
-    switch (field.dataType) {
-      case "integer":
-      case "number":
-        return 0;
-      case "boolean":
-        return true;
-      case "enum":
-        return field.enumValues?.[0] ?? "";
-      case "date":
-        return new Date().toISOString().slice(0, 10);
-      case "time":
-        return "00:00";
-      default:
-        return "";
-    }
-  };
-  const value = single();
-  return arity === "list" ? [value] : value;
-}
+/** Re-exported: it moved to `defaults.ts`, beside `defaultFieldId` and
+ * `isUntouchedRule`, so that "what a new rule is" has exactly one
+ * definition and the filter layer can compare against it without importing
+ * a .tsx module. */
+export { defaultValueFor } from "./defaults";
 
 function displayString(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -457,11 +429,13 @@ export default function ExpressionBuilder({
           query={query}
           onQueryChange={(next: RuleGroupType) => onChange(toDocument(next))}
           fields={fields}
-          getDefaultField={catalogue.fields[0]?.id}
-          getDefaultOperator={(fieldName: string) => {
-            const field = catalogue.get(fieldName);
-            return field ? operatorsForField(field)[0].name : "=";
-          }}
+          // `defaults.ts`, not `catalogue.fields[0]`: that was the
+          // alphabetically first field including the generated calls, i.e.
+          // `abs(<some attribute>)`. Both of these and `getDefaultValue`
+          // come from there, so the rule "+ Condition" builds is the same
+          // one `isUntouchedRule` compares against.
+          getDefaultField={defaultFieldId(catalogue)}
+          getDefaultOperator={(fieldName: string) => defaultOperatorFor(catalogue.get(fieldName))}
           getDefaultValue={(rule) => defaultValueFor(catalogue.get(rule.field), rule.operator)}
           getOperators={(fieldName: string) => {
             const field = catalogue.get(fieldName);

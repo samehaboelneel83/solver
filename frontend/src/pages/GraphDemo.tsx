@@ -6,7 +6,8 @@ import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "../compon
 import type { FilterState } from "../components/FilterBar";
 import { useGraphView } from "../api/graph";
 import { useEntityTypes, type Id } from "../api/v1";
-import { isEmptyDocument } from "../expressions/document";
+import { isEmptyDocument, type ExpressionDocument } from "../expressions/document";
+import { withoutUntouchedRules } from "../expressions/defaults";
 import { graphCatalogue, matchingNodeIds } from "../expressions/graphFilter";
 import { validateExpression } from "../expressions/validate";
 import { useDomain } from "../hooks/useDomain";
@@ -159,13 +160,21 @@ export default function GraphDemo() {
    * Null for an EMPTY document and for an INVALID one alike: an expression
    * half-written must not blank the canvas. What is wrong with it is shown
    * in the builder, by the builder, from the same validator.
+   *
+   * A rule nobody has touched yet is taken out first
+   * (`expressions/defaults.ts`). Pressing "+ Condition" used to cut this
+   * canvas from 23 nodes to 2 before anything was typed, because the rule
+   * the button creates is complete enough to evaluate.
    */
   const expressionMatchIds = useMemo(() => {
-    const document = filterState.expression ?? null;
-    if (!graph || !expressionCatalogue || isEmptyDocument(document)) {
+    if (!graph || !expressionCatalogue) {
       return null;
     }
-    const result = validateExpression(document, expressionCatalogue);
+    const document = withoutUntouchedRules(filterState.expression ?? null, expressionCatalogue);
+    if (isEmptyDocument(document)) {
+      return null;
+    }
+    const result = validateExpression(document as ExpressionDocument, expressionCatalogue);
     return result.valid ? matchingNodeIds(graph, expressionCatalogue, result.document) : null;
   }, [graph, expressionCatalogue, filterState.expression]);
 

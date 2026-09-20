@@ -18,6 +18,7 @@ import {
   countRules,
   isEmptyDocument,
   validateExpression,
+  withoutUntouchedRules,
   type ExpressionDocument,
 } from "../expressions";
 import { serverExpressionProblems } from "../expressions/serverProblems";
@@ -303,17 +304,26 @@ function EntityTable({
   );
 
   /**
-   * What is worth sending: a document that is neither empty nor invalid.
+   * What is worth sending: a document that is neither empty nor invalid,
+   * once the rules nobody has touched yet are taken out of it.
    *
    * An INVALID document means "no constraint", not "match nothing" -- the
    * same rule the graph applies. A half-written condition must not blank
    * the table, and it must never be sent: the server would answer 422 for
    * something the user is still in the middle of typing, and the builder
    * is already saying what is wrong.
+   *
+   * An UNTOUCHED one is the emptiest half of all, and it used to be sent
+   * the instant "+ Condition" was pressed -- 5 rows to 0 before the person
+   * had typed a character, which is the exact opposite of what the
+   * paragraph above says this does. `withoutUntouchedRules` removes them
+   * here rather than in the builder, which must keep rendering the row the
+   * person is about to fill in.
    */
   const sendable = useMemo(() => {
-    if (expression === null || isEmptyDocument(expression)) return null;
-    return validateExpression(expression, catalogue).valid ? expression : null;
+    const pruned = withoutUntouchedRules(expression, catalogue);
+    if (pruned === null || isEmptyDocument(pruned)) return null;
+    return validateExpression(pruned, catalogue).valid ? pruned : null;
   }, [expression, catalogue]);
   const sendableKey = sendable === null ? "" : JSON.stringify(sendable);
 

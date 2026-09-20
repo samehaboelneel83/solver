@@ -52,6 +52,15 @@ export type { OperatorDef } from "./operators";
 export { EXPRESSION_FUNCTIONS, FUNCTION_NAMES, functionReturnType } from "./functions";
 export type { FunctionDef } from "./functions";
 
+export {
+  defaultFieldId,
+  defaultOperatorFor,
+  defaultRule,
+  defaultValueFor,
+  isUntouchedRule,
+  withoutUntouchedRules,
+} from "./defaults";
+
 export { MAX_DEPTH, isValidExpression, validateExpression } from "./validate";
 export type { ExpressionProblem, ExpressionWarning, ValidationResult } from "./validate";
 

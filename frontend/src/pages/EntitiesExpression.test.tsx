@@ -196,6 +196,67 @@ describe("Entities: what reaches the server", () => {
     expect(sentExpressions()).toEqual([]);
   });
 
+  it("does not send a condition nobody has touched yet", async () => {
+    // The reported defect: "+ Condition" produces a complete, structurally
+    // valid rule, so it used to be sent the moment the button was pressed
+    // -- the list went from its rows to none before a character was typed.
+    // The list request still goes out; it simply carries no `expr`.
+    serve();
+    renderPage();
+    await openPanel();
+    fireEvent.click(screen.getByTestId("expression-add-rule"));
+    await waitFor(() =>
+      expect(screen.getByTestId("entities-conditions-toggle")).toHaveTextContent("1 condition")
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(sentExpressions()).toEqual([]);
+    expect(paths().some((p) => p.startsWith("/api/v1/entities?"))).toBe(true);
+    // And no error is shown for it either: an untouched condition is not a
+    // mistake, it is a row waiting to be filled in.
+    expect(screen.queryByTestId("expression-problems")).not.toBeInTheDocument();
+  });
+
+  it("starts a new condition on the key column, not on a generated call", async () => {
+    // It used to start on `abs(<the alphabetically first numeric
+    // attribute>)`, which is neither something the person chose nor
+    // something most people know exists.
+    serve();
+    renderPage();
+    await openPanel();
+    fireEvent.click(screen.getByTestId("expression-add-rule"));
+    expect((screen.getAllByTestId("expression-field")[0] as HTMLSelectElement).value).toBe("col:key");
+  });
+
+  it("sends the condition as soon as one of its controls is changed, even the operator alone", async () => {
+    serve();
+    renderPage();
+    await openPanel();
+    fireEvent.click(screen.getByTestId("expression-add-rule"));
+    fireEvent.change(screen.getAllByTestId("expression-operator")[0], { target: { value: "contains" } });
+
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    expect(sentExpressions()[0]).toEqual({
+      version: 1,
+      query: { combinator: "and", rules: [{ field: "col:key", operator: "contains", value: "" }] },
+    });
+  });
+
+  it("stops sending a condition that is edited back to exactly its starting state", async () => {
+    serve();
+    renderPage();
+    await openPanel();
+    fireEvent.click(screen.getByTestId("expression-add-rule"));
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "zo" } });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "" } });
+    const before = sentExpressions().length;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    // `key = ""` matches nothing and was never asked for; back to no filter.
+    expect(sentExpressions()).toHaveLength(before);
+    expect(paths().filter((p) => p.startsWith("/api/v1/entities?")).at(-1)).not.toContain("expr=");
+  });
+
   it("does not send an empty condition set", async () => {
     serve();
     renderPage();

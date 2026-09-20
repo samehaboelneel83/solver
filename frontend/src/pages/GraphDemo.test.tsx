@@ -610,6 +610,29 @@ describe("GraphDemo expression filter", () => {
     expect(options).toContain(GRADE);
   });
 
+  it("filters nothing until a new condition is touched", async () => {
+    // "+ Condition" creates a complete rule, so the canvas used to drop
+    // from 23 nodes to 2 the moment the button was pressed. Nothing is
+    // hidden and nothing is announced until one of the rule's controls is
+    // changed.
+    await openBuilder();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const displays = [...elementStore.values()]
+      .filter((e) => e.isNode)
+      .map((e) => e.styles.display ?? "element");
+    expect(displays).toEqual(["element", "element", "element"]);
+    expect(screen.getByTestId("graph-live")).not.toHaveTextContent("of 3");
+  });
+
+  it("starts a new condition on a plain attribute, not on a generated call", async () => {
+    // The graph's catalogue has no entity columns (graphFilter.ts), so the
+    // default is the first plain attribute -- never `abs(...)`.
+    await openBuilder();
+    const value = (screen.getAllByTestId("expression-field")[0] as HTMLSelectElement).value;
+    expect(value).toBe(GRADE);
+    expect(value.startsWith("fn:")).toBe(false);
+  });
+
   it("filters the canvas by the expression and announces how many nodes are left", async () => {
     await openBuilder();
     setRule(">", "3");
