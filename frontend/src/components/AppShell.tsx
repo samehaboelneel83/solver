@@ -90,6 +90,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/public/problem", label: "Problems" },
       { to: "/model", label: "Model editor" },
       { to: "/versions", label: "Model versions" },
+      { to: "/scenarios", label: "Scenarios" },
       { to: "/public/template", label: "Templates" },
     ],
   },
