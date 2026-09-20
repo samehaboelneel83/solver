@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# solver pre-commit hook -- installed by scripts/install-hooks.sh.
+#
+# Runs the fast checks (`scripts/check.sh --fast`: frontend dependencies,
+# lint if configured, tsc --noEmit, vitest -- no Docker, ~20 s) before every
+# commit. It is deliberately the fast set and not the full one: a hook that
+# takes two minutes is a hook people disable within a week.
+#
+# What it does NOT cover: the backend suite, and the production build. Run
+# `scripts/check.sh` with no arguments before you merge a branch.
+#
+# It checks the WORKING TREE, not the staged snapshot. Stashing unstaged work
+# to check the index exactly is a well-known way to lose changes when a hook
+# is interrupted, and this hook is not worth that risk. If you commit a subset
+# of your edits, what it reports is what you have on disk.
+#
+# To skip it for one commit:   git commit --no-verify
+# To skip it for a session:    SOLVER_SKIP_CHECKS=1 git commit ...
+# To remove it:                bash scripts/install-hooks.sh --uninstall
+
+set -uo pipefail
+
+if [[ -n "${SOLVER_SKIP_CHECKS:-}" ]]; then
+  echo "pre-commit: skipped (SOLVER_SKIP_CHECKS is set)"
+  exit 0
+fi
+
+# `git rev-parse --show-toplevel` and not a path relative to this file: the
+# installed hook lives in .git/hooks (shared by every worktree), so it must
+# find the tree it is actually committing in.
+REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
+CHECK="$REPO_ROOT/scripts/check.sh"
+
+if [[ ! -f "$CHECK" ]]; then
+  echo "pre-commit: $CHECK is missing -- skipping checks" >&2
+  exit 0
+fi
+
+# The fast checks only cover the frontend, so a commit that stages nothing
+# under frontend/ has nothing for them to say. Say so explicitly rather than
+# printing a green summary that means nothing.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^frontend/'; then
+  echo "pre-commit: no frontend files staged -- the fast checks cover only the"
+  echo "            frontend, so nothing was checked. Run scripts/check.sh"
+  echo "            (full, ~2 min, includes the backend suite) before merging."
+  exit 0
+fi
+
+echo "pre-commit: running scripts/check.sh --fast (skip with git commit --no-verify)"
+if bash "$CHECK" --fast; then
+  exit 0
+fi
+
+cat >&2 <<'MSG'
+
+pre-commit: the fast checks failed, so the commit was refused.
+
+  Fix the failures above, or commit anyway with:
+
+      git commit --no-verify
+
+  The full set (adds the production build and the 754-test backend suite):
+
+      scripts/check.sh
+MSG
+exit 1
