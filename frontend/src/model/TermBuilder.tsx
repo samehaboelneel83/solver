@@ -341,6 +341,7 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                       ],
                       columns: [],
                     })}
+                    label={`Filter for ${binding.index} in ${binding.set}`}
                     value={fromIrWhere(binding.where, setId)}
                     onChange={(document) => {
                       const converted = toIrWhere(document);

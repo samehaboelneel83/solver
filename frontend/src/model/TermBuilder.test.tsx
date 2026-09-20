@@ -119,8 +119,34 @@ describe("BindingsEditor", () => {
 
     // The builder's own controls, not a bespoke filter UI: one expression
     // language on this platform, not two.
-    expect(screen.getByRole("form")).toBeInTheDocument();
+    // The library's own controls, not a bespoke filter UI: one expression
+    // language on this platform, not two.
     expect(screen.getByRole("button", { name: /add a condition/i })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /filter for d in day/i })).toBeInTheDocument();
+  });
+
+  it("names each binding's filter, so two on a page are not two unnamed landmarks", () => {
+    // react-querybuilder renders its own `role="form"`; several unnamed ones
+    // on a page is an axe `landmark-unique` violation, which is exactly what
+    // the model editor produces without this.
+    render(
+      <BindingsEditor
+        bindings={[
+          { index: "d", set: "day" },
+          { index: "e", set: "employee" },
+        ]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "Filter for d in day" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Filter for e in employee" })).toBeInTheDocument();
+    // And none of them is a `form` landmark: a filter is a control inside a
+    // form, not a second form competing in the landmark list.
+    expect(screen.queryAllByRole("form")).toHaveLength(0);
   });
 
   it("does not offer a filter for a set with no attributes to filter on", () => {
@@ -134,7 +160,7 @@ describe("BindingsEditor", () => {
       />
     );
 
-    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /filter for/i })).not.toBeInTheDocument();
   });
 
   it("names a new index without shadowing one already bound", () => {
@@ -218,7 +244,7 @@ describe("BindingsEditor", () => {
       />
     );
 
-    const form = screen.getByRole("form");
-    expect(within(form).getByDisplayValue("is_weekend")).toBeInTheDocument();
+    const filter = screen.getByRole("group", { name: /filter for d in day/i });
+    expect(within(filter).getByDisplayValue("is_weekend")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   QueryBuilder,
   Rule as DefaultRule,
@@ -381,6 +381,15 @@ export type ExpressionBuilderProps = {
    * second place would be the only thing that told them apart.
    */
   extraProblems?: readonly { path: number[]; message: string }[];
+  /**
+   * Names this builder. react-querybuilder renders its own `role="form"`
+   * landmark and offers no prop to label it, so two builders on one page are
+   * two indistinguishable landmarks (`landmark-unique`). One is fine --
+   * which is why this was not needed until the model editor put a filter on
+   * every binding. The label is applied to both the group wrapper and, by
+   * effect, the library's form.
+   */
+  label?: string;
 };
 
 export default function ExpressionBuilder({
@@ -388,7 +397,25 @@ export default function ExpressionBuilder({
   value,
   onChange,
   extraProblems,
+  label,
 }: ExpressionBuilderProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // react-querybuilder gives its root `role="form"`, which is a **landmark**.
+  // A filter is not a form -- it is a control inside one -- and several on a
+  // page are several landmarks competing for a screen-reader user's landmark
+  // list (axe `landmark-unique`, seen with three filters in the model
+  // editor). Naming them was not enough, so the role is corrected to `group`,
+  // which is what it actually is. The library offers no prop for either.
+  //
+  // No dependency list on purpose: the library re-renders its own tree as the
+  // query changes, and the corrected role must survive that.
+  useEffect(() => {
+    // Only the role: the wrapper above already carries the name, and naming
+    // both would put two identically-named groups in the tree.
+    rootRef.current
+      ?.querySelectorAll('[role="form"]')
+      .forEach((node) => node.setAttribute("role", "group"));
+  });
   const query = useMemo(() => toQuery(value), [value]);
   const validation = useMemo(
     () => validateExpression(value ?? emptyDocument(), catalogue),
@@ -424,7 +451,12 @@ export default function ExpressionBuilder({
 
   return (
     <BuilderContext.Provider value={context}>
-      <div data-testid="expression-builder" role="group" aria-label="Filter conditions">
+      <div
+        ref={rootRef}
+        data-testid="expression-builder"
+        role="group"
+        aria-label={label ?? "Filter conditions"}
+      >
         <QueryBuilder
           query={query}
           onQueryChange={(next: RuleGroupType) => onChange(toDocument(next))}
