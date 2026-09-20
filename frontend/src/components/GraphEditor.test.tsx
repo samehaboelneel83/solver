@@ -6,8 +6,37 @@ import { MemoryRouter } from "react-router-dom";
 import { fallbackColour, labelForeground } from "../lib/colour";
 import GraphEditor, { applyGraphToCy, cyEdgeId, graphStylesheet, positionsAreDegenerate } from "./GraphEditor";
 
-const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore } = vi.hoisted(() => {
+/**
+ * The cytoscape double, and what it is allowed to be more permissive
+ * about: nothing that this component can get wrong.
+ *
+ * Ruling 39 found the objects view drawing zero edges because node ids
+ * (`entity.id`) and edge ids (`relationship.id`) are two identity
+ * sequences in ONE cytoscape id space, and the double kept them in two
+ * separate maps -- so no test could fail on it. That class of gap is what
+ * this double now closes. Four rules, each verified against
+ * cytoscape@3.34.3 and each pinned by a test in "the double matches the
+ * library" below:
+ *
+ * 1. **One id space, first writer wins.** `cy.add()` for an id that is
+ *    already taken does nothing at all -- no throw, no console message,
+ *    the element simply never appears. It does NOT overwrite.
+ * 2. **An edge with a missing endpoint throws**, synchronously, out of
+ *    `add()`, taking the rest of the batch with it. That is what
+ *    `applyGraphToCy`'s dangling-edge guard exists to prevent.
+ * 3. **Removing a node removes its edges.** They cannot exist without
+ *    their endpoints.
+ * 4. **`getElementById` always returns a collection**, `length === 0`
+ *    when nothing matches. It never returns undefined, and it never
+ *    claims `length: 1` for an id that is not there.
+ *
+ * `refusedAdds` and `throwCount` are exposed so a test can assert that
+ * the double really did refuse, rather than inferring it from an absence.
+ */
+const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore, cyStats } =
+  vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
+  const stats = { refusedAdds: [] as string[], throws: [] as string[] };
 
   type EleEntry = {
     data: Record<string, any>;
@@ -57,12 +86,25 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
     };
   }
 
+  // Rule 3: an edge cannot outlive either of its endpoints.
+  function removeWithEdges(id: string) {
+    if (!store.has(id)) return;
+    const entry = store.get(id)!;
+    store.delete(id);
+    if (!entry.isNode) return;
+    for (const [edgeId, edge] of [...store.entries()]) {
+      if (!edge.isNode && (edge.data.source === id || edge.data.target === id)) {
+        store.delete(edgeId);
+      }
+    }
+  }
+
   function makeCollection(ids: string[]) {
     return {
       forEach: (fn: (ele: any) => void) => ids.forEach((id) => fn(wrapEle(id))),
       map: (fn: (ele: any) => any) => ids.map((id) => fn(wrapEle(id))),
       removeClass: (cls: string) => ids.forEach((id) => wrapEle(id).removeClass(cls)),
-      remove: () => ids.forEach((id) => store.delete(id)),
+      remove: () => ids.forEach(removeWithEdges),
       length: ids.length,
     };
   }
@@ -82,8 +124,28 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
   const instance: any = {
     add: vi.fn((elements: any[]) => {
       const added: string[] = [];
+      // In array order, one at a time: an element added earlier in the
+      // same call has already taken its id, and an edge may name a node
+      // added earlier in the same call. Both are what the library does.
       (elements ?? []).forEach((el: any) => {
         const isNode = !("source" in el.data);
+        // Rule 1: first writer wins, silently.
+        if (store.has(el.data.id)) {
+          stats.refusedAdds.push(el.data.id);
+          return;
+        }
+        // Rule 2: an edge with a missing endpoint is not skipped, it throws.
+        if (!isNode) {
+          for (const end of ["source", "target"] as const) {
+            const endId = el.data[end];
+            if (!store.has(endId) || !store.get(endId)!.isNode) {
+              stats.throws.push(el.data.id);
+              throw new Error(
+                `Can not create edge \`${el.data.id}\` with nonexistent ${end} \`${endId}\``
+              );
+            }
+          }
+        }
         store.set(el.data.id, {
           data: { ...el.data },
           isNode,
@@ -96,9 +158,10 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
       return makeCollection(added);
     }),
     remove: vi.fn((target: any) => {
-      idsOf(target).forEach((id) => store.delete(id));
+      idsOf(target).forEach(removeWithEdges);
     }),
-    getElementById: vi.fn((id: string) => wrapEle(id)),
+    // Rule 4: always a collection; `length` is 0 when nothing matches.
+    getElementById: vi.fn((id: string) => ({ ...wrapEle(id), length: store.has(id) ? 1 : 0 })),
     nodes: vi.fn(() =>
       makeCollection([...store.entries()].filter(([, e]) => e.isNode).map(([id]) => id))
     ),
@@ -132,12 +195,23 @@ const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStor
   };
   const constructor: any = vi.fn(() => instance);
   constructor.use = vi.fn();
-  return { mockCytoscapeInstance: instance, mockCytoscape: constructor, registeredHandlersRef: handlersRef, elementStore: store };
+  return {
+    mockCytoscapeInstance: instance,
+    mockCytoscape: constructor,
+    registeredHandlersRef: handlersRef,
+    elementStore: store,
+    cyStats: stats,
+  };
 });
 
 vi.mock("cytoscape", () => ({ default: mockCytoscape }));
-vi.mock("cytoscape-elk", () => ({ default: {} }));
-vi.mock("cytoscape-edgehandles", () => ({ default: {} }));
+// Named, not bare `{}`: `cytoscape.use(elk)` and `cytoscape.use(edgehandles)`
+// are two calls with two arguments, and two indistinguishable empty objects
+// cannot tell them apart -- dropping one registration would still look
+// registered. In the browser a missing `elk` is "Layout failed"; a missing
+// `edgehandles` is a Connect button that does nothing.
+vi.mock("cytoscape-elk", () => ({ default: { extension: "elk" } }));
+vi.mock("cytoscape-edgehandles", () => ({ default: { extension: "edgehandles" } }));
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -145,6 +219,12 @@ vi.mock("../api/client", async () => {
 });
 
 import { apiFetch, ApiError } from "../api/client";
+// The two extension objects the mocks above hand to `cytoscape.use`, so the
+// registration test can name which is which.
+// @ts-expect-error -- cytoscape-elk ships no bundled type declarations
+import elkExtension from "cytoscape-elk";
+// @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
+import edgehandlesExtension from "cytoscape-edgehandles";
 
 // --- v1 fixtures -----------------------------------------------------------
 //
@@ -162,7 +242,12 @@ const GRAPH = {
     { id: "2", type: "unit", label: "ops", parent: "1", attributes: {} },
     { id: "3", type: "employee", label: "ahmed", parent: "2", attributes: { code: "E-1", status: "active" } },
   ],
-  edges: [{ id: "10", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} }],
+  // `relationship.id = 1` and `entity.id = 1` -- two identity sequences in
+  // one cytoscape id space (Ruling 39). The fixture used to pair nodes 1-3
+  // with edge 10, which is the only reason the branch's biggest UI bug
+  // survived every earlier task. A colliding pair is now the DEFAULT, so
+  // the namespacing in `cyEdgeId` is exercised by every component test.
+  edges: [{ id: "1", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} }],
   entity_types: [
     // Task 14b: `colour` on the wire. `employee` has one, `unit` does not,
     // so both the stored path and the deterministic fallback are exercised
@@ -273,10 +358,37 @@ type Stub = {
   write?: (path: string, options: RequestInit) => unknown;
 };
 
+/**
+ * The API double. Two rules, both the opposite of what it used to do.
+ *
+ * **An unrecognised GET is refused, not answered with `{}`.** A stub that
+ * resolves every path teaches nothing: a request to the wrong URL, or to a
+ * route that no longer exists, comes back as an empty object and the
+ * component renders its empty state, which is usually what the test was
+ * checking anyway. Every other page test in this branch rejects; this one
+ * now does too.
+ *
+ * **A write must be opted into, per test.** It used to resolve any
+ * non-GET with a plausible-looking entity, so a test could "create a
+ * node" without ever saying what the server answered -- and a test that
+ * accidentally issued a write nobody meant to issue passed. `stub.write`
+ * is now the only way a write succeeds, and it is handed the path and the
+ * options so it can answer per route.
+ */
 function stubApi(stub: Stub = {}) {
   (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
     if (options?.method && options.method !== "GET") {
-      return stub.write ? stub.write(path, options) : Promise.resolve({ id: 99, key: "new", label: null, attrs: {} });
+      if (!stub.write) {
+        return Promise.reject(
+          new Error(
+            `unexpected ${options.method} ${path} -- pass \`write\` to stubApi to allow it`
+          )
+        );
+      }
+      const answer = stub.write(path, options);
+      return answer === undefined
+        ? Promise.reject(new Error(`stubApi write handler did not answer ${options.method} ${path}`))
+        : answer;
     }
     if (path.startsWith("/api/v1/graph")) {
       return stub.graphError ? Promise.reject(stub.graphError) : Promise.resolve(stub.graph ?? GRAPH);
@@ -294,9 +406,14 @@ function stubApi(stub: Stub = {}) {
     if (path.startsWith("/api/v1/entity-types")) {
       return Promise.resolve(stub.entityTypes ?? ENTITY_TYPES);
     }
-    return Promise.resolve({});
+    return Promise.reject(new Error(`unexpected GET ${path}`));
   });
 }
+
+/** The answer the old `stubApi` gave every write for free. Tests that only
+ * need "the write succeeded" pass this explicitly, so the fact that a write
+ * happened at all is written down in the test. */
+const WROTE_OK = () => Promise.resolve({ id: 99, key: "new", label: null, attrs: {} });
 
 function bodyOf(call: any[]): any {
   return JSON.parse((call[1] as RequestInit).body as string);
@@ -364,6 +481,18 @@ describe("GraphEditor", () => {
     stubApi();
   });
 
+  // --- the extensions ----------------------------------------------------
+
+  it("registers the layout and edge-handle extensions with cytoscape", () => {
+    // Module-scope side effects of importing GraphEditor, so this asserts
+    // the import, not a render. Dropping either registration is invisible
+    // in the DOM and shows up in the browser as "Layout failed" (elk) or a
+    // Connect button that does nothing (edgehandles) -- neither of which
+    // any other test in this file can see.
+    expect(mockCytoscape.use).toHaveBeenCalledWith(elkExtension);
+    expect(mockCytoscape.use).toHaveBeenCalledWith(edgehandlesExtension);
+  });
+
   // --- the v1 read -------------------------------------------------------
 
   it("reads the graph from the v1 route for its domain, naming the hierarchy type when one is selected", async () => {
@@ -383,7 +512,7 @@ describe("GraphEditor", () => {
     // Two generations deep, not one.
     expect(nodes.find((el: any) => el.data.id === "2").data.parent).toBe("1");
     expect(nodes.find((el: any) => el.data.id === "3").data.parent).toBe("2");
-    expect(added.filter((el: any) => "source" in el.data).map((el: any) => el.data.id)).toEqual([cyEdgeId("10")]);
+    expect(added.filter((el: any) => "source" in el.data).map((el: any) => el.data.id)).toEqual([cyEdgeId("1")]);
   });
 
   // --- the hierarchy picker ---------------------------------------------
@@ -425,6 +554,12 @@ describe("GraphEditor", () => {
   // --- creating a node ---------------------------------------------------
 
   it("creates an entity through the v1 entities route, with its attrs typed by data_type", async () => {
+    // The write is opted into explicitly. Before this round `stubApi`
+    // resolved any non-GET for free, so this test asserted the request and
+    // nothing about the response -- it would have passed just as happily
+    // against a server that refused, with the error banner on screen and
+    // nobody looking at it. The success is now asserted too.
+    stubApi({ write: WROTE_OK });
     renderWithProviders();
     await openCreateNodeFor("employee");
 
@@ -444,6 +579,9 @@ describe("GraphEditor", () => {
       // `integer` attribute.
       attrs: { code: "E-9", status: "leave", grade: 7 },
     });
+    // The form closes only on success, which is what tells this apart from
+    // a refusal -- whose request looks identical.
+    await waitFor(() => expect(screen.queryByLabelText(/^Key/)).not.toBeInTheDocument());
   });
 
   it("offers an input for an attribute named code or status, which v1 has no built-in to collide with", async () => {
@@ -524,6 +662,7 @@ describe("GraphEditor", () => {
   });
 
   it("does not create a hierarchy relationship when no parent was chosen", async () => {
+    stubApi({ write: WROTE_OK });
     renderWithProviders({ hierarchyTypeId: 5 });
     await openCreateNodeFor("unit");
 
@@ -531,6 +670,10 @@ describe("GraphEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(writeCalls("POST", "/api/v1/entities")).toHaveLength(1));
+    // The entity write really succeeded (the form closed), so "no
+    // relationship was written" means the code chose not to write one,
+    // rather than never reaching that branch.
+    await waitFor(() => expect(screen.queryByLabelText(/^Key/)).not.toBeInTheDocument());
     expect(writeCalls("POST", "/api/v1/relationships")).toHaveLength(0);
   });
 
@@ -741,13 +884,14 @@ describe("GraphEditor", () => {
   });
 
   it("hides an edge whose endpoint an expression hid", async () => {
-    // Edge 10 runs 1 -> 2. The expression keeps 1 and drops 2.
+    // The edge (wire id 1, canvas id `edge:1`) runs node 1 -> node 2.
+    // The expression keeps 1 and drops 2.
     renderWithProviders({
       filter: { selectedTypes: null, search: "", highlightIds: null, expressionMatchIds: new Set(["1", "3"]) },
     });
     await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
 
-    await waitFor(() => expect(elementStore.get(cyEdgeId("10"))?.styles.display).toBe("none"));
+    await waitFor(() => expect(elementStore.get(cyEdgeId("1"))?.styles.display).toBe("none"));
   });
 
   it("announces how many nodes an expression left showing, and says nothing when there is none", async () => {
@@ -788,15 +932,15 @@ describe("GraphEditor", () => {
       </QueryClientProvider>
     );
     await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
-    await waitFor(() => expect(elementStore.has(cyEdgeId("10"))).toBe(true));
+    await waitFor(() => expect(elementStore.has(cyEdgeId("1"))).toBe(true));
 
     act(() =>
       registeredHandlersRef.current["tap:edge"]({
-        target: mockCytoscapeInstance.getElementById(cyEdgeId("10")),
+        target: mockCytoscapeInstance.getElementById(cyEdgeId("1")),
       })
     );
 
-    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "edge", id: "10" });
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "edge", id: "1" });
   });
 
   it("calls the latest onSelectionChange after a rerender, not the one captured at mount", async () => {
@@ -1098,7 +1242,7 @@ describe("GraphEditor", () => {
     it("colours an edge from its relationship type", () => {
       const cy = mockCytoscapeInstance as unknown as any;
       applyGraphToCy(cy, GRAPH as any);
-      expect(elementStore.get(cyEdgeId("10"))?.data.colour).toBe("#2ca02c");
+      expect(elementStore.get(cyEdgeId("1"))?.data.colour).toBe("#2ca02c");
     });
 
     it("repaints existing elements when a type's colour changes", () => {
@@ -1311,44 +1455,99 @@ describe("applyGraphToCy", () => {
     attribute_definitions: [],
   };
 
+  /**
+   * The unit double for `applyGraphToCy`, under the same four rules as the
+   * hoisted one above (see its comment for why each is there and what the
+   * real library does). It keeps ONE store, because cytoscape keeps one id
+   * space; `_nodes` and `_edges` are views over it, so the assertions
+   * below still read the way they did while no longer being able to pass
+   * on a graph the library would refuse to draw.
+   */
   function cyDouble() {
-    const nodes = new Map<string, any>();
-    const edges = new Map<string, any>();
+    type Entry = { data: Record<string, any>; isNode: boolean };
+    const store = new Map<string, Entry>();
     const added: any[] = [];
-    function ele(id: string, store: Map<string, any>) {
+    const refused: string[] = [];
+
+    function ele(id: string) {
       return {
+        // Rule 4: a collection, and `length` tells the truth.
+        length: store.has(id) ? 1 : 0,
         id: () => id,
+        isNode: () => store.get(id)?.isNode ?? false,
         data: (arg?: any) => {
           const entry = store.get(id);
-          if (arg === undefined) return { ...entry };
-          if (typeof arg === "string") return entry[arg];
-          Object.assign(entry, arg);
+          if (!entry) return undefined;
+          if (arg === undefined) return { ...entry.data };
+          if (typeof arg === "string") return entry.data[arg];
+          Object.assign(entry.data, arg);
           return undefined;
         },
         move: (opts: { parent?: string | null }) => {
-          store.get(id).parent = opts.parent ?? undefined;
+          const entry = store.get(id);
+          if (entry) entry.data.parent = opts.parent ?? undefined;
         },
       };
     }
+
+    // Rule 3: an edge cannot outlive either of its endpoints.
+    function removeWithEdges(id: string) {
+      const entry = store.get(id);
+      if (!entry) return;
+      store.delete(id);
+      if (!entry.isNode) return;
+      for (const [edgeId, edge] of [...store.entries()]) {
+        if (!edge.isNode && (edge.data.source === id || edge.data.target === id)) {
+          store.delete(edgeId);
+        }
+      }
+    }
+
+    const view = (isNode: boolean) =>
+      new Map([...store.entries()].filter(([, e]) => e.isNode === isNode).map(([id, e]) => [id, e.data]));
+
     return {
-      _nodes: nodes,
-      _edges: edges,
-      added,
-      seedNode: (data: any) => nodes.set(data.id, { ...data }),
-      nodes: () => ({ forEach: (fn: any) => [...nodes.keys()].forEach((id) => fn(ele(id, nodes))) }),
-      edges: () => ({ forEach: (fn: any) => [...edges.keys()].forEach((id) => fn(ele(id, edges))) }),
-      getElementById: (id: string) => ele(id, nodes.has(id) ? nodes : edges),
-      remove: (target: any) => {
-        const id = target.id();
-        nodes.delete(id);
-        edges.delete(id);
+      get _nodes() {
+        return view(true);
       },
+      get _edges() {
+        return view(false);
+      },
+      added,
+      refused,
+      seedNode: (data: any) => store.set(data.id, { data: { ...data }, isNode: true }),
+      nodes: () => ({
+        forEach: (fn: any) =>
+          [...store.entries()].filter(([, e]) => e.isNode).forEach(([id]) => fn(ele(id))),
+      }),
+      edges: () => ({
+        forEach: (fn: any) =>
+          [...store.entries()].filter(([, e]) => !e.isNode).forEach(([id]) => fn(ele(id))),
+      }),
+      getElementById: (id: string) => ele(id),
+      remove: (target: any) => removeWithEdges(target.id()),
       extent: () => ({ x1: 0, y1: 0, x2: 100, y2: 100 }),
       add: (elements: any[]) => {
         elements.forEach((el) => {
+          const isNode = !("source" in el.data);
+          // Rule 1: first writer wins, silently.
+          if (store.has(el.data.id)) {
+            refused.push(el.data.id);
+            return;
+          }
+          // Rule 2: a dangling edge throws out of add(), aborting the batch.
+          if (!isNode) {
+            for (const end of ["source", "target"] as const) {
+              const endId = el.data[end];
+              if (!store.has(endId) || !store.get(endId)!.isNode) {
+                throw new Error(
+                  `Can not create edge \`${el.data.id}\` with nonexistent ${end} \`${endId}\``
+                );
+              }
+            }
+          }
           added.push(el);
-          if ("source" in el.data) edges.set(el.data.id, { ...el.data });
-          else nodes.set(el.data.id, { ...el.data });
+          store.set(el.data.id, { data: { ...el.data }, isNode });
         });
       },
     } as any;
@@ -1426,31 +1625,12 @@ describe("applyGraphToCy", () => {
   // never appears. Measured on the seeded demo (23 entities, 10
   // relationships), the canvas drew 23 nodes and **0** edges.
   //
-  // The double above stores nodes and edges in two separate maps, which is
-  // exactly why no existing test could see this -- it is more permissive
-  // than the thing it stands for. `cyDoubleOneIdSpace` reproduces the real
-  // rule.
+  // `cyDouble` used to keep nodes and edges in two separate maps, which is
+  // exactly why no earlier test could see this -- it was more permissive
+  // than the thing it stood for. It now keeps one, so the rule is in the
+  // double rather than in a wrapper that only three tests remembered to
+  // use.
   // ---------------------------------------------------------------------
-
-  function cyDoubleOneIdSpace() {
-    const cy = cyDouble();
-    const add = cy.add;
-    cy.add = (elements: any[]) => {
-      const taken = new Set<string>([...cy._nodes.keys(), ...cy._edges.keys()]);
-      // One at a time, so an element added earlier in the same call takes
-      // its id -- which is what cytoscape does.
-      elements.forEach((el) => {
-        if (taken.has(el.data.id)) {
-          cy.refused.push(el.data.id);
-          return;
-        }
-        taken.add(el.data.id);
-        add([el]);
-      });
-    };
-    cy.refused = [] as string[];
-    return cy;
-  }
 
   const COLLIDING = {
     ...base,
@@ -1465,7 +1645,7 @@ describe("applyGraphToCy", () => {
   };
 
   it("draws an edge whose id collides with a node's id", () => {
-    const cy = cyDoubleOneIdSpace();
+    const cy = cyDouble();
     applyGraphToCy(cy, COLLIDING as any);
 
     expect(cy.refused).toEqual([]);
@@ -1487,7 +1667,7 @@ describe("applyGraphToCy", () => {
   });
 
   it("updates, rather than duplicates, a colliding edge on a redraw", () => {
-    const cy = cyDoubleOneIdSpace();
+    const cy = cyDouble();
     applyGraphToCy(cy, COLLIDING as any);
     applyGraphToCy(
       cy,
@@ -1502,7 +1682,7 @@ describe("applyGraphToCy", () => {
   });
 
   it("removes a colliding edge that is no longer in the payload", () => {
-    const cy = cyDoubleOneIdSpace();
+    const cy = cyDouble();
     applyGraphToCy(cy, COLLIDING as any);
     applyGraphToCy(cy, { ...COLLIDING, edges: [] } as any);
 
@@ -1526,16 +1706,111 @@ describe("applyGraphToCy", () => {
     expect(positions[0]).toEqual(positions[1]);
   });
 
-  it("skips an edge whose source or target node is not among the kept-or-added nodes", () => {
-    const cy = cyDouble();
-    expect(() =>
+  // --- the dangling-edge guard (GraphEditor.tsx) -------------------------
+  //
+  // Until this round the one test here asserted `cy._edges.has("10")` is
+  // false -- which the Ruling 39 fix made true whether or not the guard
+  // ran, because a drawn edge is stored under `edge:10`, never "10". The
+  // double could not throw either, so deleting the guard entirely left
+  // all 1108 tests passing. Both halves are fixed: the double throws the
+  // way cytoscape does, and these three tests name the canvas id.
+  describe("an edge whose endpoint is missing", () => {
+    const dangling = {
+      ...base,
+      nodes: [{ id: "1", type: "unit", label: "hq", parent: null, attributes: {} }],
+      edges: [{ id: "10", source: "1", target: "999", type: "reports_to", label: "reports_to", attributes: {} }],
+    };
+
+    it("is skipped, and does not throw out of the update", () => {
+      const cy = cyDouble();
+      // Without the guard this is the real library's synchronous
+      // "Can not create edge `edge:10` with nonexistent target `999`".
+      expect(() => applyGraphToCy(cy, dangling as any)).not.toThrow();
+      expect(cy._edges.has(cyEdgeId("10"))).toBe(false);
+      expect(cy._edges.size).toBe(0);
+    });
+
+    it("does not take the rest of the batch down with it", () => {
+      // The failure the guard actually prevents: one bad edge aborting
+      // `cy.add()` means the NODES in the same call never appear either,
+      // and the canvas stays empty with nothing on screen to say why.
+      const cy = cyDouble();
       applyGraphToCy(cy, {
         ...base,
-        nodes: [{ id: "1", type: "unit", label: "hq", parent: null, attributes: {} }],
-        edges: [{ id: "10", source: "1", target: "999", type: "reports_to", label: "reports_to", attributes: {} }],
-      } as any)
-    ).not.toThrow();
-    expect(cy._edges.has("10")).toBe(false);
+        nodes: [
+          { id: "1", type: "unit", label: "hq", parent: null, attributes: {} },
+          { id: "2", type: "unit", label: "ops", parent: null, attributes: {} },
+        ],
+        edges: [
+          { id: "10", source: "1", target: "999", type: "reports_to", label: "x", attributes: {} },
+          { id: "11", source: "1", target: "2", type: "reports_to", label: "good", attributes: {} },
+        ],
+      } as any);
+      expect([...cy._nodes.keys()].sort()).toEqual(["1", "2"]);
+      expect([...cy._edges.keys()]).toEqual([cyEdgeId("11")]);
+    });
+
+    it("says so on the console rather than disappearing silently", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      applyGraphToCy(cyDouble(), dangling as any);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("skipped 1 edge"));
+      warn.mockRestore();
+    });
+  });
+
+  // --- the double matches the library ------------------------------------
+  //
+  // Four rules, each verified against cytoscape@3.34.3. They are asserted
+  // here because a double nobody checks drifts, and every drift makes a
+  // real defect unreachable -- which is exactly how Ruling 39's bug
+  // survived. See the comment on the hoisted double at the top of the file.
+  describe("the cytoscape double", () => {
+    it("drops a duplicate id silently, first writer wins", () => {
+      const cy = cyDouble();
+      cy.add([{ data: { id: "1", label: "first" } }]);
+      cy.add([{ data: { id: "1", label: "second" } }]);
+      expect(cy._nodes.get("1").label).toBe("first");
+      expect(cy.refused).toEqual(["1"]);
+    });
+
+    it("throws for an edge whose endpoint does not exist", () => {
+      const cy = cyDouble();
+      cy.add([{ data: { id: "1" } }]);
+      expect(() => cy.add([{ data: { id: "e", source: "1", target: "nope" } }])).toThrow(
+        /nonexistent target/
+      );
+    });
+
+    it("accepts an edge naming a node added earlier in the same call", () => {
+      const cy = cyDouble();
+      expect(() =>
+        cy.add([
+          { data: { id: "1" } },
+          { data: { id: "2" } },
+          { data: { id: "e", source: "1", target: "2" } },
+        ])
+      ).not.toThrow();
+      expect(cy._edges.has("e")).toBe(true);
+    });
+
+    it("removes a node's edges with it", () => {
+      const cy = cyDouble();
+      cy.add([
+        { data: { id: "1" } },
+        { data: { id: "2" } },
+        { data: { id: "e", source: "1", target: "2" } },
+      ]);
+      cy.remove(cy.getElementById("1"));
+      expect(cy._nodes.has("1")).toBe(false);
+      expect(cy._edges.has("e")).toBe(false);
+    });
+
+    it("answers getElementById for a missing id with an empty collection", () => {
+      const cy = cyDouble();
+      expect(cy.getElementById("nope").length).toBe(0);
+      cy.add([{ data: { id: "1" } }]);
+      expect(cy.getElementById("1").length).toBe(1);
+    });
   });
 
   it("removes a node that is no longer in the graph", () => {

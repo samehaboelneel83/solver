@@ -6,13 +6,86 @@ import GraphDemo from "./GraphDemo";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 import { GRAPH_MODE_STORAGE_KEY } from "../hooks/useGraphMode";
 
-const { mockCytoscape, registeredHandlersRef } = vi.hoisted(() => {
+/**
+ * The cytoscape double.
+ *
+ * It used to be a set of no-ops with `add: vi.fn()` (so nothing was ever
+ * on the canvas) and `getElementById: () => ({ ..., length: 1 })` -- which
+ * claimed every id existed, including ones this graph has never held. That
+ * is the shape Ruling 39 was about: a double that cannot express the
+ * library's constraint cannot fail on it, and here it made
+ * "?focus=<something not in this graph>" indistinguishable from
+ * "?focus=<a real node>" at the cytoscape boundary.
+ *
+ * It now keeps a real element store under the same four rules as
+ * `GraphEditor.test.tsx`'s double -- one id space with first-writer-wins,
+ * a throw for an edge with a missing endpoint, removal cascading from a
+ * node to its edges, and `getElementById` returning a collection whose
+ * `length` is 0 when nothing matches. Each is verified against
+ * cytoscape@3.34.3; `GraphEditor.test.tsx` holds the tests that pin them,
+ * and this file's fixtures are colliding so the constraint is live here
+ * too.
+ */
+const { mockCytoscape, registeredHandlersRef, elementStore } = vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
+  type Entry = { data: Record<string, any>; isNode: boolean; styles: Record<string, any>; classes: Set<string> };
+  const store = new Map<string, Entry>();
+
+  const wrap = (id: string) => ({
+    length: store.has(id) ? 1 : 0,
+    id: () => id,
+    isNode: () => store.get(id)?.isNode ?? false,
+    data: (arg?: any) => {
+      const entry = store.get(id);
+      if (!entry) return undefined;
+      if (arg === undefined) return { ...entry.data };
+      if (typeof arg === "string") return entry.data[arg];
+      Object.assign(entry.data, arg);
+      return undefined;
+    },
+    move: (opts: { parent?: string | null }) => {
+      const entry = store.get(id);
+      if (entry) entry.data.parent = opts.parent ?? undefined;
+    },
+    style: (key: string, value?: any) => {
+      const entry = store.get(id);
+      if (!entry) return undefined;
+      if (value === undefined) return entry.styles[key];
+      entry.styles[key] = value;
+      return undefined;
+    },
+    position: () => ({ x: 0, y: 0 }),
+    addClass: (cls: string) => store.get(id)?.classes.add(cls),
+    removeClass: (cls: string) => cls.split(" ").forEach((c) => store.get(id)?.classes.delete(c)),
+  });
+
+  function removeWithEdges(id: string) {
+    const entry = store.get(id);
+    if (!entry) return;
+    store.delete(id);
+    if (!entry.isNode) return;
+    for (const [edgeId, edge] of [...store.entries()]) {
+      if (!edge.isNode && (edge.data.source === id || edge.data.target === id)) store.delete(edgeId);
+    }
+  }
+
+  const collection = (ids: string[]) => ({
+    forEach: (fn: (ele: any) => void) => ids.forEach((id) => fn(wrap(id))),
+    map: (fn: (ele: any) => any) => ids.map((id) => fn(wrap(id))),
+    removeClass: (cls: string) => ids.forEach((id) => wrap(id).removeClass(cls)),
+    remove: () => ids.forEach(removeWithEdges),
+    length: ids.length,
+  });
+
+  const idsWhere = (isNode: boolean) =>
+    [...store.entries()].filter(([, e]) => e.isNode === isNode).map(([id]) => id);
+
   const instance: any = {
-    layout: vi.fn(() => ({ run: vi.fn() })),
+    layout: vi.fn(() => ({ run: vi.fn(), on: vi.fn(), promiseOn: vi.fn(() => Promise.resolve()) })),
     fit: vi.fn(),
     destroy: vi.fn(),
-    edgehandles: vi.fn(() => ({ destroy: vi.fn() })),
+    autoungrabify: vi.fn(),
+    edgehandles: vi.fn(() => ({ destroy: vi.fn(), enableDrawMode: vi.fn(), disableDrawMode: vi.fn(), start: vi.fn() })),
     on: vi.fn((event: string, selectorOrHandler: any, maybeHandler?: any) => {
       if (typeof selectorOrHandler === "function") {
         handlersRef.current[event] = selectorOrHandler;
@@ -20,29 +93,55 @@ const { mockCytoscape, registeredHandlersRef } = vi.hoisted(() => {
         handlersRef.current[`${event}:${selectorOrHandler}`] = maybeHandler;
       }
     }),
-    nodes: vi.fn(() => ({ forEach: vi.fn(), map: vi.fn(() => []) })),
-    edges: vi.fn(() => ({ forEach: vi.fn() })),
-    elements: vi.fn(() => ({ removeClass: vi.fn(), remove: vi.fn() })),
-    getElementById: vi.fn(() => ({ style: vi.fn(() => "element"), addClass: vi.fn(), removeClass: vi.fn(), length: 1 })),
+    nodes: vi.fn(() => collection(idsWhere(true))),
+    edges: vi.fn(() => collection(idsWhere(false))),
+    elements: vi.fn(() => collection([...store.keys()])),
+    getElementById: vi.fn((id: string) => wrap(id)),
     center: vi.fn(),
-    add: vi.fn(),
+    add: vi.fn((elements: any[]) => {
+      (elements ?? []).forEach((el: any) => {
+        const isNode = !("source" in el.data);
+        if (store.has(el.data.id)) return; // first writer wins, silently
+        if (!isNode) {
+          for (const end of ["source", "target"] as const) {
+            const endId = el.data[end];
+            if (!store.has(endId) || !store.get(endId)!.isNode) {
+              throw new Error(
+                `Can not create edge \`${el.data.id}\` with nonexistent ${end} \`${endId}\``
+              );
+            }
+          }
+        }
+        store.set(el.data.id, { data: { ...el.data }, isNode, styles: {}, classes: new Set() });
+      });
+      return collection([]);
+    }),
+    remove: vi.fn((target: any) => {
+      if (target && typeof target.id === "function") removeWithEdges(target.id());
+    }),
     extent: vi.fn(() => ({ x1: 0, y1: 0, x2: 10, y2: 10 })),
   };
   const constructor: any = vi.fn(() => instance);
   constructor.use = vi.fn();
-  return { mockCytoscape: constructor, registeredHandlersRef: handlersRef };
+  return { mockCytoscape: constructor, registeredHandlersRef: handlersRef, elementStore: store };
 });
 
 vi.mock("cytoscape", () => ({ default: mockCytoscape }));
-vi.mock("cytoscape-elk", () => ({ default: {} }));
-vi.mock("cytoscape-edgehandles", () => ({ default: {} }));
+// Named rather than two indistinguishable `{}`s -- see GraphEditor.test.tsx.
+vi.mock("cytoscape-elk", () => ({ default: { extension: "elk" } }));
+vi.mock("cytoscape-edgehandles", () => ({ default: { extension: "edgehandles" } }));
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
   return { ...actual, apiFetch: vi.fn() };
 });
 
-import { apiFetch } from "../api/client";
+import { ApiError, apiFetch } from "../api/client";
+// The two extension objects the mocks above hand to `cytoscape.use`.
+// @ts-expect-error -- cytoscape-elk ships no bundled type declarations
+import elkExtension from "cytoscape-elk";
+// @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
+import edgehandlesExtension from "cytoscape-edgehandles";
 
 const GRAPH = {
   nodes: [
@@ -50,7 +149,11 @@ const GRAPH = {
     { id: "2", type: "employee", label: "ahmed", parent: "1", attributes: { grade: 3 } },
     { id: "3", type: "employee", label: "sara", parent: "1", attributes: { grade: 4 } },
   ],
-  edges: [],
+  // `relationship.id = 1` and `entity.id = 1`: the collision Ruling 39 is
+  // about, now in this page's fixture too. With an empty `edges` array the
+  // page could not tell a graph that drew its edges from one that silently
+  // dropped every one of them.
+  edges: [{ id: "1", source: "1", target: "2", type: "reports_to", label: "reports_to", attributes: {} }],
   entity_types: [
     { id: "1", code: "employee", name: "employee", is_abstract: false, colour: "#1f77b4" },
     { id: "2", code: "unit", name: "unit", is_abstract: false, colour: null },
@@ -98,9 +201,23 @@ const ENTITIES: Record<string, unknown> = {
   "3": { id: 3, entity_type_id: 1, key: "sara", label: "Sara Q", sort_order: 0, active: true, attrs: { grade: 4 } },
 };
 
-function stubApi() {
+/**
+ * The API double. Both halves used to be unconditional: any unrecognised
+ * GET resolved as `{}` and any write resolved as success, so all 31 tests
+ * in this file had no way to fail on a request going to the wrong place.
+ * Every other page test in the branch rejects an unknown path; this one
+ * now does too, and a write has to be opted into per test.
+ */
+function stubApi(write?: (path: string, options: RequestInit) => unknown) {
   (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
-    if (options?.method && options.method !== "GET") return Promise.resolve({});
+    if (options?.method && options.method !== "GET") {
+      if (!write) {
+        return Promise.reject(
+          new Error(`unexpected ${options.method} ${path} -- pass a write handler to stubApi`)
+        );
+      }
+      return write(path, options) ?? Promise.reject(new Error(`unanswered ${options.method} ${path}`));
+    }
     if (path.startsWith("/api/v1/graph")) return Promise.resolve(GRAPH);
     // The LIST route and the single-row route are different answers; a stub
     // that returned the list for both would let a panel reading `.name` off
@@ -120,9 +237,12 @@ function stubApi() {
     }
     if (path.startsWith("/api/v1/relationship-types")) return Promise.resolve(HIERARCHY_TYPES);
     if (path.startsWith("/api/v1/entities/")) {
-      return Promise.resolve(ENTITIES[path.split("/").pop() as string] ?? {});
+      const entity = ENTITIES[path.split("/").pop() as string];
+      return entity
+        ? Promise.resolve(entity)
+        : Promise.reject(new ApiError(404, JSON.stringify({ detail: "entity not found" })));
     }
-    return Promise.resolve({});
+    return Promise.reject(new Error(`unexpected GET ${path}`));
   });
 }
 
@@ -147,6 +267,7 @@ describe("GraphDemo", () => {
   beforeEach(() => {
     mockCytoscape.mockClear();
     registeredHandlersRef.current = {};
+    elementStore.clear();
     localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
     localStorage.removeItem(GRAPH_MODE_STORAGE_KEY);
     (apiFetch as any).mockReset();
@@ -160,6 +281,40 @@ describe("GraphDemo", () => {
     expect(graphCalls()).toContain("/api/v1/graph?domain_id=1");
     expect(mockCytoscape).toHaveBeenCalled();
     expect(screen.getByText(/select a node or edge/i)).toBeInTheDocument();
+  });
+
+  it("registers the layout and edge-handle extensions", () => {
+    // Dropping either is invisible in the DOM: `elk` missing is "Layout
+    // failed" in the browser, `edgehandles` missing is a Connect button
+    // that does nothing.
+    expect(mockCytoscape.use).toHaveBeenCalledWith(elkExtension);
+    expect(mockCytoscape.use).toHaveBeenCalledWith(edgehandlesExtension);
+  });
+
+  it("actually draws the payload, edges included, onto the canvas", async () => {
+    // The double keeps one id space now, so this can fail. The fixture's
+    // edge id collides with a node id (Ruling 39): without the canvas-side
+    // namespacing the edge is silently dropped and the store holds 3
+    // elements instead of 4.
+    renderWithProviders();
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    await waitFor(() => {
+      const nodes = [...elementStore.values()].filter((e) => e.isNode);
+      const edges = [...elementStore.values()].filter((e) => !e.isNode);
+      expect(nodes).toHaveLength(3);
+      expect(edges).toHaveLength(1);
+    });
+  });
+
+  it("answers getElementById for an id this graph does not hold with an empty collection", async () => {
+    // The double used to hardcode `length: 1`, which is what made
+    // "?focus=<not in this graph>" indistinguishable from a real node at
+    // the cytoscape boundary.
+    renderWithProviders();
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    const instance = mockCytoscape.mock.results[0].value;
+    expect(instance.getElementById("999").length).toBe(0);
+    expect(instance.getElementById("1").length).toBe(1);
   });
 
   it("points at the domain selector instead of drawing an empty canvas when no domain is chosen", async () => {
@@ -285,6 +440,7 @@ describe("GraphDemo view mode", () => {
   beforeEach(() => {
     mockCytoscape.mockClear();
     registeredHandlersRef.current = {};
+    elementStore.clear();
     localStorage.clear();
     localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
     (apiFetch as any).mockReset();
@@ -404,6 +560,7 @@ describe("GraphDemo expression filter", () => {
   beforeEach(() => {
     mockCytoscape.mockClear();
     registeredHandlersRef.current = {};
+    elementStore.clear();
     localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
     localStorage.removeItem(GRAPH_MODE_STORAGE_KEY);
     (apiFetch as any).mockReset();
