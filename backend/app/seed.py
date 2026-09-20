@@ -119,27 +119,107 @@ _EMPLOYEES = [
     }),
 ]
 
-# The IR the seeded model version carries. `sets` must name entity types
-# that exist in the domain and `parameters` parameter_defs that do, or
-# `snapshot_dataset()` raises -- that is the whole contract it checks.
-# The rest is illustrative: there is no IR schema in this repository to
-# validate against (the solver owns it), so nothing here is enforced.
+# The IR the seeded model version carries, and the one worked example in
+# `docs/contracts/problem-ir.md`. It is asserted equal to the `workforce`
+# case in `backend/tests/ir_fixtures.json`, so the demo and the contract
+# cannot drift apart.
+#
+# This used to be a SKETCH: variables carried a type and an index, the
+# three constraints carried an id and a prose note and nothing else, and
+# the objective referenced a term id (`o_cost`) that nothing defined. It
+# named a model without expressing one. Phase 0 chose to express it
+# rather than to admit "declared but unexpressed" as a state a frozen,
+# content-hashed, immutable `model_version` may be in -- see the contract
+# document's "The decision" section. The three notes below are the ones
+# the sketch carried; what changed is that each now has arithmetic under
+# it that says the same thing.
+#
+# Two compromises are visible here and both are the integer-only decision
+# (spec section 2) biting:
+#
+#   * `c_max_hours` multiplies by a literal 8 because a shift's length
+#     lives in `starts_at`/`ends_at`, which are `time` attributes, and v1
+#     arithmetic runs over integers only.
+#   * the objective minimises shifts worked, not cost. The only
+#     cost-bearing datum in this domain is `employee.hourly_rate`, which
+#     is a `number`; admitting it as a coefficient would make the model
+#     continuous, which nothing here can solve.
 _IR: dict[str, Any] = {
+    "version": 1,
     "sets": ["employee", "unit", "day", "shift"],
     "parameters": {"demand": {"index": ["day", "shift"]}},
-    "variables": {
-        "assign": {"index": ["employee", "day", "shift"], "type": "binary"},
-    },
+    "variables": {"assign": {"index": ["employee", "day", "shift"], "domain": "binary"}},
     "constraints": [
         {
             "id": "c_cover_demand",
             "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [{"index": "d", "set": "day"}, {"index": "s", "set": "shift"}],
+            "left": {
+                "sum": {"var": "assign", "index": ["e", "d", "s"]},
+                "over": [{"index": "e", "set": "employee"}],
+            },
+            "relation": ">=",
+            "right": {"par": "demand", "index": ["d", "s"]},
+            "severity": "hard",
         },
-        {"id": "c_one_shift_per_day", "note": "nobody works two shifts in a day"},
-        {"id": "c_max_hours", "note": "weekly hours stay within hours_per_week"},
+        {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [{"index": "e", "set": "employee"}, {"index": "d", "set": "day"}],
+            "left": {
+                "sum": {"var": "assign", "index": ["e", "d", "s"]},
+                "over": [{"index": "s", "set": "shift"}],
+            },
+            "relation": "<=",
+            "right": {"const": 1},
+            "severity": "hard",
+        },
+        {
+            "id": "c_max_hours",
+            "note": (
+                "weekly hours stay within hours_per_week; every seeded shift is "
+                "eight hours long"
+            ),
+            "forall": [{"index": "e", "set": "employee"}],
+            "left": {
+                "mul": [
+                    {"const": 8},
+                    {
+                        "sum": {"var": "assign", "index": ["e", "d", "s"]},
+                        "over": [{"index": "d", "set": "day"}, {"index": "s", "set": "shift"}],
+                    },
+                ]
+            },
+            "relation": "<=",
+            "right": {"attr": {"of": "e", "name": "hours_per_week"}},
+            "severity": "hard",
+        },
     ],
-    "objective": {"sense": "minimize", "terms": [{"id": "o_cost", "weight": 1}]},
+    "objective": {
+        "sense": "minimize",
+        "terms": [
+            {
+                "id": "o_shifts_worked",
+                "weight": 1,
+                "expression": {
+                    "sum": {"var": "assign", "index": ["e", "d", "s"]},
+                    "over": [
+                        {"index": "e", "set": "employee"},
+                        {"index": "d", "set": "day"},
+                        {"index": "s", "set": "shift"},
+                    ],
+                },
+            }
+        ],
+    },
 }
+
+# The `relaxed_cover` scenario's patch. It softens `c_cover_demand`, and
+# with five employees against 57 shift-slots of demand it has to: the
+# demo domain is deliberately over-subscribed. `create_scenario` now
+# refuses a patch naming an id the version's IR does not declare (Task
+# 9's gap), so this constant is asserted against `_IR` by a test.
+_SCENARIO_PATCH: dict[str, Any] = {"soften": {"c_cover_demand": 100}}
 
 
 def seed_admin(db: Session) -> None:
@@ -397,7 +477,7 @@ def seed_workforce_demo(db: Session) -> dict[str, Any]:
         problem_id=problem.id,
         model_version_id=model_version_id,
         name="relaxed_cover",
-        patch={"soften": {"c_cover_demand": 100}},
+        patch=_SCENARIO_PATCH,
     )
     db.add(scenario)
     db.flush()

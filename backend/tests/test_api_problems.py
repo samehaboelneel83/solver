@@ -31,10 +31,21 @@ ownership would accept it.  Since migration 0009 the database enforces the
 rule too (a composite FK); `test_database_refuses_a_scenario_on_another_problems_version`
 proves it with raw SQL, bypassing this router.
 
-**6. What only the platform reads is validated.**  `snapshot_dataset()`
-reads `ir.sets` as an array of names and `ir.parameters` as an object; any
-other shape makes it fail with SQLSTATE 22023, which surfaces as a 500 at
-snapshot time.  So those two keys are checked, and nothing else in the IR.
+**6. The IR is validated against the contract.**  Since Phase 0 there is
+one -- `docs/contracts/problem-ir.md`, with `backend/app/ir/contract.json`
+as its machine-readable half -- and `app.ir.validate` judges every posted
+document against it.  The rules themselves are exercised, one refusal per
+rule, by `test_ir_validate.py` against the shared fixture file; what is
+pinned *here* is only what this router adds: that the refusal arrives as
+the platform's list-form 422 with `loc` naming the element, that nothing is
+stored when it does, and that the domain half runs at all (an IR naming a
+set this problem's domain does not have used to be accepted here and
+become a 500 inside `snapshot_dataset()` much later).
+
+**7. A scenario's patch names constraints its version has.**  Task 9's
+recorded gap.  The `crossed` fixture's versions therefore declare three
+constraints, `c_x`, `c_y` and `c_z`, which is what the patch tests below
+name.
 
 Test hygiene: rows made through HTTP are committed by the app.  Everything
 hangs off one `domain` row which the `domain_id` fixture deletes in a
@@ -62,8 +73,57 @@ from app.models.v1_problem import IMMUTABLE_TABLES
 from app.seed import seed_admin
 
 # The same content, differing in key order at two levels and in whitespace.
-REORDERED_BODY_1 = '{"ir": {"sets": ["day"], "objective": {"a": 1, "b": 2}}, "note": null}'
-REORDERED_BODY_2 = '{"note":null,"ir":{"objective":{"b":2,"a":1},  "sets":["day"]}}'
+# Both are contract-valid IRs; the reordering is what the hashing test needs.
+REORDERED_BODY_1 = (
+    '{"ir": {"version": 1, "sets": ["day"], "parameters": {}, '
+    '"variables": {"x": {"index": ["day"], "domain": "binary"}}, "constraints": []}, '
+    '"note": null}'
+)
+REORDERED_BODY_2 = (
+    '{"note":null,"ir":{"constraints":[],  "parameters":{},'
+    '"variables":{"x":{"domain":"binary","index":["day"]}},"sets":["day"],"version":1}}'
+)
+
+
+def _ir(marker="x", *, set_name="day", constraint_ids=("c_x", "c_y", "c_z")):
+    """A contract-valid IR (`docs/contracts/problem-ir.md`).
+
+    Two versions used to be told apart by an arbitrary extra key --
+    `{"sets": [], "n": "a1"}` -- which the contract refuses, because a key
+    nothing reads is a model half that is silently ignored.  `marker`
+    names the variable instead, so two documents still differ in content
+    and still hash differently, and the difference is now something the
+    IR actually means.
+    """
+    return {
+        "version": 1,
+        "sets": [set_name],
+        "parameters": {},
+        "variables": {marker: {"index": [set_name], "domain": "binary"}},
+        "constraints": [
+            {
+                "id": constraint_id,
+                "forall": [{"index": "i", "set": set_name}],
+                "left": {"var": marker, "index": ["i"]},
+                "relation": "<=",
+                "right": {"const": 1},
+                "severity": "hard",
+            }
+            for constraint_id in constraint_ids
+        ],
+    }
+
+
+def _mini_ir():
+    """The smallest model the contract admits, naming no set at all -- for
+    the tests whose domain has no entity types in it."""
+    return {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {"x": {"index": [], "domain": "binary"}},
+        "constraints": [],
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +160,16 @@ def domain_id(client, auth_headers):
     )
     assert response.status_code == 201, response.text
     created_id = response.json()["id"]
+    # `day` and `shift`, because the contract's domain half now resolves an
+    # IR's `sets` against the problem's own domain at submit time. Without
+    # them every version in this module would be a 422.
+    for name in ("day", "shift"):
+        made = client.post(
+            "/api/v1/entity-types",
+            json={"domain_id": created_id, "name": name, "role": "time"},
+            headers=auth_headers,
+        )
+        assert made.status_code == 201, made.text
     try:
         yield created_id
     finally:
@@ -163,9 +233,9 @@ def crossed(client, auth_headers, problems):
     cross-problem tests tell "owned by this problem" apart from "this
     problem has a version with that number"."""
     a, b = problems
-    a1 = _version(client, auth_headers, a, {"sets": [], "n": "a1"})
-    a2 = _version(client, auth_headers, a, {"sets": [], "n": "a2"})
-    b1 = _version(client, auth_headers, b, {"sets": [], "n": "b1"})
+    a1 = _version(client, auth_headers, a, _ir("a1"))
+    a2 = _version(client, auth_headers, a, _ir("a2"))
+    b1 = _version(client, auth_headers, b, _ir("b1"))
     assert (a1["version"], a2["version"], b1["version"]) == (1, 2, 1)
     assert len({a1["id"], a2["id"], b1["id"]}) == 3
     return {"a": a, "b": b, "a1": a1["id"], "a2": a2["id"], "b1": b1["id"]}
@@ -222,11 +292,11 @@ def test_versions_are_numbered_per_problem(client, auth_headers, problems):
     """Interleaved across two problems: a global counter would give B's
     first version the number 2."""
     a, b = problems
-    a1 = _version(client, auth_headers, a, {"sets": [], "n": 1})
-    b1 = _version(client, auth_headers, b, {"sets": [], "n": 1})
-    a2 = _version(client, auth_headers, a, {"sets": [], "n": 2})
-    b2 = _version(client, auth_headers, b, {"sets": [], "n": 2})
-    a3 = _version(client, auth_headers, a, {"sets": [], "n": 3})
+    a1 = _version(client, auth_headers, a, _ir("v1"))
+    b1 = _version(client, auth_headers, b, _ir("v1"))
+    a2 = _version(client, auth_headers, a, _ir("v2"))
+    b2 = _version(client, auth_headers, b, _ir("v2"))
+    a3 = _version(client, auth_headers, a, _ir("v3"))
 
     assert [a1["version"], a2["version"], a3["version"]] == [1, 2, 3]
     assert [b1["version"], b2["version"]] == [1, 2]
@@ -241,7 +311,22 @@ def test_created_version_reports_what_the_database_stored(client, auth_headers, 
     # With keys whose two orders agreed, a router hashing
     # json.dumps(ir, sort_keys=True) itself would produce the very same
     # digest and pass (mutant M2c survived exactly that way).
-    ir = {"objective": {"weight": 3, "b": 2}, "sets": ["day"]}
+    ir = {
+        **_ir("open", constraint_ids=()),
+        "objective": {
+            "sense": "minimize",
+            "terms": [
+                {
+                    "id": "o_open",
+                    "weight": 3,
+                    "expression": {
+                        "sum": {"var": "open", "index": ["i"]},
+                        "over": [{"index": "i", "set": "day"}],
+                    },
+                }
+            ],
+        },
+    }
     created = _version(client, auth_headers, a, ir, note="first cut")
 
     stored = _row(
@@ -267,7 +352,7 @@ def test_created_version_reports_what_the_database_stored(client, auth_headers, 
 def test_note_is_optional(client, auth_headers, problems):
     a, _ = problems
     response = client.post(
-        f"/api/v1/problems/{a}/versions", json={"ir": {}}, headers=auth_headers
+        f"/api/v1/problems/{a}/versions", json={"ir": _mini_ir()}, headers=auth_headers
     )
     assert response.status_code == 201, response.text
     assert response.json()["note"] is None
@@ -276,7 +361,7 @@ def test_note_is_optional(client, auth_headers, problems):
 def test_identical_ir_twice_gives_two_versions_with_one_hash(client, auth_headers, problems):
     """Hashing is content-based, not a dedup: both inserts succeed."""
     a, _ = problems
-    ir = {"sets": ["day", "shift"], "objective": {"a": 1, "b": 2}}
+    ir = _ir("open")
     first = _version(client, auth_headers, a, ir)
     second = _version(client, auth_headers, a, ir)
 
@@ -307,8 +392,8 @@ def test_reordered_keys_and_whitespace_hash_the_same(client, auth_headers, probl
 
 def test_different_ir_gives_a_different_hash(client, auth_headers, problems):
     a, _ = problems
-    first = _version(client, auth_headers, a, {"sets": ["day"]})
-    second = _version(client, auth_headers, a, {"sets": ["shift"]})
+    first = _version(client, auth_headers, a, _ir("open", set_name="day"))
+    second = _version(client, auth_headers, a, _ir("open", set_name="shift"))
     assert first["ir_hash"] != second["ir_hash"]
 
 
@@ -318,7 +403,7 @@ def test_client_cannot_choose_version_or_hash(client, auth_headers, db, problems
     a, _ = problems
     response = client.post(
         f"/api/v1/problems/{a}/versions",
-        json={"ir": {"sets": []}, "version": 99, "ir_hash": "f" * 64},
+        json={"ir": _mini_ir(), "version": 99, "ir_hash": "f" * 64},
         headers=auth_headers,
     )
     assert response.status_code == 201, response.text
@@ -331,7 +416,7 @@ def test_client_cannot_choose_version_or_hash(client, auth_headers, db, problems
 
 def test_version_for_an_unknown_problem_is_404(client, auth_headers):
     response = client.post(
-        "/api/v1/problems/999999999/versions", json={"ir": {}}, headers=auth_headers
+        "/api/v1/problems/999999999/versions", json={"ir": _mini_ir()}, headers=auth_headers
     )
     assert response.status_code == 404
 
@@ -356,7 +441,7 @@ def test_ir_is_required(client, auth_headers, problems):
 
 
 @pytest.mark.parametrize(
-    "ir,loc",
+    "broken,loc",
     [
         ({"sets": "day"}, ["body", "ir", "sets"]),
         ({"sets": None}, ["body", "ir", "sets"]),
@@ -367,14 +452,23 @@ def test_ir_is_required(client, auth_headers, problems):
         ({"parameters": "demand"}, ["body", "ir", "parameters"]),
     ],
 )
-def test_the_ir_keys_snapshot_reads_are_shape_checked(client, auth_headers, db, problems, ir, loc):
+def test_the_ir_keys_snapshot_reads_are_shape_checked(
+    client, auth_headers, db, problems, broken, loc
+):
     """`snapshot_dataset()` iterates `ir.sets` with
     jsonb_array_elements_text and `ir.parameters` with jsonb_object_keys;
     either on the wrong shape raises SQLSTATE 22023, a 500 at snapshot
-    time. Refused here instead, and nothing is stored."""
+    time. These two rules predate the contract -- the contract adopted
+    them rather than replacing them -- so they are still pinned here, at
+    the route, as well as in `test_ir_validate.py`.
+
+    Each case is an otherwise valid IR with one key replaced, so the
+    refusal that comes back is the one the `loc` names."""
     a, _ = problems
     response = client.post(
-        f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
+        f"/api/v1/problems/{a}/versions",
+        json={"ir": {**_mini_ir(), **broken}},
+        headers=auth_headers,
     )
     assert response.status_code == 422, response.text
     assert response.json()["detail"][0]["loc"] == loc
@@ -383,7 +477,11 @@ def test_the_ir_keys_snapshot_reads_are_shape_checked(client, auth_headers, db, 
     ).scalar_one() == 0
 
 
-def test_the_rest_of_the_ir_is_free_form(client, auth_headers, problems):
+def test_the_ir_is_no_longer_free_form(client, auth_headers, db, problems):
+    """The exact document this test used to ACCEPT. It names a constraint
+    without expressing it and carries a top-level key nothing reads --
+    which is what the seeded sketch did too, and what Phase 0 decided a
+    frozen, content-hashed model version may not be."""
     a, _ = problems
     ir = {
         "sets": ["day"],
@@ -391,7 +489,81 @@ def test_the_rest_of_the_ir_is_free_form(client, auth_headers, problems):
         "constraints": [{"id": "c_cover", "anything": [1, None, {"x": True}]}],
         "whatever": "the compiler wants",
     }
-    assert _version(client, auth_headers, a, ir)["ir"] == ir
+    response = client.post(
+        f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "ir", "version"]
+    assert db.execute(
+        text("SELECT count(*) FROM model_version WHERE problem_id = :p"), {"p": a}
+    ).scalar_one() == 0
+
+
+def test_an_ir_naming_a_set_the_domain_lacks_is_refused_here_not_at_snapshot_time(
+    client, auth_headers, db, problems
+):
+    """THE HOLE THIS CLOSES. `snapshot_dataset()` raises `IR set "%" has
+    no entity_type in this domain` as a bare RAISE EXCEPTION, i.e.
+    SQLSTATE P0001, which `translate_db_error` does not attribute to a
+    field -- so an IR accepted here surfaced as a 500 from whatever route
+    eventually took a snapshot. The 422 names the element instead.
+
+    The second half proves the two judgements agree: the same IR, forced
+    into the table with raw SQL, still makes the function raise.
+    """
+    a, _ = problems
+    ir = {**_mini_ir(), "sets": ["machine"]}
+    response = client.post(
+        f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"][0]
+    assert detail["loc"] == ["body", "ir", "sets", 0]
+    assert "machine" in detail["msg"]
+    assert db.execute(
+        text("SELECT count(*) FROM model_version WHERE problem_id = :p"), {"p": a}
+    ).scalar_one() == 0
+
+    forced = db.execute(
+        text(
+            "INSERT INTO model_version (problem_id, ir) "
+            "VALUES (:p, CAST(:ir AS jsonb)) RETURNING id"
+        ),
+        {"p": a, "ir": json.dumps(ir)},
+    ).scalar_one()
+    with pytest.raises(Exception) as exc:
+        db.execute(text("SELECT snapshot_dataset(:v)"), {"v": forced})
+    assert "no entity_type in this domain" in str(exc.value)
+    db.rollback()
+
+
+def test_an_ir_naming_a_parameter_the_domain_lacks_is_refused_too(
+    client, auth_headers, problems
+):
+    a, _ = problems
+    ir = {**_mini_ir(), "sets": ["day"], "parameters": {"supply": {"index": ["day"]}}}
+    response = client.post(
+        f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "ir", "parameters", "supply"]
+
+
+def test_a_refusal_carries_the_value_it_refused(client, auth_headers, problems):
+    """Ruling 19's shape: `loc`, `msg` and the offending `input`, exactly
+    as FastAPI's own body validation produces it, so `formatApiError` and
+    the per-field form errors need no special case."""
+    a, _ = problems
+    ir = {**_mini_ir(), "variables": {"x": {"index": [], "domain": "continuous"}}}
+    response = client.post(
+        f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"][0]
+    assert detail["loc"] == ["body", "ir", "variables", "x", "domain"]
+    assert detail["input"] == "continuous"
+    assert detail["type"] == "value_error"
+    assert "continuous" in detail["msg"]
 
 
 # --------------------------------------------------------------------------
@@ -406,7 +578,7 @@ def test_get_a_version(client, auth_headers, crossed):
     assert body["id"] == crossed["a2"]
     assert body["problem_id"] == crossed["a"]
     assert body["version"] == 2
-    assert body["ir"] == {"sets": [], "n": "a2"}
+    assert body["ir"] == _ir("a2")
 
 
 def test_unknown_version_is_404(client, auth_headers):
@@ -431,9 +603,9 @@ def test_list_versions_newest_first_by_number_not_id(client, auth_headers, probl
         session.commit()
     finally:
         session.close()
-    _version(client, auth_headers, a, {"n": 3})
-    _version(client, auth_headers, a, {"n": 4})
-    _version(client, auth_headers, b, {"n": "b"})  # must not appear
+    _version(client, auth_headers, a, _ir("v3"))
+    _version(client, auth_headers, a, _ir("v4"))
+    _version(client, auth_headers, b, _ir("vb"))  # must not appear
 
     response = client.get(f"/api/v1/problems/{a}/versions", headers=auth_headers)
     assert response.status_code == 200
@@ -498,14 +670,14 @@ def test_scenario_crud(client, auth_headers, db, crossed):
     # Re-point to the problem's own later version, rename, replace the patch.
     patched = client.patch(
         f"/api/v1/scenarios/{sid}",
-        json={"model_version_id": crossed["a2"], "name": "what-if-2", "patch": {"disable": ["c_q"]}},
+        json={"model_version_id": crossed["a2"], "name": "what-if-2", "patch": {"disable": ["c_x"]}},
         headers=auth_headers,
     )
     assert patched.status_code == 200, patched.text
     assert patched.json()["model_version_id"] == crossed["a2"]
     assert patched.json()["name"] == "what-if-2"
     # Replaced wholesale, not merged: the old harden/soften are gone.
-    assert patched.json()["patch"] == {"disable": ["c_q"]}
+    assert patched.json()["patch"] == {"disable": ["c_x"]}
 
     deleted = client.delete(f"/api/v1/scenarios/{sid}", headers=auth_headers)
     assert deleted.status_code == 204
@@ -666,11 +838,92 @@ def test_contradictory_or_repeated_ids_are_422(client, auth_headers, crossed, pa
     assert response.json()["detail"][0]["loc"][:2] == ["body", "patch"]
 
 
-def test_patch_ids_are_not_checked_against_the_ir(client, auth_headers, crossed):
-    """Deliberate: the repository defines no IR schema, so there is nowhere
-    authoritative to look constraint ids up. See the module docstring."""
+@pytest.mark.parametrize(
+    "patch,loc",
+    [
+        ({"disable": ["no_such_c"]}, ["body", "patch", "disable", 0]),
+        ({"disable": ["c_x", "no_such_c"]}, ["body", "patch", "disable", 1]),
+        ({"harden": ["no_such_c"]}, ["body", "patch", "harden", 0]),
+        ({"soften": {"no_such_c": 5}}, ["body", "patch", "soften", "no_such_c"]),
+        ({"soften": {"c_x": 5, "no_such_c": 5}}, ["body", "patch", "soften", "no_such_c"]),
+    ],
+)
+def test_a_patch_id_the_version_does_not_declare_is_422(
+    client, auth_headers, db, crossed, patch, loc
+):
+    """TASK 9'S RECORDED GAP, closed by the contract: before there was one,
+    a misspelt id was stored and silently had no effect on the run.
+
+    A list is addressed by position and a mapping by its key -- the same
+    `loc` shape `test_patch_shape_is_validated` pins for the other patch
+    rules. Each case names one good id beside the bad one where it can, so
+    a check that refused the whole patch on any miss would still have to
+    point at the right element."""
+    response = _scenario_post(client, auth_headers, crossed["a"], crossed["a1"], "typo", patch)
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"][0]
+    assert detail["loc"] == loc
+    assert "no_such_c" in detail["msg"]
+    # ... and the message says what the version does have, which is the
+    # half of a refusal that tells you what to do next.
+    assert "c_x" in detail["msg"]
+    assert db.execute(
+        text("SELECT count(*) FROM scenario WHERE problem_id = :p"), {"p": crossed["a"]}
+    ).scalar_one() == 0
+
+
+def test_a_patch_naming_the_versions_own_constraints_is_accepted(
+    client, auth_headers, crossed
+):
     response = _scenario_post(
-        client, auth_headers, crossed["a"], crossed["a1"], "typo", {"disable": ["no_such_c"]}
+        client,
+        auth_headers,
+        crossed["a"],
+        crossed["a1"],
+        "ok",
+        {"disable": ["c_x"], "harden": ["c_y"], "soften": {"c_z": 3}},
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_repointing_a_scenario_can_orphan_a_patch_id_and_is_refused(
+    client, auth_headers, crossed
+):
+    """The case a check that only ran on `patch` would miss: the patch is
+    not touched at all, the version under it is. `a1` declares `c_x`; the
+    version made here does not."""
+    created = _scenario_post(
+        client, auth_headers, crossed["a"], crossed["a1"], "s", {"disable": ["c_x"]}
+    )
+    assert created.status_code == 201, created.text
+    other = _version(
+        client, auth_headers, crossed["a"], _ir("later", constraint_ids=("c_other",))
+    )
+    response = client.patch(
+        f"/api/v1/scenarios/{created.json()['id']}",
+        json={"model_version_id": other["id"]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "patch", "disable", 0]
+
+
+def test_a_patch_on_a_pre_contract_version_is_not_checked(client, auth_headers, db, crossed):
+    """`model_version` rows are immutable, so a version stored before the
+    contract existed can never gain a `constraints` array -- there is
+    nothing authoritative to check its scenarios against, and refusing
+    them all would break every scenario on one. Written with raw SQL
+    because this router can no longer create such a version."""
+    legacy = db.execute(
+        text(
+            "INSERT INTO model_version (problem_id, ir) "
+            "VALUES (:p, '{\"sets\": []}'::jsonb) RETURNING id"
+        ),
+        {"p": crossed["a"]},
+    ).scalar_one()
+    db.commit()
+    response = _scenario_post(
+        client, auth_headers, crossed["a"], legacy, "legacy", {"disable": ["whatever"]}
     )
     assert response.status_code == 201, response.text
 
@@ -683,6 +936,14 @@ def test_patching_the_patch_is_validated_too(client, auth_headers, crossed):
         headers=auth_headers,
     )
     assert response.status_code == 422, response.text
+    # ... and so is the id, on PATCH as on POST.
+    orphan = client.patch(
+        f"/api/v1/scenarios/{created.json()['id']}",
+        json={"patch": {"soften": {"no_such_c": 5}}},
+        headers=auth_headers,
+    )
+    assert orphan.status_code == 422, orphan.text
+    assert orphan.json()["detail"][0]["loc"] == ["body", "patch", "soften", "no_such_c"]
 
 
 # --------------------------------------------------------------------------
@@ -721,7 +982,7 @@ def test_deleting_the_domain_cascades_cleanly(client, auth_headers):
     ).json()["id"]
     try:
         p = _problem(client, auth_headers, domain, "p")
-        v = _version(client, auth_headers, p, {"sets": []})
+        v = _version(client, auth_headers, p, _mini_ir())
         sid = _scenario_post(client, auth_headers, p, v["id"], "s").json()["id"]
         response = client.delete(f"/api/domain/{domain}", headers=auth_headers)
         assert response.status_code == 204, response.text

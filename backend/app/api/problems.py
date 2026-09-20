@@ -42,19 +42,34 @@ the same IR twice creates two versions with one hash.
 
 What `ir` is validated as
 -------------------------
-There is no IR schema in this repository (the compiler that defines it is
-absent), so the IR is free-form, with two exceptions. It must be a JSON
-object, and the two keys the platform *itself* reads must have the shape it
-reads them in: `snapshot_dataset()` iterates ``ir.sets`` with
-``jsonb_array_elements_text`` and ``ir.parameters`` with
-``jsonb_object_keys``. Any other shape -- including an explicit ``null`` --
-makes that function fail with SQLSTATE 22023, which ``translate_db_error``
-does not recognise, so a bad IR accepted here would surface much later as
-a 500 from the snapshot. So ``sets``, when present, must be an array of
-strings and ``parameters``, when present, an object. Whether those names
-resolve against the domain is **not** checked: the domain changes over
-time, and `snapshot_dataset()` already refuses an unresolvable name with a
-readable message at the moment it matters.
+Against the **problem IR contract** -- `docs/contracts/problem-ir.md`, and
+`backend/app/ir/contract.json` as the machine-readable half of it. Until
+Phase 0 there was no IR schema in this repository, so the IR was free-form
+but for the two keys `snapshot_dataset()` reads; the contract now says what
+a model is, and `app.ir.validate` judges every document against it.
+
+Two things changed here, and both were holes:
+
+1. **Resolution against the domain happens at submit time.** An IR naming
+   a set or a parameter this problem's domain does not have used to be
+   accepted, and then failed inside `snapshot_dataset()` as a bare
+   ``RAISE EXCEPTION`` -- SQLSTATE P0001, which `translate_db_error` does
+   not attribute to a field -- i.e. as a 500 on whatever route eventually
+   took a snapshot. It is now a 422 naming the element (Rulings 19, 30).
+   The check is deliberately not race-free and does not need to be: a
+   domain can lose an entity type after a version is frozen, and
+   `snapshot_dataset()` stays the backstop for exactly that. What this
+   closes is the case where the IR was never resolvable at all.
+2. **A constraint must be expressed, not merely named.** The contract
+   admits no "declared but unexpressed" constraint, because a
+   `model_version` is immutable, content-hashed and exists to be run. That
+   decision is argued in the contract document; the seeded demo was
+   rewritten to meet it.
+
+The IR still must be a JSON object, and ``sets`` and ``parameters`` still
+must have the shape `snapshot_dataset()` reads them in -- those two rules
+are now `sets_not_array` and `parameters_not_object` in the contract, which
+is where they were always going to end up once one existed.
 
 Scenarios
 ---------
@@ -87,12 +102,16 @@ not state are enforced here, as 422s:
    to the solver's patch order. The patch is stored exactly as sent: keys
    the client omitted stay omitted rather than being filled with empties.
 
-   Patch ids are **not** checked against the version's IR. The IR has no
-   schema here, so there is nowhere authoritative to find its constraint
-   ids; guessing a layout would reject valid patches as readily as it
-   caught typos. `ProblemIR.patched()` is the authority, and it does not
-   exist in this repository yet. Until it does, a misspelt id is stored
-   and silently has no effect.
+3. **Every id in the patch names a constraint of the version it patches.**
+   This is Task 9's recorded gap, and the contract is what closes it: a
+   version's constraint ids are now `ir.constraints[].id`, so there is
+   somewhere authoritative to look. A misspelt id used to be stored and
+   silently have no effect on the run.
+
+   A version whose IR predates the contract has no `constraints` array to
+   check against, and those rows are immutable, so the check applies only
+   when the version carries one. That is not a loophole left open: every
+   version created from here on is refused unless it carries one.
 
 `scenario.patch` is replaced wholesale on PATCH, not merged, for the reason
 `entities.py` records for `attrs`: a merge makes removing a key impossible.
@@ -119,6 +138,7 @@ from app.api.deps import get_current_user
 from app.api.validation import field_error, reject_null
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
+from app.ir.validate import validate_ir
 from app.models.iam import UserAccount
 from app.models.v1_problem import ModelVersion, Problem, Scenario
 
@@ -265,24 +285,68 @@ def _commit(db: Session, table: str) -> None:
         raise translate_db_error(exc, table) from exc
 
 
-def _check_ir(ir: dict[str, Any]) -> None:
-    """The two IR keys `snapshot_dataset()` reads, in the shape it reads
-    them. See the module docstring for why nothing else is checked."""
-    if "sets" in ir:
-        sets = ir["sets"]
-        if not isinstance(sets, list):
-            raise field_error(["ir", "sets"], "sets must be an array of entity type names", sets)
-        for i, name in enumerate(sets):
-            if not isinstance(name, str):
-                raise field_error(
-                    ["ir", "sets", i], "each set must be an entity type name (a string)", name
-                )
-    if "parameters" in ir and not isinstance(ir["parameters"], dict):
-        raise field_error(
-            ["ir", "parameters"],
-            "parameters must be an object keyed by parameter name",
-            ir["parameters"],
-        )
+def _check_ir(db: Session, problem: Problem, ir: dict[str, Any]) -> None:
+    """The problem IR contract, both halves. Raises the platform's
+    list-form 422 with `loc` naming the element the contract refused."""
+    refusal = validate_ir(db, problem.domain_id, ir)
+    if refusal is None:
+        return
+    raise field_error(["ir", *refusal.loc], refusal.message, _at(ir, refusal.loc))
+
+
+def _at(ir: Any, loc: list) -> Any:
+    """What the refusal's `loc` points at, for the 422's `input` field. A
+    `loc` naming something absent reports the container instead, which is
+    what FastAPI's own missing-field errors do."""
+    node = ir
+    for step in loc:
+        try:
+            node = node[step]
+        except (KeyError, IndexError, TypeError):
+            return node
+    return node
+
+
+def _constraint_ids(db: Session, model_version_id: int) -> set[str] | None:
+    """The ids a patch may name: `ir.constraints[].id` of one version.
+    ``None`` when the version's IR predates the contract and so carries no
+    constraints array -- there is nothing authoritative to check against
+    there, and the row is immutable, so it can never gain one."""
+    ir = db.execute(
+        select(_version_columns.ir).where(_version_columns.id == model_version_id)
+    ).scalar_one_or_none()
+    if not isinstance(ir, dict) or not isinstance(ir.get("constraints"), list):
+        return None
+    return {
+        constraint["id"]
+        for constraint in ir["constraints"]
+        if isinstance(constraint, dict) and isinstance(constraint.get("id"), str)
+    }
+
+
+def _check_patch_ids(db: Session, model_version_id: int, patch: "ScenarioPatch") -> None:
+    """Task 9's gap: a patch names constraints of the version it patches."""
+    known = _constraint_ids(db, model_version_id)
+    if known is None:
+        return
+    for key in ("disable", "harden", "soften"):
+        ids = getattr(patch, key)
+        if ids is None:
+            continue
+        for position, constraint_id in enumerate(ids):
+            if constraint_id in known:
+                continue
+            # A list is addressed by position and a mapping by its key --
+            # the same `loc` shape Pydantic gives for each, which is what
+            # `test_patch_shape_is_validated` already pins.
+            where = position if key != "soften" else constraint_id
+            raise field_error(
+                ["patch", key, where],
+                f"model version {model_version_id} declares no constraint "
+                f"{constraint_id!r}; it has "
+                + (", ".join(sorted(known)) if known else "no constraints at all"),
+                constraint_id,
+            )
 
 
 def _check_version_belongs(db: Session, problem_id: int, model_version_id: int) -> None:
@@ -342,8 +406,8 @@ def create_version(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> ModelVersionRead:
-    _get_problem(db, problem_id)
-    _check_ir(payload.ir)
+    problem = _get_problem(db, problem_id)
+    _check_ir(db, problem, payload.ir)
     # Core, not ORM: see the module docstring. RETURNING reports the row as
     # the BEFORE INSERT triggers left it, so `version` and `ir_hash` are the
     # database's own values.
@@ -405,6 +469,7 @@ def create_scenario(
     _: UserAccount = Depends(get_current_user),
 ) -> ScenarioRead:
     _check_version_belongs(db, payload.problem_id, payload.model_version_id)
+    _check_patch_ids(db, payload.model_version_id, payload.patch)
     row = Scenario(
         problem_id=payload.problem_id,
         model_version_id=payload.model_version_id,
@@ -442,6 +507,12 @@ def update_scenario(
         row.name = payload.name
     if "patch" in changes:
         row.patch = payload.patch.stored()
+    # Judged after both changes are applied, and against whichever version
+    # the scenario ends up on: re-pointing a scenario at another version
+    # orphans a patch id just as surely as editing the patch does, so a
+    # PATCH that changes only `model_version_id` is checked too.
+    if "patch" in changes or "model_version_id" in changes:
+        _check_patch_ids(db, row.model_version_id, ScenarioPatch(**row.patch))
     _commit(db, "scenario")
     db.refresh(row)
     return ScenarioRead.model_validate(row)
