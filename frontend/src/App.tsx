@@ -15,6 +15,7 @@ import EntityRecord from "./pages/EntityRecord";
 import Parameters from "./pages/Parameters";
 import ModelVersions from "./pages/ModelVersions";
 import Runs from "./pages/Runs";
+import ModelEditor from "./pages/ModelEditor";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="parameters" element={<Parameters />} />
         <Route path="versions" element={<ModelVersions />} />
         <Route path="runs" element={<Runs />} />
+        <Route path="model" element={<ModelEditor />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />

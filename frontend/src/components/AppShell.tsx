@@ -88,6 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Problem",
     items: [
       { to: "/public/problem", label: "Problems" },
+      { to: "/model", label: "Model editor" },
       { to: "/versions", label: "Model versions" },
       { to: "/public/template", label: "Templates" },
     ],
