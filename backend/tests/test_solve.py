@@ -351,3 +351,18 @@ def test_disabling_a_constraint_through_a_patch_removes_it(db):
     # Without the hours limit, it can.
     relaxed = patched(ir, {"disable": ["c_max_hours"]})
     assert solve(compile_model(relaxed, data)).status == "optimal"
+
+
+def test_a_pre_contract_model_version_is_refused_with_a_reason(db):
+    """`model_version` is immutable, so versions published before the IR
+    contract existed are permanent -- their constraints carry a prose note
+    and nothing to solve. A crash here would look like a compiler bug."""
+    version, _ = _feasible(db)
+    ir, data = _ir_and_data(db, version)
+    ir["constraints"][0] = {"id": "c_cover", "note": "each day is staffed"}
+
+    with pytest.raises(Unsupported) as excinfo:
+        compile_model(ir, data)
+
+    assert "no expression" in str(excinfo.value)
+    assert "Publish a new version" in str(excinfo.value)

@@ -174,6 +174,15 @@ class _Compiler:
         that looks optimal and quietly breaks the rule; ignoring the penalty
         would make every soft constraint free.
         """
+        if "left" not in spec or "right" not in spec:
+            # A model version published before the IR contract existed: its
+            # constraints carry an id and a prose note and nothing to solve.
+            # `model_version` is immutable, so these rows are permanent and a
+            # crash here would be indistinguishable from a compiler bug.
+            raise Unsupported(
+                f"constraint {spec['id']!r} carries no expression, so there is nothing "
+                "to solve; it predates the IR contract. Publish a new version."
+            )
         soft = spec.get("severity") == "soft"
         penalty = int(spec.get("penalty", 1)) if soft else 0
         if soft and spec["relation"] in ("<", ">"):  # pragma: no cover
