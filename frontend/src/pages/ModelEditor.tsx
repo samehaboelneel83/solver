@@ -6,10 +6,19 @@ import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
-import { useCreateVersion, useEntityTypes, useVersion, useVersions, type Id } from "../api/v1";
+import {
+  useCreateVersion,
+  useEntityTypes,
+  useParameters,
+  useVersion,
+  useVersions,
+  type Id,
+} from "../api/v1";
 import { checkIrShape } from "../ir";
 import { RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
+import DeclarationsEditor from "../model/DeclarationsEditor";
+import { parameterOptions } from "../model/declarations";
 import {
   describeTerm,
   freeIndexName,
@@ -45,6 +54,9 @@ import { parseRouteId } from "../lib/routeId";
  */
 
 type Draft = {
+  sets: string[];
+  parameters: Record<string, { index: string[] }>;
+  variables: Record<string, { index: string[]; domain: string }>;
   constraints: Constraint[];
   objective: { sense: string; terms: ObjectiveTerm[] };
 };
@@ -135,6 +147,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const latestId = versions.data?.items[0]?.id ?? null;
   const latest = useVersion(latestId);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
+  const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
   const toast = useToast();
 
@@ -146,6 +159,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   useEffect(() => {
     if (!ir || draft) return;
     setDraft({
+      sets: [...((ir.sets as string[]) ?? [])],
+      parameters: { ...((ir.parameters as Draft["parameters"]) ?? {}) },
+      variables: { ...((ir.variables as Draft["variables"]) ?? {}) },
       constraints: ((ir.constraints as Constraint[]) ?? []).map((c) => ({ ...c })),
       objective: {
         sense: ((ir.objective as { sense?: string })?.sense as string) ?? "minimize",
@@ -157,9 +173,12 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   }, [ir, draft]);
 
   const context: ModelContext | null = useMemo(() => {
-    if (!ir) return null;
+    if (!ir || !draft) return null;
     const types = entityTypes.data?.items ?? [];
-    const sets = (ir.sets as string[]) ?? [];
+    // From the **draft**, not the stored version: a set or variable declared
+    // a moment ago has to be offered by the term editor immediately, or the
+    // two halves of this page disagree about what the model is.
+    const sets = draft.sets;
     return {
       sets,
       setIds: Object.fromEntries(
@@ -174,10 +193,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           })),
         ])
       ),
-      variables: (ir.variables as ModelContext["variables"]) ?? {},
-      parameters: (ir.parameters as ModelContext["parameters"]) ?? {},
+      variables: draft.variables as ModelContext["variables"],
+      parameters: draft.parameters as ModelContext["parameters"],
     };
-  }, [ir, entityTypes.data]);
+  }, [ir, draft, entityTypes.data]);
 
   if (versions.isLoading || latest.isLoading || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;
@@ -196,6 +215,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   const nextIr = {
     ...ir,
+    sets: draft.sets,
+    parameters: draft.parameters,
+    variables: draft.variables,
     constraints: draft.constraints,
     objective: { sense: draft.objective.sense, terms: draft.objective.terms },
   };
@@ -222,10 +244,22 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   return (
     <>
       <p className="mb-4 text-sm text-slate-600">
-        Editing from version {versions.data?.items[0]?.version}. Sets, parameters and variables come
-        from it and from the domain:{" "}
-        <span className="font-mono text-xs">{context.sets.join(", ") || "none"}</span>.
+        Editing from version {versions.data?.items[0]?.version}.
       </p>
+
+      <DeclarationsEditor
+        sets={draft.sets}
+        parameters={draft.parameters}
+        variables={draft.variables}
+        entityTypeNames={(entityTypes.data?.items ?? []).map((type) => type.name)}
+        parameterOptions={parameterOptions(
+          parameters.data?.items ?? [],
+          entityTypes.data?.items ?? []
+        )}
+        constraints={draft.constraints}
+        objectiveTerms={draft.objective.terms}
+        onChange={(next) => setDraft({ ...draft, ...next })}
+      />
 
       <section aria-labelledby="constraints-heading" className="mb-6">
         <h2 id="constraints-heading" className="mb-2 text-base font-semibold text-slate-900">
