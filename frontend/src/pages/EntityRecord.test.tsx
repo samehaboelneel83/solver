@@ -95,10 +95,102 @@ function renderAt(path: string) {
   );
 }
 
+/** The domain around this entity, for the Relationships section: one
+ * cross-type relationship (employee -> unit) and the unit it points at.
+ * `works_in` is `many_to_one`, which is what makes the cardinality
+ * refusal below a real one. */
+const ENTITY_TYPES = [
+  TYPE,
+  { id: 9, domain_id: 7, name: "unit", role: "org", colour: null, attributes: [], updated_at: "t" },
+];
+const REL_TYPES = [
+  {
+    id: 3,
+    domain_id: 7,
+    name: "works_in",
+    from_type_id: 5,
+    to_type_id: 9,
+    cardinality: "many_to_one",
+    is_hierarchy: false,
+    colour: null,
+    updated_at: "t",
+  },
+  // An INCOMING type: this employee is the To end. Without one, a section
+  // that only ever asked `from_entity_id=` would look complete.
+  {
+    id: 4,
+    domain_id: 7,
+    name: "manages",
+    from_type_id: 9,
+    to_type_id: 5,
+    cardinality: "many_to_many",
+    is_hierarchy: false,
+    colour: null,
+    updated_at: "t",
+  },
+];
+const UNITS = [
+  { id: 71, entity_type_id: 9, key: "north", label: "North Depot", sort_order: 0, active: true, attrs: {}, updated_at: "t" },
+  { id: 72, entity_type_id: 9, key: "south", label: "South Depot", sort_order: 1, active: true, attrs: {}, updated_at: "t" },
+];
+const OUTGOING = [
+  { id: 301, relationship_type_id: 3, from_entity_id: 42, to_entity_id: 71, attrs: {}, valid_from: null, valid_to: null },
+];
+const INCOMING = [
+  { id: 302, relationship_type_id: 4, from_entity_id: 72, to_entity_id: 42, attrs: {}, valid_from: null, valid_to: null },
+];
+
+/*
+ * What the next write, and the next read of this entity, answer.
+ *
+ * These used to be `mockResolvedValueOnce`, which queues an answer for
+ * WHICHEVER request comes next. That was safe while the page made two
+ * requests it fully controlled; the Relationships section adds background
+ * reads, and a mutation invalidates them all, so "the next request" is no
+ * longer "the save". Both answers are therefore addressed by what they
+ * answer, not by their position in a queue.
+ */
+let writeAnswer: unknown = null;
+let entityAnswer: unknown = null;
+
+function answerWrite(value: unknown) {
+  writeAnswer = Promise.resolve(value);
+}
+function refuseWrite(error: unknown) {
+  writeAnswer = Promise.reject(error);
+  // A rejected promise nobody has awaited yet is an unhandled rejection
+  // in node until the component gets to it; this keeps the run quiet.
+  (writeAnswer as Promise<unknown>).catch(() => {});
+}
+function answerEntity(value: unknown) {
+  entityAnswer = value;
+}
+
 function reads(path: string) {
-  mockFetch.mockImplementation((p: string) => {
+  mockFetch.mockImplementation((p: string, init?: RequestInit) => {
+    if (init?.method && init.method !== "GET") {
+      if (writeAnswer) {
+        const answer = writeAnswer;
+        // One write per answer, as `...Once` gave: a second save in the
+        // same test must set its own.
+        writeAnswer = null;
+        return answer;
+      }
+      return Promise.reject(new Error(`unexpected ${init.method} ${p}`));
+    }
     if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
-    if (p === "/api/v1/entities/42") return Promise.resolve(ENTITY);
+    if (p === "/api/v1/entities/42") return Promise.resolve(entityAnswer ?? ENTITY);
+    if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
+    if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: REL_TYPES, total: 1 });
+    if (p.startsWith("/api/v1/relationships")) {
+      if (p.includes("from_entity_id=42")) return Promise.resolve({ items: OUTGOING, total: 1 });
+      if (p.includes("to_entity_id=42")) return Promise.resolve({ items: INCOMING, total: 1 });
+      return Promise.resolve({ items: [], total: 0 });
+    }
+    if (p.startsWith("/api/v1/entities")) {
+      if (p.includes("entity_type_id=9")) return Promise.resolve({ items: UNITS, total: 2 });
+      return Promise.resolve({ items: [], total: 0 });
+    }
     return Promise.reject(new Error(`unexpected ${p}`));
   });
   return renderAt(path);
@@ -114,6 +206,8 @@ function save(name: RegExp) {
 
 beforeEach(() => {
   mockFetch.mockReset();
+  writeAnswer = null;
+  entityAnswer = null;
   window.confirm = vi.fn(() => true);
 });
 
@@ -142,7 +236,7 @@ describe("EntityRecord: creating an entity", () => {
     setField("shift_kind", "night");
     setField("start_date", "2026-09-19");
     setField("start_time", "07:30");
-    mockFetch.mockResolvedValueOnce({ ...ENTITY, attrs: {} });
+    answerWrite({ ...ENTITY, attrs: {} });
     save(/create entity/i);
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -168,7 +262,7 @@ describe("EntityRecord: creating an entity", () => {
   it("omits an attribute left empty, so the server's default is materialised instead of being overwritten with null", async () => {
     await openNew();
     setField(/^Key/, "ahmed");
-    mockFetch.mockResolvedValueOnce({ ...ENTITY, attrs: {} });
+    answerWrite({ ...ENTITY, attrs: {} });
     save(/create entity/i);
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -232,7 +326,7 @@ describe("EntityRecord: creating an entity", () => {
   it("goes to the saved entity once the server accepts it", async () => {
     await openNew();
     setField(/^Key/, "ahmed");
-    mockFetch.mockResolvedValueOnce({ ...ENTITY, id: 99, attrs: {} });
+    answerWrite({ ...ENTITY, id: 99, attrs: {} });
     save(/create entity/i);
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/entities/99"));
   });
@@ -270,7 +364,7 @@ describe("EntityRecord: editing an entity", () => {
 
   it("round-trips the loaded values through a save, keeping a zero and a false", async () => {
     await openEdit();
-    mockFetch.mockResolvedValueOnce(ENTITY);
+    answerWrite(ENTITY);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     const body = writes()[0].body;
@@ -298,7 +392,7 @@ describe("EntityRecord: editing an entity", () => {
   it("turns a stored empty string into an absent key, because an empty control means 'not provided' for every type", async () => {
     await openEdit();
     expect((screen.getByLabelText("note") as HTMLInputElement).value).toBe("");
-    mockFetch.mockResolvedValueOnce(ENTITY);
+    answerWrite(ENTITY);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body.attrs).not.toHaveProperty("note");
@@ -306,14 +400,14 @@ describe("EntityRecord: editing an entity", () => {
 
   it("re-seeds the controls from what the server stored, so a materialised default appears without a reload", async () => {
     await openEdit();
-    mockFetch.mockResolvedValueOnce({ ...ENTITY, attrs: { ...ENTITY.attrs, grade: 7, retired: undefined } });
+    answerWrite({ ...ENTITY, attrs: { ...ENTITY.attrs, grade: 7, retired: undefined } });
     save(/save entity/i);
     await waitFor(() => expect((screen.getByLabelText("grade") as HTMLInputElement).value).toBe("7"));
   });
 
   it("drops a stored key whose attribute definition was deleted, rebuilding attrs rather than merging it", async () => {
     await openEdit();
-    mockFetch.mockResolvedValueOnce(ENTITY);
+    answerWrite(ENTITY);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body.attrs).not.toHaveProperty("retired");
@@ -327,7 +421,7 @@ describe("EntityRecord: editing an entity", () => {
   it("clears an attribute by emptying its control, which removes the key rather than sending null", async () => {
     await openEdit();
     setField("shift_kind", "");
-    mockFetch.mockResolvedValueOnce(ENTITY);
+    answerWrite(ENTITY);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body.attrs).not.toHaveProperty("shift_kind");
@@ -336,7 +430,7 @@ describe("EntityRecord: editing an entity", () => {
 
   it("deletes the entity after a confirmation and returns to the list", async () => {
     await openEdit();
-    mockFetch.mockResolvedValueOnce(undefined);
+    answerWrite(undefined);
     fireEvent.click(screen.getByRole("button", { name: /delete entity/i }));
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].method).toBe("DELETE");
@@ -398,7 +492,7 @@ describe("EntityRecord: a refusal from the server", () => {
   }
 
   function refuse(body: unknown, status = 422) {
-    mockFetch.mockRejectedValueOnce(new ApiError(status, JSON.stringify(body)));
+    refuseWrite(new ApiError(status, JSON.stringify(body)));
   }
 
   it("marks the named attribute and announces the message in the live region", async () => {
@@ -455,7 +549,7 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("sends the updated_at it read, which is what lets the server refuse", async () => {
     await openEdit();
-    mockFetch.mockResolvedValueOnce(ENTITY);
+    answerWrite(ENTITY);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body.updated_at).toBe(ENTITY.updated_at);
@@ -465,7 +559,7 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
     reads("/entities/new?type=5");
     expect(await screen.findByLabelText("grade")).toBeInTheDocument();
     setField(/^Key/, "ahmed");
-    mockFetch.mockResolvedValueOnce({ ...ENTITY, id: 99 });
+    answerWrite({ ...ENTITY, id: 99 });
     save(/create entity/i);
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0].body).not.toHaveProperty("updated_at");
@@ -473,7 +567,7 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("shows the refusal with a way out instead of a red line under a control", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    refuseWrite(new ApiError(409, JSON.stringify(STALE)));
     setField(/^Label/, "Ahmed (edited here)");
     save(/save entity/i);
 
@@ -489,13 +583,13 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("keeps what the user typed when it reloads, and takes the other change for what they did not touch", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    refuseWrite(new ApiError(409, JSON.stringify(STALE)));
     setField(/^Label/, "Ahmed (edited here)");
     setField("grade", "5");
     save(/save entity/i);
     await screen.findByTestId("stale-record");
 
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerEntity(CHANGED);
     fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
 
     // Touched here: kept exactly as typed, even though the other client
@@ -512,11 +606,11 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("names what the reload brought in, so the other change is not invisible either", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    refuseWrite(new ApiError(409, JSON.stringify(STALE)));
     save(/save entity/i);
     await screen.findByTestId("stale-record");
 
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerEntity(CHANGED);
     fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/keeping your edits/i));
     expect(screen.getByRole("status").textContent).toContain("note");
@@ -524,18 +618,18 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("saves against the reloaded timestamp afterwards, and still sends the whole attribute set", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    refuseWrite(new ApiError(409, JSON.stringify(STALE)));
     setField(/^Label/, "Ahmed (edited here)");
     save(/save entity/i);
     await screen.findByTestId("stale-record");
 
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerEntity(CHANGED);
     fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
     await waitFor(() =>
       expect((screen.getByLabelText("note") as HTMLInputElement).value).toBe("written by the other client")
     );
 
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerWrite(CHANGED);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(2));
     const retry = writes()[1].body;
@@ -553,14 +647,14 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("does not resurrect an attribute whose definition was deleted while the form was open", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(new ApiError(409, JSON.stringify(STALE)));
+    refuseWrite(new ApiError(409, JSON.stringify(STALE)));
     save(/save entity/i);
     await screen.findByTestId("stale-record");
 
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerEntity(CHANGED);
     fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
     await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
-    mockFetch.mockResolvedValueOnce(CHANGED);
+    answerWrite(CHANGED);
     save(/save entity/i);
     await waitFor(() => expect(writes()).toHaveLength(2));
     expect(writes()[1].body.attrs).not.toHaveProperty("retired");
@@ -568,12 +662,167 @@ describe("EntityRecord: a concurrent edit (Ruling 42)", () => {
 
   it("still marks the key field for the OTHER 409 a save can get", async () => {
     await openEdit();
-    mockFetch.mockRejectedValueOnce(
+    refuseWrite(
       new ApiError(409, JSON.stringify({ detail: "a entity row with the same type_id already exists" }))
     );
     save(/save entity/i);
     await waitFor(() => expect(screen.getByLabelText(/^Key/)).toHaveAttribute("aria-invalid", "true"));
     expect(screen.queryByTestId("stale-record")).toBeNull();
+  });
+});
+
+/**
+ * The Relationships section.
+ *
+ * An entity's page never showed which unit they work in, or which unit a
+ * unit sits under -- while the delete warning at the bottom of the same
+ * page counted exactly those rows. The section is here, rather than only
+ * on `/relationships`, because "who works where" is a fact ABOUT this
+ * entity and the page that describes the entity is where a reader looks
+ * for it.
+ */
+describe("EntityRecord: the entity's relationships", () => {
+  async function openEdit() {
+    reads("/entities/42");
+    expect(await screen.findByLabelText("grade")).toBeInTheDocument();
+  }
+
+  it("lists a relationship this entity is the From end of, naming the other entity and the type", async () => {
+    await openEdit();
+    const row = await screen.findByTestId("relationship-301");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]).toHaveTextContent("Ahmed");
+    expect(cells[0]).toHaveTextContent(/this entity/i);
+    expect(cells[1]).toHaveTextContent("works_in");
+    expect(cells[2]).toHaveTextContent("North Depot");
+    expect(within(cells[2]).getByRole("link", { name: "North Depot" })).toHaveAttribute("href", "/entities/71");
+  });
+
+  it("asks both directions, because the API has no 'either end' filter", async () => {
+    await openEdit();
+    await screen.findByTestId("relationship-301");
+    const paths = requests().map((r) => r.path);
+    expect(paths.some((p) => p.includes("from_entity_id=42"))).toBe(true);
+    expect(paths.some((p) => p.includes("to_entity_id=42"))).toBe(true);
+  });
+
+  it("lists a relationship this entity is the TO end of, the other way round in the same table", async () => {
+    // One table for both directions: an incoming row is the same edge seen
+    // from the other end, and the sentence already says which end this
+    // entity is on. A section that only asked `from_entity_id=` would
+    // silently show half the model.
+    await openEdit();
+    const row = await screen.findByTestId("relationship-302");
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]).toHaveTextContent("South Depot");
+    expect(cells[1]).toHaveTextContent("manages");
+    expect(cells[2]).toHaveTextContent("Ahmed");
+    expect(cells[2]).toHaveTextContent(/this entity/i);
+    expect(cells[0]).not.toHaveTextContent(/this entity/i);
+  });
+
+  it("offers the connections this entity's TYPE can take part in, and only those", async () => {
+    await openEdit();
+    await screen.findByTestId("relationship-type-select");
+    const options = within(screen.getByTestId("relationship-type-select"))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    // employee is the From end of works_in and the To end of manages, so
+    // the two sentences read in opposite directions.
+    expect(options).toEqual(["Ahmed works_in a unit", "a unit manages Ahmed"]);
+  });
+
+  it("offers only entities of the far end's type, and never this entity itself", async () => {
+    await openEdit();
+    await waitFor(() =>
+      expect(within(screen.getByTestId("relationship-other-select")).getAllByRole("option").length).toBeGreaterThan(1)
+    );
+    const options = within(screen.getByTestId("relationship-other-select"))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(options).toEqual(expect.arrayContaining(["North Depot", "South Depot"]));
+    expect(options).not.toEqual(expect.arrayContaining(["Ahmed"]));
+  });
+
+  it("creates the relationship with this entity on the end its option names", async () => {
+    await openEdit();
+    await waitFor(() =>
+      expect(within(screen.getByTestId("relationship-other-select")).getAllByRole("option").length).toBeGreaterThan(1)
+    );
+    answerWrite({ id: 302, relationship_type_id: 3, from_entity_id: 42, to_entity_id: 72, attrs: {} });
+    fireEvent.change(screen.getByTestId("relationship-other-select"), { target: { value: "72" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/relationships",
+      body: { relationship_type_id: 3, from_entity_id: 42, to_entity_id: 72 },
+    });
+  });
+
+  it("refuses to add one with no other end chosen, without sending anything", async () => {
+    await openEdit();
+    await screen.findByTestId("relationship-other-select");
+    fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes()).toHaveLength(0);
+    expect(screen.getByTestId("form-errors")).toHaveTextContent(/choose the unit to connect/i);
+  });
+
+  it("deletes a relationship after a confirmation naming the type and both ends", async () => {
+    const confirm = vi.fn(() => true);
+    window.confirm = confirm;
+    await openEdit();
+    await screen.findByTestId("relationship-301");
+    answerWrite(undefined);
+
+    fireEvent.click(within(screen.getByTestId("relationship-301")).getByRole("button", { name: /^Delete/ }));
+
+    const message = (confirm.mock.calls[0] as unknown as [string])[0];
+    expect(message).toContain("works_in");
+    expect(message).toContain("Ahmed");
+    expect(message).toContain("North Depot");
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toMatchObject({ method: "DELETE", path: "/api/v1/relationships/301" });
+  });
+
+  it("says so when the entity is connected to nothing, rather than showing an empty table", async () => {
+    mockFetch.mockImplementation((p: string) => {
+      if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
+      if (p === "/api/v1/entities/42") return Promise.resolve(ENTITY);
+      if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
+      if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: REL_TYPES, total: 1 });
+      if (p.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
+      if (p.startsWith("/api/v1/entities")) return Promise.resolve({ items: UNITS, total: 2 });
+      return Promise.reject(new Error(`unexpected ${p}`));
+    });
+    renderAt("/entities/42");
+    expect(await screen.findByTestId("relationships-empty")).toHaveTextContent(/not connected to anything yet/i);
+  });
+
+  it("says so when no relationship type can reach this entity's type at all", async () => {
+    mockFetch.mockImplementation((p: string) => {
+      if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
+      if (p === "/api/v1/entities/42") return Promise.resolve(ENTITY);
+      if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
+      if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: [], total: 0 });
+      if (p.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
+      if (p.startsWith("/api/v1/entities")) return Promise.resolve({ items: [], total: 0 });
+      return Promise.reject(new Error(`unexpected ${p}`));
+    });
+    renderAt("/entities/42");
+    expect(await screen.findByText(/No relationship type joins employee to anything yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /define one on the relationship types page/i })).toHaveAttribute(
+      "href",
+      "/relationship-types"
+    );
+  });
+
+  it("is not offered on a new entity, which has no id to connect anything to", async () => {
+    reads("/entities/new?type=5");
+    expect(await screen.findByLabelText("grade")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Relationships" })).not.toBeInTheDocument();
   });
 });
 

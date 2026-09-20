@@ -92,6 +92,21 @@ describe("AppShell", () => {
       expect(link.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it("links Relationships from the Domain group, beside the types it is rows of", async () => {
+      // The nav offered "Relationship types" and nothing at all for the
+      // rows, which is how a planner ended up believing the product could
+      // not record who works where.
+      renderWithProviders();
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      const link = within(nav).getByRole("link", { name: "Relationships" });
+      expect(link).toHaveAttribute("href", "/relationships");
+      const types = within(nav).getByRole("link", { name: "Relationship types" });
+      const entities = within(nav).getByRole("link", { name: "Entities" });
+      expect(types.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(link.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("links Entities from the Domain group, after Entity types (Task 12)", async () => {
       renderWithProviders();
       await settled();

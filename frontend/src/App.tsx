@@ -9,6 +9,7 @@ import EntityTypes from "./pages/EntityTypes";
 import EntityTypeDetail from "./pages/EntityTypeDetail";
 import RelationshipTypes from "./pages/RelationshipTypes";
 import RelationshipTypeDetail from "./pages/RelationshipTypeDetail";
+import Relationships from "./pages/Relationships";
 import Entities from "./pages/Entities";
 import EntityRecord from "./pages/EntityRecord";
 import Parameters from "./pages/Parameters";
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="entity-types/:id" element={<EntityTypeDetail />} />
         <Route path="relationship-types" element={<RelationshipTypes />} />
         <Route path="relationship-types/:id" element={<RelationshipTypeDetail />} />
+        <Route path="relationships" element={<Relationships />} />
         {/* `entities/new` before `entities/:id`: the literal segment has to win,
             or a new entity would be looked up as the entity whose id is "new". */}
         <Route path="entities" element={<Entities />} />

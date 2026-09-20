@@ -21,6 +21,7 @@ import AttrsForm, { buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts 
 import ColourField from "./ColourField";
 import { FieldLabel, INPUT_CLASS, roleLabel, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
+import { confirmDeleteRelationship, deletedRelationshipMessage } from "../lib/relationships";
 import { useToast } from "./ToastProvider";
 import {
   CARDINALITY_LABEL,
@@ -322,14 +323,15 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
 
   async function handleDelete() {
     setError(null);
-    const confirmed = window.confirm(
-      `Delete the "${edge!.type}" relationship from "${fromLabel}" to "${toLabel}"? ` +
-        `The entities at either end are not deleted. This cannot be undone.`
-    );
+    // The same wording as the relationships page and an entity's own
+    // section: three screens can now remove a relationship, and a
+    // confirmation that differs between them is three chances to be
+    // wrong about what is destroyed.
+    const confirmed = window.confirm(confirmDeleteRelationship(edge!.type, fromLabel, toLabel));
     if (!confirmed) return;
     try {
       await deleteRelationship.mutateAsync(Number(edge!.id));
-      toast.success(`"${edge!.type}" from "${fromLabel}" to "${toLabel}" deleted`);
+      toast.success(deletedRelationshipMessage(edge!.type, fromLabel, toLabel));
       onClose();
     } catch (err) {
       setError(relationshipErrorMessage(err));
