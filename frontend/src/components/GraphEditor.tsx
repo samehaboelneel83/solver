@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import cytoscape, { Core, NodeSingular } from "cytoscape";
 // @ts-expect-error -- cytoscape-elk ships no bundled type declarations
@@ -595,15 +595,64 @@ export default function GraphEditor({
     }
   }, [filter, data]);
 
+  // The ids the three filters leave showing -- the same AND the effect
+  // above writes into `display`, derived from the graph DATA so that what
+  // the page says is what was decided rather than what a style write
+  // happened to leave behind. Two things read it: the canvas's accessible
+  // name, and the expression announcement.
+  const shownNodeIds = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+    const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
+    const searchLower = (filter?.search ?? "").toLowerCase();
+    const matchIds = filter?.expressionMatchIds ?? null;
+    return new Set(
+      data.nodes
+        .filter(
+          (node) =>
+            (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
+            (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
+            (matchIds === null || matchIds.has(node.id))
+        )
+        .map((node) => node.id)
+    );
+  }, [data, filter]);
+
+  // A filter that hides the node the roving selection is on drops the
+  // selection rather than leaving a ring on something nobody can see. The
+  // next arrow key then starts from the first visible node.
+  useEffect(() => {
+    if (!focusedNodeId || !shownNodeIds || shownNodeIds.has(focusedNodeId)) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (cyRef.current as any)?.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
+    setFocusedNodeId(null);
+  }, [shownNodeIds, focusedNodeId]);
+
+  /**
+   * The canvas's accessible name.
+   *
+   * It says how many nodes are SHOWN, and -- only when a filter is hiding
+   * some -- how many exist. Unconditionally saying "N of M" would make an
+   * unfiltered canvas sound filtered; saying only "M" is what it used to
+   * do, and that was a plain untruth on a filtered one.
+   */
+  const canvasLabel = useMemo(() => {
+    const total = data?.nodes.length ?? 0;
+    const shown = shownNodeIds ? shownNodeIds.size : total;
+    const count = shown === total ? `${total} nodes` : `${shown} of ${total} nodes shown`;
+    return `Graph canvas, ${isTypes ? "types view" : "objects view"}, ${count} — use the arrow keys to move between nodes`;
+  }, [data, shownNodeIds, isTypes]);
+
   // Task 14c: the expression's result, announced in the same live region
-  // the rest of this canvas uses. Derived from the graph DATA rather than
-  // from cytoscape, so what is announced is what was decided, not what a
-  // style write happened to leave behind. Only while an expression is
-  // active: announcing on every keystroke in the search box would be
-  // noise, and the type checkboxes have never announced either.
+  // the rest of this canvas uses. Only while an expression is active:
+  // announcing on every keystroke in the search box would be noise, and
+  // the type checkboxes have never announced either.
   const announcedExpressionRef = useRef(false);
   useEffect(() => {
-    if (!data) {
+    if (!data || !shownNodeIds) {
       return;
     }
     const matchIds = filter?.expressionMatchIds ?? null;
@@ -615,16 +664,8 @@ export default function GraphEditor({
       return;
     }
     announcedExpressionRef.current = true;
-    const searchLower = (filter?.search ?? "").toLowerCase();
-    const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
-    const shown = data.nodes.filter(
-      (node) =>
-        (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
-        (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
-        matchIds.has(node.id)
-    ).length;
-    setLiveMessage(`Filter conditions: ${shown} of ${data.nodes.length} nodes shown`);
-  }, [filter, data]);
+    setLiveMessage(`Filter conditions: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
+  }, [filter, data, shownNodeIds]);
 
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
   // FilterBar's search box) to move the canvas's own roving keyboard focus to a node, so the
@@ -721,15 +762,31 @@ export default function GraphEditor({
   // H-1: node ids ordered left-to-right, then top-to-bottom by current on-canvas position, so
   // Arrow-key traversal is predictable. Recomputed from the live `cy` instance on every
   // keypress rather than cached, so it stays correct after nodes are added/removed/relaid-out.
+  //
+  // **Hidden nodes are not in it.** The filter effect above sets `display: none` on every node
+  // a type checkbox, the search box or an expression excluded, and until this round the arrow
+  // keys walked those too: with 1 of 23 nodes showing, a keyboard user was announced the other
+  // 22 by name, the canvas panned to empty space, and Enter opened an editable panel -- with a
+  // Delete button -- for a node that was not on the screen. A filtered graph gave keyboard
+  // users a different set of nodes from the one sighted users could see, which is the sharper
+  // version of the "0 axe violations" observation in the ledger: the number was true and the
+  // inference drawn from it was not.
+  //
+  // `display` is read from cytoscape rather than re-derived from `filter`, because cytoscape
+  // is what actually decides what is painted -- and the three filters already funnel into this
+  // one property precisely so that everything downstream can ask one question.
   function orderedNodeIds(cy: Core): string[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodesColl: any = (cy as any).nodes?.();
     const items: { id: string; x: number; y: number }[] =
       nodesColl && typeof nodesColl.map === "function"
-        ? nodesColl.map((n: any) => {
-            const pos = typeof n.position === "function" ? n.position() : undefined;
-            return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0 };
-          })
+        ? nodesColl
+            .map((n: any) => {
+              const pos = typeof n.position === "function" ? n.position() : undefined;
+              const display = typeof n.style === "function" ? n.style("display") : undefined;
+              return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0, hidden: display === "none" };
+            })
+            .filter((item: { hidden: boolean }) => !item.hidden)
         : [];
     items.sort((a, b) => a.x - b.x || a.y - b.y);
     return items.map((item) => item.id);
@@ -792,12 +849,17 @@ export default function GraphEditor({
         event.preventDefault();
         moveFocus(-1);
         break;
-      case "Enter":
+      case "Enter": {
         event.preventDefault();
-        if (focusedNodeId) {
+        // Only for a node that is actually on screen. The effect below clears the roving
+        // selection when a filter hides its node, but a keypress can land in the same frame
+        // as the filter change, and the panel Enter opens can delete the row.
+        const cy = cyRef.current;
+        if (focusedNodeId && cy && orderedNodeIds(cy).includes(focusedNodeId)) {
           onSelectionChangeRef.current?.({ kind: "node", id: focusedNodeId });
         }
         break;
+      }
       case "Escape":
         event.preventDefault();
         firstControlRef.current?.focus();
@@ -1242,9 +1304,12 @@ export default function GraphEditor({
           // label advertises actually reachable: without it a screen reader stays
           // in browse mode and swallows the arrow keys before `onKeyDown` sees them.
           role="application"
-          aria-label={`Graph canvas, ${isTypes ? "types view" : "objects view"}, ${
-            data?.nodes.length ?? 0
-          } nodes — use the arrow keys to move between nodes`}
+          // The count is what is SHOWN, not what was loaded. It used to be
+          // `data.nodes.length`, so a canvas displaying 1 of 23 nodes
+          // announced itself as having 23 -- and the arrow keys, which this
+          // very label advertises, then walked all 23. Both halves of that
+          // are fixed; this is the half a screen-reader user hears first.
+          aria-label={canvasLabel}
           onKeyDown={handleCanvasKeyDown}
         />
         {/* H-1: a polite live region announcing the label of whichever node keyboard focus is

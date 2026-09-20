@@ -1114,6 +1114,138 @@ describe("GraphEditor", () => {
     expect(onSelectionChange).toHaveBeenCalledWith({ kind: "node", id: expect.any(String) });
   });
 
+  // --- the keyboard only reaches what is on screen -----------------------
+  //
+  // With a filter showing 1 of 3 nodes, the arrow keys used to announce the
+  // other two by name, the canvas panned to empty space, and Enter opened an
+  // editable panel -- with a Delete button -- for a node that was not
+  // displayed. `filter.expressionMatchIds` is used here because it is the
+  // narrowest of the three filters to state in a test; the type checkboxes
+  // and the search box set the same `display` and are covered by the same
+  // code path.
+  describe("a filtered canvas", () => {
+    const only = (...ids: string[]) => ({
+      selectedTypes: null,
+      search: "",
+      highlightIds: null,
+      expressionMatchIds: new Set(ids),
+    });
+
+    async function renderFiltered(ids: string[]) {
+      const view = renderWithProviders({ filter: only(...ids) });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      await waitFor(() => expect(elementStore.get("3")!.styles.display).toBeDefined());
+      elementStore.get("1")!.position = { x: 0, y: 0 };
+      elementStore.get("2")!.position = { x: 10, y: 0 };
+      elementStore.get("3")!.position = { x: 20, y: 0 };
+      return view;
+    }
+
+    it("walks only the nodes that are displayed", async () => {
+      await renderFiltered(["3"]);
+      const container = screen.getByTestId("cytoscape-container");
+
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      // Node 1 is leftmost and hidden; the selection lands on 3, the only
+      // one drawn.
+      expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(false);
+      expect(elementStore.get("2")!.classes.has("kb-focus")).toBe(false);
+      expect(elementStore.get("3")!.classes.has("kb-focus")).toBe(true);
+
+      // And it stays there: there is nowhere else to go.
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      fireEvent.keyDown(container, { key: "ArrowLeft" });
+      expect(elementStore.get("3")!.classes.has("kb-focus")).toBe(true);
+      expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(false);
+    });
+
+    it("announces only a displayed node's label", async () => {
+      await renderFiltered(["3"]);
+      fireEvent.keyDown(screen.getByTestId("cytoscape-container"), { key: "ArrowRight" });
+      const live = screen.getByTestId("graph-live");
+      await waitFor(() => expect(live).toHaveTextContent("ahmed"));
+      expect(live).not.toHaveTextContent("hq");
+    });
+
+    it("does not open the property panel for a node that is not displayed", async () => {
+      const onSelectionChange = vi.fn();
+      const view = renderWithProviders({ onSelectionChange });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      onSelectionChange.mockClear();
+
+      // The filter arrives after the selection did. Enter must not open an
+      // editable panel -- it has a Delete button -- for a node the person
+      // cannot see.
+      view.rerender(
+        <QueryClientProvider client={client()}>
+          <MemoryRouter>
+            <GraphEditor
+              domainId={1}
+              mode="objects"
+              onModeChange={vi.fn()}
+              hierarchyTypeId={null}
+              onHierarchyTypeChange={vi.fn()}
+              onSelectionChange={onSelectionChange}
+              filter={only("3")}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      await waitFor(() => expect(elementStore.get("1")!.styles.display).toBe("none"));
+
+      fireEvent.keyDown(container, { key: "Enter" });
+      expect(onSelectionChange).not.toHaveBeenCalled();
+      // The ring goes with it, rather than sitting on something nobody can see.
+      await waitFor(() => expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(false));
+    });
+
+    it("refuses Enter for a node cytoscape is not drawing, even before the filter props catch up", async () => {
+      // Two mechanisms guard this and they guard different frames: the
+      // effect above drops the ring when `filter` changes, and Enter itself
+      // re-reads cytoscape's `display`, which is what actually decides what
+      // is painted. This pins the second -- a keypress landing in the same
+      // frame as the filter change, before any effect has run.
+      const onSelectionChange = vi.fn();
+      renderWithProviders({ onSelectionChange });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      elementStore.get("1")!.position = { x: 0, y: 0 };
+      elementStore.get("2")!.position = { x: 10, y: 0 };
+      elementStore.get("3")!.position = { x: 20, y: 0 };
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(true);
+      onSelectionChange.mockClear();
+
+      elementStore.get("1")!.styles.display = "none";
+      fireEvent.keyDown(container, { key: "Enter" });
+      expect(onSelectionChange).not.toHaveBeenCalled();
+    });
+
+    it("names the canvas after what is shown, not after what was loaded", async () => {
+      await renderFiltered(["3"]);
+      await waitFor(() =>
+        expect(screen.getByTestId("cytoscape-container").getAttribute("aria-label")).toContain(
+          "1 of 3 nodes shown"
+        )
+      );
+    });
+
+    it("says plainly how many nodes there are when nothing is filtered", async () => {
+      // "3 of 3 nodes shown" would make an unfiltered canvas sound filtered.
+      renderWithProviders();
+      await waitFor(() =>
+        expect(screen.getByTestId("cytoscape-container").getAttribute("aria-label")).toContain(
+          "3 nodes"
+        )
+      );
+      expect(screen.getByTestId("cytoscape-container").getAttribute("aria-label")).not.toContain(
+        "of 3"
+      );
+    });
+  });
+
   it("returns focus to the toolbar's first control (hierarchy select) when Escape is pressed on the canvas (H-1)", async () => {
     renderWithProviders();
     await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
