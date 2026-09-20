@@ -151,3 +151,50 @@ describe("operatorsForField", () => {
     }
   });
 });
+/**
+ * The builder is otherwise carefully type-aware -- an enum gets "is one
+ * of" and a value dropdown, a date gets a native date picker -- which is
+ * exactly why "hired_on is less than 2024-01-01" stood out. A date is
+ * ordered, but nobody says one date is less than another.
+ */
+describe("labels a date and a time in their own words", () => {
+  function labelOf(type: AttrType, operator: string): string {
+    const field = { id: "x", label: "x", dataType: type, nullable: true } as Parameters<
+      typeof operatorsForField
+    >[0];
+    const def = operatorsForField(field).find((o) => o.name === operator);
+    if (!def) throw new Error(`${type} does not offer ${operator}`);
+    return def.label;
+  }
+
+  it("reads a date comparison as before and after", () => {
+    expect(labelOf("date", "<")).toBe("is before");
+    expect(labelOf("date", "<=")).toBe("is on or before");
+    expect(labelOf("date", ">")).toBe("is after");
+    expect(labelOf("date", ">=")).toBe("is on or after");
+    // Equality already read correctly and is left alone.
+    expect(labelOf("date", "=")).toBe("is");
+  });
+
+  it("reads a time of day the same way, since it has the same defect", () => {
+    expect(labelOf("time", "<")).toBe("is before");
+    expect(labelOf("time", "<=")).toBe("is at or before");
+    expect(labelOf("time", ">")).toBe("is after");
+    expect(labelOf("time", ">=")).toBe("is at or after");
+  });
+
+  it("leaves a number and an integer reading numerically", () => {
+    // The override is per data type, not a global rename: "hourly_rate is
+    // before 20" would be its own bug.
+    expect(labelOf("number", "<")).toBe("is less than");
+    expect(labelOf("integer", ">")).toBe("is greater than");
+    expect(labelOf("number", "<=")).toBe("is at most");
+    expect(labelOf("integer", ">=")).toBe("is at least");
+  });
+
+  it("names the same operator, whatever it is called on screen", () => {
+    // The wire name is react-querybuilder's and must not drift with the
+    // wording: the server compiles `<`, not "is before".
+    expect(names(attributeField("1", "opened"))).toEqual(expect.arrayContaining(["<", "<=", ">", ">="]));
+  });
+});

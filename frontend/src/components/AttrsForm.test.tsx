@@ -392,3 +392,36 @@ describe("formatAttrValue: a stored value in a list cell", () => {
     expect(formatAttrValue(value)).toBe(expected);
   });
 });
+/*
+ * `hours_per_week`'s help read "A whole number, such as 8 or -2." -- an
+ * example generic to the TYPE and blind to the FIELD, offering a negative
+ * number of hours worked in a week.
+ */
+describe("AttrsForm: the help under a numeric control", () => {
+  function hintFor(name: string): string {
+    const control = screen.getByTestId(`attr-${name}`);
+    const described = control.getAttribute("aria-describedby") ?? "";
+    const hintId = described.split(" ").find((id) => id.endsWith("-hint"));
+    return hintId ? (document.getElementById(hintId)?.textContent ?? "") : "";
+  }
+
+  it("says decimals are refused without inventing a number for the field", () => {
+    renderForm({ attributes: [def("hours_per_week", "integer", { unit: "h/week" })] });
+    const hint = hintFor("hours_per_week");
+    expect(hint).toContain("whole number");
+    expect(hint).toContain("no decimals");
+    expect(hint).not.toContain("-2");
+  });
+
+  it("lets the field's own default be the concrete example, since that one is true of it", () => {
+    renderForm({
+      attributes: [def("hours_per_week", "integer", { unit: "h/week", default_value: 40 })],
+    });
+    expect(hintFor("hours_per_week")).toContain("Leave empty to use the default (40).");
+  });
+
+  it("keeps the decimal example on a number, where it is not a lie", () => {
+    renderForm({ attributes: [def("hourly_rate", "number", { unit: "EUR/h" })] });
+    expect(hintFor("hourly_rate")).toContain("2.5");
+  });
+});

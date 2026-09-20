@@ -47,13 +47,65 @@ describe("relationshipErrorMessage", () => {
     const message = relationshipErrorMessage(
       error422([
         {
-          loc: ["body", "manages"],
-          msg: 'relationship "manages": target already has a source',
+          loc: ["body", "custom_rule"],
+          msg: 'relationship "custom_rule": some rule nobody has written yet',
           kind: "cardinality",
         },
       ])
     );
-    expect(message).toBe('relationship "manages": target already has a source');
+    expect(message).toBe('relationship "custom_rule": some rule nobody has written yet');
+  });
+
+  /*
+   * The trigger says "source"/"target"; the forms say From/To, and
+   * "source" and "target" appear nowhere else in the UI. The refusal also
+   * never said what to do about it. Both ends are reworded, because they
+   * are the same sentence seen from opposite sides.
+   */
+  it("rewords the From-end cardinality refusal in the form's own words, with the way out", () => {
+    const message = relationshipErrorMessage(
+      error422([
+        {
+          loc: ["body", "supplied_to"],
+          msg: 'relationship "supplied_to": source already has a target',
+          kind: "cardinality",
+        },
+      ])
+    );
+    expect(message).toBe(
+      '"supplied_to" allows each From entity at most one To entity, and this From entity already ' +
+        'has one. Delete the existing "supplied_to" relationship first, or change the cardinality of the type.'
+    );
+    expect(message).not.toMatch(/source|target/);
+  });
+
+  it("rewords the To-end cardinality refusal, which is the other half of the same rule", () => {
+    const message = relationshipErrorMessage(
+      error422([
+        {
+          loc: ["body", "reports_to"],
+          msg: 'relationship "reports_to": target already has a source',
+          kind: "cardinality",
+        },
+      ])
+    );
+    expect(message).toBe(
+      '"reports_to" allows each To entity at most one From entity, and this To entity already ' +
+        'has one. Delete the existing "reports_to" relationship first, or change the cardinality of the type.'
+    );
+  });
+
+  it("rewords by the sentence, not by the kind -- a cycle at the same loc is untouched", () => {
+    const message = relationshipErrorMessage(
+      error422([
+        {
+          loc: ["body", "reports_to"],
+          msg: 'relationship "reports_to": would create a cycle',
+          kind: "cardinality",
+        },
+      ])
+    );
+    expect(message).toBe('relationship "reports_to": would create a cycle');
   });
 
   it("names the field when loc points at a real body field of the relationship write", () => {
@@ -88,7 +140,9 @@ describe("relationshipErrorMessage", () => {
       ])
     );
     expect(message).toBe(
-      'relationship "reports_to": source already has a target\nto_entity_id: entity 42 does not exist'
+      '"reports_to" allows each From entity at most one To entity, and this From entity already ' +
+        'has one. Delete the existing "reports_to" relationship first, or change the cardinality of the type.' +
+        "\nto_entity_id: entity 42 does not exist"
     );
   });
 

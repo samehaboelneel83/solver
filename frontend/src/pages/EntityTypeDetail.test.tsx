@@ -124,7 +124,15 @@ describe("EntityTypeDetail", () => {
     expect(within(grade).getByText("3")).toBeInTheDocument();
     expect(within(grade).getByText("level")).toBeInTheDocument();
     expect(within(grade).getByText("Yes")).toBeInTheDocument();
-    expect(within(rowFor("on_call")).getByText("False")).toBeInTheDocument();
+    // `on_call`'s type is "Yes / no", so its default is No -- not "False",
+    // which is a vocabulary this table alone used to speak.
+    // Read by POSITION: the Required column says "No" on this row too, so
+    // "somewhere on the row it says No" would pass against the old "False".
+    // The name is a <th scope="row">, so the cells start at Data type.
+    const onCall = within(rowFor("on_call")).getAllByRole("cell");
+    expect(onCall[0]).toHaveTextContent("Yes / no");
+    expect(onCall[4]).toHaveTextContent(/^No$/);
+    expect(rowFor("on_call").textContent).not.toContain("False");
     const kind = rowFor("shift_kind");
     expect(within(kind).getByText("day, night")).toBeInTheDocument();
     expect(within(kind).getByText("No default")).toBeInTheDocument();

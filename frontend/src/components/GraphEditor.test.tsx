@@ -742,7 +742,13 @@ describe("GraphEditor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "works_for" }));
 
     const banner = await screen.findByTestId("graph-error");
-    expect(banner).toHaveTextContent('relationship "works_for": target already has a source');
+    // Reworded into the From/To vocabulary the forms use, with the way
+    // out -- "source" and "target" appear nowhere else in this UI.
+    expect(banner).toHaveTextContent(
+      '"works_for" allows each To entity at most one From entity, and this To entity already has one.'
+    );
+    expect(banner).toHaveTextContent(/Delete the existing "works_for" relationship first/);
+    expect(banner.textContent).not.toMatch(/source|target/);
     expect(banner.textContent).not.toContain('works_for: relationship "works_for"');
   });
 

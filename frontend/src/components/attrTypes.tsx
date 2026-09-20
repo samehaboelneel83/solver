@@ -169,11 +169,19 @@ export function draftFromValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** A stored default for display in the attributes table. */
+/**
+ * A stored default for display in the attributes table.
+ *
+ * `true` and `false` read as Yes and No, not True/False: the data type in
+ * the column beside them is called "Yes / no", the control that sets one
+ * offers Yes and No, and `formatAttrValue` has always shown stored values
+ * that way. This table was the last place calling them anything else, so
+ * `on_call` showed its type as "Yes / no" and its default as "False".
+ */
 export function formatDefault(value: unknown): string {
   if (value === null || value === undefined) return "No default";
-  if (value === true) return "True";
-  if (value === false) return "False";
+  if (value === true) return "Yes";
+  if (value === false) return "No";
   return draftFromValue(value);
 }
 
