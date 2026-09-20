@@ -1,17 +1,26 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "./FilterBar";
 import type { FilterState } from "./FilterBar";
+import { buildFieldCatalogue, encodeFieldId } from "../expressions/fields";
+import {
+  ENTITY_TYPES as EXPR_ENTITY_TYPES,
+  RELATIONSHIP_TYPES as EXPR_RELATIONSHIP_TYPES,
+} from "../expressions/testFixtures";
 
+// v1 shape: `code` and `name` are both `entity_type.name`, so they are always
+// the SAME string (Task 7's mapping). A fixture where they differ would let
+// "{name} ({code})" pass as "Unit (unit)" and never show the real defect.
 const entityTypes = [
-  { id: "t1", code: "employee", name: "Employee", is_abstract: false },
-  { id: "t2", code: "unit", name: "Unit", is_abstract: false },
+  { id: "1", code: "employee", name: "employee", is_abstract: false, colour: null },
+  { id: "2", code: "unit", name: "unit", is_abstract: false, colour: "#1f77b4" },
 ];
 
 const edges = [{ id: "r1", source: "e1", target: "e2", type: "works_for", label: "Works For", attributes: {} }];
 
 describe("FilterBar", () => {
-  it("renders a 'Types: n of m' button that opens a panel with a search box and name (code) checkboxes plus All/None", () => {
+  it("renders a 'Types: n of m' button that opens a panel with a search box, one checkbox per type and All/None", () => {
     render(
       <FilterBar
         entityTypes={entityTypes}
@@ -30,8 +39,12 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-type-search")).toBeInTheDocument();
     expect(screen.getByTestId("filter-types-all")).toBeInTheDocument();
     expect(screen.getByTestId("filter-types-none")).toBeInTheDocument();
-    expect(screen.getByText("Employee (employee)")).toBeInTheDocument();
-    expect(screen.getByText("Unit (unit)")).toBeInTheDocument();
+    // The type's name, once. v1 has one name per type -- "unit (unit)" is the
+    // v0 "{name} ({code})" template rendering the same string twice.
+    expect(screen.getByText("employee")).toBeInTheDocument();
+    expect(screen.getByText("unit")).toBeInTheDocument();
+    expect(screen.queryByText("unit (unit)")).not.toBeInTheDocument();
+    expect(screen.queryByText("employee (employee)")).not.toBeInTheDocument();
   });
 
   it("wires aria-expanded/aria-haspopup/aria-controls on the Types toggle, reflecting panel state (H-7)", () => {
@@ -79,9 +92,9 @@ describe("FilterBar", () => {
 
   it("lists types alphabetically by name regardless of the entityTypes order given (F-6)", () => {
     const unordered = [
-      { id: "t3", code: "zebra", name: "Zebra Type", is_abstract: false },
-      { id: "t1", code: "alpha", name: "Alpha Type", is_abstract: false },
-      { id: "t2", code: "mid", name: "Mid Type", is_abstract: false },
+      { id: "3", code: "zebra_type", name: "zebra_type", is_abstract: false, colour: null },
+      { id: "1", code: "alpha_type", name: "alpha_type", is_abstract: false, colour: null },
+      { id: "2", code: "mid_type", name: "mid_type", is_abstract: false, colour: null },
     ];
     render(
       <FilterBar
@@ -94,10 +107,8 @@ describe("FilterBar", () => {
 
     fireEvent.click(screen.getByTestId("filter-types-toggle"));
 
-    const labels = screen
-      .getAllByText(/Type \((alpha|mid|zebra)\)/)
-      .map((el) => el.textContent);
-    expect(labels).toEqual(["Alpha Type (alpha)", "Mid Type (mid)", "Zebra Type (zebra)"]);
+    const labels = screen.getAllByText(/^(alpha|mid|zebra)_type$/).map((el) => el.textContent);
+    expect(labels).toEqual(["alpha_type", "mid_type", "zebra_type"]);
   });
 
   it("calls onChange with the updated selectedTypes when a type checkbox is toggled", () => {
@@ -305,6 +316,127 @@ describe("deriveFilterCriteria", () => {
     const state: FilterState = { selectedTypes: ["employee"], search: "ahmed", highlighting: false };
     const result = deriveFilterCriteria(state, null, edges);
 
+    expect(result.selectedTypes).toEqual(["employee"]);
+    expect(result.search).toBe("ahmed");
+  });
+});
+
+// --- Task 14c: the expression filter ------------------------------------
+
+describe("FilterBar expression panel", () => {
+  const catalogue = buildFieldCatalogue({
+    entityTypes: EXPR_ENTITY_TYPES,
+    relationshipTypes: EXPR_RELATIONSHIP_TYPES,
+  });
+  const CAPACITY = encodeFieldId({ kind: "attribute", entityTypeId: "1", attribute: "capacity" });
+
+  function renderBar(props: Omit<Partial<ComponentProps<typeof FilterBar>>, "onChange"> = {}) {
+    const onChange = vi.fn();
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        expressionCatalogue={catalogue}
+        {...props}
+        onChange={onChange}
+      />
+    );
+    return onChange;
+  }
+
+  it("offers the expression toggle only when it is given a catalogue", () => {
+    const { unmount } = render(
+      <FilterBar entityTypes={entityTypes} selectedNodeId={null} value={DEFAULT_FILTER_STATE} onChange={vi.fn()} />
+    );
+    // The types view has no entity attributes to filter by, so its bar has
+    // no expression builder at all.
+    expect(screen.queryByTestId("filter-expression-toggle")).not.toBeInTheDocument();
+    unmount();
+
+    renderBar();
+    expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument();
+  });
+
+  it("keeps the search box, the types button and the highlight button alongside it", () => {
+    renderBar();
+    expect(screen.getByTestId("filter-search")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-types-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-highlight-toggle")).toBeInTheDocument();
+  });
+
+  // The builder is code-split (react-querybuilder brings redux with it), so
+  // it arrives a tick after the panel opens.
+  it("opens and closes the builder, reflecting the state on the toggle", async () => {
+    renderBar();
+    const toggle = screen.getByTestId("filter-expression-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("expression-builder")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByTestId("expression-builder")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-expression-panel")).toHaveAttribute(
+      "id",
+      toggle.getAttribute("aria-controls") as string
+    );
+  });
+
+  it("closes on Escape and returns focus to the toggle, like the types panel (H-7)", async () => {
+    renderBar();
+    const toggle = screen.getByTestId("filter-expression-toggle");
+    fireEvent.click(toggle);
+    await screen.findByTestId("expression-builder");
+    fireEvent.keyDown(screen.getByTestId("filter-expression-panel"), { key: "Escape" });
+
+    expect(screen.queryByTestId("filter-expression-panel")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it("reports the number of conditions on the toggle, so a collapsed filter is not invisible", () => {
+    const withRule = { ...DEFAULT_FILTER_STATE, expression: { version: 1, query: { combinator: "and", rules: [{ field: CAPACITY, operator: ">", value: 1 }] } } };
+    renderBar();
+    expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent(/no conditions/i);
+    cleanup();
+    renderBar({ value: withRule as never });
+    expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent("1");
+  });
+
+  it("reports a changed expression up to its caller, leaving the rest of the state alone", async () => {
+    const onChange = renderBar({ value: { ...DEFAULT_FILTER_STATE, search: "hq" } });
+    fireEvent.click(screen.getByTestId("filter-expression-toggle"));
+    fireEvent.click(await screen.findByTestId("expression-add-rule"));
+
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(next.search).toBe("hq");
+    expect(next.expression.query.rules).toHaveLength(1);
+  });
+
+  it("clears the expression without closing the panel", async () => {
+    const onChange = renderBar({
+      value: {
+        ...DEFAULT_FILTER_STATE,
+        expression: { version: 1, query: { combinator: "and", rules: [{ field: CAPACITY, operator: ">", value: 1 }] } },
+      } as never,
+    });
+    fireEvent.click(screen.getByTestId("filter-expression-toggle"));
+    fireEvent.click(await screen.findByTestId("filter-expression-clear"));
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(next.expression).toBeNull();
+  });
+});
+
+describe("deriveFilterCriteria with an expression", () => {
+  it("passes the matching node ids through, and null when there are none to apply", () => {
+    const state: FilterState = { selectedTypes: null, search: "", highlighting: false };
+    expect(deriveFilterCriteria(state, null, edges).expressionMatchIds).toBeNull();
+    const matches = new Set(["e1"]);
+    expect(deriveFilterCriteria(state, null, edges, matches).expressionMatchIds).toBe(matches);
+  });
+
+  it("leaves the other criteria untouched when an expression is active", () => {
+    const state: FilterState = { selectedTypes: ["employee"], search: "ahmed", highlighting: false };
+    const result = deriveFilterCriteria(state, null, edges, new Set(["e1"]));
     expect(result.selectedTypes).toEqual(["employee"]);
     expect(result.search).toBe("ahmed");
   });

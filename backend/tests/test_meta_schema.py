@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.crud.registry import TABLE_REGISTRY
 from app.main import app
 from app.seed import seed_admin
 
@@ -32,12 +33,28 @@ def test_meta_schema_requires_auth():
     assert response.status_code == 401
 
 
-def test_meta_schema_lists_all_31_tables(auth_headers):
+def test_meta_schema_lists_exactly_the_registered_tables(auth_headers):
+    """Was "lists all 31 tables". Schema v1 dropped the 27 domain.*/problem.*
+    tables (migration 0006/0007) and replaced them with the four untouched
+    `iam` tables plus three flat v1 tables driven through the generic
+    factory (`domain`, `template`, `problem`); every other v1 table gets a
+    purpose-built router or (for the four IMMUTABLE_TABLES) none at all.
+    Pinning the exact set is stronger than pinning the count."""
     client = TestClient(app)
     response = client.get("/api/meta/schema", headers=auth_headers)
     assert response.status_code == 200
     tables = response.json()
-    assert len(tables) == 31
+
+    assert len(tables) == len(TABLE_REGISTRY)
+    assert {(t["schema"], t["table"]) for t in tables} == {
+        ("iam", "organization"),
+        ("iam", "user_account"),
+        ("iam", "role"),
+        ("iam", "user_role"),
+        ("public", "domain"),
+        ("public", "template"),
+        ("public", "problem"),
+    }
 
 
 def test_meta_schema_flags_foreign_keys_and_readonly_id(auth_headers):
@@ -45,8 +62,8 @@ def test_meta_schema_flags_foreign_keys_and_readonly_id(auth_headers):
     response = client.get("/api/meta/schema", headers=auth_headers)
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    entity = tables[("domain", "entity")]
-    fields_by_name = {f["name"]: f for f in entity["fields"]}
+    user_account = tables[("iam", "user_account")]
+    fields_by_name = {f["name"]: f for f in user_account["fields"]}
 
     assert fields_by_name["id"]["writable"] is False
     assert fields_by_name["organization_id"]["is_fk"] is True

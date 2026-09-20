@@ -22,6 +22,12 @@ export type EntityTypeOption = {
   code: string;
   name: string;
   is_abstract: boolean;
+  /** Task 14b: `entity_type.colour`, a lowercase `#rrggbb`, or null when
+   * the type has none -- in which case the canvas draws a deterministic
+   * fallback keyed by `id` (see `lib/colour.ts`). This is the one field of
+   * this contract Task 7 could not map, because the column did not exist
+   * then; the user has since asked for behaviour that needs it. */
+  colour: string | null;
 };
 
 export type RelationshipTypeOption = {
@@ -31,6 +37,8 @@ export type RelationshipTypeOption = {
   is_directed: boolean;
   source_entity_type: string | null;
   target_entity_type: string | null;
+  /** Task 14b: `relationship_type.colour`, same rules as above. */
+  colour: string | null;
 };
 
 export type HierarchyOption = {

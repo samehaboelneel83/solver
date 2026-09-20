@@ -1,3 +1,12 @@
+"""FK-dropdown options endpoint and /api/meta/schema labelling.
+
+Like test_crud_hardening.py, these exercise generic machinery rather than
+any particular table, and were re-expressed against the four untouched
+`iam` tables after migration 0006 dropped the domain.*/problem.* tables
+they originally used. Cases with no `iam` equivalent are deleted rather
+than weakened -- see the task report for the list.
+"""
+
 import uuid
 
 import pytest
@@ -30,12 +39,24 @@ def auth_headers():
 
 
 @pytest.fixture
-def organization_id(auth_headers):
+def admin_user_id(auth_headers):
+    settings = get_settings()
     client = TestClient(app)
-    response = client.get("/api/iam/organization/", headers=auth_headers)
+    response = client.get(
+        f"/api/iam/user_account/?q={settings.admin_username}", headers=auth_headers
+    )
     items = response.json()["items"]
-    default_org = next(item for item in items if item["code"] == "default")
-    return default_org["id"]
+    return next(item for item in items if item["username"] == settings.admin_username)["id"]
+
+
+def _make_role(client, auth_headers, code: str, name: str | None = None) -> str:
+    response = client.post(
+        "/api/iam/role/",
+        json={"code": code, "name": name if name is not None else code},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
 
 
 def test_options_route_matches_before_item_id_route(auth_headers):
@@ -45,30 +66,20 @@ def test_options_route_matches_before_item_id_route(auth_headers):
     path param first and this returns 422 instead of 200."""
     client = TestClient(app)
 
-    response = client.get("/api/domain/entity_type/options?q=x", headers=auth_headers)
+    response = client.get("/api/iam/role/options?q=x", headers=auth_headers)
 
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
 
-def test_options_search_returns_code_and_name_label(auth_headers, organization_id):
+def test_options_search_returns_code_and_name_label(auth_headers):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
     code = f"opt-{suffix}"
 
-    create_response = client.post(
-        "/api/domain/entity_type/",
-        json={
-            "organization_id": organization_id,
-            "code": code,
-            "name": "Opt Name",
-            "is_abstract": False,
-        },
-        headers=auth_headers,
-    )
-    assert create_response.status_code == 201
+    _make_role(client, auth_headers, code, "Opt Name")
 
-    response = client.get(f"/api/domain/entity_type/options?q={code}", headers=auth_headers)
+    response = client.get(f"/api/iam/role/options?q={code}", headers=auth_headers)
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
@@ -79,18 +90,13 @@ def test_options_ids_resolves_exact_rows(auth_headers):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
 
-    ids = []
-    for i in range(2):
-        response = client.post(
-            "/api/domain/role_type/",
-            json={"code": f"opt-ids-{i}-{suffix}", "name": f"Opt Ids {i}"},
-            headers=auth_headers,
-        )
-        assert response.status_code == 201
-        ids.append(response.json()["id"])
+    ids = [
+        _make_role(client, auth_headers, f"opt-ids-{i}-{suffix}", f"Opt Ids {i}")
+        for i in range(2)
+    ]
 
     response = client.get(
-        f"/api/domain/role_type/options?ids={ids[0]},{ids[1]}", headers=auth_headers
+        f"/api/iam/role/options?ids={ids[0]},{ids[1]}", headers=auth_headers
     )
     assert response.status_code == 200
     items = response.json()
@@ -105,18 +111,13 @@ def test_options_ids_over_default_limit_returns_all(auth_headers):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
 
-    ids = []
-    for i in range(60):
-        response = client.post(
-            "/api/domain/role_type/",
-            json={"code": f"opt-bulk-{i}-{suffix}", "name": f"Opt Bulk {i}"},
-            headers=auth_headers,
-        )
-        assert response.status_code == 201
-        ids.append(response.json()["id"])
+    ids = [
+        _make_role(client, auth_headers, f"opt-bulk-{i}-{suffix}", f"Opt Bulk {i}")
+        for i in range(60)
+    ]
 
     response = client.get(
-        f"/api/domain/role_type/options?ids={','.join(ids)}", headers=auth_headers
+        f"/api/iam/role/options?ids={','.join(ids)}", headers=auth_headers
     )
     assert response.status_code == 200
     items = response.json()
@@ -129,7 +130,7 @@ def test_options_too_many_ids_returns_422(auth_headers):
     ids = [str(uuid.uuid4()) for _ in range(201)]
 
     response = client.get(
-        f"/api/domain/role_type/options?ids={','.join(ids)}", headers=auth_headers
+        f"/api/iam/role/options?ids={','.join(ids)}", headers=auth_headers
     )
     assert response.status_code == 422
 
@@ -137,69 +138,36 @@ def test_options_too_many_ids_returns_422(auth_headers):
 def test_options_invalid_id_returns_422(auth_headers):
     client = TestClient(app)
 
-    response = client.get(
-        "/api/domain/role_type/options?ids=not-a-uuid", headers=auth_headers
-    )
+    response = client.get("/api/iam/role/options?ids=not-a-uuid", headers=auth_headers)
     assert response.status_code == 422
 
 
-def test_hierarchy_node_label_uses_entity_and_hierarchy_names(auth_headers, organization_id):
+def test_user_role_label_uses_username_and_role_code(auth_headers, admin_user_id):
+    """LABEL_OVERRIDES coverage: a join row with no code/name of its own
+    must resolve to a composed label rather than falling back to its id.
+    (Replaces the equivalent domain.hierarchy_node case, whose table
+    migration 0006 dropped.)"""
+    settings = get_settings()
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
+    role_code = f"lbl-role-{suffix}"
 
-    et_response = client.post(
-        "/api/domain/entity_type/",
-        json={
-            "organization_id": organization_id,
-            "code": f"hn-type-{suffix}",
-            "name": "HN Type",
-            "is_abstract": False,
-        },
+    role_id = _make_role(client, auth_headers, role_code, "Label Role")
+    create_response = client.post(
+        "/api/iam/user_role/",
+        json={"user_id": admin_user_id, "role_id": role_id},
         headers=auth_headers,
     )
-    assert et_response.status_code == 201
-    entity_type_id = et_response.json()["id"]
-
-    entity_response = client.post(
-        "/api/domain/entity/",
-        json={
-            "organization_id": organization_id,
-            "entity_type_id": entity_type_id,
-            "code": f"hn-entity-{suffix}",
-            "name": f"HN Entity {suffix}",
-        },
-        headers=auth_headers,
-    )
-    assert entity_response.status_code == 201
-    entity_id = entity_response.json()["id"]
-
-    hierarchy_response = client.post(
-        "/api/domain/hierarchy/",
-        json={
-            "organization_id": organization_id,
-            "code": f"hn-hier-{suffix}",
-            "name": f"HN Hierarchy {suffix}",
-        },
-        headers=auth_headers,
-    )
-    assert hierarchy_response.status_code == 201
-    hierarchy_id = hierarchy_response.json()["id"]
-
-    node_response = client.post(
-        "/api/domain/hierarchy_node/",
-        json={"hierarchy_id": hierarchy_id, "entity_id": entity_id, "level": 0},
-        headers=auth_headers,
-    )
-    assert node_response.status_code == 201
-    node_id = node_response.json()["id"]
+    assert create_response.status_code == 201
+    user_role_id = create_response.json()["id"]
 
     options_response = client.get(
-        f"/api/domain/hierarchy_node/options?ids={node_id}", headers=auth_headers
+        f"/api/iam/user_role/options?ids={user_role_id}", headers=auth_headers
     )
     assert options_response.status_code == 200
     items = options_response.json()
     assert len(items) == 1
-    assert items[0]["label"] == f"HN Entity {suffix} in HN Hierarchy {suffix}"
+    assert items[0]["label"] == f"{settings.admin_username} / {role_code}"
 
 
 def test_user_account_label_is_username(auth_headers):
@@ -233,25 +201,24 @@ def test_user_account_label_is_username(auth_headers):
     assert items[0]["label"] == username
 
 
-def test_meta_reports_defaults_and_choices(auth_headers):
+def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
+    """The positive `choices` half of this test is gone with its tables: no
+    field on any of the seven registered tables (the four `iam` tables plus
+    schema v1's `domain`/`template`/`problem`) matches meta.py's CHOICES
+    map. What is still checked is the `default` reporting and that plain
+    text fields report neither a default nor choices."""
     client = TestClient(app)
 
     response = client.get("/api/meta/schema", headers=auth_headers)
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    problem_fields = {f["name"]: f for f in tables[("problem", "problem")]["fields"]}
-    status_field = problem_fields["status"]
-    assert status_field["default"] == "DRAFT"
-    assert "ACTIVE" in status_field["choices"]
+    organization_fields = {f["name"]: f for f in tables[("iam", "organization")]["fields"]}
 
-    attribute_definition_fields = {
-        f["name"]: f for f in tables[("domain", "attribute_definition")]["fields"]
-    }
-    data_type_field = attribute_definition_fields["data_type"]
-    assert "boolean" in data_type_field["choices"]
+    # Client-side ORM default=True is reported as a scalar default.
+    assert organization_fields["is_active"]["default"] is True
 
-    name_field = problem_fields["name"]
+    name_field = organization_fields["name"]
     assert not name_field.get("default")
     assert not name_field.get("choices")
 
@@ -263,18 +230,13 @@ def test_schema_reports_table_labels(auth_headers):
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    entity_type_table = tables[("domain", "entity_type")]
-    assert entity_type_table["label"] == "Entity type"
-    assert entity_type_table["label_plural"] == "Entity types"
+    organization_table = tables[("iam", "organization")]
+    assert organization_table["label"] == "Organization"
+    assert organization_table["label_plural"] == "Organizations"
 
-    # Irregular plurals must not just tack an "s" on.
-    entity_table = tables[("domain", "entity")]
-    assert entity_table["label"] == "Entity"
-    assert entity_table["label_plural"] == "Entities"
-
-    hierarchy_table = tables[("domain", "hierarchy")]
-    assert hierarchy_table["label"] == "Hierarchy"
-    assert hierarchy_table["label_plural"] == "Hierarchies"
+    user_account_table = tables[("iam", "user_account")]
+    assert user_account_table["label"] == "User account"
+    assert user_account_table["label_plural"] == "User accounts"
 
 
 def test_schema_reports_field_label_overrides(auth_headers):
@@ -284,16 +246,10 @@ def test_schema_reports_field_label_overrides(auth_headers):
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    relationship_fields = {f["name"]: f for f in tables[("domain", "relationship")]["fields"]}
-    assert relationship_fields["source_entity_id"]["label"] == "From"
-    assert relationship_fields["target_entity_id"]["label"] == "To"
-
-    entity_fields = {f["name"]: f for f in tables[("domain", "entity")]["fields"]}
-    assert entity_fields["entity_type_id"]["label"] == "Type"
-    assert entity_fields["organization_id"]["label"] == "Organization"
-
-    entity_type_fields = {f["name"]: f for f in tables[("domain", "entity_type")]["fields"]}
-    assert entity_type_fields["is_abstract"]["label"] == "Abstract type"
+    # FIELD_LABELS[(None, "organization_id")] -- would otherwise humanise to
+    # "Organization" anyway, but this pins that the override is consulted.
+    user_account_fields = {f["name"]: f for f in tables[("iam", "user_account")]["fields"]}
+    assert user_account_fields["organization_id"]["label"] == "Organization"
 
 
 def test_schema_field_label_falls_back_to_humanised_name(auth_headers):
@@ -306,35 +262,33 @@ def test_schema_field_label_falls_back_to_humanised_name(auth_headers):
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    relationship_fields = {f["name"]: f for f in tables[("domain", "relationship")]["fields"]}
-    assert relationship_fields["valid_from"]["label"] == "Valid from"
-    assert relationship_fields["valid_to"]["label"] == "Valid to"
+    user_account_fields = {f["name"]: f for f in tables[("iam", "user_account")]["fields"]}
+    assert user_account_fields["display_name"]["label"] == "Display name"
+    assert user_account_fields["created_at"]["label"] == "Created at"
 
-    entity_type_fields = {f["name"]: f for f in tables[("domain", "entity_type")]["fields"]}
-    assert entity_type_fields["parent_type_id"]["label"] == "Parent type"
-    assert entity_type_fields["code"]["label"] == "Code"
+    user_role_fields = {f["name"]: f for f in tables[("iam", "user_role")]["fields"]}
+    assert user_role_fields["user_id"]["label"] == "User"
+    assert user_role_fields["role_id"]["label"] == "Role"
+
+    organization_fields = {f["name"]: f for f in tables[("iam", "organization")]["fields"]}
+    assert organization_fields["code"]["label"] == "Code"
+    assert organization_fields["parent_id"]["label"] == "Parent"
 
 
-def test_schema_field_label_drops_is_prefix_and_alias_underscore(auth_headers):
-    """A boolean column should read as the thing it describes ("Runtime"),
-    not as a question ("Is runtime"), and a column aliased to dodge a
-    SQLAlchemy name collision ("metadata_") must not leak its trailing
-    underscore to the user as a stray space."""
+def test_schema_field_label_drops_is_prefix(auth_headers):
+    """A boolean column should read as the thing it describes ("Active"),
+    not as a question ("Is active")."""
     client = TestClient(app)
 
     response = client.get("/api/meta/schema", headers=auth_headers)
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    parameter_fields = {f["name"]: f for f in tables[("problem", "parameter")]["fields"]}
-    assert parameter_fields["is_runtime"]["label"] == "Runtime"
+    organization_fields = {f["name"]: f for f in tables[("iam", "organization")]["fields"]}
+    assert organization_fields["is_active"]["label"] == "Active"
 
-    constraint_fields = {f["name"]: f for f in tables[("problem", "constraint_definition")]["fields"]}
-    assert constraint_fields["is_hard"]["label"] == "Hard"
-
-    relationship_type_fields = {f["name"]: f for f in tables[("domain", "relationship_type")]["fields"]}
-    assert relationship_type_fields["metadata_"]["label"] == "Metadata"
-    assert relationship_type_fields["is_directed"]["label"] == "Directed"
+    user_account_fields = {f["name"]: f for f in tables[("iam", "user_account")]["fields"]}
+    assert user_account_fields["is_active"]["label"] == "Active"
 
 
 def test_schema_field_keeps_all_existing_keys(auth_headers):
@@ -346,7 +300,9 @@ def test_schema_field_keeps_all_existing_keys(auth_headers):
     assert response.status_code == 200
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
-    code_field = next(f for f in tables[("domain", "entity_type")]["fields"] if f["name"] == "code")
+    code_field = next(
+        f for f in tables[("iam", "organization")]["fields"] if f["name"] == "code"
+    )
     expected_keys = {
         "name",
         "type",
@@ -379,19 +335,14 @@ def test_meta_counts_reports_one_entry_per_table_and_increments(auth_headers):
     assert len(counts) == len(TABLE_REGISTRY)
 
     by_table = {(c["schema"], c["table"]): c for c in counts}
-    role_type_before = by_table[("domain", "role_type")]
-    assert isinstance(role_type_before["total"], int)
-    assert role_type_before["label_plural"] == "Role types"
+    role_before = by_table[("iam", "role")]
+    assert isinstance(role_before["total"], int)
+    assert role_before["label_plural"] == "Roles"
 
     suffix = uuid.uuid4().hex[:8]
-    create_response = client.post(
-        "/api/domain/role_type/",
-        json={"code": f"cnt-{suffix}", "name": f"Count Test {suffix}"},
-        headers=auth_headers,
-    )
-    assert create_response.status_code == 201
+    _make_role(client, auth_headers, f"cnt-{suffix}", f"Count Test {suffix}")
 
     response_after = client.get("/api/meta/counts", headers=auth_headers)
     assert response_after.status_code == 200
     by_table_after = {(c["schema"], c["table"]): c for c in response_after.json()}
-    assert by_table_after[("domain", "role_type")]["total"] == role_type_before["total"] + 1
+    assert by_table_after[("iam", "role")]["total"] == role_before["total"] + 1

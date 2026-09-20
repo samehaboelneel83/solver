@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./Dashboard";
+import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -27,8 +28,10 @@ const counts = [
   { schema: "iam", table: "organization", label_plural: "Organizations", total: 3 },
 ];
 
+// v1's `problem` is a public-schema table with `name`, `owner` and
+// `created_at` -- no `code`, and no `status` (both were v0 columns).
 const recentProblems = {
-  items: [{ id: "p1", code: "gap-fix", name: "Reduce staffing gaps", status: "DRAFT" }],
+  items: [{ id: 31, domain_id: 7, name: "Reduce staffing gaps", owner: "ops", created_at: "2026-09-19T09:00:00Z" }],
   total: 1,
 };
 
@@ -40,7 +43,7 @@ function mockDefaultResponses() {
     if (path === "/api/meta/counts") {
       return Promise.resolve(counts);
     }
-    if (path.startsWith("/api/problem/problem")) {
+    if (path.startsWith("/api/problem/")) {
       return Promise.resolve(recentProblems);
     }
     return Promise.reject(new Error(`unexpected path ${path}`));
@@ -50,14 +53,15 @@ function mockDefaultResponses() {
 describe("Dashboard", () => {
   beforeEach(() => {
     (apiFetch as any).mockReset();
+    localStorage.removeItem(DOMAIN_STORAGE_KEY);
     mockDefaultResponses();
   });
 
   it("renders the three entry points a new user can start from (A-1)", async () => {
     renderWithProviders();
 
-    expect(await screen.findByRole("link", { name: "Domain model" })).toHaveAttribute("href", "/domain/entity");
-    expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/problem/problem");
+    expect(await screen.findByRole("link", { name: "Domain model" })).toHaveAttribute("href", "/entity-types");
+    expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
     expect(screen.getByRole("link", { name: "Graph" })).toHaveAttribute("href", "/graph");
   });
 
@@ -65,10 +69,18 @@ describe("Dashboard", () => {
     renderWithProviders();
 
     const link = await screen.findByRole("link", { name: /reduce staffing gaps/i });
-    expect(link).toHaveAttribute("href", "/problem/problem/p1");
+    expect(link).toHaveAttribute("href", "/public/problem/31");
 
-    const problemCalls = (apiFetch as any).mock.calls.filter(([path]: [string]) => path.startsWith("/api/problem/problem"));
+    // The v1 route (Ruling 27): `problem` lives in `public`, so the generic
+    // path collapses to `/api/problem/`. The v0 `/api/problem/problem/` the
+    // dashboard used to ask for was redirected to a portless host and failed
+    // in the browser (Task 10's carry-forward).
+    const problemCalls = (apiFetch as any).mock.calls.filter(([path]: [string]) => path.startsWith("/api/problem/"));
     expect(problemCalls.length).toBe(1);
+    expect(problemCalls[0][0]).not.toContain("/api/problem/problem");
+    // "Recent": newest first, which is what makes the panel worth reading.
+    expect(problemCalls[0][0]).toContain("order_by=created_at");
+    expect(problemCalls[0][0]).toContain("order=desc");
   });
 
   it("renders each row count as a link to that table's list, from a single counts request (A-2)", async () => {
@@ -101,14 +113,31 @@ describe("Dashboard", () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
       if (path === "/api/meta/counts") return Promise.resolve(counts);
-      if (path.startsWith("/api/problem/problem")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
 
     renderWithProviders();
 
     expect(await screen.findByText("No problems yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "New problem" })).toHaveAttribute("href", "/problem/problem/new");
+    expect(screen.getByRole("link", { name: "New problem" })).toHaveAttribute("href", "/public/problem/new");
+  });
+
+  it("scopes recent problems to the selected domain", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    renderWithProviders();
+
+    await screen.findByRole("link", { name: /reduce staffing gaps/i });
+    const problemCall = (apiFetch as any).mock.calls.find(([path]: [string]) => path.startsWith("/api/problem/"));
+    expect(problemCall[0]).toContain("f_domain_id=7");
+  });
+
+  it("asks for every domain's problems when no domain is selected", async () => {
+    renderWithProviders();
+
+    await screen.findByRole("link", { name: /reduce staffing gaps/i });
+    const problemCall = (apiFetch as any).mock.calls.find(([path]: [string]) => path.startsWith("/api/problem/"));
+    expect(problemCall[0]).not.toContain("f_domain_id");
   });
 
   it("still renders a sensible row-counts panel when every table is genuinely empty (A-5)", async () => {
@@ -117,7 +146,7 @@ describe("Dashboard", () => {
       if (path === "/api/meta/counts") {
         return Promise.resolve([{ schema: "domain", table: "entity", label_plural: "Entities", total: 0 }]);
       }
-      if (path.startsWith("/api/problem/problem")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
 

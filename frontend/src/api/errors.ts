@@ -1,6 +1,37 @@
 import { ApiError } from "./client";
 
-type ValidationDetail = { loc?: (string | number)[]; msg?: string };
+/**
+ * The phrase `app/api/concurrency.py` puts in the 409 it refuses a save
+ * built on a superseded read with (Ruling 42). It is a wire contract:
+ * `backend/app/api/concurrency.py::STALE_PREFIX` holds the same string and
+ * both sides' tests assert it.
+ *
+ * Matching on text is not the first choice, but a 409 body is
+ * `{"detail": "<text>"}` and has nowhere else to carry a discriminator --
+ * only the 422 list shape has `kind` (Ruling 19), and giving this one case
+ * an object `detail` would leave the API with a third body shape for a
+ * client to sniff. The precedent is already here: the entity form tells
+ * `UNIQUE (entity_type_id, key)` apart the same way.
+ */
+export const STALE_RECORD_PHRASE = "changed by someone else";
+
+/**
+ * True when a save was refused because the record moved on since it was
+ * read -- as opposed to the other 409 a save can get, a unique-key
+ * collision, which is a field error the form pins to a control.
+ */
+export function isStaleRecordError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  return formatApiError(err).includes(STALE_RECORD_PHRASE);
+}
+
+/** One entry of a 422's `detail` list. Every 422 the backend sends has
+ * this shape (Ruling 19): FastAPI's own validation errors, and schema v1's
+ * database validation triggers, which `translate_db_error` emits in the
+ * same shape plus a machine-readable `kind` (`unknown_attribute`, `cycle`,
+ * `parameter_index`, ...). `kind` is for code that needs to branch on the
+ * failure; it is never shown to the user. */
+type ValidationDetail = { loc?: (string | number)[]; msg?: string; kind?: string };
 
 function tryParseJson(text: string): unknown {
   try {
@@ -14,18 +45,24 @@ const LEADING_LOC_SEGMENTS = new Set(["body", "query", "path"]);
 
 /** FastAPI's `loc` is e.g. ["body", "attributes", "rank"] (a leading
  * request-part marker, then the field path). Strip that marker and join
- * the rest with "." (`attributes.rank`); if nothing is left after
- * stripping (or `loc` is missing/empty), fall back to its last segment. */
+ * the rest with "." (`attributes.rank`). Returns "" when nothing names a
+ * field: a `loc` of bare ["body"] (a model-level validator, or a trigger
+ * payload with no `field`) blames the request as a whole, and "body" is
+ * request plumbing, not a field name to show the user. A missing or empty
+ * `loc` keeps its "value" label. */
 function fieldNameFromLoc(loc: (string | number)[] | undefined): string {
   if (!Array.isArray(loc) || loc.length === 0) return "value";
   const segments = loc.map(String);
   const rest = LEADING_LOC_SEGMENTS.has(segments[0]) ? segments.slice(1) : segments;
-  return (rest.length > 0 ? rest : segments).join(".");
+  return rest.join(".");
 }
 
 /**
  * The single place error objects get turned into user-facing text.
- * - 422 (validation): one line per field, "<field>: <msg>", joined with "\n".
+ * - 422 (validation): one line per field, "<field>: <msg>", joined with "\n",
+ *   or just "<msg>" when `loc` names no field. Database trigger failures
+ *   take this path too: since Ruling 19 they arrive in the same list shape,
+ *   with `kind` as an extra key that is deliberately not rendered.
  * - 409/404/400 with a string `detail`: that string verbatim.
  * - 5xx: a generic "try again" message (the raw body is not shown).
  * - anything else that is an ApiError with a non-string, non-array `detail`
@@ -43,13 +80,20 @@ export function formatApiError(err: unknown): string {
     const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
 
     if (err.status === 422 && Array.isArray(detail)) {
-      const lines = (detail as ValidationDetail[]).map(
-        (d) => `${fieldNameFromLoc(d.loc)}: ${d.msg ?? "Invalid value"}`
-      );
+      const lines = (detail as ValidationDetail[]).map((d) => {
+        const field = fieldNameFromLoc(d.loc);
+        const msg = d.msg ?? "Invalid value";
+        return field ? `${field}: ${msg}` : msg;
+      });
       if (lines.length > 0) {
         return lines.join("\n");
       }
     }
+
+    // Task 6 added a second 422 branch here for the database triggers'
+    // object `detail`. Ruling 19 moved those onto the list shape above, so
+    // it is gone: an object `detail` now takes the generic path below like
+    // any other unrecognised body.
 
     if (typeof detail === "string") {
       return detail;

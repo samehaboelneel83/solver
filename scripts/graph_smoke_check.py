@@ -1,12 +1,30 @@
-"""Full-stack smoke check for the Graph Editor sub-project.
+"""Full-stack smoke check for the Graph Editor, schema v1.
 
-Assumes the platform stack is already up (`docker compose up -d`) and
-migrated, and that the frontend/backend images have been rebuilt to
-include this sub-project's code. Run the graph demo seed first:
-    docker compose exec -T backend python -m app.seed_graph_demo
-Then run this script from the host:
+Rewritten for schema v1 in Task 15. The v0 version called
+`/api/graph/domain?organization_id=` and the graph's own node/edge write
+routes; Task 7 replaced the read with `/api/v1/graph?domain_id=` and
+**deleted** the writes, so the editor now writes through
+`/api/v1/entities` and `/api/v1/relationships`. It also pointed at
+`localhost:8010`/`3010`, which is the *user's* running stack; the default
+here is the isolated verification stack on `8011`/`3011` instead, and
+both are overridable.
+
+Run the seed first, then this from the host:
+
+    docker exec -e PYTHONPATH=/app solver-e2e-backend python -m app.seed
     python scripts/graph_smoke_check.py
-(use `python3` instead if that's what resolves on your machine)
+
+Environment: `SMOKE_API_URL` (default http://localhost:8011),
+`SMOKE_WEB_URL` (default http://localhost:3011), `ADMIN_USERNAME`,
+`ADMIN_PASSWORD`.
+
+What it checks, all against the seeded Workforce demo: the graph read
+returns the demo's nodes, edges, types and hierarchies; hierarchy
+placement turns `reports_to` rows into compound parents; a new entity and
+a new relationship can be created through the v1 routers; the
+`entity_validate` and `relationship_validate` triggers still refuse bad
+data with a 422 naming the field; and the frontend serves `/graph`. It
+cleans up everything it creates.
 """
 import json
 import os
@@ -14,10 +32,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE_URL = "http://localhost:8010"
-FRONTEND_URL = "http://localhost:3010"
+BASE_URL = os.environ.get("SMOKE_API_URL", "http://localhost:8011").rstrip("/")
+FRONTEND_URL = os.environ.get("SMOKE_WEB_URL", "http://localhost:3011").rstrip("/")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me-admin")
+
+DOMAIN_NAME = "Workforce"
 
 
 def request(method, path, token=None, body=None):
@@ -33,6 +53,16 @@ def request(method, path, token=None, body=None):
         return json.loads(raw) if raw else None
 
 
+def expect_error(method, path, token=None, body=None, status=422):
+    """Assert the call fails with `status`, and return the parsed body."""
+    try:
+        request(method, path, token=token, body=body)
+    except urllib.error.HTTPError as exc:
+        assert exc.code == status, f"expected {status}, got {exc.code}"
+        return json.loads(exc.read())
+    raise AssertionError(f"expected a {status} from {method} {path}, it succeeded instead")
+
+
 def login(username, password):
     body = urllib.parse.urlencode({"username": username, "password": password}).encode()
     req = urllib.request.Request(f"{BASE_URL}/api/auth/login", data=body, method="POST")
@@ -41,96 +71,142 @@ def login(username, password):
 
 
 def main():
-    print("== Logging in ==")
+    print(f"== Logging in at {BASE_URL} ==")
     token = login(ADMIN_USERNAME, ADMIN_PASSWORD)
 
-    print("== Resolving the default organization ==")
-    orgs = request("GET", "/api/iam/organization/?limit=50&offset=0", token=token)
-    org_id = next(o["id"] for o in orgs["items"] if o["code"] == "default")
+    print(f"== Resolving the {DOMAIN_NAME!r} domain ==")
+    domains = request("GET", "/api/domain/?limit=100&offset=0", token=token)
+    domain = next(
+        (d for d in domains["items"] if d["name"] == DOMAIN_NAME),
+        None,
+    )
+    assert domain is not None, (
+        f"domain {DOMAIN_NAME!r} not found -- run the seed first: "
+        "docker exec -e PYTHONPATH=/app solver-e2e-backend python -m app.seed"
+    )
+    domain_id = domain["id"]
 
-    print("== Fetching the domain graph and confirming seeded demo data is present ==")
-    graph = request("GET", f"/api/graph/domain?organization_id={org_id}", token=token)
+    print("== Reading the domain graph and confirming the seeded demo is present ==")
+    graph = request("GET", f"/api/v1/graph?domain_id={domain_id}", token=token)
     labels = {n["label"] for n in graph["nodes"]}
-    assert "Ahmed" in labels, f"Ahmed not found in nodes: {labels}"
-    assert len(graph["edges"]) >= 3, f"expected at least 3 demo relationships, got {len(graph['edges'])}"
+    assert "Ahmed Salah" in labels, f"seeded employee not found in nodes: {sorted(labels)[:10]}"
+    assert len(graph["edges"]) >= 5, f"expected the seeded relationships, got {len(graph['edges'])}"
 
-    employee_type = next(t for t in graph["entity_types"] if t["code"] == "employee-demo")
-    works_for_type = next(t for t in graph["relationship_types"] if t["code"] == "works_for-demo")
-    hierarchy = next(h for h in graph["hierarchies"] if h["code"] == "org-chart-demo")
-    unit_node = next(n for n in graph["nodes"] if n["type"] == "unit-demo")
+    employee_type = next(t for t in graph["entity_types"] if t["name"] == "employee")
+    works_in = next(t for t in graph["relationship_types"] if t["name"] == "works_in")
+    reports_to = next(h for h in graph["hierarchies"] if h["name"] == "reports_to")
 
-    print("== Creating a node via the Graph API (with hierarchy placement) ==")
-    node = request(
-        "POST",
-        "/api/graph/domain/nodes",
+    print("== Confirming types carry their colours (Task 14b) ==")
+    assert employee_type["colour"], "entity_type.colour missing from the graph payload"
+    assert works_in["colour"], "relationship_type.colour missing from the graph payload"
+
+    print("== Confirming hierarchy placement makes `reports_to` rows compound parents ==")
+    placed = request(
+        "GET",
+        f"/api/v1/graph?domain_id={domain_id}&hierarchy_type_id={reports_to['id']}",
         token=token,
-        body={
-            "organization_id": org_id,
-            "entity_type_id": employee_type["id"],
-            "name": "Smoke Test Person",
-            "hierarchy_id": hierarchy["id"],
-        },
     )
-    assert node["label"] == "Smoke Test Person"
-    assert node["parent"] is None
+    parents = {n["id"]: n["parent"] for n in placed["nodes"]}
+    assert any(p is not None for p in parents.values()), "no node was given a parent"
+    unplaced = {n["id"]: n["parent"] for n in graph["nodes"]}
+    assert all(p is None for p in unplaced.values()), "parents set without a hierarchy_type_id"
 
-    print("== Creating an edge via the Graph API (type-validated) ==")
-    edge = request(
-        "POST",
-        "/api/graph/domain/edges",
-        token=token,
-        body={
-            "relationship_type_id": works_for_type["id"],
-            "source_entity_id": node["id"],
-            "target_entity_id": unit_node["id"],
-        },
-    )
-    assert edge["type"] == "works_for-demo"
+    depot = next(n for n in placed["nodes"] if n["label"] == "North Depot")
+    region = next(n for n in placed["nodes"] if n["label"] == "North Region")
+    assert depot["parent"] == region["id"], "North Depot is not under North Region"
 
-    print("== Updating the node's status via PATCH ==")
-    updated = request("PATCH", f"/api/graph/domain/nodes/{node['id']}", token=token, body={"status": "ACTIVE"})
-    assert updated["attributes"]["status"] == "ACTIVE"
-
-    print("== Rejecting a non-numeric value for a typed (number) attribute (422) ==")
+    created_entity = created_relationship = None
     try:
-        request(
-            "PATCH",
-            f"/api/graph/domain/nodes/{node['id']}",
+        print("== Rejecting an unknown attribute (entity_validate -> 422) ==")
+        body = expect_error(
+            "POST",
+            "/api/v1/entities",
             token=token,
-            body={"attributes": {"rank": "not a number"}},
+            body={
+                "entity_type_id": int(employee_type["id"]),
+                "key": "smoke_bad",
+                "attrs": {"full_name": "Smoke", "nonesuch": 1},
+            },
         )
-        raise AssertionError("expected a 422 for a non-numeric rank, PATCH succeeded instead")
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 422, f"expected 422, got {exc.code}"
+        assert isinstance(body["detail"], list), "Ruling 19: every 422 is list-shaped"
+        assert body["detail"][0]["loc"][-1] == "nonesuch", body["detail"]
 
-    print("== Accepting a numeric value for a typed (number) attribute ==")
-    updated = request(
-        "PATCH", f"/api/graph/domain/nodes/{node['id']}", token=token, body={"attributes": {"rank": 5}}
-    )
-    rank = updated["attributes"]["rank"]
-    assert rank == 5, f"expected rank 5, got {rank!r}"
-    assert isinstance(rank, (int, float)) and not isinstance(rank, bool), (
-        f"expected rank to come back as a JSON number, got {type(rank).__name__}"
-    )
+        print("== Creating an entity through /api/v1/entities ==")
+        created_entity = request(
+            "POST",
+            "/api/v1/entities",
+            token=token,
+            body={
+                "entity_type_id": int(employee_type["id"]),
+                "key": "smoke_person",
+                "label": "Smoke Test Person",
+                "attrs": {"full_name": "Smoke Test Person", "hours_per_week": 12},
+            },
+        )
+        # attribute_def defaults are materialised by the trigger, not by us.
+        assert created_entity["attrs"]["grade"] == "mid", created_entity["attrs"]
+        assert created_entity["attrs"]["hours_per_week"] == 12
 
-    print("== Confirming delete is blocked (409) while the node still has an edge ==")
-    try:
-        request("DELETE", f"/api/graph/domain/nodes/{node['id']}", token=token)
-        raise AssertionError("expected a 409 conflict, delete succeeded instead")
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 409, f"expected 409, got {exc.code}"
-        body = json.loads(exc.read())
-        assert isinstance(body["detail"], str), (
-            f"expected a plain string 409 detail, got {type(body['detail']).__name__}: {body['detail']!r}"
+        print("== Creating a relationship through /api/v1/relationships ==")
+        head_office = next(n for n in graph["nodes"] if n["label"] == "Head Office")
+        created_relationship = request(
+            "POST",
+            "/api/v1/relationships",
+            token=token,
+            body={
+                "relationship_type_id": int(works_in["id"]),
+                "from_entity_id": created_entity["id"],
+                "to_entity_id": int(head_office["id"]),
+            },
         )
 
-    print("== Deleting the edge, then the now-unreferenced node ==")
-    request("DELETE", f"/api/graph/domain/edges/{edge['id']}", token=token)
-    request("DELETE", f"/api/graph/domain/nodes/{node['id']}", token=token)
+        print("== Refusing a second works_in for the same employee (cardinality -> 422) ==")
+        north = next(n for n in graph["nodes"] if n["label"] == "North Region")
+        body = expect_error(
+            "POST",
+            "/api/v1/relationships",
+            token=token,
+            body={
+                "relationship_type_id": int(works_in["id"]),
+                "from_entity_id": created_entity["id"],
+                "to_entity_id": int(north["id"]),
+            },
+        )
+        assert any(d.get("kind") == "cardinality" for d in body["detail"]), body["detail"]
 
-    print("== Confirming the frontend serves the /graph route ==")
-    req = urllib.request.Request(f"{FRONTEND_URL}/graph")
-    with urllib.request.urlopen(req) as response:
+        print("== Refusing an edge whose endpoints have the wrong types (422) ==")
+        expect_error(
+            "POST",
+            "/api/v1/relationships",
+            token=token,
+            body={
+                "relationship_type_id": int(works_in["id"]),
+                "from_entity_id": int(head_office["id"]),
+                "to_entity_id": int(north["id"]),
+            },
+        )
+
+        print("== Confirming the new node and edge appear in the graph ==")
+        after = request("GET", f"/api/v1/graph?domain_id={domain_id}", token=token)
+        assert "Smoke Test Person" in {n["label"] for n in after["nodes"]}
+        assert len(after["edges"]) == len(graph["edges"]) + 1
+    finally:
+        if created_relationship is not None:
+            request(
+                "DELETE",
+                f"/api/v1/relationships/{created_relationship['id']}",
+                token=token,
+            )
+        if created_entity is not None:
+            request("DELETE", f"/api/v1/entities/{created_entity['id']}", token=token)
+
+    print("== Confirming the graph is back to its seeded state ==")
+    restored = request("GET", f"/api/v1/graph?domain_id={domain_id}", token=token)
+    assert len(restored["nodes"]) == len(graph["nodes"])
+    assert len(restored["edges"]) == len(graph["edges"])
+
+    print(f"== Confirming {FRONTEND_URL} serves the /graph route ==")
+    with urllib.request.urlopen(urllib.request.Request(f"{FRONTEND_URL}/graph")) as response:
         assert response.status == 200
 
     print("== All graph smoke checks passed ==")

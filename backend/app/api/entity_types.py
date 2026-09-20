@@ -1,0 +1,523 @@
+"""Entity types and their attribute definitions.
+
+The first of schema v1's purpose-built routers. An `entity_type` and its
+`attribute_def` rows are a single thing to a user -- "what an employee is"
+-- so the read model embeds the attributes, and the attributes get their
+own nested write routes rather than a separate top-level resource.
+
+    GET    /api/v1/entity-types                    ?domain_id=&limit=&offset=
+    POST   /api/v1/entity-types
+    GET    /api/v1/entity-types/{id}
+    PATCH  /api/v1/entity-types/{id}
+    DELETE /api/v1/entity-types/{id}
+    GET    /api/v1/entity-types/{id}/attributes
+    POST   /api/v1/entity-types/{id}/attributes
+    PATCH  /api/v1/attributes/{id}
+    DELETE /api/v1/attributes/{id}
+
+Schemas are hand-written rather than produced by `make_crud_schemas`: the
+generator mirrors columns, and these two tables carry rules that are not
+columns (the name patterns, `name <> 'id'`, the data_type/enum_values
+pairing, the read model's embedded `attributes`).
+
+Which layer answers which failure
+---------------------------------
+Two different 422 bodies are available on this platform, and mixing them
+for one status code would make the contract unreadable, so this module
+picks one and applies it to **every** field with a database-level CHECK:
+
+1. **FastAPI's validation-error shape** -- `{"detail": [{"loc", "msg",
+   "type"}, ...]}` -- for everything the request layer can decide on its
+   own: the `^[a-z][a-z0-9_]*$` names, `attribute_def.name <> 'id'`, the
+   `(data_type = 'enum') = (enum_values IS NOT NULL)` pairing, and the two
+   enum-typed columns (`role`, `data_type`).
+
+2. **`translate_db_error`** -- for everything only the database knows: the
+   two UNIQUE constraints and the `domain_id` foreign key, which come back
+   as 409s with a string `detail`.
+
+Why not leave (1) to the database and let `translate_db_error` shape it?
+Because it cannot produce a 422 for these at all. `translate_db_error`'s
+422 (a list-shaped item carrying `kind`, since Ruling 19) is driven by a
+JSON `DETAIL` payload that
+only the three DOMAIN validation *triggers* emit (`entity_validate`,
+`relationship_validate`, `parameter_value_validate` -- migration 0006).
+Neither table has a trigger that judges a *write* to it: their rules are
+plain table CHECKs, which arrive as SQLSTATE 23514 with **no** DETAIL, and
+`translate_db_error` maps those to a generic **409**. Letting the database
+answer would therefore mean `name="Employee"` returns 409 with a message
+about a constraint name, not a 422 naming the field. (Migration 0009 put
+one trigger *on* `entity_type` -- `entity_type_guard` -- but it judges
+DELETEs and domain moves, not the column values this section is about; see
+the DELETE route below.)
+
+Migration 0009 added three more CHECKs. Two are shadowed here, so they are
+422s naming their field: `attribute_def_default_value_matches_type` (a
+`default_value` its own `data_type` would reject -- Task 14b, restated as
+`_check_default_value`) and the `colour ~ '^#[0-9a-f]{6}$'` pattern on
+`entity_type.colour` (`app.api.validation.validate_colour`, which also
+normalises case). One is not: `attribute_def_enum_values_not_empty` (an
+`enum` whose list is empty) still reaches the client as the generic 409.
+
+The cost is that this router no longer reaches those CHECKs. They remain
+the backstop for every other writer -- the seed, a migration, psql, a
+future worker -- and `test_api_entity_types.py` asserts one of them still
+fires on a direct insert, so a shadowed constraint cannot be quietly
+dropped later. The request-layer rules are deliberately at least as strict
+as the CHECKs they shadow (see `app.api.validation.validate_name`).
+"""
+
+from datetime import datetime
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, field_validator
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from app.api.concurrency import check_not_stale
+from app.api.deps import get_current_user
+from app.api.validation import field_error, validate_colour, validate_name
+from app.core.db import get_db
+from app.crud.db_errors import translate_db_error
+from app.models.iam import UserAccount
+from app.models.v1_domain import AttributeDef, EntityType
+
+router = APIRouter(prefix="/api/v1", tags=["entity types"])
+
+# The two enum types the DDL declares. Spelled out as Literals rather than
+# left as `str`, because an unknown label is not a CHECK violation: it
+# reaches the driver as SQLSTATE 22P02 (invalid_text_representation), which
+# `translate_db_error` re-raises untouched -- i.e. a 500. A Literal turns it
+# into a 422 naming the field, like every other bad value here.
+EntityRole = Literal["agent", "resource", "time", "location", "task", "org", "other"]
+AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date"]
+
+
+def _validate_attribute_name(value: str | None) -> str | None:
+    value = validate_name(value)
+    # attribute_def's CHECK is `name ~ '...' AND name <> 'id'`. 'id' matches
+    # the pattern, so this half needs its own rejection.
+    if value == "id":
+        raise ValueError(
+            "the name 'id' is reserved: every entity already has an id, and an "
+            "attribute called 'id' would shadow it in model expressions"
+        )
+    return value
+
+
+def _check_enum_pairing(data_type: str, enum_values: list[str] | None) -> None:
+    """`CHECK ((data_type = 'enum') = (enum_values IS NOT NULL))`.
+
+    Deliberately a function called from the route rather than a Pydantic
+    model validator: PATCH has to check the **merged** row (a PATCH naming
+    only `data_type` still has to be judged against the stored
+    `enum_values`), and a model validator only ever sees the payload. One
+    implementation for both verbs means the two cannot drift, and blaming
+    `enum_values` keeps the error attached to a real field -- a model-level
+    validator's `loc` is just `["body"]`.
+    """
+    if data_type == "enum" and enum_values is None:
+        raise field_error(
+            "enum_values",
+            "an attribute of type 'enum' must list its allowed values",
+            enum_values,
+        )
+    if data_type != "enum" and enum_values is not None:
+        raise field_error(
+            "enum_values",
+            f"enum_values is only meaningful for data_type 'enum', not {data_type!r}",
+            enum_values,
+        )
+
+
+def _default_value_matches(data_type: str, enum_values: list[str] | None, value: Any) -> bool:
+    """`attr_value_matches_type(data_type, enum_values, value)` from
+    migration 0009, restated in Python.
+
+    The SQL function judges the **jsonb** value, so the branches here are
+    about JSON types, not Python ones -- which is why `bool` is excluded
+    from the numeric branches: `jsonb_typeof(true)` is `'boolean'`, while
+    in Python `isinstance(True, int)` is True and an integer attribute
+    would silently accept `true`.
+    """
+    if isinstance(value, bool):
+        # Settled first, so the two numeric branches below cannot see it.
+        return data_type == "boolean"
+    if data_type == "boolean":
+        return False
+    if data_type in ("integer", "number"):
+        if not isinstance(value, (int, float)):
+            return False
+        # `'integer'` in SQL is `(value)::numeric % 1 = 0`, i.e. a whole
+        # number however it was spelled -- `5.0` passes, `2.5` does not.
+        return data_type == "number" or (value % 1 == 0)
+    if data_type == "enum":
+        return isinstance(value, str) and value in (enum_values or [])
+    # text, time and date are all `jsonb_typeof(value) = 'string'` in the
+    # SQL function's ELSE branch. It does not parse a time or a date, and
+    # neither does this: shadowing a CHECK more strictly than the CHECK
+    # would refuse values the database accepts from every other writer.
+    return isinstance(value, str)
+
+
+def _check_default_value(
+    data_type: str, enum_values: list[str] | None, default_value: Any
+) -> None:
+    """``CHECK (default_value IS NULL OR attr_value_matches_type(...))``
+    (migration 0009, Ruling 32 rule 8), shadowed here so a wrong default is
+    a **422 naming `default_value`** instead of the generic 409 a bare
+    CHECK produces -- Task 14a carried this over explicitly.
+
+    Judged on the merged row for the same reason as
+    :func:`_check_enum_pairing`: a PATCH naming only `data_type` still has
+    to be judged against the stored default, and a PATCH dropping a value
+    from `enum_values` can orphan one.
+
+    `None` is *not* a candidate: it is SQL NULL, i.e. "no default", which
+    the CHECK's own first branch exempts. Note the explicit `is None` --
+    `if not default_value` would refuse `0` and `false`, which are ordinary
+    legal defaults (Task 12's falsy round-trip).
+    """
+    if default_value is None:
+        return
+    if _default_value_matches(data_type, enum_values, default_value):
+        return
+    if data_type == "enum":
+        allowed = ", ".join(repr(v) for v in (enum_values or [])) or "(none listed)"
+        message = f"an enum attribute's default must be one of its allowed values: {allowed}"
+    else:
+        message = (
+            f"a default for a {data_type!r} attribute must be a {_DEFAULT_SHAPE[data_type]}"
+        )
+    raise field_error("default_value", message, default_value)
+
+
+_DEFAULT_SHAPE = {
+    "integer": "whole number",
+    "number": "number",
+    "boolean": "true or false",
+    "text": "string",
+    "time": "string",
+    "date": "string",
+}
+
+
+# --- schemas ---------------------------------------------------------------
+
+
+class AttributeDefRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    entity_type_id: int
+    name: str
+    data_type: AttrType
+    required: bool
+    unit: str | None
+    enum_values: list[str] | None
+    default_value: Any | None
+
+
+class AttributeDefCreate(BaseModel):
+    name: str
+    data_type: AttrType
+    required: bool = False
+    unit: str | None = None
+    enum_values: list[str] | None = None
+    default_value: Any | None = None
+
+    _check_name = field_validator("name")(_validate_attribute_name)
+
+
+class AttributeDefUpdate(BaseModel):
+    """Every field optional; `model_dump(exclude_unset=True)` is what
+    distinguishes "not supplied" from an explicit `null` (which is how an
+    enum attribute's `enum_values` would be cleared)."""
+
+    name: str | None = None
+    data_type: AttrType | None = None
+    required: bool | None = None
+    unit: str | None = None
+    enum_values: list[str] | None = None
+    default_value: Any | None = None
+
+    _check_name = field_validator("name")(_validate_attribute_name)
+
+
+class EntityTypeRead(BaseModel):
+    id: int
+    domain_id: int
+    name: str
+    role: EntityRole
+    # Migration 0009. NULL means "not chosen": the graph assigns a
+    # deterministic fallback, and inventing one here would make "no colour"
+    # unexpressible on the wire.
+    colour: str | None
+    # A type and its attributes are edited as one thing, so the read model
+    # carries both -- on the list route too, which is what lets the UI show
+    # "employee (3 attributes)" without an N+1 of follow-up requests.
+    attributes: list[AttributeDefRead]
+    # Migration 0010, Ruling 42. The type's OWN row only: an attribute
+    # definition is created, edited and deleted through its own routes,
+    # each of which is a single-field write the form issues immediately,
+    # so nothing about them is built on a stale read of this row.
+    updated_at: datetime
+
+
+class EntityTypeCreate(BaseModel):
+    domain_id: int
+    name: str
+    # Mirrors the column's server default, so the field can be omitted.
+    role: EntityRole = "other"
+    colour: str | None = None
+
+    _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
+
+
+class EntityTypeUpdate(BaseModel):
+    """`model_dump(exclude_unset=True)` is what distinguishes "not
+    supplied" from an explicit `null`, which is the only way to clear a
+    colour."""
+
+    name: str | None = None
+    role: EntityRole | None = None
+    colour: str | None = None
+    # Ruling 42 -- the `updated_at` the client last read, popped before
+    # the rest are assigned. See `app/api/concurrency.py`.
+    updated_at: datetime | None = None
+
+    _check_name = field_validator("name")(validate_name)
+    _check_colour = field_validator("colour")(validate_colour)
+
+
+class EntityTypeList(BaseModel):
+    items: list[EntityTypeRead]
+    total: int
+
+
+# --- helpers ---------------------------------------------------------------
+
+
+def _attributes_for(db: Session, entity_type_ids: list[int]) -> dict[int, list[AttributeDef]]:
+    """All attribute defs for the given types, in one query, grouped by type
+    and ordered by name -- so the list route stays two queries regardless of
+    how many types it returns."""
+    if not entity_type_ids:
+        return {}
+    rows = (
+        db.query(AttributeDef)
+        .filter(AttributeDef.entity_type_id.in_(entity_type_ids))
+        .order_by(AttributeDef.name.asc())
+        .all()
+    )
+    grouped: dict[int, list[AttributeDef]] = {type_id: [] for type_id in entity_type_ids}
+    for row in rows:
+        grouped[row.entity_type_id].append(row)
+    return grouped
+
+
+def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityTypeRead:
+    return EntityTypeRead(
+        id=entity_type.id,
+        domain_id=entity_type.domain_id,
+        name=entity_type.name,
+        role=entity_type.role,
+        colour=entity_type.colour,
+        updated_at=entity_type.updated_at,
+        attributes=[AttributeDefRead.model_validate(a) for a in attributes],
+    )
+
+
+def _read_one(db: Session, entity_type: EntityType) -> EntityTypeRead:
+    return _read(entity_type, _attributes_for(db, [entity_type.id]).get(entity_type.id, []))
+
+
+def _get_entity_type(db: Session, entity_type_id: int, *, for_update: bool = False) -> EntityType:
+    # See `entities.py::_get_entity` for why the lock is conditional.
+    entity_type = (
+        db.get(EntityType, entity_type_id, with_for_update=True)
+        if for_update
+        else db.get(EntityType, entity_type_id)
+    )
+    if entity_type is None:
+        raise HTTPException(status_code=404, detail="entity type not found")
+    return entity_type
+
+
+def _get_attribute(db: Session, attribute_id: int) -> AttributeDef:
+    attribute = db.get(AttributeDef, attribute_id)
+    if attribute is None:
+        raise HTTPException(status_code=404, detail="attribute definition not found")
+    return attribute
+
+
+def _commit(db: Session, table: str) -> None:
+    try:
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        raise translate_db_error(exc, table) from exc
+
+
+# --- entity types ----------------------------------------------------------
+
+
+@router.get("/entity-types")
+def list_entity_types(
+    domain_id: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> EntityTypeList:
+    query = db.query(EntityType)
+    if domain_id is not None:
+        query = query.filter(EntityType.domain_id == domain_id)
+    total = query.count()
+    # `name` is unique per domain but not globally, so `id` is appended as a
+    # tiebreaker -- without a total order, offset pagination can skip or
+    # repeat rows across pages.
+    rows = (
+        query.order_by(EntityType.name.asc(), EntityType.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    grouped = _attributes_for(db, [row.id for row in rows])
+    return EntityTypeList(
+        items=[_read(row, grouped.get(row.id, [])) for row in rows], total=total
+    )
+
+
+@router.post("/entity-types", status_code=201)
+def create_entity_type(
+    payload: EntityTypeCreate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> EntityTypeRead:
+    entity_type = EntityType(**payload.model_dump())
+    db.add(entity_type)
+    _commit(db, "entity_type")
+    db.refresh(entity_type)
+    return _read(entity_type, [])
+
+
+@router.get("/entity-types/{entity_type_id}")
+def get_entity_type(
+    entity_type_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> EntityTypeRead:
+    return _read_one(db, _get_entity_type(db, entity_type_id))
+
+
+@router.patch("/entity-types/{entity_type_id}")
+def update_entity_type(
+    entity_type_id: int,
+    payload: EntityTypeUpdate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> EntityTypeRead:
+    changes = payload.model_dump(exclude_unset=True)
+    expected = changes.pop("updated_at", None)
+    entity_type = _get_entity_type(db, entity_type_id, for_update=expected is not None)
+    check_not_stale("entity type", entity_type.updated_at, expected)
+    for field, value in changes.items():
+        setattr(entity_type, field, value)
+    _commit(db, "entity_type")
+    db.refresh(entity_type)
+    return _read_one(db, entity_type)
+
+
+@router.delete("/entity-types/{entity_type_id}", status_code=204)
+def delete_entity_type(
+    entity_type_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> None:
+    # attribute_def, entity and everything below cascade in the database
+    # (ON DELETE CASCADE); no ORM relationship is declared, so SQLAlchemy
+    # issues the single DELETE and Postgres does the rest.
+    #
+    # One thing does not cascade: `parameter_def.index_type_ids` is an
+    # array and cannot carry a foreign key, so migration 0009's
+    # `entity_type_guard` refuses the DELETE instead of leaving a parameter
+    # that can never take a value. That arrives here as SQLSTATE 23503
+    # naming `parameter_def`, i.e. a **409** "entity_type row is still
+    # referenced by parameter_def records" -- delete or re-index the
+    # parameter first.
+    db.delete(_get_entity_type(db, entity_type_id))
+    _commit(db, "entity_type")
+
+
+# --- attribute definitions -------------------------------------------------
+
+
+@router.get("/entity-types/{entity_type_id}/attributes")
+def list_attributes(
+    entity_type_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> list[AttributeDefRead]:
+    _get_entity_type(db, entity_type_id)
+    return [
+        AttributeDefRead.model_validate(row)
+        for row in _attributes_for(db, [entity_type_id]).get(entity_type_id, [])
+    ]
+
+
+@router.post("/entity-types/{entity_type_id}/attributes", status_code=201)
+def create_attribute(
+    entity_type_id: int,
+    payload: AttributeDefCreate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> AttributeDefRead:
+    _get_entity_type(db, entity_type_id)
+    _check_enum_pairing(payload.data_type, payload.enum_values)
+    _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
+    attribute = AttributeDef(entity_type_id=entity_type_id, **payload.model_dump())
+    db.add(attribute)
+    _commit(db, "attribute_def")
+    db.refresh(attribute)
+    return AttributeDefRead.model_validate(attribute)
+
+
+@router.patch("/attributes/{attribute_id}")
+def update_attribute(
+    attribute_id: int,
+    payload: AttributeDefUpdate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> AttributeDefRead:
+    attribute = _get_attribute(db, attribute_id)
+    changes = payload.model_dump(exclude_unset=True)
+    # The pairing CHECK is on the row, not the payload: judge the values the
+    # row will have once this patch is applied, not the ones it names.
+    merged_data_type = changes.get("data_type", attribute.data_type)
+    merged_enum_values = (
+        changes["enum_values"] if "enum_values" in changes else attribute.enum_values
+    )
+    _check_enum_pairing(merged_data_type, merged_enum_values)
+    _check_default_value(
+        merged_data_type,
+        merged_enum_values,
+        changes["default_value"] if "default_value" in changes else attribute.default_value,
+    )
+    for field, value in changes.items():
+        setattr(attribute, field, value)
+    _commit(db, "attribute_def")
+    db.refresh(attribute)
+    return AttributeDefRead.model_validate(attribute)
+
+
+@router.delete("/attributes/{attribute_id}", status_code=204)
+def delete_attribute(
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> None:
+    db.delete(_get_attribute(db, attribute_id))
+    _commit(db, "attribute_def")

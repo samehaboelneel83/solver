@@ -25,34 +25,6 @@ def _default_label(row) -> str:
     return str(row.id)
 
 
-def _hierarchy_node_label(db: Session, row) -> str:
-    from app.models.domain import Entity, Hierarchy
-
-    entity = db.get(Entity, row.entity_id)
-    hierarchy = db.get(Hierarchy, row.hierarchy_id)
-    entity_label = (entity.name or entity.code) if entity else str(row.entity_id)
-    hierarchy_label = hierarchy.name if hierarchy else str(row.hierarchy_id)
-    return f"{entity_label} in {hierarchy_label}"
-
-
-def _entity_attribute_label(db: Session, row) -> str:
-    from app.models.domain import AttributeDefinition, Entity
-
-    entity = db.get(Entity, row.entity_id)
-    attribute = db.get(AttributeDefinition, row.attribute_id)
-    entity_label = (entity.name or entity.code) if entity else str(row.entity_id)
-    attribute_label = attribute.code if attribute else str(row.attribute_id)
-    return f"{entity_label}: {attribute_label}"
-
-
-def _variable_dimension_label(db: Session, row) -> str:
-    from app.models.problem import VariableDefinition
-
-    variable = db.get(VariableDefinition, row.variable_id)
-    variable_label = variable.code if variable else str(row.variable_id)
-    return f"{variable_label} #{row.dimension_order}"
-
-
 def _user_role_label(db: Session, row) -> str:
     from app.models.iam import Role, UserAccount
 
@@ -63,24 +35,13 @@ def _user_role_label(db: Session, row) -> str:
     return f"{user_label} / {role_label}"
 
 
-def _objective_component_label(db: Session, row) -> str:
-    from app.models.problem import Objective
-
-    if row.code:
-        return row.code
-    objective = db.get(Objective, row.objective_id)
-    objective_label = objective.code if objective else str(row.objective_id)
-    return f"{objective_label} component"
-
-
 # Keyed by "schema.table". Only rows with no natural code/name label need
 # an override here.
 LABEL_OVERRIDES: dict[str, Callable[[Session, object], str]] = {
-    "domain.hierarchy_node": _hierarchy_node_label,
-    "domain.entity_attribute": _entity_attribute_label,
-    "problem.variable_dimension": _variable_dimension_label,
     "iam.user_role": _user_role_label,
-    "problem.objective_component": _objective_component_label,
+    # schema v1: the domain.*/problem.* overrides went with their tables in
+    # migration 0006. v1's own composite-key rows (parameter_value) are not
+    # exposed as FK dropdown options, so nothing replaces them here yet.
 }
 
 

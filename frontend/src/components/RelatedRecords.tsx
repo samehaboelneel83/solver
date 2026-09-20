@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { tableApiPath } from "../api/paths";
 import { useQueries } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client";
@@ -86,7 +87,7 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
       queryKey: ["entities", child.schema, child.table, "related-count", child.field, id],
       queryFn: () =>
         apiFetch<ListResult>(
-          `/api/${child.schema}/${child.table}/?f_${child.field}=${encodeURIComponent(id)}&limit=1`
+          `${tableApiPath(child.schema, child.table)}/?f_${child.field}=${encodeURIComponent(id)}&limit=1`
         ),
       enabled: Boolean(id),
     })),

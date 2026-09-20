@@ -1,10 +1,24 @@
-import { useEffect, useMemo, useRef, useState, KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import type { EntityTypeOption, GraphEdge } from "../types/graph";
+import { countRules, type ExpressionDocument } from "../expressions/document";
+import type { FieldCatalogue } from "../expressions/fields";
 
 export type FilterCriteria = {
   selectedTypes: string[] | null;
   search: string;
   highlightIds: string[] | null;
+  /** Task 14c: the nodes an ACTIVE, VALID expression matches, or null when
+   * there is none. Null means "no expression constraint", never "no node
+   * matches" -- an empty or invalid expression must not blank the canvas. */
+  expressionMatchIds?: Set<string> | null;
 };
 
 /** The bit of filter state GraphDemo owns and persists across GraphEditor
@@ -14,9 +28,18 @@ export type FilterState = {
   selectedTypes: string[] | null;
   search: string;
   highlighting: boolean;
+  /** Task 14c. Optional so the two views can share one state shape: the
+   * types view has no entity attributes to filter by. Evaluating it is the
+   * page's job, not this component's -- see GraphDemo. */
+  expression?: ExpressionDocument | null;
 };
 
-export const DEFAULT_FILTER_STATE: FilterState = { selectedTypes: null, search: "", highlighting: false };
+export const DEFAULT_FILTER_STATE: FilterState = {
+  selectedTypes: null,
+  search: "",
+  highlighting: false,
+  expression: null,
+};
 
 type FilterBarProps = {
   entityTypes: EntityTypeOption[];
@@ -29,6 +52,20 @@ type FilterBarProps = {
   // the same as selecting. The caller (GraphDemo) owns the graph data and the selection, so it
   // resolves the match and opens the property panel; this component only reports the query.
   onSubmitSearch?: (query: string) => void;
+  /** What the checkbox list groups by, for the button and the panel's
+   * labels. "Types" in the objects view (a node's entity type); "Roles" in
+   * the types view, where a node IS an entity type and its `type` is that
+   * type's role. The matching itself is unchanged -- it is always
+   * `node.type` against the given options' `name`. */
+  typeNoun?: string;
+  /** The search box's accessible name, which differs by view for the same
+   * reason: it matches a node's label, which is an entity's label in one
+   * view and a type's name in the other. */
+  searchLabel?: string;
+  /** Task 14c: given, the bar offers an expression builder over these
+   * fields. Omitted (the types view), it offers none -- the fields are an
+   * entity's attributes, and a types node is not an entity. */
+  expressionCatalogue?: FieldCatalogue;
 };
 
 /**
@@ -41,7 +78,8 @@ type FilterBarProps = {
 export function deriveFilterCriteria(
   state: FilterState,
   selectedNodeId: string | null,
-  edges: GraphEdge[]
+  edges: GraphEdge[],
+  expressionMatchIds: Set<string> | null = null
 ): FilterCriteria {
   let highlightIds: string[] | null = null;
   if (state.highlighting && selectedNodeId) {
@@ -52,12 +90,25 @@ export function deriveFilterCriteria(
     }
     highlightIds = Array.from(neighbors);
   }
-  return { selectedTypes: state.selectedTypes, search: state.search, highlightIds };
+  return { selectedTypes: state.selectedTypes, search: state.search, highlightIds, expressionMatchIds };
 }
 
 const SEARCH_DEBOUNCE_MS = 200;
 
 const TYPES_PANEL_ID = "filter-types-panel";
+const EXPRESSION_PANEL_ID = "filter-expression-panel";
+
+/**
+ * Loaded on demand.
+ *
+ * react-querybuilder brings @reduxjs/toolkit and react-redux with it --
+ * +47 kB gzipped on a single entry chunk that already warns about its
+ * size, for a panel behind a toggle in one view of one page. The core
+ * (the catalogue, the validator, the evaluator) stays eager, because
+ * GraphDemo needs it to decide what the canvas shows; only the editor
+ * is split off.
+ */
+const ExpressionBuilder = lazy(() => import("../expressions/ExpressionBuilder"));
 
 export default function FilterBar({
   entityTypes,
@@ -65,14 +116,27 @@ export default function FilterBar({
   value,
   onChange,
   onSubmitSearch,
+  typeNoun = "Types",
+  searchLabel = "Search nodes by label",
+  expressionCatalogue,
 }: FilterBarProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [typeSearch, setTypeSearch] = useState("");
   const typesToggleRef = useRef<HTMLButtonElement | null>(null);
+  const [expressionOpen, setExpressionOpen] = useState(false);
+  const expressionToggleRef = useRef<HTMLButtonElement | null>(null);
 
   function closeTypesPanel() {
     setPanelOpen(false);
     typesToggleRef.current?.focus();
+  }
+
+  function handleExpressionKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setExpressionOpen(false);
+      expressionToggleRef.current?.focus();
+    }
   }
 
   function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -153,40 +217,48 @@ export default function FilterBar({
   }
 
   const selectedSet = useMemo(
-    () => (value.selectedTypes === null ? new Set(entityTypes.map((et) => et.code)) : new Set(value.selectedTypes)),
+    // Keyed by NAME, because that is what a node's `type` is
+    // (`entity_type.name`). `code` holds the same string, but only by way of
+    // Task 7's mapping.
+    () => (value.selectedTypes === null ? new Set(entityTypes.map((et) => et.name)) : new Set(value.selectedTypes)),
     [value.selectedTypes, entityTypes]
   );
   const totalCount = entityTypes.length;
   const selectedCount = selectedSet.size;
 
-  function toggleType(code: string) {
+  function toggleType(name: string) {
     const next = new Set(selectedSet);
-    if (next.has(code)) {
-      next.delete(code);
+    if (next.has(name)) {
+      next.delete(name);
     } else {
-      next.add(code);
+      next.add(name);
     }
     const allSelected = next.size === totalCount;
     onChange({ ...value, selectedTypes: allSelected ? null : Array.from(next) });
   }
 
+  const expressionRuleCount = countRules(value.expression ?? null);
+
   const visibleTypes = entityTypes
     .filter((et) => {
       const q = typeSearch.trim().toLowerCase();
       if (!q) return true;
-      return et.name.toLowerCase().includes(q) || et.code.toLowerCase().includes(q);
+      // `code` is the same string as `name` in v1 (both are
+      // `entity_type.name`), so matching it too would be matching twice.
+      return et.name.toLowerCase().includes(q);
     })
     // F-6: types were previously listed in insertion order, which forces a linear scan on a
     // large model -- alphabetical by name makes a specific type findable at a glance.
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 p-2 text-sm">
+    <div className="mb-2 rounded-md border border-slate-200 p-2 text-sm">
+      <div className="flex flex-wrap items-center gap-3">
       <input
         type="text"
-        placeholder="Search by label or code…"
-        title="Search nodes by label or code -- press Enter to select the first match"
-        aria-label="Search nodes by label or code -- press Enter to select the first match"
+        placeholder="Search…"
+        title={`${searchLabel} -- press Enter to select the first match`}
+        aria-label={`${searchLabel} -- press Enter to select the first match`}
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
         onKeyDown={handleSearchKeyDown}
@@ -199,14 +271,14 @@ export default function FilterBar({
           ref={typesToggleRef}
           type="button"
           onClick={() => setPanelOpen((v) => !v)}
-          title="Show or hide node types"
+          title={`Show or hide nodes by ${typeNoun.toLowerCase()}`}
           aria-haspopup="true"
           aria-expanded={panelOpen}
           aria-controls={TYPES_PANEL_ID}
           className="rounded-md border border-slate-300 px-2 py-1 text-xs"
           data-testid="filter-types-toggle"
         >
-          Types: {selectedCount} of {totalCount}
+          {typeNoun}: {selectedCount} of {totalCount}
         </button>
         {panelOpen && (
           <div
@@ -216,9 +288,9 @@ export default function FilterBar({
           >
             <input
               type="text"
-              placeholder="Filter types…"
-              title="Filter the type list"
-              aria-label="Filter the type list"
+              placeholder={`Filter ${typeNoun.toLowerCase()}…`}
+              title={`Filter the ${typeNoun.toLowerCase()} list`}
+              aria-label={`Filter the ${typeNoun.toLowerCase()} list`}
               value={typeSearch}
               onChange={(e) => setTypeSearch(e.target.value)}
               className="mb-2 block w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
@@ -228,7 +300,7 @@ export default function FilterBar({
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: null })}
-                title="Select all types"
+                title={`Select all ${typeNoun.toLowerCase()}`}
                 className="text-xs text-blue-600"
                 data-testid="filter-types-all"
               >
@@ -237,7 +309,7 @@ export default function FilterBar({
               <button
                 type="button"
                 onClick={() => onChange({ ...value, selectedTypes: [] })}
-                title="Deselect all types"
+                title={`Deselect all ${typeNoun.toLowerCase()}`}
                 className="text-xs text-blue-600"
                 data-testid="filter-types-none"
               >
@@ -248,16 +320,38 @@ export default function FilterBar({
               <label key={et.id} className="flex items-center gap-1 py-0.5 text-xs">
                 <input
                   type="checkbox"
-                  checked={selectedSet.has(et.code)}
-                  onChange={() => toggleType(et.code)}
-                  data-testid={`filter-type-${et.code}`}
+                  checked={selectedSet.has(et.name)}
+                  onChange={() => toggleType(et.name)}
+                  data-testid={`filter-type-${et.name}`}
                 />
-                {et.name} ({et.code})
+                {/* The type's name, once: v1 has a single `name` column, and
+                    the wire's `code` is that same string (Task 7's mapping),
+                    so "{name} ({code})" rendered every type as "unit (unit)". */}
+                {et.name}
               </label>
             ))}
           </div>
         )}
       </div>
+
+      {expressionCatalogue && (
+        <button
+          ref={expressionToggleRef}
+          type="button"
+          onClick={() => setExpressionOpen((v) => !v)}
+          title="Build a filter over the entities' own attributes"
+          aria-expanded={expressionOpen}
+          aria-controls={EXPRESSION_PANEL_ID}
+          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+          data-testid="filter-expression-toggle"
+        >
+          {expressionRuleCount === 0
+            ? "No conditions"
+            : expressionRuleCount === 1
+              ? "1 condition"
+              : `${expressionRuleCount} conditions`}
+        </button>
+      )}
 
       <button
         type="button"
@@ -273,6 +367,38 @@ export default function FilterBar({
       >
         {value.highlighting ? "Highlighting: On" : "Highlight connections"}
       </button>
+      </div>
+
+      {/* Not a popover. The builder is as tall as the expression in it, and
+          a 34rem panel anchored to a button in the middle of this bar
+          reaches out from under the page's own content -- the first browser
+          run had it landing beneath the sidebar. It expands the bar
+          downwards instead, which also needs no clamping at 375px. */}
+      {expressionCatalogue && expressionOpen && (
+        <div
+          id={EXPRESSION_PANEL_ID}
+          onKeyDown={handleExpressionKeyDown}
+          className="mt-2 max-h-96 overflow-auto border-t border-slate-200 pt-2"
+          data-testid="filter-expression-panel"
+        >
+          <Suspense fallback={<p className="text-xs text-slate-500">Loading the condition builder…</p>}>
+            <ExpressionBuilder
+              catalogue={expressionCatalogue}
+              value={value.expression ?? null}
+              onChange={(expression) => onChange({ ...value, expression })}
+            />
+          </Suspense>
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, expression: null })}
+            className="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs"
+            style={{ minWidth: 28, minHeight: 28 }}
+            data-testid="filter-expression-clear"
+          >
+            Clear conditions
+          </button>
+        </div>
+      )}
     </div>
   );
 }

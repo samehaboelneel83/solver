@@ -1,11 +1,8 @@
 import { MouseEvent, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
-import { useSchema } from "../api/meta";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
-import { schemaLabel, tableLabelPlural } from "../lib/labels";
-import OfflineNotice from "./OfflineNotice";
-import type { TableMeta } from "../types/meta";
+import DomainSelector from "./DomainSelector";
 
 // H-9: a full app-wide target-size sweep (beyond the three controls the finding named) turned
 // up these two links themselves at 223x20px -- text-sm's 20px line-height with no padding,
@@ -47,14 +44,80 @@ function saveOpenGroups(state: Record<string, boolean>) {
   }
 }
 
-function matchesFilter(table: TableMeta, filter: string): boolean {
-  if (!filter) return true;
+type NavItem = { to: string; label: string };
+type NavGroup = {
+  /** Stable key for the collapse state in localStorage. */
+  key: string;
+  label: string;
+  items: NavItem[];
+  /** Shown instead of links when a group has none yet. */
+  emptyNote?: string;
+};
+
+/**
+ * The sidebar, as a static map (Task 10). It used to be built from
+ * `/api/meta/schema`, one group per Postgres schema; schema v1 moved every
+ * table into `public`, so the schema no longer says anything about where a
+ * page belongs. Grouped instead the way a planner works: model the domain,
+ * pose a problem, look at runs.
+ *
+ * Tasks 11-13 add their pages here (entity types, entities, parameters,
+ * model versions) alongside their routes in `App.tsx` -- a link to a route
+ * that doesn't exist yet would only lead to the not-found page. Task 14f
+ * adds relationship types beside entity types: the two halves of a
+ * domain's schema, before the rows that fill it in.
+ *
+ * `/public/<table>` is the generic list route for the three flat v1 tables;
+ * `public` is the schema name `/api/meta/schema` reports for them.
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    key: "domain",
+    label: "Domain",
+    items: [
+      { to: "/public/domain", label: "Domains" },
+      { to: "/entity-types", label: "Entity types" },
+      { to: "/relationship-types", label: "Relationship types" },
+      { to: "/entities", label: "Entities" },
+      { to: "/parameters", label: "Parameters" },
+    ],
+  },
+  {
+    key: "problem",
+    label: "Problem",
+    items: [
+      { to: "/public/problem", label: "Problems" },
+      { to: "/versions", label: "Model versions" },
+      { to: "/public/template", label: "Templates" },
+    ],
+  },
+  {
+    key: "runs",
+    label: "Runs",
+    items: [],
+    // The RUN tables exist but are deliberately not wired (plan, Global Constraints).
+    emptyNote: "No run screens yet: runs appear here once a solver is connected.",
+  },
+  {
+    // Not one of the three workflow groups -- user and role administration,
+    // kept reachable rather than dropped with the schema-driven nav.
+    key: "access",
+    label: "Access",
+    items: [
+      { to: "/iam/organization", label: "Organizations" },
+      { to: "/iam/user_account", label: "Users" },
+      { to: "/iam/role", label: "Roles" },
+      { to: "/iam/user_role", label: "User roles" },
+    ],
+  },
+];
+
+/** The items of `group` that match `filter`: all of them when the group's
+ * own name matches, otherwise those whose label does. */
+function visibleItems(group: NavGroup, filter: string): NavItem[] {
   const needle = filter.trim().toLowerCase();
-  return (
-    table.table.toLowerCase().includes(needle) ||
-    tableLabelPlural(table).toLowerCase().includes(needle) ||
-    table.schema.toLowerCase().includes(needle)
-  );
+  if (!needle || group.label.toLowerCase().includes(needle)) return group.items;
+  return group.items.filter((item) => item.label.toLowerCase().includes(needle));
 }
 
 // Matches the `lg` breakpoint in tailwind.config.js (also em-based, for the
@@ -96,12 +159,6 @@ export default function AppShell() {
 }
 
 function AppShellContent() {
-  const { data: tables, isLoading, error, fetchStatus: schemaFetchStatus } = useSchema();
-  // D-7: the schema query backs the entire nav -- offline on a cold load, it never resolves
-  // and never errors (React Query pauses it instead), so `isLoading` stayed true forever with
-  // no explanation. `!tables` guards against hiding an already-loaded nav during a background
-  // refetch that happens to get paused (e.g. connectivity drops after the app is already up).
-  const navPaused = schemaFetchStatus === "paused" && !tables;
   const navigate = useNavigate();
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
@@ -124,11 +181,6 @@ function AppShellContent() {
   // AT, but the *static* sidebar must never be, regardless of `drawerOpen`.
   const [isDesktop, setIsDesktop] = useState(getIsDesktop);
 
-  const grouped: Record<string, TableMeta[]> = {};
-  for (const t of tables ?? []) {
-    (grouped[t.schema] ??= []).push(t);
-  }
-
   function handleLogout() {
     setToken(null);
     navigate("/login");
@@ -144,10 +196,10 @@ function AppShellContent() {
     setDrawerOpen(false);
   }
 
-  function toggleGroup(schemaName: string) {
+  function toggleGroup(groupKey: string) {
     setOpenGroups((current) => {
-      const isOpen = current[schemaName] ?? true;
-      const next = { ...current, [schemaName]: !isOpen };
+      const isOpen = current[groupKey] ?? true;
+      const next = { ...current, [groupKey]: !isOpen };
       saveOpenGroups(next);
       return next;
     });
@@ -329,6 +381,7 @@ function AppShellContent() {
             Sign out
           </button>
         </div>
+        <DomainSelector />
         <NavLink to="/" end className={navLinkClassName} onClick={handleNavClick}>
           Dashboard
         </NavLink>
@@ -337,58 +390,49 @@ function AppShellContent() {
         </NavLink>
 
         <label className="mb-3 block">
-          <span className="sr-only">Filter tables</span>
+          <span className="sr-only">Filter navigation</span>
           <input
             type="search"
             value={filterText}
             onChange={(event) => setFilterText(event.target.value)}
-            placeholder="Filter tables…"
+            placeholder="Filter pages…"
             className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
           />
         </label>
 
-        {navPaused && <OfflineNotice subject="Navigation" />}
-        {!navPaused && isLoading && <p className="text-sm text-slate-500">Loading navigation…</p>}
-        {!navPaused && error && <p className="text-sm text-red-600">Failed to load navigation</p>}
-
-        {/* A-4: this is the region that used to run 1120px tall with no scroll
-            cue of its own -- it now scrolls independently of the rest of the
-            shell instead of relying on the whole page to grow. */}
-        <nav aria-label="Tables" className="min-h-0 flex-1 overflow-y-auto">
-          {Object.entries(grouped).map(([schemaName, schemaTables]) => {
-            const isOpen = openGroups[schemaName] ?? true;
-            const visibleTables = schemaTables.filter((t) => matchesFilter(t, filterText));
-            if (filterText && visibleTables.length === 0) return null;
+        {/* A-4: scrolls independently of the rest of the sidebar, instead of
+            relying on the whole page to grow. */}
+        <nav aria-label="Main" className="min-h-0 flex-1 overflow-y-auto">
+          {NAV_GROUPS.map((group) => {
+            const isOpen = openGroups[group.key] ?? true;
+            const items = visibleItems(group, filterText);
+            if (filterText.trim() && items.length === 0) return null;
             return (
-              <div key={schemaName} className="mb-4">
-                {/* B-1: this heading used to render the raw postgres schema name
-                    ("domain", "problem", "iam") -- exactly the schema-detail jargon a planner
-                    shouldn't need to know. schemaLabel() gives it a human name; the raw name is
-                    still what the filter box above matches against (matchesFilter), so power-user
-                    search-by-schema-name still works even though it's no longer shown.
-                    H-9: was text-only with no padding (223x16px, under the 24x24 Target Size
-                    minimum) -- py-2 brings it to 32px tall without widening the group (it's
-                    already full-width via justify-between). */}
+              <div key={group.key} className="mb-4">
+                {/* H-9: py-2 keeps the toggle above the 24px Target Size floor. */}
                 <button
                   type="button"
-                  onClick={() => toggleGroup(schemaName)}
+                  onClick={() => toggleGroup(group.key)}
                   aria-expanded={isOpen}
                   className="mb-1 flex w-full items-center justify-between rounded px-1 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700"
                 >
-                  <span>{schemaLabel(schemaName)}</span>
+                  <span>{group.label}</span>
                   <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
                 </button>
-                {isOpen && (
-                  <ul>
-                    {visibleTables.map((t) => (
-                      <li key={`${t.schema}.${t.table}`}>
-                        <NavLink to={`/${t.schema}/${t.table}`} className={tableLinkClassName} onClick={handleNavClick}>
-                          {tableLabelPlural(t)}
-                        </NavLink>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {isOpen &&
+                  (items.length > 0 ? (
+                    <ul>
+                      {items.map((item) => (
+                        <li key={item.to}>
+                          <NavLink to={item.to} className={tableLinkClassName} onClick={handleNavClick}>
+                            {item.label}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    group.emptyNote && <p className="px-2 text-sm text-slate-500">{group.emptyNote}</p>
+                  ))}
               </div>
             );
           })}

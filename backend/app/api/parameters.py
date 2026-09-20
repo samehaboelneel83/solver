@@ -1,0 +1,472 @@
+"""Parameter definitions and their sparse value grid.
+
+    GET    /api/v1/parameters              ?domain_id=&limit=&offset=
+    POST   /api/v1/parameters
+    GET    /api/v1/parameters/{id}
+    PATCH  /api/v1/parameters/{id}
+    DELETE /api/v1/parameters/{id}
+    GET    /api/v1/parameters/{id}/values
+    PUT    /api/v1/parameters/{id}/values
+
+A `parameter_def` is indexed data that belongs to no single entity --
+``demand[day, shift]`` -- and its `parameter_value` rows are the cells of
+that grid, keyed by an array of entity ids in index order. Spec §5 calls it
+"a spreadsheet, not a list", so the values are not a CRUD resource: one GET
+returns the grid, one PUT sets any number of cells.
+
+Sparse storage
+--------------
+Only cells that differ from ``default_value`` are stored. A PUT cell whose
+value equals the default **deletes** the row rather than writing it, so
+"reset to default" and "never set" are the same state. Changing
+``default_value`` on PATCH does not rewrite stored cells: every absent cell
+takes the new default, and a stored cell that now happens to equal it is
+merely redundant, not wrong.
+
+Task 8 raised the obvious gap in that -- a dataset that carries only
+stored rows cannot say what an absent cell is worth -- and Ruling 28 is the
+user's answer: storage stays sparse, and `snapshot_dataset()` (migration
+0009) emits a sibling ``parameter_defaults`` object, one entry per
+parameter the IR references. The solver's rule is "look the cell up; if it
+is absent, use the default". Pinned by
+`test_snapshot_resolves_a_cell_reset_to_the_default` here and by
+`test_v1_problem_run.py`'s snapshot tests.
+
+Which layer answers which failure
+---------------------------------
+1. **422 with ``kind="parameter_index"``, from the database.**
+   `parameter_value` carries the `parameter_value_validate` trigger
+   (migration 0006), which compares the cell's entity types, in order,
+   against ``index_type_ids`` -- one comparison covering wrong arity, wrong
+   types, wrong order and non-existent ids. It is the only implementation
+   of that rule; this module never re-derives it. Every PUT cell passes
+   through it, **including** a cell being reset to the default: that cell
+   is upserted and then deleted within the same transaction, so a
+   malformed cell cannot slip through merely because there was nothing to
+   store. The router then re-addresses the trigger's 422 to the cell that
+   failed (``loc: ["body", "cells", i, "entity_ids"]`` -- the same `loc`
+   Pydantic gives a bad ``cells[i].value``) and replaces the trigger's
+   message, which prints a raw Postgres array, with one that names the
+   expected index types. `kind` is kept.
+
+   The new message uses what the trigger's ``expected`` payload key
+   carries -- ``parameter_def.index_type_ids`` -- but read from the row
+   this router already holds, not from the payload: ``translate_db_error``
+   drops ``expected``, and the ids alone would not give a user the type
+   *names* anyway.
+
+2. **422 without ``kind``, from this module.** `parameter_def` has no
+   trigger, so its CHECKs (the name pattern, ``cardinality(index_type_ids)
+   >= 1``, and migration 0008's no-duplicates rule) would reach the client
+   as 409s (Ruling 16). They are shadowed here, as are three rules the DDL
+   cannot state at all: every index type must exist and belong to the
+   parameter's own domain, the same cell may not appear twice in one PUT,
+   and values must be strict integers in ``int4`` range.
+
+   Strictness matters more than usual here: Postgres **rounds** a numeric
+   into an ``int`` column, so a lax validator passing ``5.5`` through would
+   store ``6`` rather than fail. ``5.0`` is refused too, on the same
+   footing as ``"5"`` and ``true``: a client holding a float has a type
+   bug, and "happens to be integral" is not a type (spec §2: integer-only,
+   deliberately, for CP-SAT).
+
+3. **409 with a string detail** for what only the database knows:
+   ``UNIQUE (domain_id, name)``, the ``domain_id`` foreign key -- and one
+   rule of this module's own: ``index_type_ids`` cannot change while cells
+   are stored, because the trigger judges a cell only when *it* is written
+   and would never revisit cells shaped for the old index.
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.api.validation import field_error, validate_name
+from app.core.db import get_db
+from app.crud.db_errors import translate_db_error
+from app.models.iam import UserAccount
+from app.models.v1_domain import Entity, EntityType, ParameterDef, ParameterValue
+
+router = APIRouter(prefix="/api/v1", tags=["parameters"])
+
+# `parameter_def.default_value` and `parameter_value.value` are `int`
+# (int4). Out of range would reach the driver as SQLSTATE 22003, which
+# `translate_db_error` re-raises untouched -- a 500.
+INT4_MIN, INT4_MAX = -(2**31), 2**31 - 1
+Int4 = Annotated[StrictInt, Field(ge=INT4_MIN, le=INT4_MAX)]
+# Ids are `bigint`. Lax on purpose, like every other id on the platform;
+# only the range is bounded, for the same 22003 reason.
+BigintId = Annotated[int, Field(ge=-(2**63), le=2**63 - 1)]
+
+_DUPLICATE_INDEX_MESSAGE = (
+    "index type {name!r} appears more than once. This is a temporary "
+    "restriction, not a modelling limit: dataset snapshots currently key each "
+    "parameter row by index-type name, so two indices of the same type would "
+    "overwrite each other in the solver's input. Self-indexed parameters "
+    "(distance matrices, transition costs, precedence) are expected to be "
+    "supported once snapshots key rows by index position instead."
+)
+
+
+def _not_null(value, info):
+    """PATCH: omitting a field means "unchanged", but an explicit `null`
+    for a NOT NULL column would otherwise reach the database as a 409."""
+    if value is None:
+        raise ValueError(f"{info.field_name} cannot be null")
+    return value
+
+
+# --- schemas ---------------------------------------------------------------
+
+
+class ParameterDefRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    domain_id: int
+    name: str
+    # Index order, exactly as defined: demand[day, shift] != demand[shift, day].
+    index_type_ids: list[int]
+    default_value: int
+    unit: str | None
+
+
+class ParameterDefCreate(BaseModel):
+    domain_id: int
+    name: str
+    index_type_ids: list[BigintId] = Field(min_length=1)
+    # Mirrors the column's server default, so the field can be omitted.
+    default_value: Int4 = 0
+    unit: str | None = None
+
+    _check_name = field_validator("name")(validate_name)
+
+
+class ParameterDefUpdate(BaseModel):
+    """`domain_id` is not patchable: the index types and every stored
+    cell's entities belong to the old domain."""
+
+    name: str | None = None
+    index_type_ids: list[BigintId] | None = Field(default=None, min_length=1)
+    default_value: Int4 | None = None
+    unit: str | None = None
+
+    _check_name = field_validator("name")(validate_name)
+    _check_not_null = field_validator("name", "index_type_ids", "default_value")(_not_null)
+
+
+class ParameterDefList(BaseModel):
+    items: list[ParameterDefRead]
+    total: int
+
+
+class IndexType(BaseModel):
+    id: int
+    # None only if the entity type was deleted after the parameter was
+    # defined: an array cannot carry a foreign key, so nothing cascades.
+    name: str | None
+
+
+class Cell(BaseModel):
+    entity_ids: list[BigintId]
+    value: Int4
+
+
+class ParameterValues(BaseModel):
+    index_types: list[IndexType]
+    cells: list[Cell]
+    default_value: int
+
+
+class ParameterValuesPut(BaseModel):
+    cells: list[Cell]
+
+
+# --- helpers ---------------------------------------------------------------
+
+
+def _get_parameter(db: Session, parameter_id: int) -> ParameterDef:
+    row = db.get(ParameterDef, parameter_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="parameter not found")
+    return row
+
+
+def _commit(db: Session, table: str) -> None:
+    try:
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        raise translate_db_error(exc, table) from exc
+
+
+def _type_names(db: Session, type_ids: list[int]) -> dict[int, tuple[str, int]]:
+    """`{id: (name, domain_id)}` for whichever of `type_ids` exist."""
+    rows = db.execute(
+        select(EntityType.id, EntityType.name, EntityType.domain_id).where(
+            EntityType.id.in_(type_ids)
+        )
+    ).all()
+    return {row.id: (row.name, row.domain_id) for row in rows}
+
+
+def _check_index_types(db: Session, domain_id: int, index_type_ids: list[int]) -> None:
+    known = _type_names(db, index_type_ids)
+    seen: set[int] = set()
+    for type_id in index_type_ids:
+        if type_id in seen:
+            # Ruling 10: the database also refuses this (migration 0008's
+            # CHECK); this is where the reason gets said.
+            name = known[type_id][0] if type_id in known else str(type_id)
+            raise field_error(
+                "index_type_ids", _DUPLICATE_INDEX_MESSAGE.format(name=name), index_type_ids
+            )
+        seen.add(type_id)
+    for type_id in index_type_ids:
+        if type_id not in known or known[type_id][1] != domain_id:
+            raise field_error(
+                "index_type_ids",
+                f"entity type {type_id} does not exist in this parameter's domain",
+                index_type_ids,
+            )
+
+
+def _coordinate_key(entity: Entity | None, entity_id: int) -> tuple:
+    # (sort_order, key) is how an entity is ordered everywhere else on the
+    # platform (entities.py, snapshot_dataset); `id` makes it total. A cell's
+    # entities always exist -- `parameter_value_cleanup` deletes the cell
+    # with the entity -- but an absent one sorts last rather than raising.
+    if entity is None:
+        return (1, 0, "", entity_id)
+    return (0, entity.sort_order, entity.key, entity_id)
+
+
+def _grid(db: Session, parameter: ParameterDef) -> ParameterValues:
+    """The grid as stored. Cells are ordered by their coordinates left to
+    right, each coordinate by its entity's `(sort_order, key, id)` -- the
+    order a user reads the grid in, and one that does not depend on
+    insertion order or on the ids the database happened to assign."""
+    names = _type_names(db, parameter.index_type_ids)
+    # Core, not `db.query(ParameterValue)`: the ORM's identity map hashes
+    # primary keys, and this table's key contains an array (a list).
+    rows = db.execute(
+        select(ParameterValue.entity_ids, ParameterValue.value).where(
+            ParameterValue.parameter_def_id == parameter.id
+        )
+    ).all()
+    entity_ids = {eid for row in rows for eid in row.entity_ids}
+    entities = (
+        {e.id: e for e in db.query(Entity).filter(Entity.id.in_(entity_ids)).all()}
+        if entity_ids
+        else {}
+    )
+    rows.sort(
+        key=lambda row: tuple(_coordinate_key(entities.get(eid), eid) for eid in row.entity_ids)
+    )
+    return ParameterValues(
+        index_types=[
+            IndexType(id=type_id, name=names[type_id][0] if type_id in names else None)
+            for type_id in parameter.index_type_ids
+        ],
+        cells=[Cell(entity_ids=list(row.entity_ids), value=row.value) for row in rows],
+        default_value=parameter.default_value,
+    )
+
+
+def _cell_error(
+    http: HTTPException, index: int, cell: Cell, parameter: ParameterDef, db: Session
+) -> HTTPException:
+    """Re-address `parameter_value_validate`'s 422 to the cell that failed.
+    Anything else from `translate_db_error` is returned unchanged."""
+    detail = http.detail
+    if not (
+        http.status_code == 422
+        and isinstance(detail, list)
+        and detail
+        and detail[0].get("kind") == "parameter_index"
+    ):
+        return http
+    names = _type_names(db, parameter.index_type_ids)
+    expected = ", ".join(
+        names[t][0] if t in names else str(t) for t in parameter.index_type_ids
+    )
+    count = len(parameter.index_type_ids)
+    message = (
+        f"entity_ids must name {count} existing "
+        f"{'entity' if count == 1 else 'entities'}, one of each index type in "
+        f"this order: ({expected}); got {cell.entity_ids}"
+    )
+    return HTTPException(
+        status_code=422,
+        detail=[
+            {
+                "type": detail[0].get("type", "value_error"),
+                "loc": ["body", "cells", index, "entity_ids"],
+                "msg": message,
+                "kind": "parameter_index",
+            }
+        ],
+    )
+
+
+# --- parameter definitions -------------------------------------------------
+
+
+@router.get("/parameters")
+def list_parameters(
+    domain_id: int | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterDefList:
+    query = db.query(ParameterDef)
+    if domain_id is not None:
+        query = query.filter(ParameterDef.domain_id == domain_id)
+    total = query.count()
+    # `name` is unique per domain but not globally; `id` makes the order
+    # total, which offset pagination needs.
+    rows = (
+        query.order_by(ParameterDef.name.asc(), ParameterDef.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return ParameterDefList(
+        items=[ParameterDefRead.model_validate(row) for row in rows], total=total
+    )
+
+
+@router.post("/parameters", status_code=201)
+def create_parameter(
+    payload: ParameterDefCreate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterDefRead:
+    _check_index_types(db, payload.domain_id, payload.index_type_ids)
+    row = ParameterDef(**payload.model_dump())
+    db.add(row)
+    _commit(db, "parameter_def")
+    db.refresh(row)
+    return ParameterDefRead.model_validate(row)
+
+
+@router.get("/parameters/{parameter_id}")
+def get_parameter(
+    parameter_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterDefRead:
+    return ParameterDefRead.model_validate(_get_parameter(db, parameter_id))
+
+
+@router.patch("/parameters/{parameter_id}")
+def update_parameter(
+    parameter_id: int,
+    payload: ParameterDefUpdate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterDefRead:
+    row = _get_parameter(db, parameter_id)
+    changes = payload.model_dump(exclude_unset=True)
+    new_index = changes.get("index_type_ids")
+    if new_index is not None and list(new_index) != list(row.index_type_ids):
+        _check_index_types(db, row.domain_id, new_index)
+        stored = db.scalar(
+            select(func.count())
+            .select_from(ParameterValue)
+            .where(ParameterValue.parameter_def_id == row.id)
+        )
+        if stored:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"cannot change the index types of a parameter with {stored} stored "
+                    "value(s): they were entered for the old index. Reset them to the "
+                    "default (or delete the parameter) first."
+                ),
+            )
+    for field, value in changes.items():
+        setattr(row, field, value)
+    _commit(db, "parameter_def")
+    db.refresh(row)
+    return ParameterDefRead.model_validate(row)
+
+
+@router.delete("/parameters/{parameter_id}", status_code=204)
+def delete_parameter(
+    parameter_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> None:
+    # `parameter_value` rows cascade (ON DELETE CASCADE).
+    db.delete(_get_parameter(db, parameter_id))
+    _commit(db, "parameter_def")
+
+
+# --- the value grid --------------------------------------------------------
+
+
+@router.get("/parameters/{parameter_id}/values")
+def get_parameter_values(
+    parameter_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterValues:
+    return _grid(db, _get_parameter(db, parameter_id))
+
+
+@router.put("/parameters/{parameter_id}/values")
+def put_parameter_values(
+    parameter_id: int,
+    payload: ParameterValuesPut,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> ParameterValues:
+    """Set the named cells; cells not named are left as they are. Atomic:
+    one bad cell and nothing in the request is written."""
+    parameter = _get_parameter(db, parameter_id)
+
+    seen: set[tuple[int, ...]] = set()
+    for index, cell in enumerate(payload.cells):
+        coordinates = tuple(cell.entity_ids)
+        if coordinates in seen:
+            raise field_error(
+                ["cells", index, "entity_ids"],
+                f"cell {cell.entity_ids} appears more than once in this request",
+                cell.entity_ids,
+            )
+        seen.add(coordinates)
+
+    for index, cell in enumerate(payload.cells):
+        key = (
+            (ParameterValue.parameter_def_id == parameter.id)
+            & (ParameterValue.entity_ids == cell.entity_ids)
+        )
+        upsert = insert(ParameterValue).values(
+            parameter_def_id=parameter.id, entity_ids=cell.entity_ids, value=cell.value
+        )
+        upsert = upsert.on_conflict_do_update(
+            index_elements=[ParameterValue.parameter_def_id, ParameterValue.entity_ids],
+            set_={"value": upsert.excluded.value},
+        )
+        try:
+            # Written even when it equals the default, so the trigger judges
+            # it; then removed, so the grid stays sparse.
+            db.execute(upsert)
+            if cell.value == parameter.default_value:
+                db.execute(delete(ParameterValue).where(key))
+        except DBAPIError as exc:
+            db.rollback()
+            raise _cell_error(
+                translate_db_error(exc, "parameter_value"), index, cell, parameter, db
+            ) from exc
+
+    _commit(db, "parameter_value")
+    return _grid(db, parameter)

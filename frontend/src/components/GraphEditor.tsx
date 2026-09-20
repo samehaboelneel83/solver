@@ -1,12 +1,27 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import cytoscape, { Core, NodeSingular } from "cytoscape";
 // @ts-expect-error -- cytoscape-elk ships no bundled type declarations
 import elk from "cytoscape-elk";
 // @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
 import edgehandles from "cytoscape-edgehandles";
-import { useCreateEdge, useCreateNode, useGraph } from "../api/graph";
-import { formatApiError } from "../api/errors";
-import { AttributeInput, attributeValueFromForm, splitBuiltinCollisions } from "./attributeInputs";
+import { relationshipErrorMessage, useGraphView } from "../api/graph";
+import {
+  useCreateEntity,
+  useCreateRelationship,
+  useEntityTypes,
+  useRelationshipTypes,
+  type Id,
+} from "../api/v1";
+import {
+  EMPTY_PALETTE,
+  objectsPalette,
+  type GraphMode,
+  type GraphPalette,
+} from "../lib/typesGraph";
+import AttrsForm, { buildAttrs, type AttrDrafts } from "./AttrsForm";
+import { FieldError, FieldLabel, INPUT_CLASS, type FieldErrors } from "./attrTypes";
+import { entityServerErrors } from "../pages/EntityRecord";
 import OfflineNotice from "./OfflineNotice";
 import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
@@ -18,9 +33,16 @@ cytoscape.use(edgehandles);
 type Selection = { kind: "node" | "edge"; id: string } | null;
 
 type GraphEditorProps = {
-  organizationId: string;
-  hierarchyId: string | null;
-  onHierarchyChange: (id: string | null) => void;
+  domainId: Id;
+  /** Which view to draw -- the domain's objects, or its schema. Owned by
+   * the page (it also lives in the URL and in localStorage); this
+   * component only renders the toggle and redraws. */
+  mode: GraphMode;
+  onModeChange: (mode: GraphMode) => void;
+  /** A `relationship_type` with `is_hierarchy = true`, whose rows become the
+   * nodes' compound parents. Null draws the graph flat. */
+  hierarchyTypeId: Id | null;
+  onHierarchyTypeChange: (id: Id | null) => void;
   filter?: FilterCriteria;
   onSelectionChange?: (selection: Selection) => void;
   // H-1 fix round 1: an external request to move the canvas's own roving keyboard focus to a
@@ -35,6 +57,85 @@ const ELK_LAYOUT = {
   elk: { algorithm: "layered", "elk.hierarchyHandling": "INCLUDE_CHILDREN" },
 } as const;
 
+// Only reached when an element has no palette entry at all -- i.e. the two
+// halves of a payload disagree. The old fixed canvas colours, so such an
+// element looks like the graph did before this task rather than invisible.
+const FALLBACK_FILL = "#0f172a";
+const FALLBACK_LABEL = "#f8fafc";
+const FALLBACK_EDGE = "#94a3b8";
+// Edge labels sit on the canvas background, not on a fill, so they do NOT
+// take a computed foreground: they are dark text with a white halo, which
+// reads over the background and over any edge passing beneath them. Only
+// node labels sit on a user-chosen colour, and only those are computed.
+const EDGE_LABEL = "#0f172a";
+const EDGE_LABEL_HALO = "#ffffff";
+
+/**
+ * The canvas stylesheet. Exported so the data-driven fills can be asserted
+ * -- everything cytoscape actually paints is inside a `<canvas>`, where
+ * neither a test nor axe can see it, so the mapping from element data to
+ * colour is the last observable point.
+ */
+export function graphStylesheet() {
+  return [
+    {
+      selector: "node",
+      style: {
+        label: "data(label)",
+        // The entity type's colour (or its deterministic fallback), and a
+        // label colour computed from that fill's luminance -- see
+        // `lib/colour.ts`. F-3 was fixed by giving the label an outline in
+        // the node's own colour: a label drifting over a neighbour still
+        // reads, because its halo is its own node's fill.
+        "background-color": "data(colour)",
+        color: "data(labelColour)",
+        "text-outline-width": 2,
+        "text-outline-color": "data(colour)",
+        "font-size": "10px",
+        width: 30,
+        height: 30,
+      },
+    },
+    {
+      // A compound (parent) node is drawn as a pale tint of its type's
+      // colour, so the label does NOT sit on that colour and the computed
+      // foreground would be the wrong answer -- a light label on a 15%
+      // tint of a dark fill is unreadable. Fixed dark-on-white instead,
+      // which is correct for every tint.
+      selector: "$node > node",
+      style: {
+        "background-color": "data(colour)",
+        "background-opacity": 0.15,
+        "border-width": 1,
+        "border-color": "data(colour)",
+        color: EDGE_LABEL,
+        "text-outline-color": EDGE_LABEL_HALO,
+      },
+    },
+    {
+      selector: "edge",
+      style: {
+        label: "data(label)",
+        "font-size": "9px",
+        // The types view puts the cardinality on a second line.
+        "text-wrap": "wrap",
+        color: EDGE_LABEL,
+        "text-outline-width": 2,
+        "text-outline-color": EDGE_LABEL_HALO,
+        width: 2,
+        "line-color": "data(colour)",
+        "target-arrow-color": "data(colour)",
+        "target-arrow-shape": "triangle",
+        "curve-style": "bezier",
+      },
+    },
+    { selector: ".graph-highlighted", style: { "border-width": 3, "border-color": "#2563eb" } },
+    { selector: ".graph-dimmed", style: { opacity: 0.25 } },
+    // H-1: the visible ring for the node currently holding keyboard (roving) focus.
+    { selector: ".kb-focus", style: { "border-width": 4, "border-color": "#f59e0b", "border-style": "solid" } },
+  ];
+}
+
 /**
  * Diffs `graph` against the elements already present in `cy` and applies the
  * minimal set of changes: removes ids no longer present, adds new ones
@@ -45,11 +146,30 @@ const ELK_LAYOUT = {
  * parent changed -- adding/removing an edge, or changing only a label/type,
  * does not warrant a relayout.
  */
-export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChanged: boolean } {
+export function applyGraphToCy(
+  cy: Core,
+  graph: GraphResponse,
+  // Defaulted rather than required so a caller that only has a payload
+  // (and the tests that predate colours) still gets the objects-mode
+  // resolution instead of an uncoloured canvas.
+  palette: GraphPalette = objectsPalette(graph)
+): { structureChanged: boolean } {
   let structureChanged = false;
+  // Cytoscape maps `data(colour)` / `data(labelColour)` onto the fill and
+  // the label (see `graphStylesheet`), so the colours travel in element
+  // data rather than as per-element `.style()` calls: a style set on an
+  // element wins over the stylesheet forever and would have to be cleared
+  // by hand when a type's colour changes.
+  const nodeStyle = (id: string) => ({
+    colour: palette.nodeFill[id] ?? FALLBACK_FILL,
+    labelColour: palette.nodeLabel[id] ?? FALLBACK_LABEL,
+  });
+  const edgeStyle = (id: string) => ({ colour: palette.edgeColour[id] ?? FALLBACK_EDGE });
 
   const desiredNodes = new Map(graph.nodes.map((n) => [n.id, n]));
-  const desiredEdges = new Map(graph.edges.map((e) => [e.id, e]));
+  // Keyed by CANVAS id -- see `cyEdgeId`. `edge.id` (the wire id) is still
+  // what styles are resolved by and what travels as `graphId`.
+  const desiredEdges = new Map(graph.edges.map((e) => [cyEdgeId(e.id), e]));
 
   const existingNodeIds = new Set<string>();
   const existingEdgeIds = new Set<string>();
@@ -81,7 +201,7 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
     if (existingNodeIds.has(id)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ele = (cy as any).getElementById(id);
-      ele.data({ label: node.label, type: node.type });
+      ele.data({ label: node.label, type: node.type, ...nodeStyle(id) });
       const currentParent = ele.data("parent") ?? undefined;
       const desiredParent = node.parent ?? undefined;
       if (currentParent !== desiredParent) {
@@ -105,7 +225,7 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
     if (existingEdgeIds.has(id)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ele = (cy as any).getElementById(id);
-      ele.data({ label: edge.label, type: edge.type });
+      ele.data({ label: edge.label, type: edge.type, ...edgeStyle(id) });
     } else if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
       skippedEdgeCount += 1;
     } else {
@@ -128,11 +248,25 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
       // that shared one `center` object would all keep reflecting whichever node's position was
       // set last, collapsing the whole graph onto a single point after layout.
       ...newNodes.map((node) => ({
-        data: { id: node.id, label: node.label, type: node.type, parent: node.parent ?? undefined },
+        data: {
+          id: node.id,
+          label: node.label,
+          type: node.type,
+          parent: node.parent ?? undefined,
+          ...nodeStyle(node.id),
+        },
         position: { x: center.x, y: center.y },
       })),
       ...newEdges.map((edge) => ({
-        data: { id: edge.id, source: edge.source, target: edge.target, label: edge.label, type: edge.type },
+        data: {
+          id: cyEdgeId(edge.id),
+          graphId: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label,
+          type: edge.type,
+          ...edgeStyle(edge.id),
+        },
       })),
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -146,6 +280,29 @@ export function applyGraphToCy(cy: Core, graph: GraphResponse): { structureChang
 }
 
 const GRID_LAYOUT = { name: "grid" } as const;
+
+/**
+ * The canvas id for a wire edge.
+ *
+ * Cytoscape keeps nodes and edges in **one** id space, and answers an
+ * `add()` whose id is already taken by silently doing nothing -- no throw,
+ * no console message, the element simply never appears. The objects view's
+ * node ids are `entity.id` and its edge ids are `relationship.id`: two
+ * independent bigint identity sequences, so in any database seeded from
+ * empty they overlap from the first row, and the overlapping edges vanish.
+ * Measured on the seeded demo: 23 nodes drawn, 10 relationships on the
+ * wire, **0** edges on the canvas.
+ *
+ * The types view already avoids this by minting `type-`/`reltype-` ids
+ * (`lib/typesGraph.ts`); this is the same idea for the objects view, but
+ * applied at the canvas boundary rather than on the wire, so the payload
+ * contract in `types/graph.ts` is untouched. The wire id travels on the
+ * element as `graphId`, because that is what the property panel and
+ * `DELETE /api/v1/relationships/{id}` need.
+ */
+export function cyEdgeId(wireId: string): string {
+  return `edge:${wireId}`;
+}
 
 /**
  * True when `positions` has 2+ points that are all within 1px of each other in both x and y --
@@ -171,13 +328,16 @@ export function positionsAreDegenerate(positions: { x: number; y: number }[]): b
 }
 
 export default function GraphEditor({
-  organizationId,
-  hierarchyId,
-  onHierarchyChange,
+  domainId,
+  mode,
+  onModeChange,
+  hierarchyTypeId,
+  onHierarchyTypeChange,
   filter,
   onSelectionChange,
   focusRequest,
 }: GraphEditorProps) {
+  const isTypes = mode === "types";
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -192,7 +352,16 @@ export default function GraphEditor({
 
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
-  const [createEntityTypeId, setCreateEntityTypeId] = useState("");
+  // The create-node form is a small `entity` form: a key, an optional label
+  // and one control per `attribute_def` of the chosen type (Task 12's
+  // AttrsForm), plus a parent when a hierarchy is selected.
+  const [createTypeId, setCreateTypeId] = useState<Id | "">("");
+  const [createKey, setCreateKey] = useState("");
+  const [createLabel, setCreateLabel] = useState("");
+  const [createParentId, setCreateParentId] = useState("");
+  const [createDrafts, setCreateDrafts] = useState<AttrDrafts>({});
+  const [createErrors, setCreateErrors] = useState<FieldErrors>({});
+  const createFormId = useId();
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -207,17 +376,29 @@ export default function GraphEditor({
   const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
   // H-1: Escape on the canvas returns focus to the toolbar's first control (the hierarchy
   // select) rather than dropping it back to the document body.
-  const firstControlRef = useRef<HTMLSelectElement | null>(null);
+  // In the types view the hierarchy select is not rendered (there are no
+  // relationship ROWS to nest anything by), so the view toggle is the first
+  // control and takes the ref instead.
+  const firstControlRef = useRef<HTMLElement | null>(null);
+
+  function resetCreateNodeForm() {
+    setCreateTypeId("");
+    setCreateKey("");
+    setCreateLabel("");
+    setCreateParentId("");
+    setCreateDrafts({});
+    setCreateErrors({});
+  }
 
   function closeCreateNodeForm() {
     setShowCreateNode(false);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
     createNodeToggleRef.current?.focus();
   }
 
   function openCreateNodeForm() {
     setShowCreateNode(true);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
   }
 
   function handleCreateNodeFormKeyDown(event: ReactKeyboardEvent<HTMLFormElement>) {
@@ -229,17 +410,29 @@ export default function GraphEditor({
 
   const {
     data,
+    palette,
     isLoading,
     error: loadError,
     refetch: refetchGraph,
     fetchStatus: graphFetchStatus,
-  } = useGraph(organizationId, hierarchyId);
+  } = useGraphView(domainId, hierarchyTypeId, mode);
   // D-7: offline, this query pauses instead of failing -- `isLoading` never resolves, so
   // without this the "Loading graph…" text below would sit there forever.
   const isOffline = graphFetchStatus === "paused" && !data;
-  const createNode = useCreateNode(organizationId, hierarchyId);
-  const createEdge = useCreateEdge(organizationId, hierarchyId);
+  // The hierarchy picker is filtered SERVER-side: `is_hierarchy` is a column
+  // on `relationship_type`, and Task 7 added the filter for exactly this.
+  const hierarchyTypes = useRelationshipTypes(domainId, { isHierarchy: true, limit: 500 });
+  // The graph payload's `attribute_definitions` carry only id/name/data_type;
+  // AttrsForm needs `required`, `enum_values`, `unit` and `default_value` as
+  // well, which the entity-type list route carries in full. Same query the
+  // property panel runs, so React Query serves it once.
+  const entityTypes = useEntityTypes(domainId, { limit: 500 });
+  const createEntity = useCreateEntity();
+  const createRelationship = useCreateRelationship();
   const toast = useToast();
+
+  const createType = createTypeId === "" ? undefined : entityTypes.data?.items.find((t) => t.id === createTypeId);
+  const createAttributes = createType?.attributes ?? [];
 
   // Create the cytoscape instance exactly once per mount. Data is applied
   // (and the instance kept alive across refetches/mutations) by the effect
@@ -252,50 +445,8 @@ export default function GraphEditor({
     const cy = cytoscape({
       container: containerRef.current,
       elements: [],
-      style: [
-        {
-          selector: "node",
-          style: {
-            label: "data(label)",
-            "background-color": "#0f172a",
-            // F-3: the label used to match the node fill exactly (both #0f172a), so it was
-            // legible only while it happened to sit above the circle -- any label drifting over
-            // a neighbouring node's fill disappeared into it. A near-white label plus a dark
-            // outline reads over both the light canvas background and any node's dark fill.
-            color: "#f8fafc",
-            "text-outline-width": 2,
-            "text-outline-color": "#0f172a",
-            "font-size": "10px",
-            width: 30,
-            height: 30,
-          },
-        },
-        {
-          selector: "$node > node",
-          style: {
-            "background-color": "#e2e8f0",
-            "background-opacity": 0.4,
-            "border-width": 1,
-            "border-color": "#94a3b8",
-          },
-        },
-        {
-          selector: "edge",
-          style: {
-            label: "data(label)",
-            "font-size": "9px",
-            width: 2,
-            "line-color": "#94a3b8",
-            "target-arrow-color": "#94a3b8",
-            "target-arrow-shape": "triangle",
-            "curve-style": "bezier",
-          },
-        },
-        { selector: ".graph-highlighted", style: { "border-width": 3, "border-color": "#2563eb" } },
-        { selector: ".graph-dimmed", style: { opacity: 0.25 } },
-        // H-1: the visible ring for the node currently holding keyboard (roving) focus.
-        { selector: ".kb-focus", style: { "border-width": 4, "border-color": "#f59e0b", "border-style": "solid" } },
-      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      style: graphStylesheet() as any,
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -308,7 +459,11 @@ export default function GraphEditor({
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", "edge", (evt: any) => {
-      onSelectionChangeRef.current?.({ kind: "edge", id: evt.target.id() });
+      // The wire id, not the canvas id -- see `cyEdgeId`.
+      onSelectionChangeRef.current?.({
+        kind: "edge",
+        id: evt.target.data("graphId") ?? evt.target.id(),
+      });
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     cy.on("tap", (evt: any) => {
@@ -352,13 +507,42 @@ export default function GraphEditor({
     if (!data) {
       return;
     }
-    const { structureChanged } = applyGraphToCy(cy, data);
+    const { structureChanged } = applyGraphToCy(cy, data, palette);
     graphRef.current = data;
     if (structureChanged || !hasLaidOutRef.current) {
       hasLaidOutRef.current = true;
       startLayout(cy);
     }
+    // `palette` is a fresh object per render of its inputs, so it is read
+    // here rather than listed as a dependency -- the data it is derived
+    // from is already in the list, and adding it would re-diff on every
+    // render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, loadError]);
+
+  // A mode switch replaces every element (types ids are namespaced, so the
+  // diff is a clean remove/add) and must announce itself: the toggle is a
+  // pair of buttons whose pressed state changes, which a screen reader
+  // reads as a button state, not as "the canvas now shows something else".
+  // Skipped on the first render so arriving on the page does not announce
+  // a change that did not happen.
+  const announcedModeRef = useRef<GraphMode>(mode);
+  useEffect(() => {
+    if (announcedModeRef.current === mode) {
+      return;
+    }
+    announcedModeRef.current = mode;
+    setFocusedNodeId(null);
+    // Both belong to the objects view; leaving them open across a switch
+    // would offer to create an entity on a canvas that has none.
+    setShowCreateNode(false);
+    setPendingEdge(null);
+    setLiveMessage(
+      mode === "types"
+        ? "Types view: entity types and relationship types"
+        : "Objects view: entities and relationships"
+    );
+  }, [mode]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -373,6 +557,9 @@ export default function GraphEditor({
     const nodeById = new Map(data.nodes.map((n) => [n.id, n]));
     const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
     const highlightIds = filter?.highlightIds ?? null;
+    // Task 14c. Null means "no expression constraint" -- an empty or
+    // invalid expression filters nothing rather than blanking the canvas.
+    const expressionMatchIds = filter?.expressionMatchIds ?? null;
 
     cy.nodes().forEach((node) => {
       const graphNode = nodeById.get(node.id());
@@ -380,12 +567,16 @@ export default function GraphEditor({
         return;
       }
       const typeOk = selectedTypesSet === null || selectedTypesSet.has(graphNode.type);
-      const codeValue = graphNode.attributes?.code;
-      const searchOk =
-        !searchLower ||
-        graphNode.label.toLowerCase().includes(searchLower) ||
-        (typeof codeValue === "string" && codeValue.toLowerCase().includes(searchLower));
-      node.style("display", typeOk && searchOk ? "element" : "none");
+      // Label only. v0 also matched `attributes.code`, which was the entity's
+      // own `code` COLUMN; v1 has no such column -- `code` there would be an
+      // ordinary attribute that a type may or may not declare, so matching it
+      // would make search mean something different per entity type.
+      const searchOk = !searchLower || graphNode.label.toLowerCase().includes(searchLower);
+      // AND, and the same `display: none` the other two use -- so a node an
+      // expression hid is indistinguishable downstream (edges, hit-testing,
+      // the empty-state overlay) from one a checkbox hid.
+      const expressionOk = expressionMatchIds === null || expressionMatchIds.has(graphNode.id);
+      node.style("display", typeOk && searchOk && expressionOk ? "element" : "none");
     });
 
     cy.edges().forEach((edge) => {
@@ -403,6 +594,78 @@ export default function GraphEditor({
       });
     }
   }, [filter, data]);
+
+  // The ids the three filters leave showing -- the same AND the effect
+  // above writes into `display`, derived from the graph DATA so that what
+  // the page says is what was decided rather than what a style write
+  // happened to leave behind. Two things read it: the canvas's accessible
+  // name, and the expression announcement.
+  const shownNodeIds = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+    const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
+    const searchLower = (filter?.search ?? "").toLowerCase();
+    const matchIds = filter?.expressionMatchIds ?? null;
+    return new Set(
+      data.nodes
+        .filter(
+          (node) =>
+            (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
+            (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
+            (matchIds === null || matchIds.has(node.id))
+        )
+        .map((node) => node.id)
+    );
+  }, [data, filter]);
+
+  // A filter that hides the node the roving selection is on drops the
+  // selection rather than leaving a ring on something nobody can see. The
+  // next arrow key then starts from the first visible node.
+  useEffect(() => {
+    if (!focusedNodeId || !shownNodeIds || shownNodeIds.has(focusedNodeId)) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (cyRef.current as any)?.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
+    setFocusedNodeId(null);
+  }, [shownNodeIds, focusedNodeId]);
+
+  /**
+   * The canvas's accessible name.
+   *
+   * It says how many nodes are SHOWN, and -- only when a filter is hiding
+   * some -- how many exist. Unconditionally saying "N of M" would make an
+   * unfiltered canvas sound filtered; saying only "M" is what it used to
+   * do, and that was a plain untruth on a filtered one.
+   */
+  const canvasLabel = useMemo(() => {
+    const total = data?.nodes.length ?? 0;
+    const shown = shownNodeIds ? shownNodeIds.size : total;
+    const count = shown === total ? `${total} nodes` : `${shown} of ${total} nodes shown`;
+    return `Graph canvas, ${isTypes ? "types view" : "objects view"}, ${count} — use the arrow keys to move between nodes`;
+  }, [data, shownNodeIds, isTypes]);
+
+  // Task 14c: the expression's result, announced in the same live region
+  // the rest of this canvas uses. Only while an expression is active:
+  // announcing on every keystroke in the search box would be noise, and
+  // the type checkboxes have never announced either.
+  const announcedExpressionRef = useRef(false);
+  useEffect(() => {
+    if (!data || !shownNodeIds) {
+      return;
+    }
+    const matchIds = filter?.expressionMatchIds ?? null;
+    if (!matchIds) {
+      if (announcedExpressionRef.current) {
+        announcedExpressionRef.current = false;
+        setLiveMessage("Filter conditions cleared");
+      }
+      return;
+    }
+    announcedExpressionRef.current = true;
+    setLiveMessage(`Filter conditions: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
+  }, [filter, data, shownNodeIds]);
 
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
   // FilterBar's search box) to move the canvas's own roving keyboard focus to a node, so the
@@ -499,15 +762,31 @@ export default function GraphEditor({
   // H-1: node ids ordered left-to-right, then top-to-bottom by current on-canvas position, so
   // Arrow-key traversal is predictable. Recomputed from the live `cy` instance on every
   // keypress rather than cached, so it stays correct after nodes are added/removed/relaid-out.
+  //
+  // **Hidden nodes are not in it.** The filter effect above sets `display: none` on every node
+  // a type checkbox, the search box or an expression excluded, and until this round the arrow
+  // keys walked those too: with 1 of 23 nodes showing, a keyboard user was announced the other
+  // 22 by name, the canvas panned to empty space, and Enter opened an editable panel -- with a
+  // Delete button -- for a node that was not on the screen. A filtered graph gave keyboard
+  // users a different set of nodes from the one sighted users could see, which is the sharper
+  // version of the "0 axe violations" observation in the ledger: the number was true and the
+  // inference drawn from it was not.
+  //
+  // `display` is read from cytoscape rather than re-derived from `filter`, because cytoscape
+  // is what actually decides what is painted -- and the three filters already funnel into this
+  // one property precisely so that everything downstream can ask one question.
   function orderedNodeIds(cy: Core): string[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodesColl: any = (cy as any).nodes?.();
     const items: { id: string; x: number; y: number }[] =
       nodesColl && typeof nodesColl.map === "function"
-        ? nodesColl.map((n: any) => {
-            const pos = typeof n.position === "function" ? n.position() : undefined;
-            return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0 };
-          })
+        ? nodesColl
+            .map((n: any) => {
+              const pos = typeof n.position === "function" ? n.position() : undefined;
+              const display = typeof n.style === "function" ? n.style("display") : undefined;
+              return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0, hidden: display === "none" };
+            })
+            .filter((item: { hidden: boolean }) => !item.hidden)
         : [];
     items.sort((a, b) => a.x - b.x || a.y - b.y);
     return items.map((item) => item.id);
@@ -570,12 +849,17 @@ export default function GraphEditor({
         event.preventDefault();
         moveFocus(-1);
         break;
-      case "Enter":
+      case "Enter": {
         event.preventDefault();
-        if (focusedNodeId) {
+        // Only for a node that is actually on screen. The effect below clears the roving
+        // selection when a filter hides its node, but a keypress can land in the same frame
+        // as the filter change, and the panel Enter opens can delete the row.
+        const cy = cyRef.current;
+        if (focusedNodeId && cy && orderedNodeIds(cy).includes(focusedNodeId)) {
           onSelectionChangeRef.current?.({ kind: "node", id: focusedNodeId });
         }
         break;
+      }
       case "Escape":
         event.preventDefault();
         firstControlRef.current?.focus();
@@ -587,13 +871,6 @@ export default function GraphEditor({
 
   function nodeEntityType(entityId: string): string | undefined {
     return data?.nodes.find((n) => n.id === entityId)?.type;
-  }
-
-  function entityTypeName(code: string | undefined): string {
-    if (!code) {
-      return "?";
-    }
-    return data?.entity_types.find((et) => et.code === code)?.name ?? code;
   }
 
   function validRelationshipTypesFor(sourceId: string, targetId: string): RelationshipTypeOption[] {
@@ -612,66 +889,88 @@ export default function GraphEditor({
     }
     const relationshipTypeName =
       data?.relationship_types.find((rt) => rt.id === relationshipTypeId)?.name ?? "Relationship";
-    createEdge.mutate(
+    createRelationship.mutate(
       {
-        relationship_type_id: relationshipTypeId,
-        source_entity_id: pendingEdge.sourceId,
-        target_entity_id: pendingEdge.targetId,
+        relationship_type_id: Number(relationshipTypeId),
+        // from -> to is the direction the cardinality, type and cycle rules
+        // are judged in; for a hierarchy, `from` is the parent.
+        from_entity_id: Number(pendingEdge.sourceId),
+        to_entity_id: Number(pendingEdge.targetId),
       },
       {
         onSuccess: () => toast.success(`${relationshipTypeName} created`),
-        onError: (e) => setError(formatApiError(e)),
+        // A cardinality, cycle or type_mismatch 422 names the relationship
+        // TYPE in `loc`, not a body field -- see relationshipErrorMessage.
+        onError: (e) => setError(relationshipErrorMessage(e)),
       }
     );
     setPendingEdge(null);
   }
 
-  function handleCreateNode(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateNode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    const form = new FormData(event.currentTarget);
-    const entityTypeId = String(form.get("entity_type_id") ?? "");
-    const name = String(form.get("name") ?? "");
-    const code = String(form.get("code") ?? "") || undefined;
-    const parentEntityId = String(form.get("parent_entity_id") ?? "") || undefined;
-    if (!entityTypeId || !name) {
+    if (createTypeId === "") {
       return;
     }
-    // Attribute definitions that collide with a built-in field (code/status/
-    // description/name) are hidden from the form and never sent -- see
-    // splitBuiltinCollisions.
-    const { visible: definitions } = splitBuiltinCollisions(
-      data?.attribute_definitions.filter((d) => d.entity_type_id === entityTypeId) ?? []
-    );
-    const attributes: Record<string, unknown> = {};
+    const next: FieldErrors = {};
+    const key = createKey.trim();
+    // The server has no CHECK on `entity.key` (Task 6's deferred item), and
+    // the key is what model expressions address the entity by.
+    if (key === "") {
+      next.key = "Key: a key is required -- it is how model expressions refer to this entity.";
+    }
+    const built = buildAttrs(createAttributes, createDrafts);
+    if (!built.ok) {
+      Object.assign(next, built.errors);
+    }
+    setCreateErrors(next);
+    if (Object.keys(next).length > 0) {
+      return;
+    }
+
+    let created;
     try {
-      for (const def of definitions) {
-        const value = attributeValueFromForm(form, def);
-        if (value !== null) {
-          attributes[def.code] = value;
-        }
-      }
+      created = await createEntity.mutateAsync({
+        entity_type_id: createTypeId,
+        key,
+        label: createLabel.trim() === "" ? null : createLabel,
+        // Every value is built from the definitions, so an omitted control
+        // sends no key at all and the trigger materialises the default.
+        attrs: built.ok ? built.attrs : {},
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid attribute value");
+      const result = entityServerErrors(err, createAttributes.map((attribute) => attribute.name));
+      setCreateErrors(result.fields);
+      setError(result.general);
       return;
     }
-    createNode.mutate(
-      {
-        organization_id: organizationId,
-        entity_type_id: entityTypeId,
-        name,
-        code,
-        attributes,
-        hierarchy_id: hierarchyId ?? undefined,
-        parent_entity_id: parentEntityId,
-      },
-      {
-        onSuccess: () => toast.success(`${name} created`),
-        onError: (e) => setError(formatApiError(e)),
+
+    // Placing the node under a parent is a second write: in v1 the nesting IS
+    // a relationship of the selected hierarchy type, read as from_entity =
+    // parent of to_entity. There is no combined endpoint, so the entity
+    // exists even if this half fails -- which the message has to say.
+    if (hierarchyTypeId !== null && createParentId !== "") {
+      try {
+        await createRelationship.mutateAsync({
+          relationship_type_id: hierarchyTypeId,
+          from_entity_id: Number(createParentId),
+          to_entity_id: created.id,
+        });
+      } catch (err) {
+        setError(
+          `${created.label ?? created.key} was created, but could not be placed under the chosen parent: ` +
+            relationshipErrorMessage(err)
+        );
+        setShowCreateNode(false);
+        resetCreateNodeForm();
+        return;
       }
-    );
+    }
+
+    toast.success(`${created.label ?? created.key} created`);
     setShowCreateNode(false);
-    setCreateEntityTypeId("");
+    resetCreateNodeForm();
   }
 
   return (
@@ -681,22 +980,61 @@ export default function GraphEditor({
     // container's comment for why this replaced a `100vh - 320px` guess.
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <select
-          ref={firstControlRef}
-          className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-          value={hierarchyId ?? ""}
-          onChange={(e) => onHierarchyChange(e.target.value || null)}
-          title="Nest nodes under a hierarchy"
-          aria-label="Hierarchy nesting"
-          data-testid="hierarchy-select"
+        {!isTypes && (
+          <select
+            ref={firstControlRef as React.RefObject<HTMLSelectElement>}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            value={hierarchyTypeId ?? ""}
+            onChange={(e) => onHierarchyTypeChange(e.target.value === "" ? null : Number(e.target.value))}
+            title="Nest nodes under a hierarchy"
+            aria-label="Hierarchy nesting"
+            data-testid="hierarchy-select"
+          >
+            <option value="">No hierarchy nesting</option>
+            {/* One `relationship_type` per option, filtered to is_hierarchy by
+                the server. Its name, once: v1 has a single name per type. */}
+            {hierarchyTypes.data?.items.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {/* The view toggle. Two buttons rather than a select, because the
+            choice is between two named views and both should be one key or
+            one click away; `aria-pressed` is what tells assistive tech which
+            one is showing, and the live region below announces the switch. */}
+        <div
+          role="group"
+          aria-label="Graph view"
+          className="flex overflow-hidden rounded-md border border-slate-300"
+          data-testid="graph-mode-toggle"
         >
-          <option value="">No hierarchy nesting</option>
-          {data?.hierarchies.map((h) => (
-            <option key={h.id} value={h.id}>
-              {h.name} ({h.code})
-            </option>
+          {(["objects", "types"] as const).map((candidate) => (
+            <button
+              key={candidate}
+              ref={
+                isTypes && candidate === "objects"
+                  ? (firstControlRef as React.RefObject<HTMLButtonElement>)
+                  : undefined
+              }
+              type="button"
+              onClick={() => onModeChange(candidate)}
+              aria-pressed={mode === candidate}
+              title={
+                candidate === "objects"
+                  ? "Show this domain's entities and the relationships between them"
+                  : "Show this domain's schema: one node per entity type, one edge per relationship type"
+              }
+              className={`px-2 py-1 text-sm ${
+                mode === candidate ? "bg-slate-900 text-white" : "bg-white text-slate-700"
+              }`}
+              data-testid={`graph-mode-${candidate}`}
+            >
+              {candidate === "objects" ? "Objects" : "Types"}
+            </button>
           ))}
-        </select>
+        </div>
         <button
           onClick={runLayout}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -715,6 +1053,11 @@ export default function GraphEditor({
         >
           Fit
         </button>
+        {/* Both of these write `entity` / `relationship` ROWS, which the
+            schema view has none of: creating an entity type or a
+            relationship type is a different form on a different page. */}
+        {!isTypes && (
+        <>
         <button
           type="button"
           onClick={toggleConnect}
@@ -736,7 +1079,7 @@ export default function GraphEditor({
           type="button"
           onClick={() => {
             setShowCreateNode((v) => !v);
-            setCreateEntityTypeId("");
+            resetCreateNodeForm();
           }}
           className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white"
           title="Create a new node"
@@ -746,6 +1089,8 @@ export default function GraphEditor({
         >
           + New Node
         </button>
+        </>
+        )}
         {layoutStatus && (
           <span data-testid="layout-status" className="text-xs text-slate-500">
             {layoutStatus}
@@ -758,9 +1103,11 @@ export default function GraphEditor({
           Connect mode is switched on. The text swaps to a focused instruction the moment Connect
           mode is actually on, so the mode is self-explanatory rather than a mystery toggle. */}
       <p data-testid="graph-help" className="mb-2 text-xs text-slate-500">
-        {connecting
-          ? "Drag from one node to another to connect them."
-          : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."}
+        {isTypes
+          ? "This is the domain's schema: one node per entity type, one edge per relationship type, labelled with its cardinality. A loop is a type that relates to itself, such as a hierarchy. Click a node or edge to see and colour it."
+          : connecting
+            ? "Drag from one node to another to connect them."
+            : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."}
       </p>
 
       {error && (
@@ -775,130 +1122,141 @@ export default function GraphEditor({
         </div>
       )}
 
-      {showCreateNode && data && (
+      {showCreateNode && data && !isTypes && (
         <form
           id="create-node-form"
           onSubmit={handleCreateNode}
           onKeyDown={handleCreateNodeFormKeyDown}
-          className="mb-2 flex flex-wrap items-end gap-2 rounded-md border border-slate-200 p-2"
+          className="mb-2 space-y-3 rounded-md border border-slate-200 p-2"
           data-testid="create-node-form"
         >
-          <label className="text-xs">
-            Type
-            <select
-              name="entity_type_id"
-              required
-              value={createEntityTypeId}
-              onChange={(e) => setCreateEntityTypeId(e.target.value)}
-              className="block rounded-md border border-slate-300 px-2 py-1 text-sm"
-            >
-              <option value="">—</option>
-              {data.entity_types.map((et) => (
-                <option key={et.id} value={et.id}>
-                  {et.name} ({et.code})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs">
-            Name
-            <input name="name" required className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          </label>
-          <label className="text-xs">
-            Code
-            <input name="code" className="block rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          </label>
-          {(() => {
-            const { visible, hidden } = splitBuiltinCollisions(
-              data.attribute_definitions.filter((def) => def.entity_type_id === createEntityTypeId)
-            );
-            return (
-              <>
-                {visible.map((def) => (
-                  <label key={def.id} className="text-xs">
-                    {def.name}
-                    <AttributeInput def={def} />
-                  </label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-type`} required>
+                Entity type
+              </FieldLabel>
+              <select
+                id={`${createFormId}-type`}
+                required
+                value={createTypeId}
+                onChange={(e) => {
+                  setCreateTypeId(e.target.value === "" ? "" : Number(e.target.value));
+                  // Drafts belong to the previous type's attributes; keeping
+                  // them would carry a value across to an unrelated name.
+                  setCreateDrafts({});
+                  setCreateErrors({});
+                }}
+                className={INPUT_CLASS}
+              >
+                <option value="">—</option>
+                {/* The type's name, once: v1 has one name per entity type. */}
+                {entityTypes.data?.items.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
                 ))}
-                {hidden.map((def) => (
-                  <p key={def.id} className="basis-full text-xs text-slate-500">
-                    attribute {def.code} hidden: collides with a built-in field
-                  </p>
-                ))}
-              </>
-            );
-          })()}
-          {hierarchyId && (
-            <label className="text-xs">
-              Parent (any node placed in this hierarchy will be used; others get an error)
-              <select name="parent_entity_id" className="block rounded-md border border-slate-300 px-2 py-1 text-sm">
-                <option value="">(root)</option>
+              </select>
+            </div>
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-key`} required>
+                Key
+              </FieldLabel>
+              <input
+                id={`${createFormId}-key`}
+                className={INPUT_CLASS}
+                value={createKey}
+                onChange={(e) => setCreateKey(e.target.value)}
+                aria-invalid={createErrors.key ? "true" : undefined}
+                aria-describedby={createErrors.key ? `${createFormId}-key-error` : undefined}
+                autoComplete="off"
+              />
+              <FieldError id={`${createFormId}-key-error`} message={createErrors.key} />
+            </div>
+            <div>
+              <FieldLabel htmlFor={`${createFormId}-label`}>Label</FieldLabel>
+              <input
+                id={`${createFormId}-label`}
+                className={INPUT_CLASS}
+                value={createLabel}
+                onChange={(e) => setCreateLabel(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+          {createTypeId !== "" && (
+            <AttrsForm
+              attributes={createAttributes}
+              drafts={createDrafts}
+              errors={createErrors}
+              onChange={(name, value) => setCreateDrafts((prev) => ({ ...prev, [name]: value }))}
+            />
+          )}
+          {hierarchyTypeId !== null && (
+            <div className="sm:max-w-xs">
+              <FieldLabel htmlFor={`${createFormId}-parent`}>Parent</FieldLabel>
+              <select
+                id={`${createFormId}-parent`}
+                value={createParentId}
+                onChange={(e) => setCreateParentId(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="">(no parent)</option>
                 {data.nodes.map((n) => (
                   <option key={n.id} value={n.id}>
                     {n.label}
                   </option>
                 ))}
               </select>
-            </label>
+              <p className="mt-1 text-xs text-slate-500">
+                Places the new node under this one, as a relationship of the selected hierarchy.
+              </p>
+            </div>
           )}
-          <button
-            type="submit"
-            disabled={createNode.isPending}
-            className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {createNode.isPending ? "Creating…" : "Create"}
-          </button>
-          {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
-          <button type="button" onClick={closeCreateNodeForm} className="rounded px-2 py-1 text-sm text-slate-500">
-            Cancel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={createEntity.isPending || createRelationship.isPending}
+              className="rounded-md bg-slate-900 px-2 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {createEntity.isPending ? "Creating…" : "Create"}
+            </button>
+            {/* H-9: was 20px tall with no padding -- px-2 py-1 clears the 24px Target Size floor. */}
+            <button type="button" onClick={closeCreateNodeForm} className="rounded px-2 py-1 text-sm text-slate-500">
+              Cancel
+            </button>
+          </div>
         </form>
       )}
 
-      {pendingEdge && data && (
+      {pendingEdge && data && !isTypes && (
         <div className="mb-2 rounded-md border border-slate-200 p-2" data-testid="edge-type-picker">
           <p className="mb-1 text-xs text-slate-600">Choose a relationship type:</p>
           {(() => {
             const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
             if (validTypes.length === 0) {
-              const sourceTypeName = entityTypeName(nodeEntityType(pendingEdge.sourceId));
-              const targetTypeName = entityTypeName(nodeEntityType(pendingEdge.targetId));
+              // A node's `type` IS the entity type's name in v1, so there is
+              // nothing to look up to name it.
               return (
                 <p className="mb-1 text-xs text-slate-500">
-                  No relationship type allows {sourceTypeName} → {targetTypeName}
+                  No relationship type allows {nodeEntityType(pendingEdge.sourceId) ?? "?"} →{" "}
+                  {nodeEntityType(pendingEdge.targetId) ?? "?"}
                 </p>
               );
             }
-            // Type-constrained matches (naming a specific source and/or target type) first,
-            // since they're almost always what the user meant for this dragged pair; fully
-            // unconstrained ("any -> any") types are the generic catch-alls, listed after a
-            // divider so they read as a separate, lower-priority group.
-            const constrained = validTypes.filter(
-              (rt) => rt.source_entity_type !== null || rt.target_entity_type !== null
-            );
-            const unconstrained = validTypes.filter(
-              (rt) => rt.source_entity_type === null && rt.target_entity_type === null
-            );
-            const button = (rt: RelationshipTypeOption) => (
+            // v0 grouped "any -> any" types after a divider. v1 has none:
+            // `from_type_id`/`to_type_id` are NOT NULL, so every relationship
+            // type names both ends and the group could never be non-empty.
+            return validTypes.map((rt: RelationshipTypeOption) => (
               <button
                 key={rt.id}
                 type="button"
                 onClick={() => handleConfirmEdge(rt.id)}
-                disabled={createEdge.isPending}
+                disabled={createRelationship.isPending}
                 className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {rt.name} ({rt.code})
+                {rt.name}
               </button>
-            );
-            return (
-              <>
-                {constrained.map(button)}
-                {constrained.length > 0 && unconstrained.length > 0 && (
-                  <hr data-testid="picker-divider" className="my-1 border-slate-200" />
-                )}
-                {unconstrained.map(button)}
-              </>
-            );
+            ));
           })()}
           <button type="button" onClick={() => setPendingEdge(null)} className="rounded px-2 py-1 text-sm text-slate-500">
             Cancel
@@ -908,7 +1266,7 @@ export default function GraphEditor({
 
       {isOffline && <OfflineNotice subject="The graph" />}
       {!isOffline && isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
-      {!isOffline && loadError && (
+      {!isOffline && Boolean(loadError) && (
         <div className="mb-2 flex items-center gap-3 text-sm text-red-600">
           <p>Failed to load graph</p>
           <button
@@ -946,7 +1304,12 @@ export default function GraphEditor({
           // label advertises actually reachable: without it a screen reader stays
           // in browse mode and swallows the arrow keys before `onKeyDown` sees them.
           role="application"
-          aria-label={`Graph canvas, ${data?.nodes.length ?? 0} nodes — use the arrow keys to move between nodes`}
+          // The count is what is SHOWN, not what was loaded. It used to be
+          // `data.nodes.length`, so a canvas displaying 1 of 23 nodes
+          // announced itself as having 23 -- and the arrow keys, which this
+          // very label advertises, then walked all 23. Both halves of that
+          // are fixed; this is the half a screen-reader user hears first.
+          aria-label={canvasLabel}
           onKeyDown={handleCanvasKeyDown}
         />
         {/* H-1: a polite live region announcing the label of whichever node keyboard focus is
@@ -963,14 +1326,25 @@ export default function GraphEditor({
             data-testid="graph-empty-state"
             className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-slate-500"
           >
-            <p>No nodes yet.</p>
-            <button
-              type="button"
-              onClick={openCreateNodeForm}
-              className="pointer-events-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
-            >
-              Create the first node
-            </button>
+            <p>{isTypes ? "No entity types in this domain yet." : "No nodes yet."}</p>
+            {isTypes ? (
+              // The schema view has nothing to create from here: a type is
+              // defined with its attributes, on its own page.
+              <Link
+                to="/entity-types"
+                className="pointer-events-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
+              >
+                Define the first entity type
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={openCreateNodeForm}
+                className="pointer-events-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
+              >
+                Create the first node
+              </button>
+            )}
           </div>
         )}
       </div>
