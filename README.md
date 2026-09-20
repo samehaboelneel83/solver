@@ -255,10 +255,10 @@ Two implementation notes worth knowing before you change anything here:
 ## Tests
 
 ```bash
-# Backend — 733 tests
+# Backend — 754 tests
 docker compose run --rm --no-deps -T backend pytest -q
 
-# Frontend — 1108 tests across 57 files
+# Frontend — 1175 tests across 59 files
 cd frontend && npm ci && npm test -- --run
 ```
 
@@ -370,8 +370,15 @@ python scripts/graph_smoke_check.py
 - **Relationship attributes are edited as raw JSON**, as is any JSONB column on
   a generic form. Entity attributes are the exception — those are typed by the
   attribute's declared `data_type`.
-- **No optimistic locking.** Nothing carries a version or etag check — the last
-  save wins, silently overwriting a concurrent edit.
+- **Optimistic locking covers three tables, not all of them.** `entity`,
+  `entity_type` and `relationship_type` carry an `updated_at` (migration
+  `0010`, maintained by a trigger so every writer moves it). Their forms send
+  it back and a save built on a superseded read is refused with a **409**,
+  offering a reload that keeps whatever the person has typed. Everything else
+  — relationships, parameter cells, the generic CRUD tables — is still
+  last-save-wins. The check is also opt-in per request: a `PATCH` that omits
+  `updated_at` is not checked, which is what keeps scripts and the graph's
+  inline edits working.
 - **The graph's expression filter mixes every entity type's attributes** in one
   flat list, and a rule on one type empties the rest of the canvas.
 - **A filtered entity list is not linkable.** The type filter is in the URL; the
