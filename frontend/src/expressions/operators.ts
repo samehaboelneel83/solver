@@ -69,6 +69,36 @@ export const OPERATORS_BY_TYPE: Record<AttrType, readonly string[]> = {
 /** Offered on any field that can be absent. */
 export const NULL_OPERATORS: readonly string[] = ["null", "notNull"];
 
+/**
+ * Where a data type reads better in its own words than in the shared
+ * numeric ones.
+ *
+ * A date IS ordered, so it offers the same four comparisons an integer
+ * does and compiles to the same SQL -- but nobody says one date is *less
+ * than* another, and "hired_on is less than 2024-01-01" was the one place
+ * an otherwise carefully type-aware builder (enum → "is one of" and a
+ * dropdown, date → a native date picker) made the reader translate. Only
+ * the LABEL changes; the operator NAME on the wire is untouched, because
+ * that is what the server compiles.
+ *
+ * Numbers deliberately keep the numeric wording: "hourly_rate is before
+ * 20" would be this same bug with the types swapped.
+ */
+const LABEL_BY_TYPE: Partial<Record<AttrType, Record<string, string>>> = {
+  date: {
+    "<": "is before",
+    "<=": "is on or before",
+    ">": "is after",
+    ">=": "is on or after",
+  },
+  time: {
+    "<": "is before",
+    "<=": "is at or before",
+    ">": "is after",
+    ">=": "is at or after",
+  },
+};
+
 /** The operators a particular field offers: its data type's, plus the null
  * pair when the field can be absent. A required attribute is guaranteed
  * present by `entity_validate`, so "is empty" there would be dead UI. */
@@ -77,7 +107,12 @@ export function operatorsForField(field: ExpressionField): OperatorDef[] {
     ...OPERATORS_BY_TYPE[field.dataType],
     ...(field.nullable ? NULL_OPERATORS : []),
   ];
-  return names.map((name) => EXPRESSION_OPERATORS[name]);
+  const overrides = LABEL_BY_TYPE[field.dataType];
+  return names.map((name) => {
+    const def = EXPRESSION_OPERATORS[name];
+    const label = overrides?.[name];
+    return label ? { ...def, label } : def;
+  });
 }
 
 /** Whether `operator` is one `field` offers. */

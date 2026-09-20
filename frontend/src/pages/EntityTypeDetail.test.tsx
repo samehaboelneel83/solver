@@ -124,7 +124,15 @@ describe("EntityTypeDetail", () => {
     expect(within(grade).getByText("3")).toBeInTheDocument();
     expect(within(grade).getByText("level")).toBeInTheDocument();
     expect(within(grade).getByText("Yes")).toBeInTheDocument();
-    expect(within(rowFor("on_call")).getByText("False")).toBeInTheDocument();
+    // `on_call`'s type is "Yes / no", so its default is No -- not "False",
+    // which is a vocabulary this table alone used to speak.
+    // Read by POSITION: the Required column says "No" on this row too, so
+    // "somewhere on the row it says No" would pass against the old "False".
+    // The name is a <th scope="row">, so the cells start at Data type.
+    const onCall = within(rowFor("on_call")).getAllByRole("cell");
+    expect(onCall[0]).toHaveTextContent("Yes / no");
+    expect(onCall[4]).toHaveTextContent(/^No$/);
+    expect(rowFor("on_call").textContent).not.toContain("False");
     const kind = rowFor("shift_kind");
     expect(within(kind).getByText("day, night")).toBeInTheDocument();
     expect(within(kind).getByText("No default")).toBeInTheDocument();
@@ -380,6 +388,12 @@ describe("EntityTypeDetail", () => {
     expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
   });
 
+  /*
+   * This used to send the PATCH anyway, carrying the last good colour, and
+   * toast "Entity type saved" -- the one field in the product that reported
+   * success while dropping what the user typed. It now blocks the save like
+   * every other invalid field, and says so in the same error summary.
+   */
   it("refuses a malformed hex without sending anything", async () => {
     serve();
     renderPage();
@@ -388,10 +402,31 @@ describe("EntityTypeDetail", () => {
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#zzz" } });
     fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
     await flush();
-    // The PATCH still goes (the name is valid), but it carries the last
-    // good colour rather than the junk in the box, and the box says why.
-    expect(within(typeForm()).getByText(/six-digit hex colour/i)).toBeInTheDocument();
-    expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
+    expect(writes()).toHaveLength(0);
+    // Both places every other refused field appears: the summary at the
+    // top of the form, and the text under the control itself.
+    expect(within(typeForm()).getByTestId("form-errors")).toHaveTextContent(
+      /Colour: Use a six-digit hex colour/i
+    );
+    expect(within(typeForm()).getByTestId("colour-hex")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByText("Entity type saved")).not.toBeInTheDocument();
+  });
+
+  it("saves once the colour is corrected, with the error gone", async () => {
+    serve((path, init) => (init?.method === "PATCH" ? Promise.resolve({ ...TYPE, colour: "#00aa00" }) : undefined));
+    renderPage();
+    await loaded();
+
+    fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "banana" } });
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    await flush();
+    expect(writes()).toHaveLength(0);
+
+    fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#00aa00" } });
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect((writes()[0].body as Record<string, unknown>).colour).toBe("#00aa00");
+    expect(within(typeForm()).queryByTestId("form-errors")).not.toBeInTheDocument();
   });
 });
 

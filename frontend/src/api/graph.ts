@@ -169,7 +169,54 @@ export function relationshipErrorMessage(err: unknown): string {
       const field = item.loc?.[1];
       return typeof field === "string" && RELATIONSHIP_BODY_FIELDS.has(field)
         ? `${field}: ${item.msg}`
-        : item.msg;
+        : rewordTriggerMessage(item.msg);
     })
     .join("\n");
+}
+
+/**
+ * `relationship_validate`'s two cardinality refusals, in the words the
+ * forms use.
+ *
+ * The trigger says `relationship "supplied_to": source already has a
+ * target`. "Source" and "target" appear nowhere else in this UI -- every
+ * form, column heading and hint calls the two ends **From** and **To** --
+ * and the sentence never said what to do about it, so the reader was left
+ * holding a rule in a vocabulary they had not been taught, and no way out
+ * of it.
+ *
+ * Matched on the SENTENCE, not on `kind`. `kind` is `cardinality` for
+ * both of these and says nothing about WHICH end is full, and the cycle
+ * and type-mismatch refusals arrive at the same `loc`; the sentence is
+ * the only thing that identifies the rule that fired. Anything not
+ * recognised here -- including a rule added to the trigger later --
+ * passes through unchanged rather than being mangled into a guess.
+ */
+const TRIGGER_REWORDINGS: { pattern: RegExp; reword: (name: string) => string }[] = [
+  {
+    // `many_to_one` / `one_to_one`: the From end may hold only one edge.
+    pattern: /^relationship "(.+)": source already has a target$/,
+    reword: (name) =>
+      `"${name}" allows each From entity at most one To entity, and this From entity already has one. ` +
+      `Delete the existing "${name}" relationship first, or change the cardinality of the type.`,
+  },
+  {
+    // `one_to_many` / `one_to_one`: the To end may hold only one edge --
+    // for a hierarchy, this is "that child already has a parent".
+    pattern: /^relationship "(.+)": target already has a source$/,
+    reword: (name) =>
+      `"${name}" allows each To entity at most one From entity, and this To entity already has one. ` +
+      `Delete the existing "${name}" relationship first, or change the cardinality of the type.`,
+  },
+];
+
+/** A trigger sentence about the relationship as a whole, reworded where
+ * this app has better words for it. Exported so the screens that show
+ * these refusals outside the graph share exactly one wording. */
+export function rewordTriggerMessage(message: string): string {
+  for (const { pattern, reword } of TRIGGER_REWORDINGS) {
+    const match = pattern.exec(message);
+    if (match) return reword(match[1]);
+  }
+  return message;
 }

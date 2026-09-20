@@ -715,7 +715,79 @@ describe("GraphEditor", () => {
     // unit -> employee: neither type allows that direction.
     act(() => registeredHandlersRef.current["ehcomplete"](null, { id: () => "1" }, { id: () => "3" }));
 
-    expect(await screen.findByText("No relationship type allows unit → employee")).toBeInTheDocument();
+    const refusal = await screen.findByTestId("connect-refusal");
+    // The two TYPES, which is what the rule is about...
+    expect(refusal).toHaveTextContent(/No relationship type joins unit to employee/);
+    // ...and the two entities the user actually dragged, which is what
+    // they were looking at.
+    expect(refusal).toHaveTextContent(/hq/);
+    expect(refusal).toHaveTextContent(/ahmed/);
+    // It is a refusal, not an offer: no "choose a type" heading over an
+    // empty list of buttons.
+    expect(screen.queryByText(/Choose a relationship type/i)).not.toBeInTheDocument();
+  });
+
+  it("says what to do about an impossible pair, and links to where it is done", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    act(() => registeredHandlersRef.current["ehcomplete"](null, { id: () => "1" }, { id: () => "3" }));
+
+    const refusal = await screen.findByTestId("connect-refusal");
+    expect(within(refusal).getByRole("link", { name: /relationship type/i })).toHaveAttribute(
+      "href",
+      "/relationship-types"
+    );
+  });
+
+  it("announces the refusal, so it is not a silent no-op for a screen reader either", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    act(() => registeredHandlersRef.current["ehcomplete"](null, { id: () => "1" }, { id: () => "3" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-live")).toHaveTextContent(/No relationship type joins unit to employee/)
+    );
+  });
+
+  /*
+   * The drag the tester actually lost was this one: in a cramped layout
+   * the target node was half outside the viewport, so the gesture ended
+   * on empty canvas. edgehandles emits `ehcancel`, the editor listened to
+   * nothing, and the product was indistinguishable from a mis-aimed drag
+   * -- so the next move is to try again, harder.
+   */
+  it("says so when a connect drag ends away from a node, instead of nothing at all", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+
+    act(() => registeredHandlersRef.current["ehcancel"](null, { id: () => "1" }, []));
+
+    const note = await screen.findByTestId("connect-note");
+    expect(note).toHaveTextContent(/did not end on another node/i);
+    expect(screen.queryByTestId("edge-type-picker")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent(/did not end on another node/i));
+  });
+
+  it("clears the note when the next drag starts, so it cannot describe an older gesture", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    act(() => registeredHandlersRef.current["ehcancel"](null, { id: () => "1" }, []));
+    await screen.findByTestId("connect-note");
+
+    act(() => registeredHandlersRef.current["ehstart"](null, { id: () => "3" }));
+
+    await waitFor(() => expect(screen.queryByTestId("connect-note")).not.toBeInTheDocument());
+  });
+
+  it("clears a refusal when the next drag starts", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    act(() => registeredHandlersRef.current["ehcomplete"](null, { id: () => "1" }, { id: () => "3" }));
+    await screen.findByTestId("connect-refusal");
+
+    act(() => registeredHandlersRef.current["ehstart"](null, { id: () => "3" }));
+
+    await waitFor(() => expect(screen.queryByTestId("connect-refusal")).not.toBeInTheDocument());
   });
 
   it("shows a cardinality violation's own message, without repeating the relationship type as a field name", async () => {
@@ -742,7 +814,13 @@ describe("GraphEditor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "works_for" }));
 
     const banner = await screen.findByTestId("graph-error");
-    expect(banner).toHaveTextContent('relationship "works_for": target already has a source');
+    // Reworded into the From/To vocabulary the forms use, with the way
+    // out -- "source" and "target" appear nowhere else in this UI.
+    expect(banner).toHaveTextContent(
+      '"works_for" allows each To entity at most one From entity, and this To entity already has one.'
+    );
+    expect(banner).toHaveTextContent(/Delete the existing "works_for" relationship first/);
+    expect(banner.textContent).not.toMatch(/source|target/);
     expect(banner.textContent).not.toContain('works_for: relationship "works_for"');
   });
 

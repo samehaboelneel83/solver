@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { FieldError, FieldLabel, INPUT_CLASS } from "./attrTypes";
 import { fallbackColour, labelForeground, normaliseColour } from "../lib/colour";
 
@@ -30,6 +30,26 @@ type ColourFieldProps = {
   /** The stored colour, or null for "not chosen". */
   value: string | null;
   onChange: (value: string | null) => void;
+  /**
+   * Why the box cannot be committed, or null when it can.
+   *
+   * `onChange` reports VALUES, and an unparseable entry has none -- which
+   * is exactly how this field used to fail silently: the parent form
+   * heard nothing, submitted, dropped what the user typed and toasted
+   * "Entity type saved". Every other invalid field in the product blocks
+   * the save, so this one has to be able to as well, and a value callback
+   * cannot say "there is no value, and here is why". Fired on every
+   * change of the problem, including back to null when the box becomes
+   * valid again or the row is re-seeded underneath the field.
+   */
+  onProblemChange?: (problem: string | null) => void;
+  /**
+   * The message the enclosing form wants shown for this field, which wins
+   * over the one derived here. It is what keeps a refused save to ONE
+   * message per field: the form's error summary and the text under the
+   * control say the same thing, as they do for every other field.
+   */
+  error?: string;
   /** The id whose fallback colour is previewed when nothing is chosen --
    * the same id the canvas keys on, so the preview is not a lie. */
   fallbackKey: string;
@@ -42,6 +62,8 @@ type ColourFieldProps = {
 export default function ColourField({
   value,
   onChange,
+  onProblemChange,
+  error,
   fallbackKey,
   sampleText,
   label = "Colour",
@@ -61,9 +83,21 @@ export default function ColourField({
   const parsed = normaliseColour(trimmed);
   const problem = trimmed !== "" && parsed === null ? "Use a six-digit hex colour, e.g. #1f77b4." : undefined;
 
+  // Reported from an effect on the DERIVED problem rather than from the
+  // change handler, so the re-seed above (a save elsewhere, or "Reload and
+  // keep my changes") clears a stale problem too -- otherwise a form could
+  // be left refusing a save over a box that no longer holds anything wrong.
+  const reportProblem = useRef(onProblemChange);
+  reportProblem.current = onProblemChange;
+  useEffect(() => {
+    reportProblem.current?.(problem ?? null);
+  }, [problem]);
+
   // What the canvas would draw: the chosen colour, or the fallback this id
   // hashes to. Computed from the *committed* value, not the draft, so a
   // half-typed hex does not flicker the preview through other colours.
+  const shown = error ?? problem;
+
   const effective = normaliseColour(value) ?? fallbackColour(fallbackKey);
   const foreground = labelForeground(effective);
 
@@ -105,8 +139,8 @@ export default function ColourField({
           className={`${INPUT_CLASS} w-32 font-mono`}
           value={draft}
           disabled={disabled}
-          aria-invalid={problem ? "true" : undefined}
-          aria-describedby={problem ? `${baseId}-error` : `${baseId}-hint`}
+          aria-invalid={shown ? "true" : undefined}
+          aria-describedby={shown ? `${baseId}-error` : `${baseId}-hint`}
           onChange={(event) => commit(event.target.value)}
           data-testid="colour-hex"
         />
@@ -137,7 +171,7 @@ export default function ColourField({
           ? "No colour chosen — the graph picks a stable one from this type's id."
           : "Used for this type's nodes and edges in both graph views."}
       </p>
-      <FieldError id={`${baseId}-error`} message={problem} />
+      <FieldError id={`${baseId}-error`} message={shown} />
     </div>
   );
 }

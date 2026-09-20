@@ -1,6 +1,7 @@
 import { FormEvent, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
+import EntityRelationships from "../components/EntityRelationships";
 import OfflineNotice from "../components/OfflineNotice";
 import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
@@ -568,6 +569,12 @@ function RecordForm({
           </div>
         </form>
       </section>
+
+      {/* The relationships this entity takes part in. Until now an
+          entity's page never showed which unit they work in, or which unit
+          a unit sits under -- while the delete warning below counted those
+          very rows. */}
+      {entity && <EntityRelationships entity={entity} entityType={type} />}
 
       {entity && (
         <section aria-labelledby="delete-entity-heading" className="rounded-md border border-red-200 bg-white p-4">

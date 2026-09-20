@@ -4,7 +4,14 @@ import RelationshipTypeFields, {
   RELATIONSHIP_TYPE_FIELDS,
   type RelationshipTypeDraft,
 } from "../components/RelationshipTypeFields";
-import { ErrorSummary, nameProblem, serverFieldErrors, useFieldErrors, type FieldErrors } from "../components/attrTypes";
+import {
+  ErrorSummary,
+  colourFieldError,
+  nameProblem,
+  serverFieldErrors,
+  useFieldErrors,
+  type FieldErrors,
+} from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
@@ -207,6 +214,7 @@ function emptyDraft(entityTypes: EntityType[]): RelationshipTypeDraft {
 
 function CreateTypeForm({ domainId, entityTypes }: { domainId: Id; entityTypes: EntityType[] }) {
   const [draft, setDraft] = useState<RelationshipTypeDraft>(() => emptyDraft(entityTypes));
+  const [colourProblem, setColourProblem] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -222,6 +230,8 @@ function CreateTypeForm({ domainId, entityTypes }: { domainId: Id; entityTypes: 
     if (problem) problems.name = problem;
     if (draft.from_type_id === null) problems.from_type_id = "From entity type: choose an entity type.";
     if (draft.to_type_id === null) problems.to_type_id = "To entity type: choose an entity type.";
+    const colourMessage = colourFieldError(colourProblem);
+    if (colourMessage) problems.colour = colourMessage;
     replace(problems);
     if (Object.keys(problems).length > 0) return;
     try {
@@ -265,6 +275,7 @@ function CreateTypeForm({ domainId, entityTypes }: { domainId: Id; entityTypes: 
               replace(rest);
             }
           }}
+          onColourProblem={setColourProblem}
           entityTypes={entityTypes}
           errors={errors}
           fallbackKey={draft.name}

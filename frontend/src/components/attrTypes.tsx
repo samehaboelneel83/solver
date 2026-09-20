@@ -169,12 +169,32 @@ export function draftFromValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** A stored default for display in the attributes table. */
+/**
+ * A stored default for display in the attributes table.
+ *
+ * `true` and `false` read as Yes and No, not True/False: the data type in
+ * the column beside them is called "Yes / no", the control that sets one
+ * offers Yes and No, and `formatAttrValue` has always shown stored values
+ * that way. This table was the last place calling them anything else, so
+ * `on_call` showed its type as "Yes / no" and its default as "False".
+ */
 export function formatDefault(value: unknown): string {
   if (value === null || value === undefined) return "No default";
-  if (value === true) return "True";
-  if (value === false) return "False";
+  if (value === true) return "Yes";
+  if (value === false) return "No";
   return draftFromValue(value);
+}
+
+/**
+ * The colour box's refusal, worded for an error summary.
+ *
+ * `ColourField` reports what it cannot commit (`onProblemChange`); this is
+ * how the four forms that hold one turn that into an entry keyed `colour`,
+ * so an unparseable colour blocks the save and is listed beside every
+ * other field problem instead of being dropped with a success toast.
+ */
+export function colourFieldError(problem: string | null | undefined): string | null {
+  return problem ? `Colour: ${problem}` : null;
 }
 
 // --- server errors ------------------------------------------------------------

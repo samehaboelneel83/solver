@@ -183,6 +183,20 @@ describe("RelationshipTypeDetail", () => {
     expect(writes()[0].body).toMatchObject({ colour: "#b8860b" });
   });
 
+  it("refuses a malformed hex without sending anything, and says so in the summary", async () => {
+    serve();
+    renderPage();
+    await screen.findByDisplayValue("works_on");
+
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    fireEvent.click(save());
+    await flush();
+
+    expect(writes()).toHaveLength(0);
+    expect(screen.getByTestId("form-errors")).toHaveTextContent(/Colour: Use a six-digit hex colour/i);
+    expect(screen.queryByText("Relationship type saved")).not.toBeInTheDocument();
+  });
+
   it("turning a stored type into a hierarchy sends a row the CHECK accepts", async () => {
     serve((_path, init) => (init?.method === "PATCH" ? Promise.resolve({ ...TYPE, is_hierarchy: true }) : undefined));
     renderPage();

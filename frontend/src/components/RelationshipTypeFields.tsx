@@ -107,12 +107,17 @@ function parseSelected(raw: string): Id | null {
 export default function RelationshipTypeFields({
   draft,
   onChange,
+  onColourProblem,
   entityTypes,
   errors,
   fallbackKey,
 }: {
   draft: RelationshipTypeDraft;
   onChange: (next: RelationshipTypeDraft) => void;
+  /** What the colour box cannot commit, so the form can refuse the save.
+   * It is not part of the draft: a problem is the absence of a value, and
+   * `RelationshipTypeDraft` holds only values that can be sent. */
+  onColourProblem: (problem: string | null) => void;
   entityTypes: EntityType[];
   errors: FieldErrors;
   /** The id the graph hashes for the fallback colour; a type being created
@@ -285,10 +290,11 @@ export default function RelationshipTypeFields({
         <ColourField
           value={draft.colour}
           onChange={(colour) => update({ colour })}
+          onProblemChange={onColourProblem}
+          error={errors.colour}
           fallbackKey={fallbackKey}
           sampleText={draft.name.trim() === "" ? "reports_to" : draft.name}
         />
-        <FieldError id={errorId("colour")} message={errors.colour} />
       </div>
     </div>
   );

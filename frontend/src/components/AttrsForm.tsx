@@ -124,7 +124,13 @@ export function formatAttrValue(value: unknown): string {
 }
 
 const TYPE_HINT: Record<AttrType, string> = {
-  integer: "A whole number, such as 8 or -2.",
+  // No invented example. The one this used to carry ("such as 8 or -2")
+  // was generic to the TYPE and blind to the FIELD, so `hours_per_week`
+  // offered -2 as an example of a week's work. What this line is actually
+  // for is saying that decimals are refused; where a concrete number
+  // helps, the sentence below supplies the field's own default, which is
+  // a number that is true of this field.
+  integer: "A whole number — no decimals.",
   number: "A number, such as 2.5.",
   text: "",
   boolean: "",

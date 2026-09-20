@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
 import {
   ErrorSummary,
+  colourFieldError,
   dataTypeLabel,
   formatDefault,
   nameProblem,
@@ -126,6 +127,9 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
   const [name, setName] = useState(type.name);
   const [role, setRole] = useState<EntityRole>(type.role);
   const [colour, setColour] = useState<string | null>(type.colour);
+  // See `EntityTypes.CreateTypeForm`: an unparseable entry has no value to
+  // hold, so the reason it has none is held instead.
+  const [colourProblem, setColourProblem] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -167,9 +171,13 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setGeneral(null);
+    const problems: FieldErrors = {};
     const problem = nameProblem(name, false);
-    replace(problem ? { name: problem } : {});
-    if (problem) return;
+    if (problem) problems.name = problem;
+    const colourMessage = colourFieldError(colourProblem);
+    if (colourMessage) problems.colour = colourMessage;
+    replace(problems);
+    if (Object.keys(problems).length > 0) return;
     try {
       const saved = await updateType.mutateAsync({
         id: type.id,
@@ -207,6 +215,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
           errors={errors}
           fallbackKey={String(type.id)}
           onColour={setColour}
+          onColourProblem={setColourProblem}
           onName={(value) => {
             setName(value);
             if (errors.name) {

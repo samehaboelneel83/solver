@@ -233,4 +233,50 @@ describe("EntityTypes list page", () => {
       });
     });
   });
+  it("shows a 422 the server raises on colour under the colour box", async () => {
+    // The parents no longer render their own message beside ColourField --
+    // the field draws whatever the form is showing -- so a server refusal
+    // that names `colour` has to reach it, or it would appear nowhere.
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    mockFetch.mockImplementation((_path: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.reject(
+          new ApiError(
+            422,
+            JSON.stringify({ detail: [{ loc: ["body", "colour"], msg: "colour must be #rrggbb" }] })
+          )
+        );
+      }
+      return Promise.resolve({ items: TYPES, total: 2 });
+    });
+    renderPage();
+    await screen.findByRole("link", { name: "employee" });
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+
+    await waitFor(() => expect(screen.getByTestId("form-errors")).toHaveTextContent(/colour must be #rrggbb/i));
+    expect(screen.getByTestId("colour-hex")).toHaveAttribute("aria-invalid", "true");
+    // Once in the summary, once under the control -- and nowhere else.
+    expect(screen.getAllByText("colour must be #rrggbb")).toHaveLength(2);
+  });
+
+  it("refuses to create a type whose colour box holds junk, and says so in the summary", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    mockFetch.mockImplementation((_path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.reject(new Error("should not be sent"));
+      return Promise.resolve({ items: TYPES, total: 2 });
+    });
+    renderPage();
+    await screen.findByRole("link", { name: "employee" });
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("form-errors")).toHaveTextContent(/Colour: Use a six-digit hex colour/i)
+    );
+    expect(mockFetch.mock.calls.some((call) => (call[1] as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
 });

@@ -257,8 +257,12 @@ export default function FilterBar({
       <input
         type="text"
         placeholder="Search…"
-        title={`${searchLabel} -- press Enter to select the first match`}
-        aria-label={`${searchLabel} -- press Enter to select the first match`}
+        // "Search nodes by label" alone reads as FIND; what this box does
+        // is hide every node that does not match, live, as you type. The
+        // name says so before the first keystroke, and the canvas's live
+        // region says how many are left after it.
+        title={`${searchLabel} -- hides the rest as you type; press Enter to select the first match`}
+        aria-label={`${searchLabel} -- hides the rest as you type; press Enter to select the first match`}
         value={searchDraft}
         onChange={(e) => handleSearchChange(e.target.value)}
         onKeyDown={handleSearchKeyDown}

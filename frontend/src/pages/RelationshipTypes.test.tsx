@@ -311,4 +311,19 @@ describe("RelationshipTypes list page", () => {
     await waitFor(() => expect(screen.getByLabelText(/^Cardinality/)).toHaveAttribute("aria-invalid", "true"));
     expect(nameBox()).not.toHaveAttribute("aria-invalid");
   });
+  it("refuses to create a type whose colour box holds junk, and says so in the summary", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    serve();
+    renderPage();
+    await screen.findByRole("link", { name: "works_on" });
+
+    fireEvent.change(nameBox(), { target: { value: "supplies" } });
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create relationship type" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("form-errors")).toHaveTextContent(/Colour: Use a six-digit hex colour/i)
+    );
+    expect(posted()).toBeNull();
+  });
 });

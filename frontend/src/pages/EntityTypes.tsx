@@ -6,6 +6,7 @@ import {
   FieldError,
   FieldLabel,
   INPUT_CLASS,
+  colourFieldError,
   describedBy,
   nameProblem,
   roleLabel,
@@ -154,6 +155,7 @@ export function EntityTypeFields({
   onName,
   onRole,
   onColour,
+  onColourProblem,
   errors,
   fallbackKey,
 }: {
@@ -163,6 +165,10 @@ export function EntityTypeFields({
   onName: (value: string) => void;
   onRole: (value: EntityRole) => void;
   onColour: (value: string | null) => void;
+  /** What the colour box cannot commit, so the form can refuse the save.
+   * Without it an unparseable colour was simply never reported, the save
+   * went ahead and the toast said it had worked. */
+  onColourProblem: (problem: string | null) => void;
   errors: FieldErrors;
   /** The id the graph hashes for the fallback colour. A type being created
    * has none yet, so the preview uses its name -- honest about being a
@@ -221,10 +227,14 @@ export function EntityTypeFields({
         <ColourField
           value={colour}
           onChange={onColour}
+          onProblemChange={onColourProblem}
+          // One message, not two: ColourField draws whatever the form is
+          // showing for this field, so the summary and the text under the
+          // control agree the way they do everywhere else.
+          error={errors.colour}
           fallbackKey={fallbackKey}
           sampleText={name.trim() === "" ? "employee" : name}
         />
-        <FieldError id={errorId("colour")} message={errors.colour} />
       </div>
     </div>
   );
@@ -236,6 +246,9 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<EntityRole>("other");
   const [colour, setColour] = useState<string | null>(null);
+  // What the colour box holds but cannot commit. Held here rather than in
+  // `colour`, because a value that cannot be parsed is not a colour.
+  const [colourProblem, setColourProblem] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -246,9 +259,13 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setGeneral(null);
+    const problems: FieldErrors = {};
     const problem = nameProblem(name, false);
-    replace(problem ? { name: problem } : {});
-    if (problem) return;
+    if (problem) problems.name = problem;
+    const colourMessage = colourFieldError(colourProblem);
+    if (colourMessage) problems.colour = colourMessage;
+    replace(problems);
+    if (Object.keys(problems).length > 0) return;
     try {
       const created = await createType.mutateAsync({ domain_id: domainId, name, role, colour });
       toast.success(`Entity type "${created.name}" created`);
@@ -283,6 +300,7 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
           }}
           onRole={setRole}
           onColour={setColour}
+          onColourProblem={setColourProblem}
         />
         <button
           type="submit"

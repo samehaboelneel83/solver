@@ -142,6 +142,21 @@ describe("relationship type routes (Task 14f)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: /works_on/ })).toBeInTheDocument();
     expect(screen.queryByText(/unknown table/i)).not.toBeInTheDocument();
   });
+
+  /* `/relationships` returned "Page not found" -- the plural, the rows
+   * themselves, had no screen at all, and the generic `:schemaName/:tableName`
+   * pair below cannot reach it either, since it is one segment. */
+  it("/relationships renders the relationships page, not the not-found page", async () => {
+    renderAt("/relationships");
+    expect(await screen.findByRole("heading", { level: 1, name: "Relationships" })).toBeInTheDocument();
+    expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+  });
+
+  it("keeps /relationship-types and /relationships apart", async () => {
+    renderAt("/relationships");
+    const heading = await screen.findByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent(/^Relationships$/);
+  });
 });
 
 describe("entity routes (Task 12)", () => {

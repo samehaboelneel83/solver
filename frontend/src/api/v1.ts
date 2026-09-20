@@ -25,7 +25,7 @@
  * - The graph read (`/api/v1/graph`) is deliberately not here: the graph
  *   client in `graph.ts` and its types belong to Task 14.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ExpressionDocument } from "../expressions/document";
 import { ApiError, apiFetch } from "./client";
 
@@ -566,6 +566,79 @@ export function useRelationships(
   params: { relationshipTypeId?: Id | null; fromEntityId?: Id | null; toEntityId?: Id | null } & PageParams
 ) {
   return useQuery({ queryKey: [V1, "relationships", params], queryFn: () => listRelationships(params) });
+}
+
+/** The API's largest page. Both multi-list hooks below ask for it, the
+ * way every other v1 screen does, and report when a list was cut off
+ * rather than quietly showing part of one. */
+const MAX_PAGE = 500;
+
+type MultiList<T> = {
+  items: T[];
+  isLoading: boolean;
+  error: unknown;
+  /** True when at least one of the lists held more rows than one page. */
+  truncated: boolean;
+};
+
+/**
+ * Every relationship of several types, as one list.
+ *
+ * `GET /api/v1/relationships` filters by `relationship_type_id`,
+ * `from_entity_id` and `to_entity_id` and has no domain filter, so "this
+ * domain's relationships" is one request per relationship type. A domain
+ * holds a handful of types -- the same assumption `EntityTypes` and
+ * `RelationshipTypes` already make when they ask for 500 and do not
+ * paginate -- and React Query serves each list once however many callers
+ * ask for it.
+ *
+ * The keys are built to match `useRelationships`'s exactly, so a list
+ * fetched here and the same list fetched there are one cache entry and
+ * one request.
+ */
+export function useRelationshipsOfTypes(relationshipTypeIds: Id[]): MultiList<Relationship> {
+  const results = useQueries({
+    queries: relationshipTypeIds.map((relationshipTypeId) => {
+      const params = { relationshipTypeId, limit: MAX_PAGE };
+      return {
+        queryKey: [V1, "relationships", params],
+        queryFn: () => listRelationships(params),
+      };
+    }),
+  });
+  return {
+    items: results.flatMap((result) => result.data?.items ?? []),
+    isLoading: results.some((result) => result.isLoading),
+    error: results.find((result) => result.error)?.error ?? null,
+    truncated: results.some((result) => (result.data?.total ?? 0) > (result.data?.items.length ?? 0)),
+  };
+}
+
+/**
+ * Every entity of several entity types, as one list.
+ *
+ * What names the two ends of a relationship: a relationship row carries
+ * ids, and the type it belongs to says which entity type each end is, so
+ * the rows needed to turn `to_entity_id: 4` into "North Depot" are
+ * exactly the entities of the types that appear as ends. Same key shape
+ * as `useEntities(id, { limit: 500 })`, for the same reason as above.
+ */
+export function useEntitiesOfTypes(entityTypeIds: Id[]): MultiList<Entity> {
+  const results = useQueries({
+    queries: entityTypeIds.map((entityTypeId) => {
+      const params = { entityTypeId, limit: MAX_PAGE };
+      return {
+        queryKey: [V1, "entities", params],
+        queryFn: () => listEntities(params),
+      };
+    }),
+  });
+  return {
+    items: results.flatMap((result) => result.data?.items ?? []),
+    isLoading: results.some((result) => result.isLoading),
+    error: results.find((result) => result.error)?.error ?? null,
+    truncated: results.some((result) => (result.data?.total ?? 0) > (result.data?.items.length ?? 0)),
+  };
 }
 export const useCreateRelationship = () => useV1Mutation(createRelationship);
 export const useUpdateRelationship = () =>

@@ -21,6 +21,7 @@ import AttrsForm, { buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts 
 import ColourField from "./ColourField";
 import { FieldLabel, INPUT_CLASS, roleLabel, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
+import { confirmDeleteRelationship, deletedRelationshipMessage } from "../lib/relationships";
 import { useToast } from "./ToastProvider";
 import {
   CARDINALITY_LABEL,
@@ -263,8 +264,29 @@ function NodeForm({
   );
 }
 
+/**
+ * One relationship, beside the canvas.
+ *
+ * Until this round it showed the relationship TYPE's name and a JSON box,
+ * and nothing else -- not which two entities it joined -- and its Delete
+ * button removed it on one click, with no confirmation, no undo and a
+ * toast naming only the type. Every other delete in the product asks
+ * first and counts what goes with the record, and this one had the worst
+ * case for not asking: there was no relationships list, so an accidental
+ * delete was invisible afterwards.
+ *
+ * Both endpoints are read from the graph the canvas is already drawn
+ * from, in the edge's own direction (from -> to, which for a hierarchy is
+ * parent -> child), so no extra request is made to say what is on screen.
+ * A node the payload does not hold shows as `#id` rather than blank --
+ * the same spelling the type lists use -- because a confirmation that
+ * silently drops one end is worse than one that admits it.
+ */
 function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: string; onClose: () => void }) {
   const edge = graph.edges.find((e) => e.id === edgeId);
+  const nodeLabel = (id: string) => graph.nodes.find((node) => node.id === id)?.label ?? `#${id}`;
+  const fromLabel = edge ? nodeLabel(edge.source) : "";
+  const toLabel = edge ? nodeLabel(edge.target) : "";
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const updateRelationship = useUpdateRelationship();
@@ -301,9 +323,15 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
 
   async function handleDelete() {
     setError(null);
+    // The same wording as the relationships page and an entity's own
+    // section: three screens can now remove a relationship, and a
+    // confirmation that differs between them is three chances to be
+    // wrong about what is destroyed.
+    const confirmed = window.confirm(confirmDeleteRelationship(edge!.type, fromLabel, toLabel));
+    if (!confirmed) return;
     try {
       await deleteRelationship.mutateAsync(Number(edge!.id));
-      toast.success(`${edge!.type} deleted`);
+      toast.success(deletedRelationshipMessage(edge!.type, fromLabel, toLabel));
       onClose();
     } catch (err) {
       setError(relationshipErrorMessage(err));
@@ -315,6 +343,13 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
       {/* N-3: same level as the node heading. The relationship type's name,
           once -- `type` and `label` are the same string in v1. */}
       <h2 className="mb-2 text-sm font-semibold text-slate-900">{edge.type}</h2>
+      {/* The two entities this edge joins, in its own direction. Without
+          them the panel described a TYPE and left the reader to work out
+          which of that type's edges they had clicked. */}
+      <p data-testid="edge-ends" className="mb-2 text-xs text-slate-600">
+        From <span className="font-medium text-slate-900">{fromLabel}</span> to{" "}
+        <span className="font-medium text-slate-900">{toLabel}</span>
+      </p>
       {error && <p className="mb-2 whitespace-pre-line text-sm text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-2" data-testid="edge-property-form">
         <FieldLabel htmlFor={attrsId}>Attributes (JSON)</FieldLabel>
