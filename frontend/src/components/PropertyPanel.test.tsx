@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import PropertyPanel from "./PropertyPanel";
+import { ToastProvider } from "./ToastProvider";
 import { fallbackColour } from "../lib/colour";
 
 vi.mock("../api/client", async () => {
@@ -93,6 +94,7 @@ function renderWithProviders(props: Record<string, unknown> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <PropertyPanel
         domainId={1}
         mode="objects"
@@ -101,6 +103,7 @@ function renderWithProviders(props: Record<string, unknown> = {}) {
         onClose={vi.fn()}
         {...props}
       />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -242,6 +245,10 @@ describe("PropertyPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(confirm).toHaveBeenCalled();
+    // The same turn-of-the-loop wait as the edge case below: this
+    // assertion used to run on the click's own tick, so it passed against
+    // a panel that deleted regardless of the answer.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(callsTo("DELETE", "/api/v1/entities/2")).toHaveLength(0);
 
     confirm.mockReturnValue(true);
@@ -279,13 +286,69 @@ describe("PropertyPanel", () => {
     expect(callsTo("PATCH", "/api/v1/relationships/10")).toHaveLength(0);
   });
 
-  it("deletes a relationship through the v1 relationships route", async () => {
+  /*
+   * This was one click, no confirmation, no undo, and no toast naming
+   * what went -- in a product whose other delete confirmations count the
+   * real objects that go with the record. Worse here than anywhere else,
+   * because until this round an accidentally deleted relationship was
+   * invisible afterwards: there was no list to miss it from.
+   */
+  it("deletes a relationship only after confirming, and does nothing on cancel", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderWithProviders({ selection: { kind: "edge", id: "10" } });
+    await screen.findByTestId("edge-property-form");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(confirm).toHaveBeenCalled();
+    // After a turn of the event loop, not on the same tick: the delete is
+    // async, so asserting immediately passes against a panel that went
+    // ahead anyway -- which is exactly what a mutant proved.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(callsTo("DELETE", "/api/v1/relationships/10")).toHaveLength(0);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(callsTo("DELETE", "/api/v1/relationships/10")).toHaveLength(1));
+  });
+
+  it("names the relationship type AND both endpoints in the confirmation", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderWithProviders({ selection: { kind: "edge", id: "10" } });
+    await screen.findByTestId("edge-property-form");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    const message = confirm.mock.calls[0][0] as string;
+    expect(message).toContain("works_for");
+    // Both ends, in the edge's own direction -- "hq works_for ahmed", not
+    // the reverse, and not the node ids.
+    expect(message.indexOf("hq")).toBeLessThan(message.indexOf("ahmed"));
+    // It volunteers what is NOT deleted, the way the other confirmations do.
+    expect(message).toMatch(/entities at (either|both) end/i);
+    expect(message).toMatch(/cannot be undone/i);
+  });
+
+  it("shows both endpoints in the panel, so the edge is identifiable before it is touched", async () => {
+    renderWithProviders({ selection: { kind: "edge", id: "10" } });
+    await screen.findByTestId("edge-property-form");
+    const ends = screen.getByTestId("edge-ends");
+    expect(ends).toHaveTextContent("hq");
+    expect(ends).toHaveTextContent("ahmed");
+    expect(ends.textContent!.indexOf("hq")).toBeLessThan(ends.textContent!.indexOf("ahmed"));
+  });
+
+  it("names what went in the toast after the delete", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders({ selection: { kind: "edge", id: "10" } });
     await screen.findByTestId("edge-property-form");
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(callsTo("DELETE", "/api/v1/relationships/10")).toHaveLength(1));
+    const toast = await screen.findByRole("status");
+    expect(toast).toHaveTextContent("works_for");
+    expect(toast).toHaveTextContent("hq");
+    expect(toast).toHaveTextContent("ahmed");
   });
 
   it("shows a cardinality violation's own message when re-pointing is refused", async () => {
