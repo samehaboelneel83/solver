@@ -636,11 +636,16 @@ def test_snapshot_shape_is_pinned(db, snapshot_domain):
         },
         # Ruling 28 (migration 0009): what an absent cell means.
         "parameter_defaults": {"demand": 1},
+        # Migration 0011: the domain's edges, frozen with everything else.
+        # This fixture declares no relationship type, so the key is present
+        # and empty -- which is itself the pinned fact, because a consumer
+        # that has to branch on "absent or empty" will get it wrong once.
+        "relationships": {},
     }
 
     # Spelled out again, so a future reader sees which facts the literal
     # above is pinning, and so a partial drift names itself.
-    assert set(data) == {"sets", "parameters", "parameter_defaults"}
+    assert set(data) == {"sets", "parameters", "parameter_defaults", "relationships"}
     assert data["sets"]["employee"][0]["id"] == "ahmed"  # entity.key -> "id"
     assert "key" not in data["sets"]["employee"][0]
     assert data["parameters"]["demand"][0] == {"day": "mon", "shift": "morning", "value": 3}

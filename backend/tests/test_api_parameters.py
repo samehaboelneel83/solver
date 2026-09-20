@@ -762,7 +762,7 @@ def test_snapshot_resolves_a_cell_reset_to_the_default(client, auth_headers, db,
     assert data["parameters"] == {"demand": [{"day": "tue", "shift": "morning", "value": 7}]}
     # ... and the default now travels beside it -- this domain's, not 9.
     assert data["parameter_defaults"] == {"demand": 2}
-    assert set(data) == {"sets", "parameters", "parameter_defaults"}
+    assert set(data) == {"sets", "parameters", "parameter_defaults", "relationships"}
 
     # So every cell resolves: the reset one to its default, the stored one
     # to its value, and one never touched to the default too.

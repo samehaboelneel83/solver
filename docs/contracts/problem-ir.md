@@ -523,7 +523,7 @@ them means contradicting something that exists:
 | constraints are hard or soft, soft ones carry an integer penalty | `constraint_result.hard boolean`, `penalty_paid bigint`; `patch.soften: {id: weight}` |
 | one objective, one integral number | `run.objective bigint` |
 | `version` from the first document; one shared JSON artefact; a parity test; `loc`-shaped refusals | the expression core (Ruling 37, Rulings 19/30) |
-| traversal cannot be expressed | `snapshot_dataset()` freezes no relationships |
+| traversal cannot be expressed **in this version** | it followed from `snapshot_dataset()` freezing no relationships. Migration **0011** now freezes them (`data.relationships`, keyed by type name), so the reason has gone and only the term forms are missing — step 2 of `docs/plans/2026-09-20-traversal-decision.md`. A v2 that adds them does not need a dataset change |
 
 **Invented** — decided here, and a later reader may reopen any of them:
 
