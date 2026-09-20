@@ -53,6 +53,19 @@ import { parseRouteId } from "../lib/routeId";
  * job from writing a rule.
  */
 
+/** A model with nothing in it: what "start from scratch" means. The keys are
+ * all present because the contract requires every top-level key, including
+ * the empty ones -- a missing `constraints` is a different document from an
+ * empty one, and only one of them is valid. */
+const EMPTY_MODEL = {
+  version: 1,
+  sets: [],
+  parameters: {},
+  variables: {},
+  constraints: [],
+  objective: { sense: "minimize", terms: [] },
+} as const;
+
 type Draft = {
   sets: string[];
   parameters: Record<string, { index: string[] }>;
@@ -143,9 +156,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
 }
 
 function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
-  const versions = useVersions(problemId, { limit: 1, offset: 0 });
-  const latestId = versions.data?.items[0]?.id ?? null;
-  const latest = useVersion(latestId);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const versions = useVersions(problemId, { limit: 50, offset: 0 });
+  const versionItems = versions.data?.items ?? [];
+  // Editing an older version is not editing it: publishing always writes a
+  // new latest, because a version a run points at can never change. So this
+  // chooses a *starting point*, which is why the label says so.
+  const requestedVersion = parseRouteId(searchParams.get("version"));
+  const base = versionItems.find((row) => row.id === requestedVersion) ?? versionItems[0] ?? null;
+  const baseId = base?.id ?? null;
+  const latest = useVersion(baseId);
+  const [scratch, setScratch] = useState(false);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
@@ -154,7 +175,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
-  const ir = latest.data?.ir as Record<string, unknown> | undefined;
+  const ir = (scratch ? EMPTY_MODEL : latest.data?.ir) as Record<string, unknown> | undefined;
 
   useEffect(() => {
     if (!ir || draft) return;
@@ -198,28 +219,52 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     };
   }, [ir, draft, entityTypes.data]);
 
-  if (versions.isLoading || latest.isLoading || entityTypes.isLoading) {
+  if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;
   }
-  if (latestId === null) {
+  if (baseId === null && !scratch) {
     return (
       <Note>
-        <p>
-          This problem has no model version yet. The editor starts from the latest one, so there is
-          nothing to edit until a first model exists.
+        <p>This problem has no model yet.</p>
+        <p className="mt-1">
+          Starting one declares what it is about — which sets it ranges over, which of the
+          domain&rsquo;s parameters it reads — and then its rules.
         </p>
+        <button
+          type="button"
+          className="mt-3 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          onClick={() => {
+            setScratch(true);
+            setDraft({
+              sets: [],
+              parameters: {},
+              variables: {},
+              constraints: [],
+              objective: { sense: "minimize", terms: [] },
+            });
+          }}
+        >
+          Start a model
+        </button>
       </Note>
     );
   }
   if (!draft || !context || !ir) return <Skeleton rows={4} cols={3} />;
 
+  // An objective with no terms is refused by the contract -- "omit the
+  // objective otherwise" -- because an empty one and an absent one would
+  // otherwise be two spellings of "optimise nothing". A model with only
+  // rules is legitimate: it asks for any answer that satisfies them.
+  const { objective: _previous, ...withoutObjective } = ir;
   const nextIr = {
-    ...ir,
+    ...withoutObjective,
     sets: draft.sets,
     parameters: draft.parameters,
     variables: draft.variables,
     constraints: draft.constraints,
-    objective: { sense: draft.objective.sense, terms: draft.objective.terms },
+    ...(draft.objective.terms.length > 0
+      ? { objective: { sense: draft.objective.sense, terms: draft.objective.terms } }
+      : {}),
   };
   // `checkIrShape` answers with the refusal itself, or null when the
   // document is shaped right. The server judges it again -- this is the
@@ -231,9 +276,14 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     createVersion.mutate(
       { problemId, body: { ir: nextIr, note: "edited in the model editor" } },
       {
-        onSuccess: (created: { version: number }) => {
+        onSuccess: (created: { id: Id; version: number }) => {
           toast.success(`Published version ${created.version}`);
           setDraft(null);
+          setScratch(false);
+          setSearchParams(
+            { problem: String(problemId), version: String(created.id) },
+            { replace: true }
+          );
           versions.refetch();
         },
         onError: (error: unknown) => setFailure(formatApiError(error)),
@@ -243,9 +293,38 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   return (
     <>
-      <p className="mb-4 text-sm text-slate-600">
-        Editing from version {versions.data?.items[0]?.version}.
-      </p>
+      {versionItems.length > 0 && !scratch ? (
+        <div className="mb-4">
+          <label htmlFor="model-base" className="block text-sm font-medium text-slate-700">
+            Starting from
+          </label>
+          <select
+            id="model-base"
+            className={`${INPUT_CLASS} max-w-sm`}
+            value={String(baseId ?? "")}
+            onChange={(event) => {
+              setDraft(null);
+              setSearchParams(
+                { problem: String(problemId), version: event.target.value },
+                { replace: true }
+              );
+            }}
+          >
+            {versionItems.map((row) => (
+              <option key={String(row.id)} value={String(row.id)}>
+                version {row.version}
+                {row.note ? ` — ${row.note}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            Publishing writes a new version either way: an older one is a starting point, never
+            something this overwrites.
+          </p>
+        </div>
+      ) : (
+        <p className="mb-4 text-sm text-slate-600">Starting a model from nothing.</p>
+      )}
 
       <DeclarationsEditor
         sets={draft.sets}
