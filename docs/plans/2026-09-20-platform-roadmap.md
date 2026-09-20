@@ -4,8 +4,11 @@
 project. It assumes the schema-v1 migration (merged at `aefc84c`) as its
 starting point and does not re-explain it.
 
-**Status:** proposed. Nothing here is built. The phases are ordered by
-dependency, not by appetite — Phase 0 blocks almost everything else.
+**Status:** Phase 0 is **done** (merged at `7c283a1`); the rest is proposed.
+The phases are ordered by dependency, not by appetite.
+
+Update, 2026-09-20: the checking infrastructure is merged too (`f30f1b6`) —
+`bash scripts/check.sh` runs both suites the one correct way.
 
 ---
 
@@ -66,41 +69,89 @@ test you can apply to a proposed change.
 
 ---
 
-## Phase 0 — The model contract
+## Phase 0 — The model contract — **DONE** (`7c283a1`)
 
-**Goal:** a written, versioned, testable definition of what a model *is*, so
-everything after it can be built against something.
+Delivered: `docs/contracts/problem-ir.md` (the contract, with worked examples),
+one shared artefact both languages read, a validator on each side with a parity
+test, shared fixtures, enforcement at `POST /versions` (an invalid IR is now a
+422 naming the path, where an unknown set used to be a 500 inside
+`snapshot_dataset()`), patch ids validated against their version, and the
+seeded model rewritten so its constraints carry mathematics instead of prose.
 
-This is a design task with a small amount of code, and it needs the user in the
-room for the decisions.
+**Three decisions it took, which the rest of this roadmap now inherits:**
 
-1. **Obtain or define the IR.** Two routes:
-   - *Preferred:* get the solver's `ProblemIR` / `psp` definition and write the
-     contract from it. Cheaper, and correct by construction.
-   - *Fallback:* define the IR here and treat the solver as the consumer that
-     must adapt. Requires the decisions in §Decisions below.
-2. **Write it down** as a JSON Schema plus a prose contract in `docs/`, with a
-   `version` field from the first document (the expression document already
-   does this — copy the approach).
-3. **Pin it with tests** on both sides: a fixture set of valid and invalid IRs,
-   asserted by the backend and by the frontend against the same file, as
-   `expression_cross_check.json` already does for expressions.
-4. **Reconcile `snapshot_dataset()`** with the written contract. It currently
-   defines part of the IR by accident; either the contract adopts what it does
-   or the function changes to match the contract. Do not leave two answers.
+1. **v1 admits `binary` and `integer` variables and refuses `continuous` by
+   name.** The reasoning is worth keeping: there is no solver to run a
+   continuous model, and admitting one would make the contract promise what
+   the platform cannot keep. It also closed a back door — entity attributes
+   include `number`, so arithmetic over a `number` attribute would have let
+   fractional coefficients in while parameters stayed integral, and nobody
+   would have decided that. Arithmetic is restricted to `integer` attributes;
+   `number` attributes remain usable in filters.
+2. **No unexpressed constraint is admitted**, so the seed was rewritten rather
+   than the contract weakened.
+3. **Traversal is not expressible** — and this one is a *consequence*, not a
+   choice. `snapshot_dataset()` freezes entities and parameters but **no
+   relationships**, so the frozen input a solver reads contains no edges. The
+   spec's own example (`unit.descendants`) therefore cannot be written today.
+   See "The traversal gap" below; it is the most consequential thing Phase 0
+   surfaced.
 
-**Done when:** an IR can be validated by a test, and the same document is
-accepted by the backend and understood by the frontend.
+Read §9 of the contract first: it separates what was **derived** from existing
+code (changing it contradicts something real) from what was **invented** here
+(a later reader, or your solver, may reopen it).
 
 ---
+
+## The traversal gap — decide before Phase 1
+
+A hierarchy is the reason `relationship` exists, and a planner's first
+interesting constraint usually crosses one: *staffing for a region, counting
+its sub-units*; *nobody reports to someone in another division*. None of that
+is expressible, because the dataset a run is frozen against carries no
+relationships at all.
+
+Three ways out, in increasing order of cost:
+
+1. **Freeze the edges too.** Extend `snapshot_dataset()` to emit relationships
+   per type, and give the term algebra a traversal form. Reproducibility is
+   preserved because the edges are frozen with everything else.
+2. **Precompute closures.** Emit `entity_descendants()` output for hierarchy
+   types as derived sets. Cheaper to express, less general.
+3. **Leave it.** Constraints stay flat; hierarchy is presentational only.
+
+This is a schema-and-contract change, so it belongs before model authoring
+rather than after — an editor built on a term algebra that cannot traverse
+will need reworking when traversal arrives.
 
 ## Phase 1 — Model authoring: variables, constraints, objectives
 
 **Goal:** a user can build a model in the product, and what they build is
 inspectable, diffable and reusable.
 
-**Schema.** Promote the model's parts from opaque JSON to first-class rows,
-while keeping the compiled IR as the immutable artefact:
+**First, a question Phase 0 reopened.** This section was written when the IR
+was opaque; it no longer is. There are now two defensible designs, and the
+choice should be deliberate:
+
+- **(a) Author the document.** The IR is already validated on both sides, with
+  a `loc`-shaped refusal per rule. An editor could read and write the document
+  directly, with the validator as its safety net. One source of truth, no
+  compile step, and the editor is honest by construction because it cannot
+  save what the contract refuses.
+- **(b) Promote to rows,** as sketched below, and compile a version from them.
+  Better for diffing two versions, for reusing a constraint across problems,
+  for per-constraint permissions, and for querying ("which models use this
+  parameter?"). Costs a second representation to keep in step with the
+  contract.
+
+**Recommendation: (a) first, (b) when a concrete need appears.** The
+contract's refusals are already field-shaped, so (a) gets a usable editor much
+sooner; the rows in (b) pay for themselves only once versions are being
+compared and constraints reused, which nothing does yet. Revisit at the first
+of those needs — not before.
+
+**Schema, if (b).** Promote the model's parts from opaque JSON to first-class
+rows, while keeping the compiled IR as the immutable artefact:
 
 ```
 variable_def       (problem_id, name, index_type_ids[], domain: binary|integer|continuous,
@@ -271,18 +322,25 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
 
 ## Decisions needed before Phase 0 can finish
 
-1. **Is the solver's IR available?** If yes, Phase 0 is transcription. If no,
-   we define it here and the solver adapts — a different and larger job.
-2. **Integer-only, or continuous too?** The schema is integer-only by decision.
-   Linear and nonlinear solving over continuous variables needs a numeric
-   parameter type. This decides whether Phase 2 is "add adapters" or "add
-   adapters and change the schema".
-3. **Where do solvers run?** In-process, as sidecar containers, or on a remote
+1. ~~Is the solver's IR available?~~ **Answered by events.** It was not
+   supplied, so the contract was defined here and the solver becomes the
+   consumer that adapts. If the real `ProblemIR` turns up, reconcile it
+   against §9's invented list — those are the points most likely to differ.
+2. **Integer-only, or continuous too?** Deferred, not settled: v1 refuses
+   `continuous` **by name**, so the refusal is visible and reversible. Genuine
+   LP and NLP still need a numeric parameter type, which is a schema change
+   (`parameter_value.value`, `parameter_def.default_value`, `run.objective`)
+   plus relaxing the `integer`-attributes-only rule. Decide when a continuous
+   solver is actually in reach; until then the current refusal is honest.
+3. **The traversal gap** (above) — freeze edges, precompute closures, or leave
+   hierarchy presentational. Blocks nothing today, shapes the term algebra
+   tomorrow.
+4. **Where do solvers run?** In-process, as sidecar containers, or on a remote
    worker pool. This determines the queue design in Phase 3 and the licence
    handling in Phase 2.
-4. **How much does the platform promise?** Specifically: may it run a nonconvex
+5. **How much does the platform promise?** Specifically: may it run a nonconvex
    model and present a local optimum, with a warning, or should it refuse?
-5. **Who is the user?** If planners self-serve, Phase 5's permissions and Phase
+6. **Who is the user?** If planners self-serve, Phase 5's permissions and Phase
    4's explanations matter more than raw solver coverage. If a modelling team
    drives it, invert that.
 
