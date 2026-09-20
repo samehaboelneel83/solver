@@ -394,7 +394,7 @@ def test_snapshot_of_the_seeded_version_is_non_empty_and_matches_the_pinned_shap
     ).scalar_one()
     db.rollback()
 
-    assert set(data) == {"sets", "parameters", "parameter_defaults"}
+    assert set(data) == {"sets", "parameters", "parameter_defaults", "relationships"}
     assert data["sets"], "sets is empty"
     assert data["parameters"], "parameters is empty"
     assert data["parameter_defaults"], "parameter_defaults is empty"
