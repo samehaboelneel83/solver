@@ -252,13 +252,83 @@ Two implementation notes worth knowing before you change anything here:
   if the page scrolls or reflows afterwards, call `cy.resize()` before relying on
   rendered node positions or hit-testing.
 
+## Checks
+
+There is no CI here and no git remote for a hosted runner to hook into, so the
+only check that ever runs is one you run. `scripts/check.sh` is that one
+command.
+
+```bash
+scripts/check.sh              # full: frontend + build + backend  (~2 min)
+scripts/check.sh --fast       # frontend only, no Docker          (~20 s)
+scripts/check.sh --backend    # the backend suite on its own
+```
+
+It reports pass/fail per step, prints a summary, and exits non-zero if
+anything failed:
+
+| step | what it is |
+| --- | --- |
+| frontend deps | `npm ci`, but only when `node_modules` is missing or older than `package-lock.json`. A stale `node_modules` fails with "cannot find module" errors that read exactly like broken source code. |
+| frontend lint | skipped — there is no lint config (see **Known limitations**). |
+| frontend typecheck | `tsc --noEmit`. A separate signal from the tests: vitest transpiles each file and never type-checks, so a type error does not fail the suite. |
+| frontend tests | `vitest run` — 1268 tests across 62 files. |
+| frontend build | `npm run build` — a third signal again: `tsc -b` plus a real rollup resolve. |
+| backend tests | `pytest -q` — 754 tests, in a throwaway container with the working tree bind-mounted. |
+
+That last one is the reason this script exists rather than a README paragraph.
+`docker compose exec -T backend pytest` runs the code baked into the image, not
+the code in your working tree, and will report a confident pass for a change
+you have not built. `check.sh` always runs `docker run --rm` with the tree
+mounted over `/app`.
+
+What it never does: migrate a database, build an image, run `docker compose
+up` / `restart` / `scripts/rebuild.sh`, create or recreate a container, or
+touch the `solver` database or ports 3010/8010. If a precondition is missing
+it names the command that fixes it and exits non-zero, rather than fixing it
+for you. The backend suite runs against `solver_test`, which
+`backend/tests/conftest.py` drops and recreates — guarded there, and again in
+`check.sh`, by a check that the name ends in `_test`.
+
+It needs an env file for the backend container: `<repo>/.env`, or, in a
+worktree (where `.env` is gitignored and therefore absent), the main
+checkout's. Override with `SOLVER_ENV_FILE`.
+
+On Windows it is written for Git Bash, and sets `MSYS_NO_PATHCONV` itself —
+without it, MSYS rewrites the container-side `-w /app` into
+`C:/Program Files/Git/app` and docker refuses.
+
+### The pre-commit hook
+
+Opt-in, and installed by hand, because git never shares `.git/hooks`: a hook
+committed to this tree does nothing at all until someone installs it.
+
+```bash
+bash scripts/install-hooks.sh              # install
+bash scripts/install-hooks.sh --status     # what is installed
+bash scripts/install-hooks.sh --uninstall  # remove it again
+```
+
+The `pre-commit` hook runs `scripts/check.sh --fast` and refuses the commit if
+it fails. Skip it for one commit with `git commit --no-verify`, or for a shell
+session with `SOLVER_SKIP_CHECKS=1`. It checks the working tree, not the staged
+snapshot, and it says so rather than printing a meaningless green summary when
+a commit stages nothing under `frontend/` — the fast checks cover only the
+frontend, so run the full `scripts/check.sh` before merging a branch.
+
+A worktree shares its main checkout's `.git/hooks`, so installing from one
+worktree installs for all of them.
+
 ## Tests
+
+`scripts/check.sh` runs both suites for you, the right way; these are the
+individual commands.
 
 ```bash
 # Backend — 754 tests
 docker compose run --rm --no-deps -T backend pytest -q
 
-# Frontend — 1175 tests across 59 files
+# Frontend — 1268 tests across 62 files
 cd frontend && npm ci && npm test -- --run
 ```
 
@@ -386,4 +456,18 @@ python scripts/graph_smoke_check.py
 - **Hierarchy collapse/expand is not implemented.** Cytoscape's compound nodes
   provide nesting only; collapsing would need the `cytoscape-expand-collapse`
   extension, which is not installed.
+- **There is no lint config, deliberately.** `scripts/check.sh` will run a
+  `lint` script if `frontend/package.json` ever grows one, and reports it as
+  skipped until then. The stock ESLint config for a Vite React-TS project was
+  measured against this tree first: **260 problems in 36 of 146 files**, 207 of
+  them `@typescript-eslint/no-explicit-any`. Turning that rule off and allowing
+  `_`-prefixed unused bindings still leaves 34. A config that starts on a wall
+  of violations gets a blanket `--max-warnings` and stops meaning anything, so
+  none was committed — the rules debate has to happen first. Two things the
+  measurement did surface, worth knowing: three genuinely unused imports
+  (`ExpressionBuilder.tsx`'s `ExpressionField`, `validate.ts`'s
+  `isExpressionGroup`, `dom.d.ts`'s type parameter `T`) that `tsc` does not
+  flag because `noUnusedLocals` is off, and roughly 28 `eslint-disable`
+  comments already in the source, including ones for `no-console` and
+  `no-bitwise` — pragmas written for a linter that has never existed here.
 - Neither image has a bind mount; see "Rebuilding after a code change".
