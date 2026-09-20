@@ -5,7 +5,14 @@ import RelationshipTypeFields, {
   draftFromType,
   type RelationshipTypeDraft,
 } from "../components/RelationshipTypeFields";
-import { ErrorSummary, nameProblem, serverFieldErrors, useFieldErrors, type FieldErrors } from "../components/attrTypes";
+import {
+  ErrorSummary,
+  colourFieldError,
+  nameProblem,
+  serverFieldErrors,
+  useFieldErrors,
+  type FieldErrors,
+} from "../components/attrTypes";
 import OfflineNotice from "../components/OfflineNotice";
 import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
@@ -115,6 +122,7 @@ function TypeForm({
   reload: () => Promise<RelationshipType | null>;
 }) {
   const [draft, setDraft] = useState<RelationshipTypeDraft>(() => draftFromType(type));
+  const [colourProblem, setColourProblem] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -169,6 +177,8 @@ function TypeForm({
     if (problem) problems.name = problem;
     if (draft.from_type_id === null) problems.from_type_id = "From entity type: choose an entity type.";
     if (draft.to_type_id === null) problems.to_type_id = "To entity type: choose an entity type.";
+    const colourMessage = colourFieldError(colourProblem);
+    if (colourMessage) problems.colour = colourMessage;
     replace(problems);
     if (Object.keys(problems).length > 0) return;
     try {
@@ -218,6 +228,7 @@ function TypeForm({
               replace(rest);
             }
           }}
+          onColourProblem={setColourProblem}
           entityTypes={entityTypes.data?.items ?? []}
           errors={errors}
           fallbackKey={String(type.id)}

@@ -108,4 +108,62 @@ describe("ColourField", () => {
     expect(screen.getByLabelText("Colour")).toBe(screen.getByTestId("colour-hex"));
     expect(screen.getByLabelText("Colour swatch")).toBe(screen.getByTestId("colour-swatch"));
   });
+  /*
+   * The Colour box used to be the one control in the product that could
+   * fail silently: an unparseable entry was left UNCOMMITTED, so the
+   * parent form never heard about it, submitted anyway, dropped the value
+   * and toasted "Entity type saved". The field now reports the problem as
+   * well as the value, and that report is what lets a form refuse.
+   */
+  it("reports a problem the parent can refuse a save on", () => {
+    const onProblemChange = vi.fn();
+    renderField({ value: "#1f77b4", onProblemChange });
+    onProblemChange.mockClear();
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    expect(onProblemChange).toHaveBeenCalledWith("Use a six-digit hex colour, e.g. #1f77b4.");
+  });
+
+  it("reports the problem cleared once the box holds a real colour again", () => {
+    const onProblemChange = vi.fn();
+    renderField({ value: "#1f77b4", onProblemChange });
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    onProblemChange.mockClear();
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#00aa00" } });
+    expect(onProblemChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("reports no problem for an empty box, which means 'no colour'", () => {
+    const onProblemChange = vi.fn();
+    renderField({ value: "#1f77b4", onProblemChange });
+    onProblemChange.mockClear();
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "" } });
+    expect(onProblemChange).not.toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it("reports the problem cleared when the row is re-seeded underneath it", () => {
+    // A save elsewhere, or "Reload and keep my changes", replaces `value`.
+    // A stale problem would then block a form whose box is valid again.
+    const onProblemChange = vi.fn();
+    const { rerender } = render(
+      <ColourField
+        value="#1f77b4"
+        onChange={vi.fn()}
+        onProblemChange={onProblemChange}
+        fallbackKey="22"
+        sampleText="employee"
+      />
+    );
+    fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
+    expect(onProblemChange).toHaveBeenLastCalledWith("Use a six-digit hex colour, e.g. #1f77b4.");
+    rerender(
+      <ColourField
+        value="#00aa00"
+        onChange={vi.fn()}
+        onProblemChange={onProblemChange}
+        fallbackKey="22"
+        sampleText="employee"
+      />
+    );
+    expect(onProblemChange).toHaveBeenLastCalledWith(null);
+  });
 });

@@ -177,6 +177,18 @@ export function formatDefault(value: unknown): string {
   return draftFromValue(value);
 }
 
+/**
+ * The colour box's refusal, worded for an error summary.
+ *
+ * `ColourField` reports what it cannot commit (`onProblemChange`); this is
+ * how the four forms that hold one turn that into an entry keyed `colour`,
+ * so an unparseable colour blocks the save and is listed beside every
+ * other field problem instead of being dropped with a success toast.
+ */
+export function colourFieldError(problem: string | null | undefined): string | null {
+  return problem ? `Colour: ${problem}` : null;
+}
+
 // --- server errors ------------------------------------------------------------
 
 export type FieldErrors = Record<string, string>;

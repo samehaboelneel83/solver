@@ -33,6 +33,7 @@ function Harness({ initial = FREE_DRAFT }: { initial?: RelationshipTypeDraft }) 
       <RelationshipTypeFields
         draft={draft}
         onChange={setDraft}
+        onColourProblem={() => {}}
         entityTypes={ENTITY_TYPES}
         errors={{}}
         fallbackKey="new"
