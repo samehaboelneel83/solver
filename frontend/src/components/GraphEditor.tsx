@@ -351,6 +351,9 @@ export default function GraphEditor({
   onSelectionChangeRef.current = onSelectionChange;
 
   const [pendingEdge, setPendingEdge] = useState<{ sourceId: string; targetId: string } | null>(null);
+  // What the last Connect gesture did when it produced no picker. Null
+  // most of the time; see the `ehcancel` handler for why it exists.
+  const [connectNote, setConnectNote] = useState<string | null>(null);
   const [showCreateNode, setShowCreateNode] = useState(false);
   // The create-node form is a small `entity` form: a key, an optional label
   // and one control per `attribute_def` of the chosen type (Task 12's
@@ -472,7 +475,32 @@ export default function GraphEditor({
       }
     });
     cy.on("ehcomplete", (_event: unknown, sourceNode: NodeSingular, targetNode: NodeSingular) => {
+      setConnectNote(null);
       setPendingEdge({ sourceId: sourceNode.id(), targetId: targetNode.id() });
+    });
+    /**
+     * The gesture ended without a target.
+     *
+     * edgehandles emits this whenever the pointer is released away from a
+     * node -- and nothing listened, so a Connect drag that missed was
+     * completely silent: no picker, no banner, no change. That is
+     * indistinguishable from a drag the product refused, so the next move
+     * is to try again, harder. It is also the likeliest outcome on the
+     * cramped default layout, where a node can sit half outside the
+     * viewport.
+     */
+    cy.on("ehcancel", () => {
+      setPendingEdge(null);
+      setConnectNote(
+        "Nothing was connected: the drag did not end on another node. " +
+          "Press on one node and release on the node you want to connect it to."
+      );
+    });
+    // A new gesture describes itself; whatever the last one said is no
+    // longer about anything on screen.
+    cy.on("ehstart", () => {
+      setConnectNote(null);
+      setPendingEdge(null);
     });
 
     cyRef.current = cy;
@@ -701,6 +729,31 @@ export default function GraphEditor({
     setLiveMessage(`${what}: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
   }, [filter, data, shownNodeIds]);
 
+  /*
+   * A Connect gesture that produced no relationship has to reach a screen
+   * reader too, and neither of the two ways that happens moves focus or
+   * changes a control's state -- so without this the canvas stayed as
+   * silent for a screen-reader user as it looked for a sighted one.
+   */
+  useEffect(() => {
+    if (connectNote) setLiveMessage(connectNote);
+  }, [connectNote]);
+
+  useEffect(() => {
+    if (!pendingEdge || !data || isTypes) {
+      return;
+    }
+    if (validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId).length > 0) {
+      return;
+    }
+    setLiveMessage(
+      `No relationship type joins ${nodeEntityType(pendingEdge.sourceId) ?? "?"} to ` +
+        `${nodeEntityType(pendingEdge.targetId) ?? "?"}, so "${nodeLabelOf(pendingEdge.sourceId)}" ` +
+        `cannot be connected to "${nodeLabelOf(pendingEdge.targetId)}".`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEdge, data, isTypes]);
+
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
   // FilterBar's search box) to move the canvas's own roving keyboard focus to a node, so the
   // property panel it just opened and the canvas's `.kb-focus` ring/live-region stay in step.
@@ -905,6 +958,13 @@ export default function GraphEditor({
 
   function nodeEntityType(entityId: string): string | undefined {
     return data?.nodes.find((n) => n.id === entityId)?.type;
+  }
+
+  /** What the canvas draws this node as. Used to name the two ends of a
+   * connect gesture: the rule is about entity TYPES, but the user dragged
+   * between two named things and those are what they are looking at. */
+  function nodeLabelOf(entityId: string): string {
+    return data?.nodes.find((n) => n.id === entityId)?.label ?? `#${entityId}`;
   }
 
   function validRelationshipTypesFor(sourceId: string, targetId: string): RelationshipTypeOption[] {
@@ -1262,41 +1322,96 @@ export default function GraphEditor({
         </form>
       )}
 
-      {pendingEdge && data && !isTypes && (
-        <div className="mb-2 rounded-md border border-slate-200 p-2" data-testid="edge-type-picker">
-          <p className="mb-1 text-xs text-slate-600">Choose a relationship type:</p>
-          {(() => {
-            const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
-            if (validTypes.length === 0) {
-              // A node's `type` IS the entity type's name in v1, so there is
-              // nothing to look up to name it.
-              return (
-                <p className="mb-1 text-xs text-slate-500">
-                  No relationship type allows {nodeEntityType(pendingEdge.sourceId) ?? "?"} →{" "}
-                  {nodeEntityType(pendingEdge.targetId) ?? "?"}
-                </p>
-              );
-            }
-            // v0 grouped "any -> any" types after a divider. v1 has none:
-            // `from_type_id`/`to_type_id` are NOT NULL, so every relationship
-            // type names both ends and the group could never be non-empty.
-            return validTypes.map((rt: RelationshipTypeOption) => (
-              <button
-                key={rt.id}
-                type="button"
-                onClick={() => handleConfirmEdge(rt.id)}
-                disabled={createRelationship.isPending}
-                className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {rt.name}
-              </button>
-            ));
-          })()}
-          <button type="button" onClick={() => setPendingEdge(null)} className="rounded px-2 py-1 text-sm text-slate-500">
-            Cancel
-          </button>
-        </div>
+      {connectNote && (
+        <p
+          data-testid="connect-note"
+          className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+        >
+          {connectNote}
+        </p>
       )}
+
+      {pendingEdge &&
+        data &&
+        !isTypes &&
+        (() => {
+          const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
+          // A node's `type` IS the entity type's name in v1, so there is
+          // nothing to look up to name it.
+          const fromType = nodeEntityType(pendingEdge.sourceId) ?? "?";
+          const toType = nodeEntityType(pendingEdge.targetId) ?? "?";
+
+          /*
+           * Two entity types nothing joins is not a failed choice, it is a
+           * refusal, so it is not dressed as one. It used to render inside
+           * a box headed "Choose a relationship type:" as a grey line under
+           * an empty list of buttons -- and on the drag that produced it in
+           * the wild, nothing appeared at all (see the `ehcancel` handler).
+           * It names the TYPES, because the rule is about types, and the two
+           * entities the user was actually looking at; and it says where the
+           * missing type is made, because otherwise the reader is told only
+           * that they cannot do what they just tried.
+           */
+          if (validTypes.length === 0) {
+            return (
+              <div
+                className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                data-testid="connect-refusal"
+              >
+                <p>
+                  No relationship type joins {fromType} to {toType}, so &ldquo;
+                  {nodeLabelOf(pendingEdge.sourceId)}&rdquo; cannot be connected to &ldquo;
+                  {nodeLabelOf(pendingEdge.targetId)}&rdquo;.
+                </p>
+                <p className="mt-1">
+                  Define one on the{" "}
+                  <Link to="/relationship-types" className="inline-block rounded underline">
+                    relationship types page
+                  </Link>{" "}
+                  — from {fromType} to {toType} — then drag again.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPendingEdge(null)}
+                  className="mt-1 rounded px-2 py-1 text-sm text-amber-900 underline"
+                >
+                  Close
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div className="mb-2 rounded-md border border-slate-200 p-2" data-testid="edge-type-picker">
+              <p className="mb-1 text-xs text-slate-600">
+                Choose a relationship type, from &ldquo;{nodeLabelOf(pendingEdge.sourceId)}&rdquo; to &ldquo;
+                {nodeLabelOf(pendingEdge.targetId)}&rdquo;:
+              </p>
+              {/* v0 grouped "any -> any" types after a divider. v1 has none:
+                  `from_type_id`/`to_type_id` are NOT NULL, so every
+                  relationship type names both ends and the group could
+                  never be non-empty. */}
+              {validTypes.map((rt: RelationshipTypeOption) => (
+                <button
+                  key={rt.id}
+                  type="button"
+                  onClick={() => handleConfirmEdge(rt.id)}
+                  disabled={createRelationship.isPending}
+                  className="mr-2 rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {rt.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPendingEdge(null)}
+                className="rounded px-2 py-1 text-sm text-slate-500"
+              >
+                Cancel
+              </button>
+            </div>
+          );
+        })()}
 
       {isOffline && <OfflineNotice subject="The graph" />}
       {!isOffline && isLoading && <p className="text-sm text-slate-500">Loading graph…</p>}
