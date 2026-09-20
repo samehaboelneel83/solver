@@ -710,3 +710,95 @@ describe("GraphDemo expression filter", () => {
     expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent(/no conditions/i);
   });
 });
+
+/**
+ * The search box drops the canvas from 23 nodes to 1 while you type, with
+ * nothing on screen saying so -- next to a condition filter that reports
+ * exactly that ("Filter conditions: 2 of 23 nodes shown"). The one action
+ * that answers "where is this person" silently destroyed the picture of
+ * who they work with, and never said it had.
+ */
+describe("GraphDemo search announcement", () => {
+  beforeEach(() => {
+    mockCytoscape.mockClear();
+    registeredHandlersRef.current = {};
+    elementStore.clear();
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
+    localStorage.removeItem(GRAPH_MODE_STORAGE_KEY);
+    (apiFetch as any).mockReset();
+    stubApi();
+  });
+
+  const GRADE = "attr:1:grade";
+
+  async function openBuilder() {
+    await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("filter-expression-toggle"));
+    fireEvent.click(await screen.findByTestId("expression-add-rule", undefined, { timeout: 3000 }));
+    await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1), {
+      timeout: 3000,
+    });
+  }
+
+  it("says what the search hid, in the same words the condition filter uses", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+    expect(screen.getByTestId("graph-live")).not.toHaveTextContent(/of 3/);
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-live")).toHaveTextContent('Search "sara": 1 of 3 nodes shown')
+    );
+  });
+
+  it("says so when the search is cleared, rather than leaving the last count standing", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "" } });
+
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("Search cleared"));
+    expect(screen.getByTestId("graph-live")).not.toHaveTextContent(/of 3/);
+  });
+
+  it("reports a search that matches nothing, which is the case that looks most like a broken page", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(screen.getByTestId("filter-search")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "nobody" } });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-live")).toHaveTextContent('Search "nobody": 0 of 3 nodes shown')
+    );
+  });
+
+  it("names both filters when both are on, and neither is lost when one is cleared", async () => {
+    renderWithProviders();
+    await openBuilder();
+    setRuleOn(GRADE, ">=", "3");
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
+
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-live")).toHaveTextContent(
+        'Search "sara" and filter conditions: 1 of 3 nodes shown'
+      )
+    );
+
+    // Clearing the search must not announce "cleared" while the conditions
+    // are still hiding two thirds of the canvas.
+    fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "" } });
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-live")).toHaveTextContent("Filter conditions: 2 of 3 nodes shown")
+    );
+  });
+
+  function setRuleOn(field: string, operator: string, value: string) {
+    fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: field } });
+    fireEvent.change(screen.getAllByTestId("expression-operator")[0], { target: { value: operator } });
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value } });
+  }
+});

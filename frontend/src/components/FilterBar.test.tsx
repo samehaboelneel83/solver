@@ -441,3 +441,43 @@ describe("deriveFilterCriteria with an expression", () => {
     expect(result.search).toBe("ahmed");
   });
 });
+
+describe("FilterBar: what the search box says it does", () => {
+  const entityTypes = [
+    { id: "1", code: "employee", name: "employee", is_abstract: false, colour: null },
+  ];
+
+  it("says it hides the rest, because that is what it does", () => {
+    // "Search nodes by label -- press Enter to select the first match"
+    // reads as FIND. What the box actually does is filter the canvas
+    // live, which is why its effect came as a surprise.
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={() => {}}
+      />
+    );
+    const box = screen.getByTestId("filter-search");
+    expect(box.getAttribute("aria-label")).toMatch(/hides the rest as you type/i);
+    // The Enter behaviour is still advertised: both are true of this box.
+    expect(box.getAttribute("aria-label")).toMatch(/press Enter to select the first match/i);
+    expect(box.getAttribute("title")).toBe(box.getAttribute("aria-label"));
+  });
+
+  it("keeps the view's own noun, so the types view does not claim to search nodes", () => {
+    render(
+      <FilterBar
+        entityTypes={entityTypes}
+        selectedNodeId={null}
+        value={DEFAULT_FILTER_STATE}
+        onChange={() => {}}
+        searchLabel="Search types by name"
+      />
+    );
+    expect(screen.getByTestId("filter-search").getAttribute("aria-label")).toMatch(
+      /^Search types by name .*hides the rest as you type/i
+    );
+  });
+});

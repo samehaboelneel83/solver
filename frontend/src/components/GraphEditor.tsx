@@ -646,25 +646,59 @@ export default function GraphEditor({
     return `Graph canvas, ${isTypes ? "types view" : "objects view"}, ${count} — use the arrow keys to move between nodes`;
   }, [data, shownNodeIds, isTypes]);
 
-  // Task 14c: the expression's result, announced in the same live region
-  // the rest of this canvas uses. Only while an expression is active:
-  // announcing on every keystroke in the search box would be noise, and
-  // the type checkboxes have never announced either.
-  const announcedExpressionRef = useRef(false);
+  /**
+   * What the two text filters left showing, announced in the live region
+   * the rest of this canvas uses.
+   *
+   * Task 14c gave the expression this treatment. The search box beside it
+   * did not have it, and it is the more destructive of the two: typing a
+   * name cut the canvas from 23 nodes to 1, live, before Enter, with
+   * nothing on screen saying so -- so the one action that answers "where
+   * is this person" silently threw away the picture of who they work
+   * with, next to a control that reports exactly the same thing about
+   * itself. Both now report, in the same words.
+   *
+   * ONE effect, not two beside each other: with the search and the
+   * conditions both on, two effects would each write this region on every
+   * render and the last one to run would decide what a screen reader
+   * heard. It also means clearing one while the other is still hiding
+   * nodes announces what is still hiding them, rather than "cleared".
+   *
+   * The type checkboxes still do not announce -- they are checkboxes,
+   * whose own state a screen reader already reads -- and the search is
+   * announced from the DEBOUNCED value GraphDemo holds, so this is one
+   * announcement per pause, not one per keystroke.
+   */
+  const announcedFilterRef = useRef<"search" | "conditions" | "both" | null>(null);
   useEffect(() => {
     if (!data || !shownNodeIds) {
       return;
     }
-    const matchIds = filter?.expressionMatchIds ?? null;
-    if (!matchIds) {
-      if (announcedExpressionRef.current) {
-        announcedExpressionRef.current = false;
-        setLiveMessage("Filter conditions cleared");
+    const search = (filter?.search ?? "").trim();
+    const conditions = Boolean(filter?.expressionMatchIds);
+    const active = search && conditions ? "both" : search ? "search" : conditions ? "conditions" : null;
+    if (!active) {
+      const was = announcedFilterRef.current;
+      if (was) {
+        announcedFilterRef.current = null;
+        setLiveMessage(
+          was === "search"
+            ? "Search cleared"
+            : was === "conditions"
+              ? "Filter conditions cleared"
+              : "Search and filter conditions cleared"
+        );
       }
       return;
     }
-    announcedExpressionRef.current = true;
-    setLiveMessage(`Filter conditions: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
+    announcedFilterRef.current = active;
+    const what =
+      active === "search"
+        ? `Search "${search}"`
+        : active === "conditions"
+          ? "Filter conditions"
+          : `Search "${search}" and filter conditions`;
+    setLiveMessage(`${what}: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
   }, [filter, data, shownNodeIds]);
 
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
