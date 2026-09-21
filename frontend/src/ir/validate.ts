@@ -32,6 +32,7 @@ import {
   SENSES,
   SEVERITIES,
   TERM_KINDS,
+  TRAVERSAL_DEPTHS,
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
@@ -46,7 +47,14 @@ export type IrRefusal = { code: string; loc: IrLoc; message: string };
 type Json = Record<string, unknown>;
 
 const LIST_OPERATORS: ReadonlySet<string> = new Set(["in", "notIn"]);
-const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where"]);
+const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via"]);
+/**
+ * A `via` names the relationship, where the *anchor* sits, and how far to
+ * walk. `from` and `to` are the anchor's end, so the index being bound takes
+ * the other one -- which is why exactly one of them appears and neither is
+ * the new index's own name.
+ */
+const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper"]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index"]);
@@ -114,6 +122,7 @@ function unknownKey(
 
 class ShapeChecker {
   readonly sets = new Set<string>();
+  readonly relationships = new Set<string>();
   readonly parameters = new Map<string, string[]>();
   readonly variables = new Map<string, string[]>();
   terms = 0;
@@ -143,6 +152,48 @@ class ShapeChecker {
         return refusal("set_duplicated", ["sets", i], `the set '${name}' is named twice`);
       }
       this.sets.add(name);
+    }
+    return null;
+  }
+
+  /**
+   * `relationships` declares which edge types the dataset must freeze.
+   *
+   * Optional, and absent means none -- which is every model written before
+   * traversal existed. It mirrors `sets` exactly, and for the same reason:
+   * `snapshot_dataset()` freezes what this names and nothing else, so a
+   * `via` that walked an undeclared type would reference data the frozen
+   * document does not carry.
+   */
+  checkRelationships(): IrRefusal | null {
+    const relationships = this.ir.relationships;
+    if (relationships === undefined) return null;
+    if (!Array.isArray(relationships)) {
+      return refusal(
+        "relationships_not_array",
+        ["relationships"],
+        "relationships must be an array of relationship type names; omit the key entirely " +
+          "for a model that does not traverse"
+      );
+    }
+    for (let i = 0; i < relationships.length; i += 1) {
+      const name = relationships[i];
+      if (!isName(name)) {
+        return refusal(
+          "relationship_not_a_name",
+          ["relationships", i],
+          `${show(name)} is not a relationship type name; relationship_type.name is ` +
+            "^[a-z][a-z0-9_]*$"
+        );
+      }
+      if (this.relationships.has(name)) {
+        return refusal(
+          "relationship_duplicated",
+          ["relationships", i],
+          `the relationship '${name}' is named twice`
+        );
+      }
+      this.relationships.add(name);
     }
     return null;
   }
@@ -479,11 +530,71 @@ class ShapeChecker {
           `${show(setName)} is not a set this model declares, so no dataset would carry it`
         );
       }
+      // Order matters here and is the whole reason `via` is a binding rather
+      // than a term: the anchor must already be bound when the traversal
+      // starts, so it is checked against `scope` BEFORE this binding's own
+      // index joins it. Checking afterwards would let a binding walk from
+      // itself.
+      const via = this.checkVia(binding, at, scope);
+      if (via) return via;
       scope.set(index, setName);
       const where = this.checkWhere(binding, at);
       if (where) return where;
     }
     return scope;
+  }
+
+  private checkVia(binding: Json, at: IrLoc, scope: Map<string, string>): IrRefusal | null {
+    if (!("via" in binding)) return null;
+    const via = binding.via;
+    const here: IrLoc = [...at, "via"];
+    if (!isObject(via)) {
+      return refusal(
+        "binding_via_not_object",
+        here,
+        "a via names the relationship to walk and which end this binding starts from"
+      );
+    }
+    const unknown = unknownKey(via, VIA_KEYS, here, "via");
+    if (unknown) return unknown;
+
+    const rel = via.rel;
+    if (typeof rel !== "string" || !this.relationships.has(rel)) {
+      return refusal(
+        "binding_via_rel_not_declared",
+        [...here, "rel"],
+        `${show(rel)} is not a relationship this model declares in relationships, so no ` +
+          "dataset would carry its edges"
+      );
+    }
+
+    const ends = (["from", "to"] as const).filter((end) => end in via);
+    if (ends.length !== 1 || !isName(via[ends[0]])) {
+      return refusal(
+        "binding_via_anchor_invalid",
+        here,
+        "a via names exactly one of from or to, and it is the index the walk starts at; the " +
+          "end named is where that index sits, so this binding takes the other"
+      );
+    }
+    const anchor = via[ends[0]] as string;
+    if (!scope.has(anchor)) {
+      return refusal(
+        "binding_via_anchor_not_bound",
+        [...here, ends[0]],
+        `the index '${anchor}' is not bound where this traversal starts; bind it in an ` +
+          "enclosing forall, or earlier in this same list"
+      );
+    }
+    if ("depth" in via && !(TRAVERSAL_DEPTHS as readonly string[]).includes(via.depth as string)) {
+      return refusal(
+        "binding_via_depth_unsupported",
+        [...here, "depth"],
+        `${show(via.depth)} is not a depth version ${IR_VERSION} walks; it has ` +
+          `${[...TRAVERSAL_DEPTHS].sort().join(", ")}`
+      );
+    }
+    return null;
   }
 
   private checkWhere(binding: Json, at: IrLoc): IrRefusal | null {
@@ -907,6 +1018,7 @@ export function checkIrShape(ir: unknown): IrRefusal | null {
   const checker = new ShapeChecker(ir);
   for (const step of [
     () => checker.checkSets(),
+    () => checker.checkRelationships(),
     () => checker.checkParameters(),
     () => checker.checkVariables(),
     () => checker.checkConstraints(),

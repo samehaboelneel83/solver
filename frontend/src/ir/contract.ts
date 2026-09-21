@@ -38,11 +38,17 @@ export function isName(value: unknown): value is string {
 }
 
 export const REQUIRED_KEYS = ["version", "sets", "parameters", "variables", "constraints"] as const;
-export const OPTIONAL_KEYS = ["objective"] as const;
+export const OPTIONAL_KEYS = ["objective", "relationships"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
 export const VARIABLE_DOMAINS = ["binary", "integer", "continuous"] as const;
 export const RELATIONS = ["<=", "=", ">="] as const;
+/** How far a `via` binding walks. `one` is a single edge; `any` is the
+ * transitive closure; `any_or_self` is that plus the anchor itself, which
+ * is the shape `entity_descendants()` has always returned ("node +
+ * everything beneath it") and the one a planner means by "counting its
+ * sub-units". */
+export const TRAVERSAL_DEPTHS = ["one", "any", "any_or_self"] as const;
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul"] as const;
@@ -54,6 +60,7 @@ export type Relation = (typeof RELATIONS)[number];
 export type Severity = (typeof SEVERITIES)[number];
 export type Sense = (typeof SENSES)[number];
 export type TermKind = (typeof TERM_KINDS)[number];
+export type TraversalDepth = (typeof TRAVERSAL_DEPTHS)[number];
 
 /** Where a rule can be decided. `shape` rules are the ones this half of
  * the platform can judge; `domain` rules need the domain's own rows and
@@ -86,6 +93,13 @@ export const IR_RULES: readonly IrRule[] = [
     text: "each set is an entity type name matching the name pattern",
   },
   { code: "set_duplicated", where: "shape", text: "a set is named once" },
+  { code: "relationships_not_array", where: "shape", text: "`relationships` is an array" },
+  {
+    code: "relationship_not_a_name",
+    where: "shape",
+    text: "each relationship is a relationship type name matching the name pattern",
+  },
+  { code: "relationship_duplicated", where: "shape", text: "a relationship is named once" },
   {
     code: "parameters_not_object",
     where: "shape",
@@ -194,6 +208,27 @@ export const IR_RULES: readonly IrRule[] = [
     where: "shape",
     text: "`forall` and a sum's `over` are arrays binding between one index and the limit",
   },
+  { code: "binding_via_not_object", where: "shape", text: "a binding's `via` is an object" },
+  {
+    code: "binding_via_rel_not_declared",
+    where: "shape",
+    text: "a `via`'s `rel` is declared in `relationships`",
+  },
+  {
+    code: "binding_via_anchor_invalid",
+    where: "shape",
+    text: "a `via` names exactly one of `from` or `to`, and it is an index name",
+  },
+  {
+    code: "binding_via_anchor_not_bound",
+    where: "shape",
+    text: "a `via`'s anchor index is already bound where the traversal starts",
+  },
+  {
+    code: "binding_via_depth_unsupported",
+    where: "shape",
+    text: "a `via`'s `depth` is one this version walks",
+  },
   { code: "where_not_array", where: "shape", text: "a binding's `where` is an array of filters" },
   {
     code: "where_filter_malformed",
@@ -274,6 +309,23 @@ export const IR_RULES: readonly IrRule[] = [
     code: "set_not_in_domain",
     where: "domain",
     text: "every declared set is an entity type of the problem's domain",
+  },
+  {
+    code: "relationship_not_in_domain",
+    where: "domain",
+    text: "every declared relationship is a relationship type of the problem's domain",
+  },
+  {
+    code: "binding_via_endpoint_mismatch",
+    where: "domain",
+    text:
+      "a `via`'s anchor and bound sets are the relationship type's own endpoint types, " +
+      "the right way round",
+  },
+  {
+    code: "binding_via_depth_not_transitive",
+    where: "domain",
+    text: "a repeated `via` walks a relationship whose two ends are the same entity type",
   },
   {
     code: "parameter_not_in_domain",

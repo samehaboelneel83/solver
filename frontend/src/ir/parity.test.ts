@@ -20,6 +20,7 @@ import {
   SEVERITIES,
   SHAPE_RULES,
   TERM_KINDS,
+  TRAVERSAL_DEPTHS,
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
@@ -87,6 +88,7 @@ function fromTypeScript(): Record<string, unknown> {
     severities: [...SEVERITIES],
     senses: [...SENSES],
     termKinds: [...TERM_KINDS],
+    traversalDepths: [...TRAVERSAL_DEPTHS],
     filterOperators: [...FILTER_OPERATORS],
     arithmeticAttrTypes: [...ARITHMETIC_ATTR_TYPES],
     rules: IR_RULES.map((rule) => ({ code: rule.code, where: rule.where, text: rule.text })),
@@ -134,6 +136,7 @@ describe("the IR contract", () => {
     expect(theirs.severities).toEqual([...SEVERITIES]);
     expect(theirs.senses).toEqual([...SENSES]);
     expect(theirs.termKinds).toEqual([...TERM_KINDS]);
+    expect(theirs.traversalDepths).toEqual([...TRAVERSAL_DEPTHS]);
     expect(theirs.filterOperators).toEqual([...FILTER_OPERATORS]);
     expect(theirs.arithmeticAttrTypes).toEqual([...ARITHMETIC_ATTR_TYPES]);
   });

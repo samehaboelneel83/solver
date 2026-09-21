@@ -152,6 +152,13 @@ class _Compiler:
         self.sets: dict[str, list[dict[str, Any]]] = data.get("sets", {})
         self.params_raw: dict[str, list[dict[str, Any]]] = data.get("parameters", {})
         self.defaults: dict[str, int] = data.get("parameter_defaults", {})
+        #: The frozen edges, per declared relationship type (migrations 0011
+        #: and 0016). Read from the snapshot and never from the live rows: a
+        #: run that consulted the database for its edges would answer a
+        #: different question each time the org chart changed, which is the
+        #: reproducibility guarantee the whole RUN half is built on.
+        self.edges: dict[str, list[dict[str, Any]]] = data.get("relationships", {})
+        self._reach: dict[tuple[str, str, str, str], set[str]] = {}
         self.variables: dict[VarKey, Variable] = {}
         self.constraints: list[Constraint] = []
         self._params: dict[str, dict[tuple[str, ...], int]] = {}
@@ -162,6 +169,7 @@ class _Compiler:
     # -- setup ------------------------------------------------------------
 
     def run(self) -> Compiled:
+        self._check_edges_were_frozen()
         self._index_parameters()
         self._declare_variables()
         for spec in self.ir.get("constraints", []):
@@ -176,6 +184,23 @@ class _Compiler:
             violations=self.violations,
             penalty_of=self.penalty_of,
         )
+
+    def _check_edges_were_frozen(self) -> None:
+        """A model that declares a relationship must be solved against a
+        dataset that carries it.
+
+        Since migration 0016 the snapshot follows the declaration, so this
+        can only fire for a dataset frozen before it -- where the two were
+        not yet related. Saying so beats silently finding nothing reachable
+        and reporting an answer to a constraint that never ran.
+        """
+        missing = [name for name in self.ir.get("relationships", []) if name not in self.edges]
+        if missing:
+            raise Unsupported(
+                f"the model declares the relationship {missing[0]!r} and the frozen dataset "
+                "carries no edges of that type; it was snapshotted before traversal existed. "
+                "Re-run to take a fresh snapshot."
+            )
 
     def _index_parameters(self) -> None:
         """A parameter arrives as rows keyed by set name (`{"day": "mon",
@@ -295,18 +320,89 @@ class _Compiler:
                 Constraint(spec["id"], index, left, spec["relation"], right)
             )
 
-    def _bindings(self, bindings: list[dict[str, Any]]) -> list[dict[str, tuple[str, dict]]]:
+    def _bindings(
+        self,
+        bindings: list[dict[str, Any]],
+        outer: dict[str, tuple[str, dict]] | None = None,
+    ) -> list[dict[str, tuple[str, dict]]]:
         """Every combination the bindings range over, as environments mapping
         an index name to the row it is bound to. A `where` filter narrows a
         binding's own set before the product, so a filtered binding shrinks
         the instance count rather than producing instances that are then
-        discarded."""
-        envs: list[dict[str, tuple[str, dict]]] = [{}]
+        discarded.
+
+        `outer` is what an enclosing `forall` bound, and the returned
+        environments extend it. A sum used to be expanded in isolation and
+        merged afterwards, which was equivalent while a binding could only
+        read its own set; a `via` reads the index it walks from, so the
+        enclosing scope has to be present while the product is built.
+        """
+        envs: list[dict[str, tuple[str, dict]]] = [dict(outer) if outer else {}]
         for binding in bindings:
             set_name = binding["set"]
             rows = [r for r in self.sets.get(set_name, []) if _passes(r, binding.get("where", []))]
-            envs = [dict(env, **{binding["index"]: (set_name, row)}) for env in envs for row in rows]
+            if "via" not in binding:
+                envs = [
+                    dict(env, **{binding["index"]: (set_name, row)}) for env in envs for row in rows
+                ]
+                continue
+            # A traversal narrows the pool per environment rather than
+            # once, because what it reaches depends on where it starts.
+            # That is exactly why `via` is a binding and not a filter: a
+            # `where` is a property of a row, and reachability is a
+            # property of a row *and* the anchor.
+            via = binding["via"]
+            anchor_end = "from" if "from" in via else "to"
+            grown: list[dict[str, tuple[str, dict]]] = []
+            for env in envs:
+                reachable = self._reachable(via, anchor_end, env[via[anchor_end]][1]["id"])
+                grown.extend(
+                    dict(env, **{binding["index"]: (set_name, row)})
+                    for row in rows
+                    if row["id"] in reachable
+                )
+            envs = grown
         return envs
+
+    def _reachable(self, via: dict[str, Any], anchor_end: str, anchor: str) -> set[str]:
+        """The keys a walk from `anchor` lands on, over the frozen edges.
+
+        `from` in the document means the anchor sits at the from end, so the
+        walk reads each edge in that direction and returns the other end.
+        """
+        rel = via["rel"]
+        depth = via.get("depth", "one")
+        far_end = "to" if anchor_end == "from" else "from"
+        cache_key = (rel, anchor_end, depth, anchor)
+        cached = self._reach.get(cache_key)
+        if cached is not None:
+            return cached
+
+        steps: dict[str, list[str]] = {}
+        for edge in self.edges.get(rel, []):
+            steps.setdefault(edge[anchor_end], []).append(edge[far_end])
+
+        if depth == "one":
+            found = set(steps.get(anchor, ()))
+        else:
+            # Breadth-first with a seen set, so a relationship that happens
+            # to hold a cycle terminates instead of hanging the worker.
+            # `is_hierarchy` forbids one, but the contract admits any
+            # self-referential type here and a dataset is not re-validated.
+            found = set()
+            frontier = [anchor]
+            while frontier:
+                nxt = []
+                for key in frontier:
+                    for other in steps.get(key, ()):
+                        if other not in found:
+                            found.add(other)
+                            nxt.append(other)
+                frontier = nxt
+            if depth == "any_or_self":
+                found.add(anchor)
+        self._reach[cache_key] = found
+        return found
 
     def _term(self, term: dict[str, Any], env: dict[str, tuple[str, dict]]) -> Linear:
         if "const" in term:
@@ -338,8 +434,8 @@ class _Compiler:
 
         if "sum" in term:
             total = Linear()
-            for env2 in self._bindings(term.get("over", [])):
-                total.add(self._term(term["sum"], {**env, **env2}))
+            for env2 in self._bindings(term.get("over", []), env):
+                total.add(self._term(term["sum"], env2))
             return total
 
         if "add" in term:

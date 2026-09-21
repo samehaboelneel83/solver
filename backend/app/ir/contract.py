@@ -52,6 +52,11 @@ ALL_KEYS: frozenset[str] = frozenset(REQUIRED_KEYS + OPTIONAL_KEYS)
 
 VARIABLE_DOMAINS: frozenset[str] = frozenset(CONTRACT["variableDomains"])
 RELATIONS: frozenset[str] = frozenset(CONTRACT["relations"])
+#: How far a `via` binding walks. `one` is a single edge; `any` is the
+#: transitive closure; `any_or_self` is that plus the anchor itself, which is
+#: the shape `entity_descendants()` has always returned ("node + everything
+#: beneath it") and the one a planner means by "counting its sub-units".
+TRAVERSAL_DEPTHS: frozenset[str] = frozenset(CONTRACT["traversalDepths"])
 SEVERITIES: frozenset[str] = frozenset(CONTRACT["severities"])
 SENSES: frozenset[str] = frozenset(CONTRACT["senses"])
 TERM_KINDS: frozenset[str] = frozenset(CONTRACT["termKinds"])

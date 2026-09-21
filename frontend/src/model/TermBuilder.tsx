@@ -3,16 +3,19 @@ import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { TERM_KINDS } from "../ir/contract";
-import type { TermKind } from "../ir";
+import type { TermKind, TraversalDepth } from "../ir";
 import {
   boundIndices,
   describeTerm,
   emptyTerm,
   freeIndexName,
-  integerAttributes,
+  arithmeticAttributes,
   mentionsVariable,
   TERM_LABELS,
   termKind,
+  viaOf,
+  walkKey,
+  walksAvailable,
   type Binding,
   type ModelContext,
   type Term,
@@ -145,7 +148,7 @@ function Body({ value, onChange, context, bound, depth }: Required<Omit<TermBuil
   if (kind === "attr") {
     const term = value as { attr: { of: string; name: string } };
     const binding = bound.find((b) => b.index === term.attr.of);
-    const attributes = binding ? integerAttributes(context, binding.set) : [];
+    const attributes = binding ? arithmeticAttributes(context, binding.set) : [];
     return (
       <div className="flex flex-wrap items-end gap-2">
         <Select
@@ -159,12 +162,12 @@ function Body({ value, onChange, context, bound, depth }: Required<Omit<TermBuil
           label="Attribute"
           value={term.attr.name}
           options={attributes.map((a) => ({ value: a.name, label: a.name }))}
-          emptyLabel={binding ? `${binding.set} has no whole-number attribute` : "choose an index first"}
+          emptyLabel={binding ? `${binding.set} has no numeric attribute` : "choose an index first"}
           onChange={(next) => onChange({ attr: { of: term.attr.of, name: next } })}
         />
         {binding && attributes.length === 0 && (
           <p className="text-xs text-slate-500">
-            Arithmetic uses whole-number attributes only, so a decimal one cannot appear here.
+            Arithmetic reads numeric attributes, so text, dates and times cannot appear here.
           </p>
         )}
       </div>
@@ -288,7 +291,6 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
       <legend className="px-1 text-xs font-medium text-slate-600">{legend}</legend>
       <div className="space-y-3">
         {bindings.map((binding, position) => {
-          const others = [...outer, ...bindings.filter((_, i) => i !== position)];
           const setId = context.setIds[binding.set];
           const attributes = context.attributes[binding.set] ?? [];
           return (
@@ -304,6 +306,17 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                   value={binding.set}
                   options={context.sets.map((s) => ({ value: s, label: s }))}
                   onChange={(next) => replace(position, { ...binding, set: next, where: [] })}
+                />
+                <WalkPicker
+                  binding={binding}
+                  context={context}
+                  // Only what is bound FURTHER OUT, and the bindings before
+                  // this one -- the contract requires the anchor to be bound
+                  // where the traversal starts, so a later sibling is not a
+                  // candidate. Offering one would build a document the
+                  // validator refuses.
+                  earlier={[...outer, ...bindings.slice(0, position)]}
+                  onChange={(next) => replace(position, next)}
                 />
                 {bindings.length > 1 && (
                   <button
@@ -380,6 +393,116 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
         </button>
       </div>
     </fieldset>
+  );
+}
+
+/**
+ * The relationship picker: "only the ones reached through …".
+ *
+ * It offers nothing at all unless a walk is possible — the model has to
+ * declare a relationship type with an end of this binding's set, and an
+ * index at the other end has to be bound already. Both conditions are the
+ * contract's (`binding_via_endpoint_mismatch`, `binding_via_anchor_not_bound`),
+ * so a refusal for either is unreachable from here rather than merely
+ * unlikely.
+ *
+ * Depth appears only on a self-joining type, because walking twice along a
+ * relationship whose ends differ lands nowhere and the contract refuses it.
+ */
+/** Not `""`: `Select` reads the empty string as "nothing chosen yet" and
+ * prepends a "choose…" option. Ranging over the whole set is a choice, and
+ * the default one. */
+const NO_WALK = "all";
+
+function WalkPicker({
+  binding,
+  context,
+  earlier,
+  onChange,
+}: {
+  binding: Binding;
+  context: ModelContext;
+  earlier: Binding[];
+  onChange: (binding: Binding) => void;
+}) {
+  const offers = walksAvailable(context, binding.set, earlier);
+  if (offers.length === 0) return null;
+
+  const current = viaOf(binding);
+  const offer = current
+    ? offers.find((o) => o.rel === current.rel && o.anchorEnd === current.anchorEnd)
+    : undefined;
+
+  function choose(key: string) {
+    if (key === NO_WALK) {
+      const { via: _dropped, ...rest } = binding;
+      onChange(rest);
+      return;
+    }
+    const picked = offers.find((o) => walkKey(o.rel, o.anchorEnd) === key);
+    if (!picked) return;
+    onChange({
+      ...binding,
+      via: { rel: picked.rel, [picked.anchorEnd]: picked.anchors[0] } as Binding["via"],
+    });
+  }
+
+  function anchor(index: string) {
+    if (!current) return;
+    onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: index, ...depthPart() } });
+  }
+
+  function depthPart() {
+    const depth = binding.via?.depth;
+    return depth ? { depth } : {};
+  }
+
+  return (
+    <>
+      <Select
+        label="Reached through"
+        value={current ? walkKey(current.rel, current.anchorEnd) : NO_WALK}
+        options={[
+          { value: NO_WALK, label: "all of them" },
+          ...offers.map((o) => ({
+            value: walkKey(o.rel, o.anchorEnd),
+            // "along" is the stored direction, from the `from` end to the
+            // `to` end; "against" reads the same edge backwards.
+            label: `${o.rel} ${o.anchorEnd === "from" ? "along" : "against"}`,
+          })),
+        ]}
+        onChange={choose}
+      />
+      {current && offer && (
+        <Select
+          label="Starting at"
+          value={current.anchor}
+          options={offer.anchors.map((a) => ({ value: a, label: a }))}
+          onChange={anchor}
+        />
+      )}
+      {current && offer?.loops && (
+        <Select
+          label="How far"
+          value={binding.via?.depth ?? "one"}
+          options={[
+            { value: "one", label: "one step" },
+            { value: "any", label: "any number of steps" },
+            { value: "any_or_self", label: "any number, or itself" },
+          ]}
+          onChange={(depth) =>
+            onChange({
+              ...binding,
+              via: {
+                rel: current.rel,
+                [current.anchorEnd]: current.anchor,
+                ...(depth === "one" ? {} : { depth: depth as TraversalDepth }),
+              },
+            })
+          }
+        />
+      )}
+    </>
   );
 }
 

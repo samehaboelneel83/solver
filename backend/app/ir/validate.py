@@ -54,9 +54,15 @@ from app.ir.contract import (
     SENSES,
     SEVERITIES,
     TERM_KINDS,
+    TRAVERSAL_DEPTHS,
     VARIABLE_DOMAINS,
 )
-from app.models.v1_domain import AttributeDef, EntityType, ParameterDef
+from app.models.v1_domain import (
+    AttributeDef,
+    EntityType,
+    ParameterDef,
+    RelationshipType,
+)
 
 Loc = list[str | int]
 
@@ -71,7 +77,12 @@ _TERM_KEYS: dict[str, frozenset[str]] = {
     "mul": frozenset(),
 }
 _LIST_OPERATORS = frozenset({"in", "notIn"})
-_BINDING_KEYS = frozenset({"index", "set", "where"})
+_BINDING_KEYS = frozenset({"index", "set", "where", "via"})
+#: A `via` names the relationship, where the *anchor* sits, and how far to
+#: walk. `from` and `to` are the anchor's end, so the index being bound takes
+#: the other one -- which is why exactly one of them appears and neither is
+#: the new index's own name.
+_VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"})
 _PARAMETER_KEYS = frozenset({"index"})
@@ -136,6 +147,7 @@ class _ShapeChecker:
     def __init__(self, ir: dict[str, Any]) -> None:
         self.ir = ir
         self.sets: set[str] = set()
+        self.relationships: set[str] = set()
         self.parameters: dict[str, list[str]] = {}
         self.variables: dict[str, list[str]] = {}
         self.terms = 0
@@ -162,6 +174,42 @@ class _ShapeChecker:
             if name in self.sets:
                 return Refusal("set_duplicated", ["sets", i], f"the set {name!r} is named twice")
             self.sets.add(name)
+        return None
+
+    def check_relationships(self):
+        """`relationships` declares which edge types the dataset must freeze.
+
+        Optional, and absent means none -- which is every model written
+        before traversal existed. It mirrors `sets` exactly, and for the same
+        reason: `snapshot_dataset()` freezes what this names and nothing else,
+        so a `via` that walked an undeclared type would reference data the
+        frozen document does not carry.
+        """
+        relationships = self.ir.get("relationships")
+        if relationships is None:
+            return None
+        if not isinstance(relationships, list):
+            return Refusal(
+                "relationships_not_array",
+                ["relationships"],
+                "relationships must be an array of relationship type names; omit the key "
+                "entirely for a model that does not traverse",
+            )
+        for i, name in enumerate(relationships):
+            if not _is_name(name):
+                return Refusal(
+                    "relationship_not_a_name",
+                    ["relationships", i],
+                    f"{json.dumps(name)} is not a relationship type name; "
+                    "relationship_type.name is ^[a-z][a-z0-9_]*$",
+                )
+            if name in self.relationships:
+                return Refusal(
+                    "relationship_duplicated",
+                    ["relationships", i],
+                    f"the relationship {name!r} is named twice",
+                )
+            self.relationships.add(name)
         return None
 
     def check_parameters(self):
@@ -460,11 +508,67 @@ class _ShapeChecker:
                     f"{json.dumps(set_name)} is not a set this model declares, so no dataset "
                     "would carry it",
                 )
+            # Order matters here and is the whole reason `via` is a binding
+            # rather than a term: the anchor must already be bound when the
+            # traversal starts, so it is checked against `scope` BEFORE this
+            # binding's own index joins it. Checking afterwards would let a
+            # binding walk from itself.
+            problem = self._check_via(binding, at, scope)
+            if problem:
+                return problem
             scope[index] = set_name
             problem = self._check_where(binding, at)
             if problem:
                 return problem
         return scope
+
+    def _check_via(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]):
+        if "via" not in binding:
+            return None
+        via = binding["via"]
+        here: Loc = [*at, "via"]
+        if not isinstance(via, dict):
+            return Refusal(
+                "binding_via_not_object",
+                here,
+                "a via names the relationship to walk and which end this binding starts from",
+            )
+        problem = _unknown_key(via, _VIA_KEYS, here, "via")
+        if problem:
+            return problem
+
+        if via.get("rel") not in self.relationships:
+            return Refusal(
+                "binding_via_rel_not_declared",
+                [*here, "rel"],
+                f"{json.dumps(via.get('rel'))} is not a relationship this model declares in "
+                "relationships, so no dataset would carry its edges",
+            )
+
+        ends = [end for end in ("from", "to") if end in via]
+        if len(ends) != 1 or not _is_name(via[ends[0]]):
+            return Refusal(
+                "binding_via_anchor_invalid",
+                here,
+                "a via names exactly one of from or to, and it is the index the walk starts "
+                "at; the end named is where that index sits, so this binding takes the other",
+            )
+        anchor = via[ends[0]]
+        if anchor not in scope:
+            return Refusal(
+                "binding_via_anchor_not_bound",
+                [*here, ends[0]],
+                f"the index {anchor!r} is not bound where this traversal starts; bind it in "
+                "an enclosing forall, or earlier in this same list",
+            )
+        if "depth" in via and via["depth"] not in TRAVERSAL_DEPTHS:
+            return Refusal(
+                "binding_via_depth_unsupported",
+                [*here, "depth"],
+                f"{json.dumps(via['depth'])} is not a depth version {IR_VERSION} walks; it "
+                f"has {', '.join(sorted(TRAVERSAL_DEPTHS))}",
+            )
+        return None
 
     def _check_where(self, binding: dict[str, Any], at: Loc):
         if "where" not in binding:
@@ -834,6 +938,7 @@ def check_shape(ir: Any) -> Refusal | None:
     checker = _ShapeChecker(ir)
     for step in (
         checker.check_sets,
+        checker.check_relationships,
         checker.check_parameters,
         checker.check_variables,
         checker.check_constraints,
@@ -882,6 +987,21 @@ class _DomainWorld:
             self.parameter_index[name] = [
                 self.type_name_by_id.get(type_id, f"#{type_id}") for type_id in index_type_ids
             ]
+        #: name -> (from set name, to set name). The endpoint types are what
+        #: makes a `via` checkable: walking `works_in` from a `unit` is a
+        #: modelling mistake the domain can see and the document cannot.
+        self.relationship_ends: dict[str, tuple[str, str]] = {}
+        for name, from_id, to_id in db.execute(
+            select(
+                RelationshipType.name,
+                RelationshipType.from_type_id,
+                RelationshipType.to_type_id,
+            ).where(RelationshipType.domain_id == domain_id)
+        ).all():
+            self.relationship_ends[name] = (
+                self.type_name_by_id.get(from_id, f"#{from_id}"),
+                self.type_name_by_id.get(to_id, f"#{to_id}"),
+            )
 
 
 def _value_is_of_type(value: Any, declared: dict[str, Any]) -> bool:
@@ -912,6 +1032,14 @@ class _DomainChecker:
                     ["sets", i],
                     f"there is no entity type called {name!r} in this problem's domain, so "
                     "snapshot_dataset() could not freeze it",
+                )
+        for i, name in enumerate(self.ir.get("relationships") or []):
+            if name not in self.world.relationship_ends:
+                return Refusal(
+                    "relationship_not_in_domain",
+                    ["relationships", i],
+                    f"there is no relationship type called {name!r} in this problem's domain, "
+                    "so snapshot_dataset() could not freeze its edges",
                 )
         for name, declaration in self.ir["parameters"].items():
             if name not in self.world.parameter_index:
@@ -951,6 +1079,12 @@ class _DomainChecker:
 
     def _bindings(self, bindings: list[Any], loc: Loc, scope: dict[str, str]) -> Refusal | None:
         for j, binding in enumerate(bindings):
+            # Before the index joins the scope, for the reason check_bindings
+            # records: the anchor is whatever was bound *outside* this
+            # binding, never this binding itself.
+            problem = self._via(binding, [*loc, j], scope)
+            if problem:
+                return problem
             scope[binding["index"]] = binding["set"]
             for k, entry in enumerate(binding.get("where", [])):
                 here: Loc = [*loc, j, "where", k]
@@ -987,6 +1121,46 @@ class _DomainChecker:
                             f"{binding['set']}.{entry['attr']}, which is "
                             f"{declared['data_type']}",
                         )
+        return None
+
+    def _via(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]) -> Refusal | None:
+        """The half of a traversal only the domain can judge: that the two
+        ends are the entity types the relationship actually joins."""
+        via = binding.get("via")
+        if via is None:
+            return None
+        here: Loc = [*at, "via"]
+        name = via["rel"]
+        if name not in self.world.relationship_ends:
+            return Refusal(
+                "relationship_not_in_domain",
+                here + ["rel"],
+                f"there is no relationship type called {name!r} in this problem's domain, so "
+                "snapshot_dataset() could not freeze its edges",
+            )
+        from_set, to_set = self.world.relationship_ends[name]
+        # `from` in the document means "the anchor sits at the from end", so
+        # the index being bound takes the `to` end, and vice versa.
+        anchor_end, bound_end = ("from", to_set) if "from" in via else ("to", from_set)
+        anchor_set = from_set if anchor_end == "from" else to_set
+        actual_anchor = scope.get(via[anchor_end])
+        if actual_anchor != anchor_set or binding["set"] != bound_end:
+            return Refusal(
+                "binding_via_endpoint_mismatch",
+                here,
+                f"{name!r} joins {from_set} to {to_set}; walking it with "
+                f"{via[anchor_end]!r} at the {anchor_end} end needs that index bound to "
+                f"{anchor_set} and this one to {bound_end}, not {actual_anchor} and "
+                f"{binding['set']}",
+            )
+        if via.get("depth", "one") != "one" and from_set != to_set:
+            return Refusal(
+                "binding_via_depth_not_transitive",
+                [*here, "depth"],
+                f"{name!r} joins {from_set} to {to_set}, which are different, so walking it "
+                "more than once lands nowhere; only a relationship whose two ends are the "
+                f"same entity type has a {via['depth']!r} depth",
+            )
         return None
 
     def _term(self, term: dict[str, Any], loc: Loc, scope: dict[str, str]) -> Refusal | None:

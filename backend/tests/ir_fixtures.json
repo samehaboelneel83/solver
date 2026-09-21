@@ -126,6 +126,22 @@
         ],
         "default_value": 1
       }
+    ],
+    "relationshipTypes": [
+      {
+        "name": "reports_to",
+        "from": "unit",
+        "to": "unit",
+        "cardinality": "one_to_many",
+        "is_hierarchy": true
+      },
+      {
+        "name": "works_in",
+        "from": "employee",
+        "to": "unit",
+        "cardinality": "many_to_one",
+        "is_hierarchy": false
+      }
     ]
   },
   "valid": [
@@ -139,6 +155,10 @@
           "unit",
           "day",
           "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
         ],
         "parameters": {
           "demand": {
@@ -277,6 +297,73 @@
               }
             },
             "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
           }
         ],
         "objective": {
@@ -677,6 +764,155 @@
               }
             },
             "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "name": "staffing_across_a_hierarchy",
+      "why": "The question the traversal decision note says a planner asks first and v1 could not express: staffing for a unit counting everything beneath it. Two walks compose -- `reports_to` at `any_or_self` depth gathers the sub-units, then `works_in` gathers the people in each -- which is the case option 2 of that note (closures only) could not have answered",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_region_cover",
+            "note": "every unit is staffed on every shift, counting the people in the units beneath it",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "soft",
+            "weight": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "one_hop_traversal_with_a_filter",
+      "why": "The simplest walk there is -- one edge, no closure -- and it composes with `where`, which is the property that makes `via` a binding form rather than a term kind",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_senior_per_unit",
+            "note": "each unit keeps at least one senior on the books",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "u"
+                  },
+                  "where": [
+                    {
+                      "attr": "grade",
+                      "op": "=",
+                      "value": "senior"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "soft",
+            "weight": 3
           }
         ]
       }
@@ -3070,6 +3306,570 @@
                       "value": 1
                     }
                   ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "relationships_not_array",
+      "loc": [
+        "relationships"
+      ],
+      "why": "one name is not a list of them. `snapshot_dataset()` reads this with jsonb_array_elements_text, exactly as it reads `sets`",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "unit"
+        ],
+        "relationships": "reports_to",
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "relationship_not_a_name",
+      "loc": [
+        "relationships",
+        0
+      ],
+      "why": "`relationship_type.name` carries the same CHECK every other name on this platform does, and it is capitalised here",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "Reports_To"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "relationship_duplicated",
+      "loc": [
+        "relationships",
+        1
+      ],
+      "why": "declaring the same edge type twice would freeze it twice under one key; `sets` refuses the same thing for the same reason",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to",
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "binding_via_not_object",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via"
+      ],
+      "why": "the relationship name alone does not say which end the walk starts from, and there is no default that would not be a guess",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": "works_in"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_rel_not_declared",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "rel"
+      ],
+      "why": "`reports_to` is never declared, so `snapshot_dataset()` would not freeze its edges and the walk would read data the frozen document does not carry",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "reports_to",
+                    "to": "u"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_anchor_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via"
+      ],
+      "why": "naming both ends says the walk starts at both of them; the end named is where the anchor sits, so exactly one of them can be",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "from": "u",
+                    "to": "u"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_anchor_not_bound",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "to"
+      ],
+      "why": "the walk starts at an index nothing bound. A free anchor has no entity to walk from, which is the traversal form of the rule that every index is bound",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "somewhere"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_depth_unsupported",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "depth"
+      ],
+      "why": "`all` is not one of the three depths; the vocabulary is closed so that a document cannot ask for a walk the compiler has no expansion for",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "sub"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "depth": "all"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "relationship_not_in_domain",
+      "loc": [
+        "relationships",
+        0
+      ],
+      "why": "a well-formed name for a relationship type this domain does not have. Only the domain's rows can say so, which is why this is the traversal twin of `set_not_in_domain`",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "manages"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "binding_via_endpoint_mismatch",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via"
+      ],
+      "why": "`works_in` runs employee to unit, so its `from` end is an employee; anchoring a unit there walks the edge backwards. The document cannot see this -- only the relationship type's own endpoint rows can",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "from": "u"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_depth_not_transitive",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "depth"
+      ],
+      "why": "walking `works_in` twice would step from a unit to an employee and then look for an edge out of a unit again. Only a relationship whose two ends are the same entity type composes with itself",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "u",
+                    "depth": "any"
+                  }
                 }
               ]
             },

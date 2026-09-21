@@ -10,6 +10,7 @@ import {
   useCreateVersion,
   useEntityTypes,
   useParameters,
+  useRelationshipTypes,
   useVersion,
   useVersions,
   type Id,
@@ -20,6 +21,7 @@ import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import { parameterOptions } from "../model/declarations";
 import {
+  declaredRelationships,
   describeTerm,
   freeIndexName,
   type Binding,
@@ -168,6 +170,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const latest = useVersion(baseId);
   const [scratch, setScratch] = useState(false);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
+  const relationshipTypes = useRelationshipTypes(domainId, { limit: 500, offset: 0 });
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
   const toast = useToast();
@@ -216,8 +219,20 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       ),
       variables: draft.variables as ModelContext["variables"],
       parameters: draft.parameters as ModelContext["parameters"],
+      // Every relationship type of the domain whose BOTH ends are sets this
+      // model declares. An edge to a type the model does not carry could not
+      // bind an index to anything, so offering it would only produce a
+      // refusal. Which of these the IR declares is decided on save, from the
+      // walks actually written -- see `declaredRelationships`.
+      relationships: (relationshipTypes.data?.items ?? [])
+        .map((rel) => ({
+          name: rel.name,
+          from: types.find((t) => t.id === rel.from_type_id)?.name ?? "",
+          to: types.find((t) => t.id === rel.to_type_id)?.name ?? "",
+        }))
+        .filter((rel) => sets.includes(rel.from) && sets.includes(rel.to)),
     };
-  }, [ir, draft, entityTypes.data]);
+  }, [ir, draft, entityTypes.data, relationshipTypes.data]);
 
   if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;
@@ -255,10 +270,17 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // objective otherwise" -- because an empty one and an absent one would
   // otherwise be two spellings of "optimise nothing". A model with only
   // rules is legitimate: it asks for any answer that satisfies them.
-  const { objective: _previous, ...withoutObjective } = ir;
+  const { objective: _previous, relationships: _edges, ...withoutObjective } = ir;
+  const walked = declaredRelationships(draft.constraints, draft.objective.terms);
   const nextIr = {
     ...withoutObjective,
     sets: draft.sets,
+    // Derived from the walks, not declared by hand. `sets` is declared
+    // because a set may legitimately be carried and never used -- for
+    // display, or for a later version (contract 3.1). A relationship has no
+    // such use: you declare one to walk it. Deriving it removes the only
+    // way this screen could build a `binding_via_rel_not_declared`.
+    ...(walked.length > 0 ? { relationships: walked } : {}),
     parameters: draft.parameters,
     variables: draft.variables,
     constraints: draft.constraints,

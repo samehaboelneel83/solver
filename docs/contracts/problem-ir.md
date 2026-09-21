@@ -57,6 +57,7 @@ This is the seeded Workforce demo, and it is the same document as the
 {
   "version": 1,
   "sets": ["employee", "unit", "day", "shift"],
+  "relationships": ["reports_to", "works_in"],
   "parameters": { "demand": { "index": ["day", "shift"] } },
   "variables": { "assign": { "index": ["employee", "day", "shift"], "domain": "binary" } },
   "constraints": [
@@ -100,6 +101,30 @@ This is the seeded Workforce demo, and it is the same document as the
       "relation": "<=",
       "right": { "attr": { "of": "e", "name": "hours_per_week" } },
       "severity": "hard"
+    },
+    {
+      "id": "c_north_region_lates",
+      "note": "North Region puts three people on the late shift every day, counting the depots under it",
+      "forall": [
+        { "index": "d", "set": "day" },
+        { "index": "r", "set": "unit",
+          "where": [{ "attr": "cost_centre", "op": "=", "value": "OPS-100" }] },
+        { "index": "late", "set": "shift",
+          "where": [{ "attr": "starts_at", "op": "=", "value": "14:00" }] }
+      ],
+      "left": {
+        "sum": { "var": "assign", "index": ["e", "d", "late"] },
+        "over": [
+          { "index": "sub", "set": "unit",
+            "via": { "rel": "reports_to", "from": "r", "depth": "any_or_self" } },
+          { "index": "e", "set": "employee",
+            "via": { "rel": "works_in", "to": "sub" } }
+        ]
+      },
+      "relation": ">=",
+      "right": { "const": 3 },
+      "severity": "soft",
+      "weight": 4
     }
   ],
   "objective": {
@@ -122,12 +147,25 @@ This is the seeded Workforce demo, and it is the same document as the
 }
 ```
 
-Read aloud: *there are employees, units, days and shifts; demand is a number per
-day and shift; `assign[e, d, s]` says whether employee e works shift s on day d.
-For every day and shift, at least `demand` employees are assigned. For every
-employee and day, at most one shift. For every employee, eight hours per
-assigned shift is within their `hours_per_week`. Among the rotas that satisfy
+Read aloud: *there are employees, units, days and shifts, and units report to
+units while employees work in units; demand is a number per day and shift;
+`assign[e, d, s]` says whether employee e works shift s on day d. For every day
+and shift, at least `demand` employees are assigned. For every employee and
+day, at most one shift. For every employee, eight hours per assigned shift is
+within their `hours_per_week`. North Region — the OPS-100 cost centre — puts
+three people on the late shift each day, counting everyone in the units
+beneath it, and pays 4 for each one it is short. Among the rotas that satisfy
 all of that, prefer the one with the fewest shifts worked.*
+
+That last rule is the one that needs §4.2. **Nobody works in North Region
+itself** — its people are all in the depot one level down — so a constraint
+written over the unit alone counts zero and is unsatisfiable for a reason that
+has nothing to do with the roster. Two walks compose to fix that: down the
+hierarchy, then out to the people.
+
+It is soft and deliberately short by one, for the same reason the demand
+figures are over-subscribed: the demo shows the platform reporting what a plan
+costs, not a plan that happens to work.
 
 ---
 
@@ -139,6 +177,7 @@ An IR is a JSON **object**. It carries exactly these keys and no others.
 |---|---|---|
 | `version` | yes | `1`. Present from the first document ever written, so a reader can refuse what it does not understand instead of misreading it. |
 | `sets` | yes | An array of **entity type names**. What the dataset must freeze. |
+| `relationships` | no | An array of **relationship type names**. Which edges the dataset must freeze, and the only ones a `via` may walk (§4.2). Omit it for a model that does not traverse. |
 | `parameters` | yes | An object keyed by **parameter name**. What indexed data the model reads. |
 | `variables` | yes | An object keyed by variable name. What the solver decides. At least one. |
 | `constraints` | yes | An array. May be empty. |
@@ -163,12 +202,32 @@ expressions". A test asserts the contract's pattern is that pattern.
 Each entry names an entity type of **the problem's own domain**. At submit time
 the platform resolves them; an unresolvable name is a 422 naming the element.
 
-A set may be declared and never used in an expression — `unit` above is.
-`sets` says what data the dataset carries, not what the arithmetic touches, so
-carrying a set for display or for a later version is legitimate.
+A set may be declared and never used in an expression. `sets` says what data
+the dataset carries, not what the arithmetic touches, so carrying a set for
+display or for a later version is legitimate. (`unit` used to be the example
+here and no longer is: `c_north_region_lates` ranges over it.)
 
 *Derived*: the array-of-names shape, and resolution against the domain, both
 from `snapshot_dataset()`.
+
+### 3.1.1 `relationships`
+
+```json
+"relationships": ["reports_to", "works_in"]
+```
+
+Optional, and absent means none — which is every model written before
+traversal existed. Each entry names a `relationship_type` of the problem's own
+domain, and `snapshot_dataset()` freezes the edges of exactly these and no
+others (migration `0016`).
+
+Unlike `sets`, there is no reason to declare one and not use it: you declare a
+relationship to walk it. The model editor therefore does not ask — it writes
+this key from the walks the model contains.
+
+*Derived*: the freezing, from `snapshot_dataset()` as amended by `0011` and
+`0016`. *Invented*: that the declaration is what the snapshot follows, rather
+than the domain's own list.
 
 ### 3.2 `parameters`
 
@@ -344,25 +403,106 @@ vocabulary on this platform, not two.
 A filter's value must be a value of the attribute's data type — the same
 judgement `entity_validate` makes when the value is stored.
 
+### 4.2 `via` — traversal
+
+```json
+{ "index": "sub", "set": "unit",
+  "via": { "rel": "reports_to", "from": "r", "depth": "any_or_self" } }
+```
+
+A binding with a `via` ranges not over its whole set but over the members
+**reached from an anchor** along a relationship.
+
+| key | required | what it is |
+|---|---|---|
+| `rel` | yes | A relationship type named in `relationships`. |
+| `from` *or* `to` | exactly one | The index the walk starts at, and **which end of the edge that index sits at**. The binding takes the other end. |
+| `depth` | no | `one` (the default), `any`, or `any_or_self`. |
+
+`from: "r"` therefore reads *"r is at the from end; bind the to end"*. Naming
+the anchor's end rather than a direction means there is nothing to get
+backwards: for `reports_to`, whose `from` is the parent, `from` walks down and
+`to` walks up, and both are the same key doing the same thing.
+
+**`any_or_self` includes the anchor; `any` does not.** `entity_descendants()`
+has always returned "node + everything beneath it", and that reflexive shape
+is what a planner means by "counting its sub-units" — so it has a name rather
+than being conflated with the strict closure. `one` is a single edge.
+
+**Traversal is a binding form, not an eighth term kind.** `termKinds` is
+unchanged. The consequences are the point: `sum` already takes `over:
+[bindings]` and `forall` already takes bindings, so "sum over everything
+beneath this unit" and "for every unit, counting its depots" both come for
+free, `where` composes with a walk unchanged, and `depth` makes the closure a
+*mode* of one mechanism rather than a second one.
+
+Rules on top of the table:
+
+- **The anchor is bound before the walk starts** — by an enclosing `forall`,
+  or by an earlier binding in the same list. This ordering rule is what makes
+  the product well defined; without it a binding could walk from itself.
+- **The two ends are the relationship's own entity types**, the right way
+  round. Walking `works_in` from a unit is a `domain` rule, because only the
+  relationship type's rows say which end is which.
+- **A repeated walk needs a relationship that joins a type to itself.**
+  Walking `works_in` twice would step from a unit to an employee and then look
+  for an edge out of a unit again, so `any` and `any_or_self` are refused on
+  it. Note the rule is about the *endpoint types*, not `is_hierarchy`: a
+  self-joining type with a cycle is still walkable, and the compiler
+  terminates on one rather than assuming acyclicity a frozen dataset is never
+  re-checked for.
+
+**The walk reads the frozen edges.** `data["relationships"]`, never
+`entity_descendants()` against live rows — a run answers the question as it
+was asked, and an org chart that changed after the snapshot must not change
+what that snapshot solves.
+
 ---
 
 ## 5. What is deliberately not supported yet
 
 Each of these was considered and left out for a reason, not overlooked.
 
-**Relationship traversal — `unit.descendants`.** The schema anticipates it:
-`docs/schema/2026-09-18-schema-v1.sql:162` introduces `entity_descendants()` as
-"what `unit.descendants` in the IR will call". **v1 cannot express it, and the
-reason is not in the IR at all.** `snapshot_dataset()` freezes `sets`,
-`parameters` and `parameter_defaults` — and **no relationships**. A traversal
-term would reference data the frozen dataset does not contain, and "a run never
-reads live domain data, it reads a frozen snapshot" is the reproducibility
-guarantee the whole RUN half is built on. Admitting a term the dataset cannot
-answer would break that guarantee silently. Unblocking it means adding a
-`relationships` key to the snapshot, which is a change to `snapshot_dataset()`
-and therefore to the dataset hash — a deliberate decision, not a detail.
-**This is the sharpest contradiction between the contract and the existing
-code, and it is recorded rather than resolved.**
+**Relationship traversal.** *Was the sharpest contradiction between this
+contract and the existing code, and is now §4.2.* The entry read: the schema
+anticipates traversal (`docs/schema/2026-09-18-schema-v1.sql:162` introduces
+`entity_descendants()` as "what `unit.descendants` in the IR will call"), but
+`snapshot_dataset()` froze `sets`, `parameters` and `parameter_defaults` and
+**no relationships** — so a traversal term would have referenced data the
+frozen dataset did not contain, and "a run never reads live domain data, it
+reads a frozen snapshot" is the reproducibility guarantee the whole RUN half
+is built on. Unblocking it meant changing `snapshot_dataset()` and therefore
+the dataset hash, which was called a deliberate decision rather than a detail.
+
+It was taken in two steps, as migration `0011`'s docstring set out:
+`0011` froze the edges, and `0016` narrowed them to what a model declares. The
+guarantee held throughout — §4.2's walk reads the frozen edges and nothing
+else. The one thing the original entry got wrong is worth recording: it
+assumed traversal would be a term. It is a binding, and that is why the term
+algebra did not grow.
+
+**An edge's own data — `valid_from`, `valid_to` and `attrs`.** Migration
+`0011` freezes all three when they are set, and §4.2 gives no way to read one.
+**Deferred, deliberately, and this is the record of the decision.** A
+time-bounded edge ("this reporting line starts in March") is a real need, and
+an `fte` on a `works_in` edge is a real coefficient. Two things are missing
+before either can be admitted, and neither is small:
+
+- **A model has no notion of "now".** A `valid_from` filter has to be read
+  against something, and the only honest candidates are a date on the scenario
+  or a date on the run — both of which are new concepts in the RUN half, not
+  new syntax here. Picking the wall clock instead would make a run
+  irreproducible, which is the one thing traversal was careful not to do.
+- **An edge attribute is a second attribute namespace.** `attr` reads an
+  attribute of an *entity* bound to an index. An edge is not bound to an
+  index; it is the thing a binding travelled along. Reading it needs either a
+  way to bind an edge or a term that names the walk that produced a binding,
+  and that is a term-algebra change — which §4.2 was specifically shaped to
+  avoid needing.
+
+So the data travels, unread, and a later version can use it without a
+migration. That is the same position `0011` left traversal in, and it is a
+better place to defer from than not freezing it at all.
 
 **Strict inequalities**, for the reason in §3.4.
 
@@ -400,10 +540,10 @@ document against the same contract before sending, so a 422 from the server is
 either a hand-written request or a client that has not reloaded the contract,
 and naming one thing precisely beats listing several.
 
-The 65 rules are in `contract.json`, each marked `shape` (58 of them: decidable
-from the document alone, and both languages decide those) or `domain` (7: needs
+The 76 rules are in `contract.json`, each marked `shape` (66 of them: decidable
+from the document alone, and both languages decide those) or `domain` (10: needs
 the domain's rows, so the server only). The split mirrors `parse.py` /
-`compiler.py`. `ir_fixtures.json` carries 10 valid documents and 75 invalid ones
+`compiler.py`. `ir_fixtures.json` carries 12 valid documents and 86 invalid ones
 — at least one per rule, several rules having more than one where the rule has
 two halves or where a fault has to be reached through a construct no other case
 goes through.
@@ -601,7 +741,8 @@ them means contradicting something that exists:
 | constraints are hard or soft, soft ones carry an integer penalty | `constraint_result.hard boolean`, `penalty_paid`; `patch.soften: {id: weight}`. The *penalty paid* is numeric since `0015`; the *weight a modeller writes* stayed an integer by decision (§3.5) |
 | one objective, one number | `run.objective`, `bigint` when this was written and `numeric(15, 6)` since `0015` — which is where "one *integral* number" came from |
 | `version` from the first document; one shared JSON artefact; a parity test; `loc`-shaped refusals | the expression core (Ruling 37, Rulings 19/30) |
-| traversal cannot be expressed **in this version** | it followed from `snapshot_dataset()` freezing no relationships. Migration **0011** now freezes them (`data.relationships`, keyed by type name), so the reason has gone and only the term forms are missing — step 2 of `docs/plans/2026-09-20-traversal-decision.md`. A v2 that adds them does not need a dataset change |
+| the frozen edges a walk reads, keyed by type name and by entity key | `snapshot_dataset()` as amended by **0011** and **0016**. This row used to read "traversal cannot be expressed in this version", which followed from the function freezing no relationships; both steps of `docs/plans/2026-09-20-traversal-decision.md` are now done and §4.2 is the result |
+| a relationship's two endpoint entity types | `relationship_type.from_type_id` / `to_type_id` — which is what makes a `via`'s ends checkable at all |
 
 **Invented** — decided here, and a later reader may reopen any of them:
 
@@ -617,6 +758,11 @@ them means contradicting something that exists:
 - keeping objective and penalty **weights** integral while everything else
   became numeric (§3.5);
 - the flat `where` filter, and narrowing the catalogue's operators for it;
+- traversal as a **binding** rather than an eighth term kind; naming the
+  anchor's end rather than a direction; the three depths, and `any_or_self`
+  being distinct from `any` (§4.2);
+- `relationships` being declared by the model and followed by the snapshot,
+  rather than the snapshot carrying the domain's whole list (§3.1.1);
 - all four limits (12 / 500 / 6 / 256 KiB);
 - every top-level key being required, including empty ones;
 - refusing unknown keys anywhere rather than ignoring them.

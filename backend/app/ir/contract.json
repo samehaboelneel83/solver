@@ -42,7 +42,8 @@
       "constraints"
     ],
     "optional": [
-      "objective"
+      "objective",
+      "relationships"
     ]
   },
   "variableDomains": [
@@ -54,6 +55,11 @@
     "<=",
     "=",
     ">="
+  ],
+  "traversalDepths": [
+    "one",
+    "any",
+    "any_or_self"
   ],
   "severities": [
     "hard",
@@ -126,6 +132,21 @@
       "code": "set_duplicated",
       "where": "shape",
       "text": "a set is named once"
+    },
+    {
+      "code": "relationships_not_array",
+      "where": "shape",
+      "text": "`relationships` is an array"
+    },
+    {
+      "code": "relationship_not_a_name",
+      "where": "shape",
+      "text": "each relationship is a relationship type name matching the name pattern"
+    },
+    {
+      "code": "relationship_duplicated",
+      "where": "shape",
+      "text": "a relationship is named once"
     },
     {
       "code": "parameters_not_object",
@@ -263,6 +284,31 @@
       "text": "`forall` and a sum's `over` are arrays binding between one index and the limit"
     },
     {
+      "code": "binding_via_not_object",
+      "where": "shape",
+      "text": "a binding's `via` is an object"
+    },
+    {
+      "code": "binding_via_rel_not_declared",
+      "where": "shape",
+      "text": "a `via`'s `rel` is declared in `relationships`"
+    },
+    {
+      "code": "binding_via_anchor_invalid",
+      "where": "shape",
+      "text": "a `via` names exactly one of `from` or `to`, and it is an index name"
+    },
+    {
+      "code": "binding_via_anchor_not_bound",
+      "where": "shape",
+      "text": "a `via`'s anchor index is already bound where the traversal starts"
+    },
+    {
+      "code": "binding_via_depth_unsupported",
+      "where": "shape",
+      "text": "a `via`'s `depth` is one this version walks"
+    },
+    {
       "code": "where_not_array",
       "where": "shape",
       "text": "a binding's `where` is an array of filters"
@@ -381,6 +427,21 @@
       "code": "set_not_in_domain",
       "where": "domain",
       "text": "every declared set is an entity type of the problem's domain"
+    },
+    {
+      "code": "relationship_not_in_domain",
+      "where": "domain",
+      "text": "every declared relationship is a relationship type of the problem's domain"
+    },
+    {
+      "code": "binding_via_endpoint_mismatch",
+      "where": "domain",
+      "text": "a `via`'s anchor and bound sets are the relationship type's own endpoint types, the right way round"
+    },
+    {
+      "code": "binding_via_depth_not_transitive",
+      "where": "domain",
+      "text": "a repeated `via` walks a relationship whose two ends are the same entity type"
     },
     {
       "code": "parameter_not_in_domain",

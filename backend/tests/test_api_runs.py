@@ -102,7 +102,12 @@ def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_he
     assert roster and all(len(entry) == 3 for entry in roster)
 
     by_id = {c["constraint_id"]: c for c in run["constraints"]}
-    assert set(by_id) == {"c_cover_demand", "c_one_shift_per_day", "c_max_hours"}
+    assert set(by_id) == {
+        "c_cover_demand",
+        "c_one_shift_per_day",
+        "c_max_hours",
+        "c_north_region_lates",
+    }
     # Softened coverage is what gives, and the run says where.
     assert by_id["c_cover_demand"]["satisfied"] is False
     assert by_id["c_cover_demand"]["total_violation"] > 0

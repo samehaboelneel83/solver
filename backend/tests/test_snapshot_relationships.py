@@ -34,7 +34,23 @@ from tests.test_v1_problem_run import (  # noqa: F401  (db fixture)
     make_problem,
 )
 
-_IR = {"sets": [], "parameters": {}, "variables": {}, "constraints": [], "objective": {}}
+def _ir(*relationships: str) -> dict:
+    """A model that declares the edge types it walks.
+
+    Since 0016 the declaration is what `snapshot_dataset()` freezes against,
+    exactly as `sets` is -- so a test about the *shape* of a frozen edge has
+    to name the type, or nothing is frozen to have a shape. 0011's own tests
+    passed no declaration because there was none to pass; the narrowing is
+    covered on its own in `test_snapshot_declared_relationships.py`.
+    """
+    return {
+        "sets": [],
+        "relationships": list(relationships),
+        "parameters": {},
+        "variables": {},
+        "constraints": [],
+        "objective": {},
+    }
 
 
 def _make_relationship_type(
@@ -67,7 +83,7 @@ def _make_relationship(db, rel_type: int, frm: int, to: int, **extra) -> int:
     ).scalar_one()
 
 
-def _fixture(db):
+def _fixture(db, *declares: str):
     """Two unit entities and two employees, a self-referencing hierarchy and a
     cross-type relationship -- the two shapes that read differently."""
     domain = make_domain(db, "trav")
@@ -88,8 +104,9 @@ def _fixture(db):
     _make_relationship(db, works_in, ahmed, depot)
 
     problem = make_problem(db, domain)
-    version = make_model_version(db, problem, _IR)
+    version = make_model_version(db, problem, _ir(*(declares or ("reports_to", "works_in"))))
     return {
+        "problem": problem,
         "domain": domain,
         "unit": unit,
         "employee": employee,
@@ -113,13 +130,14 @@ def test_edges_are_frozen_by_type_name_and_named_by_entity_key(db):
     assert rels["works_in"] == [{"from": "ahmed", "to": "depot"}]
 
 
-def test_a_type_with_no_edges_is_an_empty_list_not_a_missing_key(db):
+def test_a_declared_type_with_no_edges_is_an_empty_list_not_a_missing_key(db):
     """A consumer that has to branch on "absent or empty" will get it wrong
     once; `sets` and `parameters` already emit `[]` for the same reason."""
     f = _fixture(db)
     _make_relationship_type(db, f["domain"], "mentors", f["employee"], f["employee"])
+    version = make_model_version(db, f["problem"], _ir("mentors"))
 
-    rels = _relationships(db, f["version"])
+    rels = _relationships(db, version)
 
     assert rels["mentors"] == []
 

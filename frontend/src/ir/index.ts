@@ -28,10 +28,20 @@ export {
   SEVERITIES,
   SHAPE_RULES,
   TERM_KINDS,
+  TRAVERSAL_DEPTHS,
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
-export type { IrRule, Relation, RuleWhere, Sense, Severity, TermKind, VariableDomain } from "./contract";
+export type {
+  IrRule,
+  Relation,
+  RuleWhere,
+  Sense,
+  Severity,
+  TermKind,
+  TraversalDepth,
+  VariableDomain,
+} from "./contract";
 
 export { checkIrShape, isValidIrShape } from "./validate";
 export type { IrLoc, IrRefusal } from "./validate";

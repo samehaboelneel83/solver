@@ -4,19 +4,27 @@ import TermBuilder, { BindingsEditor } from "./TermBuilder";
 import type { Binding, ModelContext, Term } from "./terms";
 
 const CONTEXT: ModelContext = {
-  sets: ["employee", "day", "shift"],
-  setIds: { employee: 5, day: 6, shift: 7 },
+  sets: ["employee", "day", "shift", "unit"],
+  setIds: { employee: 5, day: 6, shift: 7, unit: 8 },
   attributes: {
     employee: [
       { name: "hours_per_week", data_type: "integer" },
-      // A decimal attribute: offered as a filter, never as arithmetic (§7).
+      // A decimal attribute: arithmetic since migration 0015 (§7), and
+      // still the thing that makes a model continuous.
       { name: "hourly_rate", data_type: "number" },
+      // Not a quantity, so not arithmetic in any version.
+      { name: "full_name", data_type: "text" },
     ],
     day: [{ name: "is_weekend", data_type: "boolean" }],
     shift: [],
+    unit: [{ name: "cost_centre", data_type: "text" }],
   },
   variables: { assign: { index: ["employee", "day", "shift"], domain: "binary" } },
   parameters: { demand: { index: ["day", "shift"] } },
+  relationships: [
+    { name: "reports_to", from: "unit", to: "unit" },
+    { name: "works_in", from: "employee", to: "unit" },
+  ],
 };
 
 const BOUND: Binding[] = [
@@ -58,21 +66,23 @@ describe("TermBuilder", () => {
     expect(offered).not.toContain("d");
   });
 
-  it("offers whole-number attributes only, and says why when there are none", () => {
+  it("offers numeric attributes only, and says why when there are none", () => {
     renderTerm({ attr: { of: "e", name: "hours_per_week" } } as Term);
 
     const picker = screen.getByLabelText("Attribute") as HTMLSelectElement;
     const offered = Array.from(picker.options).map((o) => o.value);
     expect(offered).toContain("hours_per_week");
-    // `hourly_rate` is a `number`; admitting it would make the model
-    // continuous without anyone deciding to.
-    expect(offered).not.toContain("hourly_rate");
+    // A `number` is arithmetic since 0015 -- reading one is how a model
+    // becomes continuous, which the platform now records rather than refuses.
+    expect(offered).toContain("hourly_rate");
+    // `text` is not a quantity in any version.
+    expect(offered).not.toContain("full_name");
   });
 
   it("explains a set with nothing arithmetic to offer", () => {
     renderTerm({ attr: { of: "d", name: "" } } as Term);
 
-    expect(screen.getByText(/whole-number attributes only/i)).toBeInTheDocument();
+    expect(screen.getByText(/text, dates and times cannot appear/i)).toBeInTheDocument();
   });
 
   it("warns that a product of two variable terms is not linear", () => {
@@ -246,5 +256,119 @@ describe("BindingsEditor", () => {
 
     const filter = screen.getByRole("group", { name: /filter for d in day/i });
     expect(within(filter).getByDisplayValue("is_weekend")).toBeInTheDocument();
+  });
+});
+
+describe("BindingsEditor, the relationship picker", () => {
+  function renderWalk(bindings: Binding[], outer: Binding[] = []) {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={bindings}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={outer}
+        legend="Summed over"
+      />
+    );
+    return onChange;
+  }
+
+  it("offers nothing when no anchor is bound to walk from", () => {
+    // `works_in` joins employee to unit, so binding an employee could walk
+    // it -- but only from a unit, and nothing here is bound to one.
+    renderWalk([{ index: "e", set: "employee" }]);
+
+    expect(screen.queryByLabelText("Reached through")).not.toBeInTheDocument();
+  });
+
+  it("offers a walk once something is bound at the other end", () => {
+    renderWalk([{ index: "e", set: "employee" }], [{ index: "u", set: "unit" }]);
+
+    const picker = screen.getByLabelText("Reached through") as HTMLSelectElement;
+    const offered = Array.from(picker.options).map((o) => o.value);
+    // The employee sits at `works_in`'s `from` end, so the anchor is at `to`.
+    expect(offered).toContain("works_in:to");
+    // `reports_to` joins units, and this binding is over employees.
+    expect(offered).not.toContain("reports_to:from");
+  });
+
+  it("will not anchor a walk on an index bound after it", () => {
+    // The contract requires the anchor to be bound where the traversal
+    // starts. A later sibling is not, so offering it would build a document
+    // the validator refuses with `binding_via_anchor_not_bound`.
+    renderWalk([
+      { index: "e", set: "employee" },
+      { index: "u", set: "unit" },
+    ]);
+
+    // One picker, not two: the unit can be reached from the employee bound
+    // before it, and the employee cannot be reached from a unit bound after.
+    const pickers = screen.getAllByLabelText("Reached through") as HTMLSelectElement[];
+    expect(pickers).toHaveLength(1);
+    expect(Array.from(pickers[0].options).map((o) => o.value)).toContain("works_in:from");
+  });
+
+  it("writes the anchor at the end the relationship puts it", () => {
+    const onChange = renderWalk([{ index: "e", set: "employee" }], [{ index: "u", set: "unit" }]);
+
+    fireEvent.change(screen.getByLabelText("Reached through"), {
+      target: { value: "works_in:to" },
+    });
+
+    const [next] = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(next[0].via).toEqual({ rel: "works_in", to: "u" });
+  });
+
+  it("offers a depth only on a relationship that joins a type to itself", () => {
+    const { rerender } = render(
+      <BindingsEditor
+        bindings={[{ index: "e", set: "employee", via: { rel: "works_in", to: "u" } }]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[{ index: "u", set: "unit" }]}
+        legend="Summed over"
+      />
+    );
+    // Walking `works_in` twice would step unit -> employee and then look for
+    // an edge out of a unit again; the contract refuses it.
+    expect(screen.queryByLabelText("How far")).not.toBeInTheDocument();
+
+    rerender(
+      <BindingsEditor
+        bindings={[{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u" } }]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[{ index: "u", set: "unit" }]}
+        legend="Summed over"
+      />
+    );
+    expect(screen.getByLabelText("How far")).toBeInTheDocument();
+  });
+
+  it("leaves depth out of the document when the walk is a single step", () => {
+    const onChange = renderWalk(
+      [{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u", depth: "any" } }],
+      [{ index: "u", set: "unit" }]
+    );
+
+    fireEvent.change(screen.getByLabelText("How far"), { target: { value: "one" } });
+
+    const [next] = onChange.mock.calls.at(-1) as [Binding[]];
+    // `one` is the default, so writing it would put a key in a hashed
+    // document that changes nothing about what it means.
+    expect(next[0].via).toEqual({ rel: "reports_to", from: "u" });
+  });
+
+  it("drops the walk entirely when the binding goes back to all of them", () => {
+    const onChange = renderWalk(
+      [{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u", depth: "any" } }],
+      [{ index: "u", set: "unit" }]
+    );
+
+    fireEvent.change(screen.getByLabelText("Reached through"), { target: { value: "all" } });
+
+    const [next] = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(next[0]).not.toHaveProperty("via");
   });
 });

@@ -15,10 +15,18 @@
  * meet inside a binding.
  */
 
-import type { Relation, Severity, TermKind } from "../ir";
+import { ARITHMETIC_ATTR_TYPES } from "../ir";
+import type { Relation, Severity, TermKind, TraversalDepth } from "../ir";
 
 export type IrFilter = { attr: string; op: string; value: unknown };
-export type Binding = { index: string; set: string; where?: IrFilter[] };
+
+/**
+ * A traversal. `from`/`to` name the end the **anchor** sits at, so the
+ * index being bound takes the other one -- which is why exactly one of
+ * them is ever present.
+ */
+export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth };
+export type Binding = { index: string; set: string; where?: IrFilter[]; via?: Via };
 
 export type Term =
   | { const: number }
@@ -48,10 +56,13 @@ export type ModelContext = {
   sets: string[];
   /** Set name -> entity type id, for the filter catalogue. */
   setIds: Record<string, number>;
-  /** Set name -> its attributes. Arithmetic admits `integer` only. */
+  /** Set name -> its attributes. */
   attributes: Record<string, { name: string; data_type: string }[]>;
   variables: Record<string, { index: string[]; domain: string }>;
   parameters: Record<string, { index: string[] }>;
+  /** The relationship types the IR declares, with the entity types each
+   * joins -- which is what decides whether a walk is offered at all. */
+  relationships: { name: string; from: string; to: string }[];
 };
 
 export const TERM_LABELS: Record<TermKind, string> = {
@@ -93,7 +104,7 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
     }
     case "attr": {
       const binding = bound[0];
-      const attrs = binding ? integerAttributes(context, binding.set) : [];
+      const attrs = binding ? arithmeticAttributes(context, binding.set) : [];
       return { attr: { of: binding?.index ?? "", name: attrs[0]?.name ?? "" } };
     }
     case "sum":
@@ -108,10 +119,52 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
   }
 }
 
-/** Only `integer` attributes are arithmetic (contract §7): admitting
- * `number` would make a model continuous without anyone deciding to. */
-export function integerAttributes(context: ModelContext, set: string) {
-  return (context.attributes[set] ?? []).filter((a) => a.data_type === "integer");
+/** The attributes arithmetic admits, which is `integer` and `number`
+ * since migration 0015 (contract §7). Reading a `number` is how a model
+ * becomes continuous, and that is now a decision the platform records
+ * rather than one it refuses. */
+export function arithmeticAttributes(context: ModelContext, set: string) {
+  return (context.attributes[set] ?? []).filter((a) =>
+    (ARITHMETIC_ATTR_TYPES as readonly string[]).includes(a.data_type)
+  );
+}
+
+/**
+ * The walks this binding could make: every relationship type with an end
+ * of the binding's own set, paired with an already-bound index sitting at
+ * the other end.
+ *
+ * Both halves of the offer are checked here, so the editor cannot compose
+ * a `via` the validator would refuse -- `binding_via_endpoint_mismatch`
+ * and `binding_via_anchor_not_bound` are unreachable from this UI.
+ */
+export function walksAvailable(context: ModelContext, set: string, bound: Binding[]) {
+  const offers: { rel: string; anchorEnd: "from" | "to"; anchors: string[]; loops: boolean }[] = [];
+  for (const rel of context.relationships) {
+    for (const anchorEnd of ["from", "to"] as const) {
+      const boundEnd = anchorEnd === "from" ? rel.to : rel.from;
+      const anchorSet = anchorEnd === "from" ? rel.from : rel.to;
+      if (boundEnd !== set) continue;
+      const anchors = bound.filter((b) => b.set === anchorSet).map((b) => b.index);
+      if (anchors.length === 0) continue;
+      offers.push({ rel: rel.name, anchorEnd, anchors, loops: rel.from === rel.to });
+    }
+  }
+  return offers;
+}
+
+/** `reports_to:from` -- one select carries both, because a self-joining
+ * type offers the same name at both ends and the pair is what identifies
+ * the walk. */
+export function walkKey(rel: string, anchorEnd: "from" | "to") {
+  return `${rel}:${anchorEnd}`;
+}
+
+export function viaOf(binding: Binding): { rel: string; anchorEnd: "from" | "to"; anchor: string } | null {
+  const via = binding.via;
+  if (!via) return null;
+  const anchorEnd = via.from !== undefined ? "from" : "to";
+  return { rel: via.rel, anchorEnd, anchor: (via.from ?? via.to) as string };
 }
 
 /** Indices bound at a point in the tree: the constraint's `forall` plus
@@ -137,6 +190,65 @@ export function freeIndexName(bound: Binding[], seed = "i"): string {
   return `${seed}_`;
 }
 
+/**
+ * Every relationship type a model actually walks, sorted, for the IR's
+ * `relationships` declaration.
+ *
+ * Walks the whole tree because a `via` can be nested arbitrarily deep
+ * inside a sum. Sorted so that two drafts holding the same walks produce
+ * the same document, and therefore the same `ir_hash` -- an order that
+ * followed the editing history would mint a new version for no change.
+ */
+export function declaredRelationships(
+  constraints: Constraint[],
+  objectiveTerms: ObjectiveTerm[]
+): string[] {
+  const found = new Set<string>();
+
+  function fromBindings(bindings: Binding[] | undefined) {
+    for (const binding of bindings ?? []) {
+      if (binding.via) found.add(binding.via.rel);
+    }
+  }
+
+  function fromTerm(term: Term) {
+    switch (termKind(term)) {
+      case "sum": {
+        const t = term as { sum: Term; over: Binding[] };
+        fromBindings(t.over);
+        fromTerm(t.sum);
+        return;
+      }
+      case "add":
+        (term as { add: Term[] }).add.forEach(fromTerm);
+        return;
+      case "mul":
+        (term as { mul: [Term, Term] }).mul.forEach(fromTerm);
+        return;
+      default:
+        return;
+    }
+  }
+
+  for (const constraint of constraints) {
+    fromBindings(constraint.forall);
+    fromTerm(constraint.left);
+    fromTerm(constraint.right);
+  }
+  for (const term of objectiveTerms) fromTerm(term.expression);
+
+  return [...found].sort();
+}
+
+/** `e in employee` or, for a walk, `sub in unit via reports_to from u`. */
+export function describeBinding(binding: Binding): string {
+  const walk = viaOf(binding);
+  if (!walk) return `${binding.index} in ${binding.set}`;
+  const depth = binding.via?.depth ?? "one";
+  const reach = depth === "one" ? "" : depth === "any" ? ", any depth" : ", any depth or itself";
+  return `${binding.index} in ${binding.set} via ${walk.rel} ${walk.anchorEnd} ${walk.anchor}${reach}`;
+}
+
 /** A one-line reading of a term, for a summary row: `sum(assign[e,d,s])`. */
 export function describeTerm(term: Term): string {
   switch (termKind(term)) {
@@ -156,7 +268,7 @@ export function describeTerm(term: Term): string {
     }
     case "sum": {
       const t = term as { sum: Term; over: Binding[] };
-      return `sum(${describeTerm(t.sum)} over ${t.over.map((b) => `${b.index} in ${b.set}`).join(", ")})`;
+      return `sum(${describeTerm(t.sum)} over ${t.over.map(describeBinding).join(", ")})`;
     }
     case "add":
       return (term as { add: Term[] }).add.map(describeTerm).join(" + ");

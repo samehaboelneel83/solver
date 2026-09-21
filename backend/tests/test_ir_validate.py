@@ -155,6 +155,22 @@ def world():
                     "v": parameter["default_value"],
                 },
             )
+        for relationship in FIXTURES["domain"]["relationshipTypes"]:
+            db.execute(
+                text(
+                    "INSERT INTO relationship_type "
+                    "(domain_id, name, from_type_id, to_type_id, cardinality, is_hierarchy) "
+                    "VALUES (:d, :n, :f, :t, :c, :h)"
+                ),
+                {
+                    "d": domain_id,
+                    "n": relationship["name"],
+                    "f": type_ids[relationship["from"]],
+                    "t": type_ids[relationship["to"]],
+                    "c": relationship["cardinality"],
+                    "h": relationship["is_hierarchy"],
+                },
+            )
         db.commit()
         yield db, domain_id
     finally:

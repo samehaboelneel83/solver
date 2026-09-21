@@ -7,7 +7,7 @@ import { checkIrShape, isValidIrShape } from "./validate";
 /**
  * The browser half of the IR fixture set.
  *
- * `backend/tests/ir_fixtures.json` carries eight valid IRs and at least
+ * `backend/tests/ir_fixtures.json` carries a dozen valid IRs and at least
  * one invalid one per rule, each wrong in exactly one way.
  * `backend/tests/test_ir_validate.py` runs them through
  * `app/ir/validate.py`; this file runs them through `validate.ts`.
@@ -106,13 +106,23 @@ describe("valid IRs", () => {
   it("includes the seeded workforce model, expressed rather than named", () => {
     const workforce = FIXTURES.valid.find((entry) => entry.name === "workforce");
     expect(workforce).toBeDefined();
-    const ir = workforce!.ir as { constraints: { left?: unknown; relation?: unknown }[] };
-    expect(ir.constraints).toHaveLength(3);
+    const ir = workforce!.ir as {
+      relationships?: string[];
+      constraints: { id: string; left?: unknown; relation?: unknown }[];
+    };
+    expect(ir.constraints).toHaveLength(4);
     // The sketch this replaced had an id and a note and nothing else.
     for (const constraint of ir.constraints) {
       expect(constraint.left).toBeDefined();
       expect(constraint.relation).toBeDefined();
     }
+    // The fourth is the traversal one, and it is the reason the model
+    // declares relationships at all -- two of them, because it composes
+    // two walks. Pinned together so that dropping either half fails here
+    // rather than leaving a declaration nothing walks, or a walk over
+    // edges the dataset was never asked to freeze.
+    expect(ir.relationships).toEqual(["reports_to", "works_in"]);
+    expect(ir.constraints.map((constraint) => constraint.id)).toContain("c_north_region_lates");
   });
 });
 

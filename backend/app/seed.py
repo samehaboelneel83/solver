@@ -134,19 +134,23 @@ _EMPLOYEES = [
 # the sketch carried; what changed is that each now has arithmetic under
 # it that says the same thing.
 #
-# Two compromises are visible here and both are the integer-only decision
-# (spec section 2) biting:
+# One compromise is still visible, and it is not the one that used to be
+# here. `c_max_hours` multiplies by a literal 8 because a shift's length
+# lives in `starts_at`/`ends_at`, which are `time` attributes -- not
+# numbers, in any version -- so the arithmetic cannot subtract one from
+# the other.
 #
-#   * `c_max_hours` multiplies by a literal 8 because a shift's length
-#     lives in `starts_at`/`ends_at`, which are `time` attributes, and v1
-#     arithmetic runs over integers only.
-#   * the objective minimises shifts worked, not cost. The only
-#     cost-bearing datum in this domain is `employee.hourly_rate`, which
-#     is a `number`; admitting it as a coefficient would make the model
-#     continuous, which nothing here can solve.
+# The other compromise has gone. The objective minimised shifts worked
+# rather than cost because the only cost-bearing datum here is
+# `employee.hourly_rate`, a `number`, and admitting it would have made
+# the model continuous with nothing able to solve one. Migration 0015 and
+# GLOP changed both halves of that. It still minimises shifts, because
+# changing what the demo optimises is a separate decision from making it
+# possible -- but it is now a choice rather than a limit.
 _IR: dict[str, Any] = {
     "version": 1,
     "sets": ["employee", "unit", "day", "shift"],
+    "relationships": ["reports_to", "works_in"],
     "parameters": {"demand": {"index": ["day", "shift"]}},
     "variables": {"assign": {"index": ["employee", "day", "shift"], "domain": "binary"}},
     "constraints": [
@@ -193,6 +197,61 @@ _IR: dict[str, Any] = {
             "relation": "<=",
             "right": {"attr": {"of": "e", "name": "hours_per_week"}},
             "severity": "hard",
+        },
+        {
+            "id": "c_north_region_lates",
+            "note": (
+                "North Region puts three people on the late shift every day, "
+                "counting the depots under it"
+            ),
+            # The traversal decision note lists this as the first thing a
+            # planner says that v1 could not express, and it is the case
+            # that needs a walk rather than a filter: NOBODY works in
+            # North Region itself. Every one of its people is in the depot
+            # beneath it, so a constraint written over the unit alone
+            # counts zero and is unsatisfiable for a reason that is
+            # nothing to do with the roster.
+            #
+            # Two walks compose. `reports_to` at `any_or_self` depth
+            # gathers North Region and everything under it; `works_in`
+            # then gathers the people in each of those. The set is named
+            # by its cost centre rather than its key because a `where`
+            # filter reads attributes, which is the same vocabulary the
+            # entity screens filter with.
+            "forall": [
+                {"index": "d", "set": "day"},
+                {
+                    "index": "r",
+                    "set": "unit",
+                    "where": [{"attr": "cost_centre", "op": "=", "value": "OPS-100"}],
+                },
+                {
+                    "index": "late",
+                    "set": "shift",
+                    "where": [{"attr": "starts_at", "op": "=", "value": "14:00"}],
+                },
+            ],
+            "left": {
+                "sum": {"var": "assign", "index": ["e", "d", "late"]},
+                "over": [
+                    {
+                        "index": "sub",
+                        "set": "unit",
+                        "via": {"rel": "reports_to", "from": "r", "depth": "any_or_self"},
+                    },
+                    {"index": "e", "set": "employee", "via": {"rel": "works_in", "to": "sub"}},
+                ],
+            },
+            "relation": ">=",
+            "right": {"const": 3},
+            # Soft, and deliberately short by one: North Region and its
+            # depot hold two people between them, so three is a target the
+            # data cannot meet. That is the same honesty as the demand
+            # figures -- the demo is over-subscribed on purpose -- and it
+            # makes the penalty visible in `constraint_result` instead of
+            # turning the whole model infeasible.
+            "severity": "soft",
+            "weight": 4,
         },
     ],
     "objective": {

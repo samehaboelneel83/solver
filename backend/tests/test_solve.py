@@ -221,7 +221,10 @@ def test_the_seeded_workforce_model_classifies_as_an_integer_program(db):
 
     assert found.model_class == "IP"
     assert "every variable is binary" in found.reasons
-    assert found.needs == {"linear", "integral"}
+    # `soft-constraints` because `c_north_region_lates` is soft. The demo
+    # asks for a traversal it cannot fully satisfy and pays for the
+    # shortfall, so a backend that cannot price a violation cannot run it.
+    assert found.needs == {"linear", "integral", "soft-constraints"}
 
 
 def test_the_seeded_workforce_model_is_infeasible_as_shipped(db):
@@ -287,7 +290,12 @@ def test_running_the_seeded_scenario_records_a_run_a_solution_and_every_constrai
 
     # Every constraint is reported, not only the broken ones -- "which rules
     # held" is part of the answer.
-    assert set(by_id) == {"c_cover_demand", "c_one_shift_per_day", "c_max_hours"}
+    assert set(by_id) == {
+        "c_cover_demand",
+        "c_one_shift_per_day",
+        "c_max_hours",
+        "c_north_region_lates",
+    }
     # The softened one is the one that gives.
     assert by_id["c_cover_demand"]["hard"] is False
     assert by_id["c_cover_demand"]["satisfied"] is False
@@ -295,6 +303,12 @@ def test_running_the_seeded_scenario_records_a_run_a_solution_and_every_constrai
     # The two hard ones are honoured exactly.
     assert by_id["c_one_shift_per_day"]["satisfied"] is True
     assert by_id["c_max_hours"]["satisfied"] is True
+    # The traversal one is reported like any other, which is the point: a
+    # constraint whose scope came from walking an org chart is not a
+    # special kind of answer. It is short by design -- North Region and
+    # its depot hold two people and it asks for three.
+    assert by_id["c_north_region_lates"]["hard"] is False
+    assert by_id["c_north_region_lates"]["satisfied"] is False
 
     assignments = db.execute(
         text("SELECT assignments FROM solution WHERE run_id = :r"), {"r": outcome.run_id}
