@@ -330,7 +330,21 @@ from a calculator into something a planner can argue with.
 
 ---
 
-## Phase 5 — Roles, and configuration that does not need a deployment
+## Phase 5 — Roles and configuration — **two of three DONE** (`671fac8`, `237049c`)
+
+- **Capabilities** -- done. Migration 0013 makes them rows granted to
+  roles, enforced by one dependency, and reported by `GET /api/v1/me` so
+  a screen and the server cannot disagree. The split that matters holds:
+  a planner may solve without being able to change the model.
+- **Settings at three levels** -- done. Migration 0014; problem beats
+  domain beats platform beats the built-in default, every resolved value
+  says which level supplied it, and a run records it too.
+- **Templates** -- **not done.** The `template` table is still unused.
+
+**Also still open:** the UI reflects capabilities on the Runs and Settings
+screens only. The domain-editing screens still offer actions a viewer
+cannot take; the API refuses them with a readable reason, so nothing is
+silently broken, but the roadmap's standard is *absent*, not *refused*.
 
 **Goal:** the flexible configuration the request asks for, for roles as well as
 for model parts.
