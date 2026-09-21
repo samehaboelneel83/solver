@@ -470,6 +470,20 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
   );
 }
 
+/**
+ * A tuple of keys, in the names people use.
+ *
+ * `["ahmed", "mon"]` becomes "Ahmed Salah - Monday" when the run's frozen
+ * dataset knew those names, and stays as the key when it did not. The set for
+ * each position comes from the model, because a key is unique within its type
+ * and not across types: looking "mon" up in every set at once would
+ * eventually find the wrong one.
+ */
+function naming(labels: Run["labels"], sets: string[] | undefined) {
+  return (tuple: string[]) =>
+    tuple.map((key, position) => labels[sets?.[position] ?? ""]?.[key] ?? key);
+}
+
 function RunDetail({ id }: { id: Id }) {
   const run = useRun(id);
 
@@ -505,7 +519,14 @@ function RunDetail({ id }: { id: Id }) {
         <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
       </dl>
 
-      {data.conflict && data.conflict.length > 0 && <Conflict items={data.conflict} minimal={data.conflict_minimal} />}
+      {data.conflict && data.conflict.length > 0 && (
+        <Conflict
+          items={data.conflict}
+          minimal={data.conflict_minimal}
+          labels={data.labels}
+          sets={data.index_sets.constraints}
+        />
+      )}
 
       {data.constraints.length > 0 && (
         <>
@@ -520,23 +541,26 @@ function RunDetail({ id }: { id: Id }) {
         </>
       )}
 
-      {Object.entries(roster).map(([variable, tuples]) => (
-        <div key={variable}>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">
-            {variable} &mdash; {tuples.length} chosen
-          </h3>
-          <ul className="flex flex-wrap gap-2">
-            {tuples.map((tuple) => (
-              <li
-                key={tuple.join("\u0001")}
-                className="rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
-              >
-                {tuple.join(" · ")}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      {Object.entries(roster).map(([variable, tuples]) => {
+        const name = naming(data.labels, data.index_sets.variables[variable]);
+        return (
+          <div key={variable}>
+            <h3 className="mb-2 text-sm font-semibold text-slate-900">
+              {variable} &mdash; {tuples.length} chosen
+            </h3>
+            <ul className="flex flex-wrap gap-2">
+              {tuples.map((tuple) => (
+                <li
+                  key={tuple.join("\u0001")}
+                  className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+                >
+                  {name(tuple).join(" · ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -555,7 +579,17 @@ function RunDetail({ id }: { id: Id }) {
  * saying the stronger thing would send someone to relax a rule that changes
  * nothing.
  */
-function Conflict({ items, minimal }: { items: ConflictItem[]; minimal: boolean | null }) {
+function Conflict({
+  items,
+  minimal,
+  labels,
+  sets,
+}: {
+  items: ConflictItem[];
+  minimal: boolean | null;
+  labels: Run["labels"];
+  sets: Record<string, string[]>;
+}) {
   const byRule = new Map<string, string[][]>();
   for (const item of items) {
     byRule.set(item.constraint_id, [...(byRule.get(item.constraint_id) ?? []), item.instance]);
@@ -577,9 +611,11 @@ function Conflict({ items, minimal }: { items: ConflictItem[]; minimal: boolean 
               {instances.map((instance) => (
                 <li
                   key={instance.join("\u0001")}
-                  className="rounded border border-amber-200 bg-white px-2 py-1 font-mono text-xs text-amber-900"
+                  className="rounded border border-amber-200 bg-white px-2 py-1 text-xs text-amber-900"
                 >
-                  {instance.length > 0 ? instance.join(" · ") : "everywhere"}
+                  {instance.length > 0
+                    ? naming(labels, sets[rule])(instance).join(" · ")
+                    : "everywhere"}
                 </li>
               ))}
             </ul>

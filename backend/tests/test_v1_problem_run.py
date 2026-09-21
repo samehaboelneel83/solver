@@ -92,11 +92,12 @@ def make_entity(
     sort_order: int = 0,
     active: bool = True,
     attrs: dict | None = None,
+    label: str | None = None,
 ) -> int:
     return db.execute(
         text(
-            "INSERT INTO entity (entity_type_id, key, sort_order, active, attrs) "
-            "VALUES (:t, :k, :s, :a, CAST(:at AS jsonb)) RETURNING id"
+            "INSERT INTO entity (entity_type_id, key, sort_order, active, attrs, label) "
+            "VALUES (:t, :k, :s, :a, CAST(:at AS jsonb), :l) RETURNING id"
         ),
         {
             "t": entity_type_id,
@@ -104,6 +105,7 @@ def make_entity(
             "s": sort_order,
             "a": active,
             "at": json.dumps(attrs or {}),
+            "l": label,
         },
     ).scalar_one()
 
@@ -641,13 +643,19 @@ def test_snapshot_shape_is_pinned(db, snapshot_domain):
         # and empty -- which is itself the pinned fact, because a consumer
         # that has to branch on "absent or empty" will get it wrong once.
         "relationships": {},
+        # Migration 0012: display names, beside the set rows rather than
+        # inside them. This fixture's entities carry no label, so each set is
+        # present and empty -- the same "present, not absent" contract.
+        "labels": {"employee": {}, "day": {}, "shift": {}},
     }
 
     # Spelled out again, so a future reader sees which facts the literal
     # above is pinning, and so a partial drift names itself.
-    assert set(data) == {"sets", "parameters", "parameter_defaults", "relationships"}
+    assert set(data) == {"sets", "parameters", "parameter_defaults", "relationships", "labels"}
     assert data["sets"]["employee"][0]["id"] == "ahmed"  # entity.key -> "id"
     assert "key" not in data["sets"]["employee"][0]
+    # A label never reaches the rows the compiler reads (migration 0012).
+    assert "label" not in data["sets"]["employee"][0]
     assert data["parameters"]["demand"][0] == {"day": "mon", "shift": "morning", "value": 3}
     assert set(data["parameters"]["demand"][0]) == {"day", "shift", "value"}
 

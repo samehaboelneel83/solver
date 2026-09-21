@@ -25,7 +25,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -101,6 +101,16 @@ class RunRead(RunSummary):
     """The answer, in the domain's own words."""
 
     params: dict[str, Any]
+    # Display names as they were when the run was made, `{set: {key: label}}`,
+    # read from the frozen dataset rather than from today's entities: a run
+    # answers the question as it was asked, and that includes what things were
+    # called. Absent for runs made before migration 0012, whose answers read
+    # back in keys -- which is what they were shown as at the time.
+    labels: dict[str, dict[str, str]]
+    # Which set each position of an index tuple comes from, so a reader can
+    # turn ["ahmed", "mon"] into names without guessing which type a key
+    # belongs to. Keys are unique within a type, not across them.
+    index_sets: dict[str, dict[str, list[str]]]
     # Why there is no answer: rules that cannot hold together. Null unless
     # the run was infeasible.
     conflict: list[ConflictItem] | None
@@ -238,9 +248,42 @@ def get_run(
     return _read(db, run_id)
 
 
+def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The frozen display names, and which set each index position names.
+
+    Both come from what the run points at -- the dataset it froze and the
+    model version it solved -- never from today's rows.
+    """
+    row = db.execute(
+        text(
+            "SELECT d.data -> 'labels' AS labels, mv.ir AS ir"
+            "  FROM run r"
+            "  JOIN dataset d ON d.id = r.dataset_id"
+            "  JOIN scenario s ON s.id = r.scenario_id"
+            "  JOIN model_version mv ON mv.id = s.model_version_id"
+            " WHERE r.id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+
+    ir = row["ir"] or {}
+    variables = {
+        name: list(spec.get("index", []))
+        for name, spec in (ir.get("variables") or {}).items()
+        if isinstance(spec, dict)
+    }
+    constraints = {
+        spec["id"]: [binding["set"] for binding in spec.get("forall", []) if "set" in binding]
+        for spec in (ir.get("constraints") or [])
+        if isinstance(spec, dict) and "id" in spec
+    }
+    return row["labels"] or {}, {"variables": variables, "constraints": constraints}
+
+
 def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
+    labels, index_sets = _vocabulary(db, run_id)
     constraints = db.scalars(
         select(ConstraintResult)
         .where(ConstraintResult.run_id == run_id)
@@ -250,6 +293,8 @@ def _read(db: Session, run_id: int) -> RunRead:
     return RunRead(
         **RunSummary.model_validate(run).model_dump(),
         params=run.params or {},
+        labels=labels,
+        index_sets=index_sets,
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,

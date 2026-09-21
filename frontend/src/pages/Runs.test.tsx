@@ -38,6 +38,11 @@ const RUN_DETAIL = {
   params: { classified_as: "IP", time_limit_s: 30 },
   conflict: null,
   conflict_minimal: null,
+  labels: { employee: { ahmed: "Ahmed Salah", bilal: "Bilal Omar" }, day: { mon: "Monday", tue: "Tuesday" } },
+  index_sets: {
+    variables: { assign: ["employee", "day", "shift"] },
+    constraints: { c_cover: ["day", "shift"], c_max_hours: ["employee"] },
+  },
   assignments: { assign: [["ahmed", "mon", "morning"], ["bilal", "tue", "night"]] },
   constraints: [
     {
@@ -194,6 +199,27 @@ describe("Runs", () => {
     expect(await screen.findByText(/no answer exists/i)).toBeInTheDocument();
   });
 
+  it("shows the answer in the names people use, not the keys", async () => {
+    // `ahmed` is a spelling the platform chose; a planner reads names.
+    stub();
+    renderPage();
+
+    expect(await screen.findByText(/Ahmed Salah . Monday . morning/)).toBeInTheDocument();
+    // `shift` has no labels in the frozen data, so that position stays as the
+    // key rather than going blank.
+    expect(screen.queryByText(/ahmed . mon . morning/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the key for a run made before names were frozen", async () => {
+    // Runs from before migration 0012 have no labels. They must read back in
+    // keys -- which is what they were shown as when they were made -- rather
+    // than render empty.
+    stub({ run: { ...RUN_DETAIL, labels: {} } });
+    renderPage();
+
+    expect(await screen.findByText(/ahmed . mon . morning/)).toBeInTheDocument();
+  });
+
   it("names the rules that cannot hold together when there is no answer", async () => {
     // The difference between a tool and a calculator: "infeasible" is not a
     // finding, "coverage and the hours cap collide on Monday morning" is.
@@ -217,8 +243,9 @@ describe("Runs", () => {
     const panel = why.closest("section") as HTMLElement;
     expect(within(panel).getByText("c_cover")).toBeInTheDocument();
     expect(within(panel).getByText("c_max_hours")).toBeInTheDocument();
-    // The instances, because a rule name alone does not say where to look.
-    expect(within(panel).getByText(/mon . morning/)).toBeInTheDocument();
+    // The instances, in names, because a rule alone does not say where to
+    // look and "mon" is a key rather than a day.
+    expect(within(panel).getByText(/Monday . morning/)).toBeInTheDocument();
     // Proven irreducible, so the stronger promise is the one shown.
     expect(within(panel).getByText(/relax or remove any single one/i)).toBeInTheDocument();
   });

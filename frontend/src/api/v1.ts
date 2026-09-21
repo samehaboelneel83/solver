@@ -475,6 +475,13 @@ export type ConflictItem = { constraint_id: string; instance: string[] };
 
 export type Run = RunSummary & {
   params: Record<string, unknown>;
+  /** Display names as they were when the run was made, `{set: {key: label}}`.
+   * Read from the frozen dataset, so renaming someone does not rewrite an
+   * answer already given. Empty for runs made before migration 0012. */
+  labels: Record<string, Record<string, string>>;
+  /** Which set each position of an index tuple names, so a key can be looked
+   * up in the right type: keys are unique within a type, not across them. */
+  index_sets: { variables: Record<string, string[]>; constraints: Record<string, string[]> };
   /** Rules that cannot hold together. Null unless the run was infeasible. */
   conflict: ConflictItem[] | null;
   /** True when every listed rule was shown to be needed, so removing any one
