@@ -554,16 +554,19 @@ def test_a_refusal_carries_the_value_it_refused(client, auth_headers, problems):
     as FastAPI's own body validation produces it, so `formatApiError` and
     the per-field form errors need no special case."""
     a, _ = problems
-    ir = {**_mini_ir(), "variables": {"x": {"index": [], "domain": "continuous"}}}
+    # "real" is a plausible mistake for "continuous", which is admitted since
+    # migration 0015. The vocabulary is still closed; this test is about the
+    # shape of the refusal, not about which word is outside it.
+    ir = {**_mini_ir(), "variables": {"x": {"index": [], "domain": "real"}}}
     response = client.post(
         f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers
     )
     assert response.status_code == 422, response.text
     detail = response.json()["detail"][0]
     assert detail["loc"] == ["body", "ir", "variables", "x", "domain"]
-    assert detail["input"] == "continuous"
+    assert detail["input"] == "real"
     assert detail["type"] == "value_error"
-    assert "continuous" in detail["msg"]
+    assert "real" in detail["msg"]
 
 
 # --------------------------------------------------------------------------

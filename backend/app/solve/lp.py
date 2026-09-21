@@ -1,0 +1,119 @@
+"""A third backend: the simplex method, through OR-Tools' GLOP.
+
+**Why a pure LP solver, when the MILP backend already takes linear models.**
+Because "the right technique" is the whole point of the selection policy, and
+for a model with no integer variables branch-and-cut is the wrong one. SCIP
+and CBC solve an LP by solving the relaxation and then discovering there is
+nothing to branch on; GLOP just solves it. On a model of any size that is the
+difference between a screen that answers and a screen that waits, and it costs
+nothing -- GLOP ships in the same `ortools` package.
+
+It is also what makes the platform's classification *mean* something. Before
+this, `LP` and `MILP` would have been labels on a model that went to the same
+solver either way; a classifier that cannot change the outcome is decoration.
+
+**What it will not take.** Any integer or binary variable. Handing it one
+would silently solve the relaxation and report a fractional answer as though
+it were the optimum -- three quarters of a nurse on Tuesday. The registry
+declares that, and `solve` refuses it rather than trusting the registry to
+have been right.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from importlib.metadata import version as _pkg_version
+
+from ortools.linear_solver import pywraplp
+
+from app.solve.compile import Compiled, Constraint
+from app.solve.result import Solution
+
+_ORTOOLS_VERSION = _pkg_version("ortools")
+
+_ENGINE = "GLOP"
+
+_STATUS = {
+    pywraplp.Solver.OPTIMAL: "optimal",
+    pywraplp.Solver.FEASIBLE: "feasible",
+    pywraplp.Solver.INFEASIBLE: "infeasible",
+    # An unbounded LP is a modelling fault -- a variable free to grow without
+    # limit -- and it is not "no answer", so it does not borrow `infeasible`.
+    pywraplp.Solver.UNBOUNDED: "unknown",
+    pywraplp.Solver.ABNORMAL: "error",
+    pywraplp.Solver.NOT_SOLVED: "unknown",
+}
+
+
+class NotContinuous(Exception):
+    """This model has discrete variables, which the simplex method ignores."""
+
+
+def available() -> bool:
+    return pywraplp.Solver.CreateSolver(_ENGINE) is not None
+
+
+def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> Solution:
+    discrete = [key[0] for key, spec in compiled.variables.items() if spec.is_integral]
+    if discrete:
+        raise NotContinuous(
+            f"glop solves linear programs and {sorted(set(discrete))[0]!r} is discrete; "
+            "solving the relaxation instead would report a fractional answer as the optimum"
+        )
+
+    solver = pywraplp.Solver.CreateSolver(_ENGINE)
+    solver.SetTimeLimit(int(time_limit * 1000))
+
+    variables = {
+        key: solver.NumVar(float(spec.lower), float(spec.upper), f"{key[0]}[{','.join(key[1])}]")
+        for key, spec in compiled.variables.items()
+    }
+
+    for constraint in compiled.constraints:
+        _add(solver, variables, constraint)
+
+    if compiled.objective.coeffs:
+        expression = solver.Sum(
+            [variables[key] * float(coeff) for key, coeff in compiled.objective.coeffs.items()]
+        )
+        solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
+
+    status = solver.Solve()
+    solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
+
+    return Solution(
+        status=_STATUS.get(status, "unknown"),
+        # The simplex method reaches a vertex or proves there is none; there
+        # is no "ran out of time with something feasible in hand" the way
+        # branch-and-bound has, so a solved LP is an optimal one.
+        optimal=status == pywraplp.Solver.OPTIMAL,
+        objective=(
+            solver.Objective().Value() if solved and compiled.objective.coeffs else None
+        ),
+        assignments=(
+            {key: var.solution_value() for key, var in variables.items()} if solved else {}
+        ),
+        wall_seconds=round(solver.WallTime() / 1000, 3),
+        solver=f"glop (ortools {_ORTOOLS_VERSION})",
+    )
+
+
+def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
+    """`left relation right`, rearranged so the variables sit on one side."""
+    coeffs: dict = dict(c.left.coeffs)
+    for key, coeff in c.right.coeffs.items():
+        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
+    rhs = float(c.right.const - c.left.const)
+
+    expression = solver.Sum([variables[key] * float(coeff) for key, coeff in coeffs.items()])
+
+    if c.relation == ">=":
+        solver.Add(expression >= rhs)
+    elif c.relation == "<=":
+        solver.Add(expression <= rhs)
+    elif c.relation in ("=", "=="):
+        solver.Add(expression == rhs)
+    else:  # pragma: no cover -- the contract admits <=, = and >= only, and
+        # a strict relation over the reals has no solver representation: the
+        # supremum it asks for is not attained.
+        raise ValueError(f"glop cannot express the relation {c.relation!r} over the reals")

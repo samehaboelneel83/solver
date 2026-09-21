@@ -41,13 +41,13 @@ export const REQUIRED_KEYS = ["version", "sets", "parameters", "variables", "con
 export const OPTIONAL_KEYS = ["objective"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
-export const VARIABLE_DOMAINS = ["binary", "integer"] as const;
+export const VARIABLE_DOMAINS = ["binary", "integer", "continuous"] as const;
 export const RELATIONS = ["<=", "=", ">="] as const;
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul"] as const;
 export const FILTER_OPERATORS = ["=", "!=", "<", "<=", ">", ">=", "in", "notIn"] as const;
-export const ARITHMETIC_ATTR_TYPES = ["integer"] as const;
+export const ARITHMETIC_ATTR_TYPES = ["integer", "number"] as const;
 
 export type VariableDomain = (typeof VARIABLE_DOMAINS)[number];
 export type Relation = (typeof RELATIONS)[number];
@@ -142,7 +142,8 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "variable_bounds_invalid",
     where: "shape",
-    text: "`lower` and `upper` are integers with lower <= upper, and belong only to an integer variable",
+    text:
+      "`lower` and `upper` are numbers with lower <= upper, and belong only to an integer or continuous variable",
   },
   { code: "constraints_not_array", where: "shape", text: "`constraints` is an array" },
   { code: "constraint_not_object", where: "shape", text: "each constraint is an object" },
@@ -211,7 +212,7 @@ export const IR_RULES: readonly IrRule[] = [
   },
   { code: "term_kind_unknown", where: "shape", text: "a term names one of the contract's kinds" },
   { code: "term_kind_ambiguous", where: "shape", text: "a term names exactly one kind" },
-  { code: "const_not_an_integer", where: "shape", text: "a `const` is an integer" },
+  { code: "const_not_a_number", where: "shape", text: "a `const` is a finite number" },
   {
     code: "reference_undeclared",
     where: "shape",

@@ -16,6 +16,7 @@ migration already created them.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -28,6 +29,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Identity,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
@@ -233,7 +235,12 @@ class ParameterDef(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     # entity_type ids, in index order: demand[day, shift, location].
     index_type_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
-    default_value: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # numeric(15, 6) since migration 0015: a parameter may be a rate, a
+    # price or a proportion, and those are the numbers that make a model
+    # continuous.
+    default_value: Mapped[Decimal] = mapped_column(
+        Numeric(15, 6), nullable=False, server_default="0"
+    )
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -248,7 +255,7 @@ class ParameterValue(Base):
     # keys, so the `parameter_value_validate` trigger checks them instead, and
     # `parameter_value_cleanup` deletes rows whose entities are deleted.
     entity_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
-    value: Mapped[int] = mapped_column(Integer, nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(15, 6), nullable=False)
 
 
 __all__ = [

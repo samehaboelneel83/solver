@@ -56,7 +56,10 @@ from app.core.db import SessionLocal
 from app.main import app
 from app.seed import seed_admin
 
-INT4_MAX = 2**31 - 1
+# The widest value `numeric(15, 6)` holds, and the finest. Nine integer
+# digits and six decimal places (migration 0015).
+NUMERIC_MAX = 10**9 - 1
+TOO_PRECISE = 1.0000005
 
 
 @pytest.fixture(autouse=True)
@@ -377,8 +380,13 @@ def test_duplicate_name_in_a_domain_is_409(client, auth_headers, domain_id, grid
     assert isinstance(response.json()["detail"], str)
 
 
-@pytest.mark.parametrize("bad", ["5", 5.5, 5.0, True, INT4_MAX + 1, -(INT4_MAX + 2)])
-def test_non_integer_or_out_of_range_default_is_422(client, auth_headers, domain_id, grid, bad):
+@pytest.mark.parametrize("bad", ["5", True, TOO_PRECISE, NUMERIC_MAX + 1, -(NUMERIC_MAX + 2)])
+def test_a_default_the_column_cannot_hold_exactly_is_422(client, auth_headers, domain_id, grid, bad):
+    """Decimals are admitted since migration 0015, and the strictness moves
+    rather than goes. Postgres *rounds* into `numeric(15, 6)` exactly as it
+    rounded into an int, so 1.0000005 would be stored as 1.000001 and nothing
+    would say so. `"5"` and `True` are refused on the old footing: a client
+    sending either has a type bug."""
     response = _make_def(
         client,
         auth_headers,
@@ -598,8 +606,10 @@ def test_a_malformed_cell_is_refused_even_when_its_value_is_the_default(
     assert _trigger_error(response)["kind"] == "parameter_index"
 
 
-@pytest.mark.parametrize("bad", ["5", 5.5, 5.0, True, None, INT4_MAX + 1])
-def test_non_integer_value_is_422_before_the_database(client, auth_headers, db, grid, demand, bad):
+@pytest.mark.parametrize("bad", ["5", True, None, TOO_PRECISE, NUMERIC_MAX + 1])
+def test_a_value_the_column_cannot_hold_exactly_is_422_before_the_database(
+    client, auth_headers, db, grid, demand, bad
+):
     """A valid cell comes *first*: had the handler run at all, it would have
     been written. That it was not proves the request layer refused the
     batch before any SQL was issued."""

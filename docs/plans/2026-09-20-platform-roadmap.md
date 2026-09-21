@@ -199,21 +199,36 @@ validates.
 
 ---
 
-## Phase 2 — Solver selection for linear and nonlinear problems — **DONE for the classes v1 expresses** (`24c894e`, `aeb5a6e`)
+## Phase 2 — Solver selection for linear and nonlinear problems — **DONE for every linear class** (`24c894e`, `aeb5a6e`, + continuous)
 
-Two backends (CP-SAT and branch-and-cut MILP), capabilities as data in a
-registry, and a policy recorded on every run: an explicit choice wins or is
+Three backends (CP-SAT, GLOP and branch-and-cut MILP), capabilities as data in
+a registry, and a policy recorded on every run: an explicit choice wins or is
 refused, otherwise the highest-ranked backend that fits, with the reason in
-`run.params.why_solver`. The test that gives it meaning is that both
-backends reach the same optimum on the same model -- with one backend, a
-wrong policy would have been invisible.
+`run.params.why_solver`. The test that gives it meaning is that two backends
+reach the same optimum on the same model -- with one backend, a wrong policy
+would have been invisible.
 
-**Still open**, and honestly so: the continuous classes (LP, QP, NLP, MINLP)
-in the table below. The contract admits only `binary` and `integer`
-variables (§7), so there is nothing yet to hand IPOPT or Bonmin. The
-schema decision named at the end of this section -- integer-only parameters
--- is the thing that blocks them, and it should be taken before an adapter
-is written, not after.
+**LP is now done too.** The schema decision named at the end of this section
+was taken rather than deferred: migration `0015` makes parameters, defaults,
+`run.objective` and `constraint_result`'s two numeric columns `numeric(15, 6)`,
+the contract admits `continuous` variables and fractional coefficients
+(contract §7), and GLOP is a third backend. The policy does real work now --
+before this, `LP` and `MILP` were labels on a model that went to the same
+solver either way, and a classifier that cannot change the outcome is
+decoration.
+
+One consequence worth carrying forward: **classification is no longer a pure
+function of the IR.** A model whose variables are all binary is still out of
+CP-SAT's reach if a parameter is 2.5, and the IR does not contain 2.5 -- the
+dataset does. So `classify()` takes the frozen dataset as an optional second
+input and may add `fractional-data` to what a backend must provide. It never
+changes the class.
+
+**Still open:** the nonlinear classes (QP, NLP, MINLP) in the table below.
+These are blocked on term forms, not on schema -- `mul` admits at most one
+variable factor, so no model this contract expresses is nonlinear. The
+convexity honesty rule further down this section is a **precondition** for
+that work, not a follow-up to it.
 
 **Goal:** the platform picks an appropriate technique, explains its choice, and
 lets a user override it.
@@ -258,12 +273,14 @@ general. Where the platform cannot prove convexity it must say the result is a
 *local* optimum, not a global one. A silent local optimum presented as the
 answer is the worst failure mode this feature can have.
 
-**Note the existing constraint:** `parameter_value.value` and
-`parameter_def.default_value` are `int`, deliberately, for CP-SAT (spec §2).
-Continuous solvers need rational or float parameters, so Phase 2 must either
-add a numeric type to parameters or restrict continuous models to
-non-parameter coefficients. **This is a schema decision, not an adapter
-detail.**
+**Note the existing constraint** — *taken, 2026-09-21; kept for the record.*
+`parameter_value.value` and `parameter_def.default_value` were `int`,
+deliberately, for CP-SAT (spec §2). Continuous solvers need rational or float
+parameters, so Phase 2 had either to add a numeric type to parameters or
+restrict continuous models to non-parameter coefficients. **This is a schema
+decision, not an adapter detail.** It went the first way: migration `0015`,
+`numeric(15, 6)`, sized so the JSON bridge is lossless. Contract §7.4 records
+why decimal rather than float, and why no stored hash moved.
 
 ---
 
@@ -308,11 +325,13 @@ The tables exist and are immutable; what is missing is everything around them.
   states what the two runs differ by and whether the patch is the only
   difference, because crediting a rule for a change the data caused is a
   wrong answer dressed as an insight.
-- **Sensitivity** -- **not done.** Shadow prices and reduced costs need an
-  LP relaxation the contract cannot express yet (see Phase 2). Slack per
-  constraint is available today and is the useful half: it names the rule
-  with no room left, which is the one to relax next. `constraint_result`
-  has no column for it, so this is a migration, not a read.
+- **Sensitivity** -- **not done, and no longer blocked.** This entry used to
+  say shadow prices needed an LP relaxation the contract could not express;
+  since `0015` and the GLOP backend it can, and GLOP exposes duals directly.
+  So this is now ordinary work rather than a dependency. Slack per constraint
+  remains the useful half and the place to start: it names the rule with no
+  room left, which is the one to relax next. `constraint_result` has no
+  column for it, so that part is a migration, not a read.
 
 A number is not an answer. The value of this phase is that it turns the tool
 from a calculator into something a planner can argue with.
@@ -392,12 +411,20 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
    supplied, so the contract was defined here and the solver becomes the
    consumer that adapts. If the real `ProblemIR` turns up, reconcile it
    against §9's invented list — those are the points most likely to differ.
-2. **Integer-only, or continuous too?** Deferred, not settled: v1 refuses
-   `continuous` **by name**, so the refusal is visible and reversible. Genuine
-   LP and NLP still need a numeric parameter type, which is a schema change
-   (`parameter_value.value`, `parameter_def.default_value`, `run.objective`)
-   plus relaxing the `integer`-attributes-only rule. Decide when a continuous
-   solver is actually in reach; until then the current refusal is honest.
+2. ~~**Integer-only, or continuous too?**~~ **Settled 2026-09-21: continuous
+   too.** The refusal was deliberately made "visible and reversible", and this
+   is it being reversed. Migration `0015` took the schema change this entry
+   named (`parameter_value.value`, `parameter_def.default_value`,
+   `run.objective`, and `constraint_result`'s two numeric columns), the
+   `integer`-attributes-only rule is relaxed, and GLOP is the continuous
+   solver that made it worth doing. Contract §7 carries the full argument,
+   including which of the original three reasons actually held.
+
+   The part worth remembering: reason 2 of the old refusal — that a
+   half-continuous model would arrive *by accident* through `number`
+   attributes — was never an argument against continuous. It was an argument
+   against admitting it silently, and it is answered by `fractional-data`
+   being detected and named on the run rather than assumed.
 3. **The traversal gap** (above) — freeze edges, precompute closures, or leave
    hierarchy presentational. Blocks nothing today, shapes the term algebra
    tomorrow.

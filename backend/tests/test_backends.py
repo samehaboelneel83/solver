@@ -144,7 +144,7 @@ def test_a_model_no_backend_takes_fails_with_the_reason():
 def test_the_registry_reports_what_this_build_actually_has():
     # Checked, not assumed: a registry that offered a backend this build
     # cannot create would fail at solve time instead of selection time.
-    assert available_names() == ["cp-sat", "milp"]
+    assert available_names() == ["cp-sat", "glop", "milp"]
     assert by_name("milp") is MILP
     assert by_name("nope") is None
 

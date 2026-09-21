@@ -1,20 +1,29 @@
-"""What kind of model is this?
+"""What kind of model is this, and what must a solver do to take it?
 
 Phase 2 of the roadmap wants the platform to pick a technique and say why.
-Classification is a pure function of the IR -- no dataset, no solver -- so it
-is testable on its own and belongs beside the contract rather than inside a
-backend adapter.
+Classification is the half of that which has nothing to do with any solver, so
+it lives here rather than inside a backend adapter.
 
-v1 can only express one class (integral and linear, by decision -- see the
-contract's §7), so this returns `IP` for everything it accepts. It exists
-anyway, and says *why* it concluded that, because the moment a second class
-is expressible the selection policy needs a classifier that was not bolted
-on afterwards.
+**Two outputs, doing different jobs.** `model_class` is the name a person
+recognises -- LP, IP, MILP -- and is what a run is labelled with. `needs` is
+what the registry actually matches against, and is deliberately finer-grained
+than the class: `fractional-data` is not visible in the class name at all, yet
+it is the thing that decides whether CP-SAT may be offered an otherwise
+perfectly integral model.
+
+**Why the data is an input.** Until migration 0015 every number in the system
+was an integer and classification was a pure function of the IR. It no longer
+can be: a model whose variables are all binary is still out of CP-SAT's reach
+if a parameter is 2.5. The IR alone cannot see that, because the IR declares
+the *shape* of a model and the dataset supplies its *numbers*. So `data` is an
+optional second input, and it can only ever add `fractional-data` -- it never
+changes the class, which stays a property of the model itself.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
@@ -26,7 +35,7 @@ class Classification:
     needs: set[str]
 
 
-def classify(ir: dict[str, Any]) -> Classification:
+def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classification:
     domains = {spec.get("domain", "binary") for spec in ir.get("variables", {}).values()}
     reasons: list[str] = []
     needs = {"linear"}
@@ -35,17 +44,157 @@ def classify(ir: dict[str, Any]) -> Classification:
         reasons.append("no variables, so nothing is decided")
         return Classification("trivial", reasons, needs)
 
-    if domains == {"binary"}:
+    integral = domains & {"binary", "integer"}
+    continuous = domains & {"continuous"}
+
+    if continuous and integral:
+        model_class = "MILP"
+        needs |= {"integral", "continuous"}
+        reasons.append(
+            f"some variables are integral ({', '.join(sorted(integral))}) and some are "
+            "continuous, so the model is mixed"
+        )
+    elif continuous:
+        model_class = "LP"
+        needs.add("continuous")
+        reasons.append("every variable is continuous")
+    elif domains == {"binary"}:
+        model_class = "IP"
+        needs.add("integral")
         reasons.append("every variable is binary")
     elif domains <= {"binary", "integer"}:
+        model_class = "IP"
+        needs.add("integral")
         reasons.append(f"variables are integral ({', '.join(sorted(domains))})")
-    else:  # pragma: no cover -- the contract refuses `continuous` by name
-        reasons.append(f"variable domains {sorted(domains)} are not integral")
+    else:  # pragma: no cover -- the validator pins the vocabulary
+        reasons.append(f"variable domains {sorted(domains)} are not ones this platform knows")
         return Classification("unsupported", reasons, needs)
 
-    needs.add("integral")
     reasons.append("all terms are linear (the contract refuses a product of two variables)")
+
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
         needs.add("soft-constraints")
         reasons.append("at least one constraint is soft, so the backend must carry penalties")
-    return Classification("IP", reasons, needs)
+
+    fractional = _fractional(ir, data)
+    if fractional:
+        needs.add("fractional-data")
+        reasons.append(
+            f"{fractional} is not a whole number, so a solver that works in integers "
+            "cannot take this model without changing it"
+        )
+
+    return Classification(model_class, reasons, needs)
+
+
+def _fractional(ir: dict[str, Any], data: dict[str, Any] | None) -> str | None:
+    """The first non-whole number in the model, named, or None.
+
+    Named rather than counted, because the reason is recorded on the run and
+    "demand is 2.5" tells someone which number made their model continuous
+    where "it has fractional data" sends them looking through all of them.
+    """
+    for name, spec in ir.get("variables", {}).items():
+        for key in ("lower", "upper"):
+            if key in spec and not _whole(spec[key]):
+                return f"{name}'s {key} bound ({spec[key]})"
+
+    found = _fractional_in_terms(ir)
+    if found is not None:
+        return found
+
+    if data is None:
+        return None
+
+    for name, rows in (data.get("parameters") or {}).items():
+        for row in rows:
+            if not _whole(row.get("value")):
+                return f"the parameter {name} ({row.get('value')})"
+    for name, value in (data.get("parameter_defaults") or {}).items():
+        if not _whole(value):
+            return f"the default of the parameter {name} ({value})"
+
+    # An `attr` used as a number: only the ones the model actually reads
+    # matter, so the set rows are searched by the attribute names the terms
+    # name rather than wholesale.
+    wanted = _attributes_used(ir)
+    for set_name, rows in (data.get("sets") or {}).items():
+        for row in rows:
+            for attribute in wanted:
+                if attribute in row and not _whole(row[attribute]):
+                    return f"{set_name}.{attribute} ({row[attribute]})"
+    return None
+
+
+def _fractional_in_terms(ir: dict[str, Any]) -> str | None:
+    for spec in ir.get("constraints", []):
+        for side in ("left", "right"):
+            found = _walk_const(spec.get(side))
+            if found is not None:
+                return f"a constant in {spec.get('id', 'a constraint')} ({found})"
+    for term in (ir.get("objective") or {}).get("terms", []):
+        if not _whole(term.get("weight", 1)):
+            return f"the weight of the objective term {term.get('id')} ({term.get('weight')})"
+        found = _walk_const(term.get("expression"))
+        if found is not None:
+            return f"a constant in the objective term {term.get('id')} ({found})"
+    return None
+
+
+def _walk_const(term: Any) -> Any:
+    if not isinstance(term, dict):
+        return None
+    if "const" in term and not _whole(term["const"]):
+        return term["const"]
+    for key in ("sum", "add", "mul"):
+        body = term.get(key)
+        if isinstance(body, dict):
+            found = _walk_const(body)
+            if found is not None:
+                return found
+        elif isinstance(body, list):
+            for item in body:
+                found = _walk_const(item)
+                if found is not None:
+                    return found
+    return None
+
+
+def _attributes_used(ir: dict[str, Any]) -> set[str]:
+    found: set[str] = set()
+
+    def walk(term: Any) -> None:
+        if not isinstance(term, dict):
+            return
+        if "attr" in term and isinstance(term["attr"], dict):
+            name = term["attr"].get("name")
+            if isinstance(name, str):
+                found.add(name)
+        for key in ("sum", "add", "mul"):
+            body = term.get(key)
+            if isinstance(body, dict):
+                walk(body)
+            elif isinstance(body, list):
+                for item in body:
+                    walk(item)
+
+    for spec in ir.get("constraints", []):
+        walk(spec.get("left"))
+        walk(spec.get("right"))
+    for term in (ir.get("objective") or {}).get("terms", []):
+        walk(term.get("expression"))
+    return found
+
+
+def _whole(value: Any) -> bool:
+    """True for anything that is a whole number, and for anything that is not
+    a number at all -- a string attribute is not this function's business, and
+    calling it fractional would route a model away from CP-SAT for no reason.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal, str)):
+        return True
+    try:
+        as_decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return True
+    return as_decimal == as_decimal.to_integral_value()

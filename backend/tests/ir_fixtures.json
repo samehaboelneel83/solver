@@ -37,88 +37,245 @@
     "entities, which is what lets `workforce` below be asserted equal to",
     "the seeded IR itself."
   ],
-
   "domain": {
     "entityTypes": [
       {
         "name": "employee",
         "role": "agent",
         "attributes": [
-          { "name": "full_name", "data_type": "text", "required": true },
-          { "name": "hours_per_week", "data_type": "integer", "default_value": 40 },
-          { "name": "hourly_rate", "data_type": "number", "default_value": 20.0 },
-          { "name": "on_call", "data_type": "boolean", "default_value": false },
-          { "name": "grade", "data_type": "enum", "enum_values": ["junior", "mid", "senior"], "default_value": "mid" },
-          { "name": "hired_on", "data_type": "date" }
+          {
+            "name": "full_name",
+            "data_type": "text",
+            "required": true
+          },
+          {
+            "name": "hours_per_week",
+            "data_type": "integer",
+            "default_value": 40
+          },
+          {
+            "name": "hourly_rate",
+            "data_type": "number",
+            "default_value": 20.0
+          },
+          {
+            "name": "on_call",
+            "data_type": "boolean",
+            "default_value": false
+          },
+          {
+            "name": "grade",
+            "data_type": "enum",
+            "enum_values": [
+              "junior",
+              "mid",
+              "senior"
+            ],
+            "default_value": "mid"
+          },
+          {
+            "name": "hired_on",
+            "data_type": "date"
+          }
         ]
       },
-      { "name": "unit", "role": "org", "attributes": [{ "name": "cost_centre", "data_type": "text" }] },
+      {
+        "name": "unit",
+        "role": "org",
+        "attributes": [
+          {
+            "name": "cost_centre",
+            "data_type": "text"
+          }
+        ]
+      },
       {
         "name": "day",
         "role": "time",
-        "attributes": [{ "name": "is_weekend", "data_type": "boolean", "default_value": false }]
+        "attributes": [
+          {
+            "name": "is_weekend",
+            "data_type": "boolean",
+            "default_value": false
+          }
+        ]
       },
       {
         "name": "shift",
         "role": "time",
         "attributes": [
-          { "name": "starts_at", "data_type": "time", "required": true },
-          { "name": "ends_at", "data_type": "time", "required": true }
+          {
+            "name": "starts_at",
+            "data_type": "time",
+            "required": true
+          },
+          {
+            "name": "ends_at",
+            "data_type": "time",
+            "required": true
+          }
         ]
       }
     ],
-    "parameters": [{ "name": "demand", "index": ["day", "shift"], "default_value": 1 }]
+    "parameters": [
+      {
+        "name": "demand",
+        "index": [
+          "day",
+          "shift"
+        ],
+        "default_value": 1
+      }
+    ]
   },
-
   "valid": [
     {
       "name": "workforce",
       "why": "The seeded demo, expressed rather than merely named. A backend test asserts this is byte-for-byte what `app.seed` stores, so the seed cannot drift from the contract it is the worked example of.",
       "ir": {
         "version": 1,
-        "sets": ["employee", "unit", "day", "shift"],
-        "parameters": { "demand": { "index": ["day", "shift"] } },
-        "variables": { "assign": { "index": ["employee", "day", "shift"], "domain": "binary" } },
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
         "constraints": [
           {
             "id": "c_cover_demand",
             "note": "each day/shift is staffed to at least demand[day, shift]",
-            "forall": [{ "index": "d", "set": "day" }, { "index": "s", "set": "shift" }],
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
             "left": {
-              "sum": { "var": "assign", "index": ["e", "d", "s"] },
-              "over": [{ "index": "e", "set": "employee" }]
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
             },
             "relation": ">=",
-            "right": { "par": "demand", "index": ["d", "s"] },
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
             "severity": "hard"
           },
           {
             "id": "c_one_shift_per_day",
             "note": "nobody works two shifts in a day",
-            "forall": [{ "index": "e", "set": "employee" }, { "index": "d", "set": "day" }],
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
             "left": {
-              "sum": { "var": "assign", "index": ["e", "d", "s"] },
-              "over": [{ "index": "s", "set": "shift" }]
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
             },
             "relation": "<=",
-            "right": { "const": 1 },
+            "right": {
+              "const": 1
+            },
             "severity": "hard"
           },
           {
             "id": "c_max_hours",
             "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
-            "forall": [{ "index": "e", "set": "employee" }],
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
             "left": {
               "mul": [
-                { "const": 8 },
                 {
-                  "sum": { "var": "assign", "index": ["e", "d", "s"] },
-                  "over": [{ "index": "d", "set": "day" }, { "index": "s", "set": "shift" }]
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
                 }
               ]
             },
             "relation": "<=",
-            "right": { "attr": { "of": "e", "name": "hours_per_week" } },
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
             "severity": "hard"
           }
         ],
@@ -129,11 +286,27 @@
               "id": "o_shifts_worked",
               "weight": 1,
               "expression": {
-                "sum": { "var": "assign", "index": ["e", "d", "s"] },
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
                 "over": [
-                  { "index": "e", "set": "employee" },
-                  { "index": "d", "set": "day" },
-                  { "index": "s", "set": "shift" }
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
                 ]
               }
             }
@@ -148,7 +321,12 @@
         "version": 1,
         "sets": [],
         "parameters": {},
-        "variables": { "x": { "index": [], "domain": "binary" } },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
         "constraints": []
       }
     },
@@ -157,9 +335,19 @@
       "why": "`unit` is in `sets` and in no expression. `sets` says what the dataset must freeze, not what the arithmetic touches, so this is legal -- and it is what the seeded model does.",
       "ir": {
         "version": 1,
-        "sets": ["day", "unit"],
+        "sets": [
+          "day",
+          "unit"
+        ],
         "parameters": {},
-        "variables": { "open": { "index": ["day"], "domain": "binary" } },
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
         "constraints": []
       }
     },
@@ -168,16 +356,55 @@
       "why": "`severity: soft` with a positive integer weight -- the shape `scenario.patch`'s `soften` produces and `harden` reverses.",
       "ir": {
         "version": 1,
-        "sets": ["day", "shift"],
-        "parameters": { "demand": { "index": ["day", "shift"] } },
-        "variables": { "open": { "index": ["day", "shift"], "domain": "binary" } },
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "open": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
         "constraints": [
           {
             "id": "c_cover",
-            "forall": [{ "index": "d", "set": "day" }, { "index": "s", "set": "shift" }],
-            "left": { "var": "open", "index": ["d", "s"] },
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
             "relation": ">=",
-            "right": { "par": "demand", "index": ["d", "s"] },
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
             "severity": "soft",
             "weight": 100
           }
@@ -189,20 +416,46 @@
       "why": "A `where` on a binding, using the expression catalogue's own `=` over a boolean attribute of the bound set: weekend days only.",
       "ir": {
         "version": 1,
-        "sets": ["day"],
+        "sets": [
+          "day"
+        ],
         "parameters": {},
-        "variables": { "open": { "index": ["day"], "domain": "binary" } },
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
         "constraints": [
           {
             "id": "c_weekend_cover",
             "left": {
-              "sum": { "var": "open", "index": ["d"] },
+              "sum": {
+                "var": "open",
+                "index": [
+                  "d"
+                ]
+              },
               "over": [
-                { "index": "d", "set": "day", "where": [{ "attr": "is_weekend", "op": "=", "value": true }] }
+                {
+                  "index": "d",
+                  "set": "day",
+                  "where": [
+                    {
+                      "attr": "is_weekend",
+                      "op": "=",
+                      "value": true
+                    }
+                  ]
+                }
               ]
             },
             "relation": ">=",
-            "right": { "const": 2 },
+            "right": {
+              "const": 2
+            },
             "severity": "hard"
           }
         ]
@@ -213,20 +466,49 @@
       "why": "`in` over an enum, with a list value -- the one filter operator whose value is an array. `operatorsByType` in the expression catalogue is what says an enum offers it.",
       "ir": {
         "version": 1,
-        "sets": ["employee"],
+        "sets": [
+          "employee"
+        ],
         "parameters": {},
-        "variables": { "pick": { "index": ["employee"], "domain": "binary" } },
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
         "constraints": [
           {
             "id": "c_seniors",
             "left": {
-              "sum": { "var": "pick", "index": ["e"] },
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
               "over": [
-                { "index": "e", "set": "employee", "where": [{ "attr": "grade", "op": "in", "value": ["mid", "senior"] }] }
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "where": [
+                    {
+                      "attr": "grade",
+                      "op": "in",
+                      "value": [
+                        "mid",
+                        "senior"
+                      ]
+                    }
+                  ]
+                }
               ]
             },
             "relation": ">=",
-            "right": { "const": 1 },
+            "right": {
+              "const": 1
+            },
             "severity": "hard"
           }
         ]
@@ -237,15 +519,41 @@
       "why": "The other admitted variable domain. Bounds are optional and, when given, are integers -- like every other number in a v1 model.",
       "ir": {
         "version": 1,
-        "sets": ["day"],
+        "sets": [
+          "day"
+        ],
         "parameters": {},
-        "variables": { "overtime": { "index": ["day"], "domain": "integer", "lower": 0, "upper": 4 } },
+        "variables": {
+          "overtime": {
+            "index": [
+              "day"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 4
+          }
+        },
         "constraints": [
           {
             "id": "c_overtime_total",
-            "left": { "sum": { "var": "overtime", "index": ["d"] }, "over": [{ "index": "d", "set": "day" }] },
+            "left": {
+              "sum": {
+                "var": "overtime",
+                "index": [
+                  "d"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                }
+              ]
+            },
             "relation": "<=",
-            "right": { "const": 10 },
+            "right": {
+              "const": 10
+            },
             "severity": "hard"
           }
         ]
@@ -256,9 +564,22 @@
       "why": "Two terms, two ids, two weights, one sense -- and `add` used inside one of them.",
       "ir": {
         "version": 1,
-        "sets": ["day"],
+        "sets": [
+          "day"
+        ],
         "parameters": {},
-        "variables": { "open": { "index": ["day"], "domain": "binary" }, "extra": { "index": [], "domain": "integer" } },
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          },
+          "extra": {
+            "index": [],
+            "domain": "integer"
+          }
+        },
         "constraints": [],
         "objective": {
           "sense": "minimize",
@@ -266,104 +587,2500 @@
             {
               "id": "o_open_days",
               "weight": 1,
-              "expression": { "sum": { "var": "open", "index": ["d"] }, "over": [{ "index": "d", "set": "day" }] }
+              "expression": {
+                "sum": {
+                  "var": "open",
+                  "index": [
+                    "d"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  }
+                ]
+              }
             },
             {
               "id": "o_extra",
               "weight": 5,
-              "expression": { "add": [{ "var": "extra", "index": [] }, { "const": 0 }] }
+              "expression": {
+                "add": [
+                  {
+                    "var": "extra",
+                    "index": []
+                  },
+                  {
+                    "const": 0
+                  }
+                ]
+              }
             }
           ]
         }
       }
+    },
+    {
+      "name": "continuous_variable",
+      "why": "a continuous variable, admitted by migration 0015. It is what makes LP a class the platform can express, and what gives the solver-selection policy something to choose between",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [],
+            "domain": "continuous"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "name": "number_attribute_as_coefficient",
+      "why": "`hourly_rate` is a `number`, and reading it as a coefficient is exactly how a model becomes continuous. It is admitted since migration 0015 and the classifier reports `fractional-data`, which routes it away from cp-sat",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "var": "pick",
+              "index": [
+                "e"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hourly_rate"
+              }
+            },
+            "severity": "hard"
+          }
+        ]
+      }
     }
   ],
-
   "invalid": [
-    { "code": "ir_not_object", "loc": [], "why": "an array is not a model", "ir": [] },
-    { "code": "version_missing", "loc": ["version"], "why": "the document carries its version from the first one ever written", "ir": { "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "version_unsupported", "loc": ["version"], "why": "JSON true is not version 1, but in Python `True == 1` and `bool` subclasses `int`, so a validator that compared with == alone would accept this and the two languages would disagree about the same document", "ir": { "version": true, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "version_unsupported", "loc": ["version"], "why": "a version this platform does not express is refused, not guessed at", "ir": { "version": 2, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "key_missing", "loc": ["constraints"], "why": "a frozen model states its constraints, even when it has none", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } } } },
-    { "code": "key_unknown", "loc": ["sense"], "why": "a top-level typo (here `sense` outside `objective`) is a silently ignored model half", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "sense": "minimize" } },
-
-    { "code": "sets_not_array", "loc": ["sets"], "why": "snapshot_dataset() reads `sets` with jsonb_array_elements_text; an object reaches it as SQLSTATE 22023, i.e. a 500", "ir": { "version": 1, "sets": { "day": 1 }, "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "set_not_a_name", "loc": ["sets", 0], "why": "entity_type.name carries the same CHECK; a name that cannot satisfy it cannot name a real type", "ir": { "version": 1, "sets": ["Day"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "set_duplicated", "loc": ["sets", 1], "why": "a repeated set would be frozen twice into the same key", "ir": { "version": 1, "sets": ["day", "day"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-
-    { "code": "parameters_not_object", "loc": ["parameters"], "why": "snapshot_dataset() reads it with jsonb_object_keys", "ir": { "version": 1, "sets": [], "parameters": [], "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_not_a_name", "loc": ["parameters", "Demand"], "why": "parameter_def.name carries the same CHECK", "ir": { "version": 1, "sets": ["day"], "parameters": { "Demand": { "index": ["day"] } }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_not_object", "loc": ["parameters", "demand"], "why": "the declaration carries the index; an array here loses it", "ir": { "version": 1, "sets": ["day"], "parameters": { "demand": ["day"] }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_index_not_array", "loc": ["parameters", "demand", "index"], "why": "a parameter is indexed by an ordered, non-empty list of sets, as parameter_def.index_type_ids is", "ir": { "version": 1, "sets": ["day"], "parameters": { "demand": { "index": "day" } }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_index_not_declared", "loc": ["parameters", "demand", "index", 0], "why": "a parameter indexed by a set the model never declares is indexed by data the dataset will not carry", "ir": { "version": 1, "sets": ["day"], "parameters": { "demand": { "index": ["week"] } }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-
-    { "code": "variables_not_object", "loc": ["variables"], "why": "variables are keyed by name, like parameters", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": [], "constraints": [] } },
-    { "code": "variables_empty", "loc": ["variables"], "why": "a model with nothing to decide is not a model", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": {}, "constraints": [] } },
-    { "code": "variable_not_a_name", "loc": ["variables", "Open"], "why": "variable names are used verbatim in solution keys, so they follow the platform's one name rule", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "Open": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "variable_not_object", "loc": ["variables", "open"], "why": "the declaration carries the index and the domain", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": "binary" }, "constraints": [] } },
-    { "code": "variable_index_not_array", "loc": ["variables", "open", "index"], "why": "a scalar variable declares an empty index, never a missing or scalar one", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": "day", "domain": "binary" } }, "constraints": [] } },
-    { "code": "variable_index_not_declared", "loc": ["variables", "open", "index", 0], "why": "a variable indexed by an undeclared set would be sized from data the dataset does not carry", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [] } },
-    { "code": "variable_domain_missing", "loc": ["variables", "open", "domain"], "why": "nothing may default a variable's domain: it decides the model's class", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": { "index": [] } }, "constraints": [] } },
-    { "code": "variable_domain_unsupported", "loc": ["variables", "open", "domain"], "why": "v1 is integral by decision (spec 2: parameter values and defaults are int, for CP-SAT). A continuous variable is refused by name so the refusal says what is missing, rather than being silently absent from the vocabulary", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": { "index": [], "domain": "continuous" } }, "constraints": [] } },
-    { "code": "variable_bounds_invalid", "loc": ["variables", "open", "lower"], "why": "and on a bound", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": { "index": [], "domain": "integer", "lower": true } }, "constraints": [] } },
-    { "code": "variable_bounds_invalid", "loc": ["variables", "open", "upper"], "why": "an inverted bound makes a variable with no admissible value, which is an infeasibility nobody wrote down on purpose", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "open": { "index": [], "domain": "integer", "lower": 3, "upper": 1 } }, "constraints": [] } },
-
-    { "code": "constraints_not_array", "loc": ["constraints"], "why": "constraints are ordered and addressed by id, not keyed", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": {} } },
-    { "code": "constraint_not_object", "loc": ["constraints", 0], "why": "a bare id is the shape the seeded sketch nearly had", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": ["c_one"] } },
-    { "code": "key_unknown", "loc": ["constraints", 0, "kind"], "why": "`kind` is a Phase 1 column, not a v1 IR key; accepting it would store a field nothing reads", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "kind": "cover", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "constraint_id_not_a_name", "loc": ["constraints", 0, "id"], "why": "constraint ids travel into scenario.patch and constraint_result.constraint_id; one spelling rule for all three", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "constraint_id_duplicated", "loc": ["constraints", 1, "id"], "why": "constraint_result is keyed (run_id, constraint_id); two constraints with one id could not both report", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }, { "id": "c_one", "left": { "var": "x", "index": [] }, "relation": ">=", "right": { "const": 0 }, "severity": "hard" }] } },
-    { "code": "constraint_expression_missing", "loc": ["constraints", 0, "left"], "why": "THE SEEDED SKETCH'S FAULT: an id and a prose note name a constraint without expressing it. Nothing can solve it, classify it or diff it", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "note": "nobody works two shifts in a day" }] } },
-    { "code": "constraint_relation_unsupported", "loc": ["constraints", 0, "relation"], "why": "strict inequalities are not in v1: over integers they are the non-strict one shifted by 1, and admitting both spellings would make two IRs for one model", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "constraint_severity_unsupported", "loc": ["constraints", 0, "severity"], "why": "constraint_result.hard is a boolean; there is no third state to record", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "medium" }] } },
-    { "code": "constraint_weight_invalid", "loc": ["constraints", 0, "weight"], "why": "and on a penalty, where `true` would become a weight of 1 -- the lightest possible penalty, chosen by a type error rather than by anyone", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "soft", "weight": true }] } },
-    { "code": "constraint_weight_invalid", "loc": ["constraints", 0, "weight"], "why": "the other half of the same rule, which no other case reached: a HARD constraint carrying a weight. A weight there is a penalty for breaking something that cannot be broken -- the author meant `soft`, or meant a scenario", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard", "weight": 5 }] } },
-    { "code": "constraint_weight_invalid", "loc": ["constraints", 0, "weight"], "why": "a soft constraint with no penalty is a constraint the solver is free to ignore, which is a disable nobody asked for", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "soft" }] } },
-
-    { "code": "binding_not_object", "loc": ["constraints", 0, "forall", 0], "why": "a binding names an index AND the set it ranges over; a bare string says only half", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": ["d"], "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "binding_index_not_a_name", "loc": ["constraints", 0, "forall", 0, "index"], "why": "index names are the one vocabulary a term may invent, so they follow the same rule as every other name here", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "D", "set": "day" }], "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "binding_index_duplicated", "loc": ["constraints", 0, "forall", 1, "index"], "why": "shadowing would make `d` mean whichever binding the reader looked at last", "ir": { "version": 1, "sets": ["day", "shift"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day" }, { "index": "d", "set": "shift" }], "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "binding_set_not_declared", "loc": ["constraints", 0, "forall", 0, "set"], "why": "ranging over a set the model never declared is ranging over data the dataset will not carry", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "w", "set": "week" }], "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "bindings_invalid", "loc": ["constraints", 0, "forall"], "why": "an empty `forall` is a constraint written as if it were indexed and is not; omitting the key says that unambiguously", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [], "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-
-    { "code": "where_not_array", "loc": ["constraints", 0, "forall", 0, "where"], "why": "filters are an AND-list; v1 has no groups and no `or`", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day", "where": { "attr": "is_weekend", "op": "=", "value": true } }], "left": { "var": "open", "index": ["d"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "where_filter_malformed", "loc": ["constraints", 0, "forall", 0, "where", 0, "op"], "why": "every filter states all three of attribute, comparison and value; v1 has no unary filters", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day", "where": [{ "attr": "is_weekend" }] }], "left": { "var": "open", "index": ["d"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "where_operator_unknown", "loc": ["constraints", 0, "forall", 0, "where", 0, "op"], "why": "the filter vocabulary is a subset of the expression catalogue's operators, and nothing outside it", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day", "where": [{ "attr": "is_weekend", "op": "~", "value": true }] }], "left": { "var": "open", "index": ["d"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-
-    { "code": "term_not_object", "loc": ["constraints", 0, "left"], "why": "a bare number is not a term: every term says what kind it is, so a reader never has to infer", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": 1, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "term_kind_unknown", "loc": ["constraints", 0, "left"], "why": "an unknown kind is a term this version cannot compile, and guessing at it is how a solver silently drops half a model", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "total": "x" }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "term_kind_ambiguous", "loc": ["constraints", 0, "left"], "why": "two kinds in one object leaves which one wins to the reader's key order", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "const": 1, "add": [{ "const": 2 }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "const_not_an_integer", "loc": ["constraints", 0, "right", "const"], "why": "the same `bool` trap on a coefficient: `isinstance(True, int)` is true in Python, so a coefficient of `true` would become a silent 1", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": true }, "severity": "hard" }] } },
-    { "code": "const_not_an_integer", "loc": ["constraints", 0, "right", "const"], "why": "v1 arithmetic is integral throughout; 1.5 is the value that would quietly make the model continuous", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "x", "index": [] }, "relation": "<=", "right": { "const": 1.5 }, "severity": "hard" }] } },
-    { "code": "reference_undeclared", "loc": ["constraints", 0, "left", "sum", "var"], "why": "the same fault one level down, INSIDE a sum's body. Without this case a validator that bound a sum's indices and then never walked what it was summing would pass every other fixture in this file", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "sum": { "var": "shut", "index": ["d"] }, "over": [{ "index": "d", "set": "day" }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "reference_undeclared", "loc": ["constraints", 0, "left", "var"], "why": "a misspelt variable is the commonest way an IR compiles to a smaller model than it reads as", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "var": "y", "index": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "reference_index_arity", "loc": ["constraints", 0, "left", "index"], "why": "a variable subscripted with fewer indices than it was declared with is a different variable", "ir": { "version": 1, "sets": ["day", "shift"], "parameters": {}, "variables": { "open": { "index": ["day", "shift"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day" }, { "index": "s", "set": "shift" }], "left": { "var": "open", "index": ["d"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "index_not_bound", "loc": ["constraints", 0, "left", "index", 1], "why": "a free index has no range, so the constraint has no instances", "ir": { "version": 1, "sets": ["day", "shift"], "parameters": {}, "variables": { "open": { "index": ["day", "shift"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day" }], "left": { "var": "open", "index": ["d", "s"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "index_set_mismatch", "loc": ["constraints", 0, "left", "index", 0], "why": "`open` is indexed [day, shift]; subscripting it [s, d] type-checks by arity and is the wrong model", "ir": { "version": 1, "sets": ["day", "shift"], "parameters": {}, "variables": { "open": { "index": ["day", "shift"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day" }, { "index": "s", "set": "shift" }], "left": { "var": "open", "index": ["s", "d"] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "sum_malformed", "loc": ["constraints", 0, "left", "over"], "why": "a sum with no `over` is not a sum; it is its own body with a misleading name", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "d", "set": "day" }], "left": { "sum": { "var": "open", "index": ["d"] } }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "add_empty", "loc": ["constraints", 0, "left", "add"], "why": "an empty sum of terms is zero, and writing zero as `{\"const\": 0}` says so", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "add": [] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "mul_arity", "loc": ["constraints", 0, "left", "mul"], "why": "exactly two factors, so the linearity rule below is a check on a pair and not a search", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "mul": [{ "const": 2 }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "mul_not_linear", "loc": ["constraints", 0, "left", "mul"], "why": "x*x is quadratic. v1 admits linear models only, and the refusal is where the platform says so rather than the solver failing later", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "mul": [{ "var": "x", "index": [] }, { "var": "x", "index": [] }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-
-    { "code": "objective_not_object", "loc": ["objective"], "why": "the key is omitted for a feasibility problem; it is never a bare sense", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": "minimize" } },
-    { "code": "objective_sense_unsupported", "loc": ["objective", "sense"], "why": "`run.objective` records one number; there is no third direction to record it in", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "lowest", "terms": [{ "id": "o_x", "weight": 1, "expression": { "var": "x", "index": [] } }] } } },
-    { "code": "objective_terms_invalid", "loc": ["objective", "terms"], "why": "an objective with no terms is no objective, and omitting the key says that", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "minimize", "terms": [] } } },
-    { "code": "objective_term_malformed", "loc": ["objective", "terms", 0, "weight"], "why": "and on an objective term's weight", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "minimize", "terms": [{ "id": "o_x", "weight": true, "expression": { "var": "x", "index": [] } }] } } },
-    { "code": "objective_term_malformed", "loc": ["objective", "terms", 0, "expression"], "why": "THE SEEDED SKETCH'S OTHER FAULT: `{\"id\": \"o_cost\", \"weight\": 1}` names a term that nothing defines", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "minimize", "terms": [{ "id": "o_cost", "weight": 1 }] } } },
-    { "code": "const_not_an_integer", "loc": ["objective", "terms", 0, "expression", "const"], "why": "a fault INSIDE an objective term's expression. Without this case a validator that checked a term's id and weight and then never walked what it was weighting would pass every other fixture in this file", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "minimize", "terms": [{ "id": "o_x", "weight": 1, "expression": { "const": 1.5 } }] } } },
-    { "code": "objective_term_id_duplicated", "loc": ["objective", "terms", 1, "id"], "why": "term ids are how a result explains which part of the objective cost what", "ir": { "version": 1, "sets": [], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [], "objective": { "sense": "minimize", "terms": [{ "id": "o_x", "weight": 1, "expression": { "var": "x", "index": [] } }, { "id": "o_x", "weight": 2, "expression": { "var": "x", "index": [] } }] } } },
-
-    { "code": "depth_exceeded", "loc": ["constraints", 0, "left", "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0, "add", 0], "why": "a term nested past the limit is past what a builder can render and what a reader can check. `nestedAdd` wraps a `const` in 14 `add`s; the outermost is at depth 1, so the thirteenth is the first past maxDepth 12 and the loc names it", "generate": { "kind": "nestedAdd", "count": 14 } },
-    { "code": "terms_exceeded", "loc": ["constraints", 0, "left", "add", 499], "why": "the bound on total work, so an IR cannot be a denial of service against the validator. The counter increments on entry to each term and the refusal names the term that took it past the limit: the `add` is term 1, so term 501 is summand 499", "generate": { "kind": "wideAdd", "count": 600 } },
-    { "code": "ir_too_large", "loc": [], "why": "the same limit with MULTI-BYTE padding. `padNoteWide` is 200000 two-byte characters: under the limit counted in characters (or in JavaScript string length), over it counted in UTF-8 bytes. Without this case both validators could measure whichever they liked and still agree with the ASCII case above", "generate": { "kind": "padNoteWide", "count": 200000 } },
-    { "code": "ir_too_large", "loc": [], "why": "the transport bound. Checked first, before any other rule, because everything else walks the document", "generate": { "kind": "padNote", "count": 300000 } },
-
-    { "code": "set_not_in_domain", "loc": ["sets", 0], "why": "TODAY THIS IS A 500: snapshot_dataset() raises `IR set \"%\" has no entity_type in this domain`, as P0001, long after the version was accepted. It belongs at submit time", "ir": { "version": 1, "sets": ["machine"], "parameters": {}, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_not_in_domain", "loc": ["parameters", "supply"], "why": "the same 500, by the other loop of the same function", "ir": { "version": 1, "sets": ["day"], "parameters": { "supply": { "index": ["day"] } }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "parameter_index_mismatch", "loc": ["parameters", "demand", "index"], "why": "demand is declared over [day, shift] in the domain. An IR that reads it as [shift, day] snapshots without complaint and solves the wrong model -- snapshot_dataset() emits cells keyed by type name, so nothing downstream notices either", "ir": { "version": 1, "sets": ["day", "shift"], "parameters": { "demand": { "index": ["shift", "day"] } }, "variables": { "x": { "index": [], "domain": "binary" } }, "constraints": [] } },
-    { "code": "attribute_not_declared", "loc": ["constraints", 0, "right", "attr", "name"], "why": "the attribute travels in the snapshot's set rows; one the entity type does not declare is never in them", "ir": { "version": 1, "sets": ["employee"], "parameters": {}, "variables": { "pick": { "index": ["employee"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "e", "set": "employee" }], "left": { "var": "pick", "index": ["e"] }, "relation": "<=", "right": { "attr": { "of": "e", "name": "hours" } }, "severity": "hard" }] } },
-    { "code": "attribute_not_arithmetic", "loc": ["constraints", 0, "right", "attr", "name"], "why": "`hourly_rate` is a `number`. Admitting it as a coefficient is how an integer-only model becomes continuous without anyone deciding to", "ir": { "version": 1, "sets": ["employee"], "parameters": {}, "variables": { "pick": { "index": ["employee"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "forall": [{ "index": "e", "set": "employee" }], "left": { "var": "pick", "index": ["e"] }, "relation": "<=", "right": { "attr": { "of": "e", "name": "hourly_rate" } }, "severity": "hard" }] } },
-    { "code": "where_operator_not_offered", "loc": ["constraints", 0, "left", "over", 0, "where", 0, "op"], "why": "`operatorsByType` in the expression catalogue gives a boolean only `=` and `!=`, and this reads the same table rather than a second one", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "sum": { "var": "open", "index": ["d"] }, "over": [{ "index": "d", "set": "day", "where": [{ "attr": "is_weekend", "op": "<", "value": true }] }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } },
-    { "code": "where_value_not_of_type", "loc": ["constraints", 0, "left", "over", 0, "where", 0, "value"], "why": "1 is not a boolean. `entity_validate` would not store it in that attribute, so no row can ever match", "ir": { "version": 1, "sets": ["day"], "parameters": {}, "variables": { "open": { "index": ["day"], "domain": "binary" } }, "constraints": [{ "id": "c_one", "left": { "sum": { "var": "open", "index": ["d"] }, "over": [{ "index": "d", "set": "day", "where": [{ "attr": "is_weekend", "op": "=", "value": 1 }] }] }, "relation": "<=", "right": { "const": 1 }, "severity": "hard" }] } }
+    {
+      "code": "ir_not_object",
+      "loc": [],
+      "why": "an array is not a model",
+      "ir": []
+    },
+    {
+      "code": "version_missing",
+      "loc": [
+        "version"
+      ],
+      "why": "the document carries its version from the first one ever written",
+      "ir": {
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "version_unsupported",
+      "loc": [
+        "version"
+      ],
+      "why": "JSON true is not version 1, but in Python `True == 1` and `bool` subclasses `int`, so a validator that compared with == alone would accept this and the two languages would disagree about the same document",
+      "ir": {
+        "version": true,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "version_unsupported",
+      "loc": [
+        "version"
+      ],
+      "why": "a version this platform does not express is refused, not guessed at",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "key_missing",
+      "loc": [
+        "constraints"
+      ],
+      "why": "a frozen model states its constraints, even when it has none",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        }
+      }
+    },
+    {
+      "code": "key_unknown",
+      "loc": [
+        "sense"
+      ],
+      "why": "a top-level typo (here `sense` outside `objective`) is a silently ignored model half",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "sense": "minimize"
+      }
+    },
+    {
+      "code": "sets_not_array",
+      "loc": [
+        "sets"
+      ],
+      "why": "snapshot_dataset() reads `sets` with jsonb_array_elements_text; an object reaches it as SQLSTATE 22023, i.e. a 500",
+      "ir": {
+        "version": 1,
+        "sets": {
+          "day": 1
+        },
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "set_not_a_name",
+      "loc": [
+        "sets",
+        0
+      ],
+      "why": "entity_type.name carries the same CHECK; a name that cannot satisfy it cannot name a real type",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "Day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "set_duplicated",
+      "loc": [
+        "sets",
+        1
+      ],
+      "why": "a repeated set would be frozen twice into the same key",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameters_not_object",
+      "loc": [
+        "parameters"
+      ],
+      "why": "snapshot_dataset() reads it with jsonb_object_keys",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": [],
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_not_a_name",
+      "loc": [
+        "parameters",
+        "Demand"
+      ],
+      "why": "parameter_def.name carries the same CHECK",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {
+          "Demand": {
+            "index": [
+              "day"
+            ]
+          }
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_not_object",
+      "loc": [
+        "parameters",
+        "demand"
+      ],
+      "why": "the declaration carries the index; an array here loses it",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {
+          "demand": [
+            "day"
+          ]
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_index_not_array",
+      "loc": [
+        "parameters",
+        "demand",
+        "index"
+      ],
+      "why": "a parameter is indexed by an ordered, non-empty list of sets, as parameter_def.index_type_ids is",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {
+          "demand": {
+            "index": "day"
+          }
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_index_not_declared",
+      "loc": [
+        "parameters",
+        "demand",
+        "index",
+        0
+      ],
+      "why": "a parameter indexed by a set the model never declares is indexed by data the dataset will not carry",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "week"
+            ]
+          }
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variables_not_object",
+      "loc": [
+        "variables"
+      ],
+      "why": "variables are keyed by name, like parameters",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": [],
+        "constraints": []
+      }
+    },
+    {
+      "code": "variables_empty",
+      "loc": [
+        "variables"
+      ],
+      "why": "a model with nothing to decide is not a model",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {},
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_not_a_name",
+      "loc": [
+        "variables",
+        "Open"
+      ],
+      "why": "variable names are used verbatim in solution keys, so they follow the platform's one name rule",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "Open": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_not_object",
+      "loc": [
+        "variables",
+        "open"
+      ],
+      "why": "the declaration carries the index and the domain",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": "binary"
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_index_not_array",
+      "loc": [
+        "variables",
+        "open",
+        "index"
+      ],
+      "why": "a scalar variable declares an empty index, never a missing or scalar one",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": "day",
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_index_not_declared",
+      "loc": [
+        "variables",
+        "open",
+        "index",
+        0
+      ],
+      "why": "a variable indexed by an undeclared set would be sized from data the dataset does not carry",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_domain_missing",
+      "loc": [
+        "variables",
+        "open",
+        "domain"
+      ],
+      "why": "nothing may default a variable's domain: it decides the model's class",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": []
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_domain_unsupported",
+      "loc": [
+        "variables",
+        "open",
+        "domain"
+      ],
+      "why": "'real' is a plausible mistake for 'continuous', which is the point: the vocabulary is closed, and a domain outside it is named in the refusal rather than silently treated as one of the three",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [],
+            "domain": "real"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_bounds_invalid",
+      "loc": [
+        "variables",
+        "open",
+        "lower"
+      ],
+      "why": "and on a bound",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [],
+            "domain": "integer",
+            "lower": true
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "variable_bounds_invalid",
+      "loc": [
+        "variables",
+        "open",
+        "upper"
+      ],
+      "why": "an inverted bound makes a variable with no admissible value, which is an infeasibility nobody wrote down on purpose",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [],
+            "domain": "integer",
+            "lower": 3,
+            "upper": 1
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "constraints_not_array",
+      "loc": [
+        "constraints"
+      ],
+      "why": "constraints are ordered and addressed by id, not keyed",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": {}
+      }
+    },
+    {
+      "code": "constraint_not_object",
+      "loc": [
+        "constraints",
+        0
+      ],
+      "why": "a bare id is the shape the seeded sketch nearly had",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          "c_one"
+        ]
+      }
+    },
+    {
+      "code": "key_unknown",
+      "loc": [
+        "constraints",
+        0,
+        "kind"
+      ],
+      "why": "`kind` is a Phase 1 column, not a v1 IR key; accepting it would store a field nothing reads",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "kind": "cover",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_id_not_a_name",
+      "loc": [
+        "constraints",
+        0,
+        "id"
+      ],
+      "why": "constraint ids travel into scenario.patch and constraint_result.constraint_id; one spelling rule for all three",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_id_duplicated",
+      "loc": [
+        "constraints",
+        1,
+        "id"
+      ],
+      "why": "constraint_result is keyed (run_id, constraint_id); two constraints with one id could not both report",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": ">=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_expression_missing",
+      "loc": [
+        "constraints",
+        0,
+        "left"
+      ],
+      "why": "THE SEEDED SKETCH'S FAULT: an id and a prose note name a constraint without expressing it. Nothing can solve it, classify it or diff it",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "note": "nobody works two shifts in a day"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_relation_unsupported",
+      "loc": [
+        "constraints",
+        0,
+        "relation"
+      ],
+      "why": "strict inequalities are not in v1: over integers they are the non-strict one shifted by 1, and admitting both spellings would make two IRs for one model",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_severity_unsupported",
+      "loc": [
+        "constraints",
+        0,
+        "severity"
+      ],
+      "why": "constraint_result.hard is a boolean; there is no third state to record",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "medium"
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_weight_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "weight"
+      ],
+      "why": "and on a penalty, where `true` would become a weight of 1 -- the lightest possible penalty, chosen by a type error rather than by anyone",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "soft",
+            "weight": true
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_weight_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "weight"
+      ],
+      "why": "the other half of the same rule, which no other case reached: a HARD constraint carrying a weight. A weight there is a penalty for breaking something that cannot be broken -- the author meant `soft`, or meant a scenario",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard",
+            "weight": 5
+          }
+        ]
+      }
+    },
+    {
+      "code": "constraint_weight_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "weight"
+      ],
+      "why": "a soft constraint with no penalty is a constraint the solver is free to ignore, which is a disable nobody asked for",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "soft"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_not_object",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0
+      ],
+      "why": "a binding names an index AND the set it ranges over; a bare string says only half",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              "d"
+            ],
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_index_not_a_name",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "index"
+      ],
+      "why": "index names are the one vocabulary a term may invent, so they follow the same rule as every other name here",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "D",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_index_duplicated",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        1,
+        "index"
+      ],
+      "why": "shadowing would make `d` mean whichever binding the reader looked at last",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "d",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_set_not_declared",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "set"
+      ],
+      "why": "ranging over a set the model never declared is ranging over data the dataset will not carry",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "w",
+                "set": "week"
+              }
+            ],
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "bindings_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "forall"
+      ],
+      "why": "an empty `forall` is a constraint written as if it were indexed and is not; omitting the key says that unambiguously",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [],
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_not_array",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "where"
+      ],
+      "why": "filters are an AND-list; v1 has no groups and no `or`",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day",
+                "where": {
+                  "attr": "is_weekend",
+                  "op": "=",
+                  "value": true
+                }
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_filter_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "where",
+        0,
+        "op"
+      ],
+      "why": "every filter states all three of attribute, comparison and value; v1 has no unary filters",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day",
+                "where": [
+                  {
+                    "attr": "is_weekend"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_operator_unknown",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "where",
+        0,
+        "op"
+      ],
+      "why": "the filter vocabulary is a subset of the expression catalogue's operators, and nothing outside it",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day",
+                "where": [
+                  {
+                    "attr": "is_weekend",
+                    "op": "~",
+                    "value": true
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "term_not_object",
+      "loc": [
+        "constraints",
+        0,
+        "left"
+      ],
+      "why": "a bare number is not a term: every term says what kind it is, so a reader never has to infer",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": 1,
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "term_kind_unknown",
+      "loc": [
+        "constraints",
+        0,
+        "left"
+      ],
+      "why": "an unknown kind is a term this version cannot compile, and guessing at it is how a solver silently drops half a model",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "total": "x"
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "term_kind_ambiguous",
+      "loc": [
+        "constraints",
+        0,
+        "left"
+      ],
+      "why": "two kinds in one object leaves which one wins to the reader's key order",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "const": 1,
+              "add": [
+                {
+                  "const": 2
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "const_not_a_number",
+      "loc": [
+        "constraints",
+        0,
+        "right",
+        "const"
+      ],
+      "why": "the `bool` trap on a coefficient: `isinstance(True, int)` is true in Python, so a coefficient of `true` would become a silent 1",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": true
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "const_not_a_number",
+      "loc": [
+        "constraints",
+        0,
+        "right",
+        "const"
+      ],
+      "why": "a number written as a string. 1.5 is a legitimate coefficient since migration 0015; \"1.5\" is a client with a type bug, and accepting it would make the contract's one numeric type two",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "x",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": "1.5"
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "reference_undeclared",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "sum",
+        "var"
+      ],
+      "why": "the same fault one level down, INSIDE a sum's body. Without this case a validator that bound a sum's indices and then never walked what it was summing would pass every other fixture in this file",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "sum": {
+                "var": "shut",
+                "index": [
+                  "d"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "reference_undeclared",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "var"
+      ],
+      "why": "a misspelt variable is the commonest way an IR compiles to a smaller model than it reads as",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "var": "y",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "reference_index_arity",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "index"
+      ],
+      "why": "a variable subscripted with fewer indices than it was declared with is a different variable",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "index_not_bound",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "index",
+        1
+      ],
+      "why": "a free index has no range, so the constraint has no instances",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "index_set_mismatch",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "index",
+        0
+      ],
+      "why": "`open` is indexed [day, shift]; subscripting it [s, d] type-checks by arity and is the wrong model",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "s",
+                "d"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "sum_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over"
+      ],
+      "why": "a sum with no `over` is not a sum; it is its own body with a misleading name",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "d"
+                ]
+              }
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "add_empty",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "add"
+      ],
+      "why": "an empty sum of terms is zero, and writing zero as `{\"const\": 0}` says so",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "add": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "mul_arity",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "mul"
+      ],
+      "why": "exactly two factors, so the linearity rule below is a check on a pair and not a search",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "mul": [
+                {
+                  "const": 2
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "mul_not_linear",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "mul"
+      ],
+      "why": "x*x is quadratic. v1 admits linear models only, and the refusal is where the platform says so rather than the solver failing later",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "mul": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "x",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "objective_not_object",
+      "loc": [
+        "objective"
+      ],
+      "why": "the key is omitted for a feasibility problem; it is never a bare sense",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": "minimize"
+      }
+    },
+    {
+      "code": "objective_sense_unsupported",
+      "loc": [
+        "objective",
+        "sense"
+      ],
+      "why": "`run.objective` records one number; there is no third direction to record it in",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "lowest",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "var": "x",
+                "index": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "objective_terms_invalid",
+      "loc": [
+        "objective",
+        "terms"
+      ],
+      "why": "an objective with no terms is no objective, and omitting the key says that",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": []
+        }
+      }
+    },
+    {
+      "code": "objective_term_malformed",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "weight"
+      ],
+      "why": "and on an objective term's weight",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": true,
+              "expression": {
+                "var": "x",
+                "index": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "objective_term_malformed",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression"
+      ],
+      "why": "THE SEEDED SKETCH'S OTHER FAULT: `{\"id\": \"o_cost\", \"weight\": 1}` names a term that nothing defines",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "const_not_a_number",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "const"
+      ],
+      "why": "a number written as a string. 1.5 is a legitimate coefficient since migration 0015; \"1.5\" is a client with a type bug, and accepting it would make the contract's one numeric type two",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "const": "1.5"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "objective_term_id_duplicated",
+      "loc": [
+        "objective",
+        "terms",
+        1,
+        "id"
+      ],
+      "why": "term ids are how a result explains which part of the objective cost what",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "var": "x",
+                "index": []
+              }
+            },
+            {
+              "id": "o_x",
+              "weight": 2,
+              "expression": {
+                "var": "x",
+                "index": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "depth_exceeded",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0,
+        "add",
+        0
+      ],
+      "why": "a term nested past the limit is past what a builder can render and what a reader can check. `nestedAdd` wraps a `const` in 14 `add`s; the outermost is at depth 1, so the thirteenth is the first past maxDepth 12 and the loc names it",
+      "generate": {
+        "kind": "nestedAdd",
+        "count": 14
+      }
+    },
+    {
+      "code": "terms_exceeded",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "add",
+        499
+      ],
+      "why": "the bound on total work, so an IR cannot be a denial of service against the validator. The counter increments on entry to each term and the refusal names the term that took it past the limit: the `add` is term 1, so term 501 is summand 499",
+      "generate": {
+        "kind": "wideAdd",
+        "count": 600
+      }
+    },
+    {
+      "code": "ir_too_large",
+      "loc": [],
+      "why": "the same limit with MULTI-BYTE padding. `padNoteWide` is 200000 two-byte characters: under the limit counted in characters (or in JavaScript string length), over it counted in UTF-8 bytes. Without this case both validators could measure whichever they liked and still agree with the ASCII case above",
+      "generate": {
+        "kind": "padNoteWide",
+        "count": 200000
+      }
+    },
+    {
+      "code": "ir_too_large",
+      "loc": [],
+      "why": "the transport bound. Checked first, before any other rule, because everything else walks the document",
+      "generate": {
+        "kind": "padNote",
+        "count": 300000
+      }
+    },
+    {
+      "code": "set_not_in_domain",
+      "loc": [
+        "sets",
+        0
+      ],
+      "why": "TODAY THIS IS A 500: snapshot_dataset() raises `IR set \"%\" has no entity_type in this domain`, as P0001, long after the version was accepted. It belongs at submit time",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "machine"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_not_in_domain",
+      "loc": [
+        "parameters",
+        "supply"
+      ],
+      "why": "the same 500, by the other loop of the same function",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {
+          "supply": {
+            "index": [
+              "day"
+            ]
+          }
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "parameter_index_mismatch",
+      "loc": [
+        "parameters",
+        "demand",
+        "index"
+      ],
+      "why": "demand is declared over [day, shift] in the domain. An IR that reads it as [shift, day] snapshots without complaint and solves the wrong model -- snapshot_dataset() emits cells keyed by type name, so nothing downstream notices either",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "shift",
+              "day"
+            ]
+          }
+        },
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "attribute_not_declared",
+      "loc": [
+        "constraints",
+        0,
+        "right",
+        "attr",
+        "name"
+      ],
+      "why": "the attribute travels in the snapshot's set rows; one the entity type does not declare is never in them",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "var": "pick",
+              "index": [
+                "e"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours"
+              }
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "attribute_not_arithmetic",
+      "loc": [
+        "constraints",
+        0,
+        "right",
+        "attr",
+        "name"
+      ],
+      "why": "`hired_on` is a date. `number` became arithmetic with migration 0015, but a date has no meaning as a coefficient and never will",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "var": "pick",
+              "index": [
+                "e"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hired_on"
+              }
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_operator_not_offered",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "where",
+        0,
+        "op"
+      ],
+      "why": "`operatorsByType` in the expression catalogue gives a boolean only `=` and `!=`, and this reads the same table rather than a second one",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "d"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day",
+                  "where": [
+                    {
+                      "attr": "is_weekend",
+                      "op": "<",
+                      "value": true
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_value_not_of_type",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "where",
+        0,
+        "value"
+      ],
+      "why": "1 is not a boolean. `entity_validate` would not store it in that attribute, so no row can ever match",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "day"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "d"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day",
+                  "where": [
+                    {
+                      "attr": "is_weekend",
+                      "op": "=",
+                      "value": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    }
   ]
 }

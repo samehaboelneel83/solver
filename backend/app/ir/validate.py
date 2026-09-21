@@ -30,6 +30,7 @@ in exactly one way, so the first refusal is the only refusal.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -96,6 +97,20 @@ class Refusal:
 def _is_int(value: Any) -> bool:
     """`bool` subclasses `int` in Python, and `True` is not a quantity."""
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    """An integer or a finite decimal.
+
+    `bool` is excluded for the reason above, and so are the IEEE specials:
+    JSON cannot carry a NaN or an infinity, but a hand-built request can, and
+    a coefficient of infinity is a model no solver answers usefully.
+    """
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _is_name(value: Any) -> bool:
@@ -262,9 +277,7 @@ class _ShapeChecker:
                     "variable_domain_unsupported",
                     [*at, "domain"],
                     f"{json.dumps(domain)} is not a variable domain version {IR_VERSION} solves; "
-                    f"it has {', '.join(sorted(VARIABLE_DOMAINS))}. A continuous variable needs "
-                    "a numeric parameter type this schema does not have (spec section 2: "
-                    "parameter values and defaults are int, for CP-SAT)",
+                    f"it has {', '.join(sorted(VARIABLE_DOMAINS))}",
                 )
             problem = self._check_bounds(name, declaration, at)
             if problem:
@@ -282,12 +295,19 @@ class _ShapeChecker:
                     [*at, key],
                     f"{name!r} is binary, so its bounds are 0 and 1 and it carries none",
                 )
-            if not _is_int(declaration[key]):
+            if not _is_number(declaration[key]):
                 return Refusal(
                     "variable_bounds_invalid",
                     [*at, key],
-                    f"{name!r}'s {key} bound must be an integer, like every other number in a "
-                    f"version {IR_VERSION} model",
+                    f"{name!r}'s {key} bound must be a number",
+                )
+            if declaration["domain"] == "integer" and not _is_int(declaration[key]):
+                return Refusal(
+                    "variable_bounds_invalid",
+                    [*at, key],
+                    f"{name!r} is an integer variable, so its {key} bound is a whole number; "
+                    f"{json.dumps(declaration[key])} would be rounded by every solver that "
+                    "took it, and differently by some",
                 )
         if "lower" in declaration and "upper" in declaration:
             if declaration["lower"] > declaration["upper"]:
@@ -552,12 +572,11 @@ class _ShapeChecker:
         return getattr(self, f"_term_{kind}")(term, loc, scope, depth)
 
     def _term_const(self, term, loc, scope, depth):
-        if not _is_int(term["const"]):
+        if not _is_number(term["const"]):
             return Refusal(
-                "const_not_an_integer",
+                "const_not_a_number",
                 [*loc, "const"],
-                f"{json.dumps(term['const'])} is not an integer; version {IR_VERSION} "
-                "arithmetic is integral throughout",
+                f"{json.dumps(term['const'])} is not a number",
             )
         return None
 
@@ -988,8 +1007,7 @@ class _DomainChecker:
                     [*loc, "attr", "name"],
                     f"{set_name}.{name} is {declared['data_type']}; only "
                     f"{', '.join(sorted(ARITHMETIC_ATTR_TYPES))} attributes are numbers a "
-                    f"version {IR_VERSION} model computes with, because the model is integral "
-                    "throughout",
+                    f"version {IR_VERSION} model computes with",
                 )
             return None
         if "sum" in term:

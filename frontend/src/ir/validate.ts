@@ -73,6 +73,13 @@ function isInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
 
+/** A number, but not a boolean and not an IEEE special. JSON cannot carry a
+ * NaN or an infinity, but a hand-built document can, and a coefficient of
+ * infinity is a model no solver answers usefully. */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function isScalar(value: unknown): boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
@@ -268,9 +275,7 @@ class ShapeChecker {
           "variable_domain_unsupported",
           [...at, "domain"],
           `${show(domain)} is not a variable domain version ${IR_VERSION} solves; it has ` +
-            `${[...VARIABLE_DOMAINS].sort().join(", ")}. A continuous variable needs a numeric ` +
-            "parameter type this schema does not have (spec section 2: parameter values and " +
-            "defaults are int, for CP-SAT)"
+            `${[...VARIABLE_DOMAINS].sort().join(", ")}`
         );
       }
       const bounds = this.checkBounds(name, declaration, at);
@@ -290,12 +295,20 @@ class ShapeChecker {
           `'${name}' is binary, so its bounds are 0 and 1 and it carries none`
         );
       }
-      if (!isInt(declaration[key])) {
+      if (!isFiniteNumber(declaration[key])) {
         return refusal(
           "variable_bounds_invalid",
           [...at, key],
-          `'${name}''s ${key} bound must be an integer, like every other number in a version ` +
-            `${IR_VERSION} model`
+          `'${name}''s ${key} bound must be a number`
+        );
+      }
+      if (declaration.domain === "integer" && !isInt(declaration[key])) {
+        return refusal(
+          "variable_bounds_invalid",
+          [...at, key],
+          `'${name}' is an integer variable, so its ${key} bound is a whole number; ` +
+            `${show(declaration[key])} would be rounded by every solver that took it, and ` +
+            "differently by some"
         );
       }
     }
@@ -607,13 +620,8 @@ class ShapeChecker {
   }
 
   private termConst(term: Json, loc: IrLoc): IrRefusal | null {
-    if (!isInt(term.const)) {
-      return refusal(
-        "const_not_an_integer",
-        [...loc, "const"],
-        `${show(term.const)} is not an integer; version ${IR_VERSION} arithmetic is integral ` +
-          "throughout"
-      );
+    if (!isFiniteNumber(term.const)) {
+      return refusal("const_not_a_number", [...loc, "const"], `${show(term.const)} is not a number`);
     }
     return null;
   }

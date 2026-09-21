@@ -1,7 +1,9 @@
 # The problem IR — what a model is
 
 **Version 1.** Written 2026-09-20, as Phase 0 of
-`docs/plans/2026-09-20-platform-roadmap.md`.
+`docs/plans/2026-09-20-platform-roadmap.md`. Amended 2026-09-21 to admit
+continuous variables and fractional numbers (§7); still version 1, for the
+reason §10 now records.
 
 **Status:** in force. `POST /api/v1/problems/{id}/versions` refuses a document
 that does not meet it.
@@ -184,13 +186,18 @@ cells keyed by entity **type name**, so an IR that reads `demand` as
 nothing downstream ever notices. Checking it at submit time is the only place
 the mistake is visible.
 
-Parameter values are integers — `parameter_value.value` and
-`parameter_def.default_value` are both `int`. A cell absent from the snapshot
-means the parameter's `default_value`, which travels beside the data as
-`parameter_defaults` (migration `0009`). The solver's rule is "look the cell up;
-if absent, use the default".
+Parameter values are numbers — `parameter_value.value` and
+`parameter_def.default_value` are `numeric(15, 6)` since migration `0015`; they
+were `int` when this contract was first written, and §7 records why that
+changed. A cell absent from the snapshot means the parameter's `default_value`,
+which travels beside the data as `parameter_defaults` (migration `0009`). The
+solver's rule is "look the cell up; if absent, use the default".
 
-*Derived*: the object-keyed shape, resolution, and the integer values.
+A whole value keeps its whole shape on the wire: `snapshot_dataset()` applies
+`trim_scale`, so a model that has never used a decimal cannot tell that
+decimals exist. `3` does not become `3.000000`.
+
+*Derived*: the object-keyed shape, resolution, and the numeric values.
 *Invented*: the `{"index": [...]}` declaration and the order check.
 
 ### 3.3 `variables`
@@ -202,8 +209,8 @@ if absent, use the default".
 | key | required | what it is |
 |---|---|---|
 | `index` | yes | Set names. **Empty** for a scalar variable. Up to 6. |
-| `domain` | yes | `binary` or `integer`. Nothing defaults it — see §7. |
-| `lower`, `upper` | no | Integers, `lower <= upper`, only on an `integer` variable. A binary one's bounds are 0 and 1. |
+| `domain` | yes | `binary`, `integer` or `continuous`. Nothing defaults it — see §7. |
+| `lower`, `upper` | no | Numbers, `lower <= upper`, only on an `integer` or `continuous` variable. A binary one's bounds are 0 and 1. An `integer` variable's bounds must be **whole**: a fractional bound would be rounded by every solver that took it, and differently by some. |
 
 *Invented*, all of it.
 
@@ -255,13 +262,22 @@ hard/soft split, from `constraint_result.hard boolean` and `penalty_paid`.
 a unique `id`, an integer `weight` and an `expression`. Omit the whole key for a
 feasibility problem.
 
+**Weights stayed integers** when §7 admitted fractional numbers everywhere
+else, and that is a decision rather than an oversight. A weight is the modeller
+saying *this matters three times as much as that*; it is a ratio between terms,
+and any ratio a decimal expresses an integer pair expresses too. Admitting
+`0.3333` would buy nothing and would invite a rounding argument about a number
+that has no unit. The same holds for a soft constraint's penalty in §3.4.
+
 Terms exist so a result can say which part of the objective cost what. An
 objective term's expression is evaluated in an empty scope: it binds its own
 indices with `sum`, and there is no `forall` at this level.
 
-*Derived*: `run.objective bigint` (one number, integral) and the `o_cost` term
-id the seeded sketch already had. *Invented*: that a term carries its own
-expression — which is exactly what the sketch was missing.
+*Derived*: `run.objective` (one number) and the `o_cost` term id the seeded
+sketch already had. It was `bigint` when this was written, which is where "one
+*integral* number" came from; migration `0015` widened it to `numeric(15, 6)`.
+*Invented*: that a term carries its own expression — which is exactly what the
+sketch was missing.
 
 ---
 
@@ -271,10 +287,10 @@ A **term** is an object naming exactly one kind. Seven kinds:
 
 | kind | shape | means |
 |---|---|---|
-| `const` | `{"const": 8}` | An integer literal. |
+| `const` | `{"const": 8}` | A numeric literal. |
 | `par` | `{"par": "demand", "index": ["d", "s"]}` | A parameter, subscripted by bound indices. |
 | `var` | `{"var": "assign", "index": ["e", "d", "s"]}` | A variable, likewise. |
-| `attr` | `{"attr": {"of": "e", "name": "hours_per_week"}}` | An integer attribute of whatever `e` is bound to. |
+| `attr` | `{"attr": {"of": "e", "name": "hours_per_week"}}` | A numeric attribute of whatever `e` is bound to. |
 | `sum` | `{"sum": <term>, "over": [<binding>, …]}` | The sum of the body over the bindings. |
 | `add` | `{"add": [<term>, …]}` | A sum of terms. At least one. |
 | `mul` | `{"mul": [<term>, <term>]}` | A product of exactly two factors. |
@@ -290,10 +306,16 @@ Rules the validator enforces on them:
 - **Products are linear.** At most one factor of a `mul` may contain a variable.
   `x * x` is refused here, so the platform says "v1 expresses linear models" —
   rather than a solver failing later with a message about the model class.
-- **Integers throughout.** `const` is an integer. Parameters are integers by the
-  schema. An `attr` used as a number must have data type `integer` — a `number`
-  attribute such as `employee.hourly_rate` is refused, because admitting it
-  would make a model continuous without anyone deciding to (§7).
+- **Numbers throughout, and finite ones.** `const` is a number. Parameters are
+  `numeric(15, 6)` by the schema. An `attr` used as a number must have data
+  type `integer` or `number` — a `text` or `date` attribute is still refused,
+  because it is not a quantity. NaN and infinity are refused too: JSON cannot
+  carry them but a hand-built request can, and a coefficient of infinity is a
+  model no solver answers usefully.
+- **Fractional data is visible, not silent.** Nothing here refuses a decimal,
+  but the platform records what one costs: a fractional number anywhere in the
+  model or its data adds `fractional-data` to what a backend must provide, and
+  CP-SAT does not provide it. See §7.
 - **Limits.** Depth 12, 500 terms, 6 indices per binding, 256 KiB serialised.
 
 An `attr` is resolvable from the frozen dataset because `snapshot_dataset()`
@@ -342,8 +364,6 @@ and therefore to the dataset hash — a deliberate decision, not a detail.
 **This is the sharpest contradiction between the contract and the existing
 code, and it is recorded rather than resolved.**
 
-**Continuous variables and continuous coefficients.** §7.
-
 **Strict inequalities**, for the reason in §3.4.
 
 **Boolean structure inside a model** — indicator constraints, disjunctions,
@@ -369,8 +389,8 @@ list-form 422:
 ```json
 {"detail": [{"type": "value_error",
              "loc": ["body", "ir", "variables", "x", "domain"],
-             "msg": "\"continuous\" is not a variable domain version 1 solves; …",
-             "input": "continuous"}]}
+             "msg": "\"real\" is not a variable domain version 1 solves; …",
+             "input": "real"}]}
 ```
 
 `loc` points at the offending element, so a builder can highlight it
@@ -383,7 +403,7 @@ and naming one thing precisely beats listing several.
 The 65 rules are in `contract.json`, each marked `shape` (58 of them: decidable
 from the document alone, and both languages decide those) or `domain` (7: needs
 the domain's rows, so the server only). The split mirrors `parse.py` /
-`compiler.py`. `ir_fixtures.json` carries 8 valid documents and 75 invalid ones
+`compiler.py`. `ir_fixtures.json` carries 10 valid documents and 75 invalid ones
 — at least one per rule, several rules having more than one where the rule has
 two halves or where a fault has to be reached through a construct no other case
 goes through.
@@ -401,50 +421,108 @@ entity type *after* a version was frozen.
 
 ## 7. The decision on continuous variables
 
-**v1 admits `binary` and `integer` variables and refuses `continuous` by name.**
-Refused by name, not merely absent, so the refusal can say what is missing.
+**Decided 2026-09-21: the contract admits `continuous` variables and
+fractional numbers throughout.** This section used to record the opposite, and
+the reasoning that held then is kept below, because the thing that changed was
+not the argument — it was one of its premises.
 
-The schema is integer-only by decision (spec §2: `parameter_value.value` and
-`parameter_def.default_value` are `int`, `run.objective` is `bigint`, "deliberate
-for CP-SAT"). Three things follow:
+### 7.1 What the refusal actually rested on
 
-1. **There is no solver.** Admitting a variable domain nothing can run and
+The original decision was: *v1 admits `binary` and `integer` and refuses
+`continuous` by name*. Three reasons were given, and they are worth re-reading
+in order, because only the first was ever load-bearing:
+
+1. **There was no solver.** Admitting a variable domain nothing can run and
    nothing can test would make the contract promise what the platform cannot
    keep — which is precisely the failure Phase 0 exists to end.
-2. **A half-continuous model would arrive by accident.** Parameters are `int`,
-   but entity attributes are not: `attr_type` has `number`, and the seed's own
+2. **A half-continuous model would arrive by accident.** Parameters were `int`,
+   but entity attributes were not: `attr_type` has `number`, and the seed's own
    `employee.hourly_rate` is one. If `attr` terms admitted `number` attributes,
-   a model could acquire fractional coefficients through the back door while its
-   parameters stayed integral, and nobody would have decided that. So v1
-   restricts arithmetic `attr` terms to `integer` attributes and keeps the whole
-   model integral. (`number` attributes are still usable in a `where` filter: a
-   filter selects members, it does not enter the objective.)
-3. **The cost is visible and was paid in the demo.** The Workforce objective
-   minimises *shifts worked*, not *cost*, because the only cost-bearing datum in
-   that domain is a `number`. And `c_max_hours` multiplies by a literal `8`
-   because a shift's length lives in `time` attributes, which v1 arithmetic
-   cannot read. Both are honest markers of the boundary, left in the seed on
-   purpose.
+   a model could acquire fractional coefficients through the back door while
+   its parameters stayed integral, and nobody would have decided that.
+3. **The cost was visible and was paid in the demo.** The Workforce objective
+   minimises *shifts worked*, not *cost*, because the only cost-bearing datum
+   in that domain is a `number`. And `c_max_hours` multiplies by a literal `8`
+   because a shift's length lives in `time` attributes.
 
-**What admitting continuous later implies** — this is the list the roadmap's
-Phase 2 asked for, made concrete:
+Reason 1 was a fact about the repository, and it stopped being true: the
+platform now has three backends. Reason 2 was never an argument for refusing
+continuous — it was an argument for **not admitting it by accident**, which is
+a different thing, and it is satisfied by admitting it on purpose. Reason 3 was
+a description of the cost, not a defence of it.
 
-- a numeric type for `parameter_def.default_value` and `parameter_value.value`
-  (a schema migration, and a UI that stops saying "integers only");
-- `run.objective` widened from `bigint`;
-- `number` attributes admitted as coefficients, and `const` admitted as a
-  rational or decimal — with a decision about how they are *stored*, since a
-  float in an immutable hashed document makes the hash depend on a text
-  rendering;
-- a `continuous` variable domain with bounds, and `lower`/`upper` no longer
-  integers;
-- a solver that can take them (HiGHS or IPOPT, per the roadmap), because CP-SAT
-  cannot;
-- the honesty rule the roadmap already names: where convexity cannot be proven,
-  a result is a *local* optimum and must say so.
+So the refusal is lifted, and the back door reason 2 named stays shut in a
+better way: a fractional number no longer leaks in unnoticed, it is *detected*
+and recorded (§7.3).
 
-Bumping the IR to version 2 is how all of that lands. The `version` field is
-here from the first document for exactly this.
+### 7.2 The checklist, walked
+
+§7 previously listed what admitting continuous would imply. Each line, against
+what now exists:
+
+| what it asked for | where it is |
+|---|---|
+| a numeric type for `parameter_def.default_value` and `parameter_value.value` | migration `0015`: both are `numeric(15, 6)` |
+| `run.objective` widened from `bigint` | `0015`, to `numeric(15, 6)`, along with `constraint_result.total_violation` and `penalty_paid` |
+| `number` attributes admitted as coefficients | `arithmeticAttrTypes` is now `["integer", "number"]` |
+| `const` admitted as a decimal | `const_not_an_integer` became `const_not_a_number` |
+| a decision about how decimals are *stored*, since a float in a hashed document makes the hash depend on a text rendering | taken: see §7.4 |
+| a `continuous` domain with bounds, `lower`/`upper` no longer integers | `variableDomains` has it; bounds are numbers, and whole only where the domain is `integer` |
+| a solver that can take them | `app/solve/lp.py` — GLOP, the simplex method, in the `ortools` package already present |
+| the honesty rule about local optima | **not yet needed, and not yet written.** It belongs to nonconvexity, and every model this contract expresses is still linear (`mul` admits at most one variable factor). When a quadratic or nonlinear term is admitted, that rule is a precondition, not a follow-up |
+
+### 7.3 Fractional data is classified, not assumed
+
+The subtle half of this change is not the variable domain. It is that
+**whether a model is solvable by CP-SAT is no longer decidable from the IR
+alone**. A model whose variables are every one of them binary is still out of
+CP-SAT's reach if a parameter is `2.5`, and the IR does not contain `2.5` — the
+dataset does.
+
+So `app/solve/classify.py` takes the frozen dataset as a second, optional
+input, and can add one capability from it: `fractional-data`. It never changes
+the model's *class*, which stays a property of the model. The class is the name
+a person recognises (`LP`, `IP`, `MILP`); `fractional-data` is finer-grained
+than any class name and is what actually keeps an integral-looking model away
+from an integer solver.
+
+It names the offending number rather than counting them — "the parameter
+demand (2.5)" — because that tells a modeller which number made their model
+continuous, where "it has fractional data" sends them looking through all of
+them.
+
+### 7.4 How a decimal is stored, and why the hash is safe
+
+`numeric(15, 6)`, and the bridge to JSON is a **number**, not a string.
+
+The two obvious alternatives are each wrong on their own. Pydantic's default
+sends a `Decimal` as a string (`"0.000000"`): lossless, and it silently
+changes the wire contract for every existing client — a field that was `0`
+becomes `"0.000000"`, and arithmetic on it in a browser becomes string
+concatenation. A bare `float` has the right JSON shape and loses precision on a
+wide value.
+
+Fifteen significant digits is what an IEEE-754 double round-trips without loss,
+which is why the column is sized `numeric(15, 6)`: **the bridge is lossless
+because the column was sized for it.** `app/api/quantity.py` holds that type,
+and an out-of-range value is a 422 naming the field rather than SQLSTATE 22003
+arriving as a 500.
+
+The hash concern the old checklist raised is real and is answered by the same
+choice. A value entering the platform is parsed through its own shortest
+round-tripping text, never from a float directly — `Decimal(0.1)` faithfully
+preserves binary floating point's error to fifty digits, `Decimal("0.1")` does
+not. And a whole value is emitted whole (`trim_scale` in `snapshot_dataset()`,
+`as_json_number` on the wire), so a model that never uses a decimal produces
+byte-for-byte the document it produced before `0015`, and hashes to the same
+thing. **No existing dataset or version hash moved.**
+
+### 7.5 What this still does not admit
+
+Admitting continuous variables does not admit nonlinearity. `mul` still refuses
+a product of two variables, so every model here is linear, and the classifier
+returns `LP`, `IP` or `MILP` and nothing else. QP, NLP and MINLP need new term
+forms, and with them the local-optimum honesty rule from §7.2's last row.
 
 ---
 
@@ -516,24 +594,28 @@ them means contradicting something that exists:
 | both resolve against the problem's domain | `snapshot_dataset()` — this was a 500, now a 422 |
 | names match `^[a-z][a-z0-9_]*$` | the CHECK on `entity_type` / `attribute_def` / `parameter_def`, whose stated reason is the IR |
 | a parameter's index is ordered | `parameter_def.index_type_ids`, and `parameter_value.entity_ids` "same order as index_type_ids" |
-| parameter values and defaults are integers | spec §2 |
+| parameter values and defaults are numbers | spec §2 said `int`, "deliberate for CP-SAT", and that is what this row recorded. Migration **0015** made both `numeric(15, 6)`, so the evidence moved and this row moved with it (§7) |
 | an absent cell means the parameter's default | migration `0009`'s `parameter_defaults` |
 | entity attributes are readable from the frozen dataset | `snapshot_dataset()` emits `{"id": key} \|\| attrs` |
 | constraints have string ids, unique per model | `scenario.patch`; `constraint_result` PK `(run_id, constraint_id)` |
-| constraints are hard or soft, soft ones carry an integer penalty | `constraint_result.hard boolean`, `penalty_paid bigint`; `patch.soften: {id: weight}` |
-| one objective, one integral number | `run.objective bigint` |
+| constraints are hard or soft, soft ones carry an integer penalty | `constraint_result.hard boolean`, `penalty_paid`; `patch.soften: {id: weight}`. The *penalty paid* is numeric since `0015`; the *weight a modeller writes* stayed an integer by decision (§3.5) |
+| one objective, one number | `run.objective`, `bigint` when this was written and `numeric(15, 6)` since `0015` — which is where "one *integral* number" came from |
 | `version` from the first document; one shared JSON artefact; a parity test; `loc`-shaped refusals | the expression core (Ruling 37, Rulings 19/30) |
 | traversal cannot be expressed **in this version** | it followed from `snapshot_dataset()` freezing no relationships. Migration **0011** now freezes them (`data.relationships`, keyed by type name), so the reason has gone and only the term forms are missing — step 2 of `docs/plans/2026-09-20-traversal-decision.md`. A v2 that adds them does not need a dataset change |
 
 **Invented** — decided here, and a later reader may reopen any of them:
 
 - the term algebra: seven kinds, `forall`/`over` bindings, named indices;
-- `{"index": …, "domain": …}` on a variable, and the two admitted domains;
+- `{"index": …, "domain": …}` on a variable, and the three admitted domains;
 - the parameter index *order* check against the domain;
 - `left`/`relation`/`right` mandatory on every constraint (§8);
 - objective terms carrying their own expressions;
 - the linearity rule on `mul`;
-- integer-only arithmetic, including the `integer`-attributes-only rule (§7);
+- admitting fractional arithmetic, and detecting it from the dataset rather
+  than assuming it from the model (§7) — this replaced the original
+  integer-only rule, which was itself invented here;
+- keeping objective and penalty **weights** integral while everything else
+  became numeric (§3.5);
 - the flat `where` filter, and narrowing the catalogue's operators for it;
 - all four limits (12 / 500 / 6 / 256 KiB);
 - every top-level key being required, including empty ones;
@@ -552,3 +634,37 @@ them means contradicting something that exists:
 5. A change that would refuse a document version 1 accepts is a **new version**,
    not an edit. Stored versions are immutable and are never re-validated; only
    submission is judged.
+
+### 10.1 Widening, and why §7 did not bump the version
+
+Rule 5 is stated in one direction on purpose, and §7 is the first change to
+test it. **A change that only makes the platform accept more is an edit, not a
+new version.**
+
+Admitting `continuous`, admitting `number` attributes as coefficients and
+admitting a fractional `const` all widen a vocabulary. Every document version 1
+accepted before §7 is still accepted, still means the same thing, and still
+hashes to the same bytes. There is nothing for a reader of an old document to
+get wrong, which is the only thing the `version` field exists to prevent.
+
+The test to apply, in this order:
+
+1. **Would any document the previous version accepted now be refused?** If yes,
+   it is a new version. No exceptions — this is rule 5.
+2. **Would any document the previous version accepted now mean something
+   different, or hash differently?** If yes, it is a new version, and this one
+   is easier to miss than the first. §7 passes it only because `trim_scale`
+   and `as_json_number` keep a whole number whole; had `3` started serialising
+   as `3.000000`, every stored hash would have moved and the widening would
+   have been a version bump whether or not any rule changed.
+3. Otherwise it is a widening: edit in place, and record it in the section
+   that owns the decision.
+
+**Renaming a refusal `code` is a widening too**, awkward as that sounds.
+`const_not_an_integer` became `const_not_a_number` in §7. Codes are not part of
+a stored document — they appear only in a 422 about a document being submitted
+*now*, against the contract as it stands now. Nothing immutable references one.
+
+What this does **not** license: removing a domain, narrowing a limit, adding a
+required key, or making an optional key mean something new. Each of those
+refuses something that used to pass, and each is rule 5.

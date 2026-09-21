@@ -10,9 +10,12 @@ from dataclasses import dataclass
 class Solution:
     status: str
     optimal: bool
-    objective: int | None
-    # ("assign", ("ahmed", "mon", "morning")) -> 1
-    assignments: dict[tuple[str, tuple[str, ...]], int]
+    # A whole number for a wholly integral model, a decimal otherwise. The
+    # backend decides, because only it knows whether the model it solved had
+    # anything fractional in it (migration 0015).
+    objective: float | int | None
+    # ("assign", ("ahmed", "mon", "morning")) -> 1, or 0.6 of an hour
+    assignments: dict[tuple[str, tuple[str, ...]], float | int]
     wall_seconds: float
     solver: str
 

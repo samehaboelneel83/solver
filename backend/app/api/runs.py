@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,6 +30,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import capabilities_of, get_current_user, requires
+from app.api.quantity import QuantityOut
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
@@ -71,8 +73,11 @@ class ConstraintOutcome(BaseModel):
     label: str
     hard: bool
     satisfied: bool
-    total_violation: int
-    penalty_paid: int
+    # Decimal since migration 0015: a rule in a continuous model can be
+    # short by half a unit, and rounding that would report a breach that
+    # did not happen.
+    total_violation: QuantityOut
+    penalty_paid: QuantityOut
     # Which instances broke, worst first. Empty for a satisfied constraint.
     violations: Any
 
@@ -87,7 +92,7 @@ class RunSummary(BaseModel):
     solver: str
     solver_version: str | None
     compiler_version: str | None
-    objective: int | None
+    objective: QuantityOut | None
     wall_time_s: float | None
     error: str | None
     queued_at: datetime

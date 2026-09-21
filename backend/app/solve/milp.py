@@ -13,18 +13,23 @@ genuinely different search — better on models with strong linear structure
 and weak combinatorial structure, worse on the opposite. They are already in
 the `ortools` package, so this adds a technique without adding a dependency.
 
-**What it cannot do.** Nothing here is continuous: the contract admits only
-`binary` and `integer` variables (§7), so this solves integer programs, not
-LPs. The gap is the schema's integer-only decision, not the backend's.
+**What it takes, since migration 0015.** Integer, binary and continuous
+variables, and fractional coefficients -- so integer programs, mixed-integer
+programs and pure linear programs. It is the only one of the three backends
+that takes a *mixed* model, which is why its rank matters less than its
+breadth: for a pure LP, GLOP's simplex is the better technique, and for a
+pure integer model CP-SAT usually is. This is the one that catches everything
+in between.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from importlib.metadata import version as _pkg_version
 
 from ortools.linear_solver import pywraplp
 
-from app.solve.compile import Compiled, Constraint
+from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution
 
 _ORTOOLS_VERSION = _pkg_version("ortools")
@@ -62,21 +67,14 @@ def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> 
     if workers > 1:
         solver.SetNumThreads(workers)
 
-    variables = {
-        key: (
-            solver.BoolVar(f"{key[0]}[{','.join(key[1])}]")
-            if spec.domain == "binary"
-            else solver.IntVar(spec.lower, spec.upper, f"{key[0]}[{','.join(key[1])}]")
-        )
-        for key, spec in compiled.variables.items()
-    }
+    variables = {key: _declare(solver, key, spec) for key, spec in compiled.variables.items()}
 
     for constraint in compiled.constraints:
         _add(solver, variables, constraint)
 
     if compiled.objective.coeffs:
         expression = solver.Sum(
-            [variables[key] * coeff for key, coeff in compiled.objective.coeffs.items()]
+            [variables[key] * float(coeff) for key, coeff in compiled.objective.coeffs.items()]
         )
         solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
@@ -90,24 +88,62 @@ def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> 
         # rather than truncating, because 0.9999999 is a 1 that took a
         # floating-point detour and `int()` would read it as 0.
         objective=(
-            round(solver.Objective().Value()) if solved and compiled.objective.coeffs else None
+            _report(compiled, solver.Objective().Value())
+            if solved and compiled.objective.coeffs
+            else None
         ),
         assignments=(
-            {key: round(var.solution_value()) for key, var in variables.items()} if solved else {}
+            {
+                key: _read(compiled.variables[key], var.solution_value())
+                for key, var in variables.items()
+            }
+            if solved
+            else {}
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"{engine.lower()} (ortools {_ORTOOLS_VERSION})",
     )
 
 
+def _report(compiled: Compiled, value: float) -> float | int:
+    """A wholly integral model's answer keeps its integer shape.
+
+    The arithmetic runs in `Decimal` from migration 0015 onwards, but an
+    integer program's optimum is still an integer, and letting it come back
+    as `2.0000000001` would make two runs of the same model look different.
+    """
+    return round(value) if compiled.is_integral else value
+
+
+def _declare(solver: pywraplp.Solver, key, spec: Variable):
+    name = f"{key[0]}[{','.join(key[1])}]"
+    if spec.domain == "binary":
+        return solver.BoolVar(name)
+    if spec.domain == "integer":
+        return solver.IntVar(float(spec.lower), float(spec.upper), name)
+    return solver.NumVar(float(spec.lower), float(spec.upper), name)
+
+
+def _read(spec: Variable, value: float) -> float | int:
+    """An integer variable's value comes back as a float and is rounded; a
+    continuous one is kept as it is.
+
+    Rounding an integer rather than truncating it, because 0.9999999 is a 1
+    that took a floating-point detour and `int()` reads it as 0 -- a roster
+    that silently loses a shift. Rounding a *continuous* value would be the
+    opposite error: 0.6 of an hour is the answer, not 1.
+    """
+    return round(value) if spec.is_integral else value
+
+
 def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
     """`left relation right`, rearranged so the variables sit on one side."""
     coeffs: dict = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
-        coeffs[key] = coeffs.get(key, 0) - coeff
-    rhs = c.right.const - c.left.const
+        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
+    rhs = float(c.right.const - c.left.const)
 
-    expression = solver.Sum([variables[key] * coeff for key, coeff in coeffs.items()])
+    expression = solver.Sum([variables[key] * float(coeff) for key, coeff in coeffs.items()])
 
     if c.relation == ">=":
         solver.Add(expression >= rhs)

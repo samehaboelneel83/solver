@@ -19,6 +19,7 @@ wrong answer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from itertools import product
 from typing import Any, Iterable
 
@@ -36,22 +37,43 @@ class Unsupported(Exception):
     """The IR is valid but this compiler cannot express it yet."""
 
 
+def number(value: Any) -> Decimal:
+    """Every quantity in a compiled model, as an exact decimal.
+
+    `Decimal(str(x))` rather than `Decimal(x)`: a float built from `0.1` is
+    not one tenth, and `Decimal(0.1)` faithfully preserves the error to fifty
+    digits. Going through its shortest round-tripping repr recovers the number
+    that was typed, which is what migration 0015 bounded the schema's
+    precision to guarantee.
+    """
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 @dataclass
 class Linear:
-    """`sum(coeff * var) + const`, the only shape v1 admits."""
+    """`sum(coeff * var) + const`.
 
-    coeffs: dict[VarKey, int] = field(default_factory=dict)
-    const: int = 0
+    Coefficients are decimals rather than ints from migration 0015 onwards.
+    That is what lets a model be continuous at all -- and CP-SAT is not
+    weakened by it, because a model whose numbers are fractional no longer
+    fits CP-SAT's declared capabilities and is routed elsewhere with the
+    reason recorded.
+    """
 
-    def add(self, other: "Linear", factor: int = 1) -> "Linear":
+    coeffs: dict[VarKey, Decimal] = field(default_factory=dict)
+    const: Decimal = field(default_factory=lambda: Decimal(0))
+
+    def add(self, other: "Linear", factor: Decimal | int = 1) -> "Linear":
         for key, coeff in other.coeffs.items():
-            self.coeffs[key] = self.coeffs.get(key, 0) + coeff * factor
+            self.coeffs[key] = self.coeffs.get(key, Decimal(0)) + coeff * factor
             if self.coeffs[key] == 0:
                 del self.coeffs[key]
         self.const += other.const * factor
         return self
 
-    def scaled(self, factor: int) -> "Linear":
+    def scaled(self, factor: Decimal | int) -> "Linear":
         return Linear({k: v * factor for k, v in self.coeffs.items()}, self.const * factor)
 
     @property
@@ -77,8 +99,12 @@ class Constraint:
 class Variable:
     key: VarKey
     domain: str
-    lower: int
-    upper: int
+    lower: Decimal
+    upper: Decimal
+
+    @property
+    def is_integral(self) -> bool:
+        return self.domain in ("binary", "integer")
 
 
 @dataclass
@@ -96,6 +122,24 @@ class Compiled:
     # constraint id -> what one unit of violation costs the objective, so a
     # result can report `penalty_paid` rather than only "it was broken".
     penalty_of: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def is_integral(self) -> bool:
+        """True when every variable and every coefficient is a whole number.
+
+        Two things read this. A backend uses it to decide whether an answer
+        is reported as `2` or `2.0` -- an integer model's answer should not
+        acquire a decimal point because the arithmetic now runs in `Decimal`.
+        And `classify` uses the same question of the model to decide whether
+        CP-SAT may be offered it at all.
+        """
+        if any(not v.is_integral for v in self.variables.values()):
+            return False
+        numbers = [self.objective.const, *self.objective.coeffs.values()]
+        for c in self.constraints:
+            numbers += [c.left.const, c.right.const, *c.left.coeffs.values()]
+            numbers += list(c.right.coeffs.values())
+        return all(n == n.to_integral_value() for n in numbers)
 
 
 def compile_model(ir: dict[str, Any], data: dict[str, Any]) -> Compiled:
@@ -140,24 +184,38 @@ class _Compiler:
         which is why `parameter_defaults` travels with the dataset."""
         for name, spec in self.ir.get("parameters", {}).items():
             order = spec["index"]
-            table: dict[tuple[str, ...], int] = {}
+            table: dict[tuple[str, ...], Decimal] = {}
             for row in self.params_raw.get(name, []):
-                table[tuple(row[set_name] for set_name in order)] = row["value"]
+                table[tuple(row[set_name] for set_name in order)] = number(row["value"])
             self._params[name] = table
 
     def _declare_variables(self) -> None:
         for name, spec in self.ir.get("variables", {}).items():
             domain = spec.get("domain", "binary")
             if domain == "binary":
-                lower, upper = 0, 1
-            elif domain == "integer":
-                lower = int(spec.get("lower", 0))
-                upper = int(spec.get("upper", 1_000_000))
-            else:  # pragma: no cover -- the contract refuses `continuous` (§7)
+                lower, upper = Decimal(0), Decimal(1)
+            elif domain in ("integer", "continuous"):
+                # The default ceiling is a guard, not a modelling choice: an
+                # unbounded variable makes a model that looks feasible and
+                # answers with an arbitrary number. A model that needs more
+                # says so.
+                lower = number(spec.get("lower", 0))
+                upper = number(spec.get("upper", 1_000_000))
+            else:  # pragma: no cover -- the validator pins the vocabulary
                 raise Unsupported(f"variable domain {domain!r} is not solvable here")
             for combo in self._members(spec["index"]):
                 key: VarKey = (name, combo)
                 self.variables[key] = Variable(key, domain, lower, upper)
+
+    def _all_integral_so_far(self) -> bool:
+        """Whether every variable *declared by the model* is integral.
+
+        Declared, not compiled: the violation variables being minted here are
+        excluded by construction, since they are the thing being decided.
+        """
+        return all(
+            v.is_integral for key, v in self.variables.items() if key[0] != _VIOLATION
+        )
 
     def _members(self, set_names: Iterable[str]) -> list[tuple[str, ...]]:
         pools = [[row["id"] for row in self.sets.get(s, [])] for s in set_names]
@@ -198,11 +256,21 @@ class _Compiler:
 
             if soft:
                 key: VarKey = (_VIOLATION, (spec["id"], *(index[k] for k in sorted(index))))
-                self.variables[key] = Variable(key, "integer", 0, _VIOLATION_CEILING)
+                # A violation is measured in the model's own numbers. In a
+                # continuous model a rule can be short by half a unit, and an
+                # integer violation variable would force it up to one -- the
+                # answer would report a breach that did not happen and charge
+                # a penalty nobody incurred.
+                self.variables[key] = Variable(
+                    key,
+                    "integer" if self._all_integral_so_far() else "continuous",
+                    Decimal(0),
+                    Decimal(_VIOLATION_CEILING),
+                )
                 self.violations.setdefault(spec["id"], []).append(key)
                 self.penalty_of[spec["id"]] = penalty
                 self._penalties.append((key, penalty))
-                slack = Linear(coeffs={key: 1})
+                slack = Linear(coeffs={key: Decimal(1)})
                 # `>=` is helped by adding slack to the left, `<=` by taking
                 # it away; `=` needs both directions, so it becomes a pair.
                 if spec["relation"] == ">=":
@@ -242,13 +310,13 @@ class _Compiler:
 
     def _term(self, term: dict[str, Any], env: dict[str, tuple[str, dict]]) -> Linear:
         if "const" in term:
-            return Linear(const=int(term["const"]))
+            return Linear(const=number(term["const"]))
 
         if "par" in term:
             name = term["par"]
             keys = tuple(env[i][1]["id"] for i in term["index"])
             table = self._params[name]
-            return Linear(const=int(table.get(keys, self.defaults.get(name, 0))))
+            return Linear(const=number(table.get(keys, self.defaults.get(name, 0))))
 
         if "attr" in term:
             of, attr_name = term["attr"]["of"], term["attr"]["name"]
@@ -259,14 +327,14 @@ class _Compiler:
                 raise Unsupported(
                     f"entity {row['id']!r} carries no {attr_name!r}, so the term has no value"
                 )
-            return Linear(const=int(row[attr_name]))
+            return Linear(const=number(row[attr_name]))
 
         if "var" in term:
             keys = tuple(env[i][1]["id"] for i in term["index"])
             key: VarKey = (term["var"], keys)
             if key not in self.variables:  # pragma: no cover -- validator pins arity
                 raise Unsupported(f"no variable {key}")
-            return Linear(coeffs={key: 1})
+            return Linear(coeffs={key: Decimal(1)})
 
         if "sum" in term:
             total = Linear()
@@ -304,7 +372,7 @@ class _Compiler:
                     f"objective term {term.get('id')!r} carries no expression, so it "
                     "contributes nothing that can be optimised"
                 )
-            total.add(self._term(expression, {}), factor=int(term.get("weight", 1)))
+            total.add(self._term(expression, {}), factor=number(term.get("weight", 1)))
 
         # Penalties push the objective the way it does not want to go: they
         # cost when minimising and subtract when maximising, so a soft
@@ -312,7 +380,7 @@ class _Compiler:
         sense = spec.get("sense", "minimize")
         direction = 1 if sense == "minimize" else -1
         for key, penalty in self._penalties:
-            total.add(Linear(coeffs={key: 1}), factor=penalty * direction)
+            total.add(Linear(coeffs={key: Decimal(1)}), factor=number(penalty) * direction)
         return total, sense
 
 

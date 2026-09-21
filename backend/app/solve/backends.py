@@ -63,6 +63,24 @@ def _milp_available() -> bool:
     return milp.available() is not None
 
 
+def _lp_solve(compiled: Compiled, *, time_limit: float, workers: int) -> Solution:
+    from app.solve import lp
+
+    return lp.solve(compiled, time_limit=time_limit, workers=workers)
+
+
+def _lp_available() -> bool:
+    from app.solve import lp
+
+    return lp.available()
+
+
+# Ranks are global, so they encode one ordering across every class. That
+# works because the `classes` sets keep each backend out of the comparison
+# where it would be the wrong technique: glop and cp-sat both rank 0 and never
+# compete, because no model is both an LP and an IP. milp ranks last not
+# because it is worst but because it is the generalist -- it wins exactly
+# where nothing more specific fits, which is the mixed case.
 CP_SAT = Backend(
     name="cp-sat",
     classes=frozenset({"IP", "trivial"}),
@@ -72,17 +90,29 @@ CP_SAT = Backend(
     note="constraint programming; strongest on tightly constrained combinatorial models",
 )
 
+GLOP = Backend(
+    name="glop",
+    classes=frozenset({"LP", "trivial"}),
+    provides=frozenset({"linear", "continuous", "fractional-data", "soft-constraints"}),
+    rank=0,
+    solve=_lp_solve,
+    is_available=_lp_available,
+    note="the simplex method; the right technique for a model with no discrete decisions",
+)
+
 MILP = Backend(
     name="milp",
-    classes=frozenset({"IP", "trivial"}),
-    provides=frozenset({"linear", "integral", "soft-constraints"}),
+    classes=frozenset({"IP", "LP", "MILP", "trivial"}),
+    provides=frozenset(
+        {"linear", "integral", "continuous", "fractional-data", "soft-constraints"}
+    ),
     rank=1,
     solve=_milp_solve,
     is_available=_milp_available,
-    note="branch and cut over a linear relaxation; strongest where the linear structure is",
+    note="branch and cut over a linear relaxation; the only one that takes a mixed model",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, MILP)
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, MILP)
 
 
 class NoBackend(Exception):

@@ -94,7 +94,13 @@ def enqueue_run(
         text("SELECT snapshot_dataset(:v)"), {"v": scenario["model_version_id"]}
     ).scalar_one()
 
-    found = classify(patched(scenario["ir"], scenario["patch"] or {}))
+    # Classified against the frozen data, not the model alone: since
+    # migration 0015 a fractional parameter can put an otherwise integral
+    # model out of CP-SAT's reach, and the IR cannot see that.
+    frozen = db.execute(
+        text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset_id}
+    ).scalar_one()
+    found = classify(patched(scenario["ir"], scenario["patch"] or {}), frozen)
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
@@ -170,7 +176,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     time_limit = float(params.get("time_limit_s", 10.0))
     dataset_id = row["dataset_id"]
 
-    found = classify(ir)
+    found = classify(ir, data)
     try:
         backend, why = choose(found, params.get("requested_solver"))
     except NoBackend as exc:

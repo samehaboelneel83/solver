@@ -77,10 +77,11 @@ Which layer answers which failure
    and would never revisit cells shaped for the old index.
 """
 
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
@@ -89,17 +90,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, validate_name
 from app.core.db import get_db
+from app.api.quantity import Quantity, QuantityOut
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
 from app.models.v1_domain import Entity, EntityType, ParameterDef, ParameterValue
 
 router = APIRouter(prefix="/api/v1", tags=["parameters"])
 
-# `parameter_def.default_value` and `parameter_value.value` are `int`
-# (int4). Out of range would reach the driver as SQLSTATE 22003, which
-# `translate_db_error` re-raises untouched -- a 500.
-INT4_MIN, INT4_MAX = -(2**31), 2**31 - 1
-Int4 = Annotated[StrictInt, Field(ge=INT4_MIN, le=INT4_MAX)]
+
+
 # Ids are `bigint`. Lax on purpose, like every other id on the platform;
 # only the range is bounded, for the same 22003 reason.
 BigintId = Annotated[int, Field(ge=-(2**63), le=2**63 - 1)]
@@ -133,7 +132,7 @@ class ParameterDefRead(BaseModel):
     name: str
     # Index order, exactly as defined: demand[day, shift] != demand[shift, day].
     index_type_ids: list[int]
-    default_value: int
+    default_value: QuantityOut
     unit: str | None
 
 
@@ -142,7 +141,7 @@ class ParameterDefCreate(BaseModel):
     name: str
     index_type_ids: list[BigintId] = Field(min_length=1)
     # Mirrors the column's server default, so the field can be omitted.
-    default_value: Int4 = 0
+    default_value: Quantity = Decimal(0)
     unit: str | None = None
 
     _check_name = field_validator("name")(validate_name)
@@ -154,7 +153,7 @@ class ParameterDefUpdate(BaseModel):
 
     name: str | None = None
     index_type_ids: list[BigintId] | None = Field(default=None, min_length=1)
-    default_value: Int4 | None = None
+    default_value: Quantity | None = None
     unit: str | None = None
 
     _check_name = field_validator("name")(validate_name)
@@ -175,13 +174,13 @@ class IndexType(BaseModel):
 
 class Cell(BaseModel):
     entity_ids: list[BigintId]
-    value: Int4
+    value: Quantity
 
 
 class ParameterValues(BaseModel):
     index_types: list[IndexType]
     cells: list[Cell]
-    default_value: int
+    default_value: QuantityOut
 
 
 class ParameterValuesPut(BaseModel):

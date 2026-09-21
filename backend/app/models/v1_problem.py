@@ -24,6 +24,7 @@ caller, and are therefore not to be set from Python:
 """
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -35,6 +36,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Identity,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
@@ -204,7 +206,9 @@ class Run(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     seed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     # bigint, not int: CP-SAT objectives scale past 2^31.
-    objective: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # numeric(15, 6) since migration 0015: a linear program's optimum is
+    # fractional almost always, and a bigint would round the answer.
+    objective: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
     wall_time_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     # infeasible: [{"constraint_id": "...", "instance": [...]}]
     conflict: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
@@ -246,8 +250,13 @@ class ConstraintResult(Base):
     label: Mapped[str] = mapped_column(Text, nullable=False)
     hard: Mapped[bool] = mapped_column(Boolean, nullable=False)
     satisfied: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    total_violation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    penalty_paid: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    # Likewise: a rule in a continuous model can be short by half a unit.
+    total_violation: Mapped[Decimal] = mapped_column(
+        Numeric(15, 6), nullable=False, server_default="0"
+    )
+    penalty_paid: Mapped[Decimal] = mapped_column(
+        Numeric(15, 6), nullable=False, server_default="0"
+    )
     # [{"instance": [...], "amount": 1}]
     violations: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default="[]")
 
