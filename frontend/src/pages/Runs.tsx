@@ -7,6 +7,7 @@ import { formatApiError } from "../api/errors";
 import {
   useCreateRun,
   useRun,
+  useRunComparison,
   useRuns,
   useScenarios,
   useSolvers,
@@ -213,10 +214,14 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
   const createRun = useCreateRun();
   const toast = useToast();
   const [openId, setOpenId] = useState<Id | null>(null);
+  const [againstId, setAgainstId] = useState<Id | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const items = runs.data?.items ?? [];
   const selected = openId ?? items[0]?.id ?? null;
+  // Comparing is only offered once there is something to compare with.
+  const comparable = items.filter((row) => row.id !== selected);
+  const against = comparable.some((row) => row.id === againstId) ? againstId : null;
 
   function solve() {
     setFailure(null);
@@ -322,10 +327,146 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
             </tbody>
           </table>
 
+          {selected !== null && comparable.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+              <label>
+                <span className="mr-2">Compare run {String(selected)} with</span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+                  value={against === null ? "" : String(against)}
+                  onChange={(event) =>
+                    setAgainstId(event.target.value === "" ? null : Number(event.target.value))
+                  }
+                >
+                  <option value="">nothing</option>
+                  {comparable.map((row) => (
+                    <option key={String(row.id)} value={String(row.id)}>
+                      Run {String(row.id)} ({row.status})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          {selected !== null && against !== null && <Comparison left={selected} right={against} />}
+
           {selected !== null && <RunDetail id={selected} />}
         </>
       )}
     </>
+  );
+}
+
+/**
+ * Two runs, side by side.
+ *
+ * The question this answers is causal -- "I relaxed the coverage rule; what
+ * did it buy me, and what did it cost?" -- so the caveat is not a footnote.
+ * Two runs can differ by the patch, the model version, the frozen data, the
+ * solver or the seed, and only when the patch is the *only* difference may a
+ * change in the roster be credited to it. When it is not, this says so before
+ * it says anything else: crediting a rule for a change an added employee
+ * caused is a wrong answer dressed as an insight.
+ */
+function Comparison({ left, right }: { left: Id; right: Id }) {
+  const comparison = useRunComparison(left, right);
+
+  if (comparison.isLoading) return <Skeleton rows={3} cols={3} />;
+  if (comparison.isError && !comparison.data) {
+    return <Failed error={comparison.error} onRetry={() => comparison.refetch()} />;
+  }
+  const data = comparison.data;
+  if (!data) return null;
+
+  return (
+    <section
+      aria-labelledby={`compare-${left}-${right}`}
+      className="mt-4 rounded-md border border-slate-200 bg-white p-4"
+    >
+      <h2 id={`compare-${left}-${right}`} className="mb-1 text-base font-semibold text-slate-900">
+        Run {String(left)} compared with run {String(right)}
+      </h2>
+      <p
+        className={`mb-4 rounded px-3 py-2 text-sm ${
+          data.patch_is_the_only_difference
+            ? "bg-green-50 text-green-900"
+            : "bg-amber-50 text-amber-900"
+        }`}
+      >
+        {data.note}
+      </p>
+
+      <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+        <Fact
+          label={`Run ${String(left)} (${data.left.scenario_name})`}
+          value={`${data.left.status}${data.left.objective === null ? "" : ` — ${data.left.objective}`}`}
+        />
+        <Fact
+          label={`Run ${String(right)} (${data.right.scenario_name})`}
+          value={`${data.right.status}${data.right.objective === null ? "" : ` — ${data.right.objective}`}`}
+        />
+        <Fact
+          label="Objective change"
+          value={
+            data.objective_delta === null
+              ? "— (one run has no objective)"
+              : `${data.objective_delta > 0 ? "+" : ""}${data.objective_delta}`
+          }
+        />
+        <Fact label="Differs by" value={data.differs_by.length === 0 ? "nothing" : data.differs_by.join(", ")} />
+      </dl>
+
+      {data.rules.length > 0 && (
+        <>
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">Rules that changed</h3>
+          <ul className="mb-4 space-y-1 text-sm">
+            {data.rules.map((rule) => (
+              <li key={rule.constraint_id} className="rounded border border-slate-200 px-3 py-2">
+                <span className="font-mono text-slate-900">{rule.constraint_id}</span>{" "}
+                <span className="text-slate-600">
+                  {rule.left_satisfied ? "held" : `short by ${rule.left_violation}`} &rarr;{" "}
+                  {rule.right_satisfied ? "held" : `short by ${rule.right_violation}`}
+                  {rule.left_penalty !== rule.right_penalty &&
+                    ` (cost ${rule.left_penalty} → ${rule.right_penalty})`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {Object.keys(data.moved).length === 0 ? (
+        <p className="text-sm text-slate-600">The answer is identical.</p>
+      ) : (
+        Object.entries(data.moved).map(([variable, diff]) => (
+          <div key={variable} className="mb-3">
+            <h3 className="mb-2 text-sm font-semibold text-slate-900">
+              {variable} &mdash; {diff.added.length} added, {diff.removed.length} removed,{" "}
+              {diff.unchanged} unchanged
+            </h3>
+            <ul className="flex flex-wrap gap-2">
+              {diff.removed.map((tuple) => (
+                <li
+                  key={`-${tuple.join("\u0001")}`}
+                  className="rounded border border-red-200 bg-red-50 px-2 py-1 font-mono text-xs text-red-900"
+                >
+                  &minus; {tuple.join(" · ")}
+                </li>
+              ))}
+              {diff.added.map((tuple) => (
+                <li
+                  key={`+${tuple.join("\u0001")}`}
+                  className="rounded border border-green-200 bg-green-50 px-2 py-1 font-mono text-xs text-green-900"
+                >
+                  + {tuple.join(" · ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+    </section>
   );
 }
 

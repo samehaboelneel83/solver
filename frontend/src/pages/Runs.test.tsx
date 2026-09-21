@@ -64,6 +64,31 @@ const RUN_DETAIL = {
   ],
 };
 
+const COMPARISON = {
+  left: {
+    id: 11, scenario_id: 7, scenario_name: "strict", status: "infeasible", solver: "cp-sat",
+    solver_version: "cp-sat (ortools 9.15)", objective: null, wall_time_s: 0.01, dataset_id: 3, patch: {},
+  },
+  right: {
+    id: 12, scenario_id: 8, scenario_name: "relaxed", status: "optimal", solver: "cp-sat",
+    solver_version: "cp-sat (ortools 9.15)", objective: 3621, wall_time_s: 0.02, dataset_id: 3,
+    patch: { soften: { c_cover: 100 } },
+  },
+  objective_delta: 120,
+  moved: { assign: { added: [["sara", "tue", "morning"]], removed: [["ahmed", "tue", "morning"]], unchanged: 4 } },
+  rules: [
+    {
+      constraint_id: "c_cover",
+      left_satisfied: true, right_satisfied: false,
+      left_violation: 0, right_violation: 2,
+      left_penalty: 0, right_penalty: 200,
+    },
+  ],
+  differs_by: ["patch"],
+  patch_is_the_only_difference: true,
+  note: "the patch is the only difference, so the change in the answer is down to it",
+};
+
 function stub(overrides: Record<string, unknown> = {}) {
   mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
     if (options?.method && options.method !== "GET") {
@@ -90,6 +115,7 @@ function stub(overrides: Record<string, unknown> = {}) {
         ],
       });
     }
+    if (path.includes("/compare/")) return resolve(overrides.comparison, COMPARISON);
     if (path.startsWith("/api/v1/runs/")) return resolve(overrides.run, RUN_DETAIL);
     if (path.startsWith("/api/v1/runs")) return resolve(overrides.runs, { items: [RUN_SUMMARY], total: 1 });
     return Promise.reject(new Error(`unexpected ${path}`));
@@ -303,6 +329,57 @@ describe("Runs", () => {
     renderPage();
 
     expect(await screen.findByText("asked for milp")).toBeInTheDocument();
+  });
+
+  it("compares two runs and shows what moved between them", async () => {
+    stub({
+      runs: {
+        items: [RUN_SUMMARY, { ...RUN_SUMMARY, id: 12, objective: 3741 }],
+        total: 2,
+      },
+    });
+    renderPage();
+
+    const chooser = await screen.findByLabelText(/compare run 11 with/i);
+    fireEvent.change(chooser, { target: { value: "12" } });
+
+    const heading = await screen.findByRole("heading", { name: /run 11 compared with run 12/i });
+    const panel = heading.closest("section") as HTMLElement;
+    // What moved, in both directions -- a list of only additions would read
+    // as a bigger roster rather than a different one.
+    expect(within(panel).getByText(/sara . tue . morning/)).toBeInTheDocument();
+    expect(within(panel).getByText(/ahmed . tue . morning/)).toBeInTheDocument();
+    expect(within(panel).getByText(/\+120/)).toBeInTheDocument();
+    expect(within(panel).getByText("c_cover")).toBeInTheDocument();
+  });
+
+  it("refuses to credit the patch when the runs differ by more than it", async () => {
+    // The honesty rule, on screen: two runs over different data can differ
+    // for reasons that have nothing to do with the rules.
+    stub({
+      runs: { items: [RUN_SUMMARY, { ...RUN_SUMMARY, id: 12 }], total: 2 },
+      comparison: {
+        ...COMPARISON,
+        differs_by: ["data", "patch"],
+        patch_is_the_only_difference: false,
+        note: "these runs differ by data, patch, so a change in the answer cannot be attributed to any one of them",
+      },
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText(/compare run 11 with/i), { target: { value: "12" } });
+
+    const heading = await screen.findByRole("heading", { name: /run 11 compared with run 12/i });
+    const panel = heading.closest("section") as HTMLElement;
+    expect(within(panel).getByText(/cannot be attributed/i)).toBeInTheDocument();
+  });
+
+  it("does not offer to compare a run with itself", async () => {
+    stub({ runs: { items: [RUN_SUMMARY], total: 1 } });
+    renderPage();
+
+    await screen.findByText(/Run 11/);
+    expect(screen.queryByLabelText(/compare run/i)).not.toBeInTheDocument();
   });
 
   it("says a problem has no scenarios rather than offering to solve nothing", async () => {

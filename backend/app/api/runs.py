@@ -19,6 +19,7 @@ what makes two results comparable.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -32,6 +33,7 @@ from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
 from app.solve.backends import available_names
+from app.solve.compare import NotComparable, compare
 from app.solve.service import enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -178,6 +180,30 @@ def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
             for b in sorted(REGISTRY, key=lambda b: b.rank)
         ]
     }
+
+
+@router.get("/runs/{left_id}/compare/{right_id}")
+def compare_runs(
+    left_id: int,
+    right_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Two runs side by side: what moved, what it cost, and what differed.
+
+    **422, not 404, when they cannot be compared.** Both runs exist; the
+    request to line them up is what is wrong, and the reason says which.
+
+    The response says what differs between the two runs and whether the patch
+    is the only difference. A caller that skipped that could read a change in
+    the roster as the effect of relaxing a rule when it came from the data
+    changing underneath -- a wrong answer dressed as an insight.
+    """
+    try:
+        result = compare(db, left_id, right_id)
+    except NotComparable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return asdict(result)
 
 
 @router.get("/runs")

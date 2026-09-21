@@ -505,6 +505,47 @@ export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): 
   return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, limit, offset })}`);
 }
 export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
+
+/** What moved between two runs -- and what may honestly be credited for it. */
+export type RunComparison = {
+  left: ComparedRun;
+  right: ComparedRun;
+  /** right - left. Null when either run has no objective. */
+  objective_delta: number | null;
+  /** Per variable, only the ones that moved. */
+  moved: Record<string, { added: string[][]; removed: string[][]; unchanged: number }>;
+  rules: {
+    constraint_id: string;
+    left_satisfied: boolean;
+    right_satisfied: boolean;
+    left_violation: number;
+    right_violation: number;
+    left_penalty: number;
+    right_penalty: number;
+  }[];
+  /** Everything not equal between the two runs, e.g. ["patch"]. */
+  differs_by: string[];
+  /** True only when the patch is the sole difference, so the change in the
+   * answer can be laid at its door. */
+  patch_is_the_only_difference: boolean;
+  note: string;
+};
+
+export type ComparedRun = {
+  id: Id;
+  scenario_id: Id;
+  scenario_name: string;
+  status: RunStatus;
+  solver: string;
+  solver_version: string | null;
+  objective: number | null;
+  wall_time_s: number | null;
+  dataset_id: Id;
+  patch: Record<string, unknown>;
+};
+
+export const compareRuns = (left: Id, right: Id) =>
+  apiFetch<RunComparison>(`/api/v1/runs/${left}/compare/${right}`);
 export const createRun = (scenarioId: Id, body: RunRequest = {}) =>
   send<Run>("POST", `/api/v1/scenarios/${scenarioId}/runs`, body);
 
@@ -786,6 +827,14 @@ export function useRun(id: Id | null | undefined) {
  * it settles. */
 export const useCreateRun = () =>
   useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
+
+export function useRunComparison(left: Id | null | undefined, right: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "compare", left, right],
+    queryFn: () => compareRuns(left as Id, right as Id),
+    enabled: isId(left) && isId(right) && left !== right,
+  });
+}
 
 export function useScenarios(problemId: Id | null, params: { modelVersionId?: Id | null } & PageParams = {}) {
   return useQuery({

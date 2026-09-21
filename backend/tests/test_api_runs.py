@@ -249,6 +249,67 @@ def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_head
     assert fetched["assignments"] is not None
 
 
+def test_two_runs_can_be_compared_and_say_what_they_differ_by(db, auth_headers):
+    """Side by side over HTTP, with the caveat attached. A caller that read
+    the roster change without `patch_is_the_only_difference` could credit a
+    relaxed rule for a change the data caused."""
+    from tests.test_solve import _feasible
+
+    client = TestClient(app)
+    version, _ = _feasible(db, demand_value=2, hours=8)
+    problem = db.execute(
+        text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}
+    ).scalar_one()
+    domain = db.execute(
+        text("SELECT domain_id FROM problem WHERE id = :p"), {"p": problem}
+    ).scalar_one()
+    scenarios = [
+        db.execute(
+            text(
+                "INSERT INTO scenario (problem_id, model_version_id, name, patch)"
+                " VALUES (:p, :v, :n, CAST(:patch AS jsonb)) RETURNING id"
+            ),
+            {"p": problem, "v": version, "n": name, "patch": patch},
+        ).scalar_one()
+        for name, patch in (("strict", "{}"), ("relaxed", '{"soften": {"c_cover": 100}}'))
+    ]
+    db.commit()
+
+    try:
+        runs = []
+        for scenario in scenarios:
+            created = client.post(
+                f"/api/v1/scenarios/{scenario}/runs",
+                headers=auth_headers,
+                json={"time_limit_s": 20},
+            )
+            assert created.status_code == 201
+            work_once(db)
+            runs.append(created.json()["id"])
+
+        response = client.get(
+            f"/api/v1/runs/{runs[0]}/compare/{runs[1]}", headers=auth_headers
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["differs_by"] == ["patch"]
+        assert body["patch_is_the_only_difference"] is True
+        assert body["left"]["status"] == "infeasible"
+        assert body["right"]["status"] in ("optimal", "feasible")
+        assert body["moved"]["assign"]["added"]
+
+        # Comparing a run with itself is a bad request, not a missing page:
+        # both runs exist, the pairing is what is wrong.
+        refused = client.get(
+            f"/api/v1/runs/{runs[0]}/compare/{runs[0]}", headers=auth_headers
+        )
+        assert refused.status_code == 422
+        assert "itself" in refused.json()["detail"]
+    finally:
+        db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+        db.commit()
+
+
 def test_unknown_scenarios_and_runs_are_404(auth_headers):
     client = TestClient(app)
 
