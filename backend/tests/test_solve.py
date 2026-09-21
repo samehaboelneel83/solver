@@ -221,10 +221,12 @@ def test_the_seeded_workforce_model_classifies_as_an_integer_program(db):
 
     assert found.model_class == "IP"
     assert "every variable is binary" in found.reasons
+    assert "every decision is yes or no" in found.planner
     # `soft-constraints` because `c_north_region_lates` is soft. The demo
     # asks for a traversal it cannot fully satisfy and pays for the
     # shortfall, so a backend that cannot price a violation cannot run it.
     assert found.needs == {"linear", "integral", "soft-constraints"}
+    assert "at least one rule can bend, at a cost" in found.planner
 
 
 def test_the_seeded_workforce_model_is_infeasible_as_shipped(db):
@@ -416,3 +418,62 @@ def test_a_pre_contract_model_version_is_refused_with_a_reason(db):
 
     assert "no expression" in str(excinfo.value)
     assert "Publish a new version" in str(excinfo.value)
+
+
+def test_a_binding_that_matches_nobody_is_reported_not_dropped_silently():
+    """A forall whose `where` matches nobody is vacuously true. Emitting
+    nothing is correct; hiding it is how "North Region has no people" ships
+    as a solved model."""
+    ir = {
+        "version": 1,
+        "sets": ["employee"],
+        "parameters": {},
+        "variables": {"x": {"index": ["employee"], "domain": "binary"}},
+        "constraints": [
+            {
+                "id": "c_north",
+                "forall": [
+                    {
+                        "index": "e",
+                        "set": "employee",
+                        "where": [{"attr": "region", "op": "=", "value": "north"}],
+                    }
+                ],
+                "left": {"var": "x", "index": ["e"]},
+                "relation": ">=",
+                "right": {"const": 1},
+                "severity": "hard",
+            }
+        ],
+        "objective": {"sense": "minimize", "terms": []},
+    }
+    data = {
+        "sets": {"employee": [{"id": "ahmed", "region": "south"}]},
+        "parameters": {},
+        "parameter_defaults": {},
+        "relationships": {},
+    }
+
+    compiled = compile_model(ir, data)
+
+    assert compiled.constraints == []
+    assert compiled.empty_ranges == [
+        {"constraint_id": "c_north", "kind": "forall", "index": {}}
+    ]
+
+
+def test_slack_is_the_room_left_on_a_held_rule():
+    from decimal import Decimal
+
+    from app.solve.compile import Constraint, Linear, slack_of
+
+    cap = Constraint(
+        "c_cap",
+        {},
+        Linear(coeffs={("x", ()): Decimal(1)}),
+        "<=",
+        Linear(const=Decimal(5)),
+    )
+
+    assert slack_of(cap, {("x", ()): 3}) == Decimal(2)
+    assert slack_of(cap, {("x", ()): 5}) == Decimal(0)

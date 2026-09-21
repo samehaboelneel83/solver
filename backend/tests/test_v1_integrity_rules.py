@@ -467,10 +467,11 @@ def test_rule4_same_domain_index_types_are_accepted(db, two_domains):
 def test_rule5_deleting_an_index_type_is_refused(db, two_domains):
     """A DELETE has no request body, so this path deliberately does *not*
     use amendment (a): it raises `foreign_key_violation` naming the
-    referencing table, the shape a real ON DELETE RESTRICT would produce,
-    which `translate_db_error` answers with conflict_detail()'s 409
-    (round 2; the first cut returned a 422 blaming `index_type_ids`, a
-    field a DELETE cannot carry)."""
+    referencing table, the shape a real ON DELETE RESTRICT would produce.
+    `translate_db_error` forwards the trigger's sentence (no
+    `constraint_name`) rather than conflict_detail()'s generic "still
+    referenced by" -- round 3; the first cut returned a 422 blaming
+    `index_type_ids`, a field a DELETE cannot carry."""
     parameter = make_parameter_def(
         db, two_domains["mine"], "demand", [two_domains["day"], two_domains["shift"]]
     )
@@ -885,8 +886,9 @@ def test_deleting_an_index_type_through_the_api_is_a_409_naming_the_table():
     that left `index_type_ids` dangling before 0009.
 
     409, not 422, because a DELETE has no body to blame a field in; this
-    is `conflict_detail()`'s referenced-row sentence, the same one a
-    genuine foreign key produces."""
+    is the trigger's own sentence, forwarded because a RAISE 23503 has no
+    constraint_name -- a genuine foreign key still gets conflict_detail()'s
+    "still referenced by"."""
     session = SessionLocal()
     seed_admin(session)
     session.close()
@@ -916,7 +918,10 @@ def test_deleting_an_index_type_through_the_api_is_a_409_naming_the_table():
 
         assert response.status_code == 409, response.text
         detail = response.json()["detail"]
-        assert detail == "entity_type row is still referenced by parameter_def records", detail
+        assert detail == (
+            'entity type "day" is an index type of parameter demand; '
+            "delete or re-index it first"
+        ), detail
         assert client.get(f"/api/v1/entity-types/{day}", headers=headers).status_code == 200
     finally:
         deleted = client.delete(f"/api/domain/{domain}", headers=headers)

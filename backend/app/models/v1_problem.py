@@ -63,6 +63,7 @@ RUN_STATUS = ENUM(
     "infeasible",
     "unknown",
     "error",
+    "cancelled",
     name="run_status",
     create_type=False,
 )
@@ -219,6 +220,12 @@ class Run(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Touched while the worker is actually solving. Reclaim looks at this,
+    # not at started_at, so a slow run is not stolen from a live worker.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set by POST /runs/{id}/cancel. A queued run is cancelled immediately;
+    # a running one is asked to stop, and the worker records `cancelled`.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
 
 class Solution(Base):
@@ -259,6 +266,9 @@ class ConstraintResult(Base):
     )
     # [{"instance": [...], "amount": 1}]
     violations: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # Residual at the recorded assignment: 0 means the rule has no room left.
+    # Nullable because a run made before migration 0017 has none to report.
+    slack: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
 
 
 __all__ = [

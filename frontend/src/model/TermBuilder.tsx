@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
@@ -21,6 +21,7 @@ import {
   type Term,
 } from "./terms";
 import { fromIrWhere, toIrWhere } from "./whereFilter";
+import { TreeItem, TreeView } from "../components/ui/tree-view";
 
 /**
  * Editing one term of a model, and the bindings it ranges over.
@@ -45,6 +46,8 @@ export type TermBuilderProps = {
   /** Nesting depth, for the heading level and the indent. */
   depth?: number;
   label?: string;
+  /** Hover actions on the tree row (remove a summand, etc.). */
+  actions?: ReactNode;
 };
 
 export default function TermBuilder({
@@ -54,42 +57,67 @@ export default function TermBuilder({
   bound,
   depth = 0,
   label,
+  actions,
 }: TermBuilderProps) {
   const kindId = useId();
   const kind = termKind(value);
+  const nested = kind === "sum" || kind === "add" || kind === "mul";
+  const namedBlock = Boolean(label);
+  const name = label ?? TERM_LABELS[kind];
+  const kindSelect = (
+    <>
+      <label htmlFor={kindId} className="sr-only">
+        {label ? `${label}: kind of term` : "Kind of term"}
+      </label>
+      <select
+        id={kindId}
+        className={`${INPUT_CLASS} w-auto text-xs`}
+        value={kind}
+        onChange={(event) =>
+          onChange(emptyTerm(event.target.value as TermKind, context, bound))
+        }
+      >
+        {TERM_KINDS.map((option) => (
+          <option key={option} value={option}>
+            {TERM_LABELS[option]}
+          </option>
+        ))}
+      </select>
+    </>
+  );
 
   return (
-    <div className={depth > 0 ? "border-l-2 border-slate-200 pl-3" : ""}>
-      <div className="flex flex-wrap items-center gap-2">
-        {label && <span className="text-xs font-medium text-slate-600">{label}</span>}
-        <label htmlFor={kindId} className="sr-only">
-          {label ? `${label}: kind of term` : "Kind of term"}
-        </label>
-        <select
-          id={kindId}
-          className={`${INPUT_CLASS} w-auto text-xs`}
-          value={kind}
-          onChange={(event) =>
-            onChange(emptyTerm(event.target.value as TermKind, context, bound))
-          }
-        >
-          {TERM_KINDS.map((option) => (
-            <option key={option} value={option}>
-              {TERM_LABELS[option]}
-            </option>
-          ))}
-        </select>
-        <span className="font-mono text-xs text-slate-500">{describeTerm(value)}</span>
-      </div>
-
-      <div className="mt-2">
-        <Body value={value} onChange={onChange} context={context} bound={bound} depth={depth} />
-      </div>
-    </div>
+    <TreeItem
+      name={name}
+      leaf={!nested && !namedBlock}
+      actions={actions}
+      header={
+        namedBlock ? (
+          <>
+            <span className="text-xs font-medium text-slate-600">{label}</span>
+            <span className="font-mono text-xs text-slate-500">{describeTerm(value)}</span>
+          </>
+        ) : (
+          <>
+            {kindSelect}
+            <span className="font-mono text-xs text-slate-500">{describeTerm(value)}</span>
+          </>
+        )
+      }
+    >
+      {namedBlock && <div className="mb-2 flex flex-wrap items-center gap-2">{kindSelect}</div>}
+      <Body value={value} onChange={onChange} context={context} bound={bound} depth={depth} />
+    </TreeItem>
   );
 }
 
-function Body({ value, onChange, context, bound, depth }: Required<Omit<TermBuilderProps, "label">>) {
+function Body({
+  value,
+  onChange,
+  context,
+  bound,
+  depth,
+}: Required<Omit<TermBuilderProps, "label" | "actions">>) {
   const kind = termKind(value);
 
   if (kind === "const") {
@@ -203,29 +231,30 @@ function Body({ value, onChange, context, bound, depth }: Required<Omit<TermBuil
     return (
       <div className="space-y-2">
         {term.add.map((part, position) => (
-          <div key={position} className="flex items-start gap-2">
-            <TermBuilder
-              value={part}
-              onChange={(next) => {
-                const parts = [...term.add];
-                parts[position] = next;
-                onChange({ add: parts });
-              }}
-              context={context}
-              bound={bound}
-              depth={depth + 1}
-              label={position === 0 ? "First" : "Plus"}
-            />
-            {term.add.length > 2 && (
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-xs text-red-700 underline"
-                onClick={() => onChange({ add: term.add.filter((_, i) => i !== position) })}
-              >
-                Remove
-              </button>
-            )}
-          </div>
+          <TermBuilder
+            key={position}
+            value={part}
+            onChange={(next) => {
+              const parts = [...term.add];
+              parts[position] = next;
+              onChange({ add: parts });
+            }}
+            context={context}
+            bound={bound}
+            depth={depth + 1}
+            label={position === 0 ? "First" : "Plus"}
+            actions={
+              term.add.length > 2 ? (
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs text-red-700 underline"
+                  onClick={() => onChange({ add: term.add.filter((_, i) => i !== position) })}
+                >
+                  Remove
+                </button>
+              ) : undefined
+            }
+          />
         ))}
         <button
           type="button"
@@ -287,15 +316,41 @@ export type BindingsEditorProps = {
  */
 export function BindingsEditor({ bindings, onChange, context, outer, legend }: BindingsEditorProps) {
   return (
-    <fieldset className="rounded border border-slate-200 p-2">
-      <legend className="px-1 text-xs font-medium text-slate-600">{legend}</legend>
-      <div className="space-y-3">
+    <TreeItem
+      name={legend}
+      header={<span className="text-xs font-medium text-slate-600">{legend}</span>}
+    >
+      <TreeView>
         {bindings.map((binding, position) => {
           const setId = context.setIds[binding.set];
           const attributes = context.attributes[binding.set] ?? [];
+          const hasFilter = setId !== undefined && attributes.length > 0;
+          const overName = `Over ${binding.index} in ${binding.set}`;
           return (
-            <div key={position} className="space-y-2 rounded bg-slate-50 p-2">
-              <div className="flex flex-wrap items-end gap-2">
+            <TreeItem
+              key={position}
+              name={overName}
+              header={
+                <>
+                  <span className="text-xs font-medium text-slate-600">Over</span>
+                  <span className="font-mono text-xs text-slate-500">
+                    {binding.index} in {binding.set}
+                  </span>
+                </>
+              }
+              actions={
+                bindings.length > 1 ? (
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-xs text-red-700 underline"
+                    onClick={() => onChange(bindings.filter((_, i) => i !== position))}
+                  >
+                    Remove
+                  </button>
+                ) : undefined
+              }
+            >
+              <div className="flex flex-wrap items-end gap-2 py-1">
                 <TextField
                   label="Index"
                   value={binding.index}
@@ -318,18 +373,8 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                   earlier={[...outer, ...bindings.slice(0, position)]}
                   onChange={(next) => replace(position, next)}
                 />
-                {bindings.length > 1 && (
-                  <button
-                    type="button"
-                    className="rounded px-2 py-1 text-xs text-red-700 underline"
-                    onClick={() => onChange(bindings.filter((_, i) => i !== position))}
-                  >
-                    Remove
-                  </button>
-                )}
               </div>
-
-              {setId !== undefined && attributes.length > 0 && (
+              {hasFilter ? (
                 <div>
                   <p className="mb-1 text-xs text-slate-600">
                     Only some of {binding.set} (optional)
@@ -371,8 +416,8 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                     </p>
                   ))}
                 </div>
-              )}
-            </div>
+              ) : null}
+            </TreeItem>
           );
 
           function replace(at: number, next: Binding) {
@@ -391,8 +436,8 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
         >
           Add an index
         </button>
-      </div>
-    </fieldset>
+      </TreeView>
+    </TreeItem>
   );
 }
 

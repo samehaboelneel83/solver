@@ -29,6 +29,8 @@ type EntityFormProps = {
    * used to stay live with its normal label the whole time.
    */
   isSubmitting?: boolean;
+  /** Hide the submit button: the viewer can read the fields but not write. */
+  readOnly?: boolean;
   /**
    * A save that failed with a mapped server-side error (C-5), e.g. a 409
    * naming which field's value collided. Merged into this form's own
@@ -83,6 +85,7 @@ export default function EntityForm({
   isEdit = false,
   isSubmitting = false,
   serverError = null,
+  readOnly = false,
 }: EntityFormProps) {
   const writableFields = fields.filter((f) => f.writable);
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -421,6 +424,7 @@ export default function EntityForm({
           </div>
         );
       })}
+      {!readOnly && (
       <button
         type="submit"
         disabled={isSubmitting}
@@ -428,6 +432,7 @@ export default function EntityForm({
       >
         {isSubmitting ? "Saving…" : submitLabel}
       </button>
+      )}
     </form>
   );
 }

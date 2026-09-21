@@ -17,8 +17,9 @@ type DataTableProps = {
   /** Human, plural table name, e.g. "Entity types" -- used for the caption
    * and the empty state ("No entity types yet"). */
   tableLabel: string;
-  /** Link target for "create a new record", reused by the empty state. */
-  newHref: string;
+  /** Link target for "create a new record", reused by the empty state.
+   * Omit when the viewer cannot create records. */
+  newHref?: string;
   fields: FieldMeta[];
   rows: Row[];
   total: number;
@@ -28,7 +29,7 @@ type DataTableProps = {
   order?: "asc" | "desc";
   onSort?: (column: string) => void;
   onPageChange: (offset: number) => void;
-  onDelete: (id: string, label: string) => void;
+  onDelete?: (id: string, label: string) => void;
   onRowClick?: (id: string) => void;
 };
 
@@ -368,6 +369,7 @@ export default function DataTable({
   }
 
   function handleDeleteClick(row: Row) {
+    if (!onDelete) return;
     const label = recordLabel({ fields }, row) ?? "this row";
     if (window.confirm(`Delete "${label}"? This cannot be undone.`)) {
       onDelete(String(row.id), label);
@@ -400,10 +402,11 @@ export default function DataTable({
       <div>
         <div className="rounded-md border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
           <p>{`No ${lowerFirst(tableLabel)} yet`}</p>
-          {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
+          {newHref && (
           <Link to={newHref} className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline">
             New
           </Link>
+          )}
         </div>
       </div>
     );
@@ -466,7 +469,7 @@ export default function DataTable({
                 {/* G-4 fix round 1: below 768px the table (and its only
                     actions trigger) is hidden -- without this, there was no
                     way to delete a record on a narrow screen at all. */}
-                <RowActionsMenu row={row} label={label} onDelete={handleDeleteClick} />
+                {onDelete && <RowActionsMenu row={row} label={label} onDelete={handleDeleteClick} />}
               </div>
               {restFields.length > 0 && (
                 <dl className="space-y-1 text-sm">
@@ -529,9 +532,11 @@ export default function DataTable({
                   </th>
                 );
               })}
+              {onDelete && (
               <th scope="col" className="px-3 py-2">
                 <span className="sr-only">Actions</span>
               </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -569,9 +574,11 @@ export default function DataTable({
                       </td>
                     );
                   })}
+                  {onDelete && (
                   <td className="px-3 py-2 text-right">
                     <RowActionsMenu row={row} label={label} onDelete={handleDeleteClick} />
                   </td>
+                  )}
                 </tr>
               );
             })}

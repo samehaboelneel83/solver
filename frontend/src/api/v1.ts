@@ -441,7 +441,7 @@ export type ScenarioUpdate = { name?: string; model_version_id?: Id; patch?: Sce
 /** `run_status`, straight from the database's own enum. `optimal` and
  * `feasible` are both answers; the schema keeps them apart, so the UI does
  * too -- "a solution" and "the best solution" are different claims. */
-export type RunStatus = "queued" | "running" | "optimal" | "feasible" | "infeasible" | "unknown" | "error";
+export type RunStatus = "queued" | "running" | "optimal" | "feasible" | "infeasible" | "unknown" | "error" | "cancelled";
 
 export type ConstraintOutcome = {
   constraint_id: string;
@@ -452,6 +452,9 @@ export type ConstraintOutcome = {
   penalty_paid: number;
   /** Which instances broke, worst first: `[{index: ["thu","morning"], by: 4}]`. */
   violations: { index: string[]; by: number }[];
+  /** Residual at the assignment. Zero means the rule has no room left.
+   * Null on runs made before the column existed. */
+  slack: number | null;
 };
 
 export type RunSummary = {
@@ -468,6 +471,9 @@ export type RunSummary = {
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
+  /** Set when someone asked this run to stop. A queued run is already
+   * `cancelled`; a running one is still `running` until the worker records it. */
+  cancel_requested: boolean;
 };
 
 /** One instance of a rule that is part of why there is no answer. */
@@ -506,6 +512,18 @@ export type SolverInfo = {
 /** What this build can solve with. Hardcoding the list would offer a solver
  * a different build does not have. */
 export const listSolvers = () => apiFetch<Page<SolverInfo>>("/api/v1/solvers");
+
+/** What kind of model this IR is. Posted, not stored: the same function a
+ * run records, so the editor cannot disagree with the run about the class. */
+export type Classification = {
+  model_class: string;
+  needs: string[];
+  reasons: string[];
+  planner: string[];
+};
+
+export const classifyIr = (ir: Record<string, unknown>) =>
+  send<Classification>("POST", "/api/v1/classify", { ir });
 
 /** Who the caller is and what they may do. Computed by the API in the same
  * place it enforces them, so the screen and the server cannot disagree. */
@@ -588,12 +606,51 @@ export const compareRuns = (left: Id, right: Id) =>
   apiFetch<RunComparison>(`/api/v1/runs/${left}/compare/${right}`);
 export const createRun = (scenarioId: Id, body: RunRequest = {}) =>
   send<Run>("POST", `/api/v1/scenarios/${scenarioId}/runs`, body);
+export const cancelRun = (id: Id) => send<Run>("POST", `/api/v1/runs/${id}/cancel`, {});
 
 export function listVersions(problemId: Id, params: PageParams = {}): Promise<Page<ModelVersionSummary>> {
   return apiFetch(`/api/v1/problems/${problemId}/versions${query({ limit: params.limit, offset: params.offset })}`);
 }
 export const createVersion = (problemId: Id, body: ModelVersionCreate) =>
   send<ModelVersion>("POST", `/api/v1/problems/${problemId}/versions`, body);
+
+export type TemplateSeed = {
+  note?: string;
+  entity_types?: unknown[];
+  relationship_types?: unknown[];
+  parameters?: unknown;
+  entities?: unknown[];
+  relationships?: unknown[];
+  parameter_values?: unknown[];
+  sets?: string[];
+};
+
+export type ModelTemplate = {
+  id: Id;
+  name: string;
+  ir_version: string;
+  domain_seed: TemplateSeed;
+  default_ir: Record<string, unknown>;
+};
+
+export type ApplyTemplateRequest = {
+  domain_id?: Id;
+  domain_name?: string;
+  problem_id?: Id;
+  name?: string;
+};
+
+export type ApplyTemplateResult = {
+  template_id: Id;
+  domain_id: Id;
+  problem_id: Id;
+  model_version_id: Id;
+  scenario_id: Id;
+};
+
+export const listTemplates = () => apiFetch<Page<ModelTemplate>>("/api/template/?limit=50");
+export const applyTemplate = (id: Id, body: ApplyTemplateRequest) =>
+  send<ApplyTemplateResult>("POST", `/api/v1/templates/${id}/apply`, body);
 export const getVersion = (id: Id) => apiFetch<ModelVersion>(`/api/v1/versions/${id}`);
 
 export function listScenarios(
@@ -838,6 +895,12 @@ export function useVersion(id: Id | null | undefined) {
 export const useCreateVersion = () =>
   useV1Mutation(({ problemId, body }: { problemId: Id; body: ModelVersionCreate }) => createVersion(problemId, body));
 
+export function useTemplates() {
+  return useQuery({ queryKey: [V1, "templates"], queryFn: listTemplates, staleTime: 60_000 });
+}
+export const useApplyTemplate = () =>
+  useV1Mutation(({ id, body }: { id: Id; body: ApplyTemplateRequest }) => applyTemplate(id, body));
+
 export function useSettings(params: { problemId?: Id | null; domainId?: Id | null } = {}) {
   return useQuery({
     queryKey: [V1, "settings", params],
@@ -852,6 +915,15 @@ export function useMe() {
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
+}
+
+export function useClassify(ir: Record<string, unknown> | null) {
+  return useQuery({
+    queryKey: [V1, "classify", ir],
+    queryFn: () => classifyIr(ir as Record<string, unknown>),
+    enabled: ir !== null,
+    staleTime: 30_000,
+  });
 }
 
 export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
@@ -879,6 +951,7 @@ export function useRun(id: Id | null | undefined) {
  * it settles. */
 export const useCreateRun = () =>
   useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
+export const useCancelRun = () => useV1Mutation((id: Id) => cancelRun(id));
 
 export function useRunComparison(left: Id | null | undefined, right: Id | null | undefined) {
   return useQuery({

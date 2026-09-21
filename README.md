@@ -1,16 +1,21 @@
 # Problem-Solver Platform — MVP Skeleton
 
-The foundational skeleton of a general-purpose "problem solver" platform: model a
-real-world domain (entity types, their attributes, entities, relationships and
-parameters), then define an optimization problem over that domain. This
-repository contains the skeleton only — containerized infrastructure, the
-**schema v1** PostgreSQL schema (16 tables in `public`, plus the 4 `iam` tables),
-an empty ClickHouse analytics schema, a FastAPI backend that is part
-purpose-built and part generic CRUD, and a React admin UI. Solver execution is
-explicitly out of scope for this phase: the RUN tables exist and nothing writes
-to them yet.
+A general-purpose problem-solving platform: model a real-world domain (entity
+types, attributes, entities, relationships, parameters), write a problem over
+that domain, and get an answer back. The **compiler** sits in the middle —
+`classify` + `compile` + `choose` — so the Model editor never asks MILP vs
+CP-SAT. LP, MILP and CP-SAT are execution targets, not the modelling language.
+
+This repository is the running product around that loop: containerized
+infrastructure, the **schema v1** PostgreSQL schema (tables in `public`, plus
+the 4 `iam` tables), an empty ClickHouse analytics schema, a FastAPI backend
+that is part purpose-built and part generic CRUD, and a React admin UI.
+Solving is async: `POST /api/v1/scenarios/{id}/runs` queues a `run`; a worker
+records the roster, `constraint_result` (including slack), and, on
+infeasibility, the fighting rules.
 
 - Schema v1 design: [`docs/superpowers/specs/2026-09-19-schema-v1-migration-design.md`](docs/superpowers/specs/2026-09-19-schema-v1-migration-design.md)
+- The Problem IR (what a model *means*): [`docs/contracts/problem-ir.md`](docs/contracts/problem-ir.md)
 - The authoritative DDL it was built from: [`docs/schema/2026-09-18-schema-v1.sql`](docs/schema/2026-09-18-schema-v1.sql)
 - Original platform skeleton design (v0, largely superseded): [`docs/superpowers/specs/2026-09-16-platform-skeleton-design.md`](docs/superpowers/specs/2026-09-16-platform-skeleton-design.md)
 
@@ -42,6 +47,12 @@ the three flat `public` tables (`domain`, `template`, `problem`) go through the
 generic CRUD factory. Everything else has a purpose-built router, or no router
 at all — see the comment block in `backend/app/api/routers.py` for the reasoning
 per table.
+
+The compiler already sits in the middle: `classify` (what the IR is),
+`compile` (IR + frozen dataset → solver-facing form), `choose` (capability
+match). What a non-specialist needs from those three is not another backend.
+It is seeing the outputs in domain language — on the Model editor before
+publish, and on a run as held rules, fighting rules, empty ranges, and slack.
 
 ## Prerequisites
 
@@ -154,7 +165,10 @@ table and some are the generic metadata-driven ones.
 | `/relationship-types`, `/relationship-types/:id` | Relationship types: endpoint types, cardinality, whether it is a hierarchy, colour |
 | `/entities`, `/entities/:id` | Entities, with attribute inputs typed by each attribute's `data_type`, and a condition builder that filters server-side |
 | `/parameters` | Parameter definitions and a grid for their cells |
+| `/model` | The Model editor (below) — writes a new `model_version` |
 | `/versions` | A problem's model versions, **read-only**, with an IR viewer |
+| `/scenarios` | Patches over a version: disable, harden, or soften a rule |
+| `/runs` | Solve a scenario and read the answer (below) |
 | `/graph` | The Graph Editor (below) |
 
 ### Generic screens
@@ -251,6 +265,130 @@ Two implementation notes worth knowing before you change anything here:
 - Cytoscape caches its container's bounding rect when the instance is created;
   if the page scrolls or reflows afterwards, call `cy.resize()` before relying on
   rendered node positions or hit-testing.
+
+## Model editor
+
+`/model` is where a problem becomes a model: the rules a solver must respect,
+and what it should make as small or as large as it can. It writes
+`POST /api/v1/problems/{id}/versions`. `/versions` is the read-only twin — a
+viewer over versions that already exist, including ones this page published.
+
+A model belongs to a **problem**, and a problem belongs to a **domain**. Choose
+the domain in the sidebar first; the page then lists that domain's problems
+(`?problem=` in the URL). With no problem yet, it points at `/public/problem`
+rather than inventing one.
+
+**Publishing writes a new version. It never overwrites one.** `model_version`
+is immutable (`forbid_update()`), which is what keeps a run's answer
+attributable to the exact model that produced it. "Starting from" is a starting
+point — including an older version — not an edit of that row. A problem with
+no versions yet offers **Start a model**, which is an empty document of the
+same shape, not a missing one: a missing `constraints` and an empty one are
+different documents, and only one of them is valid.
+
+The page has three parts, in the order a model is actually written:
+
+1. **Declarations.** Which of the domain's entity types are this model's
+   `sets`; which of its parameters it reads (the index comes from
+   `parameter_def`, in order — typing `demand[shift, day]` would type-check by
+   arity and silently mean a different model); and the **variables** a solver
+   decides (`binary`, `integer` or `continuous`). Removing a declaration that
+   a rule still uses is refused here, naming the rule, rather than after
+   publish.
+2. **Rules.** Each constraint has an id (the same one a scenario patch and
+   `constraint_result` will use), an optional `forall` of index bindings, a
+   left-hand term, a relation (`<=`, `=`, `>=`), a right-hand term, and
+   `hard` or `soft`. A soft one carries a positive integer **weight** — the
+   cost of one unit of violation. A binding is an index over a set, optionally
+   filtered (`where`: only the weekend days) and optionally walked (`via`:
+   everything under North Region). The filter is react-querybuilder, because
+   a filter is a boolean condition tree; the arithmetic around it is not, so
+   `TermBuilder` edits that. A walk names the relationship and **which end of
+   the edge the anchor sits at**, not a direction — `from: "r"` on
+   `reports_to` walks down because `r` is at the parent end.
+3. **Objective.** Minimize or maximize a weighted sum of terms. Omit it
+   entirely for a pure feasibility problem; an empty objective and a missing
+   one would otherwise be two spellings of "optimise nothing", so the page
+   drops the key when there are no terms.
+
+`relationships` is not a fourth editor. The page derives it from the `via`
+walks actually written, because a relationship has no use except to walk it.
+`sets` stays declared by hand: a set may be carried and never used.
+
+The document this produces is the Problem IR. The contract —
+[`docs/contracts/problem-ir.md`](docs/contracts/problem-ir.md) — is what a
+model *means*; `backend/app/ir/contract.json` is what a validator may
+accept. This page runs the **shape** half in the browser (`checkIrShape`)
+and disables Publish on the first refusal. The server judges it again,
+including the **domain** half (do these names exist, do the walk's ends
+match the relationship type). A wrongly built model is named, not stored.
+
+When the shape is valid, the page posts the draft to `POST /api/v1/classify`
+— the same Python `classify()` a run records — and shows **What this model
+is** in planner language: every decision is yes or no; every rule is linear;
+at least one rule can bend. No dataset is supplied, so `fractional-data` is
+absent here, which is honest. The editor never offers a solver.
+
+A **template** is a starting IR, not a solver and not a second model
+language. The seeded `weekly_rota` row is the same document the Workforce
+demo publishes. `POST /api/v1/templates/{id}/apply` walks `domain_seed`
+first — missing types, people, days, shifts and demand cells are created;
+names that already exist are left alone — then writes a problem, its first
+version, and an `as modelled` scenario. Dashboard **Start from weekly_rota**
+is that verb; if the domain already has a problem from that template, it
+opens it instead. An empty `domain_seed` still 422s from `validate_ir`, so
+a template that only carries IR cannot half-build a domain.
+
+Two leftovers from before that contract, still sitting on a long-lived
+database, are handled rather than crashed on:
+
+- A constraint that is an id and a note with no `left`/`right` — the seeded
+  demo's original version 1. The page says it is named but not expressed,
+  and **Start expressing it** fills in empty arithmetic so it can be written
+  rather than re-typed from scratch.
+- An objective term with no `expression`, same treatment.
+
+A version like that cannot be published as-is: the contract refuses an
+unexpressed constraint, and so does the compiler.
+
+## Runs
+
+`/runs` is where a scenario becomes an answer. A run belongs to a
+**scenario**, not to a problem: the scenario names the model version and any
+patch (`disable` / `harden` / `soften`), so "solve this" is only well defined
+once one is chosen. The page lists a domain's problems, then that problem's
+scenarios (`?problem=` / `?scenario=`).
+
+**Submitting queues a run.** `POST /api/v1/scenarios/{id}/runs` freezes a
+`dataset` and returns `queued`; a worker solves it. The page polls until the
+status settles. A run is immutable once written — solving again makes a new
+one, which is what lets two be compared.
+
+The detail leads in planner language, not solver names:
+
+- **Optimal / feasible.** All mandatory rules held (or N broke); preferences
+  bent at a cost. Then the roster, in the names frozen on the dataset
+  (migration `0012`).
+- **Infeasible.** Why there is no answer: the fighting rules and the days
+  they collide on. **Make these preferences** creates a scenario
+  `{soften: {id: weight}}` from those ids — the same `patched()` verb a
+  scenario already implements. It is not a second relaxation solver.
+- A `where`/`via` that matched nobody is listed as a rule that never applied
+  to anyone (a vacuously true constraint, usually a filter or a missing
+  population).
+- Held rules with slack `0` are marked **no room left**. Slack is the
+  residual at the assignment (migration `0017`), filled for every backend.
+
+Solver, class, `why_solver` and wall time sit under **Technical**. The solver
+dropdown on submit is optional and gated on `solver.configure`; the default
+is `choose()`.
+
+**Stop this run** (`POST /api/v1/runs/{id}/cancel`) is how a queued or
+running solve is abandoned. A queued run becomes `cancelled` immediately. A
+running one is asked to stop; the worker records `cancelled` instead of an
+answer. A settled run is refused: the result is already written. The worker
+heartbeats while it solves (migration `0018`); a dead worker is reclaimed
+from silence on that clock, not from a thirty-minute guess at `started_at`.
 
 ## Checks
 
@@ -411,11 +549,10 @@ python scripts/graph_smoke_check.py
 
 ## Known limitations in this phase
 
-- **Nothing in the product creates a model version.** You can create a problem
-  and read the versions a seed or a script wrote, but there is no screen or
-  route that produces an IR — the compiler that would is out of scope. The
-  Runs group in the sidebar is empty for the same reason: `dataset`, `run`,
-  `solution` and `constraint_result` exist and have no writer.
+- **The Model editor is what creates a model version.** `/model` publishes an
+  IR through `POST /api/v1/problems/{id}/versions`; `/versions` remains the
+  read-only viewer. Submitting a scenario writes `dataset`, `run`, `solution`
+  and `constraint_result`. The editor classifies a draft; it does not solve.
 - **A parameter cannot be indexed by the same entity type twice.** A `CHECK`
   on `parameter_def` refuses duplicate `index_type_ids`. This is **temporary**
   and not a modelling judgement: `snapshot_dataset()` keys parameter rows by

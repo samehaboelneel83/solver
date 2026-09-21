@@ -22,6 +22,7 @@ import ColourField from "./ColourField";
 import { FieldLabel, INPUT_CLASS, roleLabel, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
 import { confirmDeleteRelationship, deletedRelationshipMessage } from "../lib/relationships";
+import { useCapabilities } from "../hooks/useCapability";
 import { useToast } from "./ToastProvider";
 import {
   CARDINALITY_LABEL,
@@ -149,6 +150,8 @@ function NodeForm({
   entity: Entity;
   onClose: () => void;
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const [label, setLabel] = useState(entity.label ?? "");
   const [drafts, setDrafts] = useState<AttrDrafts>(() => draftsFromAttrs(attributes, entity.attrs));
   const [stored, setStored] = useState<Record<string, unknown>>(entity.attrs);
@@ -249,12 +252,16 @@ function NodeForm({
           onChange={(name, value) => setDrafts((prev) => ({ ...prev, [name]: value }))}
         />
         <div className={BUTTON_ROW}>
+          {canEdit && (
+            <>
           <button type="submit" disabled={updateEntity.isPending} className={PRIMARY_BUTTON}>
             Save
           </button>
           <button type="button" onClick={handleDelete} disabled={deleteEntity.isPending} className={DANGER_BUTTON}>
             Delete
           </button>
+            </>
+          )}
           <button type="button" onClick={onClose} className={QUIET_BUTTON}>
             Close
           </button>
@@ -283,6 +290,8 @@ function NodeForm({
  * silently drops one end is worse than one that admits it.
  */
 function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: string; onClose: () => void }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const edge = graph.edges.find((e) => e.id === edgeId);
   const nodeLabel = (id: string) => graph.nodes.find((node) => node.id === id)?.label ?? `#${id}`;
   const fromLabel = edge ? nodeLabel(edge.source) : "";
@@ -361,6 +370,8 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
           className={`${INPUT_CLASS} font-mono text-xs`}
         />
         <div className={BUTTON_ROW}>
+          {canEdit && (
+            <>
           <button type="submit" disabled={updateRelationship.isPending} className={PRIMARY_BUTTON}>
             Save
           </button>
@@ -372,6 +383,8 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
           >
             Delete
           </button>
+            </>
+          )}
           <button type="button" onClick={onClose} className={QUIET_BUTTON}>
             Close
           </button>
@@ -395,6 +408,8 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
  * canvas draws, and saving from a projection would write back a projection.
  */
 function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const entityTypeId = entityTypeIdFromNodeId(nodeId);
   const query = useEntityType(entityTypeId);
   const update = useUpdateEntityType();
@@ -438,7 +453,7 @@ function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => v
         // the colour the node is actually drawn in today.
         fallbackKey={String(type.id)}
         sampleText={type.name}
-        disabled={update.isPending}
+        disabled={update.isPending || !canEdit}
         onChange={save}
       />
       <div className={`${BUTTON_ROW} mt-3`}>
@@ -467,6 +482,8 @@ function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => v
  * form with the trigger's errors mapped onto its fields, not a side panel.
  */
 function RelationshipTypePanel({ edgeId, onClose }: { edgeId: string; onClose: () => void }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const relationshipTypeId = relationshipTypeIdFromEdgeId(edgeId);
   const query = useRelationshipType(relationshipTypeId);
   const typesQuery = useEntityTypes(query.data?.domain_id ?? null, { limit: 500 });
@@ -519,7 +536,7 @@ function RelationshipTypePanel({ edgeId, onClose }: { edgeId: string; onClose: (
         value={type.colour}
         fallbackKey={String(type.id)}
         sampleText={type.name}
-        disabled={update.isPending}
+        disabled={update.isPending || !canEdit}
         onChange={save}
       />
       <div className={`${BUTTON_ROW} mt-3`}>

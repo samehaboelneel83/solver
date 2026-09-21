@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Parameters from "./Parameters";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
+import { EDITOR_ME, VIEWER_ME, editorQueryClient } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -89,8 +90,8 @@ function ShowSearch() {
   return <output data-testid="search">{useLocation().search}</output>;
 }
 
-function renderPage(entry = "/parameters") {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(entry = "/parameters", me: typeof EDITOR_ME | typeof VIEWER_ME = EDITOR_ME) {
+  const queryClient = editorQueryClient(me);
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -391,5 +392,17 @@ describe("Parameters: deleting one", () => {
 
     await waitFor(() => expect(calls("DELETE")).toHaveLength(1));
     expect(calls("DELETE")[0].path).toBe("/api/v1/parameters/4");
+  });
+
+  it("does not offer a way to create, delete or save to an account that may not", async () => {
+    serve();
+    renderPage("/parameters", VIEWER_ME);
+    expect(await screen.findByRole("button", { name: "demand" })).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "New parameter" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete demand" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "demand" }));
+    expect(await screen.findByRole("table", { name: "demand values" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save values" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save settings" })).not.toBeInTheDocument();
   });
 });

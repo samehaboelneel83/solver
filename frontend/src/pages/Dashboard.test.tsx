@@ -46,6 +46,16 @@ function mockDefaultResponses() {
     if (path.startsWith("/api/problem/")) {
       return Promise.resolve(recentProblems);
     }
+    if (path.startsWith("/api/v1/me")) {
+      return Promise.resolve({
+        username: "admin",
+        display_name: "Administrator",
+        capabilities: ["domain.edit", "model.publish", "run.submit"],
+      });
+    }
+    if (path.startsWith("/api/template")) {
+      return Promise.resolve({ items: [], total: 0 });
+    }
     return Promise.reject(new Error(`unexpected path ${path}`));
   });
 }
@@ -114,6 +124,10 @@ describe("Dashboard", () => {
       if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
       if (path === "/api/meta/counts") return Promise.resolve(counts);
       if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/me")) {
+        return Promise.resolve({ username: "admin", capabilities: ["model.publish"] });
+      }
+      if (path.startsWith("/api/template")) return Promise.resolve({ items: [], total: 0 });
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
 
@@ -140,6 +154,54 @@ describe("Dashboard", () => {
     expect(problemCall[0]).not.toContain("f_domain_id");
   });
 
+    it("offers a template when no domain is selected yet", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
+        if (path === "/api/meta/counts") return Promise.resolve(counts);
+        if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
+        if (path.startsWith("/api/v1/me")) {
+          return Promise.resolve({ username: "admin", capabilities: ["model.publish"] });
+        }
+        if (path.startsWith("/api/template")) {
+          return Promise.resolve({
+            items: [{ id: 1, name: "weekly_rota", ir_version: "1", domain_seed: {}, default_ir: {} }],
+            total: 1,
+          });
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      renderWithProviders();
+
+      expect(await screen.findByRole("button", { name: /start from weekly_rota/i })).toBeInTheDocument();
+    });
+
+    it("opens an existing weekly rota rather than applying the template twice", async () => {
+    localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
+      if (path === "/api/meta/counts") return Promise.resolve(counts);
+      if (path.startsWith("/api/problem/")) {
+        return Promise.resolve({
+          items: [{ id: 31, domain_id: 7, name: "weekly_rota", template_id: 1, owner: "ops", created_at: "2026-09-19T09:00:00Z" }],
+          total: 1,
+        });
+      }
+      if (path.startsWith("/api/v1/me")) {
+        return Promise.resolve({ username: "admin", capabilities: ["model.publish"] });
+      }
+      if (path.startsWith("/api/template")) {
+        return Promise.resolve({
+          items: [{ id: 1, name: "weekly_rota", ir_version: "1", domain_seed: {}, default_ir: {} }],
+          total: 1,
+        });
+      }
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    renderWithProviders();
+
+    expect(await screen.findByRole("button", { name: /open weekly_rota/i })).toBeInTheDocument();
+  });
+
   it("still renders a sensible row-counts panel when every table is genuinely empty (A-5)", async () => {
     (apiFetch as any).mockImplementation((path: string) => {
       if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
@@ -147,6 +209,10 @@ describe("Dashboard", () => {
         return Promise.resolve([{ schema: "domain", table: "entity", label_plural: "Entities", total: 0 }]);
       }
       if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/me")) {
+        return Promise.resolve({ username: "admin", capabilities: ["model.publish"] });
+      }
+      if (path.startsWith("/api/template")) return Promise.resolve({ items: [], total: 0 });
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
 

@@ -27,6 +27,7 @@ import {
   type Id,
   type RelationshipType,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { mergeReload, reloadedKeys } from "../lib/staleRecord";
@@ -121,6 +122,7 @@ function TypeForm({
   type: RelationshipType;
   reload: () => Promise<RelationshipType | null>;
 }) {
+  const { can } = useCapabilities();
   const [draft, setDraft] = useState<RelationshipTypeDraft>(() => draftFromType(type));
   const [colourProblem, setColourProblem] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
@@ -233,6 +235,7 @@ function TypeForm({
           errors={errors}
           fallbackKey={String(type.id)}
         />
+        {can("domain.edit") && (
         <button
           type="submit"
           disabled={updateType.isPending}
@@ -240,12 +243,14 @@ function TypeForm({
         >
           {updateType.isPending ? "Saving…" : "Save relationship type"}
         </button>
+        )}
       </form>
     </section>
   );
 }
 
 function DeleteType({ type }: { type: RelationshipType }) {
+  const { can } = useCapabilities();
   // `relationship` rows reference `relationship_type` ON DELETE CASCADE, so
   // this count is what would be destroyed with it. One page of size 1 is
   // enough: only `total` is read. Undefined while it loads, and the
@@ -277,6 +282,8 @@ function DeleteType({ type }: { type: RelationshipType }) {
       toast.error(formatApiError(err));
     }
   }
+
+  if (!can("domain.edit")) return null;
 
   return (
     <section aria-labelledby="delete-relationship-type-heading" className="rounded-md border border-red-200 bg-white p-4">

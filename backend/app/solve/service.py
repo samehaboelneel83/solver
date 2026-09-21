@@ -14,15 +14,18 @@ attribute to a solver version is not a result (roadmap, Phase 3).
 
 from __future__ import annotations
 
+import os
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.solve.backends import NoBackend, choose
 from app.solve.classify import classify
-from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model
+from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model, slack_by_constraint
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 from app.settings_resolve import resolve
@@ -32,6 +35,10 @@ COMPILER_VERSION = "ir-compiler 1"
 # A constraint can break in many places; the row keeps the worst few rather
 # than every instance, because a `constraint_result` is read by a person.
 _MAX_REPORTED_VIOLATIONS = 20
+
+# How often a running worker says it is still alive. Reclaim is a multiple
+# of this, not of the time limit: a slow solve that heartbeats is not stale.
+HEARTBEAT_SECONDS = float(os.environ.get("WORKER_HEARTBEAT_SECONDS", "2.0"))
 
 
 @dataclass
@@ -149,15 +156,118 @@ def claim_next(db: Session) -> int | None:
         db.rollback()
         return None
     db.execute(
-        text("UPDATE run SET status = 'running', started_at = now() WHERE id = :r"),
+        text(
+            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now()"
+            " WHERE id = :r"
+        ),
         {"r": run_id},
     )
     db.commit()
     return run_id
 
 
+class CannotCancel(Exception):
+    """The run exists but is no longer in a state that can be stopped."""
+
+
+def cancel_run(db: Session, run_id: int) -> str:
+    """Ask a run to stop. Returns the status after the request.
+
+    A queued run is cancelled here: nothing has started, so there is no
+    worker to tell. A running run is asked; the worker records `cancelled`
+    instead of an answer. A settled run is refused -- stopping a result
+    already written would be rewriting history.
+    """
+    row = db.execute(
+        text("SELECT status FROM run WHERE id = :r FOR UPDATE"), {"r": run_id}
+    ).scalar_one_or_none()
+    if row is None:
+        raise LookupError(f"run {run_id} not found")
+    if row == "queued":
+        db.execute(
+            text(
+                "UPDATE run SET status = 'cancelled', cancel_requested = true,"
+                "               finished_at = now() WHERE id = :r"
+            ),
+            {"r": run_id},
+        )
+        db.commit()
+        return "cancelled"
+    if row == "running":
+        db.execute(
+            text("UPDATE run SET cancel_requested = true WHERE id = :r"),
+            {"r": run_id},
+        )
+        db.commit()
+        return "running"
+    raise CannotCancel("this run has already finished")
+
+
+def _honour_cancel(db: Session, run_id: int) -> bool:
+    """If the run was asked to stop, record `cancelled` and return True."""
+    done = db.execute(
+        text(
+            "UPDATE run SET status = 'cancelled', finished_at = now()"
+            " WHERE id = :r AND cancel_requested"
+            "   AND status IN ('queued', 'running')"
+            " RETURNING id"
+        ),
+        {"r": run_id},
+    ).scalar_one_or_none()
+    if done is None:
+        return False
+    db.commit()
+    return True
+
+
+def _cancelled_outcome(db: Session, run_id: int) -> RunOutcome:
+    dataset_id = db.execute(
+        text("SELECT dataset_id FROM run WHERE id = :r"), {"r": run_id}
+    ).scalar_one()
+    return RunOutcome(run_id, dataset_id, "cancelled", None, {})
+
+
+@contextmanager
+def _heartbeat(run_id: int, stop: threading.Event) -> Iterator[None]:
+    """Touch `heartbeat_at` while this block runs, and set `stop` on cancel.
+
+    Uses its own session: the solve holds `db` inside a library call, and a
+    heartbeat that shared it would wait on the solve it is meant to outlive.
+    """
+    from app.core.db import SessionLocal
+
+    def loop() -> None:
+        while not stop.wait(HEARTBEAT_SECONDS):
+            session = SessionLocal()
+            try:
+                asked = session.execute(
+                    text(
+                        "UPDATE run SET heartbeat_at = now()"
+                        " WHERE id = :r AND status = 'running'"
+                        " RETURNING cancel_requested"
+                    ),
+                    {"r": run_id},
+                ).scalar_one_or_none()
+                session.commit()
+                if asked:
+                    stop.set()
+            except Exception:
+                session.rollback()
+            finally:
+                session.close()
+
+    threading.Thread(target=loop, daemon=True, name=f"run-{run_id}-heartbeat").start()
+    try:
+        yield
+    finally:
+        stop.set()
+
+
 def execute_run(db: Session, run_id: int) -> RunOutcome:
     """Solve a claimed run and record what happened."""
+    if _honour_cancel(db, run_id):
+        return _cancelled_outcome(db, run_id)
+
     row = db.execute(
         text(
             "SELECT r.dataset_id, r.params, s.patch, mv.ir, d.data"
@@ -176,43 +286,58 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     time_limit = float(params.get("time_limit_s", 10.0))
     dataset_id = row["dataset_id"]
 
-    found = classify(ir, data)
-    try:
-        backend, why = choose(found, params.get("requested_solver"))
-    except NoBackend as exc:
-        db.execute(
-            text(
-                "UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"
-            ),
-            {"e": str(exc), "r": run_id},
-        )
-        db.commit()
-        return RunOutcome(run_id, dataset_id, "error", None, {})
+    stop = threading.Event()
+    with _heartbeat(run_id, stop):
+        found = classify(ir, data)
+        if _honour_cancel(db, run_id):
+            return _cancelled_outcome(db, run_id)
+        try:
+            backend, why = choose(found, params.get("requested_solver"))
+        except NoBackend as exc:
+            db.execute(
+                text(
+                    "UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"
+                ),
+                {"e": str(exc), "r": run_id},
+            )
+            db.commit()
+            return RunOutcome(run_id, dataset_id, "error", None, {})
 
-    try:
-        compiled = compile_model(ir, data)
-        result = backend.solve(compiled, time_limit=time_limit, workers=8)
-    except Unsupported as exc:
-        # The model is valid and this compiler cannot express it. That is a
-        # failed run with a reason, not a crash and not an empty answer.
-        db.execute(
-            text(
-                "UPDATE run SET status = 'error', error = :e, finished_at = now()"
-                " WHERE id = :r"
-            ),
-            {"e": str(exc), "r": run_id},
-        )
-        db.commit()
-        return RunOutcome(run_id, dataset_id, "error", None, {})
+        try:
+            compiled = compile_model(ir, data)
+            if _honour_cancel(db, run_id):
+                return _cancelled_outcome(db, run_id)
+            result = backend.solve(
+                compiled, time_limit=time_limit, workers=8, should_stop=stop.is_set
+            )
+        except Unsupported as exc:
+            # The model is valid and this compiler cannot express it. That is a
+            # failed run with a reason, not a crash and not an empty answer.
+            db.execute(
+                text(
+                    "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                    " WHERE id = :r"
+                ),
+                {"e": str(exc), "r": run_id},
+            )
+            db.commit()
+            return RunOutcome(run_id, dataset_id, "error", None, {})
+
+        if _honour_cancel(db, run_id):
+            return _cancelled_outcome(db, run_id)
 
     # Which solver ran, and why it was the one -- a result nobody can
-    # attribute to a choice is not reproducible.
+    # attribute to a choice is not reproducible. Empty ranges ride along:
+    # they are a fact about this compile, not a second table.
+    extra = {"chosen_solver": backend.name, "why_solver": why}
+    if compiled.empty_ranges:
+        extra["empty_ranges"] = compiled.empty_ranges
     db.execute(
         text(
             "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
             " WHERE id = :r"
         ),
-        {"s": backend.name, "extra": _json({"chosen_solver": backend.name, "why_solver": why}), "r": run_id},
+        {"s": backend.name, "extra": _json(extra), "r": run_id},
     )
     _record(db, run_id, compiled, result)
     if result.status == "infeasible":
@@ -241,7 +366,11 @@ def run_scenario(
     """
     run_id = enqueue_run(db, scenario_id, time_limit=time_limit, seed=seed)
     db.execute(
-        text("UPDATE run SET status = 'running', started_at = now() WHERE id = :r"), {"r": run_id}
+        text(
+            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now()"
+            " WHERE id = :r"
+        ),
+        {"r": run_id},
     )
     return execute_run(db, run_id)
 
@@ -309,10 +438,14 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
     # be indistinguishable from a rule nobody checked.
     seen: dict[str, dict[str, Any]] = {}
     for spec_id in dict.fromkeys(c.id for c in compiled.constraints):
-        seen[spec_id] = {"hard": True, "total": 0, "penalty": 0, "where": []}
+        seen[spec_id] = {"hard": True, "total": 0, "penalty": 0, "where": [], "slack": None}
+
+    slacks = slack_by_constraint(compiled, result.assignments)
 
     for spec_id, keys in compiled.violations.items():
-        entry = seen.setdefault(spec_id, {"hard": True, "total": 0, "penalty": 0, "where": []})
+        entry = seen.setdefault(
+            spec_id, {"hard": True, "total": 0, "penalty": 0, "where": [], "slack": None}
+        )
         entry["hard"] = False
         for key in keys:
             amount = result.assignments.get(key, 0)
@@ -328,8 +461,8 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
             text(
                 "INSERT INTO constraint_result"
                 " (run_id, constraint_id, label, hard, satisfied, total_violation,"
-                "  penalty_paid, violations)"
-                " VALUES (:r, :c, :l, :hard, :sat, :total, :pen, :v)"
+                "  penalty_paid, violations, slack)"
+                " VALUES (:r, :c, :l, :hard, :sat, :total, :pen, :v, :slack)"
             ),
             {
                 "r": run_id,
@@ -340,6 +473,7 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
                 "total": entry["total"],
                 "pen": entry["penalty"],
                 "v": _json(entry["where"]),
+                "slack": slacks.get(spec_id),
             },
         )
 

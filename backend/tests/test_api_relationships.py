@@ -1243,6 +1243,33 @@ def test_graph_hierarchy_type_id_from_another_domain_is_404(
     assert response.status_code == 404, response.text
 
 
+def test_graph_refuses_a_domain_over_the_node_cap(
+    auth_headers, domain_id, types, monkeypatch
+):
+    """GET /graph used to return the whole domain unbounded. Counted
+    before the rows are loaded; the cap is lowered here so the test does
+    not insert ten thousand entities."""
+    monkeypatch.setattr("app.graph.service.GRAPH_MAX_NODES", 2)
+    client = TestClient(app)
+    _entity(client, auth_headers, types["unit"], "a")
+    _entity(client, auth_headers, types["unit"], "b")
+    ok = client.get("/api/v1/graph", params={"domain_id": domain_id}, headers=auth_headers)
+    assert ok.status_code == 200, ok.text
+    assert len(ok.json()["nodes"]) == 2
+
+    _entity(client, auth_headers, types["unit"], "c")
+    response = client.get(
+        "/api/v1/graph", params={"domain_id": domain_id}, headers=auth_headers
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json().get("detail")
+    assert isinstance(detail, list) and detail, detail
+    entry = detail[0]
+    assert [str(p) for p in entry["loc"]] == ["query", "domain_id"]
+    assert "3" in entry["msg"] and "2" in entry["msg"]
+    assert "kind" not in entry
+
+
 def test_a_relationship_type_straddling_domains_is_refused_so_no_graph_can_see_one(
     auth_headers, domain_id, types, other_domain_id
 ):

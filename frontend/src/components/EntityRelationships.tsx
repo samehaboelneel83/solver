@@ -129,7 +129,7 @@ export default function EntityRelationships({
           <RelationshipList
             rows={relationshipRows(merged, typeById, entityById)}
             caption={`Relationships of ${entity.label ?? entity.key}`}
-            emptyNote="This entity is not connected to anything yet. Add the first relationship below."
+            emptyNote="This entity is not connected to anything yet."
             subjectId={entity.id}
             entityHref={(id) => `/entities/${id}`}
             truncated={others.truncated}

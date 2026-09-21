@@ -3,6 +3,7 @@
     GET    /api/v1/problems/{id}/versions   ?limit=&offset=   newest first, no `ir`
     POST   /api/v1/problems/{id}/versions   {ir, note}        -> the created version
     GET    /api/v1/versions/{id}                              -> one version, with `ir`
+    POST   /api/v1/templates/{id}/apply     {domain_id, name?} or {problem_id} or {domain_name}
     GET    /api/v1/scenarios                ?problem_id=&model_version_id=&limit=&offset=
     POST   /api/v1/scenarios
     GET    /api/v1/scenarios/{id}
@@ -140,7 +141,9 @@ from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.ir.validate import validate_ir
 from app.models.iam import UserAccount
-from app.models.v1_problem import ModelVersion, Problem, Scenario
+from app.models.v1_domain import Domain
+from app.models.v1_problem import ModelVersion, Problem, Scenario, Template
+from app.seed import plant_domain_seed
 
 router = APIRouter(prefix="/api/v1", tags=["model versions and scenarios"])
 
@@ -258,6 +261,38 @@ class ScenarioUpdate(BaseModel):
 class ScenarioList(BaseModel):
     items: list[ScenarioRead]
     total: int
+
+
+class ApplyTemplateRequest(BaseModel):
+    """Fill an empty problem, create one in a domain, or make a domain.
+
+    `domain_seed` is walked first: missing types, records and parameter
+    cells are created; names that already exist are left alone. An empty
+    seed is a no-op, and `validate_ir` still 422s if the IR names a set
+    the domain does not have.
+    """
+
+    domain_id: BigintId | None = None
+    domain_name: str | None = None
+    problem_id: BigintId | None = None
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def _need_a_place(self) -> "ApplyTemplateRequest":
+        named = (self.domain_name or "").strip()
+        if self.problem_id is None and self.domain_id is None and not named:
+            raise ValueError("name a domain to create a problem in, or a problem to fill")
+        return self
+
+
+class ApplyTemplateResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    template_id: int
+    domain_id: int
+    problem_id: int
+    model_version_id: int
+    scenario_id: int
 
 
 # --- helpers ---------------------------------------------------------------
@@ -423,6 +458,116 @@ def create_version(
         db.rollback()
         raise translate_db_error(exc, "model_version") from exc
     return ModelVersionRead.model_validate(dict(row))
+
+
+@router.post("/templates/{template_id}/apply", status_code=201)
+def apply_template(
+    template_id: int,
+    payload: ApplyTemplateRequest,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("model.publish")),
+) -> ApplyTemplateResult:
+    """Start a problem from a template's IR.
+
+    `plant_domain_seed` runs first: missing types named by `domain_seed`
+    are created, existing names are skipped. `validate_ir` still refuses
+    a miss, so a template whose seed is empty cannot half-build a domain.
+
+    Creating a problem uses `name`, defaulting to the template's. Filling
+    an existing one refuses if it already has a version -- a template
+    starts a model, it does not overwrite one. `domain_name` makes a
+    domain when neither `domain_id` nor `problem_id` is given.
+    """
+    template = db.get(Template, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+
+    problem: Problem | None = None
+    if payload.problem_id is not None:
+        problem = _get_problem(db, payload.problem_id)
+        if payload.domain_id is not None and problem.domain_id != payload.domain_id:
+            raise HTTPException(
+                status_code=422,
+                detail="that problem does not belong to the named domain",
+            )
+        already = db.scalar(
+            select(func.count())
+            .select_from(ModelVersion.__table__)
+            .where(_version_columns.problem_id == problem.id)
+        )
+        if already:
+            raise HTTPException(
+                status_code=422,
+                detail="this problem already has a model; a template starts one, it does not replace it",
+            )
+        problem.template_id = template.id
+        domain_id = problem.domain_id
+    elif payload.domain_id is not None:
+        if db.get(Domain, payload.domain_id) is None:
+            raise HTTPException(status_code=404, detail="domain not found")
+        domain_id = payload.domain_id
+    else:
+        domain = Domain(name=(payload.domain_name or "").strip())
+        db.add(domain)
+        try:
+            db.flush()
+        except DBAPIError as exc:
+            db.rollback()
+            raise translate_db_error(exc, "domain") from exc
+        domain_id = domain.id
+
+    plant_domain_seed(db, domain_id, template.domain_seed)
+
+    if problem is None:
+        problem = Problem(
+            domain_id=domain_id,
+            name=payload.name or template.name,
+            owner=user.username,
+            template_id=template.id,
+        )
+        db.add(problem)
+        try:
+            db.flush()
+        except DBAPIError as exc:
+            db.rollback()
+            raise translate_db_error(exc, "problem") from exc
+
+    try:
+        _check_ir(db, problem, template.default_ir)
+    except HTTPException:
+        db.rollback()
+        raise
+    statement = (
+        insert(ModelVersion.__table__)
+        .values(
+            problem_id=problem.id,
+            ir=template.default_ir,
+            note=f"from template {template.name}",
+        )
+        .returning(_version_columns.id)
+    )
+    try:
+        version_id = db.execute(statement).scalar_one()
+    except DBAPIError as exc:
+        db.rollback()
+        raise translate_db_error(exc, "model_version") from exc
+
+    scenario = Scenario(
+        problem_id=problem.id,
+        model_version_id=version_id,
+        name="as modelled",
+        patch={},
+    )
+    db.add(scenario)
+    _commit(db, "scenario")
+    db.refresh(scenario)
+    return ApplyTemplateResult(
+        template_id=template.id,
+        domain_id=problem.domain_id,
+        problem_id=problem.id,
+        model_version_id=version_id,
+        scenario_id=scenario.id,
+    )
 
 
 @router.get("/versions/{version_id}")

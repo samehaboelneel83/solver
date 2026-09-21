@@ -28,6 +28,7 @@ from ortools.linear_solver import pywraplp
 
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution
+from app.solve.stop import interrupt_when
 
 _ORTOOLS_VERSION = _pkg_version("ortools")
 
@@ -53,7 +54,13 @@ def available() -> bool:
     return pywraplp.Solver.CreateSolver(_ENGINE) is not None
 
 
-def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> Solution:
+def solve(
+    compiled: Compiled,
+    *,
+    time_limit: float = 10.0,
+    workers: int = 8,
+    should_stop=None,
+) -> Solution:
     discrete = [key[0] for key, spec in compiled.variables.items() if spec.is_integral]
     if discrete:
         raise NotContinuous(
@@ -78,7 +85,8 @@ def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> 
         )
         solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
-    status = solver.Solve()
+    with interrupt_when(should_stop, solver.InterruptSolve):
+        status = solver.Solve()
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
 
     return Solution(

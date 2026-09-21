@@ -74,6 +74,7 @@ returned: `relationship.valid_from` / `valid_to`. They are available from
 shadow a relationship attribute of the same name.
 """
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.graph.schemas import (
@@ -94,11 +95,33 @@ from app.models.v1_domain import (
 )
 
 
+# The canvas loads the whole domain in one GET. A domain past these
+# limits is refused rather than returned unbounded: 10k nodes is already
+# past what Cytoscape can usefully draw, and 50k edges is a dense graph
+# on that many nodes. Counted before the rows are loaded so a huge
+# domain does not become a huge allocation first.
+GRAPH_MAX_NODES = 10_000
+GRAPH_MAX_EDGES = 50_000
+
+
 class HierarchyTypeNotFound(Exception):
     """`hierarchy_type_id` names nothing, names a relationship type in a
     different domain, or names one whose `is_hierarchy` is false. Mapped to
     HTTP 404 by the route layer -- it is a bad reference to a resource, not
     a malformed request body."""
+
+
+class GraphTooLarge(Exception):
+    """The domain has more nodes or edges than this response will carry.
+    Mapped to HTTP 422 by the route, blaming `domain_id`."""
+
+    def __init__(self, kind: str, count: int, limit: int):
+        self.kind = kind
+        self.count = count
+        self.limit = limit
+        super().__init__(
+            f"this domain has {count} {kind}, which exceeds the {limit} limit"
+        )
 
 
 def _node_label(entity: Entity) -> str:
@@ -148,9 +171,17 @@ def get_domain_graph(
 
     entities: list[Entity] = []
     if entity_type_by_id:
+        type_ids = entity_type_by_id.keys()
+        node_count = (
+            db.query(func.count(Entity.id))
+            .filter(Entity.entity_type_id.in_(type_ids))
+            .scalar()
+        )
+        if node_count > GRAPH_MAX_NODES:
+            raise GraphTooLarge("nodes", node_count, GRAPH_MAX_NODES)
         entities = (
             db.query(Entity)
-            .filter(Entity.entity_type_id.in_(entity_type_by_id.keys()))
+            .filter(Entity.entity_type_id.in_(type_ids))
             # Same order as GET /api/v1/entities: `sort_order` is what makes
             # mon..sun come back in week order rather than alphabetically,
             # and `key`/`id` complete the total order.
@@ -161,18 +192,22 @@ def get_domain_graph(
 
     relationships: list[Relationship] = []
     if relationship_type_by_id and entity_ids:
+        rel_filter = (
+            Relationship.relationship_type_id.in_(relationship_type_by_id.keys()),
+            # A relationship_type's from_type_id/to_type_id are plain FKs
+            # to entity_type with no same-domain constraint, so an edge
+            # could in principle reach outside this domain's nodes.
+            # Cytoscape cannot draw an edge to a node it was not given,
+            # so those are excluded rather than returned dangling.
+            Relationship.from_entity_id.in_(entity_ids),
+            Relationship.to_entity_id.in_(entity_ids),
+        )
+        edge_count = db.query(func.count(Relationship.id)).filter(*rel_filter).scalar()
+        if edge_count > GRAPH_MAX_EDGES:
+            raise GraphTooLarge("edges", edge_count, GRAPH_MAX_EDGES)
         relationships = (
             db.query(Relationship)
-            .filter(
-                Relationship.relationship_type_id.in_(relationship_type_by_id.keys()),
-                # A relationship_type's from_type_id/to_type_id are plain FKs
-                # to entity_type with no same-domain constraint, so an edge
-                # could in principle reach outside this domain's nodes.
-                # Cytoscape cannot draw an edge to a node it was not given,
-                # so those are excluded rather than returned dangling.
-                Relationship.from_entity_id.in_(entity_ids),
-                Relationship.to_entity_id.in_(entity_ids),
-            )
+            .filter(*rel_filter)
             .order_by(Relationship.id.asc())
             .all()
         )

@@ -7,6 +7,7 @@ import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import { useDeleteEntity, useEntityList } from "../api/entities";
 import { useSchema } from "../api/meta";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { tableLabelPlural } from "../lib/labels";
@@ -21,6 +22,8 @@ export default function EntityList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const toast = useToast();
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
 
   const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
@@ -170,12 +173,14 @@ export default function EntityList() {
             </p>
           )}
         </div>
+        {canEdit && (
         <Link
           to={newHref}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
         >
           New
         </Link>
+        )}
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -240,7 +245,7 @@ export default function EntityList() {
           schema={schemaName}
           table={tableName}
           tableLabel={headingLabel}
-          newHref={newHref}
+          newHref={canEdit ? newHref : undefined}
           fields={table.fields}
           rows={data.items}
           total={data.total}
@@ -250,13 +255,17 @@ export default function EntityList() {
           order={order}
           onSort={handleSort}
           onPageChange={handlePageChange}
-          onDelete={(id, label) => {
-            setDeleteError(null);
-            deleteEntity.mutate(id, {
-              onSuccess: () => toast.success(`${label} deleted`),
-              onError: (err) => setDeleteError(formatApiError(err)),
-            });
-          }}
+          onDelete={
+            canEdit
+              ? (id, label) => {
+                  setDeleteError(null);
+                  deleteEntity.mutate(id, {
+                    onSuccess: () => toast.success(`${label} deleted`),
+                    onError: (err) => setDeleteError(formatApiError(err)),
+                  });
+                }
+              : undefined
+          }
           onRowClick={(id) => navigate(`/${schemaName}/${tableName}/${id}`)}
         />
       )}

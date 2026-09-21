@@ -11,6 +11,7 @@ import {
 import OfflineNotice from "./OfflineNotice";
 import Skeleton from "./Skeleton";
 import { useToast } from "./ToastProvider";
+import { useCapabilities } from "../hooks/useCapability";
 import { formatApiError } from "../api/errors";
 import {
   listEntities,
@@ -205,6 +206,8 @@ function Editor({
   entities: Entity[][];
   totals: number[];
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
@@ -339,7 +342,7 @@ function Editor({
             baseId={baseId}
             nameAt={nameAt}
             textOf={textOf}
-            onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+            onChange={(key, value) => canEdit && setDraft((prev) => ({ ...prev, [key]: value }))}
             stored={stored}
           />
         ) : (
@@ -351,7 +354,7 @@ function Editor({
             errors={errors}
             baseId={baseId}
             textOf={textOf}
-            onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+            onChange={(key, value) => canEdit && setDraft((prev) => ({ ...prev, [key]: value }))}
             stored={stored}
             defaultValue={values.default_value}
             cellLabel={cellLabel}
@@ -366,6 +369,7 @@ function Editor({
         </p>
       )}
 
+      {canEdit && (
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
@@ -382,6 +386,7 @@ function Editor({
               : `${changed.length} cells edited.`}
         </span>
       </div>
+      )}
     </form>
   );
 }

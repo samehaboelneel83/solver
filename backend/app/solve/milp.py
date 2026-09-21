@@ -31,6 +31,7 @@ from ortools.linear_solver import pywraplp
 
 from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution
+from app.solve.stop import interrupt_when
 
 _ORTOOLS_VERSION = _pkg_version("ortools")
 
@@ -57,7 +58,13 @@ def available() -> str | None:
     return None
 
 
-def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> Solution:
+def solve(
+    compiled: Compiled,
+    *,
+    time_limit: float = 10.0,
+    workers: int = 8,
+    should_stop=None,
+) -> Solution:
     engine = available()
     if engine is None:  # pragma: no cover -- both ship with ortools
         raise RuntimeError("no MILP engine in this build")
@@ -78,7 +85,8 @@ def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> 
         )
         solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
-    status = solver.Solve()
+    with interrupt_when(should_stop, solver.InterruptSolve):
+        status = solver.Solve()
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
 
     return Solution(

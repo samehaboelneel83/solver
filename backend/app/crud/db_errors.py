@@ -17,9 +17,11 @@ exist, from two migrations:
 ``field = 'domain_id'`` -- it is raised only for an UPDATE that moves an
 entity type between domains. That trigger's **DELETE** path deliberately
 does not use this shape: a DELETE has no request body to blame a field in,
-so it raises **23503** naming ``parameter_def`` as the referencing table
-and lands on the conflict branch below, like any other referenced-row
-refusal.
+so it raises **23503** naming ``parameter_def`` as the referencing table.
+Unlike a real foreign key it has no ``constraint_name``, which is how the
+conflict branch below tells the two apart: it forwards the trigger's
+sentence (naming the parameters) rather than conflict_detail()'s generic
+"still referenced by parameter_def records".
 
 `field` is set by **every** one of the ten: the attribute name for
 `entity_validate`'s kinds, the relationship type's *name* (not a column)
@@ -101,10 +103,11 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
       this returns its generic catch-all message rather than a tailored
       one -- still a reasonable 409, just not a field-specific one.
     - 23503 / 23505 / 23502 -> 409 via the existing conflict_detail(),
-      reused unchanged. Migration 0009's `entity_type_guard` raises a
-      23503 of its own (with ``TABLE = 'parameter_def'``) for a refused
-      DELETE, so conflict_detail()'s "still referenced by" branch answers
-      it exactly as it answers a real foreign key.
+      reused unchanged -- except a 23503 with no ``constraint_name`` and
+      a ``message_primary``. That is migration 0009's `entity_type_guard`
+      DELETE (``TABLE = 'parameter_def'``): a real FK always names its
+      constraint, and the trigger's sentence names the parameters, which
+      conflict_detail() would drop.
     - P0001 (bare RAISE EXCEPTION: forbid_update immutability,
       snapshot_dataset IR-resolution failures) -> 409 with the trigger's
       own human message. Not a 422: there's no single field the caller can
@@ -146,6 +149,17 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
         return HTTPException(status_code=409, detail=conflict_detail(exc, table))
 
     if code in _CONFLICT_CODES:
+        if code == "23503":
+            constraint = (
+                (getattr(diag, "constraint_name", None) or "") if diag is not None else ""
+            )
+            primary = getattr(diag, "message_primary", None) if diag is not None else None
+            # A RAISE ... USING ERRCODE '23503' has a TABLE but no CONSTRAINT,
+            # which is how entity_type_guard's DELETE is told apart from a
+            # real foreign key. Forward the trigger sentence; conflict_detail
+            # would rewrite it to "still referenced by {table} records".
+            if not constraint and primary:
+                return HTTPException(status_code=409, detail=primary)
         return HTTPException(status_code=409, detail=conflict_detail(exc, table))
 
     if code == "P0001":

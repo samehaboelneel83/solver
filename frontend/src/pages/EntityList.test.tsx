@@ -1,9 +1,10 @@
-import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntityList from "./EntityList";
 import { ToastProvider } from "../components/ToastProvider";
+import { editorQueryClient, EDITOR_ME } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -28,7 +29,7 @@ const schemaResponse = [
 ];
 
 function renderWithProviders(initialEntry: string, options: { retry?: boolean } = {}) {
-  const queryClient = new QueryClient({
+  const queryClient = editorQueryClient(EDITOR_ME, {
     defaultOptions: { queries: { retry: options.retry ?? false } },
   });
   return render(

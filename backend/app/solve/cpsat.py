@@ -32,6 +32,7 @@ _ORTOOLS_VERSION = _pkg_version("ortools")
 
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution
+from app.solve.stop import interrupt_when
 
 # CP-SAT's own status codes, in the platform's `run_status` vocabulary --
 # which already distinguishes a proven optimum from a merely feasible answer,
@@ -66,7 +67,23 @@ def _whole(value: Decimal, what: str) -> int:
     return int(value)
 
 
-def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> Solution:
+def solve(
+    compiled: Compiled,
+    *,
+    time_limit: float = 10.0,
+    workers: int = 8,
+    should_stop=None,
+) -> Solution:
+    if should_stop is not None and should_stop():
+        return Solution(
+            status="unknown",
+            optimal=False,
+            objective=None,
+            assignments={},
+            wall_seconds=0.0,
+            solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",
+        )
+
     model = cp_model.CpModel()
 
     for key, v in compiled.variables.items():
@@ -97,7 +114,8 @@ def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_search_workers = workers
-    status = solver.Solve(model)
+    with interrupt_when(should_stop, solver.StopSearch):
+        status = solver.Solve(model)
 
     solved = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     return Solution(

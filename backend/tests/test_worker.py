@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 from app.core.db import SessionLocal
 from app.seed import seed_workforce_demo
-from app.solve.service import claim_next, enqueue_run, execute_run
+from app.solve.service import cancel_run, claim_next, enqueue_run, execute_run
 from app.worker import reclaim_stale, work_once
 from tests.test_v1_problem_run import db  # noqa: F401  (fixture)
 
@@ -122,9 +122,13 @@ def test_a_run_left_running_by_a_dead_worker_is_requeued(db):
     run_id = enqueue_run(db, seeded["scenario_id"])
     claim_next(db)
     assert _status(db, run_id) == "running"
-    # Pretend the worker died an hour ago.
+    # Pretend the worker died an hour ago, including its last heartbeat.
     db.execute(
-        text("UPDATE run SET started_at = now() - interval '1 hour' WHERE id = :r"), {"r": run_id}
+        text(
+            "UPDATE run SET started_at = now() - interval '1 hour',"
+            "               heartbeat_at = now() - interval '1 hour' WHERE id = :r"
+        ),
+        {"r": run_id},
     )
     db.commit()
 
@@ -145,6 +149,69 @@ def test_a_run_still_solving_is_left_alone(db):
 
     assert reclaim_stale(db) == 0
     assert _status(db, run_id) == "running"
+
+
+def test_a_slow_run_that_is_still_heartbeating_is_left_alone(db):
+    """`started_at` is not liveness: a long solve that still heartbeats is
+    working, not abandoned."""
+    seeded = seed_workforce_demo(db)
+    enqueue_run(db, seeded["scenario_id"])
+    run_id = claim_next(db)
+    db.execute(
+        text(
+            "UPDATE run SET started_at = now() - interval '1 hour',"
+            "               heartbeat_at = now() WHERE id = :r"
+        ),
+        {"r": run_id},
+    )
+    db.commit()
+
+    assert reclaim_stale(db) == 0
+    assert _status(db, run_id) == "running"
+
+
+def test_cancelling_a_queued_run_stops_it_before_a_worker_takes_it(db):
+    seeded = seed_workforce_demo(db)
+    run_id = enqueue_run(db, seeded["scenario_id"])
+
+    assert cancel_run(db, run_id) == "cancelled"
+    assert _status(db, run_id) == "cancelled"
+    assert work_once(db) is None
+
+
+def test_cancelling_a_running_run_is_recorded_instead_of_an_answer(db):
+    """The worker has claimed it; honouring the stop means not writing a
+    roster as if the person waited it out."""
+    seeded = seed_workforce_demo(db)
+    run_id = enqueue_run(db, seeded["scenario_id"])
+    claim_next(db)
+    cancel_run(db, run_id)
+
+    outcome = execute_run(db, run_id)
+
+    assert outcome.status == "cancelled"
+    assert _status(db, run_id) == "cancelled"
+    assert db.execute(
+        text("SELECT count(*) FROM solution WHERE run_id = :r"), {"r": run_id}
+    ).scalar_one() == 0
+
+
+def test_a_dead_worker_that_had_been_asked_to_stop_is_cancelled_not_requeued(db):
+    seeded = seed_workforce_demo(db)
+    run_id = enqueue_run(db, seeded["scenario_id"])
+    claim_next(db)
+    cancel_run(db, run_id)
+    db.execute(
+        text(
+            "UPDATE run SET started_at = now() - interval '1 hour',"
+            "               heartbeat_at = now() - interval '1 hour' WHERE id = :r"
+        ),
+        {"r": run_id},
+    )
+    db.commit()
+
+    assert reclaim_stale(db) == 0
+    assert _status(db, run_id) == "cancelled"
 
 
 def test_a_run_the_compiler_cannot_express_is_recorded_not_retried(db):

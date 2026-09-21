@@ -21,9 +21,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.api.validation import field_error
 from app.core.db import get_db
 from app.graph.schemas import GraphResponse
-from app.graph.service import HierarchyTypeNotFound, get_domain_graph
+from app.graph.service import GraphTooLarge, HierarchyTypeNotFound, get_domain_graph
 from app.models.iam import UserAccount
 
 router = APIRouter(prefix="/api/v1", tags=["graph"])
@@ -48,3 +49,5 @@ def read_domain_graph(
         )
     except HierarchyTypeNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GraphTooLarge as exc:
+        raise field_error("domain_id", str(exc), domain_id, where="query") from exc

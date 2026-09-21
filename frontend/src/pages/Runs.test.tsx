@@ -28,9 +28,10 @@ const RUN_SUMMARY = {
   objective: 3621,
   wall_time_s: 0.009,
   error: null,
-  queued_at: "2026-09-20T10:00:00Z",
+    queued_at: "2026-09-20T10:00:00Z",
   started_at: "2026-09-20T10:00:00Z",
   finished_at: "2026-09-20T10:00:01Z",
+  cancel_requested: false,
 };
 
 const RUN_DETAIL = {
@@ -52,6 +53,7 @@ const RUN_DETAIL = {
       satisfied: false,
       total_violation: 36,
       penalty_paid: 3600,
+      slack: -36,
       violations: [
         { index: ["thu", "morning"], by: 4 },
         { index: ["tue", "evening"], by: 3 },
@@ -64,6 +66,7 @@ const RUN_DETAIL = {
       satisfied: true,
       total_violation: 0,
       penalty_paid: 0,
+      slack: 0,
       violations: [],
     },
   ],
@@ -106,6 +109,9 @@ function stub(overrides: Record<string, unknown> = {}) {
     // `/api/problem/`, not `/api/public/problem` -- the public schema's
     // prefix is collapsed (Ruling 27).
     if (path.startsWith("/api/problem")) return Promise.resolve(overrides.problems ?? PROBLEMS);
+    if (/^\/api\/v1\/scenarios\/\d+$/.test(path)) {
+      return Promise.resolve(overrides.scenario ?? SCENARIOS.items[0]);
+    }
     if (path.startsWith("/api/v1/scenarios")) return Promise.resolve(overrides.scenarios ?? SCENARIOS);
     // A function lets a test change what the server says between polls,
     // which is the whole point of a queued run.
@@ -171,6 +177,16 @@ describe("Runs", () => {
     expect(screen.getAllByText(/ortools 9\.15\.6755/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("3621").length).toBeGreaterThan(0);
     expect(screen.getAllByText("0.009s").length).toBeGreaterThan(0);
+  });
+
+  it("leads with whether the mandatory rules held, not the solver name", async () => {
+    renderPage();
+
+    expect(await screen.findByText(/all mandatory rules held/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 preference bent, at cost 3600/i)).toBeInTheDocument();
+    // Solver facts stay available, under Technical rather than in the header.
+    expect(screen.getByText("Technical")).toBeInTheDocument();
+    expect(screen.getByText(/no room left/i)).toBeInTheDocument();
   });
 
   it("distinguishes a proven optimum from a merely feasible answer", async () => {
@@ -259,6 +275,64 @@ describe("Runs", () => {
     expect(within(panel).getByText(/relax or remove any single one/i)).toBeInTheDocument();
   });
 
+  it("offers to turn the fighting rules into preferences", async () => {
+    const write = vi.fn().mockResolvedValue({
+      id: 9,
+      problem_id: 1,
+      model_version_id: 2,
+      name: "from run 11",
+      patch: { soften: { c_cover: 100, c_max_hours: 100 } },
+      created_at: "2026-09-21T10:00:00Z",
+    });
+    const infeasible = {
+      ...RUN_DETAIL,
+      status: "infeasible",
+      objective: null,
+      assignments: null,
+      constraints: [],
+      conflict: [
+        { constraint_id: "c_cover", instance: ["mon", "morning"] },
+        { constraint_id: "c_max_hours", instance: ["sara"] },
+      ],
+      conflict_minimal: true,
+    };
+    stub({
+      write,
+      run: infeasible,
+      runs: { items: [{ ...RUN_SUMMARY, status: "infeasible", objective: null }], total: 1 },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /make these preferences/i }));
+
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const [path, options] = write.mock.calls[0];
+    expect(path).toBe("/api/v1/scenarios");
+    expect(JSON.parse(options.body as string)).toMatchObject({
+      problem_id: 1,
+      model_version_id: 2,
+      name: "from run 11",
+      patch: { soften: { c_cover: 100, c_max_hours: 100 } },
+    });
+  });
+
+  it("names a rule that ranged over nobody", async () => {
+    stub({
+      run: {
+        ...RUN_DETAIL,
+        params: {
+          ...RUN_DETAIL.params,
+          empty_ranges: [{ constraint_id: "c_north", kind: "forall", index: {} }],
+        },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/rules that ranged over nobody/i)).toBeInTheDocument();
+    expect(screen.getByText(/c_north/)).toBeInTheDocument();
+    expect(screen.getByText(/never applied to anyone/i)).toBeInTheDocument();
+  });
+
   it("does not promise that relaxing one rule is enough when the search was cut short", async () => {
     // A truncated search still returns a set that conflicts, but some members
     // may not be needed. Saying "remove any one" would send a planner to
@@ -331,6 +405,47 @@ describe("Runs", () => {
     status = "optimal";
 
     expect(await screen.findByText(/best possible answer/i, {}, { timeout: 4000 })).toBeInTheDocument();
+  });
+
+  it("offers to stop a queued run, and does not offer it on a finished one", async () => {
+    let status = "queued";
+    stub({
+      run: () => ({
+        ...RUN_DETAIL,
+        status,
+        finished_at: status === "queued" ? null : RUN_DETAIL.finished_at,
+        assignments: status === "cancelled" ? null : RUN_DETAIL.assignments,
+        constraints: status === "cancelled" ? [] : RUN_DETAIL.constraints,
+        cancel_requested: status !== "queued",
+      }),
+      runs: () => ({ items: [{ ...RUN_SUMMARY, status, finished_at: status === "queued" ? null : RUN_SUMMARY.finished_at }], total: 1 }),
+      write: (path?: string) => {
+        if (String(path).includes("/cancel")) {
+          status = "cancelled";
+          return Promise.resolve({
+            ...RUN_DETAIL,
+            status: "cancelled",
+            cancel_requested: true,
+            assignments: null,
+            constraints: [],
+          });
+        }
+        return Promise.reject(new Error(`unexpected write ${path}`));
+      },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /stop this run/i }));
+
+    expect(await screen.findByText(/stopped before an answer/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /stop this run/i })).not.toBeInTheDocument();
+  });
+
+  it("does not offer to stop a finished run", async () => {
+    renderPage();
+
+    await screen.findByRole("button", { name: /run 11/i });
+    expect(screen.queryByRole("button", { name: /stop this run/i })).not.toBeInTheDocument();
   });
 
   it("offers only the solvers this build actually has, and defaults to letting it choose", async () => {

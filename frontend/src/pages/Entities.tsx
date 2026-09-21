@@ -22,6 +22,7 @@ import {
   type ExpressionDocument,
 } from "../expressions";
 import { serverExpressionProblems } from "../expressions/serverProblems";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
@@ -157,6 +158,7 @@ function TypeChooser({
   selected: EntityType | null;
   onSelect: (id: Id) => void;
 }) {
+  const { can } = useCapabilities();
   const id = useId();
   return (
     <div className="mb-4 flex flex-wrap items-end gap-4">
@@ -177,7 +179,7 @@ function TypeChooser({
           ))}
         </select>
       </div>
-      {selected && (
+      {selected && can("domain.edit") && (
         <Link
           to={`/entities/new?type=${selected.id}`}
           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"

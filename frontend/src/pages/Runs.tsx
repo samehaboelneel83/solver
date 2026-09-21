@@ -5,10 +5,13 @@ import Skeleton from "../components/Skeleton";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
 import {
+  useCancelRun,
   useCreateRun,
+  useCreateScenario,
   useRun,
   useRunComparison,
   useRuns,
+  useScenario,
   useScenarios,
   useSolvers,
   type ConflictItem,
@@ -56,6 +59,7 @@ const STATUS_STYLE: Record<RunStatus, string> = {
   unknown: "bg-slate-100 text-slate-700",
   queued: "bg-slate-100 text-slate-700",
   running: "bg-blue-100 text-blue-900",
+  cancelled: "bg-slate-100 text-slate-700",
 };
 
 /** What each status means, in a planner's terms rather than a solver's. */
@@ -67,6 +71,7 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   unknown: "The solver stopped without deciding. Try a longer time limit.",
   queued: "Waiting to start.",
   running: "Solving.",
+  cancelled: "Stopped before an answer.",
 };
 
 export default function Runs() {
@@ -281,7 +286,7 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
           <span className="text-sm text-slate-500">
             {createRun.isPending
               ? "Queueing…"
-              : "A worker solves it; this page follows along. The answer is kept, not recomputed."}
+              : "A worker solves it; this page follows along. Stop it if you asked the wrong question. The answer is kept, not recomputed."}
           </span>
         )}
       </div>
@@ -498,6 +503,10 @@ function naming(labels: Run["labels"], sets: string[] | undefined) {
 
 function RunDetail({ id }: { id: Id }) {
   const run = useRun(id);
+  const { can } = useCapabilities();
+  const cancelRun = useCancelRun();
+  const toast = useToast();
+  const [stopFailure, setStopFailure] = useState<string | null>(null);
 
   if (run.isLoading) return <Skeleton rows={4} cols={3} />;
   if (run.isError && !run.data) return <Failed error={run.error} onRetry={() => run.refetch()} />;
@@ -506,6 +515,19 @@ function RunDetail({ id }: { id: Id }) {
 
   const roster = data.assignments ?? {};
   const broken = data.constraints.filter((c) => !c.satisfied);
+  const emptyRanges = (data.params as { empty_ranges?: EmptyRange[] }).empty_ranges ?? [];
+  const lead = outcomeLead(data);
+  const params = data.params as { why_solver?: string; classified_as?: string };
+  const unfinished = data.status === "queued" || data.status === "running";
+  const stopping = data.cancel_requested || cancelRun.isPending;
+
+  function stop() {
+    setStopFailure(null);
+    cancelRun.mutate(id, {
+      onSuccess: (next) => toast.success(`Run ${next.id}: ${next.status}`),
+      onError: (error: unknown) => setStopFailure(formatApiError(error)),
+    });
+  }
 
   return (
     <section aria-labelledby={`run-${id}-heading`} className="mt-6 rounded-md border border-slate-200 bg-white p-4">
@@ -513,6 +535,25 @@ function RunDetail({ id }: { id: Id }) {
         Run {String(id)}
       </h2>
       <p className="mb-4 text-sm text-slate-600">{STATUS_NOTE[data.status]}</p>
+      {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
+
+      {can("run.submit") && unfinished && (
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={stop}
+            disabled={stopping}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {stopping ? "Stopping…" : "Stop this run"}
+          </button>
+        </div>
+      )}
+      {stopFailure && (
+        <p role="alert" className="mb-4 whitespace-pre-line text-sm text-red-600">
+          {stopFailure}
+        </p>
+      )}
 
       {data.error && (
         <p role="alert" className="mb-4 whitespace-pre-line rounded bg-red-50 p-3 text-sm text-red-800">
@@ -520,24 +561,34 @@ function RunDetail({ id }: { id: Id }) {
         </p>
       )}
 
-      <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-        <Fact label="Objective" value={data.objective === null ? "—" : String(data.objective)} />
-        <Fact label="Solved in" value={data.wall_time_s === null ? "—" : `${data.wall_time_s}s`} />
-        <Fact label="Solver" value={data.solver_version ?? data.solver} />
-        <Fact
-          label="Chosen because"
-          value={String((data.params as { why_solver?: string }).why_solver ?? "—")}
-        />
-        <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
-      </dl>
-
       {data.conflict && data.conflict.length > 0 && (
         <Conflict
+          runId={data.id}
+          scenarioId={data.scenario_id}
           items={data.conflict}
           minimal={data.conflict_minimal}
           labels={data.labels}
           sets={data.index_sets.constraints}
         />
+      )}
+
+      {emptyRanges.length > 0 && (
+        <section className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h3 className="mb-1 text-sm font-semibold text-slate-900">Rules that ranged over nobody</h3>
+          <p className="mb-2 text-sm text-slate-700">
+            A rule that matches nobody never constrains anyone. Check the filter, or the data it ranges over.
+          </p>
+          <ul className="space-y-1 text-sm text-slate-800">
+            {emptyRanges.map((item) => (
+              <li key={`${item.constraint_id}:${item.kind}:${Object.values(item.index).join(",")}`}>
+                <span className="font-mono">{item.constraint_id}</span>
+                {item.kind === "forall"
+                  ? " never applied to anyone"
+                  : ` counted nobody${emptyRangeWhere(item, data.labels)}`}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {data.constraints.length > 0 && (
@@ -573,8 +624,57 @@ function RunDetail({ id }: { id: Id }) {
           </div>
         );
       })}
+
+      <details className="mt-6 text-sm">
+        <summary className="cursor-pointer font-semibold text-slate-900">Technical</summary>
+        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+          <Fact label="Objective" value={data.objective === null ? "—" : String(data.objective)} />
+          <Fact label="Solved in" value={data.wall_time_s === null ? "—" : `${data.wall_time_s}s`} />
+          <Fact label="Solver" value={data.solver_version ?? data.solver} />
+          <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
+          <Fact label="Class" value={String(params.classified_as ?? "—")} />
+          <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
+        </dl>
+      </details>
     </section>
   );
+}
+
+type EmptyRange = { constraint_id: string; kind: string; index: Record<string, string> };
+
+function emptyRangeWhere(item: EmptyRange, labels: Run["labels"]): string {
+  const keys = Object.values(item.index);
+  if (keys.length === 0) return "";
+  const named = keys.map((key) => {
+    for (const table of Object.values(labels)) {
+      if (key in table) return table[key];
+    }
+    return key;
+  });
+  return ` at ${named.join(" · ")}`;
+}
+
+function outcomeLead(data: Run): string | null {
+  if (data.status !== "optimal" && data.status !== "feasible") return null;
+  const hard = data.constraints.filter((c) => c.hard);
+  const soft = data.constraints.filter((c) => !c.hard);
+  if (hard.length === 0 && soft.length === 0) return null;
+  const hardBroke = hard.filter((c) => !c.satisfied).length;
+  const softBent = soft.filter((c) => !c.satisfied).length;
+  const paid = soft.reduce((sum, c) => sum + c.penalty_paid, 0);
+  const parts: string[] = [
+    hardBroke === 0
+      ? "All mandatory rules held."
+      : `${hardBroke} mandatory ${hardBroke === 1 ? "rule" : "rules"} broke.`,
+  ];
+  if (soft.length > 0) {
+    parts.push(
+      paid > 0
+        ? `${softBent} ${softBent === 1 ? "preference" : "preferences"} bent, at cost ${paid}.`
+        : "Every preference held."
+    );
+  }
+  return parts.join(" ");
 }
 
 /**
@@ -592,19 +692,47 @@ function RunDetail({ id }: { id: Id }) {
  * nothing.
  */
 function Conflict({
+  runId,
+  scenarioId,
   items,
   minimal,
   labels,
   sets,
 }: {
+  runId: Id;
+  scenarioId: Id;
   items: ConflictItem[];
   minimal: boolean | null;
   labels: Run["labels"];
   sets: Record<string, string[]>;
 }) {
+  const { can } = useCapabilities();
+  const scenario = useScenario(scenarioId);
+  const create = useCreateScenario();
+  const toast = useToast();
   const byRule = new Map<string, string[][]>();
   for (const item of items) {
     byRule.set(item.constraint_id, [...(byRule.get(item.constraint_id) ?? []), item.instance]);
+  }
+
+  function soften() {
+    if (!scenario.data) return;
+    const patch: Record<string, number> = {};
+    for (const id of byRule.keys()) patch[id] = 100;
+    create.mutate(
+      {
+        problem_id: scenario.data.problem_id,
+        model_version_id: scenario.data.model_version_id,
+        name: `from run ${runId}`,
+        patch: { soften: patch },
+      },
+      {
+        onSuccess: (created) => {
+          toast.success(`Created scenario “${created.name}”: these rules are now preferences.`);
+        },
+        onError: (error: unknown) => toast.error(formatApiError(error)),
+      }
+    );
   }
 
   return (
@@ -634,6 +762,21 @@ function Conflict({
           </li>
         ))}
       </ul>
+      {can("model.publish") && scenario.data && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={soften}
+            disabled={create.isPending}
+            className="rounded-md bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-60"
+          >
+            {create.isPending ? "Creating…" : "Make these preferences"}
+          </button>
+          <span className="text-xs text-amber-900">
+            Creates a scenario that softens the fighting rules. Solve it from the Scenarios page.
+          </span>
+        </div>
+      )}
     </section>
   );
 }
@@ -650,6 +793,11 @@ function ConstraintRow({ outcome }: { outcome: ConstraintOutcome }) {
           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
             short by {outcome.total_violation}
             {outcome.penalty_paid > 0 && ` (cost ${outcome.penalty_paid})`}
+          </span>
+        )}
+        {outcome.slack != null && outcome.satisfied && (
+          <span className="text-xs text-slate-500">
+            {outcome.slack === 0 ? "no room left" : `room ${outcome.slack}`}
           </span>
         )}
       </div>

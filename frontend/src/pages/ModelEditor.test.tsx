@@ -67,6 +67,29 @@ const VERSIONS = {
 
 function stub(overrides: Record<string, unknown> = {}) {
   mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
+    if (path.startsWith("/api/v1/classify")) {
+      const ir = options?.body ? (JSON.parse(options.body) as { ir?: { variables?: object; constraints?: { severity?: string }[] } }).ir : {};
+      const variables = Object.keys(ir?.variables ?? {});
+      if (variables.length === 0) {
+        return Promise.resolve({
+          model_class: "trivial",
+          needs: ["linear"],
+          reasons: ["no variables, so nothing is decided"],
+          planner: ["nothing is decided yet"],
+        });
+      }
+      const soft = (ir?.constraints ?? []).some((c) => c.severity === "soft");
+      return Promise.resolve({
+        model_class: "IP",
+        needs: soft ? ["integral", "linear", "soft-constraints"] : ["integral", "linear"],
+        reasons: ["every variable is binary", "all terms are linear (the contract refuses a product of two variables)"],
+        planner: [
+          "every decision is yes or no",
+          "every rule is linear",
+          ...(soft ? ["at least one rule can bend, at a cost"] : []),
+        ],
+      });
+    }
     if (options?.method && options.method !== "GET") {
       const write = overrides.write as ((p: string, o: typeof options) => Promise<unknown>) | undefined;
       if (write) return write(path, options);
@@ -78,10 +101,25 @@ function stub(overrides: Record<string, unknown> = {}) {
       return Promise.resolve({ ...VERSIONS.items[1], ir: overrides.irV1 ?? { ...IR_V2, constraints: [] } });
     }
     if (path.startsWith("/api/v1/versions/22")) {
-      return Promise.resolve({ ...VERSIONS.items[0], ir: IR_V2 });
+      return Promise.resolve({ ...VERSIONS.items[0], ir: overrides.ir ?? IR_V2 });
     }
     if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(ENTITY_TYPES);
     if (path.startsWith("/api/v1/parameters")) return Promise.resolve(PARAMETERS);
+    if (path.startsWith("/api/v1/relationship-types")) {
+      return Promise.resolve(overrides.relationshipTypes ?? { items: [], total: 0 });
+    }
+    if (path.startsWith("/api/v1/me")) {
+      return Promise.resolve(
+        overrides.me ?? {
+          username: "admin",
+          display_name: "Administrator",
+          capabilities: ["domain.edit", "model.publish", "run.submit"],
+        }
+      );
+    }
+    if (path.startsWith("/api/template")) {
+      return Promise.resolve(overrides.templates ?? { items: [], total: 0 });
+    }
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -125,6 +163,27 @@ describe("ModelEditor", () => {
     expect(await screen.findByText(/starting a model from nothing/i)).toBeInTheDocument();
     const sets = screen.getByRole("group", { name: "Sets" });
     expect(within(sets).getByRole("checkbox", { name: "employee" })).not.toBeChecked();
+  });
+
+  it("offers a template when the problem has no model yet", async () => {
+    const write = vi.fn().mockResolvedValue({
+      template_id: 1,
+      problem_id: 1,
+      model_version_id: 40,
+      scenario_id: 9,
+    });
+    stub({
+      versions: { items: [], total: 0 },
+      templates: { items: [{ id: 1, name: "weekly_rota", ir_version: "1", domain_seed: {}, default_ir: {} }], total: 1 },
+      write,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /start from weekly_rota/i }));
+
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(write.mock.calls[0][0]).toBe("/api/v1/templates/1/apply");
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual({ problem_id: 1, domain_id: 1 });
   });
 
   it("starts from an older version when one is chosen, without touching it", async () => {
@@ -191,5 +250,57 @@ describe("ModelEditor", () => {
     expect(await screen.findByText(/no expression/i)).toBeInTheDocument();
     // The work is still on screen.
     expect(screen.getByDisplayValue("c_cover")).toBeInTheDocument();
+  });
+
+  it("opens a pre-contract sketch without crashing, and says why it cannot be edited yet", async () => {
+    // The live demo still carries version 1 of this shape: an id, a note,
+    // and nothing to solve. `describeTerm` used `'const' in term` on the
+    // missing left-hand side and took the whole editor down.
+    stub({
+      irV1: {
+        sets: ["employee", "day"],
+        parameters: { demand: { index: ["day"] } },
+        variables: { assign: { index: ["employee", "day"], domain: "binary" } },
+        constraints: [
+          { id: "c_cover_demand", note: "each day/shift is staffed to at least demand[day, shift]" },
+        ],
+        objective: { sense: "minimize", terms: [{ id: "o_cost", weight: 1 }] },
+      },
+    });
+    renderPage();
+    fireEvent.change(await screen.findByLabelText(/starting from/i), { target: { value: "21" } });
+
+    expect(await screen.findByDisplayValue("c_cover_demand")).toBeInTheDocument();
+    expect(screen.getByText(/named but not expressed/i)).toBeInTheDocument();
+    expect(screen.getByText(/named but has nothing to count/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Kind of term")).not.toBeInTheDocument();
+  });
+
+  it("reads a soft constraint's weight from the document, not an invented key", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [{ ...IR_V2.constraints[0], severity: "soft", weight: 4 }],
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByLabelText(/cost per unit broken/i)).toHaveValue("4");
+  });
+
+  it("gives For every, Of and That each a tree chevron", async () => {
+    renderPage();
+    await screen.findByDisplayValue("c_cover");
+    expect(screen.getByRole("button", { name: /collapse for every/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^collapse of$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^collapse that$/i })).toBeInTheDocument();
+  });
+
+  it("shows what kind of model this is, in planner language, before publish", async () => {
+    renderPage();
+
+    const panel = await screen.findByRole("complementary", { name: /what this model is/i });
+    expect(within(panel).getByText(/every decision is yes or no/i)).toBeInTheDocument();
+    expect(within(panel).getByText(/every rule is linear/i)).toBeInTheDocument();
   });
 });

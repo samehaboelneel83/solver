@@ -274,6 +274,7 @@ def test_run_status_enum_labels(db):
         "infeasible",
         "unknown",
         "error",
+        "cancelled",
     ]
 
 

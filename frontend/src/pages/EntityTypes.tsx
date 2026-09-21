@@ -21,6 +21,7 @@ import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import { useCreateEntityType, useEntityTypes, type EntityRole, type Id } from "../api/v1";
 import { typeColour } from "../lib/colour";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -35,6 +36,8 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 export default function EntityTypes() {
   useDocumentTitle("Entity types");
   const { domainId } = useDomain();
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
 
   return (
     <div className="max-w-4xl">
@@ -56,7 +59,7 @@ export default function EntityTypes() {
       ) : (
         <>
           <TypeList domainId={domainId} />
-          <CreateTypeForm domainId={domainId} />
+          {canEdit && <CreateTypeForm domainId={domainId} />}
         </>
       )}
     </div>

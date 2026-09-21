@@ -95,6 +95,21 @@ def _delete_user_role(client, auth_headers, user_role_id: str) -> None:
     client.delete(f"/api/iam/user_role/{user_role_id}", headers=auth_headers)
 
 
+def _query_error(response, field: str) -> dict:
+    """A 422 from the list route's query-param checks: FastAPI list shape,
+    loc starting at `query`, no `kind` (Ruling 19)."""
+    assert response.status_code == 422, response.text
+    detail = response.json().get("detail")
+    assert isinstance(detail, list) and detail, f"expected a list, got {detail!r}"
+    wanted = ["query", field]
+    matches = [e for e in detail if [str(p) for p in e["loc"]] == wanted]
+    assert matches, f"no error at {wanted}; got {[e.get('loc') for e in detail]}"
+    entry = matches[0]
+    assert {"loc", "msg", "type"} <= set(entry), entry
+    assert "kind" not in entry, entry
+    return entry
+
+
 def test_delete_referenced_row_returns_409(auth_headers, admin_user_id):
     client = TestClient(app)
     suffix = uuid.uuid4().hex[:8]
@@ -184,7 +199,8 @@ def test_list_filter_by_column(auth_headers, admin_user_id):
         assert not any(item["role_id"] == role_b for item in items)
 
         bad_filter_response = client.get("/api/iam/user_role/?f_nope=1", headers=auth_headers)
-        assert bad_filter_response.status_code == 422
+        entry = _query_error(bad_filter_response, "f_nope")
+        assert "unknown column" in entry["msg"]
     finally:
         for user_role_id in user_role_ids:
             _delete_user_role(client, auth_headers, user_role_id)
@@ -213,7 +229,8 @@ def test_list_order_by(auth_headers):
         assert len(returned_codes) == 3
 
         bad_order_response = client.get("/api/iam/role/?order_by=nope", headers=auth_headers)
-        assert bad_order_response.status_code == 422
+        entry = _query_error(bad_order_response, "order_by")
+        assert "unknown column" in entry["msg"]
     finally:
         for role_id in role_ids:
             _delete_role(client, auth_headers, role_id)
@@ -230,7 +247,8 @@ def test_list_filter_bad_datetime_returns_422_not_500(auth_headers):
     bad_response = client.get(
         "/api/iam/organization/?f_created_at=notadate", headers=auth_headers
     )
-    assert bad_response.status_code == 422
+    entry = _query_error(bad_response, "f_created_at")
+    assert "invalid value" in entry["msg"]
 
     valid_response = client.get(
         "/api/iam/organization/?f_created_at=2026-01-01T00:00:00%2B00:00", headers=auth_headers
@@ -247,19 +265,20 @@ def test_list_filter_and_order_reject_hidden_columns(auth_headers):
     order_response = client.get(
         "/api/iam/user_account/?order_by=hashed_password", headers=auth_headers
     )
-    assert order_response.status_code == 422
+    _query_error(order_response, "order_by")
 
     filter_response = client.get(
         "/api/iam/user_account/?f_hashed_password=x", headers=auth_headers
     )
-    assert filter_response.status_code == 422
+    _query_error(filter_response, "f_hashed_password")
 
 
 def test_list_order_rejects_invalid_direction(auth_headers):
     client = TestClient(app)
 
     response = client.get("/api/iam/role/?order_by=code&order=sideways", headers=auth_headers)
-    assert response.status_code == 422
+    entry = _query_error(response, "order")
+    assert "invalid order" in entry["msg"]
 
 
 def test_list_pagination_is_stable_without_order_by(auth_headers):

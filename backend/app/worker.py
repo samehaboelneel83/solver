@@ -10,10 +10,10 @@ the duration. A run row has carried `queued_at`, `started_at` and
 `finished_at` since migration 0007, so the shape was always meant for this;
 this is the process that fills them in.
 
-**What it does not do yet**, stated so nobody assumes otherwise: no
-back-off beyond a fixed poll, no heartbeat, no cancellation. A run whose
-worker dies mid-solve stays `running` until `reclaim_stale()` puts it back —
-which happens at start-up, not continuously.
+A live worker heartbeats on the run it is solving. Reclaim looks at that
+clock, not at `started_at`, and it runs between jobs rather than only at
+start-up. A run whose worker died is queued again — unless it had already
+been asked to stop, in which case it is `cancelled` rather than solved twice.
 """
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ from app.solve.service import claim_next, execute_run
 logger = logging.getLogger("solver.worker")
 
 POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "1.0"))
-# A run still `running` after this long has lost its worker. Generous, because
-# reclaiming one that is merely slow would solve it twice.
-STALE_AFTER_MINUTES = int(os.environ.get("WORKER_STALE_AFTER_MINUTES", "30"))
+# Silence longer than this means the worker is gone. Short enough that a
+# crashed solve is noticed; long enough that a slow heartbeat is not a theft.
+STALE_AFTER_SECONDS = int(os.environ.get("WORKER_STALE_AFTER_SECONDS", "20"))
 
 _stop = False
 
@@ -50,20 +50,32 @@ def _request_stop(signum: int, _frame: FrameType | None) -> None:
 def reclaim_stale(db) -> int:
     """Put runs whose worker died back in the queue.
 
-    At start-up only: a crash leaves `running` rows nobody owns, and without
-    this they are invisible work that never completes. The run keeps its
-    dataset, so re-solving answers the same frozen question.
+    Looks at `heartbeat_at`, falling back to `started_at` for a row written
+    before the column existed. A slow run that is still heartbeating is left
+    alone. A dead worker that had already been asked to stop is marked
+    cancelled: solving it again would ignore the stop.
     """
-    reclaimed = db.execute(
+    cancelled = db.execute(
         text(
-            "UPDATE run SET status = 'queued', started_at = NULL"
-            " WHERE status = 'running'"
-            "   AND started_at < now() - make_interval(mins => :mins)"
+            "UPDATE run SET status = 'cancelled', finished_at = now()"
+            " WHERE status = 'running' AND cancel_requested"
+            "   AND COALESCE(heartbeat_at, started_at) < now() - make_interval(secs => :secs)"
             " RETURNING id"
         ),
-        {"mins": STALE_AFTER_MINUTES},
+        {"secs": STALE_AFTER_SECONDS},
+    ).scalars().all()
+    reclaimed = db.execute(
+        text(
+            "UPDATE run SET status = 'queued', started_at = NULL, heartbeat_at = NULL"
+            " WHERE status = 'running' AND NOT cancel_requested"
+            "   AND COALESCE(heartbeat_at, started_at) < now() - make_interval(secs => :secs)"
+            " RETURNING id"
+        ),
+        {"secs": STALE_AFTER_SECONDS},
     ).scalars().all()
     db.commit()
+    if cancelled:
+        logger.info("marked %d abandoned cancelled run(s): %s", len(cancelled), cancelled)
     if reclaimed:
         logger.warning("requeued %d run(s) left running by a stopped worker: %s",
                        len(reclaimed), reclaimed)
@@ -73,6 +85,7 @@ def reclaim_stale(db) -> int:
 def work_once(db) -> int | None:
     """Claim and solve one run. Returns its id, or None when the queue is
     empty."""
+    reclaim_stale(db)
     run_id = claim_next(db)
     if run_id is None:
         return None

@@ -104,6 +104,40 @@ describe("TermBuilder", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("nests a sum's inner term under a collapsible tree row", () => {
+    renderTerm({
+      sum: { var: "assign", index: ["e", "d", "s"] },
+      over: [{ index: "d", set: "day" }],
+    } as Term);
+
+    expect(screen.getByLabelText("Variable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /collapse a sum over a set/i }));
+    expect(screen.queryByLabelText("Variable")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /expand a sum over a set/i })).toBeInTheDocument();
+  });
+
+  it("folds the Of block on its own chevron", () => {
+    renderTerm({
+      sum: { var: "assign", index: ["e", "d", "s"] },
+      over: [{ index: "d", set: "day" }],
+    } as Term);
+
+    fireEvent.click(screen.getByRole("button", { name: /^collapse of$/i }));
+    expect(screen.queryByLabelText("Variable")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Index")).toBeInTheDocument();
+  });
+
+  it("folds the Summed over block on its own chevron", () => {
+    renderTerm({
+      sum: { var: "assign", index: ["e", "d", "s"] },
+      over: [{ index: "d", set: "day" }],
+    } as Term);
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse summed over/i }));
+    expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Variable")).toBeInTheDocument();
+  });
+
   it("rebuilds a term when its kind changes, with the indices it can already bind", () => {
     const onChange = renderTerm({ const: 0 } as Term);
 
@@ -213,6 +247,38 @@ describe("BindingsEditor", () => {
 
     const indexFields = screen.getAllByLabelText("Index") as HTMLInputElement[];
     expect(indexFields.map((f) => f.value)).toEqual(["d", "s"]);
+  });
+
+  it("folds the For every block on its own chevron", () => {
+    render(
+      <BindingsEditor
+        bindings={[{ index: "d", set: "day" }]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    expect(screen.getByLabelText("Index")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /collapse for every/i }));
+    expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
+  });
+
+  it("folds each Over block on its own chevron", () => {
+    render(
+      <BindingsEditor
+        bindings={[{ index: "d", set: "day" }]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse over d in day/i }));
+    expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /collapse for every/i })).toBeInTheDocument();
   });
 
   it("removes a binding only when more than one is bound", () => {

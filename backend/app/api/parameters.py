@@ -12,7 +12,8 @@ A `parameter_def` is indexed data that belongs to no single entity --
 ``demand[day, shift]`` -- and its `parameter_value` rows are the cells of
 that grid, keyed by an array of entity ids in index order. Spec §5 calls it
 "a spreadsheet, not a list", so the values are not a CRUD resource: one GET
-returns the grid, one PUT sets any number of cells.
+returns the grid, one PUT sets any number of cells up to
+``PARAMETER_VALUES_MAX_CELLS`` (a year of hourly cells).
 
 Sparse storage
 --------------
@@ -75,10 +76,17 @@ Which layer answers which failure
    rule of this module's own: ``index_type_ids`` cannot change while cells
    are stored, because the trigger judges a cell only when *it* is written
    and would never revisit cells shaped for the old index.
+
+   The count-then-PATCH would miss a PUT that had written cells but not
+   yet committed, and the PUT's trigger would already have passed against
+   the old index. PUT therefore takes ``FOR SHARE`` on ``parameter_def``
+   before it writes cells; PATCH and DELETE take ``FOR UPDATE``. The two
+   cannot interleave, so the cell-count either sees the PUT or the PUT
+   waits and is judged against the new index.
 """
 
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -183,15 +191,37 @@ class ParameterValues(BaseModel):
     default_value: QuantityOut
 
 
+# A year of hourly cells; past that, split the PUT. Read at validation
+# time so tests can lower it without reconstructing the schema.
+PARAMETER_VALUES_MAX_CELLS = 10_000
+
+
 class ParameterValuesPut(BaseModel):
     cells: list[Cell]
+
+    @field_validator("cells")
+    @classmethod
+    def _cap_cells(cls, cells: list[Cell]) -> list[Cell]:
+        if len(cells) > PARAMETER_VALUES_MAX_CELLS:
+            raise ValueError(f"at most {PARAMETER_VALUES_MAX_CELLS} cells per request")
+        return cells
 
 
 # --- helpers ---------------------------------------------------------------
 
 
-def _get_parameter(db: Session, parameter_id: int) -> ParameterDef:
-    row = db.get(ParameterDef, parameter_id)
+def _get_parameter(
+    db: Session, parameter_id: int, *, lock: Literal["share", "update"] | None = None
+) -> ParameterDef:
+    # PUT holds FOR SHARE so a concurrent PATCH cannot change index_type_ids
+    # until the cells are committed; PATCH and DELETE take FOR UPDATE so they
+    # wait for that PUT, then see the new cell count. See the module doc.
+    kwargs: dict = {}
+    if lock == "share":
+        kwargs["with_for_update"] = {"read": True}
+    elif lock == "update":
+        kwargs["with_for_update"] = True
+    row = db.get(ParameterDef, parameter_id, **kwargs)
     if row is None:
         raise HTTPException(status_code=404, detail="parameter not found")
     return row
@@ -372,7 +402,7 @@ def update_parameter(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> ParameterDefRead:
-    row = _get_parameter(db, parameter_id)
+    row = _get_parameter(db, parameter_id, lock="update")
     changes = payload.model_dump(exclude_unset=True)
     new_index = changes.get("index_type_ids")
     if new_index is not None and list(new_index) != list(row.index_type_ids):
@@ -405,7 +435,7 @@ def delete_parameter(
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # `parameter_value` rows cascade (ON DELETE CASCADE).
-    db.delete(_get_parameter(db, parameter_id))
+    db.delete(_get_parameter(db, parameter_id, lock="update"))
     _commit(db, "parameter_def")
 
 
@@ -430,7 +460,7 @@ def put_parameter_values(
 ) -> ParameterValues:
     """Set the named cells; cells not named are left as they are. Atomic:
     one bad cell and nothing in the request is written."""
-    parameter = _get_parameter(db, parameter_id)
+    parameter = _get_parameter(db, parameter_id, lock="share")
 
     seen: set[tuple[int, ...]] = set()
     for index, cell in enumerate(payload.cells):

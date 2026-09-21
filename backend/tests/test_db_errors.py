@@ -114,9 +114,17 @@ def make_model_version(db, problem_id: int, ir: dict) -> int:
 
 
 class _FakeDiag:
-    def __init__(self, message_detail=None, message_primary=None):
+    def __init__(
+        self,
+        message_detail=None,
+        message_primary=None,
+        table_name=None,
+        constraint_name=None,
+    ):
         self.message_detail = message_detail
         self.message_primary = message_primary
+        self.table_name = table_name
+        self.constraint_name = constraint_name
 
 
 class _FakeOrig:
@@ -135,8 +143,20 @@ class _FakeDBAPIError(Exception):
         super().__init__(str(orig))
 
 
-def fake_dbapi_error(*, pgcode, message_detail=None, message_primary=None):
-    return _FakeDBAPIError(_FakeOrig(pgcode, _FakeDiag(message_detail, message_primary)))
+def fake_dbapi_error(
+    *,
+    pgcode,
+    message_detail=None,
+    message_primary=None,
+    table_name=None,
+    constraint_name=None,
+):
+    return _FakeDBAPIError(
+        _FakeOrig(
+            pgcode,
+            _FakeDiag(message_detail, message_primary, table_name, constraint_name),
+        )
+    )
 
 
 # --------------------------------------------------------------------------
@@ -318,3 +338,36 @@ def test_unhandled_pgcode_is_reraised():
     exc = fake_dbapi_error(pgcode="42601")  # syntax_error -- a ProgrammingError class
     with pytest.raises(_FakeDBAPIError):
         translate_db_error(exc, table="entity")
+
+
+def test_trigger_23503_without_a_constraint_forwards_the_trigger_sentence():
+    """entity_type_guard's DELETE: TABLE=parameter_def, no CONSTRAINT.
+    conflict_detail would rewrite this to "still referenced by"; the
+    trigger names the parameters, which is the half the user can act on."""
+    message = (
+        'entity type "shift" is an index type of parameter demand; '
+        "delete or re-index it first"
+    )
+    exc = fake_dbapi_error(
+        pgcode="23503",
+        message_primary=message,
+        table_name="parameter_def",
+    )
+    http = translate_db_error(exc, table="entity_type")
+    assert http.status_code == 409
+    assert http.detail == message
+
+
+def test_real_fk_23503_still_uses_conflict_detail():
+    """A real foreign key always names its constraint, so it keeps the
+    generic "still referenced by" sentence -- that is the platform 409
+    for every other referenced-row refusal."""
+    exc = fake_dbapi_error(
+        pgcode="23503",
+        message_primary="insert or update on table \"parameter_def\" violates foreign key constraint",
+        table_name="parameter_def",
+        constraint_name="parameter_def_domain_id_fkey",
+    )
+    http = translate_db_error(exc, table="entity_type")
+    assert http.status_code == 409
+    assert http.detail == "entity_type row is still referenced by parameter_def records"

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ vi.mock("../api/client", async () => {
 });
 
 import { apiFetch } from "../api/client";
+import { editorQueryClient } from "../test/me";
 
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -47,7 +48,7 @@ const NORTH = unit(22, "north", "North Region");
 const DEPOT = unit(23, "depot", "North Depot");
 
 function renderForm(subjectEntity: Entity = NORTH) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = editorQueryClient();
   const entitiesByType = new Map<Id, Entity[]>([[2, [HQ, NORTH, DEPOT]]]);
   return render(
     <QueryClientProvider client={queryClient}>
@@ -143,7 +144,7 @@ describe("NewRelationshipForm, anchored to an entity of a hierarchy's own type",
 
   it("falls back to an entity's key when it has no label, rather than an empty option", () => {
     render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <QueryClientProvider client={editorQueryClient()}>
         <ToastProvider>
           <MemoryRouter>
             <NewRelationshipForm

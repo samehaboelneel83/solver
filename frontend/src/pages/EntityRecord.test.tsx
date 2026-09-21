@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EntityRecord, { entityServerErrors } from "./EntityRecord";
 import { ToastProvider } from "../components/ToastProvider";
 import { attrField } from "../components/AttrsForm";
+import { editorQueryClient } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -78,7 +79,7 @@ function LocationDisplay() {
 }
 
 function renderAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = editorQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>

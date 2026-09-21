@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ErrorSummary, FieldError, FieldLabel, INPUT_CLASS, describedBy, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { useToast } from "./ToastProvider";
+import { useCapabilities } from "../hooks/useCapability";
 import { formatApiError } from "../api/errors";
 import {
   useCreateRelationship,
@@ -93,6 +94,8 @@ export function RelationshipList({
   entityHref?: (id: Id) => string;
   truncated?: boolean;
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const deleteRelationship = useDeleteRelationship();
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
@@ -158,9 +161,11 @@ export function RelationshipList({
               <th scope="col" className="px-3 py-2 font-semibold">
                 To
               </th>
+              {canEdit && (
               <th scope="col" className="px-3 py-2 font-semibold">
                 <span className="sr-only">Actions</span>
               </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -169,6 +174,7 @@ export function RelationshipList({
                 <td className={CELL}>{endCell(row.fromEntityId, row.fromLabel)}</td>
                 <td className={`${CELL} font-mono text-xs`}>{row.typeName}</td>
                 <td className={CELL}>{endCell(row.toEntityId, row.toLabel)}</td>
+                {canEdit && (
                 <td className="px-3 py-2">
                   <button
                     type="button"
@@ -183,6 +189,7 @@ export function RelationshipList({
                     </span>
                   </button>
                 </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -235,6 +242,7 @@ export function NewRelationshipForm({
   subject?: Subject;
   heading: string;
 }) {
+  const { can } = useCapabilities();
   const baseId = useId();
   const id = (field: string) => `${baseId}-${field}`;
   const errorId = (field: string) => `${baseId}-${field}-error`;
@@ -282,6 +290,8 @@ export function NewRelationshipForm({
 
   const typeName = (typeId: Id) => entityTypeNames.get(typeId) ?? `#${typeId}`;
   const choicesFor = (typeId: Id) => entitiesByType.get(typeId) ?? [];
+
+  if (!can("domain.edit")) return null;
 
   if (options.length === 0) {
     return (

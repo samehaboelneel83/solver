@@ -6,19 +6,25 @@ import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
+import { useCapabilities } from "../hooks/useCapability";
 import {
+  useApplyTemplate,
   useCreateVersion,
+  useClassify,
   useEntityTypes,
   useParameters,
   useRelationshipTypes,
+  useTemplates,
   useVersion,
   useVersions,
+  type ApplyTemplateResult,
   type Id,
 } from "../api/v1";
 import { checkIrShape } from "../ir";
 import { RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
+import { TreeItem, TreeView } from "../components/ui/tree-view";
 import { parameterOptions } from "../model/declarations";
 import {
   declaredRelationships,
@@ -123,8 +129,12 @@ function ForDomain({ domainId }: { domainId: Id }) {
           <Link to="/public/problem" className="inline-block rounded py-1 text-blue-600 underline">
             Problems page
           </Link>
-          .
+          , or start from a template. Missing types are created from its seed.
         </p>
+        <StartFromTemplates
+          domainId={domainId}
+          onApplied={(result) => setSearchParams({ problem: String(result.problem_id) }, { replace: true })}
+        />
       </Note>
     );
   }
@@ -234,6 +244,39 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     };
   }, [ir, draft, entityTypes.data, relationshipTypes.data]);
 
+  const nextIr = useMemo(() => {
+    if (!ir || !draft) return null;
+    // An objective with no terms is refused by the contract -- "omit the
+    // objective otherwise" -- because an empty one and an absent one would
+    // otherwise be two spellings of "optimise nothing". A model with only
+    // rules is legitimate: it asks for any answer that satisfies them.
+    const { objective: _previous, relationships: _edges, ...withoutObjective } = ir;
+    const walked = declaredRelationships(draft.constraints, draft.objective.terms);
+    return {
+      ...withoutObjective,
+      sets: draft.sets,
+      // Derived from the walks, not declared by hand. `sets` is declared
+      // because a set may legitimately be carried and never used -- for
+      // display, or for a later version (contract 3.1). A relationship has no
+      // such use: you declare one to walk it. Deriving it removes the only
+      // way this screen could build a `binding_via_rel_not_declared`.
+      ...(walked.length > 0 ? { relationships: walked } : {}),
+      parameters: draft.parameters,
+      variables: draft.variables,
+      constraints: draft.constraints,
+      ...(draft.objective.terms.length > 0
+        ? { objective: { sense: draft.objective.sense, terms: draft.objective.terms } }
+        : {}),
+    };
+  }, [ir, draft]);
+  // `checkIrShape` answers with the refusal itself, or null when the
+  // document is shaped right. The server judges it again -- this is the
+  // half that can be answered without the domain.
+  const refusal = nextIr ? checkIrShape(nextIr) : null;
+  const classification = useClassify(
+    nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null
+  );
+
   if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;
   }
@@ -261,42 +304,23 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         >
           Start a model
         </button>
+        <StartFromTemplates
+          domainId={domainId}
+          problemId={problemId}
+          onApplied={() => {
+            versions.refetch();
+          }}
+        />
       </Note>
     );
   }
-  if (!draft || !context || !ir) return <Skeleton rows={4} cols={3} />;
-
-  // An objective with no terms is refused by the contract -- "omit the
-  // objective otherwise" -- because an empty one and an absent one would
-  // otherwise be two spellings of "optimise nothing". A model with only
-  // rules is legitimate: it asks for any answer that satisfies them.
-  const { objective: _previous, relationships: _edges, ...withoutObjective } = ir;
-  const walked = declaredRelationships(draft.constraints, draft.objective.terms);
-  const nextIr = {
-    ...withoutObjective,
-    sets: draft.sets,
-    // Derived from the walks, not declared by hand. `sets` is declared
-    // because a set may legitimately be carried and never used -- for
-    // display, or for a later version (contract 3.1). A relationship has no
-    // such use: you declare one to walk it. Deriving it removes the only
-    // way this screen could build a `binding_via_rel_not_declared`.
-    ...(walked.length > 0 ? { relationships: walked } : {}),
-    parameters: draft.parameters,
-    variables: draft.variables,
-    constraints: draft.constraints,
-    ...(draft.objective.terms.length > 0
-      ? { objective: { sense: draft.objective.sense, terms: draft.objective.terms } }
-      : {}),
-  };
-  // `checkIrShape` answers with the refusal itself, or null when the
-  // document is shaped right. The server judges it again -- this is the
-  // half that can be answered without the domain.
-  const refusal = checkIrShape(nextIr);
+  if (!draft || !context || !ir || nextIr === null) return <Skeleton rows={4} cols={3} />;
+  const toPublish = nextIr as Record<string, unknown>;
 
   function publish() {
     setFailure(null);
     createVersion.mutate(
-      { problemId, body: { ir: nextIr, note: "edited in the model editor" } },
+      { problemId, body: { ir: toPublish, note: "edited in the model editor" } },
       {
         onSuccess: (created: { id: Id; version: number }) => {
           toast.success(`Published version ${created.version}`);
@@ -366,7 +390,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <h2 id="constraints-heading" className="mb-2 text-base font-semibold text-slate-900">
           Rules
         </h2>
-        <div className="space-y-4">
+        <div className="space-y-1">
           {draft.constraints.map((constraint, position) => (
             <ConstraintCard
               key={position}
@@ -422,6 +446,17 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         />
       </section>
 
+      {refusal === null && (classification.data?.planner.length ?? 0) > 0 && (
+        <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h2 className="mb-1 text-sm font-semibold text-slate-900">What this model is</h2>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+            {classification.data?.planner.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </aside>
+      )}
+
       {refusal && (
         <p role="alert" className="mb-3 text-sm text-red-600">
           {refusal.message}
@@ -466,103 +501,137 @@ function ConstraintCard({
   const bound: Binding[] = constraint.forall ?? [];
 
   return (
-    <article className="rounded-md border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex flex-wrap items-end gap-3">
-        <div>
-          <label htmlFor={idField} className="block text-xs text-slate-600">
-            Name
-          </label>
-          <input
-            id={idField}
-            className={`${INPUT_CLASS} w-48 text-sm`}
-            value={constraint.id}
-            onChange={(event) => onChange({ ...constraint, id: event.target.value })}
-          />
+    <article className="rounded-md border border-slate-200 bg-white p-2">
+    <TreeItem
+      name={constraint.id || "rule"}
+      header={
+        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
+          <div>
+            <label htmlFor={idField} className="block text-xs text-slate-600">
+              Name
+            </label>
+            <input
+              id={idField}
+              className={`${INPUT_CLASS} w-48 text-sm`}
+              value={constraint.id}
+              onChange={(event) => onChange({ ...constraint, id: event.target.value })}
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <label htmlFor={noteField} className="block text-xs text-slate-600">
+              What it means
+            </label>
+            <input
+              id={noteField}
+              className={`${INPUT_CLASS} text-sm`}
+              value={constraint.note ?? ""}
+              onChange={(event) => onChange({ ...constraint, note: event.target.value })}
+            />
+          </div>
         </div>
-        <div className="flex-1">
-          <label htmlFor={noteField} className="block text-xs text-slate-600">
-            What it means
-          </label>
-          <input
-            id={noteField}
-            className={`${INPUT_CLASS} text-sm`}
-            value={constraint.note ?? ""}
-            onChange={(event) => onChange({ ...constraint, note: event.target.value })}
-          />
-        </div>
-        <button type="button" onClick={onRemove} className="rounded px-2 py-2 text-sm text-red-700 underline">
+      }
+      actions={
+        <button type="button" onClick={onRemove} className="rounded px-2 py-1 text-sm text-red-700 underline">
           Remove
         </button>
-      </div>
-
-      <p className="mb-2 font-mono text-xs text-slate-500">
-        {describeTerm(constraint.left)} {constraint.relation} {describeTerm(constraint.right)}
-      </p>
-
-      <div className="space-y-3">
-        <BindingsEditor
-          bindings={bound}
-          onChange={(forall) => onChange({ ...constraint, forall })}
-          context={context}
-          outer={[]}
-          legend="For every"
-        />
-
-        <TermBuilder
-          value={constraint.left}
-          onChange={(left) => onChange({ ...constraint, left })}
-          context={context}
-          bound={bound}
-          label="This"
-        />
-
-        <div className="flex flex-wrap items-end gap-3">
-          <Choice
-            label="Must be"
-            value={constraint.relation}
-            options={RELATIONS.map((r) => ({ value: r, label: relationLabel(r) }))}
-            onChange={(relation) => onChange({ ...constraint, relation: relation as Constraint["relation"] })}
-          />
-          <Choice
-            label="Strength"
-            value={constraint.severity}
-            options={SEVERITIES.map((s) => ({
-              value: s,
-              label: s === "hard" ? "must hold" : "can bend, at a cost",
-            }))}
-            onChange={(severity) =>
-              onChange({ ...constraint, severity: severity as Constraint["severity"] })
+      }
+    >
+      {constraint.left == null || constraint.right == null ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p>
+            This rule is named but not expressed — a leftover of versions that
+            predate the contract. There is nothing here to edit, and publishing
+            it as-is is refused.
+          </p>
+          <button
+            type="button"
+            className="mt-2 rounded px-2 py-1 text-sm text-amber-950 underline"
+            onClick={() =>
+              onChange({
+                ...constraint,
+                left: { const: 0 },
+                relation: constraint.relation ?? "<=",
+                right: { const: 0 },
+                severity: constraint.severity ?? "hard",
+              })
             }
-          />
-          {constraint.severity === "soft" && (
-            <div>
-              <label className="block text-xs text-slate-600" htmlFor={`${idField}-penalty`}>
-                Cost per unit broken
-              </label>
-              <input
-                id={`${idField}-penalty`}
-                inputMode="numeric"
-                className={`${INPUT_CLASS} w-28 text-sm`}
-                value={String(constraint.penalty ?? 1)}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  if (/^\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
-                    onChange({ ...constraint, penalty: next });
-                  }
-                }}
-              />
-            </div>
-          )}
+          >
+            Start expressing it
+          </button>
         </div>
+      ) : (
+        <TreeView>
+          <p className="mb-1 px-2 font-mono text-xs text-slate-500">
+            {describeTerm(constraint.left)} {constraint.relation} {describeTerm(constraint.right)}
+          </p>
 
-        <TermBuilder
-          value={constraint.right}
-          onChange={(right) => onChange({ ...constraint, right })}
-          context={context}
-          bound={bound}
-          label="That"
-        />
-      </div>
+          <BindingsEditor
+            bindings={bound}
+            onChange={(forall) => onChange({ ...constraint, forall })}
+            context={context}
+            outer={[]}
+            legend="For every"
+          />
+
+          <TermBuilder
+            value={constraint.left}
+            onChange={(left) => onChange({ ...constraint, left })}
+            context={context}
+            bound={bound}
+            label="This"
+          />
+
+          <div className="flex flex-wrap items-end gap-3 px-2 py-1">
+            <Choice
+              label="Must be"
+              value={constraint.relation ?? "<="}
+              options={RELATIONS.map((r) => ({ value: r, label: relationLabel(r) }))}
+              onChange={(relation) =>
+                onChange({ ...constraint, relation: relation as Constraint["relation"] })
+              }
+            />
+            <Choice
+              label="Strength"
+              value={constraint.severity ?? "hard"}
+              options={SEVERITIES.map((s) => ({
+                value: s,
+                label: s === "hard" ? "must hold" : "can bend, at a cost",
+              }))}
+              onChange={(severity) =>
+                onChange({ ...constraint, severity: severity as Constraint["severity"] })
+              }
+            />
+            {constraint.severity === "soft" && (
+              <div>
+                <label className="block text-xs text-slate-600" htmlFor={`${idField}-weight`}>
+                  Cost per unit broken
+                </label>
+                <input
+                  id={`${idField}-weight`}
+                  inputMode="numeric"
+                  className={`${INPUT_CLASS} w-28 text-sm`}
+                  value={String(constraint.weight ?? 1)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (/^\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
+                      onChange({ ...constraint, weight: next });
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          <TermBuilder
+            value={constraint.right}
+            onChange={(right) => onChange({ ...constraint, right })}
+            context={context}
+            bound={bound}
+            label="That"
+          />
+        </TreeView>
+      )}
+    </TreeItem>
     </article>
   );
 }
@@ -585,73 +654,102 @@ function ObjectiveEditor({
         onChange={(sense) => onChange({ ...objective, sense })}
       />
 
-      <div className="mt-3 space-y-4">
+      <div className="mt-3 space-y-1">
         {objective.terms.map((term, position) => (
-          <div key={position} className="rounded border border-slate-200 p-3">
-            <div className="mb-2 flex flex-wrap items-end gap-3">
-              <div>
-                <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-id`}>
-                  Name
-                </label>
-                <input
-                  id={`obj-${position}-id`}
-                  className={`${INPUT_CLASS} w-48 text-sm`}
-                  value={term.id}
-                  onChange={(event) =>
-                    onChange({
-                      ...objective,
-                      terms: objective.terms.map((t, i) =>
-                        i === position ? { ...t, id: event.target.value } : t
-                      ),
-                    })
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
-                  Weight
-                </label>
-                <input
-                  id={`obj-${position}-weight`}
-                  inputMode="numeric"
-                  className={`${INPUT_CLASS} w-24 text-sm`}
-                  value={String(term.weight)}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    if (/^[+-]?\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
+          <TreeItem
+            key={position}
+            name={term.id || "objective term"}
+            header={
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-id`}>
+                    Name
+                  </label>
+                  <input
+                    id={`obj-${position}-id`}
+                    className={`${INPUT_CLASS} w-48 text-sm`}
+                    value={term.id}
+                    onChange={(event) =>
                       onChange({
                         ...objective,
                         terms: objective.terms.map((t, i) =>
-                          i === position ? { ...t, weight: next } : t
+                          i === position ? { ...t, id: event.target.value } : t
                         ),
-                      });
+                      })
                     }
-                  }}
-                />
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
+                    Weight
+                  </label>
+                  <input
+                    id={`obj-${position}-weight`}
+                    inputMode="numeric"
+                    className={`${INPUT_CLASS} w-24 text-sm`}
+                    value={String(term.weight)}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (/^[+-]?\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
+                        onChange({
+                          ...objective,
+                          terms: objective.terms.map((t, i) =>
+                            i === position ? { ...t, weight: next } : t
+                          ),
+                        });
+                      }
+                    }}
+                  />
+                </div>
               </div>
+            }
+            actions={
               <button
                 type="button"
-                className="rounded px-2 py-2 text-sm text-red-700 underline"
+                className="rounded px-2 py-1 text-sm text-red-700 underline"
                 onClick={() =>
                   onChange({ ...objective, terms: objective.terms.filter((_, i) => i !== position) })
                 }
               >
                 Remove
               </button>
-            </div>
-            <TermBuilder
-              value={term.expression}
-              onChange={(expression) =>
-                onChange({
-                  ...objective,
-                  terms: objective.terms.map((t, i) => (i === position ? { ...t, expression } : t)),
-                })
-              }
-              context={context}
-              bound={[]}
-              label="Count"
-            />
-          </div>
+            }
+          >
+            {term.expression == null ? (
+              <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <p>This term is named but has nothing to count.</p>
+                <button
+                  type="button"
+                  className="mt-2 rounded px-2 py-1 text-sm text-amber-950 underline"
+                  onClick={() =>
+                    onChange({
+                      ...objective,
+                      terms: objective.terms.map((t, i) =>
+                        i === position ? { ...t, expression: { const: 0 } } : t
+                      ),
+                    })
+                  }
+                >
+                  Start expressing it
+                </button>
+              </div>
+            ) : (
+              <TermBuilder
+                value={term.expression}
+                onChange={(expression) =>
+                  onChange({
+                    ...objective,
+                    terms: objective.terms.map((t, i) =>
+                      i === position ? { ...t, expression } : t
+                    ),
+                  })
+                }
+                context={context}
+                bound={[]}
+                label="Count"
+              />
+            )}
+          </TreeItem>
         ))}
       </div>
 
@@ -716,5 +814,57 @@ function Choice({
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">{children}</div>
+  );
+}
+
+function StartFromTemplates({
+  domainId,
+  problemId,
+  onApplied,
+}: {
+  domainId: Id;
+  problemId?: Id;
+  onApplied: (result: ApplyTemplateResult) => void;
+}) {
+  const { can } = useCapabilities();
+  const templates = useTemplates();
+  const apply = useApplyTemplate();
+  const [failure, setFailure] = useState<string | null>(null);
+  if (!can("model.publish")) return null;
+  const items = templates.data?.items ?? [];
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-3">
+      {items.map((row) => (
+        <button
+          key={String(row.id)}
+          type="button"
+          disabled={apply.isPending}
+          className="mr-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          onClick={() => {
+            setFailure(null);
+            apply.mutate(
+              {
+                id: row.id,
+                body: problemId
+                  ? { problem_id: problemId, domain_id: domainId }
+                  : { domain_id: domainId },
+              },
+              {
+                onSuccess: onApplied,
+                onError: (error: unknown) => setFailure(formatApiError(error)),
+              }
+            );
+          }}
+        >
+          {apply.isPending ? "Starting…" : `Start from ${row.name}`}
+        </button>
+      ))}
+      {failure && (
+        <p role="alert" className="mt-2 text-sm text-red-600">
+          {failure}
+        </p>
+      )}
+    </div>
   );
 }

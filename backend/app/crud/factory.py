@@ -10,6 +10,7 @@ from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, requires
+from app.api.validation import field_error
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.crud.registry import register_table
@@ -167,16 +168,23 @@ def build_crud_router(
             column_name = key[2:]
             attr = filterable.get(column_name)
             if attr is None:
-                raise HTTPException(status_code=422, detail=f"unknown column {column_name}")
+                raise field_error(key, f"unknown column {column_name}", raw_value, where="query")
             try:
                 value = _cast_filter_value(attr, raw_value)
             except (ValueError, TypeError, ArithmeticError, InvalidOperation):
-                raise HTTPException(status_code=422, detail=f"invalid value for column {column_name}")
+                raise field_error(
+                    key, f"invalid value for column {column_name}", raw_value, where="query"
+                )
             query = query.filter(attr == value)
 
         order_normalized = order.strip().lower()
         if order_normalized not in ("asc", "desc"):
-            raise HTTPException(status_code=422, detail=f"invalid order {order!r}, expected asc or desc")
+            raise field_error(
+                "order",
+                f"invalid order {order!r}, expected asc or desc",
+                order,
+                where="query",
+            )
 
         # A stable order is required for offset pagination to be meaningful at
         # all -- without one, Postgres is free to return rows in a different
@@ -190,7 +198,7 @@ def build_crud_router(
         if order_by is not None:
             attr = filterable.get(order_by)
             if attr is None:
-                raise HTTPException(status_code=422, detail=f"unknown column {order_by}")
+                raise field_error("order_by", f"unknown column {order_by}", order_by, where="query")
             primary = attr.desc() if order_normalized == "desc" else attr.asc()
             query = query.order_by(primary, model.id.asc())
         else:
@@ -201,7 +209,7 @@ def build_crud_router(
             rows = query.offset(offset).limit(limit).all()
         except DataError as exc:
             db.rollback()
-            raise HTTPException(status_code=422, detail="invalid filter value") from exc
+            raise field_error([], "invalid filter value", None, where="query") from exc
         return {
             "items": [read_schema.model_validate(row).model_dump(mode="json") for row in rows],
             "total": total,

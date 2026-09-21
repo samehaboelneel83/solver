@@ -35,7 +35,8 @@ have to compare `ir_hash` by hand. Skipping is the honest shape.
 import logging
 from typing import Any
 
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -51,7 +52,7 @@ from app.models.v1_domain import (
     Relationship,
     RelationshipType,
 )
-from app.models.v1_problem import ModelVersion, Problem, Scenario
+from app.models.v1_problem import ModelVersion, Problem, Scenario, Template
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,195 @@ _IR: dict[str, Any] = {
 # 9's gap), so this constant is asserted against `_IR` by a test.
 _SCENARIO_PATCH: dict[str, Any] = {"soften": {"c_cover_demand": 100}}
 
+WEEKLY_ROTA_TEMPLATE = "weekly_rota"
+
+
+def _weekly_rota_domain_seed() -> dict[str, Any]:
+    """The types, records and demand cells `plant_domain_seed` walks.
+
+    Built from the same constants as the Workforce demo, so applying the
+    template to an empty domain produces the same people, days and shifts
+    the demo has, rather than a second handwritten copy that can drift.
+    """
+    entities: list[dict[str, Any]] = []
+    for index, (key, label, _parent, cost_centre) in enumerate(_UNITS):
+        entities.append({
+            "type": "unit",
+            "key": key,
+            "label": label,
+            "sort_order": index,
+            "attrs": {"cost_centre": cost_centre},
+        })
+    for index, key in enumerate(_DAYS):
+        entities.append({
+            "type": "day",
+            "key": key,
+            "label": _DAY_LABELS[key],
+            "sort_order": index,
+            "attrs": {"is_weekend": key in ("sat", "sun")},
+        })
+    for index, (key, label, starts, ends) in enumerate(_SHIFTS):
+        entities.append({
+            "type": "shift",
+            "key": key,
+            "label": label,
+            "sort_order": index,
+            "attrs": {"starts_at": starts, "ends_at": ends},
+        })
+    for index, (key, label, _unit_key, attrs) in enumerate(_EMPLOYEES):
+        entities.append({
+            "type": "employee",
+            "key": key,
+            "label": label,
+            "sort_order": index,
+            "attrs": attrs,
+        })
+    relationships: list[dict[str, Any]] = []
+    for key, _label, parent_key, _cost in _UNITS:
+        if parent_key is not None:
+            relationships.append({
+                "type": "reports_to",
+                "from": ["unit", parent_key],
+                "to": ["unit", key],
+            })
+    for key, _label, unit_key, _attrs in _EMPLOYEES:
+        relationships.append({
+            "type": "works_in",
+            "from": ["employee", key],
+            "to": ["unit", unit_key],
+        })
+    return {
+        "note": (
+            "People, days and shifts. Coverage is a target; the seeded demand is "
+            "more than five people can meet."
+        ),
+        "entity_types": [
+            # integer, number, text, boolean and enum on `employee`; date
+            # there too; `time` on `shift`. Spec §6 asks for full coverage
+            # of the enum, and `test_seed_covers_every_attr_type` reads it
+            # from the database rather than from a list here.
+            {
+                "name": "employee",
+                "role": "agent",
+                "colour": "#2563eb",
+                "attributes": [
+                    {"name": "full_name", "data_type": "text", "required": True},
+                    {
+                        "name": "hours_per_week",
+                        "data_type": "integer",
+                        "unit": "h/week",
+                        "default_value": 40,
+                    },
+                    {
+                        "name": "hourly_rate",
+                        "data_type": "number",
+                        "unit": "EUR/h",
+                        "default_value": 20.0,
+                    },
+                    {"name": "on_call", "data_type": "boolean", "default_value": False},
+                    {
+                        "name": "grade",
+                        "data_type": "enum",
+                        "enum_values": ["junior", "mid", "senior"],
+                        "default_value": "mid",
+                    },
+                    {"name": "hired_on", "data_type": "date"},
+                ],
+            },
+            {
+                "name": "unit",
+                "role": "org",
+                "colour": "#7c3aed",
+                "attributes": [{"name": "cost_centre", "data_type": "text"}],
+            },
+            {
+                "name": "day",
+                "role": "time",
+                "colour": "#0d9488",
+                "attributes": [
+                    {"name": "is_weekend", "data_type": "boolean", "default_value": False}
+                ],
+            },
+            {
+                "name": "shift",
+                "role": "time",
+                "colour": "#d97706",
+                "attributes": [
+                    {"name": "starts_at", "data_type": "time", "required": True},
+                    {"name": "ends_at", "data_type": "time", "required": True},
+                ],
+            },
+        ],
+        "relationship_types": [
+            {
+                "name": "reports_to",
+                "from": "unit",
+                "to": "unit",
+                "cardinality": "one_to_many",
+                "is_hierarchy": True,
+                "colour": "#475569",
+            },
+            {
+                "name": "works_in",
+                "from": "employee",
+                "to": "unit",
+                "cardinality": "many_to_one",
+                "is_hierarchy": False,
+                "colour": "#16a34a",
+            },
+        ],
+        "parameters": [
+            {
+                "name": "demand",
+                "index": ["day", "shift"],
+                "default_value": _DEMAND_DEFAULT,
+                "unit": "people",
+            }
+        ],
+        "entities": entities,
+        "relationships": relationships,
+        "parameter_values": [
+            {
+                "parameter": "demand",
+                "entities": [["day", day_key], ["shift", shift_key]],
+                "value": value,
+            }
+            for day_key in _DAYS
+            for shift_key, value in (
+                _WEEKEND_DEMAND if day_key in ("sat", "sun") else _WEEKDAY_DEMAND
+            ).items()
+        ],
+    }
+
+
+def ensure_weekly_rota_template(db: Session) -> int:
+    """The starting model a domain can take, not a second copy of the demo.
+
+    Idempotent on the name. A row that already exists is *refreshed* so a
+    live database that got the thin seed cannot drift from this file:
+    `domain_seed` and `default_ir` are written every call.
+    """
+    seed = _weekly_rota_domain_seed()
+    found = db.execute(
+        select(Template.id).where(Template.name == WEEKLY_ROTA_TEMPLATE)
+    ).scalar_one_or_none()
+    if found is not None:
+        db.execute(
+            update(Template)
+            .where(Template.id == found)
+            .values(domain_seed=seed, default_ir=_IR)
+        )
+        return found
+    row = Template(
+        name=WEEKLY_ROTA_TEMPLATE,
+        ir_version="1",
+        domain_seed=seed,
+        default_ir=_IR,
+    )
+    db.add(row)
+    db.flush()
+    return row.id
+
 
 def seed_admin(db: Session) -> None:
     """Ensure a default organization and admin user exist. Idempotent."""
@@ -319,7 +509,9 @@ def seed_admin(db: Session) -> None:
     db.commit()
 
 
-def _entity_type(db: Session, domain_id: int, name: str, role: str, colour: str) -> EntityType:
+def _entity_type(
+    db: Session, domain_id: int, name: str, role: str, colour: str | None
+) -> EntityType:
     row = EntityType(domain_id=domain_id, name=name, role=role, colour=colour)
     db.add(row)
     db.flush()
@@ -371,6 +563,188 @@ def _entity(
     return row
 
 
+def _ensure_attribute(db: Session, entity_type: EntityType, spec: dict[str, Any]) -> AttributeDef:
+    found = db.execute(
+        select(AttributeDef).where(
+            AttributeDef.entity_type_id == entity_type.id,
+            AttributeDef.name == spec["name"],
+        )
+    ).scalar_one_or_none()
+    if found is not None:
+        return found
+    return _attribute(
+        db,
+        entity_type,
+        spec["name"],
+        spec["data_type"],
+        required=bool(spec.get("required", False)),
+        unit=spec.get("unit"),
+        enum_values=spec.get("enum_values"),
+        default_value=spec.get("default_value"),
+    )
+
+
+def _seed_end(value: Any) -> tuple[str, str] | None:
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return str(value[0]), str(value[1])
+    return None
+
+
+def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
+    """Create missing types, records and cells named by a template's seed.
+
+    A name that already exists is left alone -- applying weekly_rota to
+    Workforce must not invent a second Ahmed. ``{}`` is a no-op, so a
+    template that only carries IR still 422s from ``validate_ir``.
+    """
+    if not isinstance(seed, dict):
+        return
+
+    types: dict[str, EntityType] = {
+        row.name: row
+        for row in db.execute(select(EntityType).where(EntityType.domain_id == domain_id)).scalars()
+    }
+    for spec in seed.get("entity_types") or []:
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+        name = spec["name"]
+        if name not in types:
+            types[name] = _entity_type(
+                db, domain_id, name, spec.get("role") or "other", spec.get("colour")
+            )
+        for attr in spec.get("attributes") or []:
+            if isinstance(attr, dict) and attr.get("name") and attr.get("data_type"):
+                _ensure_attribute(db, types[name], attr)
+
+    rel_types: dict[str, RelationshipType] = {
+        row.name: row
+        for row in db.execute(
+            select(RelationshipType).where(RelationshipType.domain_id == domain_id)
+        ).scalars()
+    }
+    for spec in seed.get("relationship_types") or []:
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+        name = spec["name"]
+        if name in rel_types:
+            continue
+        from_type = types.get(spec.get("from"))
+        to_type = types.get(spec.get("to"))
+        if from_type is None or to_type is None:
+            continue
+        row = RelationshipType(
+            domain_id=domain_id,
+            name=name,
+            from_type_id=from_type.id,
+            to_type_id=to_type.id,
+            cardinality=spec.get("cardinality") or "many_to_many",
+            is_hierarchy=bool(spec.get("is_hierarchy", False)),
+            colour=spec.get("colour"),
+        )
+        db.add(row)
+        db.flush()
+        rel_types[name] = row
+
+    params: dict[str, ParameterDef] = {
+        row.name: row
+        for row in db.execute(
+            select(ParameterDef).where(ParameterDef.domain_id == domain_id)
+        ).scalars()
+    }
+    for spec in seed.get("parameters") or []:
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+        name = spec["name"]
+        if name in params:
+            continue
+        index_names = spec.get("index") or []
+        if not isinstance(index_names, list) or any(n not in types for n in index_names):
+            continue
+        row = ParameterDef(
+            domain_id=domain_id,
+            name=name,
+            index_type_ids=[types[n].id for n in index_names],
+            default_value=spec.get("default_value", 0),
+            unit=spec.get("unit"),
+        )
+        db.add(row)
+        db.flush()
+        params[name] = row
+
+    entities: dict[tuple[str, str], Entity] = {}
+    for type_name, entity_type in types.items():
+        for row in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)).scalars():
+            entities[(type_name, row.key)] = row
+    for spec in seed.get("entities") or []:
+        if not isinstance(spec, dict) or not spec.get("key") or spec.get("type") not in types:
+            continue
+        key = (spec["type"], spec["key"])
+        if key in entities:
+            continue
+        entities[key] = _entity(
+            db,
+            types[spec["type"]],
+            spec["key"],
+            spec.get("label"),
+            int(spec.get("sort_order") or 0),
+            spec.get("attrs") or {},
+        )
+
+    for spec in seed.get("relationships") or []:
+        if not isinstance(spec, dict) or spec.get("type") not in rel_types:
+            continue
+        src, dst = _seed_end(spec.get("from")), _seed_end(spec.get("to"))
+        if src is None or dst is None or src not in entities or dst not in entities:
+            continue
+        rel_type = rel_types[spec["type"]]
+        exists = db.execute(
+            select(Relationship.id).where(
+                Relationship.relationship_type_id == rel_type.id,
+                Relationship.from_entity_id == entities[src].id,
+                Relationship.to_entity_id == entities[dst].id,
+            )
+        ).scalar_one_or_none()
+        if exists is not None:
+            continue
+        db.add(
+            Relationship(
+                relationship_type_id=rel_type.id,
+                from_entity_id=entities[src].id,
+                to_entity_id=entities[dst].id,
+            )
+        )
+    db.flush()
+
+    cells: list[dict[str, Any]] = []
+    for spec in seed.get("parameter_values") or []:
+        if not isinstance(spec, dict) or spec.get("parameter") not in params:
+            continue
+        keys = spec.get("entities")
+        if not isinstance(keys, list):
+            continue
+        entity_ids: list[int] = []
+        skip = False
+        for item in keys:
+            end = _seed_end(item)
+            if end is None or end not in entities:
+                skip = True
+                break
+            entity_ids.append(entities[end].id)
+        if skip:
+            continue
+        cells.append(
+            {
+                "parameter_def_id": params[spec["parameter"]].id,
+                "entity_ids": entity_ids,
+                "value": spec.get("value", 0),
+            }
+        )
+    if cells:
+        # Ruling 24: Core, not db.add() -- the primary key contains an array.
+        # Skip cells that already exist so a second apply does not 409.
+        db.execute(pg_insert(ParameterValue).values(cells).on_conflict_do_nothing())
+
+
 def seed_workforce_demo(db: Session) -> dict[str, Any]:
     """Create the "Workforce" demo domain, or report that it is already there.
 
@@ -378,6 +752,8 @@ def seed_workforce_demo(db: Session) -> dict[str, Any]:
     ``True`` when this call wrote the data, ``False`` when it found the
     domain already present and wrote nothing at all.
     """
+    template_id = ensure_weekly_rota_template(db)
+
     existing = db.execute(
         select(Domain).where(Domain.name == WORKFORCE_DOMAIN_NAME)
     ).scalar_one_or_none()
@@ -399,6 +775,15 @@ def seed_workforce_demo(db: Session) -> dict[str, Any]:
                 .where(Scenario.problem_id == problem_id)
                 .order_by(Scenario.id)
             ).scalars().first()
+            if problem_id is not None:
+                db.execute(
+                    text(
+                        "UPDATE problem SET template_id = :t"
+                        " WHERE id = :p AND template_id IS NULL"
+                    ),
+                    {"t": template_id, "p": problem_id},
+                )
+        db.commit()
         logger.info("Workforce demo already seeded (domain %s); nothing written", existing.id)
         return {
             "created": False,
@@ -414,127 +799,32 @@ def seed_workforce_demo(db: Session) -> dict[str, Any]:
     db.add(domain)
     db.flush()
 
-    # -- entity types, coloured so the graph's types view shows something --
-    employee = _entity_type(db, domain.id, "employee", "agent", "#2563eb")
-    unit = _entity_type(db, domain.id, "unit", "org", "#7c3aed")
-    day = _entity_type(db, domain.id, "day", "time", "#0d9488")
-    shift = _entity_type(db, domain.id, "shift", "time", "#d97706")
-
-    # -- attribute definitions: every attr_type is represented ------------
-    # integer, number, text, boolean and enum on `employee`; date there
-    # too; `time` on `shift`. Spec §6 asks for full coverage of the enum,
-    # and `test_seed_covers_every_attr_type` reads the enum from the
-    # database rather than from a list here, so a new label fails.
-    _attribute(db, employee, "full_name", "text", required=True)
-    _attribute(db, employee, "hours_per_week", "integer", unit="h/week", default_value=40)
-    _attribute(db, employee, "hourly_rate", "number", unit="EUR/h", default_value=20.0)
-    _attribute(db, employee, "on_call", "boolean", default_value=False)
-    _attribute(
-        db,
-        employee,
-        "grade",
-        "enum",
-        enum_values=["junior", "mid", "senior"],
-        default_value="mid",
-    )
-    _attribute(db, employee, "hired_on", "date")
-    _attribute(db, unit, "cost_centre", "text")
-    _attribute(db, shift, "starts_at", "time", required=True)
-    _attribute(db, shift, "ends_at", "time", required=True)
-    _attribute(db, day, "is_weekend", "boolean", default_value=False)
-
-    # -- entities ---------------------------------------------------------
-    units = {
-        key: _entity(db, unit, key, label, index, {"cost_centre": cost_centre})
-        for index, (key, label, _parent, cost_centre) in enumerate(_UNITS)
+    # Types, people, days, shifts, demand: the same JSON apply walks.
+    plant_domain_seed(db, domain.id, _weekly_rota_domain_seed())
+    types = {
+        row.name: row
+        for row in db.execute(select(EntityType).where(EntityType.domain_id == domain.id)).scalars()
     }
-    days = {
-        key: _entity(
-            db, day, key, _DAY_LABELS[key], index, {"is_weekend": key in ("sat", "sun")}
-        )
-        for index, key in enumerate(_DAYS)
+    rel_types = {
+        row.name: row
+        for row in db.execute(
+            select(RelationshipType).where(RelationshipType.domain_id == domain.id)
+        ).scalars()
     }
-    shifts = {
-        key: _entity(db, shift, key, label, index, {"starts_at": starts, "ends_at": ends})
-        for index, (key, label, starts, ends) in enumerate(_SHIFTS)
+    params = {
+        row.name: row
+        for row in db.execute(
+            select(ParameterDef).where(ParameterDef.domain_id == domain.id)
+        ).scalars()
     }
-    employees = {
-        key: _entity(db, employee, key, label, index, attrs)
-        for index, (key, label, _unit_key, attrs) in enumerate(_EMPLOYEES)
-    }
-
-    # -- relationship types -----------------------------------------------
-    # A hierarchy reads "from is the PARENT of to", which is why
-    # `reports_to` points from the parent unit down. The DDL requires
-    # from_type = to_type and one_to_many for any is_hierarchy type.
-    reports_to = RelationshipType(
-        domain_id=domain.id,
-        name="reports_to",
-        from_type_id=unit.id,
-        to_type_id=unit.id,
-        cardinality="one_to_many",
-        is_hierarchy=True,
-        colour="#475569",
-    )
-    # many_to_one: an employee works in at most one unit, a unit holds many.
-    works_in = RelationshipType(
-        domain_id=domain.id,
-        name="works_in",
-        from_type_id=employee.id,
-        to_type_id=unit.id,
-        cardinality="many_to_one",
-        is_hierarchy=False,
-        colour="#16a34a",
-    )
-    db.add_all([reports_to, works_in])
-    db.flush()
-
-    for key, _label, parent_key, _cost_centre in _UNITS:
-        if parent_key is not None:
-            db.add(
-                Relationship(
-                    relationship_type_id=reports_to.id,
-                    from_entity_id=units[parent_key].id,
-                    to_entity_id=units[key].id,
-                )
-            )
-    for key, _label, unit_key, _attrs in _EMPLOYEES:
-        db.add(
-            Relationship(
-                relationship_type_id=works_in.id,
-                from_entity_id=employees[key].id,
-                to_entity_id=units[unit_key].id,
-            )
-        )
-    db.flush()
-
-    # -- demand[day, shift] ------------------------------------------------
-    demand = ParameterDef(
-        domain_id=domain.id,
-        name="demand",
-        index_type_ids=[day.id, shift.id],
-        default_value=_DEMAND_DEFAULT,
-        unit="people",
-    )
-    db.add(demand)
-    db.flush()
-
-    # Ruling 24: Core, not db.add() -- the primary key contains an array.
-    cells = [
-        {
-            "parameter_def_id": demand.id,
-            "entity_ids": [days[day_key].id, shifts[shift_key].id],
-            "value": value,
-        }
-        for day_key in _DAYS
-        for shift_key, value in (
-            _WEEKEND_DEMAND if day_key in ("sat", "sun") else _WEEKDAY_DEMAND
-        ).items()
-    ]
-    db.execute(insert(ParameterValue), cells)
+    employee, unit, day, shift = types["employee"], types["unit"], types["day"], types["shift"]
+    reports_to, works_in = rel_types["reports_to"], rel_types["works_in"]
+    demand = params["demand"]
 
     # -- problem, model version, scenario ---------------------------------
-    problem = Problem(domain_id=domain.id, name="weekly_rota", owner="demo")
+    problem = Problem(
+        domain_id=domain.id, name="weekly_rota", owner="demo", template_id=template_id
+    )
     db.add(problem)
     db.flush()
 

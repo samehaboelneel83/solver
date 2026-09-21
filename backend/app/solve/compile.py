@@ -31,6 +31,7 @@ VarKey = tuple[str, tuple[str, ...]]
 # (the contract requires `^[a-z][a-z0-9_]*$`), so it cannot collide with one.
 _VIOLATION = "__violation"
 _VIOLATION_CEILING = 1_000_000
+_MAX_EMPTY_RANGES = 50
 
 
 class Unsupported(Exception):
@@ -80,6 +81,26 @@ class Linear:
     def is_constant(self) -> bool:
         return not self.coeffs
 
+    def evaluated_at(
+        self,
+        assignments: dict[VarKey, Any],
+        *,
+        skip_names: set[str] | None = None,
+    ) -> Decimal:
+        """The number this linear form takes at an assignment.
+
+        `skip_names` drops variables the caller does not want counted --
+        violation slacks, when measuring the original rule rather than the
+        compiled one that already absorbed them.
+        """
+        skip = skip_names or set()
+        total = self.const
+        for key, coeff in self.coeffs.items():
+            if key[0] in skip:
+                continue
+            total += coeff * number(assignments.get(key, 0))
+        return total
+
 
 @dataclass
 class Constraint:
@@ -122,6 +143,10 @@ class Compiled:
     # constraint id -> what one unit of violation costs the objective, so a
     # result can report `penalty_paid` rather than only "it was broken".
     penalty_of: dict[str, int] = field(default_factory=dict)
+    # Bindings whose `where`/`via` matched nobody. The constraint is then
+    # vacuously true (a forall over the empty set) or a sum that counted as
+    # zero -- both look like a solved model and are usually a data mistake.
+    empty_ranges: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -140,6 +165,39 @@ class Compiled:
             numbers += [c.left.const, c.right.const, *c.left.coeffs.values()]
             numbers += list(c.right.coeffs.values())
         return all(n == n.to_integral_value() for n in numbers)
+
+
+def slack_of(constraint: Constraint, assignments: dict[VarKey, Any]) -> Decimal:
+    """How much room this instance has left at the recorded assignment.
+
+    Measured on the original rule, ignoring violation variables: a soft
+    constraint that paid a penalty has negative slack (it is short), and a
+    hard one that sits exactly on its bound has zero. Duals would say the
+    same for GLOP and nothing for CP-SAT; the residual is what every
+    backend already knows.
+    """
+    left = constraint.left.evaluated_at(assignments, skip_names={_VIOLATION})
+    right = constraint.right.evaluated_at(assignments, skip_names={_VIOLATION})
+    if constraint.relation in (">=", ">"):
+        return left - right
+    if constraint.relation in ("<=", "<"):
+        return right - left
+    # Equality is tight when it holds; a residual is a breach.
+    residual = left - right
+    return residual if residual == 0 else -abs(residual)
+
+
+def slack_by_constraint(
+    compiled: Compiled, assignments: dict[VarKey, Any]
+) -> dict[str, Decimal]:
+    """The tightest instance of each constraint -- the rule with no room left."""
+    tightest: dict[str, Decimal] = {}
+    for constraint in compiled.constraints:
+        value = slack_of(constraint, assignments)
+        current = tightest.get(constraint.id)
+        if current is None or value < current:
+            tightest[constraint.id] = value
+    return tightest
 
 
 def compile_model(ir: dict[str, Any], data: dict[str, Any]) -> Compiled:
@@ -165,6 +223,9 @@ class _Compiler:
         self.violations: dict[str, list[VarKey]] = {}
         self.penalty_of: dict[str, int] = {}
         self._penalties: list[tuple[VarKey, int]] = []
+        self.empty_ranges: list[dict[str, Any]] = []
+        self._empty_seen: set[tuple[Any, ...]] = set()
+        self._current_id: str | None = None
 
     # -- setup ------------------------------------------------------------
 
@@ -183,6 +244,7 @@ class _Compiler:
             var_index_sets={n: v["index"] for n, v in self.ir.get("variables", {}).items()},
             violations=self.violations,
             penalty_of=self.penalty_of,
+            empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -278,7 +340,16 @@ class _Compiler:
                 "amount by which it is broken is not well defined"
             )
 
-        for env in self._bindings(spec.get("forall", [])):
+        forall = spec.get("forall") or []
+        envs = self._bindings(forall)
+        if forall and not envs:
+            # Vacuous: the rule never fired. Emitting nothing is correct
+            # mathematically and the wrong thing to hide from a planner --
+            # "North Region has no people" looks like a solved model.
+            self._note_empty(spec["id"], "forall", {})
+            return
+        self._current_id = spec["id"]
+        for env in envs:
             left = self._term(spec["left"], env)
             right = self._term(spec["right"], env)
             index = dict(env_keys(env))
@@ -323,6 +394,16 @@ class _Compiler:
             self.constraints.append(
                 Constraint(spec["id"], index, left, spec["relation"], right)
             )
+        self._current_id = None
+
+    def _note_empty(self, constraint_id: str, kind: str, index: dict[str, str]) -> None:
+        key = (constraint_id, kind, tuple(sorted(index.items())))
+        if key in self._empty_seen:
+            return
+        self._empty_seen.add(key)
+        self.empty_ranges.append(
+            {"constraint_id": constraint_id, "kind": kind, "index": dict(index)}
+        )
 
     def _bindings(
         self,
@@ -437,8 +518,12 @@ class _Compiler:
             return Linear(coeffs={key: Decimal(1)})
 
         if "sum" in term:
+            over = term.get("over") or []
+            inner = self._bindings(over, env)
+            if over and not inner and self._current_id:
+                self._note_empty(self._current_id, "sum", dict(env_keys(env)))
             total = Linear()
-            for env2 in self._bindings(term.get("over", []), env):
+            for env2 in inner:
                 total.add(self._term(term["sum"], env2))
             return total
 

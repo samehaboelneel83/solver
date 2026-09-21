@@ -8,6 +8,7 @@ import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
+import { useCapabilities } from "../hooks/useCapability";
 import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
@@ -38,6 +39,8 @@ export function mapConstraintError(detail: string, fields: FieldMeta[]): { field
 
 export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const isNew = id === undefined;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -233,6 +236,7 @@ export default function EntityDetail() {
         isEdit={!isNew}
         isSubmitting={createEntity.isPending || updateEntity.isPending}
         serverError={serverFieldError}
+        readOnly={!canEdit}
       />
       <div className="mt-2 flex max-w-xl items-center gap-4">
         {/* H-9: same fix as the breadcrumb above -- inline-block + py-1 for a 24px+ tall target. */}

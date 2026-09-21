@@ -88,6 +88,30 @@ def test_seed_creates_one_domain_with_the_four_entity_types(seeded):
     ]
 
 
+def test_seed_registers_the_weekly_rota_template_and_points_the_problem_at_it(seeded):
+    """A template is how a second domain starts the same model. The demo
+    problem is that template applied, not a private copy of the IR."""
+    result, db = seeded
+
+    name, ir_version = db.execute(
+        text("SELECT name, ir_version FROM template WHERE name = 'weekly_rota'")
+    ).one()
+    assert (name, ir_version) == ("weekly_rota", "1")
+    template_id, = db.execute(
+        text("SELECT template_id FROM problem WHERE id = :p"), {"p": result["problem_id"]}
+    ).one()
+    assert template_id is not None
+    seed = db.execute(
+        text("SELECT domain_seed FROM template WHERE name = 'weekly_rota'")
+    ).scalar_one()
+    assert {row["name"] for row in seed["entity_types"]} == {
+        "employee",
+        "unit",
+        "day",
+        "shift",
+    }
+
+
 def test_seed_covers_every_attr_type(seeded):
     """Spec §6: the attribute definitions exercise every `attr_type`.
 

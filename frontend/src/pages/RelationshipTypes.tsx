@@ -26,6 +26,7 @@ import {
 } from "../api/v1";
 import { CARDINALITY_LABEL } from "../lib/cardinality";
 import { typeColour } from "../lib/colour";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -69,8 +70,8 @@ export default function RelationshipTypes() {
 }
 
 function Loaded({ domainId }: { domainId: Id }) {
-  // Both the list (to name each end) and the form (to offer the ends)
-  // need the domain's entity types, so they are fetched once here.
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const entityTypes = useEntityTypes(domainId, { limit: 500 });
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500 });
   const types = entityTypes.data?.items ?? [];
@@ -87,7 +88,7 @@ function Loaded({ domainId }: { domainId: Id }) {
           .
         </p>
       ) : (
-        <CreateTypeForm domainId={domainId} entityTypes={types} />
+        canEdit && <CreateTypeForm domainId={domainId} entityTypes={types} />
       )}
     </>
   );

@@ -22,7 +22,7 @@ changes the class, which stays a property of the model itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -33,6 +33,10 @@ class Classification:
     reasons: list[str]
     # What a backend must support to run it.
     needs: set[str]
+    #: The same facts in a planner's words. The Model editor shows these
+    #: rather than "IP" / "fractional-data"; `reasons` stays the record on
+    #: the run, because that is what a modeller traces a backend choice to.
+    planner: list[str] = field(default_factory=list)
 
 
 def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classification:
@@ -40,9 +44,12 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
     reasons: list[str] = []
     needs = {"linear"}
 
+    planner: list[str] = []
+
     if not domains:
         reasons.append("no variables, so nothing is decided")
-        return Classification("trivial", reasons, needs)
+        planner.append("nothing is decided yet")
+        return Classification("trivial", reasons, needs, planner)
 
     integral = domains & {"binary", "integer"}
     continuous = domains & {"continuous"}
@@ -54,27 +61,33 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"some variables are integral ({', '.join(sorted(integral))}) and some are "
             "continuous, so the model is mixed"
         )
+        planner.append("some decisions are yes or no, some are quantities")
     elif continuous:
         model_class = "LP"
         needs.add("continuous")
         reasons.append("every variable is continuous")
+        planner.append("every decision is a quantity")
     elif domains == {"binary"}:
         model_class = "IP"
         needs.add("integral")
         reasons.append("every variable is binary")
+        planner.append("every decision is yes or no")
     elif domains <= {"binary", "integer"}:
         model_class = "IP"
         needs.add("integral")
         reasons.append(f"variables are integral ({', '.join(sorted(domains))})")
+        planner.append("every decision is a whole number")
     else:  # pragma: no cover -- the validator pins the vocabulary
         reasons.append(f"variable domains {sorted(domains)} are not ones this platform knows")
-        return Classification("unsupported", reasons, needs)
+        return Classification("unsupported", reasons, needs, planner)
 
     reasons.append("all terms are linear (the contract refuses a product of two variables)")
+    planner.append("every rule is linear")
 
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
         needs.add("soft-constraints")
         reasons.append("at least one constraint is soft, so the backend must carry penalties")
+        planner.append("at least one rule can bend, at a cost")
 
     fractional = _fractional(ir, data)
     if fractional:
@@ -83,8 +96,11 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"{fractional} is not a whole number, so a solver that works in integers "
             "cannot take this model without changing it"
         )
+        planner.append(
+            f"{fractional} is not a whole number, so a yes-or-no solver cannot take this model"
+        )
 
-    return Classification(model_class, reasons, needs)
+    return Classification(model_class, reasons, needs, planner)
 
 
 def _fractional(ir: dict[str, Any], data: dict[str, Any] | None) -> str | None:

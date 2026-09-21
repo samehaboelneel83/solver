@@ -23,6 +23,7 @@ import AttrsForm, { buildAttrs, type AttrDrafts } from "./AttrsForm";
 import { FieldError, FieldLabel, INPUT_CLASS, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
 import OfflineNotice from "./OfflineNotice";
+import { useCapabilities } from "../hooks/useCapability";
 import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
@@ -337,6 +338,8 @@ export default function GraphEditor({
   onSelectionChange,
   focusRequest,
 }: GraphEditorProps) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const isTypes = mode === "types";
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
@@ -1150,7 +1153,7 @@ export default function GraphEditor({
         {/* Both of these write `entity` / `relationship` ROWS, which the
             schema view has none of: creating an entity type or a
             relationship type is a different form on a different page. */}
-        {!isTypes && (
+        {!isTypes && canEdit && (
         <>
         <button
           type="button"
@@ -1201,7 +1204,9 @@ export default function GraphEditor({
           ? "This is the domain's schema: one node per entity type, one edge per relationship type, labelled with its cardinality. A loop is a type that relates to itself, such as a hierarchy. Click a node or edge to see and colour it."
           : connecting
             ? "Drag from one node to another to connect them."
-            : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."}
+            : canEdit
+              ? "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."
+              : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to inspect it."}
       </p>
 
       {error && (
@@ -1216,7 +1221,7 @@ export default function GraphEditor({
         </div>
       )}
 
-      {showCreateNode && data && !isTypes && (
+      {showCreateNode && data && !isTypes && canEdit && (
         <form
           id="create-node-form"
           onSubmit={handleCreateNode}
@@ -1485,7 +1490,7 @@ export default function GraphEditor({
               >
                 Define the first entity type
               </Link>
-            ) : (
+            ) : canEdit ? (
               <button
                 type="button"
                 onClick={openCreateNodeForm}
@@ -1493,7 +1498,7 @@ export default function GraphEditor({
               >
                 Create the first node
               </button>
-            )}
+            ) : null}
           </div>
         )}
       </div>

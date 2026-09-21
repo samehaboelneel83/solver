@@ -1,4 +1,4 @@
-import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,10 +11,11 @@ vi.mock("../api/client", async () => {
   return { ...actual, apiFetch: vi.fn() };
 });
 
+import { editorQueryClient } from "../test/me";
 import { ApiError, apiFetch } from "../api/client";
 
 function renderAtNew() {
-  const queryClient = new QueryClient();
+  const queryClient = editorQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -29,7 +30,7 @@ function renderAtNew() {
 }
 
 function renderAtId(id: string) {
-  const queryClient = new QueryClient();
+  const queryClient = editorQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -179,7 +180,7 @@ describe("EntityDetail (missing record)", () => {
 
     // retry: false so the 404 error state settles immediately instead of
     // going through react-query's default retry/backoff.
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/missing-id"]}>
@@ -219,7 +220,7 @@ describe("EntityDetail (missing record)", () => {
       return Promise.resolve({ items: [], total: 0 });
     });
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/missing-id"]}>
@@ -258,7 +259,7 @@ describe("EntityDetail (load error other than 404)", () => {
 
     // retry: false so the error state settles immediately instead of going
     // through react-query's default retry/backoff.
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/broken-id"]}>
@@ -295,7 +296,7 @@ describe("EntityDetail (load error other than 404)", () => {
       return Promise.resolve({ items: [], total: 0 });
     });
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/broken-id"]}>
@@ -344,7 +345,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
           <Routes>
             <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
@@ -370,7 +371,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
           <Routes>
             <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
@@ -398,7 +399,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <ToastProvider>
           <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
             <Routes>
@@ -428,7 +429,7 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <ToastProvider>
           <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
             <Routes>
@@ -476,7 +477,7 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
       return Promise.resolve({ items: [], total: 0 });
     });
 
-    const queryClient = new QueryClient();
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/new?organization_id=org-1"]}>
@@ -518,7 +519,7 @@ describe("EntityDetail breadcrumb and Cancel (C-6, C-8)", () => {
 
   it("shows a breadcrumb link and a Cancel link, both back to the list -- the only controls used to be Save/Create", async () => {
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
           <Routes>
             <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
@@ -558,7 +559,7 @@ describe("EntityDetail unsaved-changes guard (C-3)", () => {
   });
 
   function renderNewWithGuard() {
-    const queryClient = new QueryClient();
+    const queryClient = editorQueryClient();
     return render(
       <QueryClientProvider client={queryClient}>
         <UnsavedChangesProvider>
@@ -692,7 +693,7 @@ describe("EntityDetail 'Show identifiers' toggle (B-1)", () => {
   });
 
   it("reads the toggle's initial state from ?ids=1, matching the list page's toggle (E-4)", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = editorQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={["/domain/entity_type/new?ids=1"]}>
@@ -740,7 +741,7 @@ describe("EntityDetail 'Open in graph' link (B-3)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity/entity-1"]}>
           <Routes>
             <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
@@ -774,7 +775,7 @@ describe("EntityDetail 'Open in graph' link (B-3)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity_type/existing-id"]}>
           <Routes>
             <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
@@ -794,7 +795,7 @@ describe("EntityDetail 'Open in graph' link (B-3)", () => {
     });
 
     render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={editorQueryClient()}>
         <MemoryRouter initialEntries={["/domain/entity/new"]}>
           <Routes>
             <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />

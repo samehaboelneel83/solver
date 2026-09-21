@@ -189,8 +189,8 @@ function Loaded({ domainId }: { domainId: Id }) {
             caption="Relationships"
             emptyNote={
               typeFilter === "all"
-                ? "No relationships in this domain yet. Add the first one below."
-                : "No relationships of this type yet. Add one below, or show all types."
+                ? "No relationships in this domain yet."
+                : "No relationships of this type yet."
             }
             entityHref={(id) => `/entities/${id}`}
             truncated={relationships.truncated || entities.truncated}

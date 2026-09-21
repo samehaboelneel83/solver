@@ -77,7 +77,11 @@ export function variableNameProblem(name: string, taken: readonly string[]): str
 }
 
 /** Every set, parameter and variable a term mentions. */
-export function referencesOf(term: Term, found = { sets: new Set<string>(), names: new Set<string>() }) {
+export function referencesOf(
+  term: Term | undefined,
+  found = { sets: new Set<string>(), names: new Set<string>() }
+) {
+  if (term == null) return found;
   switch (termKind(term)) {
     case "par":
       found.names.add((term as { par: string }).par);
@@ -125,12 +129,16 @@ export function strandedBy(
   for (const constraint of constraints) {
     const inBindings =
       removal.kind === "set" && (constraint.forall ?? []).some((b) => b.set === removal.name);
-    if (inBindings || mentions(constraint.left) || mentions(constraint.right)) {
+    if (
+      inBindings ||
+      (constraint.left != null && mentions(constraint.left)) ||
+      (constraint.right != null && mentions(constraint.right))
+    ) {
       broken.push(constraint.id);
     }
   }
   for (const term of objectiveTerms) {
-    if (mentions(term.expression)) broken.push(term.id);
+    if (term.expression != null && mentions(term.expression)) broken.push(term.id);
   }
   return broken;
 }

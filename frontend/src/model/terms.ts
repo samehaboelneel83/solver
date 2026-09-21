@@ -41,14 +41,16 @@ export type Constraint = {
   id: string;
   note?: string;
   forall?: Binding[];
-  left: Term;
-  relation: Relation;
-  right: Term;
-  severity: Severity;
-  penalty?: number;
+  /** Absent on a version that predates the IR contract — an id and a note
+   * with nothing to solve. The editor must not assume these are present. */
+  left?: Term;
+  relation?: Relation;
+  right?: Term;
+  severity?: Severity;
+  weight?: number;
 };
 
-export type ObjectiveTerm = { id: string; weight: number; expression: Term };
+export type ObjectiveTerm = { id: string; weight: number; expression?: Term };
 
 /** What the editor knows about the domain it is writing a model for. */
 export type ModelContext = {
@@ -211,7 +213,8 @@ export function declaredRelationships(
     }
   }
 
-  function fromTerm(term: Term) {
+  function fromTerm(term: Term | undefined) {
+    if (term == null) return;
     switch (termKind(term)) {
       case "sum": {
         const t = term as { sum: Term; over: Binding[] };
@@ -250,7 +253,8 @@ export function describeBinding(binding: Binding): string {
 }
 
 /** A one-line reading of a term, for a summary row: `sum(assign[e,d,s])`. */
-export function describeTerm(term: Term): string {
+export function describeTerm(term: Term | undefined | null): string {
+  if (term == null) return "(not yet expressed)";
   switch (termKind(term)) {
     case "const":
       return String((term as { const: number }).const);

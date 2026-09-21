@@ -317,9 +317,10 @@ service, snapshot-on-submit, full provenance on the run, and a UI that
 follows a run until it settles and then stops asking. Stale runs from a
 dead worker are reclaimed at start-up.
 
-**Still open:** cancellation and a heartbeat. A run can only be waited out
-today, and the 30-minute reclaim is a coarse substitute for a worker that
-says it is still alive.
+**Cancellation and heartbeat** -- done. Migration `0018` records
+`cancel_requested_at` and `last_heartbeat_at` on `run`. The worker polls
+the flag, CP-SAT / GLOP / CBC honour it, a missed heartbeat reclaims the
+row, and the Runs UI can stop a live solve instead of waiting it out.
 
 **Goal:** press solve, watch it, get a result you can trust and reproduce.
 
@@ -338,7 +339,7 @@ The tables exist and are immutable; what is missing is everything around them.
 
 ---
 
-## Phase 4 — Results, and why they are what they are — **mostly DONE** (`9dafbd1`, `f89c152`, `edff8ad`)
+## Phase 4 — Results, and why they are what they are — **mostly DONE** (`9dafbd1`, `f89c152`, `edff8ad`, slack `0017`)
 
 - **Solution viewer in domain language** -- done. Migration 0012 freezes
   display names into the snapshot, so a run reads back in the names that
@@ -351,13 +352,11 @@ The tables exist and are immutable; what is missing is everything around them.
   states what the two runs differ by and whether the patch is the only
   difference, because crediting a rule for a change the data caused is a
   wrong answer dressed as an insight.
-- **Sensitivity** -- **not done, and no longer blocked.** This entry used to
-  say shadow prices needed an LP relaxation the contract could not express;
-  since `0015` and the GLOP backend it can, and GLOP exposes duals directly.
-  So this is now ordinary work rather than a dependency. Slack per constraint
-  remains the useful half and the place to start: it names the rule with no
-  room left, which is the one to relax next. `constraint_result` has no
-  column for it, so that part is a migration, not a read.
+- **Sensitivity** -- **slack done, duals not.** Migration `0017` adds
+  `constraint_result.slack`; GLOP and CBC write it, CP-SAT reports `0` on
+  a binding integer constraint, and an infeasible run's conflict set
+  names the rule with no room left. Shadow prices and reduced costs are
+  still open: GLOP exposes duals, but nothing records them yet.
 
 A number is not an answer. The value of this phase is that it turns the tool
 from a calculator into something a planner can argue with.
@@ -375,7 +374,7 @@ from a calculator into something a planner can argue with.
 
 ---
 
-## Phase 5 — Roles and configuration — **two of three DONE** (`671fac8`, `237049c`)
+## Phase 5 — Roles and configuration — **DONE** (`671fac8`, `237049c`)
 
 - **Capabilities** -- done. Migration 0013 makes them rows granted to
   roles, enforced by one dependency, and reported by `GET /api/v1/me` so
@@ -384,12 +383,14 @@ from a calculator into something a planner can argue with.
 - **Settings at three levels** -- done. Migration 0014; problem beats
   domain beats platform beats the built-in default, every resolved value
   says which level supplied it, and a run records it too.
-- **Templates** -- **not done.** The `template` table is still unused.
+- **Templates** -- done. `POST /api/v1/templates/{id}/apply` plants
+  `domain_seed` (types, entities, relationships, parameters) then publishes
+  the stored IR; the weekly-rota seed is what Dashboard's Start uses on an
+  empty domain.
 
-**Also still open:** the UI reflects capabilities on the Runs and Settings
-screens only. The domain-editing screens still offer actions a viewer
-cannot take; the API refuses them with a readable reason, so nothing is
-silently broken, but the roadmap's standard is *absent*, not *refused*.
+**Domain-editing UI** now hides New / Save / Delete unless `GET /api/v1/me`
+lists `domain.edit`, matching Runs and Settings. The API still refuses a
+write that arrives anyway.
 
 **Goal:** the flexible configuration the request asks for, for roles as well as
 for model parts.
@@ -412,17 +413,20 @@ for model parts.
 
 Carried from the migration's ledger; none of it blocks, all of it compounds:
 
-- **Parameter re-index race** — two ordinary API calls can leave a cell whose
-  coordinates no longer match its parameter, and `snapshot_dataset()` will then
-  emit it keyed by two type names. One `FOR SHARE` clause. **Fix before the
-  solver consumes datasets in anger.**
+- **Parameter re-index race** — **done.** PUT `/values` takes `FOR SHARE` on
+  `parameter_def`; PATCH and DELETE take `FOR UPDATE`, so an uncommitted
+  cell write cannot hide from the re-index cell-count.
 - **No keyboard route to create or delete a relationship** (WCAG 2.1.1, Level
   A). Less severe since the relationships screens landed, still a gap.
-- **`translate_db_error` discards a trigger's own message on 23503**, so the
-  actionable half of a refusal reaches the logs and not the user.
-- **Unbounded payloads** on the graph read and parameter values.
-- **Five string-detail 422s** in the generic CRUD layer, inconsistent with the
-  platform's one-shape rule.
+- **`translate_db_error` discards a trigger's own message on 23503** — **done.**
+  A 23503 with no `constraint_name` (entity_type_guard's DELETE) forwards
+  the trigger sentence, which names the parameters; a real FK still uses
+  `conflict_detail()`.
+- **Unbounded payloads** — **done.** GET `/graph` refuses a domain over
+  10,000 nodes or 50,000 edges (counted before the rows load). PUT
+  `/parameters/{id}/values` refuses more than 10,000 cells.
+- **Five string-detail 422s** in the generic CRUD layer — **done.** The list
+  route now raises FastAPI's list shape with `loc` starting at `query`.
 - **The checks script** (branch `checks`) should land; nothing currently runs
   either suite automatically, which is how a smoke test rotted into a script
   that would have destroyed the live database.

@@ -1,10 +1,14 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useEntityList } from "../api/entities";
 import { useCounts } from "../api/counts";
 import { useHealth } from "../api/health";
+import { formatApiError } from "../api/errors";
+import { useApplyTemplate, useTemplates } from "../api/v1";
 import OfflineNotice from "../components/OfflineNotice";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
+import { useCapabilities } from "../hooks/useCapability";
 
 /**
  * The three places a new user actually starts (A-1): the audit's landing
@@ -50,7 +54,12 @@ export default function Dashboard() {
     isError: countsError,
     fetchStatus: countsFetchStatus,
   } = useCounts();
-  const { domainId } = useDomain();
+  const { domainId, setDomainId } = useDomain();
+  const { can } = useCapabilities();
+  const navigate = useNavigate();
+  const templates = useTemplates();
+  const apply = useApplyTemplate();
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const {
     data: recentProblems,
     isLoading: problemsLoading,
@@ -88,6 +97,60 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+
+      {can("model.publish") && (templates.data?.items.length ?? 0) > 0 && (
+        <section className="mb-8 rounded-md border border-slate-200 bg-white p-4">
+          <h2 className="mb-1 text-sm font-semibold text-slate-900">Start from a template</h2>
+          <p className="mb-3 text-sm text-slate-600">
+            A starting model, not a solver. Missing people, days and shifts are created if this
+            domain does not have them yet.
+          </p>
+          {(templates.data?.items ?? []).map((row) => {
+            const existing = recentProblems?.items.find(
+              (problem) => Number(problem.template_id) === Number(row.id)
+            );
+            return (
+              <button
+                key={String(row.id)}
+                type="button"
+                disabled={apply.isPending}
+                className="mr-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                onClick={() => {
+                  if (existing) {
+                    if (existing.domain_id != null) setDomainId(Number(existing.domain_id));
+                    navigate(`/model?problem=${existing.id}`);
+                    return;
+                  }
+                  setTemplateError(null);
+                  apply.mutate(
+                    {
+                      id: row.id,
+                      body:
+                        domainId !== null
+                          ? { domain_id: domainId }
+                          : { domain_name: row.name },
+                    },
+                    {
+                      onSuccess: (created) => {
+                        setDomainId(Number(created.domain_id));
+                        navigate(`/model?problem=${created.problem_id}`);
+                      },
+                      onError: (error: unknown) => setTemplateError(formatApiError(error)),
+                    }
+                  );
+                }}
+              >
+                {existing ? `Open ${row.name}` : apply.isPending ? "Starting…" : `Start from ${row.name}`}
+              </button>
+            );
+          })}
+          {templateError && (
+            <p role="alert" className="mt-2 text-sm text-red-600">
+              {templateError}
+            </p>
+          )}
+        </section>
+      )}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <section className="lg:col-span-2">

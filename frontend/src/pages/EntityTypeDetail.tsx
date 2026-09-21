@@ -28,6 +28,7 @@ import {
   type EntityRole,
   type EntityType,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { mergeReload, reloadedKeys } from "../lib/staleRecord";
@@ -124,6 +125,7 @@ const typeDraftsOf = (type: EntityType): TypeDrafts => ({
 });
 
 function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<EntityType | null> }) {
+  const { can } = useCapabilities();
   const [name, setName] = useState(type.name);
   const [role, setRole] = useState<EntityRole>(type.role);
   const [colour, setColour] = useState<string | null>(type.colour);
@@ -231,13 +233,15 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
             }
           }}
         />
-        <button
-          type="submit"
-          disabled={updateType.isPending}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {updateType.isPending ? "Saving…" : "Save entity type"}
-        </button>
+        {can("domain.edit") && (
+          <button
+            type="submit"
+            disabled={updateType.isPending}
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {updateType.isPending ? "Saving…" : "Save entity type"}
+          </button>
+        )}
       </form>
     </section>
   );
@@ -247,6 +251,8 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
 type Editing = null | "new" | number;
 
 function Attributes({ type }: { type: EntityType }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const [editing, setEditing] = useState<Editing>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
@@ -351,6 +357,8 @@ function Attributes({ type }: { type: EntityType }) {
                   </td>
                   <td className="px-2 py-2 text-slate-700">{formatDefault(attribute.default_value)}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-right">
+                    {canEdit && (
+                      <>
                     <button
                       type="button"
                       aria-label={`Edit ${attribute.name}`}
@@ -367,6 +375,8 @@ function Attributes({ type }: { type: EntityType }) {
                     >
                       Delete
                     </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -375,7 +385,7 @@ function Attributes({ type }: { type: EntityType }) {
         </div>
       )}
 
-      {editing === null && (
+      {editing === null && canEdit && (
         <button
           type="button"
           onClick={() => open("new")}
@@ -422,6 +432,7 @@ function Attributes({ type }: { type: EntityType }) {
 }
 
 function DeleteType({ type }: { type: EntityType }) {
+  const { can } = useCapabilities();
   const deleteType = useDeleteEntityType();
   const toast = useToast();
   const navigate = useNavigate();
@@ -448,6 +459,8 @@ function DeleteType({ type }: { type: EntityType }) {
       toast.error(formatApiError(err));
     }
   }
+
+  if (!can("domain.edit")) return null;
 
   return (
     <section aria-labelledby="delete-type-heading" className="rounded-md border border-red-200 bg-white p-4">

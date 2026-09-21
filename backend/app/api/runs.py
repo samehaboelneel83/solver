@@ -36,7 +36,7 @@ from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
-from app.solve.service import enqueue_run
+from app.solve.service import CannotCancel, cancel_run, enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
@@ -80,6 +80,10 @@ class ConstraintOutcome(BaseModel):
     penalty_paid: QuantityOut
     # Which instances broke, worst first. Empty for a satisfied constraint.
     violations: Any
+    # Residual at the assignment, tightest instance. Null on runs made
+    # before the column existed, and on a constraint the compiler never
+    # emitted (a vacuous forall). Zero means the rule has no room left.
+    slack: QuantityOut | None = None
 
 
 class RunSummary(BaseModel):
@@ -98,6 +102,7 @@ class RunSummary(BaseModel):
     queued_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    cancel_requested: bool = False
 
 
 class ConflictItem(BaseModel):
@@ -194,6 +199,27 @@ def create_run(
     return _read(db, run_id)
 
 
+@router.post("/runs/{run_id}/cancel")
+def cancel(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("run.submit")),
+) -> RunRead:
+    """Stop a run that has not finished.
+
+    A queued run is cancelled immediately: no worker has started it. A
+    running one is asked to stop; the worker records `cancelled` instead of
+    an answer. A settled run is a 422 -- the result is already written.
+    """
+    if db.get(Run, run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        cancel_run(db, run_id)
+    except CannotCancel as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _read(db, run_id)
+
+
 @router.get("/me")
 def whoami(
     db: Session = Depends(get_db),
@@ -210,6 +236,37 @@ def whoami(
         "username": user.username,
         "display_name": user.display_name,
         "capabilities": sorted(capabilities_of(db, user)),
+    }
+
+
+class ClassifyRequest(BaseModel):
+    """An IR, and nothing else. Classification of the *shape* does not
+    need the domain or a frozen dataset; `fractional-data` from parameter
+    values is a property of a run, and this route is what the editor asks
+    before there is one."""
+
+    ir: dict[str, Any]
+
+
+@router.post("/classify")
+def classify_model(
+    payload: ClassifyRequest, _: UserAccount = Depends(get_current_user)
+) -> dict[str, Any]:
+    """What kind of model this is, in the classifier's words and a planner's.
+
+    **Posted, not stored.** The same function a run records as
+    `classified_as` / `why`, so the editor cannot disagree with the run
+    about what the model is. No dataset is supplied: a draft has none, and
+    a missing `fractional-data` flag here is honest rather than guessed.
+    """
+    from app.solve.classify import classify
+
+    found = classify(payload.ir)
+    return {
+        "model_class": found.model_class,
+        "needs": sorted(found.needs),
+        "reasons": found.reasons,
+        "planner": found.planner,
     }
 
 

@@ -49,8 +49,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
+from app.api.parameters import _get_parameter
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
@@ -442,6 +443,43 @@ def test_changing_index_types_is_refused_while_values_are_stored(
     assert response.json()["index_type_ids"] == [grid["shift"], grid["day"]]
 
 
+def test_an_uncommitted_put_blocks_reindex_until_it_commits(demand):
+    """PUT holds FOR SHARE on parameter_def; a PATCH that changes the index
+    takes FOR UPDATE. Without that lock the PATCH's cell-count can miss an
+    uncommitted PUT and leave a cell whose coordinates no longer match.
+
+    The pin is the lock itself: a second session's FOR UPDATE times out
+    while the first still holds FOR SHARE, which is the interleaving the
+    two ordinary API calls used to be able to hit.
+    """
+    holder = SessionLocal()
+    waiter = SessionLocal()
+    try:
+        _get_parameter(holder, demand, lock="share")
+        waiter.execute(text("SET LOCAL lock_timeout = '250ms'"))
+        with pytest.raises(OperationalError) as exc:
+            _get_parameter(waiter, demand, lock="update")
+        assert exc.value.orig.pgcode == "55P03"
+    finally:
+        holder.rollback()
+        holder.close()
+        waiter.rollback()
+        waiter.close()
+
+
+def test_get_does_not_take_the_reindex_lock(client, auth_headers, demand):
+    """Readers must not queue behind a writer: GET is AccessShareLock,
+    which is compatible with the FOR UPDATE PATCH holds."""
+    holder = SessionLocal()
+    try:
+        _get_parameter(holder, demand, lock="update")
+        response = client.get(f"/api/v1/parameters/{demand}", headers=auth_headers)
+        assert response.status_code == 200, response.text
+    finally:
+        holder.rollback()
+        holder.close()
+
+
 # --- the value grid --------------------------------------------------------
 
 
@@ -779,3 +817,22 @@ def test_snapshot_resolves_a_cell_reset_to_the_default(client, auth_headers, db,
     assert _resolve(data, "demand", {"day": "mon", "shift": "morning"}) == 2
     assert _resolve(data, "demand", {"day": "tue", "shift": "morning"}) == 7
     assert _resolve(data, "demand", {"day": "wed", "shift": "night"}) == 2
+
+
+def test_put_refuses_more_cells_than_the_cap(client, auth_headers, demand, monkeypatch):
+    """A PUT used to accept an unbounded `cells` list. The cap is lowered
+    here so the test does not ship ten thousand rows; Pydantic judges
+    length before any cell is written."""
+    monkeypatch.setattr("app.api.parameters.PARAMETER_VALUES_MAX_CELLS", 2)
+    response = _put(
+        client,
+        auth_headers,
+        demand,
+        [
+            {"entity_ids": [1, 1], "value": 1},
+            {"entity_ids": [1, 2], "value": 1},
+            {"entity_ids": [1, 3], "value": 1},
+        ],
+    )
+    entry = _blamed(_request_layer_errors(response), "cells")
+    assert "2" in entry["msg"]

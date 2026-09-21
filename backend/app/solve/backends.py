@@ -25,9 +25,20 @@ from app.solve.classify import Classification
 from app.solve.compile import Compiled
 from app.solve.result import Solution
 
+# True means the caller has asked this solve to give up. Backends that can
+# interrupt do; the rest return as soon as their current call does.
+ShouldStop = Callable[[], bool]
+
 
 class SolveFn(Protocol):
-    def __call__(self, compiled: Compiled, *, time_limit: float, workers: int) -> Solution: ...
+    def __call__(
+        self,
+        compiled: Compiled,
+        *,
+        time_limit: float,
+        workers: int,
+        should_stop: ShouldStop | None = None,
+    ) -> Solution: ...
 
 
 @dataclass(frozen=True)
@@ -45,16 +56,32 @@ class Backend:
     note: str = ""
 
 
-def _cpsat_solve(compiled: Compiled, *, time_limit: float, workers: int) -> Solution:
+def _cpsat_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+) -> Solution:
     from app.solve import cpsat
 
-    return cpsat.solve(compiled, time_limit=time_limit, workers=workers)
+    return cpsat.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+    )
 
 
-def _milp_solve(compiled: Compiled, *, time_limit: float, workers: int) -> Solution:
+def _milp_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+) -> Solution:
     from app.solve import milp
 
-    return milp.solve(compiled, time_limit=time_limit, workers=workers)
+    return milp.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+    )
 
 
 def _milp_available() -> bool:
@@ -63,10 +90,18 @@ def _milp_available() -> bool:
     return milp.available() is not None
 
 
-def _lp_solve(compiled: Compiled, *, time_limit: float, workers: int) -> Solution:
+def _lp_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+) -> Solution:
     from app.solve import lp
 
-    return lp.solve(compiled, time_limit=time_limit, workers=workers)
+    return lp.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+    )
 
 
 def _lp_available() -> bool:

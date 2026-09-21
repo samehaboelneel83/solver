@@ -28,6 +28,7 @@ import {
   type Entity,
   type EntityType,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { mergeReload, reloadedKeys } from "../lib/staleRecord";
@@ -221,6 +222,8 @@ function RecordForm({
   entity: Entity | null;
   reload: () => Promise<Entity | null>;
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const attributes = type.attributes;
   const [key, setKey] = useState(entity?.key ?? "");
   const [label, setLabel] = useState(entity?.label ?? "");
@@ -556,6 +559,7 @@ function RecordForm({
           </fieldset>
 
           <div className="flex flex-wrap items-center gap-3">
+            {canEdit && (
             <button
               type="submit"
               disabled={isSubmitting}
@@ -563,6 +567,7 @@ function RecordForm({
             >
               {isSubmitting ? "Saving…" : entity ? "Save entity" : "Create entity"}
             </button>
+            )}
             <Link to={`/entities?type=${type.id}`} className="rounded px-3 py-2 text-sm text-slate-600 underline hover:text-slate-900">
               Cancel
             </Link>
@@ -576,7 +581,7 @@ function RecordForm({
           very rows. */}
       {entity && <EntityRelationships entity={entity} entityType={type} />}
 
-      {entity && (
+      {entity && canEdit && (
         <section aria-labelledby="delete-entity-heading" className="rounded-md border border-red-200 bg-white p-4">
           <h2 id="delete-entity-heading" className="mb-2 text-base font-semibold text-slate-900">
             Delete this entity

@@ -26,6 +26,7 @@ import {
   type Id,
   type ParameterDef,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
@@ -77,6 +78,8 @@ export default function Parameters() {
 }
 
 function ForDomain({ domainId }: { domainId: Id }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const [searchParams, setSearchParams] = useSearchParams();
   const parameters = useParameters(domainId, { limit: 500 });
   const types = useEntityTypes(domainId, { limit: 500 });
@@ -100,7 +103,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
       {items.length === 0 ? (
         <p className="mb-6 text-sm text-slate-600">
           No parameters in this domain yet.{" "}
-          {entityTypes.length > 0 ? "Define the first one below." : ""}
+          {entityTypes.length > 0 && canEdit ? "Define the first one below." : ""}
         </p>
       ) : (
         <ParameterTable
@@ -136,11 +139,13 @@ function ForDomain({ domainId }: { domainId: Id }) {
           </p>
         </div>
       ) : (
+        canEdit && (
         <CreateParameterForm
           domainId={domainId}
           entityTypes={entityTypes}
           onCreated={(id) => setSearchParams({ parameter: String(id) }, { replace: true })}
         />
+        )
       )}
     </>
   );
@@ -180,6 +185,8 @@ function ParameterTable({
   selectedId: Id | null;
   onSelect: (id: Id) => void;
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const remove = useDeleteParameter();
   const toast = useToast();
 
@@ -241,6 +248,7 @@ function ParameterTable({
               <td className="px-3 py-2 text-slate-700">{parameter.default_value}</td>
               <td className="px-3 py-2 text-slate-700">{parameter.unit ?? "—"}</td>
               <td className="whitespace-nowrap px-3 py-1 text-right">
+                {canEdit && (
                 <button
                   type="button"
                   aria-label={`Delete ${parameter.name}`}
@@ -249,6 +257,7 @@ function ParameterTable({
                 >
                   Delete
                 </button>
+                )}
               </td>
             </tr>
           ))}
@@ -518,6 +527,8 @@ function ParameterSettings({
   parameter: ParameterDef;
   entityTypes: EntityType[];
 }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
   const baseId = useId();
   const [name, setName] = useState(parameter.name);
   const [defaultValue, setDefaultValue] = useState(String(parameter.default_value));
@@ -592,6 +603,7 @@ function ParameterSettings({
         Changing the default: stored cells are not rewritten — every empty cell takes the new default, and a cell
         that happens to equal it stays stored until you clear it.
       </p>
+      {canEdit && (
       <button
         type="submit"
         disabled={update.isPending}
@@ -599,6 +611,7 @@ function ParameterSettings({
       >
         {update.isPending ? "Saving…" : "Save settings"}
       </button>
+      )}
     </form>
   );
 }

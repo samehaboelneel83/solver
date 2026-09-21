@@ -114,6 +114,12 @@ def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_he
     assert by_id["c_cover_demand"]["penalty_paid"] > 0
     assert by_id["c_cover_demand"]["violations"], "a broken constraint that names no instance"
     assert by_id["c_one_shift_per_day"]["satisfied"] is True
+    # Slack is the residual, filled for every backend: a held rule with no
+    # room left is 0, a broken preference is short.
+    assert by_id["c_one_shift_per_day"]["slack"] is not None
+    assert by_id["c_one_shift_per_day"]["slack"] >= 0
+    assert by_id["c_cover_demand"]["slack"] is not None
+    assert by_id["c_cover_demand"]["slack"] < 0
 
 
 def test_broken_constraints_are_listed_before_the_ones_that_held(seeded, auth_headers, db):
@@ -342,3 +348,70 @@ def test_a_time_limit_outside_the_allowed_range_is_refused(seeded, auth_headers)
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["body", "time_limit_s"]
+
+
+def test_classify_reports_the_model_in_planner_language(auth_headers):
+    """The editor asks this of a draft. Same function a run records, so the
+    two cannot disagree about what the model is."""
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/classify",
+        json={
+            "ir": {
+                "variables": {"assign": {"domain": "binary"}},
+                "constraints": [{"severity": "soft"}],
+            }
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_class"] == "IP"
+    assert "every decision is yes or no" in body["planner"]
+    assert "every rule is linear" in body["planner"]
+    assert "at least one rule can bend, at a cost" in body["planner"]
+    assert "soft-constraints" in body["needs"]
+
+
+def test_cancelling_a_queued_run_returns_it_cancelled(seeded, auth_headers, db):
+    """Nothing has started, so there is no worker to tell. The status is the
+    answer: this question will not be solved."""
+    client = TestClient(app)
+    queued = client.post(
+        f"/api/v1/scenarios/{seeded['scenario_id']}/runs",
+        json={"time_limit_s": 30},
+        headers=auth_headers,
+    )
+    run_id = queued.json()["id"]
+
+    response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=auth_headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "cancelled"
+    assert body["cancel_requested"] is True
+    assert body["assignments"] is None
+    work_once(db)
+    assert (
+        client.get(f"/api/v1/runs/{run_id}", headers=auth_headers).json()["status"]
+        == "cancelled"
+    )
+
+
+def test_cancelling_a_finished_run_is_refused(seeded, auth_headers, db):
+    """The result is already written. Stopping it would be rewriting history."""
+    client = TestClient(app)
+    queued = client.post(
+        f"/api/v1/scenarios/{seeded['scenario_id']}/runs",
+        json={"time_limit_s": 30},
+        headers=auth_headers,
+    )
+    run_id = queued.json()["id"]
+    work_once(db)
+
+    response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=auth_headers)
+
+    assert response.status_code == 422, response.text
+    assert "already finished" in response.json()["detail"]

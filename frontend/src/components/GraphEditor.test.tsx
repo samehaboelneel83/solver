@@ -1,10 +1,11 @@
 import type { ComponentProps } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { fallbackColour, labelForeground } from "../lib/colour";
 import GraphEditor, { applyGraphToCy, cyEdgeId, graphStylesheet, positionsAreDegenerate } from "./GraphEditor";
+import { EDITOR_ME, VIEWER_ME, editorQueryClient } from "../test/me";
 
 /**
  * The cytoscape double, and what it is allowed to be more permissive
@@ -425,13 +426,16 @@ function writeCalls(method: string, prefix: string): any[][] {
   );
 }
 
-function client() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function client(me: typeof EDITOR_ME | typeof VIEWER_ME = EDITOR_ME) {
+  return editorQueryClient(me);
 }
 
-function renderWithProviders(props: Partial<ComponentProps<typeof GraphEditor>> = {}) {
+function renderWithProviders(
+  props: Partial<ComponentProps<typeof GraphEditor>> = {},
+  me: typeof EDITOR_ME | typeof VIEWER_ME = EDITOR_ME
+) {
   return render(
-    <QueryClientProvider client={client()}>
+    <QueryClientProvider client={client(me)}>
       <MemoryRouter>
         <GraphEditor
           domainId={1}
@@ -1106,6 +1110,14 @@ describe("GraphEditor", () => {
 
     fireEvent.click(screen.getByTestId("toggle-connect"));
     expect(screen.getByTestId("graph-help")).toHaveTextContent("Drag from one node to another to connect them.");
+  });
+
+  it("does not offer Connect or New Node to an account that may not edit the domain", async () => {
+    renderWithProviders({}, VIEWER_ME);
+    await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+    expect(screen.queryByTestId("toggle-connect")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("toggle-create-node")).not.toBeInTheDocument();
+    expect(screen.getByTestId("graph-help")).toHaveTextContent(/Click a node or edge to inspect it/);
   });
 
   it("gives node labels their own colour (distinct from the node background) and a text outline (F-3)", async () => {

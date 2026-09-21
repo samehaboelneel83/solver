@@ -445,9 +445,10 @@ def delete_entity_type(
     # array and cannot carry a foreign key, so migration 0009's
     # `entity_type_guard` refuses the DELETE instead of leaving a parameter
     # that can never take a value. That arrives here as SQLSTATE 23503
-    # naming `parameter_def`, i.e. a **409** "entity_type row is still
-    # referenced by parameter_def records" -- delete or re-index the
-    # parameter first.
+    # with no constraint_name, so `translate_db_error` forwards the
+    # trigger's sentence (`entity type "shift" is an index type of
+    # parameter demand; delete or re-index it first`) rather than
+    # conflict_detail()'s generic "still referenced by".
     db.delete(_get_entity_type(db, entity_type_id))
     _commit(db, "entity_type")
 
