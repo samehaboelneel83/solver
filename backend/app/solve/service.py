@@ -268,10 +268,13 @@ def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         spec = dict(spec)
         if spec["id"] in hardened:
             spec["severity"] = "hard"
-            spec.pop("penalty", None)
+            # A hard constraint carrying a weight is refused by the
+            # validator, so hardening must take it away and not merely
+            # stop reading it.
+            spec.pop("weight", None)
         elif spec["id"] in softened:
             spec["severity"] = "soft"
-            spec["penalty"] = int(softened[spec["id"]])
+            spec["weight"] = int(softened[spec["id"]])
         constraints.append(spec)
     return {**ir, "constraints": constraints}
 

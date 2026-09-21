@@ -353,6 +353,42 @@ def test_a_soft_constraint_is_paid_for_rather_than_free(db):
     assert result.objective == 2
 
 
+def test_a_weight_declared_in_the_model_is_the_price_that_is_paid(db):
+    """The weight on a soft constraint in the IR, not only one a scenario
+    sets. These were two different keys: `patched` wrote `penalty` and the
+    compiler read `penalty`, so a weight written in the model itself was
+    silently priced at 1. Nothing caught it because until the traversal
+    constraint the seed had no soft constraint of its own -- every one that
+    had ever been compiled came from a patch.
+
+    The price is asserted twice over: that the compiler charges it, and
+    that the answer is the one the patched case gives at the same price.
+    """
+    version, _ = _feasible(db, demand_value=1)
+    ir, data = _ir_and_data(db, version)
+    ir["constraints"][0]["severity"] = "soft"
+    ir["constraints"][0]["weight"] = 50
+
+    compiled = compile_model(ir, data)
+    result = solve(compiled)
+
+    # The number the compiler charges. This is what was wrong: it read a
+    # key the model does not use, so it was 1 for every declared weight.
+    assert compiled.penalty_of["c_cover"] == 50
+    # And the answer matches `test_a_soft_constraint_is_paid_for_rather
+    # _than_free`, which softens the same rule to the same 50 through a
+    # patch -- the same rule at the same price costs the same whichever
+    # half declared it.
+    assert result.status == "optimal"
+    assert result.objective == 2
+
+    # A different declared weight is a different price, rather than both
+    # collapsing to the default.
+    assert compile_model({**ir, "constraints": [
+        {**ir["constraints"][0], "weight": 7}, *ir["constraints"][1:]
+    ]}, data).penalty_of["c_cover"] == 7
+
+
 def test_disabling_a_constraint_through_a_patch_removes_it(db):
     version, _ = _feasible(db, demand_value=1, hours=8)
     ir, data = _ir_and_data(db, version)

@@ -267,7 +267,11 @@ class _Compiler:
                 "to solve; it predates the IR contract. Publish a new version."
             )
         soft = spec.get("severity") == "soft"
-        penalty = int(spec.get("penalty", 1)) if soft else 0
+        # `weight` is the contract's key (§3.4), and a soft constraint must
+        # carry one. The default is for a document that predates the rule,
+        # not for a valid one -- reading a key the contract does not have
+        # priced every declared weight at 1 and said nothing.
+        penalty = int(spec.get("weight", 1)) if soft else 0
         if soft and spec["relation"] in ("<", ">"):  # pragma: no cover
             raise Unsupported(
                 f"constraint {spec['id']!r} is soft with a strict relation; the "

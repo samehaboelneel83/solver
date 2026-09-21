@@ -297,6 +297,13 @@ decimals exist. `3` does not become `3.000000`.
 | `severity` | yes | `hard` or `soft`. |
 | `weight` | iff soft | A positive integer penalty. A hard constraint carries none. |
 
+**`weight` is the only name for a penalty.** A scenario's `soften` verb sets
+this key, and the compiler reads this key. They used not to: `soften` wrote a
+`penalty` the contract does not have and the compiler read the same invented
+name, so a weight written in a *model* was silently charged at 1. It went
+unnoticed because every soft constraint ever compiled had come from a patch —
+the seeded demo had none of its own until §4.2's traversal constraint.
+
 **The id is load-bearing in three places**, which is why it is unique and
 spelled the platform's one way: `scenario.patch` names it, `constraint_result`
 is keyed `(run_id, constraint_id)`, and `run.conflict` reports it.
