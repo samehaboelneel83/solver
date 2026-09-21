@@ -35,6 +35,8 @@ def make_crud_schemas(
     readonly: frozenset = frozenset({"id"}),
     server_default: frozenset = frozenset(),
     hidden: frozenset = frozenset(),
+    extra_create: dict | None = None,
+    extra_update: dict | None = None,
 ) -> tuple[Type[BaseModel], Type[BaseModel], Type[BaseModel]]:
     """Derive (Create, Update, Read) Pydantic schemas from a SQLAlchemy model.
 
@@ -43,6 +45,8 @@ def make_crud_schemas(
         them in (e.g. created_at via `server_default=func.now()`).
     hidden: fields excluded from all three schemas entirely (e.g.
         hashed_password) — unlike readonly, these never appear even in Read.
+    extra_create / extra_update: write-only fields that are not columns
+        (e.g. `password` on user_account). They never appear on Read.
     """
     mapper = inspect(model)
     create_fields: dict[str, tuple] = {}
@@ -88,6 +92,11 @@ def make_crud_schemas(
             create_fields[field_name] = (py_type, ...)
 
         update_fields[field_name] = (Optional[py_type], None)
+
+    if extra_create:
+        create_fields.update(extra_create)
+    if extra_update:
+        update_fields.update(extra_update)
 
     cfg = ConfigDict(from_attributes=True)
     create_schema = create_model(f"{name}Create", __config__=cfg, **create_fields)

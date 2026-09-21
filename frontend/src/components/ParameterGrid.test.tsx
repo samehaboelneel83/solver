@@ -54,15 +54,17 @@ const SHIFTS = {
   total: 3,
 };
 
+const CELL_TS = "2026-09-20T09:00:00+00:00";
+
 const VALUES = {
   index_types: [
     { id: 5, name: "day" },
     { id: 9, name: "shift" },
   ],
   cells: [
-    { entity_ids: [44, 91], value: 7 }, // Monday x Evening
-    { entity_ids: [42, 93], value: 0 }, // tue x Morning -- zero is not "empty"
-    { entity_ids: [44, 92], value: 4 }, // Monday x Night -- equal to the default, still stored
+    { entity_ids: [44, 91], value: 7, updated_at: CELL_TS }, // Monday x Evening
+    { entity_ids: [42, 93], value: 0, updated_at: CELL_TS }, // tue x Morning -- zero is not "empty"
+    { entity_ids: [44, 92], value: 4, updated_at: CELL_TS }, // Monday x Night -- equal to the default, still stored
   ],
   default_value: 4,
 };
@@ -199,7 +201,9 @@ describe("ParameterGrid: editing", () => {
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 
     await waitFor(() => expect(puts()).toHaveLength(1));
-    expect(puts()[0].body).toEqual({ cells: [{ entity_ids: [44, 91], value: 4 }] });
+    expect(puts()[0].body).toEqual({
+      cells: [{ entity_ids: [44, 91], value: 4, updated_at: CELL_TS }],
+    });
   });
 
   it("sends a cell typed as the default too, rather than treating it as no change", async () => {
@@ -210,7 +214,9 @@ describe("ParameterGrid: editing", () => {
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 
     await waitFor(() => expect(puts()).toHaveLength(1));
-    expect(puts()[0].body).toEqual({ cells: [{ entity_ids: [44, 91], value: 4 }] });
+    expect(puts()[0].body).toEqual({
+      cells: [{ entity_ids: [44, 91], value: 4, updated_at: CELL_TS }],
+    });
   });
 
   it("shows what the server stored once a save succeeds, rather than what was typed", async () => {
@@ -456,5 +462,81 @@ describe("ParameterGrid: states that are not a grid", () => {
       .filter((path) => path.startsWith("/api/v1/entities"));
     expect(entityCalls).toHaveLength(2);
     for (const path of entityCalls) expect(path).toContain("limit=500");
+  });
+});
+
+describe("ParameterGrid: a concurrent edit (Ruling 42)", () => {
+  const STALE = {
+    detail:
+      "This parameter cell was changed by someone else after this form loaded it. " +
+      "Reload the parameter cell and apply your changes to the current version.",
+  };
+
+  it("sends the updated_at it read for a stored cell, which is what lets the server refuse", async () => {
+    serve({ "PUT /api/v1/parameters/3/values": VALUES });
+    renderGrid();
+
+    fireEvent.change(await cell("demand[Monday, Evening]"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].body).toEqual({
+      cells: [{ entity_ids: [44, 91], value: 8, updated_at: CELL_TS }],
+    });
+  });
+
+  it("does not send updated_at for a cell that was empty, because there is nothing to compare", async () => {
+    serve({ "PUT /api/v1/parameters/3/values": VALUES });
+    renderGrid();
+
+    fireEvent.change(await cell("demand[Monday, Morning]"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].body).toEqual({ cells: [{ entity_ids: [44, 93], value: 12 }] });
+  });
+
+  it("shows the refusal with a way out instead of a red line under a cell", async () => {
+    serve({
+      "PUT /api/v1/parameters/3/values": new ApiError(409, JSON.stringify(STALE)),
+    });
+    renderGrid();
+
+    fireEvent.change(await cell("demand[Monday, Evening]"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice).toHaveTextContent(/changed by someone else/i);
+    expect(within(notice).getByRole("button", { name: /reload and keep my changes/i })).toBeInTheDocument();
+    expect(await cell("demand[Monday, Evening]")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByTestId("form-errors")).toBeNull();
+  });
+
+  it("keeps the typed cell when it reloads, and takes the other change for cells not touched", async () => {
+    serve({
+      "PUT /api/v1/parameters/3/values": new ApiError(409, JSON.stringify(STALE)),
+    });
+    renderGrid();
+
+    fireEvent.change(await cell("demand[Monday, Evening]"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await screen.findByTestId("stale-record");
+
+    serve({
+      "/api/v1/parameters/3/values": {
+        ...VALUES,
+        cells: [
+          { entity_ids: [44, 91], value: 9, updated_at: "2026-09-20T09:05:00+00:00" },
+          { entity_ids: [42, 93], value: 0, updated_at: CELL_TS },
+          { entity_ids: [44, 92], value: 11, updated_at: "2026-09-20T09:05:00+00:00" },
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
+    expect((await cell("demand[Monday, Evening]")).value).toBe("8");
+    expect((await cell("demand[Monday, Night]")).value).toBe("11");
   });
 });

@@ -26,7 +26,7 @@ from sqlalchemy import text
 
 from app.solve import compile_model, cpsat
 from app.solve import lp, milp
-from app.solve.backends import CP_SAT, GLOP, MILP, NoBackend, choose
+from app.solve.backends import CP_SAT, GLOP, HIGHS, MILP, NoBackend, choose
 from app.solve.classify import classify
 from app.solve.compile import Unsupported
 from app.solve.cpsat import NotIntegral
@@ -74,6 +74,7 @@ def _blend(db, *, domain_name="blend"):
     make_attribute_def(db, feed, "protein", "number")
     make_entity(db, feed, "barley", attrs={"protein": 0.5})
     make_entity(db, feed, "maize", attrs={"protein": 0.2})
+    make_entity(db, feed, "oats", attrs={"protein": 0.1})
 
     cost = make_parameter_def(db, domain, "cost", [feed], default_value=1)
     db.execute(
@@ -81,6 +82,14 @@ def _blend(db, *, domain_name="blend"):
             "INSERT INTO parameter_value (parameter_def_id, entity_ids, value)"
             " SELECT :p, ARRAY[e.id], 3 FROM entity e"
             "  WHERE e.entity_type_id = :t AND e.key = 'barley'"
+        ),
+        {"p": cost, "t": feed},
+    )
+    db.execute(
+        text(
+            "INSERT INTO parameter_value (parameter_def_id, entity_ids, value)"
+            " SELECT :p, ARRAY[e.id], 100 FROM entity e"
+            "  WHERE e.entity_type_id = :t AND e.key = 'oats'"
         ),
         {"p": cost, "t": feed},
     )
@@ -154,6 +163,15 @@ def test_a_continuous_model_solves_and_its_answer_is_not_rounded(db):
     assert bought["maize"] == pytest.approx(30.0)
     assert bought["barley"] == pytest.approx(8.0)
     assert result.objective == pytest.approx(54.0)
+    # Extra protein comes from barley at the margin: 3 per kilo at 0.5
+    # protein, so the shadow price of the protein rule is 6.
+    assert result.duals is not None
+    assert result.duals["c_protein"] == pytest.approx(6.0)
+    # Oats is unused: 100 a kilo at 0.1 protein is dearer than barley at the
+    # margin, and the reduced cost says by how much.
+    assert result.reduced_costs is not None
+    assert result.reduced_costs[("buy", ("oats",))] == pytest.approx(99.4)
+    assert result.assignments[("buy", ("oats",))] == pytest.approx(0.0)
 
 
 def test_the_two_linear_backends_agree_on_a_continuous_optimum(db):
@@ -259,10 +277,10 @@ def test_an_integral_model_with_a_fractional_parameter_leaves_cp_sat(db):
     assert found.model_class == "IP"
     assert "fractional-data" in found.needs
     backend, _ = choose(found)
-    assert backend is MILP
+    assert backend is (HIGHS if HIGHS.is_available() else MILP)
 
 
-def test_a_mixed_model_is_MILP_and_only_one_backend_takes_it(db):
+def test_a_mixed_model_is_MILP_and_goes_to_the_mixed_solver(db):
     ir = {
         "version": 1,
         "sets": [],
@@ -279,7 +297,7 @@ def test_a_mixed_model_is_MILP_and_only_one_backend_takes_it(db):
     assert found.model_class == "MILP"
     assert found.needs >= {"integral", "continuous"}
     backend, why = choose(found)
-    assert backend is MILP
+    assert backend is (HIGHS if HIGHS.is_available() else MILP)
     assert "MILP" in why
 
 
@@ -379,3 +397,17 @@ def test_a_continuous_run_records_the_simplex_and_a_fractional_objective(db):
     assert row["solver_version"].startswith("glop")
     assert row["params"]["classified_as"] == "LP"
     assert row["objective"] == Decimal("54.000000")
+    dual = db.execute(
+        text(
+            "SELECT dual FROM constraint_result"
+            " WHERE run_id = :r AND constraint_id = 'c_protein'"
+        ),
+        {"r": run_id},
+    ).scalar_one()
+    assert dual == Decimal("6.000000")
+    stored = db.execute(
+        text("SELECT reduced_costs FROM solution WHERE run_id = :r"),
+        {"r": run_id},
+    ).scalar_one()
+    oats = next(entry for entry in stored["buy"] if entry["index"] == ["oats"])
+    assert oats["value"] == pytest.approx(99.4)

@@ -9,6 +9,7 @@ from sqlalchemy import String, Text, inspect, or_
 from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.orm import Session
 
+from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error
 from app.core.db import get_db
@@ -98,6 +99,8 @@ def build_crud_router(
     creatable: bool = True,
     updatable: bool = True,
     deletable: bool = True,
+    prepare=None,
+    write_capability: str = "domain.edit",
 ) -> APIRouter:
     """Build a generic list/get/create/update/delete router for one table.
 
@@ -115,6 +118,14 @@ def build_crud_router(
     tables (domain, template, problem, ...) use `bigint` surrogate keys,
     while the untouched `iam` tables still use `UUID`. Deriving it keeps
     both working through the same generic factory.
+
+    `prepare` rewrites the dumped payload before it becomes a row — used
+    to hash `password` into `hashed_password` on user_account so the
+    plaintext never reaches the model.
+
+    `write_capability` is the capability `requires()` checks on create,
+    update and delete. Domain tables stay on `domain.edit`; granting a
+    role is `iam.manage`.
 
     `schema_name == "public"` (schema v1's flat tables all live there) is
     special-cased to drop the schema segment from the URL, so these read as
@@ -137,6 +148,7 @@ def build_crud_router(
         creatable=creatable,
         updatable=updatable,
         deletable=deletable,
+        write_capability=write_capability,
     )
 
     item_id_type = _python_type(inspect(model).primary_key[0])
@@ -230,9 +242,12 @@ def build_crud_router(
         def create_item(
             payload: create_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires("domain.edit")),
+            _: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
-            item = model(**payload.model_dump())
+            data = payload.model_dump()
+            if prepare is not None:
+                data = prepare(data)
+            item = model(**data)
             db.add(item)
             try:
                 db.commit()
@@ -249,12 +264,17 @@ def build_crud_router(
             item_id: item_id_type,
             payload: update_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires("domain.edit")),
+            _: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
-            item = db.get(model, item_id)
+            changes = payload.model_dump(exclude_unset=True)
+            expected = changes.pop("updated_at", None)
+            if prepare is not None:
+                changes = prepare(changes)
+            item = db.get(model, item_id, with_for_update=expected is not None)
             if item is None:
                 raise HTTPException(status_code=404, detail="not found")
-            for field, value in payload.model_dump(exclude_unset=True).items():
+            check_not_stale(table_name.replace("_", " "), item.updated_at, expected)
+            for field, value in changes.items():
                 setattr(item, field, value)
             try:
                 db.commit()
@@ -270,7 +290,7 @@ def build_crud_router(
         def delete_item(
             item_id: item_id_type,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires("domain.edit")),
+            _: UserAccount = Depends(requires(write_capability)),
         ) -> None:
             item = db.get(model, item_id)
             if item is None:

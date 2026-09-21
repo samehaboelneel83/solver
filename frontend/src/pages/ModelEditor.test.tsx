@@ -76,6 +76,8 @@ function stub(overrides: Record<string, unknown> = {}) {
           needs: ["linear"],
           reasons: ["no variables, so nothing is decided"],
           planner: ["nothing is decided yet"],
+          empty_ranges: [],
+          would_solve: "A combinatorial solver will take this by default.",
         });
       }
       const soft = (ir?.constraints ?? []).some((c) => c.severity === "soft");
@@ -88,6 +90,11 @@ function stub(overrides: Record<string, unknown> = {}) {
           "every rule is linear",
           ...(soft ? ["at least one rule can bend, at a cost"] : []),
         ],
+        empty_ranges: (overrides.emptyRanges as unknown[]) ?? [],
+        would_solve:
+          "wouldSolve" in overrides
+            ? (overrides.wouldSolve as string | null)
+            : "A combinatorial solver will take this by default.",
       });
     }
     if (options?.method && options.method !== "GET") {
@@ -302,5 +309,32 @@ describe("ModelEditor", () => {
     const panel = await screen.findByRole("complementary", { name: /what this model is/i });
     expect(within(panel).getByText(/every decision is yes or no/i)).toBeInTheDocument();
     expect(within(panel).getByText(/every rule is linear/i)).toBeInTheDocument();
+  });
+
+  it("says which kind of solver a run would pick, without offering one", async () => {
+    renderPage();
+
+    const panel = await screen.findByRole("complementary", { name: /what this model is/i });
+    expect(within(panel).getByText(/combinatorial solver/i)).toBeInTheDocument();
+    expect(within(panel).queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
+  it("says so when no solver this platform has can take the draft", async () => {
+    stub({ wouldSolve: null });
+    renderPage();
+
+    const panel = await screen.findByRole("complementary", { name: /what this model is/i });
+    expect(within(panel).getByText(/no solver this platform has/i)).toBeInTheDocument();
+  });
+
+  it("names a rule that ranges over nobody, before publish", async () => {
+    stub({
+      emptyRanges: [{ constraint_id: "c_north", kind: "forall", index: {} }],
+    });
+    renderPage();
+
+    const panel = await screen.findByRole("complementary", { name: /rules that ranged over nobody/i });
+    expect(within(panel).getByText("c_north")).toBeInTheDocument();
+    expect(within(panel).getByText(/never applied to anyone/i)).toBeInTheDocument();
   });
 });

@@ -308,6 +308,7 @@ def test_schema_field_keeps_all_existing_keys(auth_headers):
         "type",
         "required",
         "writable",
+        "write_only",
         "is_fk",
         "fk_table",
         "default",

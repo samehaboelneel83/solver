@@ -51,6 +51,7 @@ export const RELATIONS = ["<=", "=", ">="] as const;
 export const TRAVERSAL_DEPTHS = ["one", "any", "any_or_self"] as const;
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
+export const OBJECTIVE_MODES = ["weighted", "lex"] as const;
 export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul"] as const;
 export const FILTER_OPERATORS = ["=", "!=", "<", "<=", ">", ">=", "in", "notIn"] as const;
 export const ARITHMETIC_ATTR_TYPES = ["integer", "number"] as const;
@@ -59,6 +60,7 @@ export type VariableDomain = (typeof VARIABLE_DOMAINS)[number];
 export type Relation = (typeof RELATIONS)[number];
 export type Severity = (typeof SEVERITIES)[number];
 export type Sense = (typeof SENSES)[number];
+export type ObjectiveMode = (typeof OBJECTIVE_MODES)[number];
 export type TermKind = (typeof TERM_KINDS)[number];
 export type TraversalDepth = (typeof TRAVERSAL_DEPTHS)[number];
 
@@ -288,6 +290,11 @@ export const IR_RULES: readonly IrRule[] = [
     code: "objective_sense_unsupported",
     where: "shape",
     text: "an objective's `sense` is `minimize` or `maximize`",
+  },
+  {
+    code: "objective_mode_unsupported",
+    where: "shape",
+    text: "an objective's `mode` is `weighted` or `lex`; omit it for a weighted sum",
   },
   {
     code: "objective_terms_invalid",

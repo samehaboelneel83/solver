@@ -28,12 +28,14 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
+    Index,
     Integer,
     Numeric,
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -75,6 +77,10 @@ class Domain(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Migration 0023 -- the generic form sends every filled field.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class EntityType(Base):
@@ -108,11 +114,34 @@ class EntityType(Base):
 
 class AttributeDef(Base):
     __tablename__ = "attribute_def"
-    __table_args__ = (UniqueConstraint("entity_type_id", "name"),)
+    __table_args__ = (
+        # Migration 0024: the same row belongs to an entity type OR a
+        # relationship type, never both. Partial uniques replace the old
+        # UNIQUE (entity_type_id, name), which would treat every
+        # relationship-owned def as colliding on (NULL, name).
+        Index(
+            "attribute_def_entity_type_id_name_key",
+            "entity_type_id",
+            "name",
+            unique=True,
+            postgresql_where=text("entity_type_id IS NOT NULL"),
+        ),
+        Index(
+            "attribute_def_relationship_type_id_name_key",
+            "relationship_type_id",
+            "name",
+            unique=True,
+            postgresql_where=text("relationship_type_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    entity_type_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("entity_type.id", ondelete="CASCADE"), nullable=False
+    entity_type_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("entity_type.id", ondelete="CASCADE"), nullable=True
+    )
+    # Migration 0024 -- see the indexes above.
+    relationship_type_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("relationship_type.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     data_type: Mapped[str] = mapped_column(ATTR_TYPE, nullable=False)
@@ -222,6 +251,11 @@ class Relationship(Base):
     attrs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Migration 0021 -- see EntityType.updated_at. The graph panel writes
+    # `attrs` wholesale, so a concurrent save has to be detected.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class ParameterDef(Base):
@@ -256,6 +290,12 @@ class ParameterValue(Base):
     # `parameter_value_cleanup` deletes rows whose entities are deleted.
     entity_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
     value: Mapped[Decimal] = mapped_column(Numeric(15, 6), nullable=False)
+    # Migration 0022 -- see EntityType.updated_at. The grid sends only dirty
+    # cells, so two people editing different cells do not collide; the same
+    # cell still needs a timestamp so a concurrent overwrite is refused.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 __all__ = [

@@ -9,23 +9,23 @@ not what is implemented. Tasks 11/12 deliberately send the **whole**
 attribute set so that a key left behind by a deleted `attribute_def`
 disappears on the next save (`EntityRecord.test.tsx` pins that), and a
 narrower payload would silently undo it. So the payload stays whole and the
-*staleness* is detected instead: migration 0010 adds an `updated_at` to
-`entity`, `entity_type` and `relationship_type`, maintained by a trigger so
-that every writer moves it -- the API, the seed, a migration, `psql` -- and
-`app/api/concurrency.py` refuses a PATCH whose `updated_at` is not the
-stored one.
+*staleness* is detected instead: `updated_at` on `entity`, `entity_type`,
+`relationship_type`, `relationship` and `parameter_value` (migrations
+0010, 0021, 0022), maintained by a trigger so that every writer moves it
+-- the API, the seed, a migration, `psql` -- and `app/api/concurrency.py`
+refuses a write whose `updated_at` is not the stored one.
 
 What each block pins
 --------------------
-- **the column and its trigger**: present on all three tables, moved by an
+- **the column and its trigger**: present on all five tables, moved by an
   ORM write and by raw SQL, not moved by an UPDATE that changes nothing,
   and moved twice within one transaction (which `now()` would not do).
 - **the refusal**: 409, string `detail`, carrying the phrase the browser
   matches on; and the row is *unchanged* afterwards -- a refusal that had
   already written is worse than no refusal at all.
-- **the concurrent scenario itself**, replayed over HTTP for each of the
-  three tables: read, another client writes, first client saves the whole
-  payload it loaded, refused.
+- **the concurrent scenario itself**, replayed over HTTP for each form:
+  read, another client writes, first client saves the payload it loaded,
+  refused.
 - **the escape hatch**: omitting `updated_at` keeps the pre-0010
   behaviour, which is what every other caller (the graph's node rename,
   the seed, `curl`) relies on.
@@ -43,7 +43,13 @@ from app.core.db import SessionLocal
 from app.main import app
 from app.seed import seed_admin
 
-TABLES = ("entity", "entity_type", "relationship_type")
+TABLES = ("entity", "entity_type", "relationship_type", "relationship")
+# `parameter_value` is the fifth: the grid writes named cells, and two
+# clients typing the same cell is the same silent overwrite 0010 closed
+# for a whole row. It is not in TABLES because the omit-hatch parametrize
+# PATCHes by `id`, and this table's key is `(parameter_def_id, entity_ids)`.
+CELL_TABLE = "parameter_value"
+FORM_TABLES = TABLES + (CELL_TABLE,)
 
 
 @pytest.fixture(autouse=True)
@@ -137,6 +143,35 @@ def relationship_type(auth_headers, domain_id, entity_type_id):
     return response.json()
 
 
+@pytest.fixture
+def other_entity(auth_headers, entity_type_id):
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/entities",
+        json={"entity_type_id": entity_type_id, "key": "bilal", "label": "Bilal", "attrs": {}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def relationship(auth_headers, relationship_type, entity, other_entity):
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/relationships",
+        json={
+            "relationship_type_id": relationship_type["id"],
+            "from_entity_id": entity["id"],
+            "to_entity_id": other_entity["id"],
+            "attrs": {"weight": 1},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def _assert_stale_conflict(response) -> str:
     """A refusal is a 409 with a **string** `detail` carrying the phrase the
     browser keys on -- not a 422 (no field in the payload is wrong) and not
@@ -148,13 +183,47 @@ def _assert_stale_conflict(response) -> str:
     return detail
 
 
+@pytest.fixture
+def parameter(auth_headers, domain_id, entity_type_id):
+    """A one-index grid so a cell is addressed by a single entity."""
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/parameters",
+        json={
+            "domain_id": domain_id,
+            "name": "headcount",
+            "index_type_ids": [entity_type_id],
+            "default_value": 0,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def stored_cell(auth_headers, parameter, entity):
+    """One stored cell, returned as the values payload so the test can
+    send back the `updated_at` the GET (and the PUT response) carries."""
+    client = TestClient(app)
+    response = client.put(
+        f"/api/v1/parameters/{parameter['id']}/values",
+        json={"cells": [{"entity_ids": [entity["id"]], "value": 5}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    cells = response.json()["cells"]
+    assert len(cells) == 1, response.text
+    return {"parameter_id": parameter["id"], "cell": cells[0]}
+
+
 # --- the column and its trigger --------------------------------------------
 
 
 def test_every_form_backed_table_has_updated_at():
     db = SessionLocal()
     try:
-        for table in TABLES:
+        for table in FORM_TABLES:
             row = db.execute(
                 text(
                     "SELECT data_type, is_nullable FROM information_schema.columns "
@@ -176,7 +245,7 @@ def test_a_trigger_maintains_it_so_every_writer_is_covered():
     code ever sees."""
     db = SessionLocal()
     try:
-        for table in TABLES:
+        for table in FORM_TABLES:
             row = db.execute(
                 text(
                     "SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger "
@@ -292,6 +361,19 @@ def test_the_relationship_type_read_routes_carry_updated_at(
 
     listed = client.get(
         f"/api/v1/relationship-types?domain_id={domain_id}", headers=auth_headers
+    )
+    assert listed.status_code == 200, listed.text
+    assert all("updated_at" in item for item in listed.json()["items"])
+
+
+def test_the_relationship_read_routes_carry_updated_at(auth_headers, relationship):
+    client = TestClient(app)
+    one = client.get(f"/api/v1/relationships/{relationship['id']}", headers=auth_headers)
+    assert one.status_code == 200, one.text
+    assert one.json()["updated_at"] == relationship["updated_at"]
+    listed = client.get(
+        f"/api/v1/relationships?relationship_type_id={relationship['relationship_type_id']}",
+        headers=auth_headers,
     )
     assert listed.status_code == 200, listed.text
     assert all("updated_at" in item for item in listed.json()["items"])
@@ -439,6 +521,170 @@ def test_a_stale_relationship_type_save_is_refused(auth_headers, relationship_ty
     assert current["name"] == "reports_to"
 
 
+def test_a_stale_relationship_save_is_refused(auth_headers, relationship):
+    """The graph panel writes the whole attrs object. Two clients opening
+    the same edge is the same defect 0010 closed for entities."""
+    client = TestClient(app)
+    loaded = relationship
+    other = client.patch(
+        f"/api/v1/relationships/{relationship['id']}",
+        json={"attrs": {"weight": 9}},
+        headers=auth_headers,
+    )
+    assert other.status_code == 200, other.text
+
+    refused = client.patch(
+        f"/api/v1/relationships/{relationship['id']}",
+        json={"attrs": loaded["attrs"], "updated_at": loaded["updated_at"]},
+        headers=auth_headers,
+    )
+    detail = _assert_stale_conflict(refused)
+    assert "relationship" in detail
+    current = client.get(
+        f"/api/v1/relationships/{relationship['id']}", headers=auth_headers
+    ).json()
+    assert current["attrs"] == {"weight": 9}
+
+
+def test_the_parameter_values_read_carries_updated_at_on_stored_cells(
+    auth_headers, stored_cell
+):
+    client = TestClient(app)
+    response = client.get(
+        f"/api/v1/parameters/{stored_cell['parameter_id']}/values",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    cells = response.json()["cells"]
+    assert len(cells) == 1
+    assert isinstance(cells[0]["updated_at"], str)
+    assert cells[0]["updated_at"] == stored_cell["cell"]["updated_at"]
+    assert cells[0]["value"] == 5
+
+
+def test_a_stale_parameter_cell_save_is_refused(auth_headers, stored_cell):
+    """The grid sends only dirty cells, so two people editing different
+    cells do not collide. Two people typing the same cell still can, and
+    that is the overwrite this check refuses."""
+    client = TestClient(app)
+    loaded = stored_cell["cell"]
+    path = f"/api/v1/parameters/{stored_cell['parameter_id']}/values"
+    other = client.put(
+        path,
+        json={"cells": [{"entity_ids": loaded["entity_ids"], "value": 9}]},
+        headers=auth_headers,
+    )
+    assert other.status_code == 200, other.text
+
+    refused = client.put(
+        path,
+        json={
+            "cells": [
+                {
+                    "entity_ids": loaded["entity_ids"],
+                    "value": 7,
+                    "updated_at": loaded["updated_at"],
+                }
+            ]
+        },
+        headers=auth_headers,
+    )
+    detail = _assert_stale_conflict(refused)
+    assert "parameter cell" in detail
+    current = client.get(path, headers=auth_headers).json()
+    assert current["cells"][0]["value"] == 9
+
+
+def test_a_stale_cell_does_not_write_the_other_cells_in_the_same_put(
+    auth_headers, stored_cell, other_entity
+):
+    """The PUT is already atomic for a 422; a 409 has to be the same,
+    otherwise the client that lost the race still changed a different
+    cell it happened to send in the same request."""
+    client = TestClient(app)
+    loaded = stored_cell["cell"]
+    path = f"/api/v1/parameters/{stored_cell['parameter_id']}/values"
+    other = client.put(
+        path,
+        json={"cells": [{"entity_ids": loaded["entity_ids"], "value": 9}]},
+        headers=auth_headers,
+    )
+    assert other.status_code == 200, other.text
+
+    refused = client.put(
+        path,
+        json={
+            "cells": [
+                {
+                    "entity_ids": loaded["entity_ids"],
+                    "value": 7,
+                    "updated_at": loaded["updated_at"],
+                },
+                {"entity_ids": [other_entity["id"]], "value": 3},
+            ]
+        },
+        headers=auth_headers,
+    )
+    _assert_stale_conflict(refused)
+    current = client.get(path, headers=auth_headers).json()
+    assert [cell["value"] for cell in current["cells"]] == [9]
+
+
+def test_resetting_a_cell_that_someone_else_already_cleared_is_refused(
+    auth_headers, stored_cell, parameter
+):
+    """Sparse storage deletes a cell set to the default. Client A still
+    holds the timestamp of a row that B has already removed."""
+    client = TestClient(app)
+    loaded = stored_cell["cell"]
+    path = f"/api/v1/parameters/{stored_cell['parameter_id']}/values"
+    cleared = client.put(
+        path,
+        json={"cells": [{"entity_ids": loaded["entity_ids"], "value": parameter["default_value"]}]},
+        headers=auth_headers,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["cells"] == []
+
+    refused = client.put(
+        path,
+        json={
+            "cells": [
+                {
+                    "entity_ids": loaded["entity_ids"],
+                    "value": 7,
+                    "updated_at": loaded["updated_at"],
+                }
+            ]
+        },
+        headers=auth_headers,
+    )
+    _assert_stale_conflict(refused)
+    current = client.get(path, headers=auth_headers).json()
+    assert current["cells"] == []
+
+
+def test_omitting_updated_at_on_a_parameter_cell_keeps_last_save_wins(
+    auth_headers, stored_cell
+):
+    client = TestClient(app)
+    loaded = stored_cell["cell"]
+    path = f"/api/v1/parameters/{stored_cell['parameter_id']}/values"
+    other = client.put(
+        path,
+        json={"cells": [{"entity_ids": loaded["entity_ids"], "value": 9}]},
+        headers=auth_headers,
+    )
+    assert other.status_code == 200, other.text
+    response = client.put(
+        path,
+        json={"cells": [{"entity_ids": loaded["entity_ids"], "value": 7}]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["cells"][0]["value"] == 7
+
+
 def test_editing_an_attribute_definition_does_not_make_the_type_stale(
     auth_headers, entity_type_id
 ):
@@ -467,11 +713,11 @@ def test_editing_an_attribute_definition_does_not_make_the_type_stale(
 
 @pytest.mark.parametrize("table", TABLES)
 def test_omitting_updated_at_keeps_the_pre_0010_behaviour(
-    auth_headers, entity, entity_type_id, relationship_type, table
+    auth_headers, entity, entity_type_id, relationship_type, relationship, table
 ):
     """Every caller that predates the column keeps working: the graph's
-    inline node rename, `scripts/graph_smoke_check.py`, the seed, `curl`.
-    Opting in is what the three forms do."""
+    node rename, `scripts/graph_smoke_check.py`, the seed, `curl`.
+    Opting in is what the forms that can lose a concurrent edit do."""
     client = TestClient(app)
     path, payload = {
         "entity": (f"/api/v1/entities/{entity['id']}", {"label": "no check"}),
@@ -479,6 +725,10 @@ def test_omitting_updated_at_keeps_the_pre_0010_behaviour(
         "relationship_type": (
             f"/api/v1/relationship-types/{relationship_type['id']}",
             {"colour": "#fedcba"},
+        ),
+        "relationship": (
+            f"/api/v1/relationships/{relationship['id']}",
+            {"attrs": {"weight": 2}},
         ),
     }[table]
     # Something else writes the row first, so the read the caller never
@@ -489,6 +739,7 @@ def test_omitting_updated_at_keeps_the_pre_0010_behaviour(
             "entity": entity["id"],
             "entity_type": entity_type_id,
             "relationship_type": relationship_type["id"],
+            "relationship": relationship["id"],
         }[table]
         db.execute(
             text(f"UPDATE {table} SET updated_at = updated_at - interval '1 second' WHERE id = :id"),

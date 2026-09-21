@@ -80,6 +80,13 @@ def test_meta_schema_reports_capability_flags_defaulting_true(auth_headers):
         assert table["updatable"] is True
         assert table["deletable"] is True
 
+    by_name = {(t["schema"], t["table"]): t for t in response.json()}
+    assert by_name[("iam", "user_account")]["write_capability"] == "iam.manage"
+    assert by_name[("iam", "role")]["write_capability"] == "iam.manage"
+    assert by_name[("iam", "user_role")]["write_capability"] == "iam.manage"
+    assert by_name[("public", "domain")]["write_capability"] == "domain.edit"
+    assert by_name[("iam", "organization")]["write_capability"] == "domain.edit"
+
 
 def test_capability_flags_suppress_write_routes():
     """A router built with updatable=False, deletable=False exposes GET and

@@ -11,6 +11,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { tableLabelPlural } from "../lib/labels";
+import { writeCapability } from "../types/meta";
 
 const PAGE_SIZE = 20;
 const FILTER_PREFIX = "f_";
@@ -23,10 +24,10 @@ export default function EntityList() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const toast = useToast();
   const { can } = useCapabilities();
-  const canEdit = can("domain.edit");
 
   const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+  const canEdit = can(writeCapability(table));
   const [showIds] = useShowIdentifiers();
 
   // Shared fallback while the schema is still loading (or for a route with

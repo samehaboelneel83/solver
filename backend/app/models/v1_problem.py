@@ -81,6 +81,10 @@ class Template(Base):
         JSONB, nullable=False, server_default="{}"
     )
     default_ir: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # Migration 0023 -- the generic form sends every filled field.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class Problem(Base):
@@ -98,6 +102,10 @@ class Problem(Base):
     owner: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Migration 0023 -- the generic form sends every filled field.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )
 
 
@@ -240,6 +248,9 @@ class Solution(Base):
         BigInteger, ForeignKey("run.id", ondelete="CASCADE"), primary_key=True
     )
     assignments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # Reduced costs from a linear solver, grouped like the roster.
+    # Null when the backend has none or the run predates migration 0020.
+    reduced_costs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class ConstraintResult(Base):
@@ -269,6 +280,9 @@ class ConstraintResult(Base):
     # Residual at the recorded assignment: 0 means the rule has no room left.
     # Nullable because a run made before migration 0017 has none to report.
     slack: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    # Shadow price from a linear solver. Null when the backend has none
+    # (CP-SAT, mixed-integer search) or the run predates migration 0019.
+    dual: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
 
 
 __all__ = [

@@ -683,3 +683,66 @@ describe("EntityForm FK display can never disagree with what it submits (fix rou
     });
   });
 });
+
+describe("EntityForm password (write-only)", () => {
+  const passwordFields = [
+    { name: "id", type: "uuid" as const, required: true, writable: false, is_fk: false, fk_table: null },
+    { name: "username", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null },
+    {
+      name: "password",
+      type: "password" as const,
+      required: true,
+      writable: true,
+      write_only: true,
+      is_fk: false,
+      fk_table: null,
+    },
+  ];
+
+  it("renders type=password and requires it on create", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm fields={passwordFields} onSubmit={onSubmit} submitLabel="Create" />
+      </QueryClientProvider>
+    );
+
+    const input = screen.getByTestId("field-password");
+    expect(input).toHaveAttribute("type", "password");
+    expect(input).toHaveAttribute("autocomplete", "new-password");
+
+    fireEvent.change(screen.getByTestId("field-username"), { target: { value: "planner" } });
+    fireEvent.click(screen.getByText("Create"));
+    expect(await screen.findByTestId("form-errors")).toHaveTextContent(/password/i);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "change-me-planner" } });
+    fireEvent.click(screen.getByText("Create"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ username: "planner", password: "change-me-planner" });
+    });
+  });
+
+  it("omits an empty password on edit so a save does not reset it", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm
+          fields={passwordFields}
+          initialValues={{ username: "planner" }}
+          onSubmit={onSubmit}
+          submitLabel="Save"
+          isEdit
+        />
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByTestId("field-username"), { target: { value: "planner-2" } });
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ username: "planner-2" });
+    });
+  });
+});

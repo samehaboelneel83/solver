@@ -4,7 +4,10 @@ A general-purpose problem-solving platform: model a real-world domain (entity
 types, attributes, entities, relationships, parameters), write a problem over
 that domain, and get an answer back. The **compiler** sits in the middle —
 `classify` + `compile` + `choose` — so the Model editor never asks MILP vs
-CP-SAT. LP, MILP and CP-SAT are execution targets, not the modelling language.
+CP-SAT. LP, MILP and CP-SAT are execution targets, not the modelling language;
+HiGHS is a fourth, when installed — it runs in a child process, because it
+cannot share one with OR-Tools. An objective may mix terms by weight or
+take them in order (`lex`).
 
 This repository is the running product around that loop: containerized
 infrastructure, the **schema v1** PostgreSQL schema (tables in `public`, plus
@@ -163,7 +166,7 @@ table and some are the generic metadata-driven ones.
 |---|---|
 | `/entity-types`, `/entity-types/:id` | Entity types and their attribute definitions — data type, required, unit, enum values, default, colour |
 | `/relationship-types`, `/relationship-types/:id` | Relationship types: endpoint types, cardinality, whether it is a hierarchy, colour |
-| `/entities`, `/entities/:id` | Entities, with attribute inputs typed by each attribute's `data_type`, and a condition builder that filters server-side |
+| `/entities`, `/entities/:id` | Entities, with attribute inputs typed by each attribute's `data_type`, and a condition builder that filters server-side (`?type=` `&expr=` `&q=` so a filtered list is a link) |
 | `/parameters` | Parameter definitions and a grid for their cells |
 | `/model` | The Model editor (below) — writes a new `model_version` |
 | `/versions` | A problem's model versions, **read-only**, with an IR viewer |
@@ -251,7 +254,9 @@ UI uses — the graph has no write routes of its own.
   types valid between those two entity types.
 - A **condition builder** filters the canvas by a typed expression over the
   domain's attribute definitions — the same builder and the same document the
-  Entities page sends to the server as `?expr=`.
+  Entities page sends to the server as `?expr=`. Fields are grouped by entity
+  type. A rule about one type leaves every other type drawn; a relationship
+  count still applies to every node.
 - A **property panel** edits the selected node's `label` and `attrs` (inputs
   typed per `data_type`) or the selected edge's relationship type and validity
   window, and can delete either.
@@ -324,10 +329,15 @@ including the **domain** half (do these names exist, do the walk's ends
 match the relationship type). A wrongly built model is named, not stored.
 
 When the shape is valid, the page posts the draft to `POST /api/v1/classify`
-— the same Python `classify()` a run records — and shows **What this model
-is** in planner language: every decision is yes or no; every rule is linear;
-at least one rule can bend. No dataset is supplied, so `fractional-data` is
-absent here, which is honest. The editor never offers a solver.
+with the problem id — the same Python `classify()` a run records, compiled
+against a **read** of the live domain (not `snapshot_dataset()`, which writes).
+**What this model is** is planner language: every decision is yes or no;
+every rule is linear; at least one rule can bend. A `where`/`via` that matches
+nobody is listed the same way a run lists it. `fractional-data` can appear
+here because those numbers live in the domain, not the IR. The editor never
+offers a solver; it does say which kind `choose()` would pick (a
+combinatorial solver, a linear one, a mixed one, or that this platform has
+nothing that can take the draft).
 
 A **template** is a starting IR, not a solver and not a second model
 language. The seeded `weekly_rota` row is the same document the Workforce
@@ -378,6 +388,9 @@ The detail leads in planner language, not solver names:
   population).
 - Held rules with slack `0` are marked **no room left**. Slack is the
   residual at the assignment (migration `0017`), filled for every backend.
+  A linear solver also reports a **shadow price** (migration `0019`): how
+  much the goal would move if that rule moved, and **reduced costs**
+  (migration `0020`) on decisions that would move it. CP-SAT leaves both blank.
 
 Solver, class, `why_solver` and wall time sit under **Technical**. The solver
 dropdown on submit is optional and gated on `solver.configure`; the default
@@ -553,46 +566,58 @@ python scripts/graph_smoke_check.py
   IR through `POST /api/v1/problems/{id}/versions`; `/versions` remains the
   read-only viewer. Submitting a scenario writes `dataset`, `run`, `solution`
   and `constraint_result`. The editor classifies a draft; it does not solve.
-- **A parameter cannot be indexed by the same entity type twice.** A `CHECK`
-  on `parameter_def` refuses duplicate `index_type_ids`. This is **temporary**
-  and not a modelling judgement: `snapshot_dataset()` keys parameter rows by
-  index-*type* name, so `distance[location, location]` would silently collapse
-  both coordinates onto one key. The restriction stands until that contract is
-  redesigned; self-indexed parameters (distance matrices, transition costs,
-  precedence) are perfectly ordinary and will be supported.
+- **A parameter may be indexed by the same entity type twice.**
+  `distance[location, location]` is an ordinary grid. Migration `0025` dropped
+  the temporary CHECK that refused it: snapshots now key a repeated index by
+  position (`"0"`, `"1"`) so the two ends stay distinct, and uniquely-typed
+  parameters (`demand[day, shift]`) keep their type-name keys so existing
+  dataset hashes do not move.
 - **The migration is one-way.** See
   [`docs/runbooks/schema-v1-cutover.md`](docs/runbooks/schema-v1-cutover.md):
   the downgrade drops the v1 tables and recreates nothing, contrary to what
   the design spec (§8) asked for. A `pg_dump` is the only rollback.
-- **Users cannot be created through the admin UI.** `hashed_password` is
-  deliberately excluded from the generic CRUD API, so `iam.user_account` is
-  read-only in practice and only the seeded admin exists. `POST
-  /api/iam/user_account/` returns a clean `409` rather than a raw 500.
-- **No enforced RBAC.** Auth is real (JWT, bearer token on every route), but
-  `role`/`user_role` are not checked per endpoint — any authenticated user can
-  read and write everything. Deferred by spec §2.
+- **Users are created with a password, never a hash.** The Users form
+  (generic CRUD on `iam.user_account`) sends `password`; the factory hashes
+  it and `hashed_password` stays hidden — it is not in the metadata, not
+  filterable, and never returned. An empty password on edit leaves the
+  stored hash. Creating a user opens that row so Related records can offer
+  **User roles → New** (the same prefilled form as any other child table).
+  A user with no role can sign in and cannot do anything else.
+- **Capabilities gate writes.** Auth is JWT on every route; what the
+  caller may do is a row on a role (migration `0013`), enforced in one
+  API dependency and reported by `GET /api/v1/me`. Screens hide New /
+  Save / Delete unless the matching capability is present, and the API
+  refuses a write that arrives anyway. A planner can solve without being
+  able to change the model. Creating users and assigning roles is
+  `iam.manage`, not `domain.edit` — a modeller shapes the domain, they do
+  not decide who else may.
 - **Styling is plain Tailwind,** not the shadcn/ui component library named in
   the original spec §7.1. Components were hand-rolled instead; functionally
   equivalent, but don't go looking for a shadcn install that isn't there.
-- **Relationship attributes are edited as raw JSON**, as is any JSONB column on
-  a generic form. Entity attributes are the exception — those are typed by the
-  attribute's declared `data_type`.
-- **Optimistic locking covers three tables, not all of them.** `entity`,
-  `entity_type` and `relationship_type` carry an `updated_at` (migration
-  `0010`, maintained by a trigger so every writer moves it). Their forms send
-  it back and a save built on a superseded read is refused with a **409**,
-  offering a reload that keeps whatever the person has typed. Everything else
-  — relationships, parameter cells, the generic CRUD tables — is still
-  last-save-wins. The check is also opt-in per request: a `PATCH` that omits
-  `updated_at` is not checked, which is what keeps scripts and the graph's
-  inline edits working.
-- **The graph's expression filter mixes every entity type's attributes** in one
-  flat list, and a rule on one type empties the rest of the canvas.
-- **A filtered entity list is not linkable.** The type filter is in the URL; the
-  expression is not, so a filtered list cannot be shared or survive a reload.
-- **Hierarchy collapse/expand is not implemented.** Cytoscape's compound nodes
-  provide nesting only; collapsing would need the `cytoscape-expand-collapse`
-  extension, which is not installed.
+- **Relationship attributes are typed when the type declares them.** The same
+  `attribute_def` object now belongs to exactly one owner (entity type or
+  relationship type; migration `0024`). A type with no defs still edits `attrs`
+  as JSON, which is why existing free-form payloads stay legal. Once a def
+  exists, the graph panel uses the same typed controls as an entity, and the
+  database refuses an unknown key or a wrong type with the same `kind`s as
+  `entity_validate`. Generic JSONB columns on other tables remain a JSON box.
+- **Optimistic locking covers the purpose-built forms and generic CRUD.**
+  `entity`, `entity_type`, `relationship_type`, `relationship` and
+  `parameter_value` plus the seven factory tables (`domain`, `template`,
+  `problem`, `iam.organization`, `iam.user_account`, `iam.role`,
+  `iam.user_role`) carry an `updated_at` (migrations `0010`, `0021`, `0022`
+  and `0023`, maintained by a trigger so every writer moves it). Their forms
+  send it back and a save built on a superseded read is refused with a
+  **409**, offering a reload that keeps whatever the person has typed. The
+  check is also opt-in per request: a write that omits `updated_at` is not
+  checked, which is what keeps scripts, a first write into an empty parameter
+  cell, and the graph's node rename working.
+- **Hierarchy collapse sits on the existing canvas.** Compound nodes still
+  nest; with a hierarchy selected, Minus on a focused parent (or Collapse
+  all) removes its descendants from the canvas and names how many are
+  sitting under it. Equals and Expand all put them back. The keyboard only
+  walks what is still drawn, the same rule a filter already uses. No extra
+  Cytoscape extension.
 - **There is no lint config, deliberately.** `scripts/check.sh` will run a
   `lint` script if `frontend/package.json` ever grows one, and reports it as
   skipped until then. The stock ESLint config for a Vite React-TS project was

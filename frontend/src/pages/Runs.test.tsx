@@ -45,6 +45,7 @@ const RUN_DETAIL = {
     constraints: { c_cover: ["day", "shift"], c_max_hours: ["employee"] },
   },
   assignments: { assign: [["ahmed", "mon", "morning"], ["bilal", "tue", "night"]] },
+  reduced_costs: null,
   constraints: [
     {
       constraint_id: "c_cover_demand",
@@ -54,6 +55,7 @@ const RUN_DETAIL = {
       total_violation: 36,
       penalty_paid: 3600,
       slack: -36,
+      dual: null,
       violations: [
         { index: ["thu", "morning"], by: 4 },
         { index: ["tue", "evening"], by: 3 },
@@ -67,6 +69,7 @@ const RUN_DETAIL = {
       total_violation: 0,
       penalty_paid: 0,
       slack: 0,
+      dual: 6,
       violations: [],
     },
   ],
@@ -187,6 +190,26 @@ describe("Runs", () => {
     // Solver facts stay available, under Technical rather than in the header.
     expect(screen.getByText("Technical")).toBeInTheDocument();
     expect(screen.getByText(/no room left/i)).toBeInTheDocument();
+    expect(screen.getByText(/worth 6 on the goal/i)).toBeInTheDocument();
+  });
+
+  it("names a decision that would move the goal", async () => {
+    stub({
+      run: {
+        ...RUN_DETAIL,
+        reduced_costs: { buy: [{ index: ["oats"], value: 94 }] },
+        index_sets: {
+          ...RUN_DETAIL.index_sets,
+          variables: { ...RUN_DETAIL.index_sets.variables, buy: ["feed"] },
+        },
+        labels: { ...RUN_DETAIL.labels, feed: { oats: "Oats" } },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/would move the goal/i)).toBeInTheDocument();
+    expect(screen.getByText(/Oats/)).toBeInTheDocument();
+    expect(screen.getByText(/worth 94 on the goal/i)).toBeInTheDocument();
   });
 
   it("distinguishes a proven optimum from a merely feasible answer", async () => {

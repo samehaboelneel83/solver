@@ -210,7 +210,9 @@ class AttributeDefRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    entity_type_id: int
+    entity_type_id: int | None
+    # Migration 0024: exactly one of entity_type_id / relationship_type_id.
+    relationship_type_id: int | None
     name: str
     data_type: AttrType
     required: bool

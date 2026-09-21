@@ -44,8 +44,9 @@ const ExpressionBuilder = lazy(() => import("../expressions/ExpressionBuilder"))
  * them -- with no way to page the result. A type also decides which
  * columns the table has, since they are its `attribute_def` rows.
  *
- * The chosen type lives in the query string so a list can be linked to and
- * survives a reload, and so the "New entity" link can carry it.
+ * The chosen type, the search box and the condition document live in the
+ * query string so a filtered list can be linked to and survives a reload,
+ * and so the "New entity" link can carry the type.
  *
  * Conditions (Task 14d)
  * ---------------------
@@ -229,7 +230,7 @@ function Conditions({
   onChange: (document: ExpressionDocument | null) => void;
   serverProblems: readonly { path: number[]; message: string }[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => countRules(value) > 0);
   const panelId = useId();
   const catalogue = useMemo(
     () => buildFieldCatalogue({ entityTypes: [type], relationshipTypes }),
@@ -293,11 +294,14 @@ function EntityTable({
   type: EntityType;
   relationshipTypes: RelationshipType[];
 }) {
-  const [draft, setDraft] = useState("");
-  const [q, setQ] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fromUrl = parseExprParam(searchParams.get("expr"));
+  const qFromUrl = searchParams.get("q") ?? "";
+  const [draft, setDraft] = useState(qFromUrl);
+  const [q, setQ] = useState(qFromUrl);
   const [offset, setOffset] = useState(0);
-  const [expression, setExpression] = useState<ExpressionDocument | null>(null);
-  const [applied, setApplied] = useState<ExpressionDocument | null>(null);
+  const [expression, setExpression] = useState<ExpressionDocument | null>(fromUrl);
+  const [applied, setApplied] = useState<ExpressionDocument | null>(fromUrl);
   const searchId = useId();
 
   const catalogue = useMemo(
@@ -333,6 +337,19 @@ function EntityTable({
     const timer = setTimeout(() => setApplied(sendableKey === "" ? null : JSON.parse(sendableKey)), APPLY_DELAY_MS);
     return () => clearTimeout(timer);
   }, [sendableKey]);
+
+  // The type was already in the URL; the expression and the search were
+  // not, so a filtered list could not be shared or survive a reload.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set("type", String(type.id));
+    if (q) next.set("q", q);
+    else next.delete("q");
+    if (applied) next.set("expr", JSON.stringify(applied));
+    else next.delete("expr");
+    if (next.toString() === searchParams.toString()) return;
+    setSearchParams(next, { replace: true });
+  }, [applied, q, type.id, searchParams, setSearchParams]);
 
   const { data, error, isError, isLoading, refetch, fetchStatus } = useEntities(type.id, {
     q: q || undefined,
@@ -501,4 +518,23 @@ function EntityTable({
       {body}
     </>
   );
+}
+
+function parseExprParam(raw: string | null): ExpressionDocument | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      (parsed as ExpressionDocument).version === 1 &&
+      typeof (parsed as ExpressionDocument).query === "object" &&
+      (parsed as ExpressionDocument).query !== null
+    ) {
+      return parsed as ExpressionDocument;
+    }
+  } catch {
+    // A broken link is no filter, not a crashed page.
+  }
+  return null;
 }

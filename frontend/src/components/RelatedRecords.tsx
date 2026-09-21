@@ -6,6 +6,8 @@ import { apiFetch } from "../api/client";
 import type { ListResult } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { fieldLabel, tableLabelPlural } from "../lib/labels";
+import { writeCapability } from "../types/meta";
+import { useCapabilities } from "../hooks/useCapability";
 
 type ChildRef = {
   schema: string;
@@ -76,6 +78,7 @@ function childRefsFrom(tables: ChildTable[], schema: string, table: string): Chi
  * with this row's id. Renders nothing when no table references this one. */
 export default function RelatedRecords({ schema, table, id }: RelatedRecordsProps) {
   const { data: tables } = useSchema();
+  const { can } = useCapabilities();
 
   const children = useMemo(
     () => (tables ? childRefsFrom(tables, schema, table) : []),
@@ -109,15 +112,18 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
     );
     const listHref = `/${child.schema}/${child.table}?f_${child.field}=${encodeURIComponent(id)}`;
     const newHref = `/${child.schema}/${child.table}/new?${child.field}=${encodeURIComponent(id)}`;
+    const childTable = tables?.find((t) => t.schema === child.schema && t.table === child.table);
     return (
       <li key={`${child.schema}.${child.table}.${child.field}`} className="flex items-center gap-3 text-sm">
         {/* H-9: were 20px tall with no padding -- inline-block + py-1 clears the 24px floor. */}
         <Link to={listHref} className="inline-block rounded py-1 text-blue-600 underline">
           {child.label} ({countNode})
         </Link>
+        {can(writeCapability(childTable)) && (
         <Link to={newHref} className="inline-block rounded py-1 text-slate-500 underline">
           New
         </Link>
+        )}
       </li>
     );
   }
@@ -134,17 +140,25 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
     const isConfirmedEmpty = !result?.isError && result?.data?.total === 0;
     (isConfirmedEmpty ? empty : nonEmpty).push({ child, index });
   });
+  // E-6 hides empties only when something non-empty is already on screen.
+  // A brand-new parent (a user with no roles yet) has only empties: burying
+  // them behind "Show N empty" hides the New link that is the next step.
+  const shownEmpty = nonEmpty.length === 0 ? empty : [];
+  const hiddenEmpty = nonEmpty.length === 0 ? [] : empty;
 
   return (
     <div className="mt-6 border-t border-slate-200 pt-4">
       <h2 className="mb-2 text-sm font-semibold text-slate-900">Related records</h2>
-      <ul className="space-y-1">{nonEmpty.map(({ child, index }) => renderChild(child, index))}</ul>
-      {empty.length > 0 && (
+      <ul className="space-y-1">
+        {nonEmpty.map(({ child, index }) => renderChild(child, index))}
+        {shownEmpty.map(({ child, index }) => renderChild(child, index))}
+      </ul>
+      {hiddenEmpty.length > 0 && (
         <details className="mt-2 text-sm text-slate-500">
           <summary className="cursor-pointer select-none hover:text-slate-700">
-            Show {empty.length} empty
+            Show {hiddenEmpty.length} empty
           </summary>
-          <ul className="mt-1 space-y-1">{empty.map(({ child, index }) => renderChild(child, index))}</ul>
+          <ul className="mt-1 space-y-1">{hiddenEmpty.map(({ child, index }) => renderChild(child, index))}</ul>
         </details>
       )}
     </div>

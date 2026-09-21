@@ -33,7 +33,7 @@ from app.api.deps import capabilities_of, get_current_user, requires
 from app.api.quantity import QuantityOut
 from app.core.db import get_db
 from app.models.iam import UserAccount
-from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
+from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solution
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
 from app.solve.service import CannotCancel, cancel_run, enqueue_run
@@ -84,6 +84,9 @@ class ConstraintOutcome(BaseModel):
     # before the column existed, and on a constraint the compiler never
     # emitted (a vacuous forall). Zero means the rule has no room left.
     slack: QuantityOut | None = None
+    # Shadow price from a linear solver. Null when the backend has none
+    # (CP-SAT, mixed-integer) or the run predates the column.
+    dual: QuantityOut | None = None
 
 
 class RunSummary(BaseModel):
@@ -139,6 +142,9 @@ class RunRead(RunSummary):
     # {"assign": [["ahmed", "mon", "morning"], ...]}. Absent when the run
     # found nothing, which is not the same as an empty roster.
     assignments: dict[str, Any] | None
+    # Reduced costs from a linear solver, grouped like the roster. Null when
+    # the backend has none or the run predates the column.
+    reduced_costs: dict[str, Any] | None = None
     constraints: list[ConstraintOutcome]
 
 
@@ -240,33 +246,60 @@ def whoami(
 
 
 class ClassifyRequest(BaseModel):
-    """An IR, and nothing else. Classification of the *shape* does not
-    need the domain or a frozen dataset; `fractional-data` from parameter
-    values is a property of a run, and this route is what the editor asks
-    before there is one."""
+    """A draft IR, and optionally the problem whose live domain to read.
+
+    Classification of the *shape* does not need the domain. Empty ranges
+    and `fractional-data` do: they are properties of the numbers and the
+    people, not of the document. `problem_id` is how the editor names
+    those without freezing a dataset — `snapshot_dataset()` writes, and a
+    keystroke must not.
+    """
 
     ir: dict[str, Any]
+    problem_id: int | None = Field(default=None, ge=1)
 
 
 @router.post("/classify")
 def classify_model(
-    payload: ClassifyRequest, _: UserAccount = Depends(get_current_user)
+    payload: ClassifyRequest,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
     """What kind of model this is, in the classifier's words and a planner's.
 
     **Posted, not stored.** The same function a run records as
     `classified_as` / `why`, so the editor cannot disagree with the run
-    about what the model is. No dataset is supplied: a draft has none, and
-    a missing `fractional-data` flag here is honest rather than guessed.
+    about what the model is. With a `problem_id`, the live domain is
+    read (not snapshotted) so a vacuous `forall` and a fractional
+    parameter can be named here the same way a run names them.
+    `would_solve` is `choose()`'s pick in planner language -- the editor
+    never offers a solver, but it does say which kind a run would use.
     """
+    from app.solve.backends import planner_choice_for
     from app.solve.classify import classify
+    from app.solve.compile import Unsupported, compile_model
+    from app.solve.preview import live_data
 
-    found = classify(payload.ir)
+    data = None
+    empty_ranges: list[dict[str, Any]] = []
+    if payload.problem_id is not None:
+        problem = db.get(Problem, payload.problem_id)
+        if problem is None:
+            raise HTTPException(status_code=404, detail="problem not found")
+        data = live_data(db, problem.domain_id, payload.ir)
+        try:
+            empty_ranges = compile_model(payload.ir, data).empty_ranges
+        except Unsupported:
+            empty_ranges = []
+
+    found = classify(payload.ir, data)
     return {
         "model_class": found.model_class,
         "needs": sorted(found.needs),
         "reasons": found.reasons,
         "planner": found.planner,
+        "empty_ranges": empty_ranges,
+        "would_solve": planner_choice_for(found),
     }
 
 
@@ -395,5 +428,6 @@ def _read(db: Session, run_id: int) -> RunRead:
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,
+        reduced_costs=solution.reduced_costs if solution else None,
         constraints=[ConstraintOutcome.model_validate(c) for c in constraints],
     )

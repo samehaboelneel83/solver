@@ -18,6 +18,7 @@ import {
   useVersion,
   useVersions,
   type ApplyTemplateResult,
+  type EmptyRange,
   type Id,
 } from "../api/v1";
 import { checkIrShape } from "../ir";
@@ -71,7 +72,7 @@ const EMPTY_MODEL = {
   parameters: {},
   variables: {},
   constraints: [],
-  objective: { sense: "minimize", terms: [] },
+  objective: { sense: "minimize", mode: "weighted", terms: [] },
 } as const;
 
 type Draft = {
@@ -79,8 +80,14 @@ type Draft = {
   parameters: Record<string, { index: string[] }>;
   variables: Record<string, { index: string[]; domain: string }>;
   constraints: Constraint[];
-  objective: { sense: string; terms: ObjectiveTerm[] };
+  objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
 };
+
+function emptyRangeWhere(item: EmptyRange): string {
+  const keys = Object.values(item.index);
+  if (keys.length === 0) return "";
+  return ` at ${keys.join(" · ")}`;
+}
 
 export default function ModelEditor() {
   useDocumentTitle("Model editor");
@@ -199,6 +206,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       constraints: ((ir.constraints as Constraint[]) ?? []).map((c) => ({ ...c })),
       objective: {
         sense: ((ir.objective as { sense?: string })?.sense as string) ?? "minimize",
+        mode: ((ir.objective as { mode?: string })?.mode as string) === "lex" ? "lex" : "weighted",
         terms: (((ir.objective as { terms?: ObjectiveTerm[] })?.terms ?? []) as ObjectiveTerm[]).map(
           (t) => ({ ...t })
         ),
@@ -265,7 +273,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       variables: draft.variables,
       constraints: draft.constraints,
       ...(draft.objective.terms.length > 0
-        ? { objective: { sense: draft.objective.sense, terms: draft.objective.terms } }
+        ? {
+            objective: {
+              sense: draft.objective.sense,
+              ...(draft.objective.mode === "lex" ? { mode: "lex" } : {}),
+              terms: draft.objective.terms,
+            },
+          }
         : {}),
     };
   }, [ir, draft]);
@@ -274,7 +288,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // half that can be answered without the domain.
   const refusal = nextIr ? checkIrShape(nextIr) : null;
   const classification = useClassify(
-    nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null
+    nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null,
+    problemId
   );
 
   if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
@@ -298,7 +313,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               parameters: {},
               variables: {},
               constraints: [],
-              objective: { sense: "minimize", terms: [] },
+              objective: { sense: "minimize", mode: "weighted", terms: [] },
             });
           }}
         >
@@ -446,12 +461,48 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         />
       </section>
 
-      {refusal === null && (classification.data?.planner.length ?? 0) > 0 && (
+      {refusal === null && classification.data && (
         <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
           <h2 className="mb-1 text-sm font-semibold text-slate-900">What this model is</h2>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-            {classification.data?.planner.map((line) => (
-              <li key={line}>{line}</li>
+          {classification.data.planner.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+              {classification.data.planner.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+          {classification.data.would_solve ? (
+            <p className={`text-sm text-slate-700 ${classification.data.planner.length > 0 ? "mt-2" : ""}`}>
+              {classification.data.would_solve}
+            </p>
+          ) : (
+            <p
+              className={`text-sm text-amber-800 ${classification.data.planner.length > 0 ? "mt-2" : ""}`}
+            >
+              No solver this platform has can take this model.
+            </p>
+          )}
+        </aside>
+      )}
+
+      {refusal === null && (classification.data?.empty_ranges.length ?? 0) > 0 && (
+        <aside
+          aria-label="Rules that ranged over nobody"
+          className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3"
+        >
+          <h2 className="mb-1 text-sm font-semibold text-slate-900">Rules that ranged over nobody</h2>
+          <p className="mb-2 text-sm text-slate-700">
+            A rule that matches nobody never constrains anyone. Check the filter, or the data it ranges
+            over.
+          </p>
+          <ul className="space-y-1 text-sm text-slate-800">
+            {classification.data?.empty_ranges.map((item) => (
+              <li key={`${item.constraint_id}:${item.kind}:${Object.values(item.index).join(",")}`}>
+                <span className="font-mono">{item.constraint_id}</span>
+                {item.kind === "forall"
+                  ? " never applied to anyone"
+                  : ` counted nobody${emptyRangeWhere(item)}`}
+              </li>
             ))}
           </ul>
         </aside>
@@ -641,9 +692,9 @@ function ObjectiveEditor({
   context,
   onChange,
 }: {
-  objective: { sense: string; terms: ObjectiveTerm[] };
+  objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
   context: ModelContext;
-  onChange: (next: { sense: string; terms: ObjectiveTerm[] }) => void;
+  onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
 }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white p-4">
@@ -652,6 +703,15 @@ function ObjectiveEditor({
         value={objective.sense}
         options={SENSES.map((s) => ({ value: s, label: s === "minimize" ? "make it as small as possible" : "make it as large as possible" }))}
         onChange={(sense) => onChange({ ...objective, sense })}
+      />
+      <Choice
+        label="When there is more than one goal"
+        value={objective.mode}
+        options={[
+          { value: "weighted", label: "mix them by weight" },
+          { value: "lex", label: "this order: first goal, then the next" },
+        ]}
+        onChange={(mode) => onChange({ ...objective, mode })}
       />
 
       <div className="mt-3 space-y-1">
@@ -681,7 +741,7 @@ function ObjectiveEditor({
                 </div>
                 <div>
                   <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
-                    Weight
+                    {objective.mode === "lex" ? "Weight (unused in this order)" : "Weight"}
                   </label>
                   <input
                     id={`obj-${position}-weight`}

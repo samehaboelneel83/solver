@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Entities from "./Entities";
 import { ToastProvider } from "../components/ToastProvider";
@@ -59,6 +59,11 @@ const ENTITIES = {
 
 const GRADE = "attr:5:grade";
 
+const GRADE_EQUALS_FOUR = {
+  version: 1,
+  query: { combinator: "and", rules: [{ field: GRADE, operator: "=", value: 4 }] },
+};
+
 function paths(): string[] {
   return mockFetch.mock.calls.map((call) => call[0] as string);
 }
@@ -91,14 +96,22 @@ function refusal(loc: (string | number)[], msg: string) {
   return new ApiError(422, JSON.stringify({ detail: [{ type: "value_error", loc, msg }] }));
 }
 
-function renderPage() {
+function renderPage(entry = "/entities") {
   const queryClient = editorQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/entities"]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
-            <Route path="/entities" element={<Entities />} />
+            <Route
+              path="/entities"
+              element={
+                <>
+                  <SearchSpy />
+                  <Entities />
+                </>
+              }
+            />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -106,8 +119,16 @@ function renderPage() {
   );
 }
 
+function SearchSpy() {
+  const [params] = useSearchParams();
+  return <span data-testid="entities-search">{params.toString()}</span>;
+}
+
 async function openPanel() {
-  fireEvent.click(await screen.findByTestId("entities-conditions-toggle"));
+  const toggle = await screen.findByTestId("entities-conditions-toggle");
+  if (toggle.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(toggle);
+  }
   // The builder is lazy, so it arrives a tick later.
   return screen.findByTestId("expression-builder");
 }
@@ -370,5 +391,55 @@ describe("Entities: a refusal from the server", () => {
     renderPage();
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByTestId("entities-expression-refused")).not.toBeInTheDocument();
+  });
+});
+
+describe("Entities: a filtered list is a link", () => {
+  it("reads the condition from the URL and sends it, with the panel already open", async () => {
+    serve();
+    renderPage(`/entities?type=5&expr=${encodeURIComponent(JSON.stringify(GRADE_EQUALS_FOUR))}`);
+
+    await waitFor(() => expect(sentExpressions()[0]).toEqual(GRADE_EQUALS_FOUR));
+    expect(screen.getByTestId("entities-conditions-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByTestId("expression-builder")).toBeInTheDocument();
+  });
+
+  it("writes a valid condition into the URL so the list can be shared", async () => {
+    serve();
+    renderPage();
+    await openPanel();
+    fireEvent.click(screen.getByTestId("expression-add-rule"));
+    fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
+    fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "4" } });
+
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("entities-search").textContent ?? "");
+      expect(JSON.parse(params.get("expr") ?? "null")).toEqual(GRADE_EQUALS_FOUR);
+    });
+  });
+
+  it("drops the condition from the URL when the conditions are cleared", async () => {
+    serve();
+    renderPage(`/entities?type=5&expr=${encodeURIComponent(JSON.stringify(GRADE_EQUALS_FOUR))}`);
+    await screen.findByTestId("expression-builder");
+
+    fireEvent.click(screen.getByTestId("entities-conditions-clear"));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("entities-search").textContent ?? "");
+      expect(params.get("expr")).toBeNull();
+    });
+  });
+
+  it("drops the condition when the type changes, because the fields are a different type's", async () => {
+    serve();
+    renderPage(`/entities?type=5&expr=${encodeURIComponent(JSON.stringify(GRADE_EQUALS_FOUR))}`);
+    await screen.findByTestId("expression-builder");
+
+    fireEvent.change(screen.getByLabelText(/entity type/i), { target: { value: "9" } });
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("entities-search").textContent ?? "");
+      expect(params.get("type")).toBe("9");
+      expect(params.get("expr")).toBeNull();
+    });
   });
 });

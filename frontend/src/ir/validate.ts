@@ -30,6 +30,7 @@ import {
   RELATIONS,
   REQUIRED_KEYS,
   SENSES,
+  OBJECTIVE_MODES,
   SEVERITIES,
   TERM_KINDS,
   TRAVERSAL_DEPTHS,
@@ -58,7 +59,7 @@ const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper"]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index"]);
-const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms"]);
+const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
 const TERM_KEYS: Record<string, readonly string[]> = {
   const: [],
@@ -903,6 +904,15 @@ class ShapeChecker {
         ["objective", "sense"],
         `${show(objective.sense)} is not a sense; an objective is ` +
           `${[...SENSES].sort().join(" or ")}`
+      );
+    }
+    const mode = objective.mode ?? "weighted";
+    if (!(OBJECTIVE_MODES as readonly unknown[]).includes(mode)) {
+      return refusal(
+        "objective_mode_unsupported",
+        ["objective", "mode"],
+        `${show(mode)} is not an objective mode; an objective is ` +
+          `${[...OBJECTIVE_MODES].sort().join(" or ")}, or omit mode for a weighted sum`
       );
     }
     const terms = objective.terms;

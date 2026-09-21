@@ -1109,7 +1109,7 @@ describe("GraphEditor", () => {
     expect(screen.getByTestId("graph-help")).toHaveTextContent(/Boxes group nodes by hierarchy/);
 
     fireEvent.click(screen.getByTestId("toggle-connect"));
-    expect(screen.getByTestId("graph-help")).toHaveTextContent("Drag from one node to another to connect them.");
+    expect(screen.getByTestId("graph-help")).toHaveTextContent(/Drag from one node to another to connect them/);
   });
 
   it("does not offer Connect or New Node to an account that may not edit the domain", async () => {
@@ -1202,6 +1202,67 @@ describe("GraphEditor", () => {
     fireEvent.keyDown(container, { key: "Enter" });
 
     expect(onSelectionChange).toHaveBeenCalledWith({ kind: "node", id: expect.any(String) });
+  });
+
+  it("opens the relationship-type picker when C then Enter on another node (keyboard connect)", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    elementStore.get("1")!.position = { x: 0, y: 0 };
+    elementStore.get("2")!.position = { x: 10, y: 0 };
+    const container = screen.getByTestId("cytoscape-container");
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "c" });
+    expect(screen.getByTestId("graph-live")).toHaveTextContent(/Connecting from hq/i);
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "Enter" });
+
+    expect(screen.getByTestId("edge-type-picker")).toBeInTheDocument();
+  });
+
+  it("cancels a keyboard connect on Escape without leaving the canvas", async () => {
+    renderWithProviders();
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    const container = screen.getByTestId("cytoscape-container");
+    const hierarchy = screen.getByTestId("hierarchy-select");
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "c" });
+    fireEvent.keyDown(container, { key: "Escape" });
+
+    expect(screen.getByTestId("graph-live")).toHaveTextContent(/Connect cancelled/i);
+    expect(document.activeElement).not.toBe(hierarchy);
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "Enter" });
+    expect(screen.queryByTestId("edge-type-picker")).not.toBeInTheDocument();
+  });
+
+  it("does not start a keyboard connect for an account that may not edit the domain", async () => {
+    renderWithProviders({}, VIEWER_ME);
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    const container = screen.getByTestId("cytoscape-container");
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "c" });
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "Enter" });
+
+    expect(screen.queryByTestId("edge-type-picker")).not.toBeInTheDocument();
+  });
+
+  it("opens a relationship from the keyboard with E then Enter, so Delete in the panel is reachable", async () => {
+    const onSelectionChange = vi.fn();
+    renderWithProviders({ onSelectionChange });
+    await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+    const container = screen.getByTestId("cytoscape-container");
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    fireEvent.keyDown(container, { key: "e" });
+    expect(elementStore.get("edge:1")!.classes.has("kb-focus")).toBe(true);
+    expect(screen.getByTestId("graph-live")).toHaveTextContent(/reports_to relationship/i);
+
+    fireEvent.keyDown(container, { key: "Enter" });
+    expect(onSelectionChange).toHaveBeenCalledWith({ kind: "edge", id: "1" });
   });
 
   // --- the keyboard only reaches what is on screen -----------------------
@@ -1333,6 +1394,89 @@ describe("GraphEditor", () => {
       expect(screen.getByTestId("cytoscape-container").getAttribute("aria-label")).not.toContain(
         "of 3"
       );
+    });
+  });
+
+  // Compound boxes nest; they do not hide. Collapse is the other half of
+  // a hierarchy: a parent stays, its descendants leave the canvas, and
+  // the keyboard can only walk what is still drawn -- the same rule the
+  // filter already uses.
+  describe("hierarchy collapse", () => {
+    async function renderNested() {
+      const view = renderWithProviders({ hierarchyTypeId: 5 });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      elementStore.get("1")!.position = { x: 0, y: 0 };
+      elementStore.get("2")!.position = { x: 10, y: 0 };
+      elementStore.get("3")!.position = { x: 20, y: 0 };
+      return view;
+    }
+
+    it("does not offer collapse when the graph is drawn flat", async () => {
+      renderWithProviders({ hierarchyTypeId: null });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      expect(screen.queryByTestId("collapse-all")).toBeNull();
+      expect(screen.queryByTestId("expand-all")).toBeNull();
+    });
+
+    it("hides a focused parent's descendants on Minus, and names how many", async () => {
+      await renderNested();
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(true);
+      fireEvent.keyDown(container, { key: "-" });
+      await waitFor(() => expect(elementStore.has("2")).toBe(false));
+      expect(elementStore.has("3")).toBe(false);
+      expect(elementStore.has("1")).toBe(true);
+      expect(elementStore.get("1")!.data.label).toMatch(/2 hidden/);
+    });
+
+    it("walks only what collapse left showing", async () => {
+      await renderNested();
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      fireEvent.keyDown(container, { key: "-" });
+      await waitFor(() => expect(elementStore.has("2")).toBe(false));
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      expect(elementStore.get("1")!.classes.has("kb-focus")).toBe(true);
+    });
+
+    it("shows them again on Equals", async () => {
+      await renderNested();
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      fireEvent.keyDown(container, { key: "-" });
+      await waitFor(() => expect(elementStore.has("2")).toBe(false));
+      fireEvent.keyDown(container, { key: "=" });
+      await waitFor(() => expect(elementStore.has("2")).toBe(true));
+      expect(elementStore.has("3")).toBe(true);
+      expect(elementStore.get("1")!.data.label).toBe("hq");
+    });
+
+    it("Collapse all hides every nested node, Expand all puts them back", async () => {
+      await renderNested();
+      fireEvent.click(screen.getByTestId("collapse-all"));
+      await waitFor(() => expect(elementStore.has("2")).toBe(false));
+      expect(elementStore.has("3")).toBe(false);
+      fireEvent.click(screen.getByTestId("expand-all"));
+      await waitFor(() => expect(elementStore.has("2")).toBe(true));
+      expect(elementStore.has("3")).toBe(true);
+    });
+
+    it("does not collapse when no hierarchy is selected", async () => {
+      renderWithProviders({ hierarchyTypeId: null });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      elementStore.get("1")!.position = { x: 0, y: 0 };
+      const container = screen.getByTestId("cytoscape-container");
+      fireEvent.keyDown(container, { key: "ArrowRight" });
+      fireEvent.keyDown(container, { key: "-" });
+      expect(elementStore.has("2")).toBe(true);
+      expect(elementStore.has("3")).toBe(true);
+    });
+
+    it("tells the person how to collapse a nest", async () => {
+      renderWithProviders({ hierarchyTypeId: 5 });
+      await waitFor(() => expect(screen.getByTestId("collapse-all")).toBeInTheDocument());
+      expect(screen.getByTestId("graph-help")).toHaveTextContent(/Minus hides a focused parent's children/i);
     });
   });
 

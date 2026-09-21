@@ -1,9 +1,15 @@
 import type { EntityType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
-import type { ExpressionDocument } from "./document";
+import {
+  isExpressionGroup,
+  type ExpressionDocument,
+  type ExpressionGroup,
+  type ExpressionRule,
+} from "./document";
 import {
   buildFieldCatalogue,
   RELATIONSHIP_DIRECTIONS,
+  type ExpressionField,
   type FieldCatalogue,
   type RelationshipTypeRef,
 } from "./fields";
@@ -25,6 +31,12 @@ import { degreeKey, evaluateExpression, type EvaluationTarget } from "./evaluate
  *
  * Filtering is client-side over the graph already in memory: no endpoint,
  * no round trip.
+ *
+ * A rule about one type does not hide the others. `evaluateExpression`
+ * is fail-closed on a type mismatch -- that is the SQL a list filter
+ * compiles, and an employee-only page wants it. This canvas is a picture
+ * of the whole domain, so a condition that is not about a node is not a
+ * reason to take it off. Relationship counts still apply to every type.
  */
 
 export function graphCatalogue(
@@ -81,6 +93,43 @@ export function graphTargets(graph: GraphResponse): Map<string, EvaluationTarget
   return targets;
 }
 
+/** The entity type an attribute field belongs to, or null for a field
+ * every node has (a column, a relationship count). */
+function ownerEntityTypeId(field: ExpressionField): string | null {
+  const ref = field.ref.kind === "function" ? field.ref.argument : field.ref;
+  return ref.kind === "attribute" ? ref.entityTypeId : null;
+}
+
+/**
+ * Drop rules that name a different entity type. An empty group after
+ * pruning is "this constraint does not apply", including a negated one:
+ * `NOT (unit.capacity > 5)` hiding every shift would be the same bug
+ * with a minus sign.
+ */
+function pruneGroup(
+  group: ExpressionGroup,
+  catalogue: FieldCatalogue,
+  entityTypeId: string
+): ExpressionGroup | null {
+  const rules: (ExpressionRule | ExpressionGroup)[] = [];
+  for (const node of group.rules) {
+    if (isExpressionGroup(node)) {
+      const inner = pruneGroup(node, catalogue, entityTypeId);
+      if (inner) rules.push(inner);
+      continue;
+    }
+    const field = catalogue.get(node.field);
+    // An unresolvable field stays: evaluateExpression is false for it,
+    // which is the same failure as a typed-out rule on an entity list.
+    const owner = field ? ownerEntityTypeId(field) : null;
+    if (!field || owner === null || owner === entityTypeId) rules.push(node);
+  }
+  if (rules.length === 0) return null;
+  const next: ExpressionGroup = { combinator: group.combinator, rules };
+  if (group.not) next.not = true;
+  return next;
+}
+
 /** The ids of the nodes the expression matches. */
 export function matchingNodeIds(
   graph: GraphResponse,
@@ -97,7 +146,10 @@ export function matchingNodeIds(
       if (document.query.rules.length === 0) matched.add(node.id);
       continue;
     }
-    if (evaluateExpression(document, catalogue, target)) matched.add(node.id);
+    const query = pruneGroup(document.query, catalogue, target.entityTypeId);
+    if (!query || evaluateExpression({ version: document.version, query }, catalogue, target)) {
+      matched.add(node.id);
+    }
   }
   return matched;
 }

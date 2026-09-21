@@ -14,6 +14,7 @@ class TableMeta:
     creatable: bool = True
     updatable: bool = True
     deletable: bool = True
+    write_capability: str = "domain.edit"
 
 
 TABLE_REGISTRY: list[TableMeta] = []
@@ -28,6 +29,7 @@ def register_table(
     creatable: bool = True,
     updatable: bool = True,
     deletable: bool = True,
+    write_capability: str = "domain.edit",
 ) -> None:
     TABLE_REGISTRY.append(
         TableMeta(
@@ -39,5 +41,6 @@ def register_table(
             creatable=creatable,
             updatable=updatable,
             deletable=deletable,
+            write_capability=write_capability,
         )
     )

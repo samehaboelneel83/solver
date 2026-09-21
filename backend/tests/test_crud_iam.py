@@ -124,22 +124,143 @@ def test_user_account_never_exposes_hashed_password(auth_headers):
     assert "hashed_password" not in get_response.json()
 
 
-def test_user_account_cannot_be_created_with_a_raw_hash(auth_headers):
-    """`hidden` drops hashed_password from the Create schema, so Pydantic
-    ignores it and the NOT NULL column rejects the insert at the database
-    level. Task 1 (generic CRUD hardening) wraps that IntegrityError and
-    returns a 409 with a helpful detail message instead of the raw 500
-    that used to surface here."""
+def test_user_account_is_created_with_a_password(auth_headers):
+    """The admin form sends `password`. The factory hashes it; neither the
+    plaintext nor hashed_password comes back."""
     client = TestClient(app)
+    username = f"planner-{uuid.uuid4().hex[:8]}"
+    password = "change-me-planner"
 
     response = client.post(
         "/api/iam/user_account/",
+        json={"username": username, "display_name": "Planner", "password": password},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["username"] == username
+    assert "password" not in body
+    assert "hashed_password" not in body
+
+    login = client.post("/api/auth/login", data={"username": username, "password": password})
+    assert login.status_code == 200, login.text
+    assert login.json()["access_token"]
+
+    client.delete(f"/api/iam/user_account/{body['id']}", headers=auth_headers)
+
+
+def test_user_account_create_without_password_is_422(auth_headers):
+    client = TestClient(app)
+    response = client.post(
+        "/api/iam/user_account/",
+        json={"username": f"nopw-{uuid.uuid4().hex[:8]}", "display_name": "No Password"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422, response.text
+    locs = [tuple(err.get("loc", ())) for err in response.json()["detail"]]
+    assert any("password" in loc for loc in locs), response.text
+
+
+def test_user_account_empty_password_is_422(auth_headers):
+    client = TestClient(app)
+    response = client.post(
+        "/api/iam/user_account/",
+        json={"username": f"blank-{uuid.uuid4().hex[:8]}", "password": "   "},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422, response.text
+    locs = [tuple(err.get("loc", ())) for err in response.json()["detail"]]
+    assert any("password" in loc for loc in locs), response.text
+
+
+def test_user_account_cannot_be_created_with_a_raw_hash(auth_headers):
+    """hashed_password stays hidden. Sending it does not create a user, and
+    a create that also carries password hashes that password -- the raw
+    string is never stored as the hash."""
+    client = TestClient(app)
+    username = f"probe-{uuid.uuid4().hex[:8]}"
+    password = "the-real-password"
+
+    ignored = client.post(
+        "/api/iam/user_account/",
         json={
-            "username": f"probe-{uuid.uuid4().hex[:8]}",
+            "username": username,
             "display_name": "Probe",
             "hashed_password": "plaintext-oops",
         },
         headers=auth_headers,
     )
-    assert response.status_code == 409
-    assert "required" in response.json()["detail"]
+    assert ignored.status_code == 422, ignored.text
+
+    created = client.post(
+        "/api/iam/user_account/",
+        json={
+            "username": username,
+            "display_name": "Probe",
+            "password": password,
+            "hashed_password": "plaintext-oops",
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": password}
+    ).status_code == 200
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": "plaintext-oops"}
+    ).status_code == 401
+
+    client.delete(f"/api/iam/user_account/{created.json()['id']}", headers=auth_headers)
+
+
+def test_user_account_patch_password_changes_login(auth_headers):
+    client = TestClient(app)
+    username = f"reset-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/iam/user_account/",
+        json={"username": username, "password": "first-password"},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    user_id = created.json()["id"]
+
+    changed = client.put(
+        f"/api/iam/user_account/{user_id}",
+        json={"password": "second-password"},
+        headers=auth_headers,
+    )
+    assert changed.status_code == 200, changed.text
+    assert "password" not in changed.json()
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": "second-password"}
+    ).status_code == 200
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": "first-password"}
+    ).status_code == 401
+
+    client.delete(f"/api/iam/user_account/{user_id}", headers=auth_headers)
+
+
+def test_user_account_patch_without_password_keeps_login(auth_headers):
+    client = TestClient(app)
+    username = f"keep-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/iam/user_account/",
+        json={"username": username, "display_name": "Keep", "password": "same-password"},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    user_id = created.json()["id"]
+
+    renamed = client.put(
+        f"/api/iam/user_account/{user_id}",
+        json={"display_name": "Kept"},
+        headers=auth_headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["display_name"] == "Kept"
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": "same-password"}
+    ).status_code == 200
+
+    client.delete(f"/api/iam/user_account/{user_id}", headers=auth_headers)

@@ -227,10 +227,15 @@ validates.
 
 ## Phase 2 — Solver selection for linear and nonlinear problems — **DONE for every linear class** (`24c894e`, `aeb5a6e`, + continuous)
 
-Three backends (CP-SAT, GLOP and branch-and-cut MILP), capabilities as data in
+Three backends (CP-SAT, GLOP and branch-and-cut MILP) plus **HiGHS** when
+`highspy` is installed, capabilities as data in
 a registry, and a policy recorded on every run: an explicit choice wins or is
 refused, otherwise the highest-ranked backend that fits, with the reason in
-`run.params.why_solver`. The test that gives it meaning is that two backends
+`run.params.why_solver`. HiGHS sits at the same rank as MILP and ahead of it
+in the registry, so a mixed model prefers it when the package is there; GLOP
+still wins a pure LP and CP-SAT a pure integer model. HiGHS runs in a child
+process: `highspy` and `ortools` both ship `libHighs` and cannot load in one
+interpreter. The test that gives it meaning is that two backends
 reach the same optimum on the same model -- with one backend, a wrong policy
 would have been invisible.
 
@@ -352,11 +357,21 @@ The tables exist and are immutable; what is missing is everything around them.
   states what the two runs differ by and whether the patch is the only
   difference, because crediting a rule for a change the data caused is a
   wrong answer dressed as an insight.
-- **Sensitivity** -- **slack done, duals not.** Migration `0017` adds
+- **Sensitivity** -- **slack done, duals done.** Migration `0017` adds
   `constraint_result.slack`; GLOP and CBC write it, CP-SAT reports `0` on
   a binding integer constraint, and an infeasible run's conflict set
-  names the rule with no room left. Shadow prices and reduced costs are
-  still open: GLOP exposes duals, but nothing records them yet.
+  names the rule with no room left. Migration `0019` adds
+  `constraint_result.dual`: GLOP and HiGHS fill it on a pure LP; CP-SAT
+  and a mixed-integer search leave it null. Reduced costs on variables
+  are on `solution.reduced_costs` (migration `0020`), same honesty.
+- **Empty ranges on the editor** -- done. `POST /api/v1/classify` takes
+  an optional `problem_id`, compiles against a live read of the domain
+  (no `snapshot_dataset()` insert), and the Model editor lists a
+  `where`/`via` that matched nobody before publish, in the same words a
+  run uses.
+- **choose() on the editor** -- done. The same classify response now
+  carries `would_solve`: `choose()`'s pick in planner language, no
+  picker. The editor still never names a backend.
 
 A number is not an answer. The value of this phase is that it turns the tool
 from a calculator into something a planner can argue with.
@@ -416,8 +431,11 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
 - **Parameter re-index race** — **done.** PUT `/values` takes `FOR SHARE` on
   `parameter_def`; PATCH and DELETE take `FOR UPDATE`, so an uncommitted
   cell write cannot hide from the re-index cell-count.
-- **No keyboard route to create or delete a relationship** (WCAG 2.1.1, Level
-  A). Less severe since the relationships screens landed, still a gap.
+- **No keyboard route to create or delete a relationship** — **done.**
+  The Relationships page already had forms and named Delete buttons.
+  The graph canvas now does too: with a node focused, `C` then Enter on
+  another node opens the same type picker as a Connect drag; `E` then
+  Enter opens the relationship panel, whose Delete is a real button.
 - **`translate_db_error` discards a trigger's own message on 23503** — **done.**
   A 23503 with no `constraint_name` (entity_type_guard's DELETE) forwards
   the trigger sentence, which names the parameters; a real FK still uses
@@ -427,9 +445,9 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
   `/parameters/{id}/values` refuses more than 10,000 cells.
 - **Five string-detail 422s** in the generic CRUD layer — **done.** The list
   route now raises FastAPI's list shape with `loc` starting at `query`.
-- **The checks script** (branch `checks`) should land; nothing currently runs
-  either suite automatically, which is how a smoke test rotted into a script
-  that would have destroyed the live database.
+- **The checks script** (branch `checks`) — **done.** `scripts/check.sh`
+  runs both suites the one correct way; `scripts/install-hooks.sh` installs
+  the pre-commit hook. Merged at `f30f1b6`.
 - **Lint** was measured and deliberately left out: a stock config reports 260
   problems, a reduced one still 34. Revisit deliberately, not by accident.
 

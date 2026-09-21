@@ -3,9 +3,10 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import EntityForm, { type ServerFieldError } from "../components/EntityForm";
 import OfflineNotice from "../components/OfflineNotice";
 import RelatedRecords from "../components/RelatedRecords";
+import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import { useCreateEntity, useEntity, useUpdateEntity } from "../api/entities";
 import { useSchema } from "../api/meta";
 import { useCapabilities } from "../hooks/useCapability";
@@ -13,7 +14,9 @@ import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useShowIdentifiers } from "../hooks/useShowIdentifiers";
 import { fieldLabel, lowerFirst, recordLabel, tableLabel, tableLabelPlural } from "../lib/labels";
+import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 import type { FieldMeta } from "../types/meta";
+import { writeCapability } from "../types/meta";
 
 /**
  * C-5: a 409 (unique-constraint violation) detail from the backend names
@@ -40,17 +43,22 @@ export function mapConstraintError(detail: string, fields: FieldMeta[]): { field
 export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
   const { can } = useCapabilities();
-  const canEdit = can("domain.edit");
   const isNew = id === undefined;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [serverFieldError, setServerFieldError] = useState<ServerFieldError | null>(null);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
+  const [pendingSubmit, setPendingSubmit] = useState<Record<string, unknown> | null>(null);
+  const [formSeed, setFormSeed] = useState<Record<string, unknown> | null>(null);
+  const [formKey, setFormKey] = useState(0);
   const toast = useToast();
   const confirmLeave = useConfirmLeave();
 
   const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
+  const canEdit = can(writeCapability(table));
   const listUrl = `/${schemaName}/${tableName}`;
   const [showIds, toggleShowIds] = useShowIdentifiers();
 
@@ -166,22 +174,61 @@ export default function EntityDetail() {
     return <p className="text-sm text-slate-500">Loading…</p>;
   }
 
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const result = await refetchEntity();
+      const fresh = result.data;
+      if (!fresh || !existing || !pendingSubmit) return;
+      const current = { ...existing, ...pendingSubmit };
+      const merged = mergeReload(existing, current, fresh);
+      setFormSeed(merged);
+      setFormKey((key) => key + 1);
+      setStale(null);
+      setPendingSubmit(null);
+      const brought = reloadedKeys(existing, current, fresh);
+      toast.success(
+        brought.length > 0
+          ? `Reloaded, keeping your edits. Updated from the other change: ${brought.join(", ")}.`
+          : "Reloaded, keeping your edits."
+      );
+    } finally {
+      setReloading(false);
+    }
+  }
+
   async function handleSubmit(values: Record<string, unknown>) {
     if (!table) return; // unreachable: the early "Loading…" return above guarantees this by the time the form can submit
     setError(null);
     setServerFieldError(null);
+    setStale(null);
     const recordTypeLabel = table ? tableLabel(table) : "Record";
+    const stamp = formSeed?.updated_at ?? existing?.updated_at;
+    const payload = !isNew && stamp ? { ...values, updated_at: stamp } : values;
     try {
       if (isNew) {
-        await createEntity.mutateAsync(values);
+        const created = (await createEntity.mutateAsync(payload)) as { id?: string };
         toast.success(`${recordTypeLabel} created`);
-      } else {
-        await updateEntity.mutateAsync(values);
-        toast.success(`${recordTypeLabel} saved`);
+        if (created?.id != null) {
+          navigate(`/${schemaName}/${tableName}/${created.id}`);
+          return;
+        }
+        navigate(listUrl);
+        return;
       }
+      await updateEntity.mutateAsync(payload);
+      toast.success(`${recordTypeLabel} saved`);
       navigate(listUrl);
     } catch (err) {
       const message = formatApiError(err);
+      // Ruling 42: not a field problem, and re-sending the same payload
+      // would be refused again -- so it gets its own state and its own
+      // remedy rather than a red line under a control.
+      if (isStaleRecordError(err)) {
+        setPendingSubmit(payload);
+        setStale(message);
+        return;
+      }
       // C-5: a 409 names the raw DB constraint (e.g.
       // "...organization_id_code already exists"), which leaks schema
       // internals and doesn't mark the offending field. When the detail
@@ -227,10 +274,12 @@ export default function EntityDetail() {
           {schemaName}.{tableName}
         </p>
       )}
+      {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <EntityForm
+        key={formKey}
         fields={table.fields}
-        initialValues={isNew ? prefill : existing}
+        initialValues={isNew ? prefill : (formSeed ?? existing)}
         onSubmit={handleSubmit}
         submitLabel={isNew ? "Create" : "Save"}
         isEdit={!isNew}

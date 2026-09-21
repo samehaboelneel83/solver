@@ -21,6 +21,10 @@ class Organization(UUIDPKMixin, Base):
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Migration 0023 -- the generic form sends every filled field.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class UserAccount(UUIDPKMixin, Base):
@@ -36,6 +40,10 @@ class UserAccount(UUIDPKMixin, Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Migration 0023 -- see Organization.updated_at.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class Role(UUIDPKMixin, Base):
@@ -44,6 +52,10 @@ class Role(UUIDPKMixin, Base):
 
     code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Migration 0023 -- see Organization.updated_at.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class UserRole(UUIDPKMixin, Base):
@@ -55,4 +67,8 @@ class UserRole(UUIDPKMixin, Base):
     )
     role_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("iam.role.id"), nullable=False
+    )
+    # Migration 0023 -- see Organization.updated_at.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )

@@ -1,9 +1,11 @@
-"""Optimistic concurrency for the three tables that have an editable form.
+"""Optimistic concurrency for the tables that have an editable form.
 
-Ruling 42. `entity`, `entity_type` and `relationship_type` each carry an
-`updated_at` maintained by a database trigger (migration ``0010``). A read
-route returns it; a form sends it back on save; :func:`check_not_stale`
-refuses the save with a **409** when the stored value has moved on.
+Ruling 42. Purpose-built forms (`entity`, `entity_type`, `relationship_type`,
+`relationship`, `parameter_value`) and the seven generic CRUD tables each
+carry an `updated_at` maintained by a database trigger (migrations ``0010``,
+``0021``, ``0022`` and ``0023``). A read route returns it; a form sends it
+back on save; :func:`check_not_stale` refuses the save with a **409** when
+the stored value has moved on.
 
 Why a 409 with a string ``detail``
 ----------------------------------
@@ -60,8 +62,8 @@ def check_not_stale(label: str, stored: datetime, expected: datetime | None) -> 
 
     `expected` is what the client last read. ``None`` means the client did
     not opt in to the check -- every route keeps working for callers that
-    predate migration 0010 (the graph's inline node rename, `curl`, the
-    seed), and the three forms that can lose a concurrent edit send it.
+    predate the column (the graph's node rename, `curl`, the seed), and the
+    forms that can lose a concurrent edit send it.
     """
     if expected is None:
         return

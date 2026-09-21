@@ -58,11 +58,11 @@ Which layer answers which failure
 
 2. **422 without ``kind``, from this module.** `parameter_def` has no
    trigger, so its CHECKs (the name pattern, ``cardinality(index_type_ids)
-   >= 1``, and migration 0008's no-duplicates rule) would reach the client
-   as 409s (Ruling 16). They are shadowed here, as are three rules the DDL
-   cannot state at all: every index type must exist and belong to the
-   parameter's own domain, the same cell may not appear twice in one PUT,
-   and values must be strict integers in ``int4`` range.
+   >= 1``) would reach the client as 409s (Ruling 16). They are shadowed
+   here, as are three rules the DDL cannot state at all: every index type
+   must exist and belong to the parameter's own domain, the same cell may
+   not appear twice in one PUT, and values must be numbers the column can
+   store. A repeated index type is legal (migration ``0025``).
 
    Strictness matters more than usual here: Postgres **rounds** a numeric
    into an ``int`` column, so a lax validator passing ``5.5`` through would
@@ -85,6 +85,7 @@ Which layer answers which failure
    waits and is judged against the new index.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -96,6 +97,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, requires
+from app.api.concurrency import check_not_stale, stale_record_conflict
 from app.api.validation import field_error, validate_name
 from app.core.db import get_db
 from app.api.quantity import Quantity, QuantityOut
@@ -110,16 +112,6 @@ router = APIRouter(prefix="/api/v1", tags=["parameters"])
 # Ids are `bigint`. Lax on purpose, like every other id on the platform;
 # only the range is bounded, for the same 22003 reason.
 BigintId = Annotated[int, Field(ge=-(2**63), le=2**63 - 1)]
-
-_DUPLICATE_INDEX_MESSAGE = (
-    "index type {name!r} appears more than once. This is a temporary "
-    "restriction, not a modelling limit: dataset snapshots currently key each "
-    "parameter row by index-type name, so two indices of the same type would "
-    "overwrite each other in the solver's input. Self-indexed parameters "
-    "(distance matrices, transition costs, precedence) are expected to be "
-    "supported once snapshots key rows by index position instead."
-)
-
 
 def _not_null(value, info):
     """PATCH: omitting a field means "unchanged", but an explicit `null`
@@ -183,6 +175,11 @@ class IndexType(BaseModel):
 class Cell(BaseModel):
     entity_ids: list[BigintId]
     value: Quantity
+    # Present on a stored cell's GET. Optional on PUT: send the value the
+    # form last read to opt in to the stale check, omit it to keep the
+    # pre-0022 last-save-wins behaviour (a first write into an empty cell,
+    # scripts, `curl`).
+    updated_at: datetime | None = None
 
 
 class ParameterValues(BaseModel):
@@ -227,6 +224,23 @@ def _get_parameter(
     return row
 
 
+def _check_cells_not_stale(db: Session, parameter_id: int, cells: list[Cell]) -> None:
+    """Refuse the whole PUT if any named cell was loaded from a superseded
+    read. Checked before any write so a 409 is as atomic as a 422."""
+    for cell in cells:
+        if cell.updated_at is None:
+            continue
+        stored = db.execute(
+            select(ParameterValue.updated_at)
+            .where(ParameterValue.parameter_def_id == parameter_id)
+            .where(ParameterValue.entity_ids == cell.entity_ids)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if stored is None:
+            raise stale_record_conflict("parameter cell")
+        check_not_stale("parameter cell", stored, cell.updated_at)
+
+
 def _commit(db: Session, table: str) -> None:
     try:
         db.commit()
@@ -247,16 +261,6 @@ def _type_names(db: Session, type_ids: list[int]) -> dict[int, tuple[str, int]]:
 
 def _check_index_types(db: Session, domain_id: int, index_type_ids: list[int]) -> None:
     known = _type_names(db, index_type_ids)
-    seen: set[int] = set()
-    for type_id in index_type_ids:
-        if type_id in seen:
-            # Ruling 10: the database also refuses this (migration 0008's
-            # CHECK); this is where the reason gets said.
-            name = known[type_id][0] if type_id in known else str(type_id)
-            raise field_error(
-                "index_type_ids", _DUPLICATE_INDEX_MESSAGE.format(name=name), index_type_ids
-            )
-        seen.add(type_id)
     for type_id in index_type_ids:
         if type_id not in known or known[type_id][1] != domain_id:
             raise field_error(
@@ -285,9 +289,9 @@ def _grid(db: Session, parameter: ParameterDef) -> ParameterValues:
     # Core, not `db.query(ParameterValue)`: the ORM's identity map hashes
     # primary keys, and this table's key contains an array (a list).
     rows = db.execute(
-        select(ParameterValue.entity_ids, ParameterValue.value).where(
-            ParameterValue.parameter_def_id == parameter.id
-        )
+        select(
+            ParameterValue.entity_ids, ParameterValue.value, ParameterValue.updated_at
+        ).where(ParameterValue.parameter_def_id == parameter.id)
     ).all()
     entity_ids = {eid for row in rows for eid in row.entity_ids}
     entities = (
@@ -303,7 +307,10 @@ def _grid(db: Session, parameter: ParameterDef) -> ParameterValues:
             IndexType(id=type_id, name=names[type_id][0] if type_id in names else None)
             for type_id in parameter.index_type_ids
         ],
-        cells=[Cell(entity_ids=list(row.entity_ids), value=row.value) for row in rows],
+        cells=[
+            Cell(entity_ids=list(row.entity_ids), value=row.value, updated_at=row.updated_at)
+            for row in rows
+        ],
         default_value=parameter.default_value,
     )
 
@@ -472,6 +479,8 @@ def put_parameter_values(
                 cell.entity_ids,
             )
         seen.add(coordinates)
+
+    _check_cells_not_stale(db, parameter.id, payload.cells)
 
     for index, cell in enumerate(payload.cells):
         key = (

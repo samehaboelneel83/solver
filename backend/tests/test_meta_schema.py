@@ -82,6 +82,10 @@ def test_meta_schema_writable_distinguishes_server_default_from_nullable(auth_he
     # (server_default, Task 11) -- must not be writable, or the frontend
     # would render an editable timestamp input on create.
     assert fields_by_name["created_at"]["writable"] is False
+    # Migration 0023: same demotion as created_at — the form must not
+    # render a timestamp control; EntityDetail attaches the loaded value.
+    assert "updated_at" in fields_by_name
+    assert fields_by_name["updated_at"]["writable"] is False
     # Nullable column, optional on create because it's genuinely optional
     # input -- must remain writable (this is what the naive is_required()
     # fix would have incorrectly hidden from create forms).
@@ -113,13 +117,19 @@ def test_meta_schema_keeps_client_default_fields_writable(auth_headers):
 
 def test_meta_schema_hides_hidden_fields_entirely(auth_headers):
     """hashed_password is passed as `hidden`, so it must not appear in the
-    metadata at all -- otherwise the frontend would render an input for it."""
+    metadata at all -- the form offers `password` instead, write-only."""
     client = TestClient(app)
     response = client.get("/api/meta/schema", headers=auth_headers)
     tables = {(t["schema"], t["table"]): t for t in response.json()}
 
     user_account = tables[("iam", "user_account")]
     field_names = {f["name"] for f in user_account["fields"]}
+    fields_by_name = {f["name"]: f for f in user_account["fields"]}
 
     assert "hashed_password" not in field_names
     assert "username" in field_names
+    password = fields_by_name["password"]
+    assert password["writable"] is True
+    assert password["write_only"] is True
+    assert password["required"] is True
+    assert password["type"] == "password"

@@ -1,10 +1,12 @@
-export type FieldType = "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "uuid" | "json";
+export type FieldType = "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "uuid" | "json" | "password";
 
 export type FieldMeta = {
   name: string;
   type: FieldType;
   required: boolean;
   writable: boolean;
+  /** Present on create/update, never returned. Empty on edit means leave the stored value. */
+  write_only?: boolean;
   is_fk: boolean;
   fk_table: string | null;
   default?: string | number | boolean | null;
@@ -27,4 +29,13 @@ export type TableMeta = {
   /** Plural human-readable name, e.g. "Entity types". Optional for the
    * same reason as `FieldMeta.label`. */
   label_plural?: string;
+  creatable?: boolean;
+  updatable?: boolean;
+  deletable?: boolean;
+  /** Capability required to create, update or delete. Defaults to domain.edit. */
+  write_capability?: string;
 };
+
+export function writeCapability(table: Pick<TableMeta, "write_capability"> | undefined): string {
+  return table?.write_capability ?? "domain.edit";
+}

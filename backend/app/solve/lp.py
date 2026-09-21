@@ -27,7 +27,7 @@ from importlib.metadata import version as _pkg_version
 from ortools.linear_solver import pywraplp
 
 from app.solve.compile import Compiled, Constraint
-from app.solve.result import Solution
+from app.solve.result import Solution, fold_duals
 from app.solve.stop import interrupt_when
 
 _ORTOOLS_VERSION = _pkg_version("ortools")
@@ -76,8 +76,7 @@ def solve(
         for key, spec in compiled.variables.items()
     }
 
-    for constraint in compiled.constraints:
-        _add(solver, variables, constraint)
+    rows = [(constraint.id, _add(solver, variables, constraint)) for constraint in compiled.constraints]
 
     if compiled.objective.coeffs:
         expression = solver.Sum(
@@ -88,6 +87,11 @@ def solve(
     with interrupt_when(should_stop, solver.InterruptSolve):
         status = solver.Solve()
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
+    duals = (
+        fold_duals((spec_id, row.dual_value()) for spec_id, row in rows if row is not None)
+        if solved
+        else None
+    )
 
     return Solution(
         status=_STATUS.get(status, "unknown"),
@@ -103,10 +107,14 @@ def solve(
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"glop (ortools {_ORTOOLS_VERSION})",
+        duals=duals,
+        reduced_costs=(
+            {key: var.reduced_cost() for key, var in variables.items()} if solved else None
+        ),
     )
 
 
-def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
+def _add(solver: pywraplp.Solver, variables: dict, c: Constraint):
     """`left relation right`, rearranged so the variables sit on one side."""
     coeffs: dict = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
@@ -116,12 +124,12 @@ def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
     expression = solver.Sum([variables[key] * float(coeff) for key, coeff in coeffs.items()])
 
     if c.relation == ">=":
-        solver.Add(expression >= rhs)
-    elif c.relation == "<=":
-        solver.Add(expression <= rhs)
-    elif c.relation in ("=", "=="):
-        solver.Add(expression == rhs)
-    else:  # pragma: no cover -- the contract admits <=, = and >= only, and
-        # a strict relation over the reals has no solver representation: the
-        # supremum it asks for is not attained.
-        raise ValueError(f"glop cannot express the relation {c.relation!r} over the reals")
+        return solver.Add(expression >= rhs)
+    if c.relation == "<=":
+        return solver.Add(expression <= rhs)
+    if c.relation in ("=", "=="):
+        return solver.Add(expression == rhs)
+    # pragma: no cover -- the contract admits <=, = and >= only, and
+    # a strict relation over the reals has no solver representation: the
+    # supremum it asks for is not attained.
+    raise ValueError(f"glop cannot express the relation {c.relation!r} over the reals")

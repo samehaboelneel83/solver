@@ -77,6 +77,17 @@ function hasNonEmptyValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
 }
 
+/** A write-only field is required on create and optional on edit — empty
+ * on edit means "leave the stored value" (a password you are not changing). */
+function requiresValue(field: FieldMeta, isEdit: boolean): boolean {
+  if (isEdit && field.write_only) return false;
+  return field.required;
+}
+
+function isPasswordField(field: FieldMeta): boolean {
+  return field.type === "password" || field.name === "password";
+}
+
 export default function EntityForm({
   fields,
   initialValues,
@@ -182,7 +193,7 @@ export default function EntityForm({
       // field -- not just FK pickers -- is checked here instead. Booleans
       // are exempt: `defaultValueFor` always gives a required boolean a
       // concrete true/false, so it's never "empty".
-      if (field.required && field.type !== "boolean" && (raw === "" || raw === null || raw === undefined)) {
+      if (requiresValue(field, isEdit) && field.type !== "boolean" && (raw === "" || raw === null || raw === undefined)) {
         nextFieldErrors[field.name] = `${fieldLabel(field)} is required.`;
         continue;
       }
@@ -329,11 +340,16 @@ export default function EntityForm({
               ? "date"
               : field.type === "datetime"
                 ? "datetime-local"
-                : "text"
+                : isPasswordField(field)
+                  ? "password"
+                  : "text"
         }
+        autoComplete={isPasswordField(field) ? "new-password" : undefined}
         className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-        placeholder={placeholderFor(field)}
-        required={field.required}
+        placeholder={
+          isEdit && field.write_only ? "leave blank to keep" : placeholderFor(field)
+        }
+        required={requiresValue(field, isEdit)}
         aria-invalid={ariaInvalid}
         aria-describedby={describedBy}
         value={toInputValue(field, values[field.name])}
@@ -344,7 +360,7 @@ export default function EntityForm({
   }
 
   const hasErrors = Object.keys(fieldErrors).length > 0;
-  const hasRequiredField = writableFields.some((f) => f.required);
+  const hasRequiredField = writableFields.some((f) => requiresValue(f, isEdit));
 
   return (
     <form onSubmit={handleSubmit} noValidate className="max-w-xl space-y-4">
@@ -384,7 +400,7 @@ export default function EntityForm({
               <>
                 <label htmlFor={id} className="block text-sm font-medium text-slate-700">
                   {fieldLabel(field)}
-                  {field.required && (
+                  {requiresValue(field, isEdit) && (
                     <span className="text-red-500" aria-hidden="true">
                       {" "}
                       *
@@ -396,7 +412,7 @@ export default function EntityForm({
                   fkTable={field.fk_table as string}
                   value={String(values[field.name] ?? "")}
                   onChange={(v) => setField(field.name, v)}
-                  required={field.required}
+                  required={requiresValue(field, isEdit)}
                   aria-invalid={hasError ? "true" : undefined}
                   aria-describedby={hasError ? errorId(field.name) : undefined}
                   testId={`field-${field.name}`}
@@ -406,7 +422,7 @@ export default function EntityForm({
               <>
                 <label htmlFor={id} className="block text-sm font-medium text-slate-700">
                   {fieldLabel(field)}
-                  {field.required && (
+                  {requiresValue(field, isEdit) && (
                     <span className="text-red-500" aria-hidden="true">
                       {" "}
                       *

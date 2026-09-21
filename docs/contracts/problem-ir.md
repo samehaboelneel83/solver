@@ -240,10 +240,15 @@ ordered, non-empty list of set names it is indexed by, and it must be **exactly*
 the domain's own `index_type_ids` resolved to names, in that order.
 
 That last rule is worth its weight. `snapshot_dataset()` emits a parameter's
-cells keyed by entity **type name**, so an IR that reads `demand` as
-`[shift, day]` snapshots without complaint, solves a different model, and
-nothing downstream ever notices. Checking it at submit time is the only place
-the mistake is visible.
+cells keyed by entity **type name** when every index type is distinct, so an
+IR that reads `demand` as `[shift, day]` snapshots without complaint, solves
+a different model, and nothing downstream ever notices. Checking it at submit
+time is the only place the mistake is visible. A repeated index type
+(`distance[location, location]`) cannot use those names: both ends would be
+the key `location`. Migration `0025` keys those cells by position (`"0"`,
+`"1"`, …) instead. The compiler prefers positional keys when they are all
+present, and falls back to type names so a dataset frozen before 0025 still
+solves.
 
 Parameter values are numbers — `parameter_value.value` and
 `parameter_def.default_value` are `numeric(15, 6)` since migration `0015`; they
@@ -324,9 +329,20 @@ hard/soft split, from `constraint_result.hard boolean` and `penalty_paid`.
                "terms": [{ "id": "o_shifts_worked", "weight": 1, "expression": { … } }] }
 ```
 
-`sense` is `minimize` or `maximize`. `terms` is a non-empty array; each term has
+`sense` is `minimize` or `maximize`. Optional `mode` is `weighted` (the
+default, omit the key) or `lex`. `terms` is a non-empty array; each term has
 a unique `id`, an integer `weight` and an `expression`. Omit the whole key for a
 feasibility problem.
+
+**`weighted` is scalarisation** — `run.objective` is the sum of `weight * term`.
+**`lex` is term order** — the first term is made as good as it can be, then
+frozen, then the next, and so on. Weights are still required (the term shape
+does not change) but they are not mixed. Soft-constraint penalties are an
+implicit last term, so bending a rule is never cheaper than meeting a
+higher-priority goal.
+
+Omitting `mode` is a widening: every document version 1 accepted still
+means a weighted sum and still hashes the same (§10.1).
 
 **Weights stayed integers** when §7 admitted fractional numbers everywhere
 else, and that is a decision rather than an oversight. A weight is the modeller
@@ -523,8 +539,8 @@ be classified into that family yet.
 **Named subexpressions**, quadratic terms, division, `min`/`max`, absolute
 value, conditionals.
 
-**Multi-objective**. `terms` with weights is scalarisation: one number comes
-out, which is what `run.objective bigint` records.
+**Pareto**. `lex` is the other ordering this version expresses; a frontier of
+answers is not one number, and `run.objective` is still one number.
 
 ---
 
@@ -615,7 +631,7 @@ what now exists:
 | `const` admitted as a decimal | `const_not_an_integer` became `const_not_a_number` |
 | a decision about how decimals are *stored*, since a float in a hashed document makes the hash depend on a text rendering | taken: see §7.4 |
 | a `continuous` domain with bounds, `lower`/`upper` no longer integers | `variableDomains` has it; bounds are numbers, and whole only where the domain is `integer` |
-| a solver that can take them | `app/solve/lp.py` — GLOP, the simplex method, in the `ortools` package already present |
+| a solver that can take them | `app/solve/lp.py` — GLOP; `app/solve/highs.py` — HiGHS in a child process when `highspy` is installed; mixed models still have the MILP fallback |
 | the honesty rule about local optima | **not yet needed, and not yet written.** It belongs to nonconvexity, and every model this contract expresses is still linear (`mul` admits at most one variable factor). When a quadratic or nonlinear term is admitted, that rule is a precondition, not a follow-up |
 
 ### 7.3 Fractional data is classified, not assumed

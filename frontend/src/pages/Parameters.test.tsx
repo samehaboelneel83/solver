@@ -305,19 +305,16 @@ describe("Parameters: creating one", () => {
     expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/already has a parameter/i);
   });
 
-  it("shows the server's explanation when the same index type is used twice", async () => {
+  it("creates a self-indexed parameter through the same form as any other", async () => {
     serve({
-      "POST /api/v1/parameters": new ApiError(
-        422,
-        JSON.stringify({
-          detail: [
-            {
-              loc: ["body", "index_type_ids"],
-              msg: "index type 'day' appears more than once. This is a temporary restriction",
-            },
-          ],
-        })
-      ),
+      "POST /api/v1/parameters": {
+        id: 9,
+        domain_id: 7,
+        name: "distance",
+        index_type_ids: [5, 5],
+        default_value: 0,
+        unit: null,
+      },
     });
     renderPage();
     const form = await screen.findByRole("form", { name: /new parameter/i });
@@ -326,7 +323,14 @@ describe("Parameters: creating one", () => {
     fireEvent.click(within(form).getByRole("button", { name: /add an index/i }));
     fireEvent.click(within(form).getByRole("button", { name: /create parameter/i }));
 
-    expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/appears more than once/i);
+    await waitFor(() => expect(calls("POST")).toHaveLength(1));
+    expect(calls("POST")[0].body).toEqual({
+      domain_id: 7,
+      name: "distance",
+      index_type_ids: [5, 5],
+      default_value: 0,
+      unit: null,
+    });
   });
 });
 

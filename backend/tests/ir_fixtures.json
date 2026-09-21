@@ -2778,6 +2778,40 @@
       }
     },
     {
+      "code": "objective_mode_unsupported",
+      "loc": [
+        "objective",
+        "mode"
+      ],
+      "why": "Pareto is a frontier of answers, not a mode of one number; lex is the other ordering this version expresses",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "mode": "pareto",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "var": "x",
+                "index": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
       "code": "objective_terms_invalid",
       "loc": [
         "objective",

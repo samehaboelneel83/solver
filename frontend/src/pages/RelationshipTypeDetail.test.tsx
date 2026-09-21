@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RelationshipTypeDetail from "./RelationshipTypeDetail";
@@ -261,6 +261,41 @@ describe("RelationshipTypeDetail", () => {
     // Same page, no level-1 heading: an axe `page-has-heading-one`
     // violation, and nothing for a screen-reader user to land on.
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/relationship type not found/i);
+  });
+
+  it("adds an attribute to this type through the nested relationship-types route", async () => {
+    serve((path, init) =>
+      init?.method === "POST" && path === "/api/v1/relationship-types/21/attributes"
+        ? Promise.resolve({
+            id: 40,
+            entity_type_id: null,
+            relationship_type_id: 21,
+            name: "weight",
+            data_type: "integer",
+            required: false,
+            unit: null,
+            enum_values: null,
+            default_value: null,
+          })
+        : undefined
+    );
+    renderPage();
+    await screen.findByDisplayValue("works_on");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
+    const editor = screen.getByRole("form", { name: "New attribute" });
+    fireEvent.change(within(editor).getByLabelText(/^Name/), { target: { value: "weight" } });
+    fireEvent.change(within(editor).getByLabelText(/^Data type/), { target: { value: "integer" } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Add attribute" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toEqual({
+      method: "POST",
+      path: "/api/v1/relationship-types/21/attributes",
+      body: { name: "weight", data_type: "integer", required: false, unit: null, enum_values: null, default_value: null },
+    });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/attribute "weight" added/i));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New attribute" })).not.toBeInTheDocument());
   });
 
   describe("deleting", () => {

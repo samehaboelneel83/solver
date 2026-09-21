@@ -52,6 +52,7 @@ from app.ir.contract import (
     RELATIONS,
     REQUIRED_KEYS,
     SENSES,
+    OBJECTIVE_MODES,
     SEVERITIES,
     TERM_KINDS,
     TRAVERSAL_DEPTHS,
@@ -86,7 +87,7 @@ _VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"})
 _PARAMETER_KEYS = frozenset({"index"})
-_OBJECTIVE_KEYS = frozenset({"sense", "terms"})
+_OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
 
 
@@ -819,6 +820,14 @@ class _ShapeChecker:
                 ["objective", "sense"],
                 f"{json.dumps(objective.get('sense'))} is not a sense; an objective is "
                 f"{' or '.join(sorted(SENSES))}",
+            )
+        mode = objective.get("mode", "weighted")
+        if mode not in OBJECTIVE_MODES:
+            return Refusal(
+                "objective_mode_unsupported",
+                ["objective", "mode"],
+                f"{json.dumps(mode)} is not an objective mode; an objective is "
+                f"{' or '.join(sorted(OBJECTIVE_MODES))}, or omit mode for a weighted sum",
             )
         terms = objective.get("terms")
         if not isinstance(terms, list) or not terms:

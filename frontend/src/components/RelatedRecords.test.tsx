@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RelatedRecords from "./RelatedRecords";
+import { editorQueryClient, EDITOR_ME } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -11,7 +12,7 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderRelated(schema: string, table: string, id: string, queryClient = new QueryClient()) {
+function renderRelated(schema: string, table: string, id: string, queryClient = editorQueryClient()) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -73,6 +74,44 @@ describe("RelatedRecords", () => {
       }
       return Promise.resolve({ items: [], total: 0 });
     });
+  });
+
+  it("hides New when the account lacks the child table's write_capability", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "iam",
+            table: "user_account",
+            write_capability: "iam.manage",
+            fields: [{ name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null }],
+          },
+          {
+            schema: "iam",
+            table: "user_role",
+            write_capability: "iam.manage",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              {
+                name: "user_id",
+                type: "uuid",
+                required: true,
+                writable: true,
+                is_fk: true,
+                fk_table: "iam.user_account",
+              },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderRelated("iam", "user_account", "u1");
+
+    expect(await screen.findByText("user_role (0)")).toBeInTheDocument();
+    expect(screen.queryByText("New")).not.toBeInTheDocument();
+    expect(screen.getByText("user_role (0)")).toHaveAttribute("href", "/iam/user_role?f_user_id=u1");
   });
 
   it("lists child tables with counts, list links, and new links", async () => {
@@ -275,6 +314,25 @@ describe("RelatedRecords", () => {
     expect(screen.queryByText(/variable_definition \(/)).not.toBeInTheDocument();
   });
 
+  it("keeps empty children in the main list when every child is empty", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve(SCHEMA_WITH_CHILDREN);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    renderRelated("problem", "problem", "p1");
+
+    expect(await screen.findByText("variable_definition (0)")).toBeInTheDocument();
+    expect(screen.getByText("constraint_definition (0)")).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ empty/)).not.toBeInTheDocument();
+    expect(screen.getByText("variable_definition (0)")).toHaveAttribute(
+      "href",
+      "/problem/variable_definition?f_problem_id=p1"
+    );
+  });
+
   it("sorts non-empty children first and collapses confirmed-empty ones behind a 'Show N empty' disclosure (E-6)", async () => {
     renderRelated("problem", "problem", "p1");
 
@@ -340,7 +398,9 @@ describe("RelatedRecords", () => {
 
     // retry: false so the failed query settles into its error state
     // immediately instead of going through react-query's default retries.
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryClient = editorQueryClient(EDITOR_ME, {
+      defaultOptions: { queries: { retry: false } },
+    });
     renderRelated("problem", "problem", "p1", queryClient);
 
     const marker = await screen.findByTitle("Count unavailable");

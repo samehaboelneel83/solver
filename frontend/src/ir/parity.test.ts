@@ -17,6 +17,7 @@ import {
   RELATIONS,
   REQUIRED_KEYS,
   SENSES,
+  OBJECTIVE_MODES,
   SEVERITIES,
   SHAPE_RULES,
   TERM_KINDS,
@@ -87,6 +88,7 @@ function fromTypeScript(): Record<string, unknown> {
     relations: [...RELATIONS],
     severities: [...SEVERITIES],
     senses: [...SENSES],
+    objectiveModes: [...OBJECTIVE_MODES],
     termKinds: [...TERM_KINDS],
     traversalDepths: [...TRAVERSAL_DEPTHS],
     filterOperators: [...FILTER_OPERATORS],
@@ -135,6 +137,7 @@ describe("the IR contract", () => {
     expect(theirs.relations).toEqual([...RELATIONS]);
     expect(theirs.severities).toEqual([...SEVERITIES]);
     expect(theirs.senses).toEqual([...SENSES]);
+    expect(theirs.objectiveModes).toEqual([...OBJECTIVE_MODES]);
     expect(theirs.termKinds).toEqual([...TERM_KINDS]);
     expect(theirs.traversalDepths).toEqual([...TRAVERSAL_DEPTHS]);
     expect(theirs.filterOperators).toEqual([...FILTER_OPERATORS]);

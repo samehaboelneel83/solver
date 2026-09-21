@@ -477,3 +477,81 @@ def test_slack_is_the_room_left_on_a_held_rule():
 
     assert slack_of(cap, {("x", ()): 3}) == Decimal(2)
     assert slack_of(cap, {("x", ()): 5}) == Decimal(0)
+
+
+def _two_binaries(*, mode: str) -> tuple[dict, dict]:
+    """x + y ≤ 1, maximise. Weighted (y at 100) prefers y; lex (x first)
+    prefers x — the case that proves the two modes are not the same mix."""
+    ir = {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+            "x": {"index": [], "domain": "binary"},
+            "y": {"index": [], "domain": "binary"},
+        },
+        "constraints": [
+            {
+                "id": "c_one",
+                "left": {"add": [{"var": "x", "index": []}, {"var": "y", "index": []}]},
+                "relation": "<=",
+                "right": {"const": 1},
+                "severity": "hard",
+            }
+        ],
+        "objective": {
+            "sense": "maximize",
+            "mode": mode,
+            "terms": [
+                {"id": "o_x", "weight": 1, "expression": {"var": "x", "index": []}},
+                {"id": "o_y", "weight": 100, "expression": {"var": "y", "index": []}},
+            ],
+        },
+    }
+    data = {"sets": {}, "parameters": {}, "parameter_defaults": {}, "relationships": {}}
+    return ir, data
+
+
+def test_lex_optimises_the_first_term_even_when_the_second_weighs_more():
+    from app.solve import cpsat
+    from app.solve.backends import CP_SAT
+    from app.solve.service import _solve_lex
+
+    weighted, data = _two_binaries(mode="weighted")
+    lex, _ = _two_binaries(mode="lex")
+
+    from_weighted = cpsat.solve(compile_model(weighted, data), time_limit=5.0)
+    from_lex = _solve_lex(CP_SAT, compile_model(lex, data), time_limit=5.0, workers=1)
+
+    assert from_weighted.status == "optimal"
+    assert from_weighted.assignments[("y", ())] == 1
+    assert from_weighted.assignments[("x", ())] == 0
+
+    assert from_lex.status == "optimal"
+    assert from_lex.assignments[("x", ())] == 1
+    assert from_lex.assignments[("y", ())] == 0
+    assert from_lex.objective == 1
+
+
+def test_omitting_mode_is_a_weighted_sum():
+    ir, data = _two_binaries(mode="weighted")
+    del ir["objective"]["mode"]
+    compiled = compile_model(ir, data)
+    assert compiled.objective_mode == "weighted"
+    assert compiled.objective.coeffs[("y", ())] == 100
+
+
+def test_parameter_index_prefers_positional_keys_so_a_self_index_keeps_both_ends():
+    from app.solve.compile import parameter_index
+
+    assert parameter_index({"0": "a", "1": "b", "value": 4}, ["location", "location"]) == ("a", "b")
+    assert parameter_index({"0": "b", "1": "a", "value": 9}, ["location", "location"]) == ("b", "a")
+
+
+def test_parameter_index_falls_back_to_type_names_for_older_snapshots():
+    from app.solve.compile import parameter_index
+
+    assert parameter_index({"day": "mon", "shift": "morning", "value": 3}, ["day", "shift"]) == (
+        "mon",
+        "morning",
+    )

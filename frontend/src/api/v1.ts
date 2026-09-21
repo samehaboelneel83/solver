@@ -114,7 +114,8 @@ export type AttrType = "integer" | "number" | "text" | "boolean" | "enum" | "tim
 
 export type AttributeDef = {
   id: Id;
-  entity_type_id: Id;
+  entity_type_id: Id | null;
+  relationship_type_id?: Id | null;
   name: string;
   data_type: AttrType;
   required: boolean;
@@ -184,6 +185,8 @@ export const listAttributes = (entityTypeId: Id) =>
   apiFetch<AttributeDef[]>(`/api/v1/entity-types/${entityTypeId}/attributes`);
 export const createAttribute = (entityTypeId: Id, body: AttributeDefCreate) =>
   send<AttributeDef>("POST", `/api/v1/entity-types/${entityTypeId}/attributes`, body);
+export const createRelationshipAttribute = (relationshipTypeId: Id, body: AttributeDefCreate) =>
+  send<AttributeDef>("POST", `/api/v1/relationship-types/${relationshipTypeId}/attributes`, body);
 export const updateAttribute = (id: Id, body: AttributeDefUpdate) =>
   send<AttributeDef>("PATCH", `/api/v1/attributes/${id}`, body);
 export const deleteAttribute = (id: Id) => remove(`/api/v1/attributes/${id}`);
@@ -268,6 +271,8 @@ export type RelationshipType = {
    * superseded read with a 409. Parsing it into a `Date` would lose the
    * microseconds Postgres stores and make every save look stale. */
   updated_at: string;
+  /** Migration 0024. Empty until the type declares some. */
+  attributes?: AttributeDef[];
 };
 
 export type RelationshipTypeCreate = {
@@ -295,6 +300,10 @@ export type Relationship = {
   /** ISO dates (`YYYY-MM-DD`). */
   valid_from: string | null;
   valid_to: string | null;
+  /** Migration 0021, Ruling 42. An opaque token, never parsed here. */
+  updated_at: string;
+  /** Migration 0024. Empty until the type declares some. */
+  attributes?: AttributeDef[];
 };
 
 export type RelationshipCreate = {
@@ -306,8 +315,11 @@ export type RelationshipCreate = {
   valid_to?: string | null;
 };
 
-/** Re-typing an edge is delete + create; re-pointing it is a PATCH. */
-export type RelationshipUpdate = Partial<Omit<RelationshipCreate, "relationship_type_id">>;
+/** Re-typing an edge is delete + create; re-pointing it is a PATCH.
+ * `updated_at` is the value the form last read -- compared, never stored. */
+export type RelationshipUpdate = Partial<Omit<RelationshipCreate, "relationship_type_id">> & {
+  updated_at?: string;
+};
 
 export function listRelationshipTypes(
   params: { domainId?: Id | null; isHierarchy?: boolean } & PageParams = {}
@@ -359,7 +371,7 @@ export type ParameterDef = {
 export type ParameterDefCreate = {
   domain_id: Id;
   name: string;
-  /** At least one, no duplicates (a temporary restriction -- see the 422's message). */
+  /** At least one. The same type may appear twice (`distance[location, location]`). */
   index_type_ids: Id[];
   default_value?: number;
   unit?: string | null;
@@ -370,7 +382,7 @@ export type ParameterDefCreate = {
  * has stored cells is a 409. */
 export type ParameterDefUpdate = Partial<Omit<ParameterDefCreate, "domain_id">>;
 
-export type ParameterCell = { entity_ids: Id[]; value: number };
+export type ParameterCell = { entity_ids: Id[]; value: number; updated_at?: string };
 
 export type ParameterValues = {
   /** `name` is null when the index type was deleted after the parameter was defined. */
@@ -455,6 +467,8 @@ export type ConstraintOutcome = {
   /** Residual at the assignment. Zero means the rule has no room left.
    * Null on runs made before the column existed. */
   slack: number | null;
+  /** Shadow price from a linear solver. Null when the backend has none. */
+  dual: number | null;
 };
 
 export type RunSummary = {
@@ -497,6 +511,8 @@ export type Run = RunSummary & {
   /** Variable name -> the index tuples it took. Null when the run found
    * nothing, which is not the same as an empty roster. */
   assignments: Record<string, string[][]> | null;
+  /** Reduced costs from a linear solver. Null when the backend has none. */
+  reduced_costs: Record<string, { index: string[]; value: number }[]> | null;
   constraints: ConstraintOutcome[];
 };
 
@@ -514,16 +530,33 @@ export type SolverInfo = {
 export const listSolvers = () => apiFetch<Page<SolverInfo>>("/api/v1/solvers");
 
 /** What kind of model this IR is. Posted, not stored: the same function a
- * run records, so the editor cannot disagree with the run about the class. */
+ * run records, so the editor cannot disagree with the run about the class.
+ * `empty_ranges` is filled when a `problem_id` is posted so the compiler
+ * can see the live domain; it stays empty when the shape is classified
+ * alone. */
+export type EmptyRange = {
+  constraint_id: string;
+  kind: string;
+  index: Record<string, string>;
+};
+
 export type Classification = {
   model_class: string;
   needs: string[];
   reasons: string[];
   planner: string[];
+  empty_ranges: EmptyRange[];
+  /** `choose()`'s pick in planner language, or null when this platform
+   * has nothing that can take the model. The editor shows this; it never
+   * offers a solver picker. */
+  would_solve: string | null;
 };
 
-export const classifyIr = (ir: Record<string, unknown>) =>
-  send<Classification>("POST", "/api/v1/classify", { ir });
+export const classifyIr = (ir: Record<string, unknown>, problemId?: Id | null) =>
+  send<Classification>("POST", "/api/v1/classify", {
+    ir,
+    ...(problemId != null ? { problem_id: problemId } : {}),
+  });
 
 /** Who the caller is and what they may do. Computed by the API in the same
  * place it enforces them, so the screen and the server cannot disagree. */
@@ -721,6 +754,10 @@ export const useCreateAttribute = () =>
   useV1Mutation(({ entityTypeId, body }: { entityTypeId: Id; body: AttributeDefCreate }) =>
     createAttribute(entityTypeId, body)
   );
+export const useCreateRelationshipAttribute = () =>
+  useV1Mutation(({ relationshipTypeId, body }: { relationshipTypeId: Id; body: AttributeDefCreate }) =>
+    createRelationshipAttribute(relationshipTypeId, body)
+  );
 export const useUpdateAttribute = () =>
   useV1Mutation(({ id, body }: { id: Id; body: AttributeDefUpdate }) => updateAttribute(id, body));
 export const useDeleteAttribute = () => useV1Mutation(deleteAttribute);
@@ -777,6 +814,13 @@ export function useRelationships(
   params: { relationshipTypeId?: Id | null; fromEntityId?: Id | null; toEntityId?: Id | null } & PageParams
 ) {
   return useQuery({ queryKey: [V1, "relationships", params], queryFn: () => listRelationships(params) });
+}
+export function useRelationship(id: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "relationship", id],
+    queryFn: () => getRelationship(id as Id),
+    enabled: isId(id),
+  });
 }
 
 /** The API's largest page. Both multi-list hooks below ask for it, the
@@ -917,10 +961,10 @@ export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
 }
 
-export function useClassify(ir: Record<string, unknown> | null) {
+export function useClassify(ir: Record<string, unknown> | null, problemId?: Id | null) {
   return useQuery({
-    queryKey: [V1, "classify", ir],
-    queryFn: () => classifyIr(ir as Record<string, unknown>),
+    queryKey: [V1, "classify", ir, problemId ?? null],
+    queryFn: () => classifyIr(ir as Record<string, unknown>, problemId),
     enabled: ir !== null,
     staleTime: 30_000,
   });

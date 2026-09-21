@@ -78,6 +78,35 @@ describe("DataTable", () => {
     expect(status).toHaveTextContent("1-1 of 1");
   });
 
+  it("does not render a write-only column", () => {
+    renderTable(
+      <DataTable
+        {...baseProps}
+        fields={[
+          ...fields,
+          {
+            name: "password",
+            type: "password",
+            required: true,
+            writable: true,
+            write_only: true,
+            is_fk: false,
+            fk_table: null,
+          },
+        ]}
+        rows={[{ ...rows[0], password: undefined }]}
+        total={1}
+        limit={20}
+        offset={0}
+        onPageChange={vi.fn()}
+      />
+    );
+
+    const table = screen.getByRole("table");
+    expect(within(table).queryByRole("columnheader", { name: /password/i })).not.toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /code/i })).toBeInTheDocument();
+  });
+
   it("calls onPageChange with the next offset", () => {
     const onPageChange = vi.fn();
     renderTable(

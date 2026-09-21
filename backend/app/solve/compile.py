@@ -38,6 +38,20 @@ class Unsupported(Exception):
     """The IR is valid but this compiler cannot express it yet."""
 
 
+def parameter_index(row: dict[str, Any], order: list[str]) -> tuple[str, ...]:
+    """The entity keys of one frozen parameter cell, in index order.
+
+    New snapshots of a self-indexed parameter (`distance[location,
+    location]`) key the two ends ``"0"`` and ``"1"``: type name would
+    collapse them. Older snapshots, and every uniquely-typed parameter,
+    still key by type name. Prefer positions when they are all present so
+    a run frozen before 0025 and one frozen after both compile.
+    """
+    if all(str(i) in row for i in range(len(order))):
+        return tuple(str(row[str(i)]) for i in range(len(order)))
+    return tuple(row[set_name] for set_name in order)
+
+
 def number(value: Any) -> Decimal:
     """Every quantity in a compiled model, as an exact decimal.
 
@@ -65,6 +79,9 @@ class Linear:
 
     coeffs: dict[VarKey, Decimal] = field(default_factory=dict)
     const: Decimal = field(default_factory=lambda: Decimal(0))
+
+    def copy(self) -> "Linear":
+        return Linear(dict(self.coeffs), self.const)
 
     def add(self, other: "Linear", factor: Decimal | int = 1) -> "Linear":
         for key, coeff in other.coeffs.items():
@@ -136,6 +153,14 @@ class Compiled:
     sense: str
     # Kept for the result: solutions are reported in domain terms.
     var_index_sets: dict[str, list[str]]
+    # `weighted` (default) is a scalarised sum; `lex` is term order, first
+    # term most important. Omit `mode` on the IR and this is `weighted`.
+    objective_mode: str = "weighted"
+    objective_term_ids: list[str] = field(default_factory=list)
+    objective_terms: list[Linear] = field(default_factory=list)
+    # Soft-constraint penalties, already pointed the way the sense wants.
+    # Weighted mode folds them into `objective`; lex solves them last.
+    penalty_objective: Linear = field(default_factory=Linear)
     # constraint id -> the violation variables minted for its instances, so a
     # result can say *which* instance was broken and by how much, not merely
     # that a penalty was paid.
@@ -235,12 +260,16 @@ class _Compiler:
         self._declare_variables()
         for spec in self.ir.get("constraints", []):
             self._expand_constraint(spec)
-        objective, sense = self._objective()
+        objective, sense, mode, term_ids, terms, penalties = self._objective()
         return Compiled(
             variables=self.variables,
             constraints=self.constraints,
             objective=objective,
             sense=sense,
+            objective_mode=mode,
+            objective_term_ids=term_ids,
+            objective_terms=terms,
+            penalty_objective=penalties,
             var_index_sets={n: v["index"] for n, v in self.ir.get("variables", {}).items()},
             violations=self.violations,
             penalty_of=self.penalty_of,
@@ -266,14 +295,16 @@ class _Compiler:
 
     def _index_parameters(self) -> None:
         """A parameter arrives as rows keyed by set name (`{"day": "mon",
-        "shift": "morning", "value": 3}`); solving wants a lookup by the
-        ordered index tuple. An absent cell means the default (Ruling 28) --
-        which is why `parameter_defaults` travels with the dataset."""
+        "shift": "morning", "value": 3}`) or, when an index type repeats,
+        by position (`{"0": "a", "1": "b", "value": 4}`). Solving wants a
+        lookup by the ordered index tuple. An absent cell means the default
+        (Ruling 28) -- which is why `parameter_defaults` travels with the
+        dataset."""
         for name, spec in self.ir.get("parameters", {}).items():
             order = spec["index"]
             table: dict[tuple[str, ...], Decimal] = {}
             for row in self.params_raw.get(name, []):
-                table[tuple(row[set_name] for set_name in order)] = number(row["value"])
+                table[parameter_index(row, order)] = number(row["value"])
             self._params[name] = table
 
     def _declare_variables(self) -> None:
@@ -547,9 +578,11 @@ class _Compiler:
 
     # -- objective --------------------------------------------------------
 
-    def _objective(self) -> tuple[Linear, str]:
+    def _objective(self) -> tuple[Linear, str, str, list[str], list[Linear], Linear]:
         spec = self.ir.get("objective") or {}
         total = Linear()
+        term_ids: list[str] = []
+        terms: list[Linear] = []
         for term in spec.get("terms", []):
             expression = term.get("expression")
             if expression is None:
@@ -557,16 +590,22 @@ class _Compiler:
                     f"objective term {term.get('id')!r} carries no expression, so it "
                     "contributes nothing that can be optimised"
                 )
-            total.add(self._term(expression, {}), factor=number(term.get("weight", 1)))
+            linear = self._term(expression, {})
+            term_ids.append(str(term.get("id")))
+            terms.append(linear.copy())
+            total.add(linear, factor=number(term.get("weight", 1)))
 
         # Penalties push the objective the way it does not want to go: they
         # cost when minimising and subtract when maximising, so a soft
         # constraint is never free in either direction.
         sense = spec.get("sense", "minimize")
+        mode = spec.get("mode", "weighted")
         direction = 1 if sense == "minimize" else -1
+        penalties = Linear()
         for key, penalty in self._penalties:
-            total.add(Linear(coeffs={key: Decimal(1)}), factor=number(penalty) * direction)
-        return total, sense
+            penalties.add(Linear(coeffs={key: Decimal(1)}), factor=number(penalty) * direction)
+        total.add(penalties.copy())
+        return total, sense, mode, term_ids, terms, penalties
 
 
 def env_keys(env: dict[str, tuple[str, dict]]) -> list[tuple[str, str]]:

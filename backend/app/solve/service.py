@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterator
 
 from sqlalchemy import text
@@ -25,7 +26,16 @@ from sqlalchemy.orm import Session
 
 from app.solve.backends import NoBackend, choose
 from app.solve.classify import classify
-from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model, slack_by_constraint
+from app.solve.compile import (
+    _VIOLATION,
+    Compiled,
+    Constraint,
+    Linear,
+    Unsupported,
+    compile_model,
+    number,
+    slack_by_constraint,
+)
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 from app.settings_resolve import resolve
@@ -307,9 +317,18 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             compiled = compile_model(ir, data)
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
-            result = backend.solve(
-                compiled, time_limit=time_limit, workers=8, should_stop=stop.is_set
-            )
+            if compiled.objective_mode == "lex":
+                result = _solve_lex(
+                    backend,
+                    compiled,
+                    time_limit=time_limit,
+                    workers=8,
+                    should_stop=stop.is_set,
+                )
+            else:
+                result = backend.solve(
+                    compiled, time_limit=time_limit, workers=8, should_stop=stop.is_set
+                )
         except Unsupported as exc:
             # The model is valid and this compiler cannot express it. That is a
             # failed run with a reason, not a crash and not an empty answer.
@@ -332,6 +351,18 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     extra = {"chosen_solver": backend.name, "why_solver": why}
     if compiled.empty_ranges:
         extra["empty_ranges"] = compiled.empty_ranges
+    if compiled.objective_mode == "lex":
+        extra["objective_mode"] = "lex"
+        if result.assignments:
+            extra["objective_terms"] = [
+                {
+                    "id": term_id,
+                    "value": float(term.evaluated_at(result.assignments)),
+                }
+                for term_id, term in zip(
+                    compiled.objective_term_ids, compiled.objective_terms, strict=True
+                )
+            ]
     db.execute(
         text(
             "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
@@ -429,8 +460,15 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
         return
 
     db.execute(
-        text("INSERT INTO solution (run_id, assignments) VALUES (:r, :a)"),
-        {"r": run_id, "a": _json(_assignments(compiled, result))},
+        text(
+            "INSERT INTO solution (run_id, assignments, reduced_costs)"
+            " VALUES (:r, :a, CAST(:rc AS jsonb))"
+        ),
+        {
+            "r": run_id,
+            "a": _json(_assignments(compiled, result)),
+            "rc": None if (packed := _reduced_costs(result)) is None else _json(packed),
+        },
     )
 
     # One row per constraint, including the satisfied ones: "which rules held"
@@ -441,6 +479,7 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
         seen[spec_id] = {"hard": True, "total": 0, "penalty": 0, "where": [], "slack": None}
 
     slacks = slack_by_constraint(compiled, result.assignments)
+    duals = result.duals
 
     for spec_id, keys in compiled.violations.items():
         entry = seen.setdefault(
@@ -461,8 +500,8 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
             text(
                 "INSERT INTO constraint_result"
                 " (run_id, constraint_id, label, hard, satisfied, total_violation,"
-                "  penalty_paid, violations, slack)"
-                " VALUES (:r, :c, :l, :hard, :sat, :total, :pen, :v, :slack)"
+                "  penalty_paid, violations, slack, dual)"
+                " VALUES (:r, :c, :l, :hard, :sat, :total, :pen, :v, :slack, :dual)"
             ),
             {
                 "r": run_id,
@@ -474,8 +513,69 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
                 "pen": entry["penalty"],
                 "v": _json(entry["where"]),
                 "slack": slacks.get(spec_id),
+                "dual": None if duals is None else duals.get(spec_id, 0),
             },
         )
+
+
+def _solve_lex(
+    backend,
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop=None,
+) -> Solution:
+    """Optimise terms in order, freezing each before the next.
+
+    Backends stay dumb: each stage is an ordinary `Compiled` with one
+    objective. Soft-constraint penalties are an implicit last term, so a
+    planner's priorities are not traded against bending a rule until those
+    priorities are already met.
+    """
+    stages: list[Linear] = [term.copy() for term in compiled.objective_terms]
+    if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
+        stages.append(compiled.penalty_objective.copy())
+    if not stages:
+        return backend.solve(
+            compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        )
+
+    deadline = time.monotonic() + time_limit
+    freezes: list[Constraint] = []
+    wall = 0.0
+    result: Solution | None = None
+    for i, term in enumerate(stages):
+        remaining = max(0.05, deadline - time.monotonic())
+        stage = replace(
+            compiled,
+            objective=term.copy(),
+            constraints=[*compiled.constraints, *freezes],
+        )
+        result = backend.solve(
+            stage, time_limit=remaining, workers=workers, should_stop=should_stop
+        )
+        wall += result.wall_seconds
+        if result.status != "optimal" or not result.assignments:
+            return replace(result, wall_seconds=round(wall, 3))
+        value = term.evaluated_at(result.assignments)
+        freeze_rhs = number(round(value)) if compiled.is_integral else value
+        freezes.append(
+            Constraint(
+                id=f"_lex_{i}",
+                index={},
+                left=term.copy(),
+                relation="=",
+                right=Linear(const=freeze_rhs),
+            )
+        )
+
+    assert result is not None
+    primary = None
+    if compiled.objective_terms and result.assignments:
+        raw = compiled.objective_terms[0].evaluated_at(result.assignments)
+        primary = int(round(raw)) if compiled.is_integral else float(raw)
+    return replace(result, wall_seconds=round(wall, 3), objective=primary)
 
 
 def _record_conflict(
@@ -517,6 +617,32 @@ def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[st
         if name != _VIOLATION and value:
             out.setdefault(name, []).append(list(index))
     return out
+
+
+_REDUCED_COST_FLOOR = 1e-8
+
+
+def _reduced_costs(result: Solution) -> dict[str, list[dict[str, Any]]] | None:
+    """Non-zero reduced costs, grouped like the roster. None when this
+    backend has nothing to say -- not an empty object, which would mean it
+    looked and every decision was free."""
+    if result.reduced_costs is None:
+        return None
+    out: dict[str, list[dict[str, Any]]] = {}
+    for (name, index), value in sorted(result.reduced_costs.items()):
+        if name == _VIOLATION or abs(value) < _REDUCED_COST_FLOOR:
+            continue
+        out.setdefault(name, []).append(
+            {"index": list(index), "value": _json_number(value)}
+        )
+    return out
+
+
+def _json_number(value: float) -> int | float:
+    rounded = round(value)
+    if abs(value - rounded) < _REDUCED_COST_FLOOR:
+        return int(rounded)
+    return float(value)
 
 
 def _json(value: Any) -> str:

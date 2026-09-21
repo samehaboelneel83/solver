@@ -55,6 +55,37 @@ describe("EntityList", () => {
     });
   });
 
+  it("hides New on a table whose write_capability the account does not hold", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "iam",
+            table: "user_account",
+            write_capability: "iam.manage",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              {
+                name: "username",
+                type: "string",
+                required: true,
+                writable: true,
+                is_fk: false,
+                fk_table: null,
+                label_field: true,
+              },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [{ id: "1", username: "admin" }], total: 1 });
+    });
+
+    renderWithProviders("/iam/user_account");
+    await screen.findByRole("table");
+    expect(screen.queryByRole("link", { name: "New" })).not.toBeInTheDocument();
+  });
+
   it("renders rows using the metadata field list", async () => {
     renderWithProviders("/domain/entity_type");
 

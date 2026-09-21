@@ -1,5 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
 import RelationshipTypeFields, {
   RELATIONSHIP_TYPE_FIELDS,
   draftFromType,
@@ -8,6 +9,8 @@ import RelationshipTypeFields, {
 import {
   ErrorSummary,
   colourFieldError,
+  dataTypeLabel,
+  formatDefault,
   nameProblem,
   serverFieldErrors,
   useFieldErrors,
@@ -19,11 +22,16 @@ import { useToast } from "../components/ToastProvider";
 import { ApiError } from "../api/client";
 import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
+  useCreateRelationshipAttribute,
+  useDeleteAttribute,
   useDeleteRelationshipType,
   useEntityTypes,
   useRelationshipType,
   useRelationships,
+  useUpdateAttribute,
   useUpdateRelationshipType,
+  type AttributeDef,
+  type AttributeDefCreate,
   type Id,
   type RelationshipType,
 } from "../api/v1";
@@ -35,8 +43,8 @@ import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
 
 /** One relationship type: its name, its two ends, its cardinality, whether
- * it is a hierarchy, and its colour -- edited together, then deleted here
- * if it is no longer wanted. */
+ * it is a hierarchy, its colour, and (from 0024) its attribute definitions
+ * -- edited together, then deleted here if it is no longer wanted. */
 export default function RelationshipTypeDetail() {
   const { id: rawId } = useParams();
   const id = parseRouteId(rawId);
@@ -110,6 +118,7 @@ function Editor({
         </h1>
       </div>
       <TypeForm type={type} reload={reload} />
+      <Attributes type={type} />
       <DeleteType type={type} />
     </div>
   );
@@ -245,6 +254,193 @@ function TypeForm({
         </button>
         )}
       </form>
+    </section>
+  );
+}
+
+/** Which editor is open: none, a new attribute, or an existing one by id. */
+type Editing = null | "new" | number;
+
+function Attributes({ type }: { type: RelationshipType }) {
+  const { can } = useCapabilities();
+  const canEdit = can("domain.edit");
+  const [editing, setEditing] = useState<Editing>(null);
+  const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
+  const [general, setGeneral] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const createAttribute = useCreateRelationshipAttribute();
+  const updateAttribute = useUpdateAttribute();
+  const deleteAttribute = useDeleteAttribute();
+  const toast = useToast();
+  const attributes = type.attributes ?? [];
+
+  const editingAttribute = typeof editing === "number" ? attributes.find((a) => a.id === editing) : undefined;
+
+  function open(next: Editing) {
+    setServerErrors(null);
+    setGeneral(null);
+    setEditing(next);
+  }
+
+  function close() {
+    open(null);
+    headingRef.current?.focus();
+  }
+
+  function refused(err: unknown) {
+    const result = serverFieldErrors(err, ATTRIBUTE_FIELDS, "attribute");
+    setServerErrors(result.fields);
+    setGeneral(result.general);
+  }
+
+  async function handleCreate(body: AttributeDefCreate) {
+    setGeneral(null);
+    try {
+      const created = await createAttribute.mutateAsync({ relationshipTypeId: type.id, body });
+      toast.success(`Attribute "${created.name}" added`);
+      close();
+    } catch (err) {
+      refused(err);
+    }
+  }
+
+  async function handleUpdate(attribute: AttributeDef, body: AttributeDefCreate) {
+    setGeneral(null);
+    try {
+      const saved = await updateAttribute.mutateAsync({ id: attribute.id, body });
+      toast.success(`Attribute "${saved.name}" saved`);
+      close();
+    } catch (err) {
+      refused(err);
+    }
+  }
+
+  async function handleDelete(attribute: AttributeDef) {
+    const confirmed = window.confirm(
+      `Delete attribute "${attribute.name}"? Values already stored on relationships are not removed: a relationship that ` +
+        `still holds a "${attribute.name}" value will be refused on its next save (unknown attribute) until that ` +
+        `value is removed. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    try {
+      await deleteAttribute.mutateAsync(attribute.id);
+      toast.success(`Attribute "${attribute.name}" deleted`);
+      if (editing === attribute.id) close();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }
+
+  return (
+    <section aria-labelledby="attributes-heading" className="rounded-md border border-slate-200 bg-white p-4">
+      <h2 id="attributes-heading" ref={headingRef} tabIndex={-1} className="mb-3 text-base font-semibold text-slate-900">
+        Attributes
+      </h2>
+
+      {attributes.length === 0 ? (
+        <p className="mb-4 text-sm text-slate-600">
+          No attributes yet. Relationships of this type keep free-form JSON attributes until you add some.
+        </p>
+      ) : (
+        <div className="mb-4 overflow-x-auto">
+          <table className="w-full text-left text-sm" aria-label="Attributes">
+            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-600">
+              <tr>
+                <th scope="col" className="px-2 py-2 font-semibold">Name</th>
+                <th scope="col" className="px-2 py-2 font-semibold">Data type</th>
+                <th scope="col" className="px-2 py-2 font-semibold">Required</th>
+                <th scope="col" className="px-2 py-2 font-semibold">Unit</th>
+                <th scope="col" className="px-2 py-2 font-semibold">Allowed values</th>
+                <th scope="col" className="px-2 py-2 font-semibold">Default</th>
+                <th scope="col" className="px-2 py-2 font-semibold">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {attributes.map((attribute) => (
+                <tr key={attribute.id} className="border-b border-slate-100 last:border-0 align-top">
+                  <th scope="row" className="px-2 py-2 font-mono font-normal text-slate-900">
+                    {attribute.name}
+                  </th>
+                  <td className="px-2 py-2 text-slate-700">{dataTypeLabel(attribute.data_type)}</td>
+                  <td className="px-2 py-2 text-slate-700">{attribute.required ? "Yes" : "No"}</td>
+                  <td className="px-2 py-2 text-slate-700">{attribute.unit ?? "—"}</td>
+                  <td className="px-2 py-2 text-slate-700">
+                    {attribute.enum_values ? attribute.enum_values.join(", ") : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-slate-700">{formatDefault(attribute.default_value)}</td>
+                  <td className="whitespace-nowrap px-2 py-1 text-right">
+                    {canEdit && (
+                      <>
+                    <button
+                      type="button"
+                      aria-label={`Edit ${attribute.name}`}
+                      onClick={() => open(attribute.id)}
+                      className="rounded px-2 py-1.5 text-sm text-blue-600 underline hover:text-blue-800"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${attribute.name}`}
+                      onClick={() => handleDelete(attribute)}
+                      className="rounded px-2 py-1.5 text-sm text-red-700 underline hover:text-red-900"
+                    >
+                      Delete
+                    </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing === null && canEdit && (
+        <button
+          type="button"
+          onClick={() => open("new")}
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          Add attribute
+        </button>
+      )}
+
+      {editing !== null && (
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">
+            {editing === "new" ? "New attribute" : `Edit attribute ${editingAttribute?.name ?? ""}`}
+          </h3>
+          {general && <p className="mb-3 whitespace-pre-line text-sm text-red-600">{general}</p>}
+          {editing === "new" ? (
+            <AttributeDefEditor
+              key="new"
+              submitLabel="Add attribute"
+              onSubmit={handleCreate}
+              onCancel={close}
+              isSubmitting={createAttribute.isPending}
+              serverErrors={serverErrors}
+              autoFocus
+            />
+          ) : editingAttribute ? (
+            <AttributeDefEditor
+              key={editingAttribute.id}
+              initial={editingAttribute}
+              submitLabel="Save attribute"
+              onSubmit={(body) => handleUpdate(editingAttribute, body)}
+              onCancel={close}
+              isSubmitting={updateAttribute.isPending}
+              serverErrors={serverErrors}
+              autoFocus
+            />
+          ) : (
+            <p className="text-sm text-slate-600">This attribute no longer exists.</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

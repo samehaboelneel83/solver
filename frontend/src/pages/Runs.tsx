@@ -517,7 +517,12 @@ function RunDetail({ id }: { id: Id }) {
   const broken = data.constraints.filter((c) => !c.satisfied);
   const emptyRanges = (data.params as { empty_ranges?: EmptyRange[] }).empty_ranges ?? [];
   const lead = outcomeLead(data);
-  const params = data.params as { why_solver?: string; classified_as?: string };
+  const params = data.params as {
+    why_solver?: string;
+    classified_as?: string;
+    objective_mode?: string;
+    objective_terms?: { id: string; value: number }[];
+  };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
 
@@ -625,6 +630,27 @@ function RunDetail({ id }: { id: Id }) {
         );
       })}
 
+      {data.reduced_costs &&
+        Object.values(data.reduced_costs).some((entries) => entries.length > 0) && (
+          <div className="mt-4">
+            <h3 className="mb-2 text-sm font-semibold text-slate-900">Would move the goal</h3>
+            <ul className="space-y-1 text-xs text-slate-600">
+              {Object.entries(data.reduced_costs).flatMap(([variable, entries]) => {
+                const name = naming(data.labels, data.index_sets.variables[variable]);
+                return entries.map((entry) => (
+                  <li key={`${variable}\u0001${entry.index.join("\u0001")}`}>
+                    <span className="font-mono text-slate-900">
+                      {variable}
+                      {entry.index.length > 0 ? ` · ${name(entry.index).join(" · ")}` : ""}
+                    </span>{" "}
+                    worth {entry.value} on the goal
+                  </li>
+                ));
+              })}
+            </ul>
+          </div>
+        )}
+
       <details className="mt-6 text-sm">
         <summary className="cursor-pointer font-semibold text-slate-900">Technical</summary>
         <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
@@ -634,6 +660,14 @@ function RunDetail({ id }: { id: Id }) {
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
+          {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (
+            <Fact
+              label="Goals in order"
+              value={(params.objective_terms ?? [])
+                .map((term) => `${term.id} ${term.value}`)
+                .join(" → ")}
+            />
+          )}
         </dl>
       </details>
     </section>
@@ -799,6 +833,9 @@ function ConstraintRow({ outcome }: { outcome: ConstraintOutcome }) {
           <span className="text-xs text-slate-500">
             {outcome.slack === 0 ? "no room left" : `room ${outcome.slack}`}
           </span>
+        )}
+        {outcome.dual != null && outcome.dual !== 0 && (
+          <span className="text-xs text-slate-500">worth {outcome.dual} on the goal</span>
         )}
       </div>
       {outcome.violations.length > 0 && (

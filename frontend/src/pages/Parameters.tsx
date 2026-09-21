@@ -470,7 +470,8 @@ function IndexChooser({
       </legend>
       <p id={`${baseId}-index-hint`} className="mt-1 text-xs text-slate-500">
         One entity type per index, in order: <code>demand[day, shift]</code> is not the same parameter as{" "}
-        <code>demand[shift, day]</code>. Two indexes are laid out as a grid; three or more are listed.
+        <code>demand[shift, day]</code>. The same type twice is a distance matrix. Two indexes are laid out as a
+        grid; three or more are listed.
       </p>
       <div className="mt-2 flex flex-wrap items-end gap-2">
         {indexes.map((typeId, position) => (

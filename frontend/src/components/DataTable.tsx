@@ -342,7 +342,7 @@ export default function DataTable({
   // flag gates every raw-identifier surface on a page, not just this table's own id column.
   const [showIds, toggleShowIds] = useShowIdentifiers();
 
-  const displayFields = showIds ? fields : fields.filter((f) => !isIdentifierColumn(f));
+  const displayFields = fields.filter((f) => !f.write_only && (showIds || !isIdentifierColumn(f)));
 
   // FK columns, grouped by the table they reference: one label query per
   // distinct FK table on the page. useQueries (rather than calling

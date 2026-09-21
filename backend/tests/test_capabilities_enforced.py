@@ -110,6 +110,32 @@ def test_a_modeller_may_change_the_model(db, seeded):
     assert response.status_code == 201
 
 
+def test_a_modeller_may_not_grant_roles(db, seeded):
+    """iam.manage is the capability that creates users and assigns roles.
+    domain.edit is not a back door onto that — a modeller shapes the model,
+    they do not decide who else may."""
+    client = TestClient(app)
+    modeller = _account(db, "modeller")
+    username = f"granted-{uuid.uuid4().hex[:8]}"
+
+    created = client.post(
+        "/api/iam/user_account/",
+        headers=modeller,
+        json={"username": username, "password": "change-me-planner"},
+    )
+    assert created.status_code == 403, created.text
+    assert "iam.manage" in created.json()["detail"]
+
+    role = client.get("/api/iam/role/?q=planner", headers=modeller).json()["items"][0]
+    granted = client.post(
+        "/api/iam/user_role/",
+        headers=modeller,
+        json={"user_id": role["id"], "role_id": role["id"]},
+    )
+    assert granted.status_code == 403, granted.text
+    assert "iam.manage" in granted.json()["detail"]
+
+
 def test_a_viewer_may_read_but_neither_solve_nor_edit(db, seeded):
     """Reading stays behind authentication alone: a result nobody can look at
     is not worth producing, and the platform's value is in being read."""

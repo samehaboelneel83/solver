@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import { relationshipErrorMessage } from "../api/graph";
 import {
   useDeleteEntity,
@@ -8,6 +8,7 @@ import {
   useEntityRecord,
   useEntityType,
   useEntityTypes,
+  useRelationship,
   useRelationshipType,
   useUpdateEntity,
   useUpdateEntityType,
@@ -24,6 +25,8 @@ import { entityServerErrors } from "../pages/EntityRecord";
 import { confirmDeleteRelationship, deletedRelationshipMessage } from "../lib/relationships";
 import { useCapabilities } from "../hooks/useCapability";
 import { useToast } from "./ToastProvider";
+import StaleRecordNotice from "./StaleRecordNotice";
+import { mergeReload } from "../lib/staleRecord";
 import {
   CARDINALITY_LABEL,
   entityTypeIdFromNodeId,
@@ -288,15 +291,35 @@ function NodeForm({
  * A node the payload does not hold shows as `#id` rather than blank --
  * the same spelling the type lists use -- because a confirmation that
  * silently drops one end is worse than one that admits it.
+ *
+ * The stored row is fetched rather than read off the canvas, so the form
+ * can send `updated_at` (migration 0021) and a concurrent attrs overwrite
+ * is refused instead of last-save-wins. When the type has declared
+ * `attribute_def` rows (migration 0024), those attrs are the same typed
+ * controls an entity uses; otherwise the JSON box remains.
  */
 function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: string; onClose: () => void }) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
   const edge = graph.edges.find((e) => e.id === edgeId);
+  const relationshipId = Number(edgeId);
+  const query = useRelationship(Number.isSafeInteger(relationshipId) ? relationshipId : null);
+  const typeQuery = useRelationshipType(query.data?.relationship_type_id ?? null);
+  const attributes = typeQuery.data?.attributes ?? [];
+  const typed = attributes.length > 0;
   const nodeLabel = (id: string) => graph.nodes.find((node) => node.id === id)?.label ?? `#${id}`;
   const fromLabel = edge ? nodeLabel(edge.source) : "";
   const toLabel = edge ? nodeLabel(edge.target) : "";
+  const seeded = useRef("");
+  const loadedId = useRef<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [drafts, setDrafts] = useState<AttrDrafts>({});
+  const [stored, setStored] = useState<Record<string, unknown>>({});
+  const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
+  const { errors, replace } = useFieldErrors(serverErrors);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const updateRelationship = useUpdateRelationship();
   const deleteRelationship = useDeleteRelationship();
@@ -304,29 +327,100 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
   const attrsId = useId();
 
   useEffect(() => {
-    setDraft(JSON.stringify(edge?.attributes ?? {}, null, 2));
-  }, [edgeId, edge?.attributes]);
+    loadedId.current = null;
+  }, [edgeId]);
+
+  useEffect(() => {
+    if (!query.data || loadedId.current === query.data.id) return;
+    loadedId.current = query.data.id;
+    const text = JSON.stringify(query.data.attrs ?? {}, null, 2);
+    seeded.current = text;
+    setDraft(text);
+    setStored(query.data.attrs ?? {});
+    setUpdatedAt(query.data.updated_at);
+    setStale(null);
+  }, [query.data]);
+
+  useEffect(() => {
+    if (!query.data || attributes.length === 0) return;
+    setDrafts(draftsFromAttrs(attributes, query.data.attrs ?? {}));
+  }, [query.data, attributes]);
 
   if (!edge) return null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setStale(null);
+    setServerErrors(null);
     let attrs: Record<string, unknown>;
-    try {
-      attrs = JSON.parse(draft);
-    } catch {
-      setError("Attributes must be valid JSON.");
-      return;
+    if (typed) {
+      const built = buildAttrs(attributes, drafts);
+      if (!built.ok) {
+        replace(built.errors);
+        return;
+      }
+      replace({});
+      attrs = built.attrs;
+    } else {
+      try {
+        attrs = JSON.parse(draft);
+      } catch {
+        setError("Attributes must be valid JSON.");
+        return;
+      }
     }
     try {
-      // A relationship's `attrs` has no `attribute_def` behind it in v1 --
-      // only entities' do -- so this stays a JSON box rather than becoming a
-      // typed form.
-      await updateRelationship.mutateAsync({ id: Number(edge!.id), body: { attrs } });
+      // When the type has declared defs, attrs are rebuilt from those
+      // (same as an entity). Otherwise the JSON box remains, for a type
+      // that has not declared any. The whole object is replaced, which
+      // is why `updated_at` is sent.
+      const body = updatedAt === null ? { attrs } : { attrs, updated_at: updatedAt };
+      const saved = await updateRelationship.mutateAsync({ id: Number(edge!.id), body });
+      const text = JSON.stringify(saved.attrs ?? {}, null, 2);
+      seeded.current = text;
+      setDraft(text);
+      setStored(saved.attrs ?? {});
+      setDrafts(draftsFromAttrs(attributes, saved.attrs ?? {}));
+      setUpdatedAt(saved.updated_at);
       toast.success(`${edge!.type} saved`);
     } catch (err) {
+      if (isStaleRecordError(err)) {
+        setError(null);
+        setStale(formatApiError(err));
+        return;
+      }
+      if (typed) {
+        const result = entityServerErrors(err, attributes.map((attribute) => attribute.name));
+        setServerErrors(result.fields);
+        setError(result.general);
+        return;
+      }
       setError(relationshipErrorMessage(err));
+    }
+  }
+
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const fresh = (await query.refetch()).data;
+      if (!fresh) return;
+      const freshText = JSON.stringify(fresh.attrs ?? {}, null, 2);
+      if (typed) {
+        const baseline = draftsFromAttrs(attributes, stored);
+        const merged = mergeReload(baseline, drafts, draftsFromAttrs(attributes, fresh.attrs ?? {}));
+        setDrafts(merged);
+      } else {
+        const merged = mergeReload({ json: seeded.current }, { json: draft }, { json: freshText });
+        setDraft(merged.json);
+      }
+      setStored(fresh.attrs ?? {});
+      setUpdatedAt(fresh.updated_at);
+      setStale(null);
+      seeded.current = freshText;
+      toast.success("Reloaded, keeping your edits.");
+    } finally {
+      setReloading(false);
     }
   }
 
@@ -359,16 +453,39 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
         From <span className="font-medium text-slate-900">{fromLabel}</span> to{" "}
         <span className="font-medium text-slate-900">{toLabel}</span>
       </p>
+      {query.error && (
+        <p className="mb-2 whitespace-pre-line text-sm text-red-600">{formatApiError(query.error)}</p>
+      )}
+      {stale && (
+        <div className="mb-2">
+          <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />
+        </div>
+      )}
       {error && <p className="mb-2 whitespace-pre-line text-sm text-red-600">{error}</p>}
+      {!query.data ? (
+        <p className="text-sm text-slate-500">Loading…</p>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-2" data-testid="edge-property-form">
-        <FieldLabel htmlFor={attrsId}>Attributes (JSON)</FieldLabel>
-        <textarea
-          id={attrsId}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          rows={4}
-          className={`${INPUT_CLASS} font-mono text-xs`}
-        />
+        {typed ? (
+          <AttrsForm
+            attributes={attributes}
+            drafts={drafts}
+            errors={errors}
+            staleKeys={staleAttrKeys(attributes, stored)}
+            onChange={(name, value) => setDrafts((prev) => ({ ...prev, [name]: value }))}
+          />
+        ) : (
+          <>
+            <FieldLabel htmlFor={attrsId}>Attributes (JSON)</FieldLabel>
+            <textarea
+              id={attrsId}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={4}
+              className={`${INPUT_CLASS} font-mono text-xs`}
+            />
+          </>
+        )}
         <div className={BUTTON_ROW}>
           {canEdit && (
             <>
@@ -390,6 +507,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }

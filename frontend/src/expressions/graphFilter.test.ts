@@ -112,13 +112,53 @@ describe("graphTargets", () => {
 describe("matchingNodeIds", () => {
   it("returns the nodes that match and leaves out the ones that do not", () => {
     const ids = matchingNodeIds(GRAPH, catalogue, expr({ field: UNIT_CAPACITY, operator: ">", value: 5 }));
-    expect([...ids].sort()).toEqual(["n1"]);
+    expect(ids.has("n1")).toBe(true);
+    expect(ids.has("n2")).toBe(false);
+  });
+
+  it("keeps every other type on the canvas when a rule names one type's attribute", () => {
+    // HQ matches `unit.capacity > 5`; Ops does not. Morning is a shift, so
+    // a unit rule is not a reason to hide it -- that used to empty the
+    // rest of the canvas. A node we cannot type still does not sneak through.
+    const ids = matchingNodeIds(GRAPH, catalogue, expr({ field: UNIT_CAPACITY, operator: ">", value: 5 }));
+    expect([...ids].sort()).toEqual(["n1", "n3"]);
+    expect(ids.has("n4")).toBe(false);
   });
 
   it("distinguishes the two entity types' same-named attributes", () => {
-    expect([...matchingNodeIds(GRAPH, catalogue, expr({ field: SHIFT_CAPACITY, operator: ">", value: 5 }))]).toEqual([
+    // Threshold above both capacities, so a match-by-name would hide
+    // everyone. Keeping the *other* type is what proves the field still
+    // carries its owner, not that we matched the wrong `capacity`.
+    expect([...matchingNodeIds(GRAPH, catalogue, expr({ field: SHIFT_CAPACITY, operator: ">", value: 20 }))].sort()).toEqual(
+      ["n1", "n2"]
+    );
+    expect([...matchingNodeIds(GRAPH, catalogue, expr({ field: UNIT_CAPACITY, operator: ">", value: 20 }))]).toEqual([
       "n3",
     ]);
+  });
+
+  it("filters each type independently when the document names two types under and", () => {
+    const ids = matchingNodeIds(
+      GRAPH,
+      catalogue,
+      expr(
+        { field: UNIT_CAPACITY, operator: ">", value: 5 },
+        { field: SHIFT_CAPACITY, operator: ">", value: 5 }
+      )
+    );
+    expect([...ids].sort()).toEqual(["n1", "n3"]);
+  });
+
+  it("a negated rule about one type does not hide the others", () => {
+    const ids = matchingNodeIds(GRAPH, catalogue, {
+      version: EXPRESSION_VERSION,
+      query: {
+        combinator: "and",
+        not: true,
+        rules: [{ field: UNIT_CAPACITY, operator: ">", value: 5 }],
+      },
+    } as ExpressionDocument);
+    expect([...ids].sort()).toEqual(["n2", "n3"]);
   });
 
   it("returns every node for an empty expression, so it filters nothing", () => {

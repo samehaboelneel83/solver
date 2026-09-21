@@ -68,16 +68,17 @@ from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user, requires
-# Shared rather than re-derived: `relationship_type.name` carries the
-# identical `^[a-z][a-z0-9_]*$` CHECK as the two names Task 5 validates,
-# including the trailing-newline subtlety that `re.fullmatch` closes and
-# `re.match` on an anchored pattern does not. (Imported privately from
-# `entity_types` until Task 8 moved them to `validation`, per Ruling 22.)
+from app.api.entity_types import (
+    AttributeDefCreate,
+    AttributeDefRead,
+    _check_default_value,
+    _check_enum_pairing,
+)
 from app.api.validation import NAME_PATTERN, field_error, validate_colour, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
-from app.models.v1_domain import Relationship, RelationshipType
+from app.models.v1_domain import AttributeDef, Relationship, RelationshipType
 
 router = APIRouter(prefix="/api/v1", tags=["relationships"])
 
@@ -152,6 +153,9 @@ class RelationshipTypeRead(BaseModel):
     # Migration 0010, Ruling 42. Sent back on PATCH to have a save built
     # on a superseded read refused with a 409.
     updated_at: datetime
+    # Migration 0024. Empty until the type declares some; a type with none
+    # still accepts free-form `relationship.attrs`.
+    attributes: list[AttributeDefRead]
 
 
 class RelationshipTypeCreate(BaseModel):
@@ -203,6 +207,9 @@ class RelationshipRead(BaseModel):
     attrs: dict[str, Any]
     valid_from: date | None
     valid_to: date | None
+    # Migration 0021, Ruling 42. Sent back on PATCH to have a save built
+    # on a superseded read refused with a 409.
+    updated_at: datetime
 
 
 class RelationshipCreate(BaseModel):
@@ -233,6 +240,9 @@ class RelationshipUpdate(BaseModel):
     attrs: dict[str, Any] | None = None
     valid_from: date | None = None
     valid_to: date | None = None
+    # Ruling 42 -- the `updated_at` the client last read, popped before
+    # the rest are assigned. See `app/api/concurrency.py`.
+    updated_at: datetime | None = None
 
 
 class RelationshipList(BaseModel):
@@ -257,11 +267,53 @@ def _get_relationship_type(
     return row
 
 
-def _get_relationship(db: Session, relationship_id: int) -> Relationship:
-    row = db.get(Relationship, relationship_id)
+def _get_relationship(db: Session, relationship_id: int, *, for_update: bool = False) -> Relationship:
+    # See `entities.py::_get_entity` for why the lock is conditional.
+    row = (
+        db.get(Relationship, relationship_id, with_for_update=True)
+        if for_update
+        else db.get(Relationship, relationship_id)
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="relationship not found")
     return row
+
+
+def _attributes_for_relationship_types(
+    db: Session, type_ids: list[int]
+) -> dict[int, list[AttributeDef]]:
+    if not type_ids:
+        return {}
+    rows = (
+        db.query(AttributeDef)
+        .filter(AttributeDef.relationship_type_id.in_(type_ids))
+        .order_by(AttributeDef.name.asc())
+        .all()
+    )
+    grouped: dict[int, list[AttributeDef]] = {type_id: [] for type_id in type_ids}
+    for row in rows:
+        if row.relationship_type_id is not None:
+            grouped[row.relationship_type_id].append(row)
+    return grouped
+
+
+def _read_type(row: RelationshipType, attributes: list[AttributeDef]) -> RelationshipTypeRead:
+    return RelationshipTypeRead(
+        id=row.id,
+        domain_id=row.domain_id,
+        name=row.name,
+        from_type_id=row.from_type_id,
+        to_type_id=row.to_type_id,
+        cardinality=row.cardinality,  # type: ignore[arg-type]
+        is_hierarchy=row.is_hierarchy,
+        colour=row.colour,
+        updated_at=row.updated_at,
+        attributes=[AttributeDefRead.model_validate(a) for a in attributes],
+    )
+
+
+def _read_type_one(db: Session, row: RelationshipType) -> RelationshipTypeRead:
+    return _read_type(row, _attributes_for_relationship_types(db, [row.id]).get(row.id, []))
 
 
 def _commit(db: Session, table: str) -> None:
@@ -298,8 +350,9 @@ def list_relationship_types(
         .limit(limit)
         .all()
     )
+    grouped = _attributes_for_relationship_types(db, [row.id for row in rows])
     return RelationshipTypeList(
-        items=[RelationshipTypeRead.model_validate(row) for row in rows], total=total
+        items=[_read_type(row, grouped.get(row.id, [])) for row in rows], total=total
     )
 
 
@@ -316,7 +369,7 @@ def create_relationship_type(
     db.add(row)
     _commit(db, "relationship_type")
     db.refresh(row)
-    return RelationshipTypeRead.model_validate(row)
+    return _read_type_one(db, row)
 
 
 @router.get("/relationship-types/{relationship_type_id}")
@@ -325,7 +378,7 @@ def get_relationship_type(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> RelationshipTypeRead:
-    return RelationshipTypeRead.model_validate(_get_relationship_type(db, relationship_type_id))
+    return _read_type_one(db, _get_relationship_type(db, relationship_type_id))
 
 
 @router.patch("/relationship-types/{relationship_type_id}")
@@ -349,7 +402,7 @@ def update_relationship_type(
         setattr(row, field, value)
     _commit(db, "relationship_type")
     db.refresh(row)
-    return RelationshipTypeRead.model_validate(row)
+    return _read_type_one(db, row)
 
 
 @router.delete("/relationship-types/{relationship_type_id}", status_code=204)
@@ -361,6 +414,38 @@ def delete_relationship_type(
     # `relationship` rows cascade in the database (ON DELETE CASCADE).
     db.delete(_get_relationship_type(db, relationship_type_id))
     _commit(db, "relationship_type")
+
+
+@router.get("/relationship-types/{relationship_type_id}/attributes")
+def list_relationship_attributes(
+    relationship_type_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> list[AttributeDefRead]:
+    _get_relationship_type(db, relationship_type_id)
+    return [
+        AttributeDefRead.model_validate(row)
+        for row in _attributes_for_relationship_types(db, [relationship_type_id]).get(
+            relationship_type_id, []
+        )
+    ]
+
+
+@router.post("/relationship-types/{relationship_type_id}/attributes", status_code=201)
+def create_relationship_attribute(
+    relationship_type_id: int,
+    payload: AttributeDefCreate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("domain.edit")),
+) -> AttributeDefRead:
+    _get_relationship_type(db, relationship_type_id)
+    _check_enum_pairing(payload.data_type, payload.enum_values)
+    _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
+    attribute = AttributeDef(relationship_type_id=relationship_type_id, **payload.model_dump())
+    db.add(attribute)
+    _commit(db, "attribute_def")
+    db.refresh(attribute)
+    return AttributeDefRead.model_validate(attribute)
 
 
 # --- relationships ---------------------------------------------------------
@@ -422,8 +507,10 @@ def update_relationship(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> RelationshipRead:
-    row = _get_relationship(db, relationship_id)
     changes = payload.model_dump(exclude_unset=True)
+    expected = changes.pop("updated_at", None)
+    row = _get_relationship(db, relationship_id, for_update=expected is not None)
+    check_not_stale("relationship", row.updated_at, expected)
     _check_validity_window(
         changes["valid_from"] if "valid_from" in changes else row.valid_from,
         changes["valid_to"] if "valid_to" in changes else row.valid_to,

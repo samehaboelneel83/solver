@@ -15,6 +15,8 @@ answer":
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -120,6 +122,10 @@ def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_he
     assert by_id["c_one_shift_per_day"]["slack"] >= 0
     assert by_id["c_cover_demand"]["slack"] is not None
     assert by_id["c_cover_demand"]["slack"] < 0
+    # CP-SAT has no duals; a number here would be invented.
+    assert by_id["c_one_shift_per_day"]["dual"] is None
+    assert by_id["c_cover_demand"]["dual"] is None
+    assert run["reduced_costs"] is None
 
 
 def test_broken_constraints_are_listed_before_the_ones_that_held(seeded, auth_headers, db):
@@ -373,6 +379,101 @@ def test_classify_reports_the_model_in_planner_language(auth_headers):
     assert "every rule is linear" in body["planner"]
     assert "at least one rule can bend, at a cost" in body["planner"]
     assert "soft-constraints" in body["needs"]
+    assert body["empty_ranges"] == []
+    assert body["would_solve"]
+    assert "combinatorial" in body["would_solve"].lower()
+    assert "cp-sat" not in body["would_solve"].lower()
+
+
+def test_classify_says_when_no_solver_this_platform_has_can_take_the_model(auth_headers):
+    """A draft the registry cannot take is still classified: the editor
+    has to say so before publish, not wait for a run to fail."""
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/classify",
+        json={"ir": {"variables": {"x": {"domain": "foo"}}}},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_class"] == "unsupported"
+    assert body["would_solve"] is None
+
+
+def test_classify_against_live_data_names_empty_ranges_without_writing(
+    seeded, auth_headers, db
+):
+    """The editor needs compile_model(ir, data) to see a vacuous forall.
+    snapshot_dataset() writes; a keystroke must not. The live read is the
+    same JSON a freeze would produce, and the dataset table stays put."""
+    client = TestClient(app)
+    ir = copy.deepcopy(
+        db.execute(
+            text("SELECT ir FROM model_version WHERE id = :v"),
+            {"v": seeded["model_version_id"]},
+        ).scalar_one()
+    )
+    ir["constraints"] = [
+        *ir["constraints"],
+        {
+            "id": "c_nobody",
+            "forall": [
+                {
+                    "index": "e",
+                    "set": "employee",
+                    "where": [{"attr": "full_name", "op": "=", "value": "nobody-at-all"}],
+                }
+            ],
+            "left": {
+                "sum": {"var": "assign", "index": ["e", "d", "s"]},
+                "over": [
+                    {"index": "d", "set": "day"},
+                    {"index": "s", "set": "shift"},
+                ],
+            },
+            "relation": ">=",
+            "right": {"const": 1},
+            "severity": "hard",
+        },
+    ]
+    before = db.execute(
+        text("SELECT count(*) FROM dataset WHERE problem_id = :p"),
+        {"p": seeded["problem_id"]},
+    ).scalar_one()
+
+    response = client.post(
+        "/api/v1/classify",
+        json={"ir": ir, "problem_id": seeded["problem_id"]},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_class"] == "IP"
+    assert {"constraint_id": "c_nobody", "kind": "forall", "index": {}} in body[
+        "empty_ranges"
+    ]
+    after = db.execute(
+        text("SELECT count(*) FROM dataset WHERE problem_id = :p"),
+        {"p": seeded["problem_id"]},
+    ).scalar_one()
+    assert after == before
+
+
+def test_classify_unknown_problem_is_404(auth_headers):
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/classify",
+        json={
+            "ir": {"variables": {"x": {"domain": "binary"}}},
+            "problem_id": 9_000_000_000,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "problem not found"
 
 
 def test_cancelling_a_queued_run_returns_it_cancelled(seeded, auth_headers, db):

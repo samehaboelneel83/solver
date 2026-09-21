@@ -54,6 +54,9 @@ class Backend:
     #: Whether this build actually has it.
     is_available: Callable[[], bool] = field(default=lambda: True)
     note: str = ""
+    #: One sentence the Model editor shows instead of this backend's name.
+    #: A picker is a different capability; the editor never offers one.
+    planner_choice: str = ""
 
 
 def _cpsat_solve(
@@ -110,12 +113,32 @@ def _lp_available() -> bool:
     return lp.available()
 
 
+def _highs_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+) -> Solution:
+    from app.solve import highs
+
+    return highs.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+    )
+
+
+def _highs_available() -> bool:
+    from app.solve import highs
+
+    return highs.available()
+
+
 # Ranks are global, so they encode one ordering across every class. That
 # works because the `classes` sets keep each backend out of the comparison
 # where it would be the wrong technique: glop and cp-sat both rank 0 and never
-# compete, because no model is both an LP and an IP. milp ranks last not
-# because it is worst but because it is the generalist -- it wins exactly
-# where nothing more specific fits, which is the mixed case.
+# compete, because no model is both an LP and an IP. highs and milp share
+# rank 1; highs is listed first so it wins the mixed case when installed.
+# milp remains the generalist fallback that ships inside ortools.
 CP_SAT = Backend(
     name="cp-sat",
     classes=frozenset({"IP", "trivial"}),
@@ -123,6 +146,7 @@ CP_SAT = Backend(
     rank=0,
     solve=_cpsat_solve,
     note="constraint programming; strongest on tightly constrained combinatorial models",
+    planner_choice="A combinatorial solver will take this by default.",
 )
 
 GLOP = Backend(
@@ -133,6 +157,20 @@ GLOP = Backend(
     solve=_lp_solve,
     is_available=_lp_available,
     note="the simplex method; the right technique for a model with no discrete decisions",
+    planner_choice="A linear solver will take this by default.",
+)
+
+HIGHS = Backend(
+    name="highs",
+    classes=frozenset({"IP", "LP", "MILP", "trivial"}),
+    provides=frozenset(
+        {"linear", "integral", "continuous", "fractional-data", "soft-constraints"}
+    ),
+    rank=1,
+    solve=_highs_solve,
+    is_available=_highs_available,
+    note="HiGHS; LP and MILP under an MIT licence, the mixed-model default when installed",
+    planner_choice="A mixed solver will take this by default.",
 )
 
 MILP = Backend(
@@ -144,10 +182,11 @@ MILP = Backend(
     rank=1,
     solve=_milp_solve,
     is_available=_milp_available,
-    note="branch and cut over a linear relaxation; the only one that takes a mixed model",
+    note="branch and cut over a linear relaxation; the ortools fallback for a mixed model",
+    planner_choice="A mixed solver will take this by default.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, MILP)
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP)
 
 
 class NoBackend(Exception):
@@ -199,3 +238,17 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
     if others:
         reason += f"; {', '.join(others)} could also take it"
     return chosen, reason
+
+
+def planner_choice_for(found: Classification) -> str | None:
+    """What the Model editor shows: the chosen backend's planner sentence,
+    or None when this platform has nothing that can take the model.
+
+    `choose()` is the one policy; this is only its wording. The editor
+    never names the backend and never offers a picker.
+    """
+    try:
+        backend, _why = choose(found)
+    except NoBackend:
+        return None
+    return backend.planner_choice

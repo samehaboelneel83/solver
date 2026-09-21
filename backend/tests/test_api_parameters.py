@@ -1,6 +1,6 @@
 """Parameter definitions and the sparse value grid (`app/api/parameters.py`),
-plus migration 0008's duplicate-index CHECK and how `snapshot_dataset()`
-resolves a sparse grid (migration 0009).
+plus how `snapshot_dataset()` resolves a sparse grid (migration 0009) and
+keeps both ends of a self-indexed parameter (migration 0025).
 
 What is pinned here, and why each is shaped the way it is:
 
@@ -29,9 +29,9 @@ that insertion order, id order, key order and `sort_order` all disagree
 with the order the grid promises (see `grid`).  An order that merely
 happened to match insertion would pass a weaker fixture and pin nothing.
 
-**5. Ruling 10's CHECK, at the database level.**  Duplicate
-`index_type_ids` are refused by raw SQL, bypassing the router, so the
-constraint is proven to exist independently of the 422 that shadows it.
+**5. Self-indexed parameters.**  `distance[day, day]` is accepted by the
+router and by raw SQL. A snapshot of it keys cells `"0"`/`"1"`, so
+`(mon, tue)` and `(tue, mon)` both survive.
 
 **6. Obligation B, resolved.**  `test_snapshot_resolves_a_cell_reset_to_the_default`
 was Task 8's KNOWN GAP test; since migration 0009 (Ruling 28) the snapshot
@@ -49,7 +49,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import OperationalError
 
 from app.api.parameters import _get_parameter
 from app.core.config import get_settings
@@ -201,6 +201,17 @@ def _get_values(client, auth_headers, parameter_id) -> dict:
     return response.json()
 
 
+def _plain_cells(payload) -> list[dict]:
+    """entity_ids and value only. `updated_at` is asserted present so a
+    GET that dropped it cannot hide behind this helper."""
+    cells = payload["cells"] if isinstance(payload, dict) else payload
+    plain = []
+    for cell in cells:
+        assert isinstance(cell.get("updated_at"), str), cell
+        plain.append({"entity_ids": cell["entity_ids"], "value": cell["value"]})
+    return plain
+
+
 def _stored(db, parameter_id) -> dict[tuple, int]:
     """The table itself, bypassing the router."""
     rows = db.execute(
@@ -319,11 +330,9 @@ def test_empty_index_type_ids_is_422_not_409(client, auth_headers, domain_id):
     _blamed(_request_layer_errors(response), "index_type_ids")
 
 
-def test_duplicate_index_type_ids_is_422_and_says_it_is_temporary(
-    client, auth_headers, domain_id, grid
-):
-    """Ruling 10: the message must say the restriction is temporary and why,
-    so a user does not read it as a permanent modelling limit."""
+def test_self_indexed_parameter_is_accepted(client, auth_headers, domain_id, grid):
+    """distance[day, day] is an ordinary parameter. The 0008 CHECK was a
+    temporary guard while snapshots keyed cells by type name."""
     response = _make_def(
         client,
         auth_headers,
@@ -331,14 +340,11 @@ def test_duplicate_index_type_ids_is_422_and_says_it_is_temporary(
         name="distance",
         index_type_ids=[grid["day"], grid["day"]],
     )
-    entry = _blamed(_request_layer_errors(response), "index_type_ids")
-    message = entry["msg"].lower()
-    assert "temporar" in message
-    assert "snapshot" in message  # the why: rows are keyed by index-type name
-    assert "day" in message  # names the repeated type, not just an id
+    assert response.status_code == 201, response.text
+    assert response.json()["index_type_ids"] == [grid["day"], grid["day"]]
 
 
-def test_patch_to_duplicate_index_type_ids_is_422(client, auth_headers, domain_id, grid):
+def test_patch_to_a_repeated_index_type_is_accepted(client, auth_headers, domain_id, grid):
     parameter = _def_id(
         client, auth_headers, domain_id, name="distance", index_type_ids=[grid["day"]]
     )
@@ -347,7 +353,8 @@ def test_patch_to_duplicate_index_type_ids_is_422(client, auth_headers, domain_i
         json={"index_type_ids": [grid["shift"], grid["shift"]]},
         headers=auth_headers,
     )
-    assert "temporar" in _blamed(_request_layer_errors(response), "index_type_ids")["msg"]
+    assert response.status_code == 200, response.text
+    assert response.json()["index_type_ids"] == [grid["shift"], grid["shift"]]
 
 
 def test_index_type_from_another_domain_or_missing_is_422(client, auth_headers, domain_id, grid):
@@ -542,7 +549,7 @@ def test_a_cell_equal_to_the_default_is_deleted_not_stored(client, auth_headers,
 
     db.rollback()  # new snapshot: see the committed state
     assert _stored(db, demand) == {(tue, morning): 7}
-    assert response.json()["cells"] == [{"entity_ids": [tue, morning], "value": 7}]
+    assert _plain_cells(response.json()) == [{"entity_ids": [tue, morning], "value": 7}]
 
 
 def test_setting_a_never_stored_cell_to_the_default_stores_nothing(
@@ -593,9 +600,9 @@ def test_cells_come_back_in_grid_order(client, auth_headers, grid, demand):
         ("sat", "morning", 11),
     ]
     want = [{"entity_ids": [d[day], s[shift]], "value": v} for day, shift, v in expected]
-    assert _get_values(client, auth_headers, demand)["cells"] == want
+    assert _plain_cells(_get_values(client, auth_headers, demand)) == want
     # And again: stable across reads, not just once.
-    assert _get_values(client, auth_headers, demand)["cells"] == want
+    assert _plain_cells(_get_values(client, auth_headers, demand)) == want
 
 
 def test_wrong_arity_is_422_parameter_index(client, auth_headers, db, grid, demand):
@@ -679,30 +686,28 @@ def test_deleting_an_entity_removes_its_cells(client, auth_headers, grid, demand
         [{"entity_ids": [mon, morning], "value": 5}, {"entity_ids": [tue, morning], "value": 7}],
     )
     assert client.delete(f"/api/v1/entities/{mon}", headers=auth_headers).status_code == 204
-    assert _get_values(client, auth_headers, demand)["cells"] == [
+    assert _plain_cells(_get_values(client, auth_headers, demand)) == [
         {"entity_ids": [tue, morning], "value": 7}
     ]
 
 
-# --- migration 0008: Ruling 10's CHECK, at the database level --------------
+# --- migration 0025: a repeated index type is a real parameter -------------
 
 
-def test_duplicate_index_types_are_refused_by_the_database(db, domain_id, grid):
-    """Raw SQL, bypassing the router: the seed, a migration, psql or a
-    future worker never go through the 422, so the CHECK must stand alone."""
-    with pytest.raises(IntegrityError) as exc:
-        db.execute(
-            text(
-                "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
-                "VALUES (:d, 'distance', :i)"
-            ),
-            {"d": domain_id, "i": [grid["day"], grid["shift"], grid["day"]]},
-        )
-    assert exc.value.orig.pgcode == "23514"
-    assert exc.value.orig.diag.constraint_name == "parameter_def_index_type_ids_distinct"
+def test_self_indexed_parameter_is_accepted_by_the_database(db, domain_id, grid):
+    """Raw SQL, bypassing the router: the seed and psql never go through
+    the 201, so the CHECK that used to refuse this must be gone."""
+    parameter = db.execute(
+        text(
+            "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
+            "VALUES (:d, 'distance', :i) RETURNING id"
+        ),
+        {"d": domain_id, "i": [grid["day"], grid["day"]]},
+    ).scalar_one()
+    assert parameter
 
 
-def test_distinct_index_types_are_accepted_by_the_database(db, domain_id, grid):
+def test_distinct_index_types_are_still_accepted_by_the_database(db, domain_id, grid):
     parameter = db.execute(
         text(
             "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
@@ -711,22 +716,6 @@ def test_distinct_index_types_are_accepted_by_the_database(db, domain_id, grid):
         {"d": domain_id, "i": [grid["shift"], grid["day"]]},
     ).scalar_one()
     assert parameter
-
-
-def test_the_duplicate_check_also_guards_updates(db, domain_id, grid):
-    parameter = db.execute(
-        text(
-            "INSERT INTO parameter_def (domain_id, name, index_type_ids) "
-            "VALUES (:d, 'rota', :i) RETURNING id"
-        ),
-        {"d": domain_id, "i": [grid["day"]]},
-    ).scalar_one()
-    with pytest.raises(IntegrityError) as exc:
-        db.execute(
-            text("UPDATE parameter_def SET index_type_ids = :i WHERE id = :p"),
-            {"i": [grid["day"], grid["day"]], "p": parameter},
-        )
-    assert exc.value.orig.diag.constraint_name == "parameter_def_index_type_ids_distinct"
 
 
 # --- Obligation B, resolved: the snapshot carries the defaults (Ruling 28) --
@@ -817,6 +806,49 @@ def test_snapshot_resolves_a_cell_reset_to_the_default(client, auth_headers, db,
     assert _resolve(data, "demand", {"day": "mon", "shift": "morning"}) == 2
     assert _resolve(data, "demand", {"day": "tue", "shift": "morning"}) == 7
     assert _resolve(data, "demand", {"day": "wed", "shift": "night"}) == 2
+
+
+def test_snapshot_keeps_both_coordinates_of_a_self_indexed_parameter(
+    client, auth_headers, db, domain_id, grid
+):
+    """A cell (mon, tue) is not the same as (tue, mon). Snapshots used to
+    key both coordinates `day`, so the second overwrote the first."""
+    distance = _def_id(
+        client,
+        auth_headers,
+        domain_id,
+        name="distance",
+        index_type_ids=[grid["day"], grid["day"]],
+        default_value=0,
+    )
+    mon, tue = grid["days"]["mon"], grid["days"]["tue"]
+    assert (
+        _put(
+            client,
+            auth_headers,
+            distance,
+            [
+                {"entity_ids": [mon, tue], "value": 4},
+                {"entity_ids": [tue, mon], "value": 9},
+            ],
+        ).status_code
+        == 200
+    )
+    problem = db.execute(
+        text("INSERT INTO problem (domain_id, name) VALUES (:d, 'p') RETURNING id"),
+        {"d": domain_id},
+    ).scalar_one()
+    model_version = db.execute(
+        text(
+            "INSERT INTO model_version (problem_id, ir) "
+            "VALUES (:p, CAST(:ir AS jsonb)) RETURNING id"
+        ),
+        {"p": problem, "ir": '{"sets": ["day"], "parameters": {"distance": {}}}'},
+    ).scalar_one()
+    dataset = db.execute(text("SELECT snapshot_dataset(:mv)"), {"mv": model_version}).scalar_one()
+    data = db.execute(text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset}).scalar_one()
+    rows = {(row["0"], row["1"]): row["value"] for row in data["parameters"]["distance"]}
+    assert rows == {("mon", "tue"): 4, ("tue", "mon"): 9}
 
 
 def test_put_refuses_more_cells_than_the_cap(client, auth_headers, demand, monkeypatch):

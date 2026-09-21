@@ -1,5 +1,9 @@
+from typing import Optional
+
 from fastapi import APIRouter
 
+from app.api.validation import field_error
+from app.core.security import hash_password
 from app.crud.factory import build_crud_router
 from app.models.iam import Organization, Role, UserAccount, UserRole
 from app.models.v1_domain import Domain
@@ -11,7 +15,7 @@ router = APIRouter()
 # --- iam ---
 
 OrganizationCreate, OrganizationUpdate, OrganizationRead = make_crud_schemas(
-    Organization, name="Organization", readonly={"id"}, server_default={"created_at"}
+    Organization, name="Organization", readonly={"id"}, server_default={"created_at", "updated_at"}
 )
 router.include_router(
     build_crud_router(
@@ -24,12 +28,30 @@ router.include_router(
     )
 )
 
+def hash_user_password(data: dict) -> dict:
+    """Turn a write-only `password` into `hashed_password`. A raw hash in
+    the payload is still dropped by `hidden=`, so it never reaches here."""
+    if "password" not in data:
+        return data
+    password = data.pop("password")
+    if password is None:
+        return data
+    if not isinstance(password, str) or password.strip() == "":
+        raise field_error("password", "set a password", password)
+    if len(password.encode("utf-8")) > 72:
+        raise field_error("password", "must be at most 72 bytes (bcrypt's limit)", password)
+    data["hashed_password"] = hash_password(password)
+    return data
+
+
 UserAccountCreate, UserAccountUpdate, UserAccountRead = make_crud_schemas(
     UserAccount,
     name="UserAccount",
     readonly={"id"},
-    server_default={"created_at"},
+    server_default={"created_at", "updated_at"},
     hidden={"hashed_password"},
+    extra_create={"password": (str, ...)},
+    extra_update={"password": (Optional[str], None)},
 )
 router.include_router(
     build_crud_router(
@@ -39,10 +61,14 @@ router.include_router(
         read_schema=UserAccountRead,
         schema_name="iam",
         table_name="user_account",
+        prepare=hash_user_password,
+        write_capability="iam.manage",
     )
 )
 
-RoleCreate, RoleUpdate, RoleRead = make_crud_schemas(Role, name="Role", readonly={"id"})
+RoleCreate, RoleUpdate, RoleRead = make_crud_schemas(
+    Role, name="Role", readonly={"id"}, server_default={"updated_at"}
+)
 router.include_router(
     build_crud_router(
         model=Role,
@@ -51,10 +77,13 @@ router.include_router(
         read_schema=RoleRead,
         schema_name="iam",
         table_name="role",
+        write_capability="iam.manage",
     )
 )
 
-UserRoleCreate, UserRoleUpdate, UserRoleRead = make_crud_schemas(UserRole, name="UserRole", readonly={"id"})
+UserRoleCreate, UserRoleUpdate, UserRoleRead = make_crud_schemas(
+    UserRole, name="UserRole", readonly={"id"}, server_default={"updated_at"}
+)
 router.include_router(
     build_crud_router(
         model=UserRole,
@@ -63,6 +92,7 @@ router.include_router(
         read_schema=UserRoleRead,
         schema_name="iam",
         table_name="user_role",
+        write_capability="iam.manage",
     )
 )
 
@@ -90,7 +120,7 @@ router.include_router(
 #   at all. None of the four may appear in TABLE_REGISTRY.
 
 DomainCreate, DomainUpdate, DomainRead = make_crud_schemas(
-    Domain, name="Domain", readonly={"id"}, server_default={"created_at"}
+    Domain, name="Domain", readonly={"id"}, server_default={"created_at", "updated_at"}
 )
 router.include_router(
     build_crud_router(
@@ -104,7 +134,7 @@ router.include_router(
 )
 
 TemplateCreate, TemplateUpdate, TemplateRead = make_crud_schemas(
-    Template, name="Template", readonly={"id"}
+    Template, name="Template", readonly={"id"}, server_default={"updated_at"}
 )
 router.include_router(
     build_crud_router(
@@ -118,7 +148,7 @@ router.include_router(
 )
 
 ProblemCreate, ProblemUpdate, ProblemRead = make_crud_schemas(
-    Problem, name="Problem", readonly={"id"}, server_default={"created_at"}
+    Problem, name="Problem", readonly={"id"}, server_default={"created_at", "updated_at"}
 )
 router.include_router(
     build_crud_router(

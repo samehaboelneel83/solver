@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import text
 
 from app.solve import compile_model, classify
-from app.solve.backends import CP_SAT, MILP, NoBackend, available_names, by_name, choose
-from app.solve import cpsat, milp
+from app.solve.backends import CP_SAT, HIGHS, MILP, NoBackend, available_names, by_name, choose
+from app.solve import cpsat, highs, milp
 from app.solve.classify import Classification
 from app.solve.service import enqueue_run, execute_run
 from app.worker import work_once
@@ -105,6 +105,18 @@ def test_an_integer_model_goes_to_the_highest_ranked_solver_that_fits():
     assert "milp" in why
 
 
+def test_choose_has_a_planner_sentence_the_editor_can_show():
+    """The Model editor must not grow a solver picker. It still has to say
+    what a run would pick, and in words that are not the backend's name."""
+    found = Classification("IP", [], {"linear", "integral"})
+
+    backend, _why = choose(found)
+
+    assert backend.planner_choice
+    assert "combinatorial" in backend.planner_choice.lower()
+    assert backend.name not in backend.planner_choice.lower()
+
+
 def test_an_explicit_choice_wins_and_says_so():
     found = Classification("IP", [], {"linear", "integral"})
 
@@ -144,9 +156,44 @@ def test_a_model_no_backend_takes_fails_with_the_reason():
 def test_the_registry_reports_what_this_build_actually_has():
     # Checked, not assumed: a registry that offered a backend this build
     # cannot create would fail at solve time instead of selection time.
-    assert available_names() == ["cp-sat", "glop", "milp"]
+    names = available_names()
+    assert names[0] == "cp-sat"
+    assert "glop" in names
+    assert "milp" in names
+    if HIGHS.is_available():
+        assert "highs" in names
+        assert names.index("highs") < names.index("milp")
+    else:
+        assert "highs" not in names
     assert by_name("milp") is MILP
+    assert by_name("highs") is HIGHS
     assert by_name("nope") is None
+
+
+def test_highs_stays_available_after_ortools_has_loaded():
+    """highspy and ortools both ship libHighs. A same-process import of
+    highspy after milp would raise undefined symbol; the child process is
+    what makes a fourth backend real rather than a row that is never ready."""
+    assert milp.available() is not None
+    from importlib.util import find_spec
+
+    if find_spec("highspy") is None:
+        pytest.skip("highspy is not in this build")
+    assert highs.available()
+
+
+@pytest.mark.skipif(not HIGHS.is_available(), reason="highspy is not in this build")
+def test_highs_agrees_with_milp_on_the_optimum(db):
+    version, _ = _feasible(db, demand_value=1)
+    ir, data = _ir_and_data(db, version)
+    compiled = compile_model(ir, data)
+
+    from_highs = highs.solve(compiled, time_limit=10.0)
+    from_milp = milp.solve(compiled, time_limit=10.0)
+
+    assert from_highs.status == "optimal"
+    assert from_milp.status == "optimal"
+    assert from_highs.objective == from_milp.objective == 2
 
 
 # -- through a run ----------------------------------------------------------

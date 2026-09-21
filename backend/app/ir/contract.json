@@ -69,6 +69,10 @@
     "minimize",
     "maximize"
   ],
+  "objectiveModes": [
+    "weighted",
+    "lex"
+  ],
   "termKinds": [
     "const",
     "par",
@@ -407,6 +411,11 @@
       "code": "objective_sense_unsupported",
       "where": "shape",
       "text": "an objective's `sense` is `minimize` or `maximize`"
+    },
+    {
+      "code": "objective_mode_unsupported",
+      "where": "shape",
+      "text": "an objective's `mode` is `weighted` or `lex`; omit it for a weighted sum"
     },
     {
       "code": "objective_terms_invalid",

@@ -637,14 +637,15 @@ describe("GraphDemo expression filter", () => {
   it("filters the canvas by the expression and announces how many nodes are left", async () => {
     await openBuilder();
     setRule(">", "3");
-    // Of hq (a unit), ahmed (grade 3) and sara (grade 4), only sara matches.
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    // Of the two employees, only sara (grade 4) matches; hq is a unit, so
+    // an employee rule leaves it drawn. Ahmed (grade 3) is the one hidden.
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
   });
 
   it("filters nothing and says what is wrong when the expression is invalid", async () => {
     await openBuilder();
     setRule(">", "3");
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "abc" } });
 
@@ -657,7 +658,7 @@ describe("GraphDemo expression filter", () => {
     // consumer that only checked for null would go on filtering by it.
     await openBuilder();
     setRule(">", "3");
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.click(screen.getAllByTestId("expression-remove-rule")[0]);
 
@@ -668,19 +669,19 @@ describe("GraphDemo expression filter", () => {
   it("ANDs the expression with the entity-type checkboxes", async () => {
     await openBuilder();
     setRule(">", "3");
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.click(screen.getByTestId("filter-types-toggle"));
     fireEvent.click(screen.getByTestId("filter-type-employee"));
 
-    // sara is an employee; with employees hidden nothing is left, and the
+    // sara is the matching employee; hiding employees leaves hq, and the
     // count changes only if both filters are being applied.
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("0 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
   });
 
   it("ANDs the expression with the search box", async () => {
     await openBuilder();
-    setRule(">=", "3");
+    setRule(">", "3");
     await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
@@ -690,7 +691,7 @@ describe("GraphDemo expression filter", () => {
   it("keeps Enter-to-select working while an expression is active", async () => {
     await openBuilder();
     setRule(">", "3");
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
     fireEvent.keyDown(screen.getByTestId("filter-search"), { key: "Enter" });
@@ -701,7 +702,7 @@ describe("GraphDemo expression filter", () => {
   it("drops the expression when the view is switched, so it cannot filter a canvas it was not written for", async () => {
     await openBuilder();
     setRule(">", "3");
-    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("1 of 3"));
+    await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.click(screen.getByRole("button", { name: /^Types$/ }));
 
@@ -779,7 +780,7 @@ describe("GraphDemo search announcement", () => {
   it("names both filters when both are on, and neither is lost when one is cleared", async () => {
     renderWithProviders();
     await openBuilder();
-    setRuleOn(GRADE, ">=", "3");
+    setRuleOn(GRADE, ">", "3");
     await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
     fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "sara" } });
@@ -790,7 +791,7 @@ describe("GraphDemo search announcement", () => {
     );
 
     // Clearing the search must not announce "cleared" while the conditions
-    // are still hiding two thirds of the canvas.
+    // are still hiding a node.
     fireEvent.change(screen.getByTestId("filter-search"), { target: { value: "" } });
     await waitFor(() =>
       expect(screen.getByTestId("graph-live")).toHaveTextContent("Filter conditions: 2 of 3 nodes shown")

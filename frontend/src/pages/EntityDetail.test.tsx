@@ -1,5 +1,5 @@
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntityDetail, { mapConstraintError } from "./EntityDetail";
@@ -414,6 +414,37 @@ describe("EntityDetail human-readable titles (B-1)", () => {
     fireEvent.click(screen.getByText("Create"));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Entity type created");
+  });
+
+  it("opens the record it just created so related records are one click away", async () => {
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(labeledSchema);
+      if (path === "/api/domain/entity_type/" && options?.method === "POST") {
+        return Promise.resolve({ id: "new-id", code: "employee" });
+      }
+      if (path === "/api/domain/entity_type/new-id") {
+        return Promise.resolve({ id: "new-id", code: "employee" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={editorQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/domain/entity_type/new"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+              <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(await screen.findByTestId("field-code"), { target: { value: "employee" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    expect(await screen.findByRole("heading", { name: "Edit employee" })).toBeInTheDocument();
   });
 
   it("shows an 'Entity type saved' toast after a successful update (D-1)", async () => {
@@ -837,5 +868,156 @@ describe("EntityDetail goes offline (D-7)", () => {
 
     expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+});
+
+describe("EntityDetail: a concurrent edit (Ruling 42)", () => {
+  const TS = "2026-09-20T09:00:00+00:00";
+  const STALE = {
+    detail:
+      "This domain was changed by someone else after this form loaded it. " +
+      "Reload the domain and apply your changes to the current version.",
+  };
+  const DOMAIN = {
+    id: 7,
+    name: "Workforce",
+    created_at: TS,
+    updated_at: TS,
+  };
+  const schema = [
+    {
+      schema: "public",
+      table: "domain",
+      label: "Domain",
+      label_plural: "Domains",
+      fields: [
+        { name: "id", type: "integer", required: true, writable: false, is_fk: false, fk_table: null },
+        { name: "name", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+        { name: "created_at", type: "datetime", required: false, writable: false, is_fk: false, fk_table: null },
+        { name: "updated_at", type: "datetime", required: false, writable: false, is_fk: false, fk_table: null },
+      ],
+    },
+  ];
+
+  function puts(): Record<string, unknown>[] {
+    return (apiFetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => (call[1] as RequestInit | undefined)?.method === "PUT")
+      .map((call) => JSON.parse((call[1] as RequestInit).body as string));
+  }
+
+  function renderDomain() {
+    const queryClient = editorQueryClient();
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/public/domain/7"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it("sends the updated_at it read, which is what lets the server refuse", async () => {
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(schema);
+      if (path === "/api/domain/7" && options?.method === "PUT") return Promise.resolve(DOMAIN);
+      if (path === "/api/domain/7") return Promise.resolve(DOMAIN);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    renderDomain();
+    fireEvent.change(await screen.findByTestId("field-name"), { target: { value: "Workforce (edited)" } });
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].updated_at).toBe(TS);
+    expect(puts()[0].name).toBe("Workforce (edited)");
+  });
+
+  it("does not send updated_at when creating, because there is nothing to compare", async () => {
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(schema);
+      if (path === "/api/domain/" && options?.method === "POST") {
+        return Promise.resolve({ ...DOMAIN, id: 99 });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    const queryClient = editorQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/public/domain/new"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    fireEvent.change(await screen.findByTestId("field-name"), { target: { value: "New domain" } });
+    fireEvent.click(screen.getByText("Create"));
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/domain/",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+    const body = JSON.parse(
+      ((apiFetch as ReturnType<typeof vi.fn>).mock.calls.find((call) => (call[1] as RequestInit)?.method === "POST")?.[1] as RequestInit)
+        .body as string
+    );
+    expect(body).not.toHaveProperty("updated_at");
+  });
+
+  it("shows the refusal with a way out instead of a red line under a control", async () => {
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(schema);
+      if (path === "/api/domain/7" && options?.method === "PUT") {
+        return Promise.reject(new ApiError(409, JSON.stringify(STALE)));
+      }
+      if (path === "/api/domain/7") return Promise.resolve(DOMAIN);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    renderDomain();
+    fireEvent.change(await screen.findByTestId("field-name"), { target: { value: "Workforce (edited)" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice).toHaveTextContent(/changed by someone else/i);
+    expect(within(notice).getByRole("button", { name: /reload and keep my changes/i })).toBeInTheDocument();
+    expect(screen.getByTestId("field-name")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByTestId("form-errors")).toBeNull();
+  });
+
+  it("keeps what the user typed when it reloads, and takes the other change for what they did not touch", async () => {
+    const changed = {
+      ...DOMAIN,
+      name: "Written by B",
+      updated_at: "2026-09-20T09:05:00+00:00",
+    };
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(schema);
+      if (path === "/api/domain/7" && options?.method === "PUT") {
+        return Promise.reject(new ApiError(409, JSON.stringify(STALE)));
+      }
+      if (path === "/api/domain/7") return Promise.resolve(DOMAIN);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    renderDomain();
+    fireEvent.change(await screen.findByTestId("field-name"), { target: { value: "Workforce (edited)" } });
+    fireEvent.click(screen.getByText("Save"));
+    await screen.findByTestId("stale-record");
+
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") return Promise.resolve(schema);
+      if (path === "/api/domain/7") return Promise.resolve(changed);
+      return Promise.resolve({ items: [], total: 0 });
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
+    expect((screen.getByTestId("field-name") as HTMLInputElement).value).toBe("Workforce (edited)");
   });
 });

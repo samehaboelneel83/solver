@@ -10,9 +10,10 @@ import {
 } from "./attrTypes";
 import OfflineNotice from "./OfflineNotice";
 import Skeleton from "./Skeleton";
+import StaleRecordNotice from "./StaleRecordNotice";
 import { useToast } from "./ToastProvider";
 import { useCapabilities } from "../hooks/useCapability";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
   listEntities,
   useParameterValues,
@@ -24,6 +25,7 @@ import {
   type ParameterDef,
   type ParameterValues,
 } from "../api/v1";
+import { mergeReload } from "../lib/staleRecord";
 
 /**
  * A parameter's values, as the spreadsheet spec §5 calls them rather than
@@ -174,6 +176,7 @@ export default function ParameterGrid({ parameter }: { parameter: ParameterDef }
       axes={namedAxes}
       entities={entities}
       totals={totals}
+      reload={async () => (await values.refetch()).data}
     />
   );
 }
@@ -199,18 +202,22 @@ function Editor({
   axes,
   entities,
   totals,
+  reload,
 }: {
   parameter: ParameterDef;
   values: ParameterValues;
   axes: Axis[];
   entities: Entity[][];
   totals: number[];
+  reload: () => Promise<ParameterValues | undefined>;
 }) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
   const [general, setGeneral] = useState<string | null>(null);
+  const [stale, setStale] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
   const put = usePutParameterValues();
   const toast = useToast();
@@ -219,6 +226,15 @@ function Editor({
   const flat = axes.length > 2;
   const stored = useMemo(
     () => new Map(values.cells.map((cell) => [coordKey(cell.entity_ids), cell.value])),
+    [values.cells]
+  );
+  const timestamps = useMemo(
+    () =>
+      new Map(
+        values.cells
+          .filter((cell) => cell.updated_at)
+          .map((cell) => [coordKey(cell.entity_ids), cell.updated_at as string])
+      ),
     [values.cells]
   );
   const byId = useMemo(
@@ -268,13 +284,20 @@ function Editor({
     event.preventDefault();
     setGeneral(null);
     setServerErrors(null);
+    setStale(null);
 
     const refused: FieldErrors = {};
     const cells: ParameterCell[] = [];
     for (const spec of changed) {
       const parsed = parseCellValue(textOf(spec.key), spec.label, values.default_value);
-      if (parsed.ok) cells.push({ entity_ids: spec.ids, value: parsed.value });
-      else refused[spec.key] = parsed.message;
+      if (parsed.ok) {
+        const updatedAt = timestamps.get(spec.key);
+        cells.push(
+          updatedAt
+            ? { entity_ids: spec.ids, value: parsed.value, updated_at: updatedAt }
+            : { entity_ids: spec.ids, value: parsed.value }
+        );
+      } else refused[spec.key] = parsed.message;
     }
     replace(refused);
     if (Object.keys(refused).length > 0) return;
@@ -285,6 +308,12 @@ function Editor({
       setDraft({});
       toast.success(cells.length === 1 ? "1 cell saved" : `${cells.length} cells saved`);
     } catch (err) {
+      if (isStaleRecordError(err)) {
+        setServerErrors(null);
+        setGeneral(null);
+        setStale(formatApiError(err));
+        return;
+      }
       const items = validationErrors(err);
       const mapped: FieldErrors = {};
       const rest: string[] = [];
@@ -301,7 +330,35 @@ function Editor({
         }
       }
       if (Object.keys(mapped).length > 0) setServerErrors(mapped);
-      setGeneral(rest.length > 0 ? rest.join("\n") : items.length > 0 ? null : formatApiError(err));
+      setGeneral(rest.length > 0 ? rest.join("\n") : items.length === 0 ? formatApiError(err) : null);
+    }
+  }
+
+  async function handleReload() {
+    setReloading(true);
+    try {
+      const fresh = await reload();
+      if (!fresh) return;
+      const freshStored = new Map(fresh.cells.map((cell) => [coordKey(cell.entity_ids), cell.value]));
+      const keys = new Set([...cellSpecs.map((spec) => spec.key), ...fresh.cells.map((cell) => coordKey(cell.entity_ids))]);
+      const baseline: Record<string, string> = {};
+      const current: Record<string, string> = {};
+      const nextFresh: Record<string, string> = {};
+      for (const key of keys) {
+        baseline[key] = storedText(key);
+        current[key] = textOf(key);
+        nextFresh[key] = freshStored.has(key) ? String(freshStored.get(key)) : "";
+      }
+      const merged = mergeReload(baseline, current, nextFresh);
+      const nextDraft: Record<string, string> = {};
+      for (const key of keys) {
+        if (merged[key] !== nextFresh[key]) nextDraft[key] = merged[key] as string;
+      }
+      setDraft(nextDraft);
+      setStale(null);
+      toast.success("Reloaded, keeping your edits.");
+    } finally {
+      setReloading(false);
     }
   }
 
@@ -327,6 +384,9 @@ function Editor({
       ))}
 
       <ErrorSummary errors={errors} order={order} summaryRef={summaryRef} />
+      {stale && (
+        <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />
+      )}
       {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
 
       <div

@@ -14,6 +14,12 @@ import {
   type Id,
 } from "../api/v1";
 import {
+  collapseGraph,
+  descendantIds,
+  hiddenByCollapse,
+  parentIds,
+} from "../lib/hierarchyCollapse";
+import {
   EMPTY_PALETTE,
   objectsPalette,
   type GraphMode,
@@ -367,6 +373,9 @@ export default function GraphEditor({
   const [createParentId, setCreateParentId] = useState("");
   const [createDrafts, setCreateDrafts] = useState<AttrDrafts>({});
   const [createErrors, setCreateErrors] = useState<FieldErrors>({});
+  // Compound parents nest; they do not hide. This is the other half of a
+  // hierarchy: which parents currently sit on their descendants.
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const createFormId = useId();
   const [connecting, setConnecting] = useState(false);
   const [layoutStatus, setLayoutStatus] = useState<string | null>(null);
@@ -376,6 +385,9 @@ export default function GraphEditor({
   // live cytoscape instance at each keypress (see orderedNodeIds) rather than cached, so it
   // stays correct as nodes are added/removed/relaid-out.
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [focusedEdgeCyId, setFocusedEdgeCyId] = useState<string | null>(null);
+  // Keyboard connect: the node C was pressed on, waiting for Enter on another.
+  const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
   // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
   // closes it and returns focus here, rather than dropping focus back to the document body.
@@ -422,6 +434,15 @@ export default function GraphEditor({
     refetch: refetchGraph,
     fetchStatus: graphFetchStatus,
   } = useGraphView(domainId, hierarchyTypeId, mode);
+  // Collapse only when a hierarchy is actually nesting the canvas. A
+  // flat objects view, and the types view, have no compound parents to
+  // sit on -- Minus must not remove nodes there.
+  const nesting = !isTypes && hierarchyTypeId !== null;
+
+  useEffect(() => {
+    setCollapsedIds(new Set());
+  }, [hierarchyTypeId, mode]);
+
   // D-7: offline, this query pauses instead of failing -- `isLoading` never resolves, so
   // without this the "Loading graph…" text below would sit there forever.
   const isOffline = graphFetchStatus === "paused" && !data;
@@ -538,7 +559,8 @@ export default function GraphEditor({
     if (!data) {
       return;
     }
-    const { structureChanged } = applyGraphToCy(cy, data, palette);
+    const drawn = nesting ? collapseGraph(data, collapsedIds) : data;
+    const { structureChanged } = applyGraphToCy(cy, drawn, palette);
     graphRef.current = data;
     if (structureChanged || !hasLaidOutRef.current) {
       hasLaidOutRef.current = true;
@@ -549,7 +571,7 @@ export default function GraphEditor({
     // from is already in the list, and adding it would re-diff on every
     // render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, loadError]);
+  }, [data, loadError, nesting, collapsedIds]);
 
   // A mode switch replaces every element (types ids are namespaced, so the
   // diff is a clean remove/add) and must announce itself: the toggle is a
@@ -638,17 +660,19 @@ export default function GraphEditor({
     const selectedTypesSet = filter?.selectedTypes ? new Set(filter.selectedTypes) : null;
     const searchLower = (filter?.search ?? "").toLowerCase();
     const matchIds = filter?.expressionMatchIds ?? null;
+    const collapsedAway = nesting ? hiddenByCollapse(data.nodes, collapsedIds) : null;
     return new Set(
       data.nodes
         .filter(
           (node) =>
             (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
             (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
-            (matchIds === null || matchIds.has(node.id))
+            (matchIds === null || matchIds.has(node.id)) &&
+            (collapsedAway === null || !collapsedAway.has(node.id))
         )
         .map((node) => node.id)
     );
-  }, [data, filter]);
+  }, [data, filter, nesting, collapsedIds]);
 
   // A filter that hides the node the roving selection is on drops the
   // selection rather than leaving a ring on something nobody can see. The
@@ -895,12 +919,56 @@ export default function GraphEditor({
     if (focusedNodeId && focusedNodeId !== id) {
       anyCy.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
     }
+    if (focusedEdgeCyId) {
+      anyCy.getElementById?.(focusedEdgeCyId)?.removeClass?.("kb-focus");
+      setFocusedEdgeCyId(null);
+    }
     const node = anyCy.getElementById?.(id);
     node?.addClass?.("kb-focus");
     anyCy.center?.(node);
     setFocusedNodeId(id);
     const label = node?.data?.("label");
     setLiveMessage(typeof label === "string" && label ? label : id);
+  }
+
+  function focusEdge(cyId: string) {
+    const cy = cyRef.current;
+    if (!cy) {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyCy = cy as any;
+    if (focusedNodeId) {
+      anyCy.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
+    }
+    if (focusedEdgeCyId && focusedEdgeCyId !== cyId) {
+      anyCy.getElementById?.(focusedEdgeCyId)?.removeClass?.("kb-focus");
+    }
+    const edge = anyCy.getElementById?.(cyId);
+    edge?.addClass?.("kb-focus");
+    anyCy.center?.(edge);
+    setFocusedEdgeCyId(cyId);
+    const label = edge?.data?.("label");
+    setLiveMessage(
+      typeof label === "string" && label ? `${label} relationship` : "relationship"
+    );
+  }
+
+  function incidentEdgeIds(cy: Core, nodeId: string): string[] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const edgesColl: any = (cy as any).edges?.();
+    const ids: string[] = [];
+    edgesColl?.forEach?.((edge: any) => {
+      const display = typeof edge.style === "function" ? edge.style("display") : undefined;
+      if (display === "none") {
+        return;
+      }
+      const data = typeof edge.data === "function" ? edge.data() : undefined;
+      if (data?.source === nodeId || data?.target === nodeId) {
+        ids.push(edge.id());
+      }
+    });
+    return ids;
   }
 
   function moveFocus(direction: 1 | -1) {
@@ -922,12 +990,81 @@ export default function GraphEditor({
     focusNode(ids[nextIndex]);
   }
 
-  // H-1: the canvas container's own keydown handler -- this is the keyboard path the graph
-  // editor previously had none of at all (tabIndex was -1 and refused focus). Arrow keys move
-  // the roving selection, Enter opens the property panel for the focused node via the same
-  // onSelectionChange path a tap takes, and Escape returns focus to the toolbar. Creating an
-  // edge by keyboard is explicitly out of scope -- that stays a pointer (drag) gesture.
+  function startKeyboardConnect() {
+    if (!canEdit || isTypes) {
+      return;
+    }
+    const cy = cyRef.current;
+    if (!focusedNodeId || !cy || !orderedNodeIds(cy).includes(focusedNodeId)) {
+      setLiveMessage("Move to a node first");
+      return;
+    }
+    setConnectFromId(focusedNodeId);
+    const label = nodeLabelOf(focusedNodeId);
+    setLiveMessage(`Connecting from ${label}. Move to the other node and press Enter.`);
+  }
+
+  function cycleIncidentEdge() {
+    const cy = cyRef.current;
+    if (!focusedNodeId || !cy || !orderedNodeIds(cy).includes(focusedNodeId)) {
+      return;
+    }
+    const ids = incidentEdgeIds(cy, focusedNodeId);
+    if (ids.length === 0) {
+      setLiveMessage("No relationships on this node");
+      return;
+    }
+    const current = focusedEdgeCyId ? ids.indexOf(focusedEdgeCyId) : -1;
+    focusEdge(ids[(current + 1) % ids.length]);
+  }
+
+  function collapseFocused() {
+    if (!nesting || !data || !focusedNodeId) return;
+    const hidden = descendantIds(data.nodes, focusedNodeId);
+    if (hidden.length === 0) {
+      setLiveMessage("Nothing sits under this node");
+      return;
+    }
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      next.add(focusedNodeId);
+      return next;
+    });
+    setLiveMessage(`Hid ${hidden.length} under ${nodeLabelOf(focusedNodeId)}`);
+  }
+
+  function expandFocused() {
+    if (!nesting || !focusedNodeId) return;
+    if (!collapsedIds.has(focusedNodeId)) {
+      setLiveMessage("Nothing is hidden under this node");
+      return;
+    }
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(focusedNodeId);
+      return next;
+    });
+    setLiveMessage(`Showing children of ${nodeLabelOf(focusedNodeId)}`);
+  }
+
+  function collapseAll() {
+    if (!nesting || !data) return;
+    setCollapsedIds(new Set(parentIds(data.nodes)));
+  }
+
+  function expandAll() {
+    if (!nesting) return;
+    setCollapsedIds(new Set());
+  }
+
+  // Arrow keys move the roving selection, Enter opens the property panel,
+  // C then Enter on another node creates a relationship, E then Enter
+  // opens one so it can be deleted, Minus / Equals collapse a nest, and
+  // Escape unwinds that path before leaving the canvas.
   function handleCanvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
     switch (event.key) {
       case "ArrowRight":
       case "ArrowDown":
@@ -941,10 +1078,28 @@ export default function GraphEditor({
         break;
       case "Enter": {
         event.preventDefault();
-        // Only for a node that is actually on screen. The effect below clears the roving
-        // selection when a filter hides its node, but a keypress can land in the same frame
-        // as the filter change, and the panel Enter opens can delete the row.
         const cy = cyRef.current;
+        if (focusedEdgeCyId && cy) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const edge = (cy as any).getElementById?.(focusedEdgeCyId);
+          const graphId = edge?.data?.("graphId") ?? focusedEdgeCyId;
+          onSelectionChangeRef.current?.({ kind: "edge", id: String(graphId) });
+          break;
+        }
+        if (
+          connectFromId &&
+          focusedNodeId &&
+          cy &&
+          orderedNodeIds(cy).includes(focusedNodeId)
+        ) {
+          if (focusedNodeId === connectFromId) {
+            setLiveMessage("Pick a different node to connect to");
+            break;
+          }
+          setPendingEdge({ sourceId: connectFromId, targetId: focusedNodeId });
+          setConnectFromId(null);
+          break;
+        }
         if (focusedNodeId && cy && orderedNodeIds(cy).includes(focusedNodeId)) {
           onSelectionChangeRef.current?.({ kind: "node", id: focusedNodeId });
         }
@@ -952,7 +1107,36 @@ export default function GraphEditor({
       }
       case "Escape":
         event.preventDefault();
+        if (connectFromId) {
+          setConnectFromId(null);
+          setLiveMessage("Connect cancelled");
+          break;
+        }
+        if (focusedEdgeCyId && focusedNodeId) {
+          focusNode(focusedNodeId);
+          break;
+        }
         firstControlRef.current?.focus();
+        break;
+      case "c":
+      case "C":
+        event.preventDefault();
+        startKeyboardConnect();
+        break;
+      case "e":
+      case "E":
+        event.preventDefault();
+        cycleIncidentEdge();
+        break;
+      case "-":
+      case "_":
+        event.preventDefault();
+        collapseFocused();
+        break;
+      case "=":
+      case "+":
+        event.preventDefault();
+        expandFocused();
         break;
       default:
         break;
@@ -1150,6 +1334,29 @@ export default function GraphEditor({
         >
           Fit
         </button>
+        {nesting && (
+          <>
+            <button
+              type="button"
+              onClick={collapseAll}
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              title="Hide every nested node, leaving each parent on the canvas"
+              data-testid="collapse-all"
+            >
+              Collapse all
+            </button>
+            <button
+              type="button"
+              onClick={expandAll}
+              disabled={collapsedIds.size === 0}
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              title="Show every node the current collapse hid"
+              data-testid="expand-all"
+            >
+              Expand all
+            </button>
+          </>
+        )}
         {/* Both of these write `entity` / `relationship` ROWS, which the
             schema view has none of: creating an entity type or a
             relationship type is a different form on a different page. */}
@@ -1163,8 +1370,8 @@ export default function GraphEditor({
           }`}
           title={
             connecting
-              ? "Connect mode is on -- drag from one node to another to create a relationship"
-              : "Turn on Connect mode, then drag from one node to another to create a relationship"
+              ? "Connect mode is on -- drag from one node to another, or with a node focused press C then Enter on the other node"
+              : "Turn on Connect and drag, or with a node focused press C then Enter on another node"
           }
           aria-pressed={connecting}
           data-testid="toggle-connect"
@@ -1203,10 +1410,12 @@ export default function GraphEditor({
         {isTypes
           ? "This is the domain's schema: one node per entity type, one edge per relationship type, labelled with its cardinality. A loop is a type that relates to itself, such as a hierarchy. Click a node or edge to see and colour it."
           : connecting
-            ? "Drag from one node to another to connect them."
+            ? "Drag from one node to another to connect them, or with a node focused press C then Enter on the other node."
             : canEdit
-              ? "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it, or turn on Connect and drag between two nodes to create a relationship."
-              : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to inspect it."}
+              ? "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to edit it. With a node focused, C then Enter on another node connects them; E then Enter opens a relationship to delete it." +
+                (nesting ? " Minus hides a focused parent's children; Equals shows them." : "")
+              : "Boxes group nodes by hierarchy; arrows show relationship direction. Click a node or edge to inspect it. With a node focused, E then Enter opens a relationship." +
+                (nesting ? " Minus hides a focused parent's children; Equals shows them." : "")}
       </p>
 
       {error && (
@@ -1373,7 +1582,7 @@ export default function GraphEditor({
                   <Link to="/relationship-types" className="inline-block rounded underline">
                     relationship types page
                   </Link>{" "}
-                  — from {fromType} to {toType} — then drag again.
+                  — from {fromType} to {toType} — then connect them again.
                 </p>
                 <button
                   type="button"

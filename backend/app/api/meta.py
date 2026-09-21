@@ -196,11 +196,35 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
                     "type": _type_label(field_info.annotation),
                     "required": is_required,
                     "writable": is_writable,
+                    "write_only": False,
                     "is_fk": field_name in fk_table_by_field,
                     "fk_table": fk_table_by_field.get(field_name),
                     "default": default_by_field.get(field_name),
                     "choices": _choices_for(meta.table, field_name),
                     "label_field": field_name in DEFAULT_LABEL_COLUMNS,
+                    "label": _field_label(meta.table, field_name),
+                }
+            )
+
+        # Write-only fields live on Create (and maybe Update) but never on
+        # Read — `password` on user_account is the one case. The form must
+        # still render them; the table must not, because there is nothing
+        # to show.
+        for field_name, field_info in meta.create_schema.model_fields.items():
+            if field_name in meta.read_schema.model_fields:
+                continue
+            fields.append(
+                {
+                    "name": field_name,
+                    "type": "password" if field_name == "password" else _type_label(field_info.annotation),
+                    "required": field_info.is_required(),
+                    "writable": True,
+                    "write_only": True,
+                    "is_fk": False,
+                    "fk_table": None,
+                    "default": None,
+                    "choices": _choices_for(meta.table, field_name),
+                    "label_field": False,
                     "label": _field_label(meta.table, field_name),
                 }
             )
@@ -216,6 +240,7 @@ def get_schema(_: UserAccount = Depends(get_current_user)) -> list[dict]:
                 "creatable": meta.creatable,
                 "updatable": meta.updatable,
                 "deletable": meta.deletable,
+                "write_capability": meta.write_capability,
             }
         )
 

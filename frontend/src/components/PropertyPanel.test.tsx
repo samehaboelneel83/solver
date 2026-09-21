@@ -67,7 +67,24 @@ const ENTITY = {
   attrs: { code: "E-1", status: "active", grade: 3, on_call: false },
 };
 
-type Stub = { entity?: unknown; entityTypes?: unknown; write?: (path: string, options: RequestInit) => unknown };
+const RELATIONSHIP = {
+  id: 10,
+  relationship_type_id: 6,
+  from_entity_id: 1,
+  to_entity_id: 2,
+  attrs: { weight: 1 },
+  valid_from: null,
+  valid_to: null,
+  updated_at: "2026-09-20T09:00:00+00:00",
+};
+
+type Stub = {
+  entity?: unknown;
+  entityTypes?: unknown;
+  relationship?: unknown;
+  relationshipType?: unknown;
+  write?: (path: string, options: RequestInit) => unknown;
+};
 
 function stubApi(stub: Stub = {}) {
   (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
@@ -77,6 +94,10 @@ function stubApi(stub: Stub = {}) {
     if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(stub.entityTypes ?? ENTITY_TYPES);
     if (path === "/api/v1/entities/1") return Promise.resolve(HQ);
     if (path.startsWith("/api/v1/entities/")) return Promise.resolve(stub.entity ?? ENTITY);
+    if (path.startsWith("/api/v1/relationships/")) return Promise.resolve(stub.relationship ?? RELATIONSHIP);
+    if (path.startsWith("/api/v1/relationship-types/")) {
+      return Promise.resolve(stub.relationshipType ?? { id: 6, attributes: [] });
+    }
     return Promise.resolve({});
   });
 }
@@ -273,7 +294,54 @@ describe("PropertyPanel", () => {
     fireEvent.submit(form);
 
     await waitFor(() => expect(callsTo("PATCH", "/api/v1/relationships/10")).toHaveLength(1));
-    expect(bodyOf(callsTo("PATCH", "/api/v1/relationships/10")[0])).toEqual({ attrs: { weight: 5 } });
+    expect(bodyOf(callsTo("PATCH", "/api/v1/relationships/10")[0])).toEqual({
+      attrs: { weight: 5 },
+      updated_at: RELATIONSHIP.updated_at,
+    });
+  });
+
+  it("edits a declared relationship attribute as a typed control, not JSON", async () => {
+    stubApi({
+      relationshipType: {
+        id: 6,
+        domain_id: 1,
+        name: "works_for",
+        from_type_id: 2,
+        to_type_id: 1,
+        cardinality: "many_to_one",
+        is_hierarchy: false,
+        colour: null,
+        updated_at: "2026-09-20T09:00:00+00:00",
+        attributes: [
+          {
+            id: 40,
+            entity_type_id: null,
+            relationship_type_id: 6,
+            name: "weight",
+            data_type: "integer",
+            required: false,
+            unit: null,
+            enum_values: null,
+            default_value: null,
+          },
+        ],
+      },
+      write: () => Promise.resolve({ ...RELATIONSHIP, attrs: { weight: 5 } }),
+    });
+    renderWithProviders({ selection: { kind: "edge", id: "10" } });
+    const form = await screen.findByTestId("edge-property-form");
+    const weight = await screen.findByTestId("attr-weight");
+    expect(weight).toHaveValue("1");
+    expect(within(form).queryByLabelText(/Attributes \(JSON\)/i)).not.toBeInTheDocument();
+
+    fireEvent.change(weight, { target: { value: "5" } });
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(callsTo("PATCH", "/api/v1/relationships/10")).toHaveLength(1));
+    expect(bodyOf(callsTo("PATCH", "/api/v1/relationships/10")[0])).toEqual({
+      attrs: { weight: 5 },
+      updated_at: RELATIONSHIP.updated_at,
+    });
   });
 
   it("refuses invalid JSON for a relationship's attrs without sending anything", async () => {
@@ -285,6 +353,35 @@ describe("PropertyPanel", () => {
 
     expect(await screen.findByText(/must be valid JSON/i)).toBeInTheDocument();
     expect(callsTo("PATCH", "/api/v1/relationships/10")).toHaveLength(0);
+  });
+
+  it("shows a reload when the relationship changed underneath, and keeps the typed JSON", async () => {
+    const stale = new ApiError(
+      409,
+      JSON.stringify({
+        detail:
+          "This relationship was changed by someone else after this form loaded it. Reload the relationship and apply your changes to the current version.",
+      })
+    );
+    stubApi({
+      write: () => Promise.reject(stale),
+    });
+    renderWithProviders({ selection: { kind: "edge", id: "10" } });
+    const form = await screen.findByTestId("edge-property-form");
+    fireEvent.change(within(form).getByRole("textbox"), { target: { value: '{"weight": 5}' } });
+    fireEvent.submit(form);
+
+    const notice = await screen.findByTestId("stale-record");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice).toHaveTextContent(/changed by someone else/i);
+
+    stubApi({
+      relationship: { ...RELATIONSHIP, attrs: { weight: 9 }, updated_at: "2026-09-20T09:05:00+00:00" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reload and keep my changes/i }));
+
+    await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
+    expect(within(screen.getByTestId("edge-property-form")).getByRole("textbox")).toHaveValue('{"weight": 5}');
   });
 
   /*

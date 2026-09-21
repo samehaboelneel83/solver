@@ -165,6 +165,9 @@ export default function GraphDemo() {
    * (`expressions/defaults.ts`). Pressing "+ Condition" used to cut this
    * canvas from 23 nodes to 2 before anything was typed, because the rule
    * the button creates is complete enough to evaluate.
+   *
+   * `matchingNodeIds` keeps nodes whose type the document does not name:
+   * `employee.grade > 3` hides the other employees, not the units.
    */
   const expressionMatchIds = useMemo(() => {
     if (!graph || !expressionCatalogue) {
