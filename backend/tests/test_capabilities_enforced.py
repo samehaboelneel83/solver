@@ -65,6 +65,51 @@ def _account(db, role: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _holding(db, *capabilities: str) -> dict[str, str]:
+    """An account that holds exactly these capabilities, not a named role."""
+    username = f"holding-{uuid.uuid4().hex[:8]}"
+    password = "correct horse battery staple"
+    org = db.execute(text("SELECT id FROM iam.organization LIMIT 1")).scalar_one()
+    user_id = db.execute(
+        text(
+            "INSERT INTO iam.user_account (id, organization_id, username, display_name,"
+            "                              email, hashed_password, is_active)"
+            " VALUES (gen_random_uuid(), :o, :u, :u, :e, :p, true) RETURNING id"
+        ),
+        {"o": org, "u": username, "e": f"{username}@example.test", "p": hash_password(password)},
+    ).scalar_one()
+    role_code = f"only-{uuid.uuid4().hex[:8]}"
+    role_id = db.execute(
+        text(
+            "INSERT INTO iam.role (id, code, name)"
+            " VALUES (gen_random_uuid(), :c, :c) RETURNING id"
+        ),
+        {"c": role_code},
+    ).scalar_one()
+    for capability in capabilities:
+        db.execute(
+            text(
+                "INSERT INTO iam.role_capability (role_id, capability_code)"
+                " VALUES (:r, :c)"
+            ),
+            {"r": str(role_id), "c": capability},
+        )
+    db.execute(
+        text(
+            "INSERT INTO iam.user_role (id, user_id, role_id)"
+            " VALUES (gen_random_uuid(), :u, :r)"
+        ),
+        {"u": str(user_id), "r": str(role_id)},
+    )
+    db.commit()
+
+    client = TestClient(app)
+    token = client.post(
+        "/api/auth/login", data={"username": username, "password": password}
+    ).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest.fixture
 def seeded(db):
     created = seed_workforce_demo(db)
@@ -110,6 +155,36 @@ def test_a_modeller_may_change_the_model(db, seeded):
     assert response.status_code == 201
 
 
+def test_shaping_the_domain_is_not_publishing_a_model(db, seeded):
+    """domain.edit is entity types and parameters. A problem and a
+    template are model.publish — starting a model is not shaping the
+    domain."""
+    client = TestClient(app)
+    domain_only = _holding(db, "domain.edit")
+
+    problem = client.post(
+        "/api/problem/",
+        headers=domain_only,
+        json={"domain_id": seeded["domain_id"], "name": "not-theirs"},
+    )
+    template = client.post(
+        "/api/template/",
+        headers=domain_only,
+        json={"name": f"not-theirs-{uuid.uuid4().hex[:8]}", "ir_version": "1", "default_ir": {}},
+    )
+    still_domain = client.post(
+        "/api/v1/entity-types",
+        headers=domain_only,
+        json={"domain_id": seeded["domain_id"], "name": "still_ok", "role": "resource"},
+    )
+
+    assert problem.status_code == 403, problem.text
+    assert "model.publish" in problem.json()["detail"]
+    assert template.status_code == 403, template.text
+    assert "model.publish" in template.json()["detail"]
+    assert still_domain.status_code == 201
+
+
 def test_a_modeller_may_not_grant_roles(db, seeded):
     """iam.manage is the capability that creates users and assigns roles.
     domain.edit is not a back door onto that — a modeller shapes the model,
@@ -134,6 +209,120 @@ def test_a_modeller_may_not_grant_roles(db, seeded):
     )
     assert granted.status_code == 403, granted.text
     assert "iam.manage" in granted.json()["detail"]
+
+    capability = client.post(
+        "/api/iam/role_capability/",
+        headers=modeller,
+        json={"role_id": role["id"], "capability_code": "iam.manage"},
+    )
+    assert capability.status_code == 403, capability.text
+    assert "iam.manage" in capability.json()["detail"]
+
+
+def test_granting_a_capability_changes_what_the_role_may_do(db, seeded):
+    """Assigning a role is not the same as saying what that role may do.
+    The grant is a row on role_capability, the same factory as user_role."""
+    client = TestClient(app)
+    admin = _account(db, "admin")
+    code = f"cap-{uuid.uuid4().hex[:8]}"
+
+    role = client.post(
+        "/api/iam/role/",
+        headers=admin,
+        json={"code": code, "name": "Throwaway"},
+    )
+    assert role.status_code == 201, role.text
+    role_id = role.json()["id"]
+
+    granted = client.post(
+        "/api/iam/role_capability/",
+        headers=admin,
+        json={"role_id": role_id, "capability_code": "run.submit"},
+    )
+    assert granted.status_code == 201, granted.text
+    body = granted.json()
+    assert body["capability_code"] == "run.submit"
+    assert body["role_id"] == role_id
+    grant_id = body["id"]
+
+    again = client.post(
+        "/api/iam/role_capability/",
+        headers=admin,
+        json={"role_id": role_id, "capability_code": "run.submit"},
+    )
+    assert again.status_code == 409, again.text
+
+    unknown = client.post(
+        "/api/iam/role_capability/",
+        headers=admin,
+        json={"role_id": role_id, "capability_code": "not.a.thing"},
+    )
+    assert unknown.status_code == 409, unknown.text
+
+    username = f"granted-{uuid.uuid4().hex[:8]}"
+    user = client.post(
+        "/api/iam/user_account/",
+        headers=admin,
+        json={"username": username, "password": "change-me-granted"},
+    )
+    assert user.status_code == 201, user.text
+    assigned = client.post(
+        "/api/iam/user_role/",
+        headers=admin,
+        json={"user_id": user.json()["id"], "role_id": role_id},
+    )
+    assert assigned.status_code == 201, assigned.text
+
+    token = client.post(
+        "/api/auth/login", data={"username": username, "password": "change-me-granted"}
+    ).json()["access_token"]
+    me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"}).json()
+    assert me["capabilities"] == ["run.submit"]
+
+    client.delete(f"/api/iam/role_capability/{grant_id}", headers=admin)
+    client.delete(f"/api/iam/user_role/{assigned.json()['id']}", headers=admin)
+    client.delete(f"/api/iam/user_account/{user.json()['id']}", headers=admin)
+    client.delete(f"/api/iam/role/{role_id}", headers=admin)
+
+
+def test_a_modeller_may_change_their_own_password(db, seeded):
+    """iam.manage is who else may sign in. Changing the password you
+    yourself sign in with is the account talking about itself."""
+    client = TestClient(app)
+    headers = _account(db, "modeller")
+    username = client.get("/api/v1/me", headers=headers).json()["username"]
+    old = "correct horse battery staple"
+    new = "a different horse battery staple"
+
+    changed = client.patch("/api/v1/me", headers=headers, json={"password": new})
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    assert body["username"] == username
+    assert "password" not in body
+    assert "hashed_password" not in body
+
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": old}
+    ).status_code == 401
+    assert client.post(
+        "/api/auth/login", data={"username": username, "password": new}
+    ).status_code == 200
+
+
+def test_changing_your_name_does_not_clear_the_password(db, seeded):
+    client = TestClient(app)
+    headers = _account(db, "planner")
+    username = client.get("/api/v1/me", headers=headers).json()["username"]
+
+    changed = client.patch(
+        "/api/v1/me", headers=headers, json={"display_name": "Pat Planner"}
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["display_name"] == "Pat Planner"
+    assert client.post(
+        "/api/auth/login",
+        data={"username": username, "password": "correct horse battery staple"},
+    ).status_code == 200
 
 
 def test_a_viewer_may_read_but_neither_solve_nor_edit(db, seeded):

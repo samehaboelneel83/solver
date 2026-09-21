@@ -5,7 +5,7 @@
 # `problem.*` models were dropped by migration 0006 along with their
 # schemas. `v1_domain` holds the eight DOMAIN tables; `v1_problem` holds
 # the four PROBLEM and four RUN tables.
-from app.models.iam import Organization, Role, UserAccount, UserRole  # noqa: F401
+from app.models.iam import Organization, Role, RoleCapability, UserAccount, UserRole  # noqa: F401
 from app.models.v1_domain import (  # noqa: F401
     AttributeDef,
     Domain,

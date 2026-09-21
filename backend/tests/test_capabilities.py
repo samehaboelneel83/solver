@@ -47,7 +47,7 @@ def auth_headers():
 
 
 def test_registry_is_exactly_the_seven_flat_and_iam_tables():
-    """The generic CRUD registry must contain exactly the four `iam` tables
+    """The generic CRUD registry must contain exactly the five `iam` tables
     plus the three flat v1 tables -- no stray registration, and (see next
     test) none of the four immutable tables."""
     assert {(m.schema, m.table) for m in TABLE_REGISTRY} == {
@@ -55,6 +55,7 @@ def test_registry_is_exactly_the_seven_flat_and_iam_tables():
         ("iam", "user_account"),
         ("iam", "role"),
         ("iam", "user_role"),
+        ("iam", "role_capability"),
         ("public", "domain"),
         ("public", "template"),
         ("public", "problem"),
@@ -84,8 +85,11 @@ def test_meta_schema_reports_capability_flags_defaulting_true(auth_headers):
     assert by_name[("iam", "user_account")]["write_capability"] == "iam.manage"
     assert by_name[("iam", "role")]["write_capability"] == "iam.manage"
     assert by_name[("iam", "user_role")]["write_capability"] == "iam.manage"
+    assert by_name[("iam", "role_capability")]["write_capability"] == "iam.manage"
     assert by_name[("public", "domain")]["write_capability"] == "domain.edit"
     assert by_name[("iam", "organization")]["write_capability"] == "domain.edit"
+    assert by_name[("public", "problem")]["write_capability"] == "model.publish"
+    assert by_name[("public", "template")]["write_capability"] == "model.publish"
 
 
 def test_capability_flags_suppress_write_routes():

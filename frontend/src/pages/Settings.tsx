@@ -1,10 +1,19 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
-import { useSetSetting, useSettings, type Id, type SettingScope, type SettingValue } from "../api/v1";
+import {
+  useMe,
+  useSetSetting,
+  useSettings,
+  useUpdateMe,
+  type Id,
+  type MeUpdate,
+  type SettingScope,
+  type SettingValue,
+} from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -67,6 +76,8 @@ export default function Settings() {
         platform; where nothing is set, the built-in default applies.
       </p>
 
+      <AccountForm />
+
       <div className="mb-4 flex flex-wrap items-end gap-4">
         <label className="text-sm text-slate-700">
           <span className="mr-2 font-medium">Level</span>
@@ -126,6 +137,100 @@ export default function Settings() {
         </ul>
       )}
     </div>
+  );
+}
+
+function AccountForm() {
+  const me = useMe();
+  const save = useUpdateMe();
+  const toast = useToast();
+  const formId = useId();
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!me.data) return;
+    setDisplayName(me.data.display_name ?? "");
+    setEmail(me.data.email ?? "");
+  }, [me.data]);
+
+  function commit() {
+    setFailure(null);
+    const body: MeUpdate = {
+      display_name: displayName.trim() === "" ? null : displayName,
+      email: email.trim() === "" ? null : email,
+    };
+    if (password !== "") {
+      body.password = password;
+    }
+    save.mutate(body, {
+      onSuccess: () => {
+        setPassword("");
+        toast.success("Account saved");
+      },
+      onError: (error: unknown) => setFailure(formatApiError(error)),
+    });
+  }
+
+  if (!me.data) {
+    return null;
+  }
+
+  return (
+    <section className="mb-6 rounded-md border border-slate-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-slate-900">Your account</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Signed in as {me.data.username}. Changing this is not granting a role.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="text-sm text-slate-700">
+          <span className="mb-1 block font-medium">Display name</span>
+          <input
+            id={`${formId}-display-name`}
+            className="w-52 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+        </label>
+        <label className="text-sm text-slate-700">
+          <span className="mb-1 block font-medium">Email</span>
+          <input
+            id={`${formId}-email`}
+            type="email"
+            className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </label>
+        <label className="text-sm text-slate-700">
+          <span className="mb-1 block font-medium">Password</span>
+          <input
+            id={`${formId}-password`}
+            type="password"
+            autoComplete="new-password"
+            className="w-52 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            value={password}
+            placeholder="leave blank to keep"
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={commit}
+          disabled={save.isPending}
+          className="rounded-md bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          Save account
+        </button>
+      </div>
+      {failure && (
+        <p role="alert" className="mt-2 text-xs text-red-600">
+          {failure}
+        </p>
+      )}
+    </section>
   );
 }
 

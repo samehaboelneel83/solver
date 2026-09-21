@@ -560,9 +560,22 @@ export const classifyIr = (ir: Record<string, unknown>, problemId?: Id | null) =
 
 /** Who the caller is and what they may do. Computed by the API in the same
  * place it enforces them, so the screen and the server cannot disagree. */
-export type Me = { username: string; display_name: string | null; capabilities: string[] };
+export type Me = {
+  username: string;
+  display_name: string | null;
+  email?: string | null;
+  capabilities: string[];
+};
 
 export const getMe = () => apiFetch<Me>("/api/v1/me");
+
+export type MeUpdate = {
+  display_name?: string | null;
+  email?: string | null;
+  password?: string;
+};
+
+export const updateMe = (body: MeUpdate) => send<Me>("PATCH", "/api/v1/me", body);
 
 export type SettingScope = "platform" | "domain" | "problem";
 
@@ -956,6 +969,7 @@ export const useSetSetting = () => useV1Mutation(setSetting);
 export function useMe() {
   return useQuery({ queryKey: [V1, "me"], queryFn: getMe, staleTime: 5 * 60 * 1000 });
 }
+export const useUpdateMe = () => useV1Mutation(updateMe);
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });

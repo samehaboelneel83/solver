@@ -38,6 +38,13 @@ describe("AppShell", () => {
     localStorage.clear();
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+      if (path.startsWith("/api/v1/me")) {
+        return Promise.resolve({
+          username: "modeller",
+          display_name: null,
+          capabilities: ["domain.edit", "model.publish", "run.submit", "solver.configure", "settings.edit"],
+        });
+      }
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
   });
@@ -61,9 +68,61 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Domains" })).toHaveAttribute("href", "/public/domain");
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
-      // Access administration stays reachable, in its own group after the three.
+      // Organizations are domain.edit; Users / Roles / User roles /
+      // Role capabilities are iam.manage. A modeller shapes the domain
+      // (and so still sees Organizations) and does not grant roles.
+      // Templates are model.publish — this default account has that grant.
       expect(screen.getByRole("link", { name: "Organizations" })).toHaveAttribute("href", "/iam/organization");
+      expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Roles" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "User roles" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Role capabilities" })).not.toBeInTheDocument();
+    });
+
+    it("hides Templates, Organizations and Access when the account cannot write them", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+        if (path.startsWith("/api/v1/me")) {
+          return Promise.resolve({
+            username: "planner",
+            display_name: null,
+            capabilities: ["run.submit"],
+          });
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      renderWithProviders();
+      await settled();
+
+      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
+      expect(screen.getByRole("link", { name: "Model editor" })).toHaveAttribute("href", "/model");
+      expect(screen.queryByRole("link", { name: "Templates" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Organizations" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Access/ })).not.toBeInTheDocument();
+    });
+
+    it("shows Users, Roles and User roles only when the account may grant roles", async () => {
+      (apiFetch as any).mockImplementation((path: string) => {
+        if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+        if (path.startsWith("/api/v1/me")) {
+          return Promise.resolve({
+            username: "admin",
+            display_name: null,
+            capabilities: ["domain.edit", "iam.manage"],
+          });
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      renderWithProviders();
+      await settled();
+
       expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/iam/user_account");
+      expect(screen.getByRole("link", { name: "Roles" })).toHaveAttribute("href", "/iam/role");
+      expect(screen.getByRole("link", { name: "User roles" })).toHaveAttribute("href", "/iam/user_role");
+      expect(screen.getByRole("link", { name: "Role capabilities" })).toHaveAttribute(
+        "href",
+        "/iam/role_capability"
+      );
     });
 
     it("links Entity types from the Domain group (Task 11)", async () => {

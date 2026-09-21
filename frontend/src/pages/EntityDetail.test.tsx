@@ -523,6 +523,88 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
       expect((screen.getByTestId("field-organization_id") as HTMLInputElement).value).toBe("Acme");
     });
   });
+
+  it("keeps the parent id when Related records New reuses EntityDetail", async () => {
+    // Same component instance: /iam/role/:id → /iam/role_capability/new.
+    // EntityForm's state is only initialized on mount, so a key that does
+    // not change with the table leaves role_id empty and Create says
+    // "Role is required."
+    (apiFetch as any).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "iam",
+            table: "role",
+            label: "Role",
+            label_plural: "Roles",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "code", type: "string", required: true, writable: true, is_fk: false, fk_table: null, label_field: true },
+              { name: "name", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+          {
+            schema: "iam",
+            table: "role_capability",
+            label: "Role capability",
+            label_plural: "Role capabilities",
+            fields: [
+              { name: "id", type: "uuid", required: true, writable: false, is_fk: false, fk_table: null },
+              {
+                name: "role_id",
+                type: "uuid",
+                required: true,
+                writable: true,
+                is_fk: true,
+                fk_table: "iam.role",
+              },
+              { name: "capability_code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      if (path === "/api/iam/role/role-1") {
+        return Promise.resolve({ id: "role-1", code: "planner", name: "Planner" });
+      }
+      if (path === "/api/iam/role/options?ids=role-1") {
+        return Promise.resolve([{ id: "role-1", label: "planner" }]);
+      }
+      if (path.startsWith("/api/iam/role_capability/") && options?.method === "POST") {
+        return Promise.resolve({ id: "grant-1", role_id: "role-1", capability_code: "run.submit" });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    render(
+      <QueryClientProvider client={editorQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/iam/role/role-1"]}>
+            <Routes>
+              <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+              <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    const related = await screen.findByRole("heading", { name: /related records/i });
+    const row = related.parentElement?.parentElement ?? related.closest("section") ?? document.body;
+    fireEvent.click(within(row instanceof HTMLElement ? row : document.body).getByRole("link", { name: "New" }));
+
+    fireEvent.change(await screen.findByTestId("field-capability_code"), { target: { value: "run.submit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      const posted = (apiFetch as any).mock.calls.find(
+        (call: [string, RequestInit?]) => call[0] === "/api/iam/role_capability/" && call[1]?.method === "POST"
+      );
+      expect(posted).toBeTruthy();
+      expect(JSON.parse(posted[1].body)).toEqual(
+        expect.objectContaining({ role_id: "role-1", capability_code: "run.submit" })
+      );
+    });
+  });
 });
 
 describe("EntityDetail breadcrumb and Cancel (C-6, C-8)", () => {

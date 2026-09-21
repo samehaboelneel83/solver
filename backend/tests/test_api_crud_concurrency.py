@@ -1,10 +1,11 @@
 """Ruling 42 on the generic CRUD factory -- a stale PUT is refused.
 
-The seven factory tables (`domain`, `template`, `problem`, and the four
+The factory tables (`domain`, `template`, `problem`, and the five
 `iam` tables) share one PUT. The generic form sends every filled writable
 field, so two clients opening the same row is the same silent overwrite
 0010 closed for purpose-built forms. Migration 0023 gives each table an
 `updated_at`; the factory compares it when the payload carries it.
+`role_capability` joined them in 0026.
 """
 
 import uuid
@@ -24,6 +25,7 @@ CRUD_TABLES = (
     ("iam", "user_account"),
     ("iam", "role"),
     ("iam", "user_role"),
+    ("iam", "role_capability"),
     ("public", "domain"),
     ("public", "template"),
     ("public", "problem"),

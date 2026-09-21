@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.validation import field_error
 from app.core.security import hash_password
 from app.crud.factory import build_crud_router
-from app.models.iam import Organization, Role, UserAccount, UserRole
+from app.models.iam import Organization, Role, RoleCapability, UserAccount, UserRole
 from app.models.v1_domain import Domain
 from app.models.v1_problem import Problem, Template
 from app.schemas.generate import make_crud_schemas
@@ -96,6 +96,21 @@ router.include_router(
     )
 )
 
+RoleCapabilityCreate, RoleCapabilityUpdate, RoleCapabilityRead = make_crud_schemas(
+    RoleCapability, name="RoleCapability", readonly={"id"}, server_default={"updated_at"}
+)
+router.include_router(
+    build_crud_router(
+        model=RoleCapability,
+        create_schema=RoleCapabilityCreate,
+        update_schema=RoleCapabilityUpdate,
+        read_schema=RoleCapabilityRead,
+        schema_name="iam",
+        table_name="role_capability",
+        write_capability="iam.manage",
+    )
+)
+
 # --- public (schema v1 flat tables) ---
 #
 # schema v1: the v0 `domain.*` and `problem.*` schemas (27 tables) were
@@ -144,6 +159,7 @@ router.include_router(
         read_schema=TemplateRead,
         schema_name="public",
         table_name="template",
+        write_capability="model.publish",
     )
 )
 
@@ -158,5 +174,6 @@ router.include_router(
         read_schema=ProblemRead,
         schema_name="public",
         table_name="problem",
+        write_capability="model.publish",
     )
 )

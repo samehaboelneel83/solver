@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import capabilities_of, get_current_user, requires
 from app.api.quantity import QuantityOut
+from app.api.routers import hash_user_password
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solution
@@ -238,11 +239,55 @@ def whoami(
     or hide actions the user actually has. The capabilities are computed in
     the one place that enforces them, so the two cannot disagree.
     """
+    return _me(db, user)
+
+
+class MeUpdate(BaseModel):
+    """What an account may change about itself.
+
+    Username, organisation and whether the account is active stay off
+    this form: those are who the person is, and granting that is
+    `iam.manage`. An omitted password leaves the stored hash.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    email: str | None = None
+    password: str | None = None
+
+
+def _me(db: Session, user: UserAccount) -> dict[str, Any]:
     return {
         "username": user.username,
         "display_name": user.display_name,
+        "email": user.email,
         "capabilities": sorted(capabilities_of(db, user)),
     }
+
+
+@router.patch("/me")
+def update_whoami(
+    payload: MeUpdate,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Change the caller's own name, email or password.
+
+    Creating users and assigning roles is `iam.manage`. This is not that:
+    the row is already theirs. Any authenticated account may call it.
+    """
+    changes = hash_user_password(payload.model_dump(exclude_unset=True))
+    if "hashed_password" in changes:
+        user.hashed_password = changes["hashed_password"]
+    if "display_name" in changes:
+        user.display_name = changes["display_name"]
+    if "email" in changes:
+        user.email = changes["email"]
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _me(db, user)
 
 
 class ClassifyRequest(BaseModel):

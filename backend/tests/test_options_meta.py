@@ -170,6 +170,30 @@ def test_user_role_label_uses_username_and_role_code(auth_headers, admin_user_id
     assert items[0]["label"] == f"{settings.admin_username} / {role_code}"
 
 
+def test_role_capability_label_uses_role_code_and_capability(auth_headers):
+    client = TestClient(app)
+    role_code = f"lbl-cap-{uuid.uuid4().hex[:8]}"
+    role_id = _make_role(client, auth_headers, role_code, "Label Cap")
+    created = client.post(
+        "/api/iam/role_capability/",
+        json={"role_id": role_id, "capability_code": "run.submit"},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    grant_id = created.json()["id"]
+
+    options_response = client.get(
+        f"/api/iam/role_capability/options?ids={grant_id}", headers=auth_headers
+    )
+    assert options_response.status_code == 200
+    items = options_response.json()
+    assert len(items) == 1
+    assert items[0]["label"] == f"{role_code} / run.submit"
+
+    client.delete(f"/api/iam/role_capability/{grant_id}", headers=auth_headers)
+    client.delete(f"/api/iam/role/{role_id}", headers=auth_headers)
+
+
 def test_user_account_label_is_username(auth_headers):
     # hashed_password is `hidden=` on UserAccount's create schema (by
     # design -- see test_list_filter_and_order_reject_hidden_columns in
@@ -203,10 +227,10 @@ def test_user_account_label_is_username(auth_headers):
 
 def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
     """The positive `choices` half of this test is gone with its tables: no
-    field on any of the seven registered tables (the four `iam` tables plus
-    schema v1's `domain`/`template`/`problem`) matches meta.py's CHOICES
-    map. What is still checked is the `default` reporting and that plain
-    text fields report neither a default nor choices."""
+    field on any of the factory tables other than `role_capability`
+    matches meta.py's CHOICES map. What is still checked is the `default`
+    reporting and that plain text fields report neither a default nor
+    choices. `capability_code` is the one field that does carry choices."""
     client = TestClient(app)
 
     response = client.get("/api/meta/schema", headers=auth_headers)
@@ -221,6 +245,11 @@ def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
     name_field = organization_fields["name"]
     assert not name_field.get("default")
     assert not name_field.get("choices")
+
+    capability_fields = {f["name"]: f for f in tables[("iam", "role_capability")]["fields"]}
+    assert "iam.manage" in capability_fields["capability_code"]["choices"]
+    assert "run.submit" in capability_fields["capability_code"]["choices"]
+    assert capability_fields["capability_code"]["label"] == "Capability"
 
 
 def test_schema_reports_table_labels(auth_headers):
@@ -237,6 +266,10 @@ def test_schema_reports_table_labels(auth_headers):
     user_account_table = tables[("iam", "user_account")]
     assert user_account_table["label"] == "User account"
     assert user_account_table["label_plural"] == "User accounts"
+
+    role_capability_table = tables[("iam", "role_capability")]
+    assert role_capability_table["label"] == "Role capability"
+    assert role_capability_table["label_plural"] == "Role capabilities"
 
 
 def test_schema_reports_field_label_overrides(auth_headers):

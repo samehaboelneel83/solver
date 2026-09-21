@@ -277,7 +277,7 @@ export default function EntityDetail() {
       {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <EntityForm
-        key={formKey}
+        key={`${schemaName}.${tableName}.${isNew ? "new" : id ?? ""}:${formKey}`}
         fields={table.fields}
         initialValues={isNew ? prefill : (formSeed ?? existing)}
         onSubmit={handleSubmit}

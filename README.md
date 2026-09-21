@@ -45,7 +45,7 @@ Two things about this shape drive most of the code:
   read/create router whose `PUT`/`PATCH`/`DELETE` answer `405`; the other three
   have no router at all.
 
-`GET /api/meta/schema` lists **7** tables, not 20: only the four `iam` tables and
+`GET /api/meta/schema` lists **8** tables, not 20: the five `iam` tables and
 the three flat `public` tables (`domain`, `template`, `problem`) go through the
 generic CRUD factory. Everything else has a purpose-built router, or no router
 at all — see the comment block in `backend/app/api/routers.py` for the reasoning
@@ -582,6 +582,8 @@ python scripts/graph_smoke_check.py
   filterable, and never returned. An empty password on edit leaves the
   stored hash. Creating a user opens that row so Related records can offer
   **User roles → New** (the same prefilled form as any other child table).
+  The form remounts when the table changes, so the parent id from the
+  query string is not left behind from the record you just left.
   A user with no role can sign in and cannot do anything else.
 - **Capabilities gate writes.** Auth is JWT on every route; what the
   caller may do is a row on a role (migration `0013`), enforced in one
@@ -590,7 +592,18 @@ python scripts/graph_smoke_check.py
   refuses a write that arrives anyway. A planner can solve without being
   able to change the model. Creating users and assigning roles is
   `iam.manage`, not `domain.edit` — a modeller shapes the domain, they do
-  not decide who else may.
+  not decide who else may. Changing your own name, email or password is
+  `PATCH /api/v1/me`, not that grant: Settings offers it to whoever is
+  signed in. The Access nav offers Users, Roles, User roles and Role
+  capabilities only to an account that holds `iam.manage`, and
+  Organizations only to one that holds `domain.edit`. A planner sees
+  none of those links, and the Access heading goes with them. Assigning a role is
+  not saying what that role may do — the grant is a `role_capability`
+  row, the same factory form. Creating a problem or a template is
+  `model.publish`, not `domain.edit` — starting a model is not shaping
+  entity types. The Problem nav offers Templates only to an account that
+  holds that grant; Problems and the Model editor stay, because a planner
+  still reads them. A typed URL still reads.
 - **Styling is plain Tailwind,** not the shadcn/ui component library named in
   the original spec §7.1. Components were hand-rolled instead; functionally
   equivalent, but don't go looking for a shadcn install that isn't there.
@@ -603,10 +616,11 @@ python scripts/graph_smoke_check.py
   `entity_validate`. Generic JSONB columns on other tables remain a JSON box.
 - **Optimistic locking covers the purpose-built forms and generic CRUD.**
   `entity`, `entity_type`, `relationship_type`, `relationship` and
-  `parameter_value` plus the seven factory tables (`domain`, `template`,
+  `parameter_value` plus the factory tables (`domain`, `template`,
   `problem`, `iam.organization`, `iam.user_account`, `iam.role`,
-  `iam.user_role`) carry an `updated_at` (migrations `0010`, `0021`, `0022`
-  and `0023`, maintained by a trigger so every writer moves it). Their forms
+  `iam.user_role`, `iam.role_capability`) carry an `updated_at` (migrations
+  `0010`, `0021`, `0022`, `0023` and `0026`, maintained by a trigger so
+  every writer moves it). Their forms
   send it back and a save built on a superseded read is refused with a
   **409**, offering a reload that keeps whatever the person has typed. The
   check is also opt-in per request: a write that omits `updated_at` is not

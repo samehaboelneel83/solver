@@ -1,6 +1,7 @@
 import { MouseEvent, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
+import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
 
@@ -44,7 +45,7 @@ function saveOpenGroups(state: Record<string, boolean>) {
   }
 }
 
-type NavItem = { to: string; label: string };
+type NavItem = { to: string; label: string; /** Hide unless `GET /me` lists this. */ capability?: string };
 type NavGroup = {
   /** Stable key for the collapse state in localStorage. */
   key: string;
@@ -91,7 +92,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/model", label: "Model editor" },
       { to: "/versions", label: "Model versions" },
       { to: "/scenarios", label: "Scenarios" },
-      { to: "/public/template", label: "Templates" },
+      { to: "/public/template", label: "Templates", capability: "model.publish" },
     ],
   },
   {
@@ -110,20 +111,26 @@ export const NAV_GROUPS: NavGroup[] = [
     key: "access",
     label: "Access",
     items: [
-      { to: "/iam/organization", label: "Organizations" },
-      { to: "/iam/user_account", label: "Users" },
-      { to: "/iam/role", label: "Roles" },
-      { to: "/iam/user_role", label: "User roles" },
+      { to: "/iam/organization", label: "Organizations", capability: "domain.edit" },
+      { to: "/iam/user_account", label: "Users", capability: "iam.manage" },
+      { to: "/iam/role", label: "Roles", capability: "iam.manage" },
+      { to: "/iam/user_role", label: "User roles", capability: "iam.manage" },
+      { to: "/iam/role_capability", label: "Role capabilities", capability: "iam.manage" },
     ],
   },
 ];
 
 /** The items of `group` that match `filter`: all of them when the group's
  * own name matches, otherwise those whose label does. */
-function visibleItems(group: NavGroup, filter: string): NavItem[] {
+function visibleItems(
+  group: NavGroup,
+  filter: string,
+  can: (capability: string) => boolean
+): NavItem[] {
+  const allowed = group.items.filter((item) => !item.capability || can(item.capability));
   const needle = filter.trim().toLowerCase();
-  if (!needle || group.label.toLowerCase().includes(needle)) return group.items;
-  return group.items.filter((item) => item.label.toLowerCase().includes(needle));
+  if (!needle || group.label.toLowerCase().includes(needle)) return allowed;
+  return allowed.filter((item) => item.label.toLowerCase().includes(needle));
 }
 
 // Matches the `lg` breakpoint in tailwind.config.js (also em-based, for the
@@ -173,6 +180,7 @@ function AppShellContent() {
   const drawerHeadingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
   const confirmLeave = useConfirmLeave();
+  const { can } = useCapabilities();
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");
@@ -411,8 +419,8 @@ function AppShellContent() {
         <nav aria-label="Main" className="min-h-0 flex-1 overflow-y-auto">
           {NAV_GROUPS.map((group) => {
             const isOpen = openGroups[group.key] ?? true;
-            const items = visibleItems(group, filterText);
-            if (filterText.trim() && items.length === 0) return null;
+            const items = visibleItems(group, filterText, can);
+            if (items.length === 0 && (filterText.trim() || !group.emptyNote)) return null;
             return (
               <div key={group.key} className="mb-4">
                 {/* H-9: py-2 keeps the toggle above the 24px Target Size floor. */}

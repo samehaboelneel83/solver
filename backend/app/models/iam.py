@@ -72,3 +72,24 @@ class UserRole(UUIDPKMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )
+
+
+class RoleCapability(UUIDPKMixin, Base):
+    """A grant: this role may do this capability.
+
+    The pair is unique (migration 0026). `capability_code` is a string
+    referencing `iam.capability`; the form offers the known codes as
+    choices rather than a second factory table.
+    """
+
+    __tablename__ = "role_capability"
+    __table_args__ = {"schema": "iam"}
+
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("iam.role.id"), nullable=False
+    )
+    capability_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Migration 0026 -- same trigger as the other factory tables.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )

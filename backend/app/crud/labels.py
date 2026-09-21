@@ -35,10 +35,19 @@ def _user_role_label(db: Session, row) -> str:
     return f"{user_label} / {role_label}"
 
 
+def _role_capability_label(db: Session, row) -> str:
+    from app.models.iam import Role
+
+    role = db.get(Role, row.role_id)
+    role_label = role.code if role else str(row.role_id)
+    return f"{role_label} / {row.capability_code}"
+
+
 # Keyed by "schema.table". Only rows with no natural code/name label need
 # an override here.
 LABEL_OVERRIDES: dict[str, Callable[[Session, object], str]] = {
     "iam.user_role": _user_role_label,
+    "iam.role_capability": _role_capability_label,
     # schema v1: the domain.*/problem.* overrides went with their tables in
     # migration 0006. v1's own composite-key rows (parameter_value) are not
     # exposed as FK dropdown options, so nothing replaces them here yet.

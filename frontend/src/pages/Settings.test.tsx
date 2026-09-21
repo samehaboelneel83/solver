@@ -103,7 +103,7 @@ describe("Settings", () => {
 
     const box = await screen.findByLabelText("solve.time_limit_s");
     fireEvent.change(box, { target: { value: "" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Save$/ })[0]);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     // null, not 0: unsetting restores the level above.
@@ -121,7 +121,7 @@ describe("Settings", () => {
     renderPage();
 
     fireEvent.change(await screen.findByLabelText("solve.time_limit_s"), { target: { value: "45" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Save$/ })[0]);
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ value: 45 });
@@ -131,7 +131,7 @@ describe("Settings", () => {
     renderPage();
 
     fireEvent.change(await screen.findByLabelText("solve.time_limit_s"), { target: { value: "soon" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Save$/ })[0]);
 
     const message = await screen.findByText(/is a number/);
     expect(message).toHaveAttribute("role", "alert");
@@ -142,6 +142,31 @@ describe("Settings", () => {
     renderPage();
 
     expect(await screen.findByLabelText("solve.time_limit_s")).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Save$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save account" })).toBeInTheDocument();
+  });
+
+  it("lets an account change its own password without iam.manage", async () => {
+    const sent: { path: string; body: unknown }[] = [];
+    stub({
+      me: { username: "planner", display_name: "Pat", email: "pat@example.test", capabilities: ["run.submit"] },
+      write: (path: string, options?: { body?: string }) => {
+        sent.push({ path, body: JSON.parse(options?.body ?? "{}") });
+        return Promise.resolve({
+          username: "planner",
+          display_name: "Pat",
+          email: "pat@example.test",
+          capabilities: ["run.submit"],
+        });
+      },
+    });
+    renderPage();
+
+    fireEvent.change(await screen.findByLabelText("Password"), { target: { value: "a new horse" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].path).toBe("/api/v1/me");
+    expect(sent[0].body).toMatchObject({ password: "a new horse" });
   });
 });

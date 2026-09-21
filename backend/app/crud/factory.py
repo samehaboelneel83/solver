@@ -124,8 +124,9 @@ def build_crud_router(
     plaintext never reaches the model.
 
     `write_capability` is the capability `requires()` checks on create,
-    update and delete. Domain tables stay on `domain.edit`; granting a
-    role is `iam.manage`.
+    update and delete. Domain tables stay on `domain.edit`; a problem
+    or template is `model.publish`; granting a role, or saying what that
+    role may do, is `iam.manage`.
 
     `schema_name == "public"` (schema v1's flat tables all live there) is
     special-cased to drop the schema segment from the URL, so these read as
