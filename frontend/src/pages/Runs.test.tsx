@@ -63,10 +63,12 @@ const RUN_DETAIL = {
 };
 
 function stub(overrides: Record<string, unknown> = {}) {
-  mockFetch.mockImplementation((path: string, options?: { method?: string }) => {
+  mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
     if (options?.method && options.method !== "GET") {
-      const write = overrides.write as ((p: string) => Promise<unknown>) | undefined;
-      if (write) return write(path);
+      const write = overrides.write as
+        | ((p: string, o?: { method?: string; body?: string }) => Promise<unknown>)
+        | undefined;
+      if (write) return write(path, options);
       return Promise.reject(new Error(`unexpected write ${path}`));
     }
     // `/api/problem/`, not `/api/public/problem` -- the public schema's
@@ -77,6 +79,15 @@ function stub(overrides: Record<string, unknown> = {}) {
     // which is the whole point of a queued run.
     const resolve = (value: unknown, fallback: unknown) =>
       Promise.resolve(typeof value === "function" ? (value as () => unknown)() : (value ?? fallback));
+    if (path.startsWith("/api/v1/solvers")) {
+      return Promise.resolve({
+        items: [
+          { name: "cp-sat", available: true, classes: ["IP"], note: "constraint programming" },
+          { name: "milp", available: true, classes: ["IP"], note: "branch and cut" },
+          { name: "gone", available: false, classes: ["IP"], note: "not in this build" },
+        ],
+      });
+    }
     if (path.startsWith("/api/v1/runs/")) return resolve(overrides.run, RUN_DETAIL);
     if (path.startsWith("/api/v1/runs")) return resolve(overrides.runs, { items: [RUN_SUMMARY], total: 1 });
     return Promise.reject(new Error(`unexpected ${path}`));
@@ -205,6 +216,40 @@ describe("Runs", () => {
     status = "optimal";
 
     expect(await screen.findByText(/best possible answer/i, {}, { timeout: 4000 })).toBeInTheDocument();
+  });
+
+  it("offers only the solvers this build actually has, and defaults to letting it choose", async () => {
+    renderPage();
+
+    const picker = await screen.findByLabelText(/solver/i);
+    // The registry is fetched, so the options arrive after the control does.
+    await screen.findByRole("option", { name: "milp" });
+    const offered = Array.from((picker as HTMLSelectElement).options).map((o) => o.value);
+    expect(offered).toEqual(["", "cp-sat", "milp"]);
+    // A build without a solver must not offer it: the run would fail at
+    // selection rather than being quietly given to another.
+    expect(offered).not.toContain("gone");
+    expect(picker).toHaveValue("");
+  });
+
+  it("asks for a named solver when one is chosen", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 12 });
+    stub({ write, runs: { items: [], total: 0 } });
+    renderPage();
+
+    await screen.findByRole("option", { name: "milp" });
+    fireEvent.change(screen.getByLabelText(/solver/i), { target: { value: "milp" } });
+    fireEvent.click(screen.getByRole("button", { name: /^solve/i }));
+
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body).solver).toBe("milp");
+  });
+
+  it("says why a solver was chosen, not only which", async () => {
+    stub({ run: { ...RUN_DETAIL, params: { ...RUN_DETAIL.params, why_solver: "asked for milp" } } });
+    renderPage();
+
+    expect(await screen.findByText("asked for milp")).toBeInTheDocument();
   });
 
   it("says a problem has no scenarios rather than offering to solve nothing", async () => {

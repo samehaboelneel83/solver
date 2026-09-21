@@ -12,7 +12,6 @@ backend would need the numeric-parameter decision taken first.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from importlib.metadata import version as _pkg_version
@@ -24,6 +23,7 @@ from ortools.sat.python import cp_model
 _ORTOOLS_VERSION = _pkg_version("ortools")
 
 from app.solve.compile import Compiled, Constraint
+from app.solve.result import Solution
 
 # CP-SAT's own status codes, in the platform's `run_status` vocabulary --
 # which already distinguishes a proven optimum from a merely feasible answer,
@@ -35,22 +35,6 @@ _STATUS = {
     cp_model.MODEL_INVALID: "error",
     cp_model.UNKNOWN: "unknown",
 }
-
-
-@dataclass
-class Solution:
-    status: str
-    optimal: bool
-    objective: int | None
-    # ("assign", ("ahmed", "mon", "morning")) -> 1
-    assignments: dict[tuple[str, tuple[str, ...]], int]
-    wall_seconds: float
-    solver: str
-
-    def chosen(self, variable: str) -> list[tuple[str, ...]]:
-        """The index tuples a binary variable took as 1 — the roster, in the
-        domain's own keys."""
-        return sorted(k[1] for k, v in self.assignments.items() if k[0] == variable and v)
 
 
 def solve(compiled: Compiled, *, time_limit: float = 10.0, workers: int = 8) -> Solution:

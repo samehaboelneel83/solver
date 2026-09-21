@@ -31,6 +31,7 @@ from app.api.deps import get_current_user
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
+from app.solve.backends import available_names
 from app.solve.service import enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -43,11 +44,16 @@ Seed = Annotated[int, Field(ge=0, le=2**31 - 1)]
 
 
 class RunRequest(BaseModel):
-    """Both fields are recorded on the run: a result nobody can attribute to
-    a time limit and a seed is not reproducible."""
+    """All three are recorded on the run: a result nobody can attribute to a
+    solver, a time limit and a seed is not reproducible."""
 
     time_limit_s: TimeLimit = 10.0
     seed: Seed = 1
+    #: Leave it out and the platform chooses, recording why. Naming one that
+    #: cannot take the model fails the run with that reason rather than
+    #: quietly using another -- "I used something else" would make the
+    #: record a lie.
+    solver: str | None = None
 
 
 class ConstraintOutcome(BaseModel):
@@ -116,13 +122,46 @@ def create_run(
     if db.get(Scenario, scenario_id) is None:
         raise HTTPException(status_code=404, detail="scenario not found")
 
+    request = payload or RunRequest()
+    if request.solver is not None and request.solver not in available_names():
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "solver"],
+                    "msg": f"no solver called {request.solver!r}; this build has "
+                    f"{', '.join(available_names())}",
+                }
+            ],
+        )
     run_id = enqueue_run(
         db,
         scenario_id,
-        time_limit=(payload or RunRequest()).time_limit_s,
-        seed=(payload or RunRequest()).seed,
+        time_limit=request.time_limit_s,
+        seed=request.seed,
+        solver=request.solver,
     )
     return _read(db, run_id)
+
+
+@router.get("/solvers")
+def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """What this build can solve with. A UI that hardcoded the list would
+    offer a solver a different build does not have."""
+    from app.solve.backends import REGISTRY
+
+    return {
+        "items": [
+            {
+                "name": b.name,
+                "available": b.is_available(),
+                "classes": sorted(b.classes),
+                "note": b.note,
+            }
+            for b in sorted(REGISTRY, key=lambda b: b.rank)
+        ]
+    }
 
 
 @router.get("/runs")

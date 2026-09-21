@@ -478,7 +478,18 @@ export type Run = RunSummary & {
   constraints: ConstraintOutcome[];
 };
 
-export type RunRequest = { time_limit_s?: number; seed?: number };
+export type RunRequest = { time_limit_s?: number; seed?: number; solver?: string | null };
+
+export type SolverInfo = {
+  name: string;
+  available: boolean;
+  classes: string[];
+  note: string;
+};
+
+/** What this build can solve with. Hardcoding the list would offer a solver
+ * a different build does not have. */
+export const listSolvers = () => apiFetch<Page<SolverInfo>>("/api/v1/solvers");
 
 export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
   const { scenarioId, limit, offset } = params;
@@ -736,6 +747,10 @@ export function useVersion(id: Id | null | undefined) {
 }
 export const useCreateVersion = () =>
   useV1Mutation(({ problemId, body }: { problemId: Id; body: ModelVersionCreate }) => createVersion(problemId, body));
+
+export function useSolvers() {
+  return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
+}
 
 export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
   return useQuery({

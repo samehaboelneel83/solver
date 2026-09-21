@@ -20,9 +20,10 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.solve.backends import NoBackend, choose
 from app.solve.classify import classify
 from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model
-from app.solve.cpsat import Solution, solve
+from app.solve.result import Solution
 
 COMPILER_VERSION = "ir-compiler 1"
 
@@ -41,7 +42,12 @@ class RunOutcome:
 
 
 def enqueue_run(
-    db: Session, scenario_id: int, *, time_limit: float = 10.0, seed: int = 1
+    db: Session,
+    scenario_id: int,
+    *,
+    time_limit: float = 10.0,
+    seed: int = 1,
+    solver: str | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -78,8 +84,15 @@ def enqueue_run(
             "s": scenario_id,
             "d": dataset_id,
             "cv": COMPILER_VERSION,
-            "params": _json({"time_limit_s": time_limit, "classified_as": found.model_class,
-                             "why": found.reasons}),
+            "params": _json(
+                {
+                    "time_limit_s": time_limit,
+                    "classified_as": found.model_class,
+                    "why": found.reasons,
+                    "needs": sorted(found.needs),
+                    **({"requested_solver": solver} if solver else {}),
+                }
+            ),
             "seed": seed,
         },
     ).scalar_one()
@@ -127,12 +140,26 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
 
     ir = patched(row["ir"], row["patch"] or {})
     data = row["data"]
-    time_limit = float((row["params"] or {}).get("time_limit_s", 10.0))
+    params = row["params"] or {}
+    time_limit = float(params.get("time_limit_s", 10.0))
     dataset_id = row["dataset_id"]
+
+    found = classify(ir)
+    try:
+        backend, why = choose(found, params.get("requested_solver"))
+    except NoBackend as exc:
+        db.execute(
+            text(
+                "UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"
+            ),
+            {"e": str(exc), "r": run_id},
+        )
+        db.commit()
+        return RunOutcome(run_id, dataset_id, "error", None, {})
 
     try:
         compiled = compile_model(ir, data)
-        result = solve(compiled, time_limit=time_limit)
+        result = backend.solve(compiled, time_limit=time_limit, workers=8)
     except Unsupported as exc:
         # The model is valid and this compiler cannot express it. That is a
         # failed run with a reason, not a crash and not an empty answer.
@@ -146,6 +173,12 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         db.commit()
         return RunOutcome(run_id, dataset_id, "error", None, {})
 
+    # Which solver ran, and why it was the one -- a result nobody can
+    # attribute to a choice is not reproducible.
+    db.execute(
+        text("UPDATE run SET solver = :s, params = params || :extra WHERE id = :r"),
+        {"s": backend.name, "extra": _json({"chosen_solver": backend.name, "why_solver": why}), "r": run_id},
+    )
     _record(db, run_id, compiled, result)
     db.commit()
     return RunOutcome(

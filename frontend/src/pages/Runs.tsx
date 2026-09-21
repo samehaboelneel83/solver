@@ -9,6 +9,7 @@ import {
   useRun,
   useRuns,
   useScenarios,
+  useSolvers,
   type ConstraintOutcome,
   type Id,
   type Run,
@@ -196,6 +197,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
 }
 
 function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioName: string }) {
+  const solvers = useSolvers();
+  const [solver, setSolver] = useState<string>("");
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
   // While anything is unfinished the list is stale the moment it arrives.
   const settling = (runs.data?.items ?? []).some(
@@ -217,7 +220,7 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
   function solve() {
     setFailure(null);
     createRun.mutate(
-      { scenarioId, body: { time_limit_s: 30 } },
+      { scenarioId, body: { time_limit_s: 30, ...(solver ? { solver } : {}) } },
       {
         onSuccess: (run: Run) => {
           setOpenId(run.id);
@@ -239,6 +242,25 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
         >
           {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
         </button>
+        <label className="text-sm text-slate-600">
+          <span className="mr-2">Solver</span>
+          <select
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+            value={solver}
+            onChange={(event) => setSolver(event.target.value)}
+          >
+            {/* Empty means "let the platform choose", which is the default
+                and records why it chose. */}
+            <option value="">chosen for me</option>
+            {(solvers.data?.items ?? [])
+              .filter((option) => option.available)
+              .map((option) => (
+                <option key={option.name} value={option.name}>
+                  {option.name}
+                </option>
+              ))}
+          </select>
+        </label>
         <span className="text-sm text-slate-500">
           {createRun.isPending
             ? "Queueing…"
@@ -334,6 +356,10 @@ function RunDetail({ id }: { id: Id }) {
         <Fact label="Objective" value={data.objective === null ? "—" : String(data.objective)} />
         <Fact label="Solved in" value={data.wall_time_s === null ? "—" : `${data.wall_time_s}s`} />
         <Fact label="Solver" value={data.solver_version ?? data.solver} />
+        <Fact
+          label="Chosen because"
+          value={String((data.params as { why_solver?: string }).why_solver ?? "—")}
+        />
         <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
       </dl>
 
