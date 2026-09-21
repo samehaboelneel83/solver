@@ -470,8 +470,17 @@ export type RunSummary = {
   finished_at: string | null;
 };
 
+/** One instance of a rule that is part of why there is no answer. */
+export type ConflictItem = { constraint_id: string; instance: string[] };
+
 export type Run = RunSummary & {
   params: Record<string, unknown>;
+  /** Rules that cannot hold together. Null unless the run was infeasible. */
+  conflict: ConflictItem[] | null;
+  /** True when every listed rule was shown to be needed, so removing any one
+   * of them makes the model solvable. False means the search was cut short:
+   * the set conflicts, but may be bigger than it needs to be. */
+  conflict_minimal: boolean | null;
   /** Variable name -> the index tuples it took. Null when the run found
    * nothing, which is not the same as an empty roster. */
   assignments: Record<string, string[][]> | null;

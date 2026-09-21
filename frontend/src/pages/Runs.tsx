@@ -10,6 +10,7 @@ import {
   useRuns,
   useScenarios,
   useSolvers,
+  type ConflictItem,
   type ConstraintOutcome,
   type Id,
   type Run,
@@ -363,6 +364,8 @@ function RunDetail({ id }: { id: Id }) {
         <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
       </dl>
 
+      {data.conflict && data.conflict.length > 0 && <Conflict items={data.conflict} minimal={data.conflict_minimal} />}
+
       {data.constraints.length > 0 && (
         <>
           <h3 className="mb-2 text-sm font-semibold text-slate-900">
@@ -393,6 +396,55 @@ function RunDetail({ id }: { id: Id }) {
           </ul>
         </div>
       ))}
+    </section>
+  );
+}
+
+/**
+ * Why there is no answer.
+ *
+ * `infeasible` on its own tells a planner what they already know: they cannot
+ * build the roster. The rules that cannot hold together, and the days they
+ * collide on, are what they can act on -- so this is the loudest thing on an
+ * infeasible run, above the rule list and the (empty) roster.
+ *
+ * `minimal` is not a detail. When the search proved irreducibility, "relax
+ * any one of these and it solves" is a promise the platform can make. When it
+ * was cut short, the same list is only a set that conflicts somewhere, and
+ * saying the stronger thing would send someone to relax a rule that changes
+ * nothing.
+ */
+function Conflict({ items, minimal }: { items: ConflictItem[]; minimal: boolean | null }) {
+  const byRule = new Map<string, string[][]>();
+  for (const item of items) {
+    byRule.set(item.constraint_id, [...(byRule.get(item.constraint_id) ?? []), item.instance]);
+  }
+
+  return (
+    <section className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+      <h3 className="mb-1 text-sm font-semibold text-amber-900">Why there is no answer</h3>
+      <p className="mb-3 text-sm text-amber-900">
+        {minimal
+          ? "These rules cannot all hold at once. Every one of them is needed for the clash: relax or remove any single one and the model can be solved."
+          : "These rules cannot all hold at once. The search stopped before it could narrow the list, so some of them may not be needed."}
+      </p>
+      <ul className="space-y-2">
+        {[...byRule.entries()].map(([rule, instances]) => (
+          <li key={rule} className="text-sm">
+            <span className="font-mono text-amber-900">{rule}</span>
+            <ul className="mt-1 flex flex-wrap gap-2">
+              {instances.map((instance) => (
+                <li
+                  key={instance.join("\u0001")}
+                  className="rounded border border-amber-200 bg-white px-2 py-1 font-mono text-xs text-amber-900"
+                >
+                  {instance.length > 0 ? instance.join(" · ") : "everywhere"}
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

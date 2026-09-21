@@ -1,0 +1,214 @@
+"""Why there is no answer.
+
+The fixture is a conflict that can be reasoned about by hand. Two employees,
+two days, one shift; each day needs **two** people, and an 8-hour weekly cap
+means nobody can work more than one shift all week. Four shift-slots have to
+be filled and only two can be. It is infeasible, and the reason is a
+particular pair of rules -- coverage and the hours cap -- while the third
+rule, "nobody works two shifts in a day", has nothing to do with it.
+
+That third rule is what makes these tests worth writing. Reporting every hard
+constraint would be true ("these cannot all hold") and worthless; the
+question is which ones are *needed*, and the test asserts irreducibility
+directly, by removing each reported member and checking the model becomes
+solvable.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+from sqlalchemy import text
+
+from app.solve import compile_model, cpsat
+from app.solve.compile import Linear
+from app.solve.diagnose import explain
+from app.solve.result import Solution
+from app.solve.service import enqueue_run
+from app.worker import work_once
+from tests.test_solve import _feasible, _ir_and_data  # noqa: F401
+from tests.test_v1_problem_run import (  # noqa: F401
+    _data,
+    _snapshot,
+    db,
+    make_attribute_def,
+    make_domain,
+    make_entity,
+    make_entity_type,
+    make_model_version,
+    make_parameter_def,
+    make_parameter_value,
+    make_problem,
+)
+
+
+@pytest.fixture(autouse=True)
+def empty_queue(db):
+    db.execute(text("DELETE FROM run"))
+    db.commit()
+    yield
+    db.execute(text("DELETE FROM run"))
+    db.commit()
+
+
+def _impossible(db):
+    """Demand 2 a day, but an 8-hour cap allows one shift a week each."""
+    version, _ = _feasible(db, demand_value=2, hours=8)
+    ir, data = _ir_and_data(db, version)
+    return version, compile_model(ir, data)
+
+
+def _solves(compiled, constraints) -> bool:
+    """Is the model solvable with just these constraints?"""
+    trial = replace(compiled, constraints=list(constraints), objective=Linear())
+    return cpsat.solve(trial, time_limit=10.0).status in ("optimal", "feasible")
+
+
+def _matches(constraint, items) -> bool:
+    instance = [str(v) for v in constraint.index.values()]
+    return any(
+        item["constraint_id"] == constraint.id and item["instance"] == instance for item in items
+    )
+
+
+def _scenario_for(db, version: int) -> int:
+    problem = db.execute(
+        text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}
+    ).scalar_one()
+    scenario = db.execute(
+        text(
+            "INSERT INTO scenario (problem_id, model_version_id, name)"
+            " VALUES (:p, :v, 'base') RETURNING id"
+        ),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.commit()
+    return scenario
+
+
+# -- the property the whole module exists for -------------------------------
+
+
+def test_every_rule_reported_is_one_that_removing_makes_it_solvable(db):
+    """Irreducibility, checked rather than claimed. If a member could be
+    dropped and the model stayed infeasible, it was never part of the reason,
+    and listing it sends a planner to change the wrong rule."""
+    _, compiled = _impossible(db)
+
+    conflict = explain(compiled, cpsat.solve)
+
+    assert conflict.items, "an infeasible model must have a reason"
+    assert conflict.minimal
+    reported = [c for c in compiled.constraints if _matches(c, conflict.items)]
+    assert _solves(compiled, []), "the fixture is only infeasible because of its rules"
+    assert not _solves(compiled, reported), "the reported set must itself be infeasible"
+    for dropped in reported:
+        rest = [c for c in reported if c is not dropped]
+        assert _solves(compiled, rest), (
+            f"{dropped.id} {list(dropped.index.values())} was reported but is not needed"
+        )
+
+
+def test_a_rule_that_is_not_part_of_the_conflict_is_not_reported(db):
+    """`c_one_shift_per_day` is a hard rule that holds here and is implied by
+    the hours cap. Naming it would send a planner to edit a rule whose
+    removal changes nothing."""
+    _, compiled = _impossible(db)
+
+    conflict = explain(compiled, cpsat.solve)
+
+    assert "c_one_shift_per_day" not in conflict.rules
+    assert set(conflict.rules) == {"c_cover", "c_max_hours"}
+
+
+def test_the_conflict_names_instances_not_just_rules(db):
+    """Coverage is broken is not actionable; Monday morning is. The schema's
+    `run.conflict` is shaped for the second."""
+    _, compiled = _impossible(db)
+
+    conflict = explain(compiled, cpsat.solve)
+
+    for item in conflict.items:
+        assert set(item) == {"constraint_id", "instance"}
+        assert all(isinstance(part, str) for part in item["instance"])
+    cover = [i["instance"] for i in conflict.items if i["constraint_id"] == "c_cover"]
+    assert cover
+    assert all(part in (["mon", "morning"], ["tue", "morning"]) for part in cover)
+
+
+# -- honesty when the search is cut short -----------------------------------
+
+
+def test_a_search_that_runs_out_of_budget_says_it_is_not_minimal(db):
+    """A truncated deletion filter still returns a set that conflicts, but not
+    an irreducible one. Reporting it as minimal would tell a planner that
+    every listed rule matters when some may not."""
+    _, compiled = _impossible(db)
+
+    conflict = explain(compiled, cpsat.solve, budget=1)
+
+    assert conflict.minimal is False
+    assert "may be larger than it needs to be" in conflict.note
+    # Still true, and still a conflict: it just has not been narrowed.
+    reported = [c for c in compiled.constraints if _matches(c, conflict.items)]
+    assert not _solves(compiled, reported)
+
+
+def test_a_probe_that_cannot_decide_stops_the_search_rather_than_guessing(db):
+    """A timeout is not a verdict. Treating `unknown` as still-infeasible
+    would drop a constraint that was in fact needed, and the answer would name
+    the wrong rules."""
+    _, compiled = _impossible(db)
+
+    def never_decides(compiled, *, time_limit, workers=8):
+        return Solution(
+            status="unknown",
+            optimal=False,
+            objective=None,
+            assignments={},
+            wall_seconds=0.0,
+            solver="stub",
+        )
+
+    conflict = explain(compiled, never_decides)
+
+    assert conflict.minimal is False
+    assert "without deciding" in conflict.note
+    # Nothing was narrowed away on an undecided probe.
+    assert len(conflict.items) == len(compiled.constraints)
+
+
+# -- through a run ----------------------------------------------------------
+
+
+def test_an_infeasible_run_records_its_conflict(db):
+    version, compiled = _impossible(db)
+    run_id = enqueue_run(db, _scenario_for(db, version), time_limit=20.0)
+
+    work_once(db)
+
+    row = db.execute(
+        text("SELECT status, conflict, conflict_minimal, params FROM run WHERE id = :r"),
+        {"r": run_id},
+    ).mappings().one()
+    assert row["status"] == "infeasible"
+    assert row["conflict_minimal"] is True
+    assert {item["constraint_id"] for item in row["conflict"]} == {"c_cover", "c_max_hours"}
+    assert "removing any one" in row["params"]["conflict_note"]
+
+
+def test_a_solved_run_carries_no_conflict(db):
+    """There is nothing to explain when there is an answer, and an empty list
+    would read as a conflict with no members."""
+    version, _ = _feasible(db, demand_value=1)
+    run_id = enqueue_run(db, _scenario_for(db, version), time_limit=20.0)
+
+    work_once(db)
+
+    row = db.execute(
+        text("SELECT status, conflict, conflict_minimal FROM run WHERE id = :r"), {"r": run_id}
+    ).mappings().one()
+    assert row["status"] == "optimal"
+    assert row["conflict"] is None
+    assert row["conflict_minimal"] is None

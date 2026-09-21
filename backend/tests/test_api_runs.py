@@ -172,6 +172,54 @@ def test_an_unsolvable_model_is_a_recorded_run_not_a_client_error(db, auth_heade
         db.commit()
 
 
+def test_an_infeasible_run_says_which_rules_cannot_hold_together(db, auth_headers):
+    """The difference between a tool and a calculator. "Infeasible" tells a
+    planner nothing they did not know; the pair of rules that cannot both
+    hold, and the instances where they collide, is what they can act on."""
+    from tests.test_solve import _feasible
+
+    client = TestClient(app)
+    # Demand 2 a day against an 8-hour weekly cap: four slots to fill, two
+    # that can be filled.
+    version, _ = _feasible(db, demand_value=2, hours=8)
+    problem = db.execute(
+        text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}
+    ).scalar_one()
+    domain = db.execute(
+        text("SELECT domain_id FROM problem WHERE id = :p"), {"p": problem}
+    ).scalar_one()
+    scenario = db.execute(
+        text(
+            "INSERT INTO scenario (problem_id, model_version_id, name)"
+            " VALUES (:p, :v, 's') RETURNING id"
+        ),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.commit()
+
+    try:
+        created = client.post(
+            f"/api/v1/scenarios/{scenario}/runs",
+            headers=auth_headers,
+            json={"time_limit_s": 20},
+        )
+        assert created.status_code == 201
+        work_once(db)
+        run = client.get(f"/api/v1/runs/{created.json()['id']}", headers=auth_headers).json()
+
+        assert run["status"] == "infeasible"
+        assert run["assignments"] is None
+        assert {item["constraint_id"] for item in run["conflict"]} == {"c_cover", "c_max_hours"}
+        # Instances, not just rules: the day and shift that collide.
+        assert ["mon", "morning"] in [item["instance"] for item in run["conflict"]]
+        # And it is proven irreducible, which is what makes "remove any one of
+        # these" a safe thing for the UI to say.
+        assert run["conflict_minimal"] is True
+    finally:
+        db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+        db.commit()
+
+
 def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_headers, db):
     client = TestClient(app)
     first = client.post(

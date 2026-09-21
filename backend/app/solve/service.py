@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.solve.backends import NoBackend, choose
 from app.solve.classify import classify
 from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model
+from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 
 COMPILER_VERSION = "ir-compiler 1"
@@ -176,10 +177,18 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     # Which solver ran, and why it was the one -- a result nobody can
     # attribute to a choice is not reproducible.
     db.execute(
-        text("UPDATE run SET solver = :s, params = params || :extra WHERE id = :r"),
+        text(
+            "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
+            " WHERE id = :r"
+        ),
         {"s": backend.name, "extra": _json({"chosen_solver": backend.name, "why_solver": why}), "r": run_id},
     )
     _record(db, run_id, compiled, result)
+    if result.status == "infeasible":
+        # "No answer exists" is true and useless on its own. Which rules
+        # cannot hold together is the thing a planner can act on, and it is
+        # only findable here, where the compiled model still exists.
+        _record_conflict(db, run_id, compiled, backend, time_limit)
     db.commit()
     return RunOutcome(
         run_id,
@@ -299,6 +308,36 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
                 "v": _json(entry["where"]),
             },
         )
+
+
+def _record_conflict(
+    db: Session, run_id: int, compiled: Compiled, backend: Any, time_limit: float
+) -> None:
+    """Diagnose an infeasible run with the same backend that called it
+    infeasible, so the explanation cannot disagree with the verdict.
+
+    The probe clock is a fraction of the run's, not the whole of it: a
+    diagnosis that took longer than the solve would be a second run wearing a
+    different name.
+    """
+    conflict = explain(
+        compiled,
+        backend.solve,
+        probe_seconds=min(DEFAULT_PROBE_SECONDS, max(1.0, time_limit / 4)),
+    )
+    db.execute(
+        text(
+            "UPDATE run SET conflict = :c, conflict_minimal = :m,"
+            "               params = params || CAST(:note AS jsonb)"
+            " WHERE id = :r"
+        ),
+        {
+            "c": _json(conflict.items),
+            "m": conflict.minimal,
+            "note": _json({"conflict_note": conflict.note}),
+            "r": run_id,
+        },
+    )
 
 
 def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[str]]]:

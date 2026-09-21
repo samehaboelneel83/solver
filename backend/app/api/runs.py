@@ -87,10 +87,26 @@ class RunSummary(BaseModel):
     finished_at: datetime | None
 
 
+class ConflictItem(BaseModel):
+    """One instance of a rule that is part of why there is no answer."""
+
+    constraint_id: str
+    # The index tuple, e.g. ["mon", "morning"] -- the instance, not the rule.
+    instance: list[str]
+
+
 class RunRead(RunSummary):
     """The answer, in the domain's own words."""
 
     params: dict[str, Any]
+    # Why there is no answer: rules that cannot hold together. Null unless
+    # the run was infeasible.
+    conflict: list[ConflictItem] | None
+    # Whether that set was proven irreducible. False means it conflicts but
+    # may contain rules that are not needed -- the search was cut short, and
+    # saying so is the difference between "change one of these" and "the
+    # reason is somewhere in here".
+    conflict_minimal: bool | None
     # variable name -> the index tuples it took, e.g.
     # {"assign": [["ahmed", "mon", "morning"], ...]}. Absent when the run
     # found nothing, which is not the same as an empty roster.
@@ -208,6 +224,8 @@ def _read(db: Session, run_id: int) -> RunRead:
     return RunRead(
         **RunSummary.model_validate(run).model_dump(),
         params=run.params or {},
+        conflict=run.conflict,
+        conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,
         constraints=[ConstraintOutcome.model_validate(c) for c in constraints],
     )

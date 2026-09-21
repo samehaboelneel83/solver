@@ -36,6 +36,8 @@ const RUN_SUMMARY = {
 const RUN_DETAIL = {
   ...RUN_SUMMARY,
   params: { classified_as: "IP", time_limit_s: 30 },
+  conflict: null,
+  conflict_minimal: null,
   assignments: { assign: [["ahmed", "mon", "morning"], ["bilal", "tue", "night"]] },
   constraints: [
     {
@@ -164,6 +166,57 @@ describe("Runs", () => {
     renderPage();
 
     expect(await screen.findByText(/no answer exists/i)).toBeInTheDocument();
+  });
+
+  it("names the rules that cannot hold together when there is no answer", async () => {
+    // The difference between a tool and a calculator: "infeasible" is not a
+    // finding, "coverage and the hours cap collide on Monday morning" is.
+    const infeasible = {
+      ...RUN_DETAIL,
+      status: "infeasible",
+      objective: null,
+      assignments: null,
+      constraints: [],
+      conflict: [
+        { constraint_id: "c_cover", instance: ["mon", "morning"] },
+        { constraint_id: "c_cover", instance: ["tue", "morning"] },
+        { constraint_id: "c_max_hours", instance: ["sara"] },
+      ],
+      conflict_minimal: true,
+    };
+    stub({ run: infeasible, runs: { items: [{ ...RUN_SUMMARY, status: "infeasible", objective: null }], total: 1 } });
+    renderPage();
+
+    const why = await screen.findByRole("heading", { name: /why there is no answer/i });
+    const panel = why.closest("section") as HTMLElement;
+    expect(within(panel).getByText("c_cover")).toBeInTheDocument();
+    expect(within(panel).getByText("c_max_hours")).toBeInTheDocument();
+    // The instances, because a rule name alone does not say where to look.
+    expect(within(panel).getByText(/mon . morning/)).toBeInTheDocument();
+    // Proven irreducible, so the stronger promise is the one shown.
+    expect(within(panel).getByText(/relax or remove any single one/i)).toBeInTheDocument();
+  });
+
+  it("does not promise that relaxing one rule is enough when the search was cut short", async () => {
+    // A truncated search still returns a set that conflicts, but some members
+    // may not be needed. Saying "remove any one" would send a planner to
+    // change a rule that changes nothing.
+    const infeasible = {
+      ...RUN_DETAIL,
+      status: "infeasible",
+      objective: null,
+      assignments: null,
+      constraints: [],
+      conflict: [{ constraint_id: "c_cover", instance: ["mon", "morning"] }],
+      conflict_minimal: false,
+    };
+    stub({ run: infeasible, runs: { items: [{ ...RUN_SUMMARY, status: "infeasible", objective: null }], total: 1 } });
+    renderPage();
+
+    const why = await screen.findByRole("heading", { name: /why there is no answer/i });
+    const panel = why.closest("section") as HTMLElement;
+    expect(within(panel).getByText(/stopped before it could narrow/i)).toBeInTheDocument();
+    expect(within(panel).queryByText(/relax or remove any single one/i)).not.toBeInTheDocument();
   });
 
   it("shows the reason a model could not be solved at all", async () => {
