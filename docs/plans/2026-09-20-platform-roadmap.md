@@ -14,7 +14,12 @@ Update, 2026-09-20: the checking infrastructure is merged too (`f30f1b6`) —
 
 ## 1. Where the platform actually is
 
-Facts, not impressions:
+Facts, not impressions — **as at 2026-09-20**. The table is left as written
+because the phases below are answers to it; where a row has since been
+overtaken, the phase that overtook it says so. The short version on
+2026-09-21: migrations run to `0016`, the solver exists and is chosen by
+class, and the run subsystem has its API, worker, queue and UI. Tests are
+1112 backend and 1493 frontend.
 
 | | state |
 |---|---|
@@ -80,22 +85,27 @@ seeded model rewritten so its constraints carry mathematics instead of prose.
 
 **Three decisions it took, which the rest of this roadmap now inherits:**
 
-1. **v1 admits `binary` and `integer` variables and refuses `continuous` by
-   name.** The reasoning is worth keeping: there is no solver to run a
-   continuous model, and admitting one would make the contract promise what
-   the platform cannot keep. It also closed a back door — entity attributes
-   include `number`, so arithmetic over a `number` attribute would have let
-   fractional coefficients in while parameters stayed integral, and nobody
-   would have decided that. Arithmetic is restricted to `integer` attributes;
-   `number` attributes remain usable in filters.
+1. ~~**v1 admits `binary` and `integer` variables and refuses `continuous` by
+   name.**~~ **Reversed 2026-09-21**; the reasoning is kept because reversing
+   it is what the entry was written to allow. There was no solver to run a
+   continuous model, and admitting one would have made the contract promise
+   what the platform could not keep. It also closed a back door — entity
+   attributes include `number`, so arithmetic over a `number` attribute would
+   have let fractional coefficients in while parameters stayed integral, and
+   nobody would have decided that. Arithmetic was restricted to `integer`
+   attributes; `number` attributes remained usable in filters.
+
+   Both halves are answered rather than dropped: GLOP is the solver, and the
+   back door is now a front door with a sign on it — `fractional-data` is
+   detected and named on the run. See decision #2.
 2. **No unexpressed constraint is admitted**, so the seed was rewritten rather
    than the contract weakened.
-3. **Traversal is not expressible** — and this one is a *consequence*, not a
-   choice. `snapshot_dataset()` freezes entities and parameters but **no
-   relationships**, so the frozen input a solver reads contains no edges. The
-   spec's own example (`unit.descendants`) therefore cannot be written today.
-   See "The traversal gap" below; it is the most consequential thing Phase 0
-   surfaced.
+3. ~~**Traversal is not expressible**~~ — a *consequence* rather than a choice:
+   `snapshot_dataset()` froze entities and parameters but **no
+   relationships**, so the frozen input a solver read contained no edges, and
+   the spec's own example (`unit.descendants`) could not be written. The most
+   consequential thing Phase 0 surfaced, and **closed on 2026-09-21** by
+   removing the cause — see "The traversal gap" below.
 
 Read §9 of the contract first: it separates what was **derived** from existing
 code (changing it contradicts something real) from what was **invented** here
@@ -103,26 +113,42 @@ code (changing it contradicts something real) from what was **invented** here
 
 ---
 
-## The traversal gap — decide before Phase 1
+## The traversal gap — **CLOSED 2026-09-21** (`cb7a684`)
+
+*Kept because the reasoning is the record of why it was worth doing, and
+because the last paragraph turned out to be right.*
 
 A hierarchy is the reason `relationship` exists, and a planner's first
 interesting constraint usually crosses one: *staffing for a region, counting
 its sub-units*; *nobody reports to someone in another division*. None of that
-is expressible, because the dataset a run is frozen against carries no
+was expressible, because the dataset a run is frozen against carried no
 relationships at all.
 
-Three ways out, in increasing order of cost:
+Three ways out were listed, in increasing order of cost:
 
 1. **Freeze the edges too.** Extend `snapshot_dataset()` to emit relationships
    per type, and give the term algebra a traversal form. Reproducibility is
-   preserved because the edges are frozen with everything else.
+   preserved because the edges are frozen with everything else. — **taken**,
+   except that the term algebra did not have to grow: see decision #3 below.
 2. **Precompute closures.** Emit `entity_descendants()` output for hierarchy
-   types as derived sets. Cheaper to express, less general.
+   types as derived sets. Cheaper to express, less general. — **not needed as
+   a separate mechanism**; it is `depth: any_or_self`.
 3. **Leave it.** Constraints stay flat; hierarchy is presentational only.
 
-This is a schema-and-contract change, so it belongs before model authoring
-rather than after — an editor built on a term algebra that cannot traverse
-will need reworking when traversal arrives.
+> This is a schema-and-contract change, so it belongs before model authoring
+> rather than after — an editor built on a term algebra that cannot traverse
+> will need reworking when traversal arrives.
+
+That was half right, and the half it got wrong is the more useful lesson. The
+sequencing warning was sound — this landed after the editor, and the editor
+did need reworking. But the rework was small, and it was small *because*
+traversal turned out to be a binding rather than a term: `TermBuilder`'s term
+half was untouched, and the change was one picker in the binding editor. The
+cost of getting the sequencing wrong is paid in the shape of the thing you
+have to change, not in the calendar.
+
+The first of the three inexpressible planner sentences — "North Region needs
+three on lates, counting its depots" — is now a constraint in the seeded demo.
 
 ## Phase 1 — Model authoring — **DONE via (a), the document** (`90eef1e`, `349a863`, `c4b76a6`)
 
@@ -425,9 +451,22 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
    attributes — was never an argument against continuous. It was an argument
    against admitting it silently, and it is answered by `fractional-data`
    being detected and named on the run rather than assumed.
-3. **The traversal gap** (above) — freeze edges, precompute closures, or leave
-   hierarchy presentational. Blocks nothing today, shapes the term algebra
-   tomorrow.
+3. ~~**The traversal gap**~~ **Settled 2026-09-21: option 1, freeze the edges.**
+   Done in the two steps migration `0011`'s docstring set out — `0011` froze
+   them, `0016` narrowed the emission to the types a model declares, the same
+   contract `sets` already had. Contract §4.2 is the form.
+
+   Two things about it were not in the three options. The term algebra did
+   **not** gain a traversal form: a walk is a property of a *binding*, so
+   `termKinds` is unchanged and `sum`, `forall` and `where` compose with it
+   without knowing it exists. And option 2 did not have to be chosen against —
+   `depth: one | any | any_or_self` makes the closure a mode of the one
+   mechanism rather than a second one, which is what the traversal decision
+   note had recommended.
+
+   Deferred, in the contract rather than in silence: an edge's own
+   `valid_from`, `valid_to` and `attrs`. `0011` freezes them; §5 records why
+   no term reads them yet.
 4. **Where do solvers run?** In-process, as sidecar containers, or on a remote
    worker pool. This determines the queue design in Phase 3 and the licence
    handling in Phase 2.
