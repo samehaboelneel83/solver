@@ -507,6 +507,12 @@ export type SolverInfo = {
  * a different build does not have. */
 export const listSolvers = () => apiFetch<Page<SolverInfo>>("/api/v1/solvers");
 
+/** Who the caller is and what they may do. Computed by the API in the same
+ * place it enforces them, so the screen and the server cannot disagree. */
+export type Me = { username: string; display_name: string | null; capabilities: string[] };
+
+export const getMe = () => apiFetch<Me>("/api/v1/me");
+
 export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
   const { scenarioId, limit, offset } = params;
   return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, limit, offset })}`);
@@ -804,6 +810,10 @@ export function useVersion(id: Id | null | undefined) {
 }
 export const useCreateVersion = () =>
   useV1Mutation(({ problemId, body }: { problemId: Id; body: ModelVersionCreate }) => createVersion(problemId, body));
+
+export function useMe() {
+  return useQuery({ queryKey: [V1, "me"], queryFn: getMe, staleTime: 5 * 60 * 1000 });
+}
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });

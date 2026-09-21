@@ -134,7 +134,7 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, reject_null
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
@@ -404,7 +404,7 @@ def create_version(
     problem_id: int,
     payload: ModelVersionCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("model.publish")),
 ) -> ModelVersionRead:
     problem = _get_problem(db, problem_id)
     _check_ir(db, problem, payload.ir)
@@ -466,7 +466,7 @@ def list_scenarios(
 def create_scenario(
     payload: ScenarioCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("model.publish")),
 ) -> ScenarioRead:
     _check_version_belongs(db, payload.problem_id, payload.model_version_id)
     _check_patch_ids(db, payload.model_version_id, payload.patch)
@@ -496,7 +496,7 @@ def update_scenario(
     scenario_id: int,
     payload: ScenarioUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("model.publish")),
 ) -> ScenarioRead:
     row = _get_scenario(db, scenario_id)
     changes = payload.model_fields_set
@@ -522,7 +522,7 @@ def update_scenario(
 def delete_scenario(
     scenario_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("model.publish")),
 ) -> None:
     # `run` rows cascade in the database (ON DELETE CASCADE).
     db.delete(_get_scenario(db, scenario_id))

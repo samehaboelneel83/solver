@@ -67,7 +67,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 # Shared rather than re-derived: `relationship_type.name` carries the
 # identical `^[a-z][a-z0-9_]*$` CHECK as the two names Task 5 validates,
 # including the trailing-newline subtlety that `re.fullmatch` closes and
@@ -307,7 +307,7 @@ def list_relationship_types(
 def create_relationship_type(
     payload: RelationshipTypeCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> RelationshipTypeRead:
     _check_hierarchy_rules(
         payload.from_type_id, payload.to_type_id, payload.cardinality, payload.is_hierarchy
@@ -333,7 +333,7 @@ def update_relationship_type(
     relationship_type_id: int,
     payload: RelationshipTypeUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> RelationshipTypeRead:
     changes = payload.model_dump(exclude_unset=True)
     expected = changes.pop("updated_at", None)
@@ -356,7 +356,7 @@ def update_relationship_type(
 def delete_relationship_type(
     relationship_type_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # `relationship` rows cascade in the database (ON DELETE CASCADE).
     db.delete(_get_relationship_type(db, relationship_type_id))
@@ -396,7 +396,7 @@ def list_relationships(
 def create_relationship(
     payload: RelationshipCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> RelationshipRead:
     _check_validity_window(payload.valid_from, payload.valid_to)
     row = Relationship(**payload.model_dump())
@@ -420,7 +420,7 @@ def update_relationship(
     relationship_id: int,
     payload: RelationshipUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> RelationshipRead:
     row = _get_relationship(db, relationship_id)
     changes = payload.model_dump(exclude_unset=True)
@@ -443,7 +443,7 @@ def update_relationship(
 def delete_relationship(
     relationship_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     db.delete(_get_relationship(db, relationship_id))
     _commit(db, "relationship")

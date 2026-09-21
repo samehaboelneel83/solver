@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -30,3 +31,47 @@ def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exception
     return user
+
+
+# -- capabilities -----------------------------------------------------------
+#
+# A role is a bag of capabilities (migration 0013), and the API checks for a
+# capability by name rather than for a role. Checking for a role would put the
+# policy in two places: "who may publish" would be spelled out at every route,
+# and adding a fifth role would mean editing all of them.
+
+
+def capabilities_of(db: Session, user: UserAccount) -> set[str]:
+    """Everything this user may do, from every role they hold."""
+    rows = db.execute(
+        text(
+            "SELECT DISTINCT rc.capability_code"
+            "  FROM iam.user_role ur"
+            "  JOIN iam.role_capability rc ON rc.role_id = ur.role_id"
+            " WHERE ur.user_id = :u"
+        ),
+        {"u": str(user.id)},
+    ).scalars().all()
+    return set(rows)
+
+
+def requires(capability: str):
+    """A dependency that refuses a request the user may not make.
+
+    **403, not 404.** The resource exists and the caller is who they say they
+    are; what is missing is permission, and saying so is what lets them ask
+    for it. Hiding it behind a 404 would also lie to the UI, which needs to
+    know the difference between "not there" and "not yours".
+    """
+
+    def dependency(
+        db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)
+    ) -> UserAccount:
+        if capability not in capabilities_of(db, user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"this account does not have the {capability!r} capability",
+            )
+        return user
+
+    return dependency

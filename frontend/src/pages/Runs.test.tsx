@@ -111,6 +111,15 @@ function stub(overrides: Record<string, unknown> = {}) {
     // which is the whole point of a queued run.
     const resolve = (value: unknown, fallback: unknown) =>
       Promise.resolve(typeof value === "function" ? (value as () => unknown)() : (value ?? fallback));
+    if (path.startsWith("/api/v1/me")) {
+      return Promise.resolve(
+        overrides.me ?? {
+          username: "admin",
+          display_name: "Administrator",
+          capabilities: ["domain.edit", "model.publish", "run.submit", "solver.configure"],
+        }
+      );
+    }
     if (path.startsWith("/api/v1/solvers")) {
       return Promise.resolve({
         items: [
@@ -407,6 +416,25 @@ describe("Runs", () => {
 
     await screen.findByText(/Run 11/);
     expect(screen.queryByLabelText(/compare run/i)).not.toBeInTheDocument();
+  });
+
+  it("does not offer to solve to an account that may not", async () => {
+    // Absent, not broken: a button whose only outcome is a 403 is worse than
+    // no button, because it reads as the platform being unreliable.
+    stub({ me: { username: "viewer", display_name: null, capabilities: [] } });
+    renderPage();
+
+    expect(await screen.findByText(/may read runs but not start them/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Solve/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the solver chooser from an account that may solve but not choose", async () => {
+    stub({ me: { username: "planner", display_name: null, capabilities: ["run.submit"] } });
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /^Solve/ })).toBeInTheDocument();
+    // The chooser would only ever produce a refusal for this account.
+    expect(screen.queryByLabelText(/^Solver$/)).not.toBeInTheDocument();
   });
 
   it("says a problem has no scenarios rather than offering to solve nothing", async () => {

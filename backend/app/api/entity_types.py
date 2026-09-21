@@ -76,7 +76,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, validate_colour, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
@@ -395,7 +395,7 @@ def list_entity_types(
 def create_entity_type(
     payload: EntityTypeCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> EntityTypeRead:
     entity_type = EntityType(**payload.model_dump())
     db.add(entity_type)
@@ -418,7 +418,7 @@ def update_entity_type(
     entity_type_id: int,
     payload: EntityTypeUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> EntityTypeRead:
     changes = payload.model_dump(exclude_unset=True)
     expected = changes.pop("updated_at", None)
@@ -435,7 +435,7 @@ def update_entity_type(
 def delete_entity_type(
     entity_type_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # attribute_def, entity and everything below cascade in the database
     # (ON DELETE CASCADE); no ORM relationship is declared, so SQLAlchemy
@@ -473,7 +473,7 @@ def create_attribute(
     entity_type_id: int,
     payload: AttributeDefCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> AttributeDefRead:
     _get_entity_type(db, entity_type_id)
     _check_enum_pairing(payload.data_type, payload.enum_values)
@@ -490,7 +490,7 @@ def update_attribute(
     attribute_id: int,
     payload: AttributeDefUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> AttributeDefRead:
     attribute = _get_attribute(db, attribute_id)
     changes = payload.model_dump(exclude_unset=True)
@@ -517,7 +517,7 @@ def update_attribute(
 def delete_attribute(
     attribute_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     db.delete(_get_attribute(db, attribute_id))
     _commit(db, "attribute_def")

@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import capabilities_of, get_current_user, requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
@@ -131,7 +131,7 @@ def create_run(
     scenario_id: int,
     payload: RunRequest | None = None,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    user: UserAccount = Depends(requires("run.submit")),
 ) -> RunRead:
     """Queue a run and return it, `queued`.
 
@@ -151,6 +151,16 @@ def create_run(
         raise HTTPException(status_code=404, detail="scenario not found")
 
     request = payload or RunRequest()
+    # Naming a solver is a separate capability from solving. A planner should
+    # be able to ask the question; choosing the technique it is answered with
+    # is a decision about the platform, and a run's solver is part of what
+    # makes its answer defensible.
+    if request.solver is not None and "solver.configure" not in capabilities_of(db, user):
+        raise HTTPException(
+            status_code=403,
+            detail="this account may solve, but not choose the solver; omit `solver` to let the"
+            " platform choose and record why",
+        )
     if request.solver is not None and request.solver not in available_names():
         raise HTTPException(
             status_code=422,
@@ -171,6 +181,25 @@ def create_run(
         solver=request.solver,
     )
     return _read(db, run_id)
+
+
+@router.get("/me")
+def whoami(
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Who the caller is and what they may do.
+
+    A UI that guessed at this would guess wrong: it would either offer
+    actions that fail with a 403 -- a button whose only outcome is an error --
+    or hide actions the user actually has. The capabilities are computed in
+    the one place that enforces them, so the two cannot disagree.
+    """
+    return {
+        "username": user.username,
+        "display_name": user.display_name,
+        "capabilities": sorted(capabilities_of(db, user)),
+    }
 
 
 @router.get("/solvers")

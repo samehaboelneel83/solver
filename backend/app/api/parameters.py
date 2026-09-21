@@ -86,7 +86,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
@@ -347,7 +347,7 @@ def list_parameters(
 def create_parameter(
     payload: ParameterDefCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> ParameterDefRead:
     _check_index_types(db, payload.domain_id, payload.index_type_ids)
     row = ParameterDef(**payload.model_dump())
@@ -371,7 +371,7 @@ def update_parameter(
     parameter_id: int,
     payload: ParameterDefUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> ParameterDefRead:
     row = _get_parameter(db, parameter_id)
     changes = payload.model_dump(exclude_unset=True)
@@ -403,7 +403,7 @@ def update_parameter(
 def delete_parameter(
     parameter_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # `parameter_value` rows cascade (ON DELETE CASCADE).
     db.delete(_get_parameter(db, parameter_id))
@@ -427,7 +427,7 @@ def put_parameter_values(
     parameter_id: int,
     payload: ParameterValuesPut,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> ParameterValues:
     """Set the named cells; cells not named are left as they are. Atomic:
     one bad cell and nothing in the request is written."""

@@ -35,7 +35,7 @@ have to compare `ir_hash` by hand. Skipping is the honest shape.
 import logging
 from typing import Any
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -244,6 +244,20 @@ def seed_admin(db: Session) -> None:
         )
         db.add(admin)
         db.commit()
+
+    # The admin role, every time -- not only when the account is created.
+    # Migration 0013 grants it to everyone who existed then; an account made
+    # after that migration would otherwise be an administrator who cannot
+    # administer anything, which reads as the platform being broken.
+    db.execute(
+        text(
+            "INSERT INTO iam.user_role (id, user_id, role_id)"
+            " SELECT gen_random_uuid(), :u, r.id FROM iam.role r WHERE r.code = 'admin'"
+            " ON CONFLICT (user_id, role_id) DO NOTHING"
+        ),
+        {"u": str(admin.id)},
+    )
+    db.commit()
 
 
 def _entity_type(db: Session, domain_id: int, name: str, role: str, colour: str) -> EntityType:

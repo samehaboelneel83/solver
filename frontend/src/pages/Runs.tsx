@@ -17,6 +17,7 @@ import {
   type Run,
   type RunStatus,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
@@ -199,6 +200,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
 }
 
 function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioName: string }) {
+  const { can } = useCapabilities();
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
@@ -240,14 +242,21 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={solve}
-          disabled={createRun.isPending}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
-        </button>
+        {can("run.submit") ? (
+          <button
+            type="button"
+            onClick={solve}
+            disabled={createRun.isPending}
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
+          </button>
+        ) : (
+          <p className="text-sm text-slate-600">
+            This account may read runs but not start them. Past answers are below.
+          </p>
+        )}
+        {can("solver.configure") && (
         <label className="text-sm text-slate-600">
           <span className="mr-2">Solver</span>
           <select
@@ -267,11 +276,14 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
               ))}
           </select>
         </label>
-        <span className="text-sm text-slate-500">
-          {createRun.isPending
-            ? "Queueing…"
-            : "A worker solves it; this page follows along. The answer is kept, not recomputed."}
-        </span>
+        )}
+        {can("run.submit") && (
+          <span className="text-sm text-slate-500">
+            {createRun.isPending
+              ? "Queueing…"
+              : "A worker solves it; this page follows along. The answer is kept, not recomputed."}
+          </span>
+        )}
       </div>
 
       {failure && (

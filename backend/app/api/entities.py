@@ -92,7 +92,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 from app.api.validation import field_error
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
@@ -266,7 +266,7 @@ def list_entities(
 def create_entity(
     payload: EntityCreate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> EntityRead:
     entity = Entity(**payload.model_dump())
     db.add(entity)
@@ -292,7 +292,7 @@ def update_entity(
     entity_id: int,
     payload: EntityUpdate,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> EntityRead:
     changes = payload.model_dump(exclude_unset=True)
     expected = changes.pop("updated_at", None)
@@ -312,7 +312,7 @@ def update_entity(
 def delete_entity(
     entity_id: int,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # Relationships cascade (ON DELETE CASCADE) and `parameter_value` rows
     # indexed by this entity are removed by the `parameter_value_cleanup`

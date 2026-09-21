@@ -9,7 +9,7 @@ from sqlalchemy import String, Text, inspect, or_
 from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.crud.registry import register_table
@@ -222,7 +222,7 @@ def build_crud_router(
         def create_item(
             payload: create_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(get_current_user),
+            _: UserAccount = Depends(requires("domain.edit")),
         ) -> read_schema:
             item = model(**payload.model_dump())
             db.add(item)
@@ -241,7 +241,7 @@ def build_crud_router(
             item_id: item_id_type,
             payload: update_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(get_current_user),
+            _: UserAccount = Depends(requires("domain.edit")),
         ) -> read_schema:
             item = db.get(model, item_id)
             if item is None:
@@ -260,7 +260,9 @@ def build_crud_router(
 
         @router.delete("/{item_id}", status_code=204)
         def delete_item(
-            item_id: item_id_type, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)
+            item_id: item_id_type,
+            db: Session = Depends(get_db),
+            _: UserAccount = Depends(requires("domain.edit")),
         ) -> None:
             item = db.get(model, item_id)
             if item is None:
