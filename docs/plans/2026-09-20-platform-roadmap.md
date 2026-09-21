@@ -124,7 +124,19 @@ This is a schema-and-contract change, so it belongs before model authoring
 rather than after — an editor built on a term algebra that cannot traverse
 will need reworking when traversal arrives.
 
-## Phase 1 — Model authoring: variables, constraints, objectives
+## Phase 1 — Model authoring — **DONE via (a), the document** (`90eef1e`, `349a863`, `c4b76a6`)
+
+The choice below was taken: the editor reads and writes the IR document
+directly, with the contract's validator as its safety net. Sets, parameters
+and variables are declared in the product; constraints and objectives are
+built with react-querybuilder over the same expression catalogue; versions
+are started from nothing or from any earlier one; scenarios ask the same
+model a different question.
+
+**(b), promotion to rows, remains open and should stay open** until a
+concrete need appears -- diffing two versions rule by rule, reusing a
+constraint across problems, or per-constraint permissions. The record below
+is the design for when it does.
 
 **Goal:** a user can build a model in the product, and what they build is
 inspectable, diffable and reusable.
@@ -187,7 +199,21 @@ validates.
 
 ---
 
-## Phase 2 — Solver selection for linear and nonlinear problems
+## Phase 2 — Solver selection for linear and nonlinear problems — **DONE for the classes v1 expresses** (`24c894e`, `aeb5a6e`)
+
+Two backends (CP-SAT and branch-and-cut MILP), capabilities as data in a
+registry, and a policy recorded on every run: an explicit choice wins or is
+refused, otherwise the highest-ranked backend that fits, with the reason in
+`run.params.why_solver`. The test that gives it meaning is that both
+backends reach the same optimum on the same model -- with one backend, a
+wrong policy would have been invisible.
+
+**Still open**, and honestly so: the continuous classes (LP, QP, NLP, MINLP)
+in the table below. The contract admits only `binary` and `integer`
+variables (§7), so there is nothing yet to hand IPOPT or Bonmin. The
+schema decision named at the end of this section -- integer-only parameters
+-- is the thing that blocks them, and it should be taken before an adapter
+is written, not after.
 
 **Goal:** the platform picks an appropriate technique, explains its choice, and
 lets a user override it.
@@ -241,7 +267,16 @@ detail.**
 
 ---
 
-## Phase 3 — Runs
+## Phase 3 — Runs — **DONE** (`dac2f03`, `aeb5a6e`)
+
+A database-backed queue claimed with `FOR UPDATE SKIP LOCKED`, a worker
+service, snapshot-on-submit, full provenance on the run, and a UI that
+follows a run until it settles and then stops asking. Stale runs from a
+dead worker are reclaimed at start-up.
+
+**Still open:** cancellation and a heartbeat. A run can only be waited out
+today, and the 30-minute reclaim is a coarse substitute for a worker that
+says it is still alive.
 
 **Goal:** press solve, watch it, get a result you can trust and reproduce.
 
@@ -260,7 +295,24 @@ The tables exist and are immutable; what is missing is everything around them.
 
 ---
 
-## Phase 4 — Results, and why they are what they are
+## Phase 4 — Results, and why they are what they are — **mostly DONE** (`9dafbd1`, `f89c152`, `edff8ad`)
+
+- **Solution viewer in domain language** -- done. Migration 0012 freezes
+  display names into the snapshot, so a run reads back in the names that
+  were current when it was asked rather than today's.
+- **Infeasibility diagnosis** -- done, by deletion filtering, reported into
+  `run.conflict` per instance. `run.conflict_minimal` says whether the set
+  was proven irreducible, so the UI promises "relax any one of these" only
+  when that is true.
+- **Scenario comparison** -- done, with the caveat attached: the comparison
+  states what the two runs differ by and whether the patch is the only
+  difference, because crediting a rule for a change the data caused is a
+  wrong answer dressed as an insight.
+- **Sensitivity** -- **not done.** Shadow prices and reduced costs need an
+  LP relaxation the contract cannot express yet (see Phase 2). Slack per
+  constraint is available today and is the useful half: it names the rule
+  with no room left, which is the one to relax next. `constraint_result`
+  has no column for it, so this is a migration, not a read.
 
 A number is not an answer. The value of this phase is that it turns the tool
 from a calculator into something a planner can argue with.
