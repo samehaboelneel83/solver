@@ -745,10 +745,21 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
   });
 }
 export function useRun(id: Id | null | undefined) {
-  return useQuery({ queryKey: [V1, "run", id], queryFn: () => getRun(id as Id), enabled: isId(id) });
+  return useQuery({
+    queryKey: [V1, "run", id],
+    queryFn: () => getRun(id as Id),
+    enabled: isId(id),
+    // Solving happens in a worker, so a run arrives `queued` and settles
+    // later. Poll while it is unfinished and stop as soon as it is: a run is
+    // immutable once written, so there is nothing to poll for afterwards.
+    refetchInterval: (query) => {
+      const status = (query.state.data as Run | undefined)?.status;
+      return status === "queued" || status === "running" ? 1000 : false;
+    },
+  });
 }
-/** Solving happens in the request today (a queue is Phase 3), so this
- * mutation is slow by nature -- callers should show it working. */
+/** Returns the run `queued`: the worker solves it, and `useRun` polls until
+ * it settles. */
 export const useCreateRun = () =>
   useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
 

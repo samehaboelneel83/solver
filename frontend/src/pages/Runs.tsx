@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
@@ -36,8 +36,10 @@ import { useToast } from "../components/ToastProvider";
  *   much -- "Thursday morning, 4 short" is what a planner can act on, where
  *   "coverage: broken" is not.
  *
- * Solving happens inside the request today (a queue is Phase 3 of the
- * roadmap), so the button is deliberately explicit that it is working.
+ * Solving happens in a **worker**, so submitting returns a `queued` run and
+ * the answer arrives later. This page follows it: `useRun` polls while a run
+ * is unfinished and stops the moment it settles, because a run is immutable
+ * once written and there is nothing left to poll for.
  */
 
 const PAGE_SIZE = 50;
@@ -195,6 +197,15 @@ function ForDomain({ domainId }: { domainId: Id }) {
 
 function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioName: string }) {
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
+  // While anything is unfinished the list is stale the moment it arrives.
+  const settling = (runs.data?.items ?? []).some(
+    (row) => row.status === "queued" || row.status === "running"
+  );
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setInterval(() => runs.refetch(), 1000);
+    return () => clearInterval(timer);
+  }, [settling, runs]);
   const createRun = useCreateRun();
   const toast = useToast();
   const [openId, setOpenId] = useState<Id | null>(null);
@@ -226,12 +237,12 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
           disabled={createRun.isPending}
           className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
-          {createRun.isPending ? "Solving…" : `Solve ${scenarioName}`}
+          {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
         </button>
         <span className="text-sm text-slate-500">
           {createRun.isPending
-            ? "The solver is working; this page waits for it."
-            : "Up to 30 seconds. The answer is kept, not recomputed."}
+            ? "Queueing…"
+            : "A worker solves it; this page follows along. The answer is kept, not recomputed."}
         </span>
       </div>
 

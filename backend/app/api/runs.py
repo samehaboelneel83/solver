@@ -31,13 +31,13 @@ from app.api.deps import get_current_user
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Run, Scenario, Solution
-from app.solve.service import run_scenario
+from app.solve.service import enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
-# Bounded because solving happens in the request. Ten seconds answers the
-# demo a thousand times over; the ceiling is what stops a request running
-# away before there is a worker to run away in.
+# Bounded because a solve holds a worker for its duration. Ten seconds
+# answers the demo a thousand times over; the ceiling is what stops one run
+# starving every other.
 TimeLimit = Annotated[float, Field(gt=0, le=60)]
 Seed = Annotated[int, Field(ge=0, le=2**31 - 1)]
 
@@ -99,7 +99,13 @@ def create_run(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> RunRead:
-    """Solve a scenario and return the run.
+    """Queue a run and return it, `queued`.
+
+    **The answer is not in this response.** Solving happens in a worker, so
+    this returns as soon as the data is frozen and the work is recorded; the
+    caller polls `GET /runs/{id}` until the status settles. That is what lets
+    a model take longer than a request may, and what stops one solve holding
+    a web worker.
 
     **201 even when the model cannot be solved.** An infeasible model, or one
     this compiler cannot express, is an answer about the model -- recorded on
@@ -110,13 +116,13 @@ def create_run(
     if db.get(Scenario, scenario_id) is None:
         raise HTTPException(status_code=404, detail="scenario not found")
 
-    outcome = run_scenario(
+    run_id = enqueue_run(
         db,
         scenario_id,
         time_limit=(payload or RunRequest()).time_limit_s,
         seed=(payload or RunRequest()).seed,
     )
-    return _read(db, outcome.run_id)
+    return _read(db, run_id)
 
 
 @router.get("/runs")

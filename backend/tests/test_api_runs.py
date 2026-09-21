@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
 from app.seed import seed_admin, seed_workforce_demo
+from app.worker import work_once
 from tests.test_v1_problem_run import db  # noqa: F401  (fixture)
 
 
@@ -57,7 +58,10 @@ def seeded(db):
     db.commit()
 
 
-def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_headers):
+def test_submitting_queues_a_run_rather_than_solving_in_the_request(seeded, auth_headers, db):
+    """Solving happens in a worker, so the answer is not in this response.
+    The data is frozen here, though -- a run answers the question as it was
+    asked, not as the domain becomes while it waits."""
     client = TestClient(app)
 
     response = client.post(
@@ -67,7 +71,27 @@ def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_he
     )
 
     assert response.status_code == 201, response.text
-    run = response.json()
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert queued["dataset_id"] is not None
+    assert queued["assignments"] is None
+    assert queued["finished_at"] is None
+
+
+def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_headers, db):
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/v1/scenarios/{seeded['scenario_id']}/runs",
+        json={"time_limit_s": 30},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    # The worker does the solving; the API is read back afterwards, which is
+    # exactly what a caller polling `GET /runs/{id}` does.
+    work_once(db)
+    run = client.get(f"/api/v1/runs/{response.json()['id']}", headers=auth_headers).json()
+
     assert run["status"] in ("optimal", "feasible")
     assert run["solver"] == "cp-sat"
     assert "ortools" in run["solver_version"]
@@ -87,14 +111,16 @@ def test_running_a_scenario_returns_the_roster_and_what_it_broke(seeded, auth_he
     assert by_id["c_one_shift_per_day"]["satisfied"] is True
 
 
-def test_broken_constraints_are_listed_before_the_ones_that_held(seeded, auth_headers):
+def test_broken_constraints_are_listed_before_the_ones_that_held(seeded, auth_headers, db):
     """A planner reads this to find out what went wrong; making them scroll
     past the rules that worked is a small cruelty."""
     client = TestClient(app)
 
-    run = client.post(
+    queued = client.post(
         f"/api/v1/scenarios/{seeded['scenario_id']}/runs", headers=auth_headers
     ).json()
+    work_once(db)
+    run = client.get(f"/api/v1/runs/{queued['id']}", headers=auth_headers).json()
 
     satisfied_flags = [c["satisfied"] for c in run["constraints"]]
     assert satisfied_flags == sorted(satisfied_flags), "broken constraints must come first"
@@ -134,9 +160,10 @@ def test_an_unsolvable_model_is_a_recorded_run_not_a_client_error(db, auth_heade
 
     try:
         response = client.post(f"/api/v1/scenarios/{scenario}/runs", headers=auth_headers)
-
         assert response.status_code == 201
-        run = response.json()
+        work_once(db)
+        run = client.get(f"/api/v1/runs/{response.json()['id']}", headers=auth_headers).json()
+
         assert run["status"] == "error"
         assert "no expression" in run["error"]
         assert run["assignments"] is None, "no answer is not the same as an empty answer"
@@ -145,7 +172,7 @@ def test_an_unsolvable_model_is_a_recorded_run_not_a_client_error(db, auth_heade
         db.commit()
 
 
-def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_headers):
+def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_headers, db):
     client = TestClient(app)
     first = client.post(
         f"/api/v1/scenarios/{seeded['scenario_id']}/runs", headers=auth_headers
@@ -154,6 +181,8 @@ def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_head
         f"/api/v1/scenarios/{seeded['scenario_id']}/runs", headers=auth_headers
     ).json()
 
+    work_once(db)
+    work_once(db)
     listed = client.get(
         f"/api/v1/runs?scenario_id={seeded['scenario_id']}", headers=auth_headers
     ).json()
@@ -162,10 +191,14 @@ def test_runs_are_listed_newest_first_and_filtered_by_scenario(seeded, auth_head
     assert listed["total"] >= 2
     assert {row["scenario_id"] for row in listed["items"]} == {seeded["scenario_id"]}
 
-    # And the same run reads back identically by id.
+    # And the same run reads back by id, agreeing with its listed row. The
+    # POST response is not compared: it was the run when it was queued, and
+    # the point of a queue is that the answer arrives later.
+    listed_second = next(row for row in listed["items"] if row["id"] == second["id"])
     fetched = client.get(f"/api/v1/runs/{second['id']}", headers=auth_headers).json()
-    assert fetched["objective"] == second["objective"]
-    assert fetched["assignments"] == second["assignments"]
+    assert fetched["objective"] == listed_second["objective"]
+    assert fetched["status"] == listed_second["status"]
+    assert fetched["assignments"] is not None
 
 
 def test_unknown_scenarios_and_runs_are_404(auth_headers):

@@ -73,8 +73,12 @@ function stub(overrides: Record<string, unknown> = {}) {
     // prefix is collapsed (Ruling 27).
     if (path.startsWith("/api/problem")) return Promise.resolve(overrides.problems ?? PROBLEMS);
     if (path.startsWith("/api/v1/scenarios")) return Promise.resolve(overrides.scenarios ?? SCENARIOS);
-    if (path.startsWith("/api/v1/runs/")) return Promise.resolve(overrides.run ?? RUN_DETAIL);
-    if (path.startsWith("/api/v1/runs")) return Promise.resolve(overrides.runs ?? { items: [RUN_SUMMARY], total: 1 });
+    // A function lets a test change what the server says between polls,
+    // which is the whole point of a queued run.
+    const resolve = (value: unknown, fallback: unknown) =>
+      Promise.resolve(typeof value === "function" ? (value as () => unknown)() : (value ?? fallback));
+    if (path.startsWith("/api/v1/runs/")) return resolve(overrides.run, RUN_DETAIL);
+    if (path.startsWith("/api/v1/runs")) return resolve(overrides.runs, { items: [RUN_SUMMARY], total: 1 });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -170,7 +174,7 @@ describe("Runs", () => {
     expect(message).toHaveAttribute("role", "alert");
   });
 
-  it("solves on demand and says it is working while it does", async () => {
+  it("queues on demand and says so while the request is in flight", async () => {
     let resolveWrite: (value: unknown) => void = () => {};
     stub({
       write: () => new Promise((resolve) => { resolveWrite = resolve; }),
@@ -180,10 +184,27 @@ describe("Runs", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /solve relaxed_cover/i }));
 
-    // Solving happens in the request, so the button must not look idle.
-    expect(await screen.findByRole("button", { name: /solving/i })).toBeDisabled();
+    // Submitting only queues now, so the button says that rather than
+    // claiming the solver is working -- a worker does that, elsewhere.
+    expect(await screen.findByRole("button", { name: /queueing/i })).toBeDisabled();
     resolveWrite({ ...RUN_DETAIL, id: 12 });
     await waitFor(() => expect(screen.getByRole("button", { name: /solve relaxed_cover/i })).toBeEnabled());
+  });
+
+  it("follows a queued run until it settles, then stops asking", async () => {
+    // The answer arrives from a worker, so the page must keep looking --
+    // and must stop once a run is finished, since a run never changes again.
+    let status = "queued";
+    stub({
+      run: () => ({ ...RUN_DETAIL, status }),
+      runs: () => ({ items: [{ ...RUN_SUMMARY, status }], total: 1 }),
+    });
+    renderPage();
+
+    expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
+    status = "optimal";
+
+    expect(await screen.findByText(/best possible answer/i, {}, { timeout: 4000 })).toBeInTheDocument();
   });
 
   it("says a problem has no scenarios rather than offering to solve nothing", async () => {

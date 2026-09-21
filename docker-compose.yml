@@ -66,6 +66,24 @@ services:
     networks:
       - solver_net
 
+  # Solving runs here, not in a web request: a model may take longer than a
+  # request should, and a solve would otherwise hold a web worker for its
+  # duration. Several replicas are safe -- the queue is claimed with
+  # FOR UPDATE SKIP LOCKED.
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CLICKHOUSE_HOST: clickhouse
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - solver_net
+
   frontend:
     build: ./frontend
     restart: unless-stopped

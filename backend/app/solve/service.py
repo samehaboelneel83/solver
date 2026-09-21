@@ -40,9 +40,17 @@ class RunOutcome:
     assignments: dict[str, list[list[str]]]
 
 
-def run_scenario(
+def enqueue_run(
     db: Session, scenario_id: int, *, time_limit: float = 10.0, seed: int = 1
-) -> RunOutcome:
+) -> int:
+    """Freeze the data and queue the work. Returns the run's id.
+
+    **The snapshot happens here, not in the worker.** A run answers the
+    question as it was asked: if an entity changes between submitting and
+    solving, the answer must still be about the data the person was looking
+    at. Freezing at submit is what makes that true, and it is why `run` can
+    carry `dataset_id` before it carries a result.
+    """
     scenario = db.execute(
         text(
             "SELECT s.id, s.model_version_id, s.patch, mv.ir"
@@ -57,18 +65,13 @@ def run_scenario(
     dataset_id = db.execute(
         text("SELECT snapshot_dataset(:v)"), {"v": scenario["model_version_id"]}
     ).scalar_one()
-    data = db.execute(
-        text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset_id}
-    ).scalar_one()
 
-    ir = patched(scenario["ir"], scenario["patch"] or {})
-    found = classify(ir)
-
+    found = classify(patched(scenario["ir"], scenario["patch"] or {}))
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
-            "                 params, seed, started_at)"
-            " VALUES (:s, :d, 'running', 'cp-sat', :cv, :params, :seed, now())"
+            "                 params, seed)"
+            " VALUES (:s, :d, 'queued', 'cp-sat', :cv, :params, :seed)"
             " RETURNING id"
         ),
         {
@@ -80,6 +83,52 @@ def run_scenario(
             "seed": seed,
         },
     ).scalar_one()
+    db.commit()
+    return run_id
+
+
+def claim_next(db: Session) -> int | None:
+    """Take the oldest queued run, or nothing.
+
+    `FOR UPDATE SKIP LOCKED` is what makes a second worker safe: it takes the
+    next row rather than waiting on the one already being claimed, so two
+    workers never solve the same run and neither blocks the other.
+    """
+    run_id = db.execute(
+        text(
+            "SELECT id FROM run WHERE status = 'queued'"
+            " ORDER BY queued_at, id FOR UPDATE SKIP LOCKED LIMIT 1"
+        )
+    ).scalar_one_or_none()
+    if run_id is None:
+        db.rollback()
+        return None
+    db.execute(
+        text("UPDATE run SET status = 'running', started_at = now() WHERE id = :r"),
+        {"r": run_id},
+    )
+    db.commit()
+    return run_id
+
+
+def execute_run(db: Session, run_id: int) -> RunOutcome:
+    """Solve a claimed run and record what happened."""
+    row = db.execute(
+        text(
+            "SELECT r.dataset_id, r.params, s.patch, mv.ir, d.data"
+            "  FROM run r"
+            "  JOIN scenario s ON s.id = r.scenario_id"
+            "  JOIN model_version mv ON mv.id = s.model_version_id"
+            "  JOIN dataset d ON d.id = r.dataset_id"
+            " WHERE r.id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+
+    ir = patched(row["ir"], row["patch"] or {})
+    data = row["data"]
+    time_limit = float((row["params"] or {}).get("time_limit_s", 10.0))
+    dataset_id = row["dataset_id"]
 
     try:
         compiled = compile_model(ir, data)
@@ -106,6 +155,22 @@ def run_scenario(
         result.objective,
         _assignments(compiled, result),
     )
+
+
+def run_scenario(
+    db: Session, scenario_id: int, *, time_limit: float = 10.0, seed: int = 1
+) -> RunOutcome:
+    """Queue a run and solve it here and now.
+
+    Kept for the seed, the tests and anything without a worker: it is
+    `enqueue_run` followed immediately by `execute_run`, so it exercises the
+    same path the worker takes rather than a second one that could drift.
+    """
+    run_id = enqueue_run(db, scenario_id, time_limit=time_limit, seed=seed)
+    db.execute(
+        text("UPDATE run SET status = 'running', started_at = now() WHERE id = :r"), {"r": run_id}
+    )
+    return execute_run(db, run_id)
 
 
 def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
