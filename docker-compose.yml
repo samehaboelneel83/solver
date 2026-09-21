@@ -51,6 +51,7 @@ services:
 
   backend:
     build: ./backend
+    image: solver-backend:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -70,8 +71,13 @@ services:
   # request should, and a solve would otherwise hold a web worker for its
   # duration. Several replicas are safe -- the queue is claimed with
   # FOR UPDATE SKIP LOCKED.
+  #
+  # It shares the api's image deliberately. With two image names, a build
+  # of one left the other serving older code, and the only symptom was a
+  # run quietly solved by the wrong solver.
   worker:
     build: ./backend
+    image: solver-backend:latest
     restart: unless-stopped
     env_file: .env
     environment:
