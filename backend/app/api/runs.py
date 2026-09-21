@@ -47,10 +47,16 @@ Seed = Annotated[int, Field(ge=0, le=2**31 - 1)]
 
 class RunRequest(BaseModel):
     """All three are recorded on the run: a result nobody can attribute to a
-    solver, a time limit and a seed is not reproducible."""
+    solver, a time limit and a seed is not reproducible.
 
-    time_limit_s: TimeLimit = 10.0
-    seed: Seed = 1
+    All three are also **optional**. What the caller does not name is resolved
+    from settings -- problem, then domain, then platform, then the built-in
+    default -- so a domain whose models need ninety seconds can say so once
+    rather than at every call (migration 0014).
+    """
+
+    time_limit_s: TimeLimit | None = None
+    seed: Seed | None = None
     #: Leave it out and the platform chooses, recording why. Naming one that
     #: cannot take the model fails the run with that reason rather than
     #: quietly using another -- "I used something else" would make the

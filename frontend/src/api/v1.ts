@@ -513,6 +513,33 @@ export type Me = { username: string; display_name: string | null; capabilities: 
 
 export const getMe = () => apiFetch<Me>("/api/v1/me");
 
+export type SettingScope = "platform" | "domain" | "problem";
+
+export type SettingValue = {
+  key: string;
+  value: number | string | boolean | null;
+  /** Which level supplied it: a value nobody can attribute is one nobody can
+   * change with confidence. `"default"` means nothing is set anywhere. */
+  source: SettingScope | "default";
+  value_type: "number" | "string" | "boolean";
+  description: string;
+};
+
+export function listSettings(params: { problemId?: Id | null; domainId?: Id | null } = {}) {
+  const { problemId, domainId } = params;
+  return apiFetch<Page<SettingValue>>(
+    `/api/v1/settings${query({ problem_id: problemId, domain_id: domainId })}`
+  );
+}
+
+/** `value: null` unsets this level, restoring whatever the level above says. */
+export const setSetting = (body: {
+  scope: SettingScope;
+  scope_id: Id | null;
+  key: string;
+  value: number | string | boolean | null;
+}) => send<Record<string, unknown>>("PUT", "/api/v1/settings", body);
+
 export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
   const { scenarioId, limit, offset } = params;
   return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, limit, offset })}`);
@@ -810,6 +837,14 @@ export function useVersion(id: Id | null | undefined) {
 }
 export const useCreateVersion = () =>
   useV1Mutation(({ problemId, body }: { problemId: Id; body: ModelVersionCreate }) => createVersion(problemId, body));
+
+export function useSettings(params: { problemId?: Id | null; domainId?: Id | null } = {}) {
+  return useQuery({
+    queryKey: [V1, "settings", params],
+    queryFn: () => listSettings(params),
+  });
+}
+export const useSetSetting = () => useV1Mutation(setSetting);
 
 export function useMe() {
   return useQuery({ queryKey: [V1, "me"], queryFn: getMe, staleTime: 5 * 60 * 1000 });

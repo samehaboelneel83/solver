@@ -25,6 +25,7 @@ from app.solve.classify import classify
 from app.solve.compile import _VIOLATION, Compiled, Unsupported, compile_model
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
+from app.settings_resolve import resolve
 
 COMPILER_VERSION = "ir-compiler 1"
 
@@ -46,11 +47,19 @@ def enqueue_run(
     db: Session,
     scenario_id: int,
     *,
-    time_limit: float = 10.0,
-    seed: int = 1,
+    time_limit: float | None = None,
+    seed: int | None = None,
     solver: str | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
+
+    **What is not given is resolved, not hardcoded.** The time limit, the seed
+    and the solver come from settings when the caller does not name them --
+    problem, then domain, then platform, then the built-in default (migration
+    0014). A model that needs ninety seconds and one that needs three should
+    not have to share a number baked into this function, and the run records
+    where each value came from so a slow answer can be traced to the level
+    that set it.
 
     **The snapshot happens here, not in the worker.** A run answers the
     question as it was asked: if an entity changes between submitting and
@@ -60,7 +69,7 @@ def enqueue_run(
     """
     scenario = db.execute(
         text(
-            "SELECT s.id, s.model_version_id, s.patch, mv.ir"
+            "SELECT s.id, s.model_version_id, s.patch, s.problem_id, mv.ir"
             "  FROM scenario s JOIN model_version mv ON mv.id = s.model_version_id"
             " WHERE s.id = :s"
         ),
@@ -68,6 +77,18 @@ def enqueue_run(
     ).mappings().one_or_none()
     if scenario is None:
         raise LookupError(f"scenario {scenario_id} not found")
+
+    settings = resolve(db, problem_id=scenario["problem_id"])
+    from_settings = {}
+    if time_limit is None:
+        time_limit = float(settings["solve.time_limit_s"].value)
+        from_settings["time_limit_s"] = settings["solve.time_limit_s"].source
+    if seed is None:
+        seed = int(settings["solve.seed"].value)
+        from_settings["seed"] = settings["solve.seed"].source
+    if solver is None and settings["solve.solver"].value is not None:
+        solver = str(settings["solve.solver"].value)
+        from_settings["requested_solver"] = settings["solve.solver"].source
 
     dataset_id = db.execute(
         text("SELECT snapshot_dataset(:v)"), {"v": scenario["model_version_id"]}
@@ -92,6 +113,10 @@ def enqueue_run(
                     "why": found.reasons,
                     "needs": sorted(found.needs),
                     **({"requested_solver": solver} if solver else {}),
+                    # Which of the three levels supplied each value the caller
+                    # did not. A run whose time limit nobody can account for
+                    # is a run nobody can make faster.
+                    **({"from_settings": from_settings} if from_settings else {}),
                 }
             ),
             "seed": seed,

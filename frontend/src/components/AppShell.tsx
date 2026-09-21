@@ -100,6 +100,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ to: "/runs", label: "Runs" }],
   },
   {
+    key: "platform",
+    label: "Platform",
+    items: [{ to: "/settings", label: "Settings" }],
+  },
+  {
     // Not one of the three workflow groups -- user and role administration,
     // kept reachable rather than dropped with the schema-driven nav.
     key: "access",

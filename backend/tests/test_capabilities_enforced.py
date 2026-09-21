@@ -204,6 +204,8 @@ def test_me_reports_the_capabilities_the_api_actually_enforces(db, seeded):
         "model.publish",
         "run.submit",
         "solver.configure",
+        # Migration 0014: a modeller may also change what governs a solve.
+        "settings.edit",
     }
 
 
