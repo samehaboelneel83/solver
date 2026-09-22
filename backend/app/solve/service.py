@@ -89,7 +89,7 @@ def enqueue_run(
     """
     scenario = db.execute(
         text(
-            "SELECT s.id, s.model_version_id, s.patch, s.problem_id, mv.ir"
+            "SELECT s.id, s.model_version_id, s.patch, s.problem_id, s.organization_id, mv.ir"
             "  FROM scenario s JOIN model_version mv ON mv.id = s.model_version_id"
             " WHERE s.id = :s"
         ),
@@ -114,6 +114,9 @@ def enqueue_run(
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
 
+    quota = quota_of(db, scenario["organization_id"])
+    _check_quota_before_snapshot(db, scenario["organization_id"], quota, time_limit)
+
     dataset_id = db.execute(
         text("SELECT snapshot_dataset(:v)"), {"v": scenario["model_version_id"]}
     ).scalar_one()
@@ -125,6 +128,16 @@ def enqueue_run(
         text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset_id}
     ).scalar_one()
     found = classify(patched(scenario["ir"], scenario["patch"] or {}), frozen)
+    if quota.get("max_vars") is not None:
+        count = variable_count(scenario["ir"], frozen)
+        if count > quota["max_vars"]:
+            # Raised before the commit: the snapshot above is rolled back
+            # with the refused run.
+            raise QuotaExceeded(
+                "max_vars",
+                f"this model has {count:,} decisions and this organization's quota is "
+                f"{quota['max_vars']:,}",
+            )
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
@@ -159,16 +172,34 @@ def enqueue_run(
 
 
 def claim_next(db: Session) -> int | None:
-    """Take the oldest queued run, or nothing.
+    """Take the next queued run, fairly across organizations, or nothing.
 
-    `FOR UPDATE SKIP LOCKED` is what makes a second worker safe: it takes the
-    next row rather than waiting on the one already being claimed, so two
-    workers never solve the same run and neither blocks the other.
+    **Fair.** The queue is shared by every organization, and oldest-first
+    would let one that submits a hundred runs make everyone else wait behind
+    all of them. So the next run is the oldest one of the organization with
+    the fewest runs in progress, and an organization already at its
+    `max_concurrent_runs` quota (migration 0034) is skipped until one ends.
+
+    **One claim at a time.** Claims take a transaction-level advisory lock:
+    a claim is two short statements, and serialising them is what makes the
+    concurrency quota exact -- two workers counting at once could otherwise
+    both see room for one more. `SKIP LOCKED` stays, so a worker never waits
+    on a row another is updating.
     """
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _CLAIM_LOCK})
     run_id = db.execute(
         text(
-            "SELECT id FROM run WHERE status = 'queued'"
-            " ORDER BY queued_at, id FOR UPDATE SKIP LOCKED LIMIT 1"
+            "WITH running AS ("
+            "    SELECT organization_id, count(*) AS n FROM run"
+            "     WHERE status = 'running' GROUP BY organization_id"
+            ")"
+            " SELECT r.id FROM run r"
+            "   LEFT JOIN running c ON c.organization_id = r.organization_id"
+            "   LEFT JOIN iam.quota q ON q.organization_id = r.organization_id"
+            "  WHERE r.status = 'queued'"
+            "    AND (q.max_concurrent_runs IS NULL OR coalesce(c.n, 0) < q.max_concurrent_runs)"
+            "  ORDER BY coalesce(c.n, 0), r.queued_at, r.id"
+            "  FOR UPDATE OF r SKIP LOCKED LIMIT 1"
         )
     ).scalar_one_or_none()
     if run_id is None:
@@ -183,6 +214,85 @@ def claim_next(db: Session) -> int | None:
     )
     db.commit()
     return run_id
+
+
+# Any fixed number, shared by every worker: the key of the claim lock.
+_CLAIM_LOCK = 7_140_001
+
+
+class QuotaExceeded(Exception):
+    """A run this organization's quota does not allow. `quota` names the
+    limit, so the refusal can say which one to raise."""
+
+    def __init__(self, quota: str, message: str):
+        super().__init__(message)
+        self.quota = quota
+
+
+def quota_of(db: Session, organization_id) -> dict[str, Any]:
+    row = db.execute(
+        text(
+            "SELECT max_concurrent_runs, max_queued_runs, max_time_limit_s, max_vars,"
+            "       cpu_seconds_month"
+            "  FROM iam.quota WHERE organization_id = :o"
+        ),
+        {"o": organization_id},
+    ).mappings().one_or_none()
+    return dict(row) if row else {}
+
+
+def month_usage(db: Session, organization_id) -> dict[str, Any]:
+    row = db.execute(
+        text(
+            "SELECT cpu_seconds, runs FROM iam.usage_month"
+            " WHERE organization_id = :o"
+            "   AND month = date_trunc('month', now() AT TIME ZONE 'UTC')::date"
+        ),
+        {"o": organization_id},
+    ).mappings().one_or_none()
+    return dict(row) if row else {"cpu_seconds": 0.0, "runs": 0}
+
+
+def _check_quota_before_snapshot(db: Session, organization_id, quota: dict, time_limit: float) -> None:
+    """The limits that need no data: checked before anything is frozen."""
+    if quota.get("max_time_limit_s") is not None and time_limit > quota["max_time_limit_s"]:
+        raise QuotaExceeded(
+            "max_time_limit_s",
+            f"a time limit of {time_limit:g} s is over this organization's quota of "
+            f"{quota['max_time_limit_s']:g} s",
+        )
+    if quota.get("max_queued_runs") is not None:
+        queued = db.execute(
+            text("SELECT count(*) FROM run WHERE organization_id = :o AND status = 'queued'"),
+            {"o": organization_id},
+        ).scalar_one()
+        if queued >= quota["max_queued_runs"]:
+            raise QuotaExceeded(
+                "max_queued_runs",
+                f"this organization already has {queued} runs waiting, its quota; "
+                "one must start before another is queued",
+            )
+    if quota.get("cpu_seconds_month") is not None:
+        used = month_usage(db, organization_id)["cpu_seconds"]
+        if used >= quota["cpu_seconds_month"]:
+            raise QuotaExceeded(
+                "cpu_seconds_month",
+                f"this organization has used {used:,.0f} of its {quota['cpu_seconds_month']:,.0f} "
+                "CPU-seconds this month",
+            )
+
+
+def variable_count(ir: dict[str, Any], data: dict[str, Any]) -> int:
+    """How many decisions the model has on this data: each variable once per
+    combination of its index sets' members."""
+    sets = data.get("sets") or {}
+    total = 0
+    for spec in (ir.get("variables") or {}).values():
+        size = 1
+        for set_name in spec.get("index", []):
+            size *= len(sets.get(set_name, []))
+        total += size
+    return total
 
 
 class CannotCancel(Exception):

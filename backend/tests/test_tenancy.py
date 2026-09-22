@@ -110,6 +110,8 @@ def tenants(db):
     db.execute(text("DELETE FROM iam.user_role WHERE user_id = :u"), {"u": user_b})
     db.execute(text("DELETE FROM iam.user_account WHERE id = :u"), {"u": user_b})
     db.execute(text("DELETE FROM setting WHERE organization_id = :o"), {"o": org_b})
+    db.execute(text("DELETE FROM iam.usage_month WHERE organization_id = :o"), {"o": org_b})
+    db.execute(text("DELETE FROM iam.quota WHERE organization_id = :o"), {"o": org_b})
     db.execute(text("DELETE FROM iam.organization WHERE id = :o"), {"o": org_b})
     db.commit()
 

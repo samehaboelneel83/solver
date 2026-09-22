@@ -277,8 +277,13 @@ connection so the tenant cannot be lost at a commit. Roles, capabilities,
 setting keys, templates and platform settings are shared and writable only
 by an operator organization (`is_operator`, the seed `default`). Instead of
 a grep lint, `tests/test_tenancy.py` asserts every public table is a tenant
-table under RLS or on an explicit shared list. Still open: API keys, quotas,
-fair claim, rate limit.
+table under RLS or on an explicit shared list. Quotas and fair claim are
+migration `0034`: `iam.quota` (null = unlimited; checked at submit, 422
+naming the quota; `max_concurrent_runs` at claim), CPU-seconds metered by a
+trigger into `iam.usage_month`, and `claim_next` takes the oldest run of the
+organization with the fewest in progress, serialised by an advisory lock so
+the concurrency quota is exact. Run priority is not modelled yet. Still
+open: API keys, rate limit.
 
 ---
 

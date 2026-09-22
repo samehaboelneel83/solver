@@ -37,7 +37,7 @@ from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solution
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
-from app.solve.service import CannotCancel, cancel_run, enqueue_run
+from app.solve.service import CannotCancel, QuotaExceeded, cancel_run, enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
@@ -204,13 +204,23 @@ def create_run(
                 }
             ],
         )
-    run_id = enqueue_run(
-        db,
-        scenario_id,
-        time_limit=request.time_limit_s,
-        seed=request.seed,
-        solver=request.solver,
-    )
+    try:
+        run_id = enqueue_run(
+            db,
+            scenario_id,
+            time_limit=request.time_limit_s,
+            seed=request.seed,
+            solver=request.solver,
+        )
+    except QuotaExceeded as exc:
+        # 422, not 429: the request is well-formed and the caller is not
+        # sending too fast; what it asks for is over a limit, and the body
+        # names which one.
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "quota", "loc": ["quota", exc.quota], "msg": str(exc)}],
+        ) from exc
     return _read(db, run_id)
 
 

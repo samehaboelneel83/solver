@@ -14,6 +14,7 @@ from app.api.meta import router as meta_router
 from app.api.options import router as options_router
 from app.api.parameters import router as parameters_router
 from app.api.problems import router as problems_router
+from app.api.quota import router as quota_router
 from app.api.runs import router as runs_router
 from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
@@ -112,6 +113,7 @@ app.include_router(relationships_router)
 app.include_router(parameters_router)
 app.include_router(problems_router)
 app.include_router(runs_router)
+app.include_router(quota_router)
 app.include_router(settings_router)
 # Re-mounted in Task 7. Task 1 had unmounted it because every query behind
 # it read the v0 domain.* tables that migration 0006_schema_v1_domain
