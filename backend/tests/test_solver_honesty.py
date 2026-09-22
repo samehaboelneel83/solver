@@ -139,6 +139,9 @@ def test_the_run_seed_reaches_the_solver(db, monkeypatch):
         seen.append(kwargs.get("seed"))
         return real(compiled, **kwargs)
 
+    # A fake solver lives in this process; the sandbox's child would not
+    # see it (app.solve.sandbox). What is tested here is the run's wiring.
+    monkeypatch.setenv("SOLVE_SANDBOX", "0")
     monkeypatch.setattr(cpsat, "solve", spy)
     ir = _scalar("binary", "maximize", X, [])
 
@@ -263,6 +266,9 @@ def test_the_run_passes_its_threads_and_gap_to_the_solver(db, monkeypatch):
         seen.append((kwargs.get("workers"), kwargs.get("gap_rel")))
         return real(compiled, **kwargs)
 
+    # A fake solver lives in this process; the sandbox's child would not
+    # see it (app.solve.sandbox). What is tested here is the run's wiring.
+    monkeypatch.setenv("SOLVE_SANDBOX", "0")
     monkeypatch.setattr(cpsat, "solve", spy)
     db.execute(
         text("INSERT INTO setting (scope, scope_id, key, value) VALUES ('platform', NULL, 'solve.workers', '2')")
@@ -357,6 +363,9 @@ def _stop_during_solve(monkeypatch, answer: Solution | None):
         session.close()
         return answer if answer is not None else real(compiled, **kwargs)
 
+    # A fake solver lives in this process; the sandbox's child would not
+    # see it (app.solve.sandbox). What is tested here is the run's wiring.
+    monkeypatch.setenv("SOLVE_SANDBOX", "0")
     monkeypatch.setattr(cpsat, "solve", stopped)
 
 

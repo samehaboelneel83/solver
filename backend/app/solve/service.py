@@ -40,7 +40,8 @@ from app.solve.compile import (
     number,
     slack_by_constraint,
 )
-from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
+from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
+from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.core.logs import bind as bind_log
@@ -523,22 +524,31 @@ def _execute(
                 return _cancelled_outcome(db, run_id)
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
-                result, reason = solve_compiled(
-                    backend,
-                    compiled,
+                # In a child process with a memory ceiling, a CPU allowance
+                # and a deadline (app.solve.sandbox, Phase 9): a model that
+                # outgrows them fails with a reason, not the worker.
+                result, reason = sandbox.run(
+                    "app.solve.sandbox:solve_in_child",
+                    {
+                        "backend": backend.name,
+                        "compiled": compiled,
+                        "time_limit": time_limit,
+                        "seed": seed,
+                        "workers": workers,
+                        "gap_rel": gap_rel,
+                    },
                     time_limit=time_limit,
-                    seed=seed,
-                    should_stop=stop.is_set,
                     workers=workers,
-                    gap_rel=gap_rel,
                     on_progress=events.progress,
+                    should_stop=stop.is_set,
                 )
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
-        except Unsupported as exc:
-            # The model is valid and this compiler cannot express it. That is a
-            # failed run with a reason, not a crash and not an empty answer.
+        except (Unsupported, sandbox.SandboxFailed) as exc:
+            # The model is valid and this compiler cannot express it, or its
+            # solve outgrew the sandbox. Either is a failed run with a reason,
+            # not a crash and not an empty answer.
             db.execute(
                 text(
                     "UPDATE run SET status = 'error', error = :e, finished_at = now()"
@@ -1078,11 +1088,21 @@ def _record_conflict(
     diagnosis that took longer than the solve would be a second run wearing a
     different name.
     """
-    conflict = explain(
-        compiled,
-        backend.solve,
-        probe_seconds=min(DEFAULT_PROBE_SECONDS, max(1.0, time_limit / 4)),
-    )
+    probe_seconds = min(DEFAULT_PROBE_SECONDS, max(1.0, time_limit / 4))
+    try:
+        # Sandboxed like the solve: diagnosis solves the model many times.
+        conflict = sandbox.run(
+            "app.solve.sandbox:explain_in_child",
+            {"backend": backend.name, "compiled": compiled, "probe_seconds": probe_seconds},
+            time_limit=probe_seconds,
+            deadline_s=probe_seconds * DEFAULT_BUDGET + 30,
+        )
+    except sandbox.SandboxFailed as exc:
+        db.execute(
+            text("UPDATE run SET params = params || CAST(:note AS jsonb) WHERE id = :r"),
+            {"note": _json({"conflict_note": f"the diagnosis could not finish: {exc}"}), "r": run_id},
+        )
+        return
     db.execute(
         text(
             "UPDATE run SET conflict = :c, conflict_minimal = :m,"

@@ -70,6 +70,9 @@ services:
     # never published -- queue depth names organizations.
     expose:
       - "9101"
+    # Solving happens in the worker; the API only answers requests.
+    mem_limit: 2g
+    cpus: "4"
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,6 +104,12 @@ services:
     # Prometheus metrics, on the compose network only.
     expose:
       - "9100"
+    # The container's ceiling (Phase 9). Each solve also runs in a child with
+    # its own: SOLVE_MEMORY_MB of address space (default 4096) and CPU time
+    # of its time limit x workers + 30 s (app.solve.sandbox). The worker
+    # itself stays small, so a solve that hits either fails alone.
+    mem_limit: 12g
+    cpus: "8"
     depends_on:
       postgres:
         condition: service_healthy
