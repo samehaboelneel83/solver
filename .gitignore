@@ -17,3 +17,6 @@ dist/
 # with fixed ids and are not part of the test suite; kept locally, never
 # committed by accident.
 frontend/_browser_check_*.mjs
+
+# MIPLIB instances are downloaded by `python -m bench.download_miplib`, not committed.
+backend/bench/mps/

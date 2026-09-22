@@ -228,10 +228,17 @@ the answer it had. D7 is done for HiGHS -- rows and columns go in as arrays,
 2.0 s to 0.23 s on a 200,000-entry model -- which also fixed a dropped
 constant rule (`0 >= 1` vanished and an infeasible model got an answer).
 The golden suite is `backend/tests/test_golden.py`: 15 hand-solved models on
-every backend that takes them. Still open in this phase: the benchmark
-harness (6.1 `bench/`), D7 for the pywraplp backends (GLOP and the MILP
-wrapper spend ~0.7 s on the same model; not yet measured against a proto
-load), and CP-SAT scaling.
+every backend that takes them. The harness is `backend/bench/`: four seeded
+families (`rota` IP, `facility` MILP, `feed_blend` LP, `load_balance` QP) at
+S/M/L/XL, the MIPLIB lane (`bench.mps` reader, `bench.download_miplib`, files
+not committed), `bench.run` with the wrong-answer check and `--store` into
+`bench_result` (migration `0031`), and `bench.report` with the SGM and the
+enable-by-default verdict. First result: `bench/results/2026-09-22-rota-cpsat-threads.md`
+-- CP-SAT on one thread cannot prove the rota optimum in 20 s; on eight, 30 ms.
+Still open in this phase: a nightly job (the repo has no CI yet), the primal
+integral (needs streamed incumbents), D7 for the pywraplp backends (GLOP and
+the MILP wrapper spend ~0.7 s on a 200,000-entry model; not yet measured
+against a proto load), and CP-SAT fractional scaling.
 
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.
