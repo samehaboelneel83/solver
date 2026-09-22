@@ -1,24 +1,39 @@
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import get_settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt directly, not through passlib. passlib is unmaintained and imports
+# the standard library's `crypt` module, which Python 3.13 removes: the first
+# 3.13 image would have failed to hash or check any password, so nobody could
+# sign in. Every stored hash is already plain bcrypt (`$2b$12$...`, which is
+# what passlib wrote), so this reads them unchanged.
+_ROUNDS = 12
+
+# bcrypt only ever looks at the first 72 bytes of a password. passlib and
+# bcrypt 4.0 cut the rest off silently; bcrypt 5 raises instead. Cutting it
+# here keeps every existing hash verifying, and keeps a long passphrase
+# working whichever version of the library is installed.
+_BCRYPT_MAX_BYTES = 72
+
+
+def _secret(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
 
 
 def hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
+    return bcrypt.hashpw(_secret(password), bcrypt.gensalt(rounds=_ROUNDS)).decode("ascii")
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    # A malformed/non-bcrypt stored value makes passlib raise rather than
+    # A malformed or non-bcrypt stored value makes bcrypt raise rather than
     # return False, which would surface as a 500 from /api/auth/login.
     # Treat any unverifiable hash as a failed login instead.
     try:
-        return _pwd_context.verify(password, hashed)
-    except Exception:
+        return bcrypt.checkpw(_secret(password), hashed.encode("ascii"))
+    except (ValueError, TypeError, UnicodeEncodeError):
         return False
 
 
