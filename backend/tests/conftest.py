@@ -159,3 +159,17 @@ _alembic_cfg = Config(str(_alembic_ini))
 # general, so pin it explicitly relative to this conftest's location.
 _alembic_cfg.set_main_option("script_location", str(_backend_dir / "alembic"))
 command.upgrade(_alembic_cfg, "head")
+
+# The seed organization and admin, as `lifespan` creates them at start-up.
+# Since migration 0032 every row belongs to an organization, and a row made
+# by system code with none named gets the seed one -- so a test file that
+# creates a domain without ever signing in needs it to exist, whether that
+# file runs in the whole suite or on its own.
+from app.core.db import SessionLocal  # noqa: E402
+from app.seed import seed_admin  # noqa: E402
+
+_session = SessionLocal()
+try:
+    seed_admin(_session)
+finally:
+    _session.close()

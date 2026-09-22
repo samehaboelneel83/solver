@@ -19,6 +19,8 @@ makes that a refusal rather than a silent rounding.
 
 from __future__ import annotations
 
+import time
+
 from decimal import Decimal
 from typing import Any
 
@@ -32,6 +34,7 @@ _ORTOOLS_VERSION = _pkg_version("ortools")
 
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution
+from app.solve.progress import report
 from app.solve.stop import interrupt_when
 
 # CP-SAT's own status codes, in the platform's `run_status` vocabulary --
@@ -75,6 +78,7 @@ def solve(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return Solution(
@@ -141,8 +145,17 @@ def solve(
     # default, is "prove the optimum"; the run then checks the recorded gap
     # before it lets the answer be called optimal.
     solver.parameters.relative_gap_limit = float(gap_rel)
+    callback = None
+    if on_progress is not None and has_objective:
+        callback = _Progress(on_progress)
+        # Our own clock: `solver.wall_time` is only readable once the solve
+        # has returned, and this fires while it runs.
+        started = time.monotonic()
+        solver.best_bound_callback = lambda bound: report(
+            on_progress, "bound", time.monotonic() - started, callback.best, bound
+        )
     with interrupt_when(should_stop, solver.StopSearch):
-        status = solver.Solve(model)
+        status = solver.Solve(model, callback) if callback else solver.Solve(model)
 
     solved = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     return Solution(
@@ -154,6 +167,19 @@ def solve(
         wall_seconds=round(solver.WallTime(), 3),
         solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",
     )
+
+
+class _Progress(cp_model.CpSolverSolutionCallback):
+    """Each better answer CP-SAT finds, with the bound at that moment."""
+
+    def __init__(self, on_progress):
+        super().__init__()
+        self.on_progress = on_progress
+        self.best = None
+
+    def on_solution_callback(self) -> None:
+        self.best = self.ObjectiveValue()
+        report(self.on_progress, "incumbent", self.WallTime(), self.best, self.BestObjectiveBound())
 
 
 def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):

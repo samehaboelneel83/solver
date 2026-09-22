@@ -41,6 +41,7 @@ from importlib.util import find_spec
 from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution
+from app.solve.progress import report
 from app.solve.stop import interrupt_when
 
 _available: bool | None = None
@@ -66,6 +67,7 @@ def solve(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     import pyscipopt
 
@@ -109,6 +111,9 @@ def solve(
             wall_seconds=0.0,
             solver=_name(),
         )
+
+    if on_progress is not None and has_objective:
+        model.includeEventhdlr(_progress_handler(on_progress), "progress", "reports each better answer and bound")
 
     def interrupt() -> None:
         # From the watcher thread; SCIP refuses outside its solving stage,
@@ -156,6 +161,34 @@ def solve(
         wall_seconds=round(model.getSolvingTime(), 3),
         solver=_name(),
     )
+
+
+def _progress_handler(on_progress):
+    """An event handler for SCIP's better-answer and better-bound events."""
+    import pyscipopt
+
+    class Progress(pyscipopt.Eventhdlr):
+        def eventinit(self):
+            self.model.catchEvent(pyscipopt.SCIP_EVENTTYPE.BESTSOLFOUND, self)
+            self.model.catchEvent(pyscipopt.SCIP_EVENTTYPE.DUALBOUNDIMPROVED, self)
+
+        def eventexit(self):
+            self.model.dropEvent(pyscipopt.SCIP_EVENTTYPE.BESTSOLFOUND, self)
+            self.model.dropEvent(pyscipopt.SCIP_EVENTTYPE.DUALBOUNDIMPROVED, self)
+
+        def eventexec(self, event):
+            model = self.model
+            found = event.getType() == pyscipopt.SCIP_EVENTTYPE.BESTSOLFOUND
+            best = model.getBestSol() if model.getNSols() else None
+            report(
+                on_progress,
+                "incumbent" if found else "bound",
+                model.getSolvingTime(),
+                model.getSolObjVal(best) if best is not None else None,
+                model.getDualbound(),
+            )
+
+    return Progress()
 
 
 def _name() -> str:

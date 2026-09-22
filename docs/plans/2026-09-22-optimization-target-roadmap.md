@@ -315,6 +315,23 @@ is complete.
 
 ---
 
+**Progress (2026-09-22):** progress events and the stream are done, as
+migration `0036`. `run_event` records each better answer (`incumbent`) and
+each tightening of the bound (`bound`), throttled to two a second per run,
+from CP-SAT's solution and best-bound callbacks, HiGHS's improving-solution
+and interrupt callbacks (relayed from its child process as JSON lines) and
+a SCIP event handler; plus `stage` events (compiled, solving, settled). Each
+write does `pg_notify('run_<id>')`. `GET /api/v1/runs/{id}/events` replays
+from `Last-Event-ID`, then LISTENs, with a keep-alive every 15 s, closing
+when the run settles; the browser reads it with `fetch` rather than
+`EventSource` (which cannot send the Authorization header) and falls back to
+the existing polling after repeated failures. The Runs page draws the
+answer and the bound closing on each other, live and in replay. Still open
+in this phase: structured logs, Prometheus metrics, OpenTelemetry tracing,
+the ClickHouse `run_fact` writer, and `run_event` retention.
+
+---
+
 ## Phase 9 — Worker isolation and resource control (~1–2 weeks)
 
 **Decision 4 (where solvers run) is answered here:** a worker container pool; each run solves in a **fresh

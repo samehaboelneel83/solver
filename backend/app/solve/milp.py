@@ -67,6 +67,7 @@ def solve(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     engine = available()
     if engine is None:  # pragma: no cover -- both ship with ortools

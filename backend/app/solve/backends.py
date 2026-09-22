@@ -29,6 +29,12 @@ from app.solve.result import Solution
 # interrupt do; the rest return as soon as their current call does.
 ShouldStop = Callable[[], bool]
 
+# Told of progress while a backend solves: ("incumbent" | "bound", payload)
+# with `t` (seconds into the solve), `objective` (the best answer so far,
+# or None) and `bound` (the best proven limit, or None). Backends that have
+# no callback never call it; a failure in it must not stop the solve.
+ProgressFn = Callable[[str, dict], None]
+
 
 class SolveFn(Protocol):
     def __call__(
@@ -40,6 +46,7 @@ class SolveFn(Protocol):
         should_stop: ShouldStop | None = None,
         seed: int | None = None,
         gap_rel: float = 0.0,
+        on_progress: "ProgressFn | None" = None,
     ) -> Solution: ...
 
 
@@ -75,12 +82,14 @@ def _cpsat_solve(
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     from app.solve import cpsat
 
     return cpsat.solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
+        on_progress=on_progress,
     )
 
 
@@ -92,12 +101,14 @@ def _milp_solve(
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     from app.solve import milp
 
     return milp.solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
+        on_progress=on_progress,
     )
 
 
@@ -115,12 +126,14 @@ def _lp_solve(
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     from app.solve import lp
 
     return lp.solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
+        on_progress=on_progress,
     )
 
 
@@ -138,12 +151,14 @@ def _highs_solve(
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     from app.solve import highs
 
     return highs.solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
+        on_progress=on_progress,
     )
 
 
@@ -161,12 +176,14 @@ def _scip_solve(
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     from app.solve import scip
 
     return scip.solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
+        on_progress=on_progress,
     )
 
 

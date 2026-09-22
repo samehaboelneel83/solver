@@ -34,6 +34,7 @@ from pathlib import Path
 from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution, fold_duals
+from app.solve.progress import report
 from app.solve.stop import interrupt_when
 
 _BACKEND_ROOT = str(Path(__file__).resolve().parents[2])
@@ -88,6 +89,7 @@ def solve(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return _blank("unknown")
@@ -105,6 +107,7 @@ def solve(
                     "workers": workers,
                     "seed": seed,
                     "gap_rel": gap_rel,
+                    "progress": on_progress is not None,
                 },
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -113,9 +116,19 @@ def solve(
             [sys.executable, "-m", "app.solve.highs_worker", req_path, out_path],
             cwd=_BACKEND_ROOT,
             env=_child_env(),
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        # The child reports progress as one JSON line per event on stdout
+        # (HiGHS itself prints nothing: `output_flag` is off). Both pipes are
+        # drained on threads, so neither can fill and stall the child.
+        errors: list[bytes] = []
+        readers = [
+            threading.Thread(target=_relay_progress, args=(proc.stdout, on_progress), daemon=True),
+            threading.Thread(target=lambda: errors.append(proc.stderr.read()), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
         def stop_child() -> None:
             # SIGTERM first: the child turns it into HiGHS's own cancel and
             # writes out the best answer it has. Killed only if it has not
@@ -127,11 +140,14 @@ def solve(
 
         try:
             with interrupt_when(should_stop, stop_child):
-                _, stderr = proc.communicate(timeout=max(time_limit + 15.0, 20.0))
+                proc.wait(timeout=max(time_limit + 15.0, 20.0))
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
             raise RuntimeError("highs worker timed out") from None
+        for reader in readers:
+            reader.join(timeout=5)
+        stderr = b"".join(errors)
 
         if proc.returncode != 0:
             if should_stop is not None and should_stop():
@@ -150,6 +166,7 @@ def solve_in_process(
     workers: int = 8,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    progress: bool = False,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -184,6 +201,9 @@ def solve_in_process(
         _set_objective(highspy, solver, compiled, position, sign)
         if compiled.objective_quadratic:
             solver.passHessian(_hessian(highspy, len(keys), position, compiled.objective_quadratic, sign))
+
+    if progress:
+        _subscribe_progress(solver, sign)
 
     # `solve()` with keyboard-interrupt handling, not `run()`: HiGHS then
     # solves on a thread, and an interrupt -- the SIGTERM the parent sends
@@ -289,6 +309,60 @@ def _bound(solver, compiled: Compiled, status: str, sign: float) -> float | None
             return None
         return bound * sign if abs(bound) < 1e20 else None
     return solver.getObjectiveValue() * sign if status == "optimal" else None
+
+
+# How often the child writes a bound-only line: HiGHS's MIP interrupt
+# callback fires constantly, and the parent throttles again anyway.
+_BOUND_EVERY = 0.5
+
+
+def _subscribe_progress(solver, sign: float) -> None:
+    """In the child: print each better answer, and the bound now and then,
+    as JSON lines for the parent (`_relay_progress`)."""
+    import json
+    import time
+
+    last = [0.0]
+
+    def line(kind: str, data) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": kind,
+                    "t": float(data.running_time),
+                    "objective": float(data.objective_function_value) * sign,
+                    "bound": float(data.mip_dual_bound) * sign,
+                },
+                allow_nan=True,
+            ),
+            flush=True,
+        )
+
+    def improving(event) -> None:
+        line("incumbent", event.data_out)
+
+    def interrupt(event) -> None:
+        now = time.monotonic()
+        if now - last[0] >= _BOUND_EVERY:
+            last[0] = now
+            line("bound", event.data_out)
+
+    solver.cbMipImprovingSolution.subscribe(improving)
+    solver.cbMipInterrupt.subscribe(interrupt)
+
+
+def _relay_progress(stream, on_progress) -> None:
+    """In the parent: turn the child's progress lines into `on_progress`."""
+    import json
+
+    for raw in stream:
+        if on_progress is None:
+            continue
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        report(on_progress, event.get("kind", "bound"), event.get("t", 0), event.get("objective"), event.get("bound"))
 
 
 def _has_solution(solver) -> bool:

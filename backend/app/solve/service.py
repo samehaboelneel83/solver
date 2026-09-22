@@ -14,6 +14,7 @@ attribute to a solver version is not a result (roadmap, Phase 3).
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -42,6 +43,8 @@ from app.solve.compile import (
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 from app.settings_resolve import resolve
+
+logger = logging.getLogger(__name__)
 
 COMPILER_VERSION = "ir-compiler 1"
 
@@ -427,6 +430,31 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     dataset_id = row["dataset_id"]
 
     stop = threading.Event()
+    events = RunEvents(run_id)
+    try:
+        return _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
+    finally:
+        # Whatever happened -- solved, refused, cancelled, crashed -- the
+        # stream's last word is the status the run ended with.
+        settled = db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one_or_none()
+        events.stage("settled", status=settled)
+        events.close()
+
+
+def _execute(
+    db: Session,
+    run_id: int,
+    events: "RunEvents",
+    ir: dict,
+    data: dict,
+    params: dict,
+    time_limit: float,
+    seed,
+    workers: int,
+    gap_rel: float,
+    dataset_id: int,
+    stop: threading.Event,
+) -> RunOutcome:
     with _heartbeat(run_id, stop):
         found = classify(ir, data)
         if _honour_cancel(db, run_id):
@@ -447,6 +475,12 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
         found = refine(found, compiled)
+        events.stage(
+            "compiled",
+            model_class=found.model_class,
+            variables=len(compiled.variables),
+            rules=len(compiled.constraints),
+        )
         try:
             backend, why = choose(found, params.get("requested_solver"))
         except NoBackend as exc:
@@ -462,6 +496,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         try:
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
+            events.stage("solving", solver=backend.name, time_limit_s=time_limit)
             result, reason = solve_compiled(
                 backend,
                 compiled,
@@ -470,6 +505,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
                 should_stop=stop.is_set,
                 workers=workers,
                 gap_rel=gap_rel,
+                on_progress=events.progress,
             )
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
@@ -776,6 +812,7 @@ def solve_compiled(
     should_stop=None,
     workers: int = 8,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> tuple[Solution, str | None]:
     """Solve a compiled model as a run does, and say why if it is unbounded.
 
@@ -791,7 +828,11 @@ def solve_compiled(
     """
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     started = time.monotonic()
-    result = _solve(backend, compiled, time_limit, knobs, should_stop)
+    # Only the first solve is watched: the re-solve that tests a ceiling
+    # (`_unbounded_ceilings`) answers a different question, and a
+    # lexicographic run's stages each optimise something else, so its
+    # numbers would not belong on one curve.
+    result = _solve(backend, compiled, time_limit, knobs, should_stop, on_progress)
     unbounded = _unbounded_ceilings(
         backend,
         compiled,
@@ -814,7 +855,9 @@ def solve_compiled(
 OPTIMAL_GAP = 1e-6
 
 
-def _solve(backend, compiled: Compiled, time_limit: float, knobs: dict, should_stop) -> Solution:
+def _solve(
+    backend, compiled: Compiled, time_limit: float, knobs: dict, should_stop, on_progress=None
+) -> Solution:
     if compiled.objective_mode == "lex":
         return _solve_lex(
             backend,
@@ -823,7 +866,9 @@ def _solve(backend, compiled: Compiled, time_limit: float, knobs: dict, should_s
             should_stop=should_stop,
             **knobs,
         )
-    return backend.solve(compiled, time_limit=time_limit, should_stop=should_stop, **knobs)
+    return backend.solve(
+        compiled, time_limit=time_limit, should_stop=should_stop, on_progress=on_progress, **knobs
+    )
 
 
 def _unbounded_ceilings(
@@ -898,6 +943,80 @@ def gap_of(objective, bound) -> float | None:
     gap = abs(objective - bound) / max(abs(objective), 1e-9)
     # Below the six places an objective is stored to, a gap is rounding.
     return 0.0 if gap < 1e-9 else gap
+
+
+class RunEvents:
+    """What a run did while it ran, written as it happens (migration 0036).
+
+    Its own session: the run's is held inside a solver call for as long as
+    the solve takes, and these rows are the point of being able to watch
+    one. Progress is throttled to `EVERY_SECONDS`, keeping the latest of
+    whatever arrived in between and writing it when the window passes or at
+    the end, so a solver finding a thousand answers a second costs two rows.
+
+    Each write notifies `run_<id>`, which is what an open events stream
+    (`GET /runs/{id}/events`) waits on.
+    """
+
+    EVERY_SECONDS = 0.5
+
+    def __init__(self, run_id: int):
+        from app.core.db import SessionLocal
+
+        self.run_id = run_id
+        self.session = SessionLocal()
+        self.lock = threading.Lock()
+        self.seq = (
+            self.session.execute(
+                text("SELECT coalesce(max(seq), 0) FROM run_event WHERE run_id = :r"), {"r": run_id}
+            ).scalar_one()
+            + 1
+        )
+        self.last_write = 0.0
+        self.pending: tuple[str, dict] | None = None
+
+    def stage(self, name: str, **facts: Any) -> None:
+        with self.lock:
+            self._flush()
+            self._write("stage", {"stage": name, **facts})
+
+    def progress(self, kind: str, payload: dict) -> None:
+        with self.lock:
+            now = time.monotonic()
+            if now - self.last_write >= self.EVERY_SECONDS:
+                self._write(kind, payload)
+            else:
+                self.pending = (kind, payload)
+
+    def close(self) -> None:
+        with self.lock:
+            self._flush()
+        self.session.close()
+
+    def _flush(self) -> None:
+        if self.pending is not None:
+            kind, payload = self.pending
+            self.pending = None
+            self._write(kind, payload)
+
+    def _write(self, kind: str, payload: dict) -> None:
+        try:
+            self.session.execute(
+                text(
+                    "INSERT INTO run_event (run_id, seq, kind, payload)"
+                    " VALUES (:r, :s, :k, CAST(:p AS jsonb))"
+                ),
+                {"r": self.run_id, "s": self.seq, "k": kind, "p": _json(payload)},
+            )
+            self.session.execute(
+                text("SELECT pg_notify('run_' || :r, :s)"), {"r": str(self.run_id), "s": str(self.seq)}
+            )
+            self.session.commit()
+            self.seq += 1
+            self.last_write = time.monotonic()
+        except Exception:  # pragma: no cover -- watching must not break solving
+            self.session.rollback()
+            logger.warning("could not record a run event", exc_info=True)
 
 
 def _record_conflict(

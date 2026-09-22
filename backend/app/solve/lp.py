@@ -63,6 +63,7 @@ def solve(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    on_progress=None,
 ) -> Solution:
     discrete = [key[0] for key, spec in compiled.variables.items() if spec.is_integral]
     if discrete:

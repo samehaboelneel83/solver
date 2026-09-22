@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         workers=payload["workers"],
         seed=payload.get("seed"),
         gap_rel=payload.get("gap_rel", 0.0),
+        progress=payload.get("progress", False),
     )
     with open(out_path, "wb") as handle:
         pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)

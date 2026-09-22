@@ -25,6 +25,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
 
 /**
@@ -634,6 +635,11 @@ function RunDetail({ id }: { id: Id }) {
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
+
+      {/* The solve itself: live while it runs, replayed afterwards. When it
+          settles, refresh the run so the answer below it appears at once
+          rather than at the next poll. */}
+      <RunProgress runId={id} live={unfinished} onSettled={() => void run.refetch()} />
 
       {can("run.submit") && unfinished && (
         <div className="mb-4">
