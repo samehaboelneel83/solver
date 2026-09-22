@@ -24,13 +24,13 @@ in between.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from importlib.metadata import version as _pkg_version
 
 from ortools.linear_solver import pywraplp
 
 from app.api.quantity import report_quantity
-from app.solve.compile import Compiled, Constraint, Variable
+from app.solve.compile import Compiled, Variable
+from app.solve.pywraplp_model import load
 from app.solve.result import Solution
 from app.solve.stop import interrupt_when
 
@@ -74,6 +74,9 @@ def solve(
         raise RuntimeError("no MILP engine in this build")
 
     solver = pywraplp.Solver.CreateSolver(engine)
+    # One proto, loaded at once (D7): 1.61 s -> 0.43 s on 320,000 entries.
+    # Loaded before the settings below, so a load cannot reset them.
+    variables, _rows = load(solver, compiled)
     solver.SetTimeLimit(int(time_limit * 1000))
     if workers > 1:
         solver.SetNumThreads(workers)
@@ -81,17 +84,6 @@ def solve(
         solver.SetSolverSpecificParametersAsString(
             f"randomization/randomseedshift = {int(seed)}"
         )
-
-    variables = {key: _declare(solver, key, spec) for key, spec in compiled.variables.items()}
-
-    for constraint in compiled.constraints:
-        _add(solver, variables, constraint)
-
-    if compiled.objective.coeffs:
-        expression = solver.Sum(
-            [variables[key] * float(coeff) for key, coeff in compiled.objective.coeffs.items()]
-        )
-        solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
     # pywraplp's own default gap is 1e-4, which would let a run be called
     # optimal 0.01% short of the best. The setting decides, 0 by default.
@@ -139,15 +131,6 @@ def _report(compiled: Compiled, value: float) -> float | int:
     return report_quantity(value, integral=compiled.is_integral)
 
 
-def _declare(solver: pywraplp.Solver, key, spec: Variable):
-    name = f"{key[0]}[{','.join(key[1])}]"
-    if spec.domain == "binary":
-        return solver.BoolVar(name)
-    if spec.domain == "integer":
-        return solver.IntVar(float(spec.lower), float(spec.upper), name)
-    return solver.NumVar(float(spec.lower), float(spec.upper), name)
-
-
 def _read(spec: Variable, value: float) -> float | int:
     """An integer variable's value comes back as a float and is rounded; a
     continuous one is kept at six decimal places.
@@ -159,27 +142,3 @@ def _read(spec: Variable, value: float) -> float | int:
     """
     return report_quantity(value, integral=spec.is_integral)
 
-
-def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
-    """`left relation right`, rearranged so the variables sit on one side."""
-    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
-        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
-    coeffs: dict = dict(c.left.coeffs)
-    for key, coeff in c.right.coeffs.items():
-        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
-    rhs = float(c.right.const - c.left.const)
-
-    expression = solver.Sum([variables[key] * float(coeff) for key, coeff in coeffs.items()])
-
-    if c.relation == ">=":
-        solver.Add(expression >= rhs)
-    elif c.relation == "<=":
-        solver.Add(expression <= rhs)
-    elif c.relation in ("=", "=="):
-        solver.Add(expression == rhs)
-    elif c.relation == "<":
-        solver.Add(expression <= rhs - 1)
-    elif c.relation == ">":
-        solver.Add(expression >= rhs + 1)
-    else:  # pragma: no cover -- the contract's relation vocabulary
-        raise ValueError(f"unknown relation {c.relation!r}")

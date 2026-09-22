@@ -21,13 +21,13 @@ have been right.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from importlib.metadata import version as _pkg_version
 
 from ortools.linear_solver import pywraplp
 
 from app.api.quantity import report_quantity
-from app.solve.compile import Compiled, Constraint
+from app.solve.compile import Compiled
+from app.solve.pywraplp_model import load
 from app.solve.result import Solution, fold_duals
 from app.solve.stop import interrupt_when
 
@@ -73,23 +73,14 @@ def solve(
         )
 
     solver = pywraplp.Solver.CreateSolver(_ENGINE)
+    # One proto, loaded at once (D7): 0.435 s -> 0.054 s on 200,000 entries.
+    # Loaded before the settings below, so a load cannot reset them.
+    variables, loaded = load(solver, compiled)
+    rows = [(constraint.id, row) for constraint, row in zip(compiled.constraints, loaded)]
     solver.SetTimeLimit(int(time_limit * 1000))
     if seed is not None:
         # GLOP's own parameters, in their text form; it perturbs with them.
         solver.SetSolverSpecificParametersAsString(f"random_seed: {int(seed)}")
-
-    variables = {
-        key: solver.NumVar(float(spec.lower), float(spec.upper), f"{key[0]}[{','.join(key[1])}]")
-        for key, spec in compiled.variables.items()
-    }
-
-    rows = [(constraint.id, _add(solver, variables, constraint)) for constraint in compiled.constraints]
-
-    if compiled.objective.coeffs:
-        expression = solver.Sum(
-            [variables[key] * float(coeff) for key, coeff in compiled.objective.coeffs.items()]
-        )
-        solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
     with interrupt_when(should_stop, solver.InterruptSolve):
         status = solver.Solve()
@@ -142,25 +133,3 @@ def solve(
         ),
     )
 
-
-def _add(solver: pywraplp.Solver, variables: dict, c: Constraint):
-    """`left relation right`, rearranged so the variables sit on one side."""
-    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
-        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
-    coeffs: dict = dict(c.left.coeffs)
-    for key, coeff in c.right.coeffs.items():
-        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
-    rhs = float(c.right.const - c.left.const)
-
-    expression = solver.Sum([variables[key] * float(coeff) for key, coeff in coeffs.items()])
-
-    if c.relation == ">=":
-        return solver.Add(expression >= rhs)
-    if c.relation == "<=":
-        return solver.Add(expression <= rhs)
-    if c.relation in ("=", "=="):
-        return solver.Add(expression == rhs)
-    # pragma: no cover -- the contract admits <=, = and >= only, and
-    # a strict relation over the reals has no solver representation: the
-    # supremum it asks for is not attained.
-    raise ValueError(f"glop cannot express the relation {c.relation!r} over the reals")
