@@ -43,6 +43,7 @@ from app.ir.contract import (
     ARITHMETIC_ATTR_TYPES,
     CONSTRAINT_KEYS,
     FILTER_OPERATORS,
+    ACCEPTED_VERSIONS,
     IR_VERSION,
     MAX_DEPTH,
     MAX_INDICES,
@@ -959,12 +960,12 @@ def check_shape(ir: Any) -> Refusal | None:
             ["version"],
             f"an IR carries its version; this platform expresses version {IR_VERSION}",
         )
-    if ir["version"] != IR_VERSION or isinstance(ir["version"], bool):
+    if isinstance(ir["version"], bool) or ir["version"] not in ACCEPTED_VERSIONS:
         return Refusal(
             "version_unsupported",
             ["version"],
             f"{json.dumps(ir['version'])} is not an IR version this platform expresses; it "
-            f"expresses {IR_VERSION}",
+            f"expresses {' and '.join(str(v) for v in ACCEPTED_VERSIONS)}",
         )
     for key in REQUIRED_KEYS:
         if key not in ir:

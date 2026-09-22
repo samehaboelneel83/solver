@@ -5,6 +5,15 @@
 continuous variables and fractional numbers (§7); still version 1, for the
 reason §10 now records.
 
+**Version 2** (2026-09-23, target roadmap Phase 10) is version 1 plus the
+constructs Phase 10 adds as they land -- indicators, piecewise-linear terms,
+scheduling. It removes and changes nothing, so every version 1 document is
+a valid version 2 document as written: the platform reads `version` 1 or 2
+(`acceptedVersions` in `contract.json`) and writes 2, and `upgrade_v1`
+(`backend/app/ir/models.py`) only restamps. The same contract is also
+typed as Pydantic models there, bound to `contract.json` by
+`backend/tests/test_ir_models.py`.
+
 **Status:** in force. `POST /api/v1/problems/{id}/versions` refuses a document
 that does not meet it.
 
@@ -175,7 +184,7 @@ An IR is a JSON **object**. It carries exactly these keys and no others.
 
 | key | required | what it is |
 |---|---|---|
-| `version` | yes | `1`. Present from the first document ever written, so a reader can refuse what it does not understand instead of misreading it. |
+| `version` | yes | `1` or `2` (written as `2` since Phase 10). Present from the first document ever written, so a reader can refuse what it does not understand instead of misreading it. |
 | `sets` | yes | An array of **entity type names**. What the dataset must freeze. |
 | `relationships` | no | An array of **relationship type names**. Which edges the dataset must freeze, and the only ones a `via` may walk (§4.2). Omit it for a model that does not traverse. |
 | `parameters` | yes | An object keyed by **parameter name**. What indexed data the model reads. |

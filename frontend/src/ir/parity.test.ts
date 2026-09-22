@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ACCEPTED_VERSIONS,
   ALL_KEYS,
   ARITHMETIC_ATTR_TYPES,
   DOMAIN_RULES,
@@ -76,6 +77,7 @@ function readContract(): Record<string, unknown> {
 function fromTypeScript(): Record<string, unknown> {
   return {
     version: IR_VERSION,
+    acceptedVersions: [...ACCEPTED_VERSIONS],
     limits: {
       maxDepth: MAX_DEPTH,
       maxTerms: MAX_TERMS,
@@ -123,6 +125,7 @@ describe("the IR contract", () => {
   it("agrees on the version and the four limits", () => {
     const theirs = readContract();
     expect(theirs.version).toBe(IR_VERSION);
+    expect(theirs.acceptedVersions).toEqual([...ACCEPTED_VERSIONS]);
     expect(theirs.limits).toEqual({
       maxDepth: MAX_DEPTH,
       maxTerms: MAX_TERMS,

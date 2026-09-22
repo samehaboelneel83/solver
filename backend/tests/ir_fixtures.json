@@ -1004,6 +1004,262 @@
           }
         ]
       }
+    },
+    {
+      "name": "workforce_as_version_2",
+      "why": "Version 2 is version 1 plus what Phase 10 adds: the demo restamped as version 2 is valid as it stands, which is all app/ir/models.py upgrade_v1 does.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -1055,9 +1311,9 @@
       "loc": [
         "version"
       ],
-      "why": "a version this platform does not express is refused, not guessed at",
+      "why": "a version this platform does not express is refused, not guessed at (it reads 1 and 2)",
       "ir": {
-        "version": 2,
+        "version": 3,
         "sets": [],
         "parameters": {},
         "variables": {

@@ -23,9 +23,15 @@
     "catalogue's `operators`, not a second table: app/ir/contract.py",
     "asserts every name here exists there, and which of them a given",
     "attribute accepts comes from that catalogue's `operatorsByType`.",
-    "There is one operator vocabulary on this platform."
+    "There is one operator vocabulary on this platform.",
+    "",
+    "`version` is the version this platform writes; `acceptedVersions` the",
+    "ones it reads. Version 2 is version 1 plus what Phase 10 adds, so a",
+    "version 1 document is valid as it stands (app/ir/models.py upgrade_v1",
+    "only restamps it)."
   ],
-  "version": 1,
+  "version": 2,
+  "acceptedVersions": [1, 2],
   "limits": {
     "maxDepth": 12,
     "maxTerms": 500,

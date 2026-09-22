@@ -15,7 +15,10 @@
  * The prose the numbers mean is in `docs/contracts/problem-ir.md`.
  */
 
-export const IR_VERSION = 1;
+/** The version this platform writes. */
+export const IR_VERSION = 2;
+/** The versions it reads: version 2 is version 1 plus what Phase 10 adds. */
+export const ACCEPTED_VERSIONS: readonly number[] = [1, 2];
 
 export const MAX_DEPTH = 12;
 export const MAX_TERMS = 500;

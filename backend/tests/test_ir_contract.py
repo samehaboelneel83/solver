@@ -118,7 +118,9 @@ def test_names_follow_the_one_platform_name_rule():
 
 
 def test_the_document_carries_its_version_from_the_first_one():
-    assert IR_VERSION == 1
+    # Version 2 is what is written; version 1 documents are still read.
+    assert IR_VERSION == 2
+    assert CONTRACT["acceptedVersions"] == [1, 2]
     assert "version" in CONTRACT["topLevel"]["required"]
 
 

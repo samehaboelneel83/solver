@@ -22,6 +22,7 @@ import {
   ALL_KEYS,
   CONSTRAINT_KEYS,
   FILTER_OPERATORS,
+  ACCEPTED_VERSIONS,
   IR_VERSION,
   MAX_DEPTH,
   MAX_INDICES,
@@ -1036,12 +1037,12 @@ export function checkIrShape(ir: unknown): IrRefusal | null {
       `an IR carries its version; this platform expresses version ${IR_VERSION}`
     );
   }
-  if (ir.version !== IR_VERSION) {
+  if (typeof ir.version !== "number" || !ACCEPTED_VERSIONS.includes(ir.version)) {
     return refusal(
       "version_unsupported",
       ["version"],
       `${show(ir.version)} is not an IR version this platform expresses; it expresses ` +
-        `${IR_VERSION}`
+        ACCEPTED_VERSIONS.join(" and ")
     );
   }
   for (const key of REQUIRED_KEYS) {

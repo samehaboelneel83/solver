@@ -9,6 +9,7 @@
  * Consumers import from here.
  */
 export {
+  ACCEPTED_VERSIONS,
   ALL_KEYS,
   ARITHMETIC_ATTR_TYPES,
   CONSTRAINT_KEYS,

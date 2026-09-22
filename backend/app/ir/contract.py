@@ -32,6 +32,8 @@ _RAW: dict[str, Any] = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 CONTRACT: dict[str, Any] = {k: v for k, v in _RAW.items() if not k.startswith("//")}
 
 IR_VERSION: int = CONTRACT["version"]
+#: The versions a document may carry; `IR_VERSION` is the one written.
+ACCEPTED_VERSIONS: tuple[int, ...] = tuple(CONTRACT["acceptedVersions"])
 
 MAX_DEPTH: int = CONTRACT["limits"]["maxDepth"]
 MAX_TERMS: int = CONTRACT["limits"]["maxTerms"]

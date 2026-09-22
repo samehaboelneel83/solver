@@ -70,7 +70,7 @@ import { parseRouteId } from "../lib/routeId";
  * the empty ones -- a missing `constraints` is a different document from an
  * empty one, and only one of them is valid. */
 const EMPTY_MODEL = {
-  version: 1,
+  version: 2,
   sets: [],
   parameters: {},
   variables: {},
