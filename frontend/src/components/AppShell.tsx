@@ -116,6 +116,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/iam/role", label: "Roles", capability: "iam.manage" },
       { to: "/iam/user_role", label: "User roles", capability: "iam.manage" },
       { to: "/iam/role_capability", label: "Role capabilities", capability: "iam.manage" },
+      { to: "/iam/capability", label: "Capabilities", capability: "iam.manage" },
     ],
   },
 ];
@@ -285,7 +286,7 @@ function AppShellContent() {
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [drawerOpen, isDesktop]);
 
   // G-2 fix round 1: track the `lg` breakpoint in JS so the drawer's

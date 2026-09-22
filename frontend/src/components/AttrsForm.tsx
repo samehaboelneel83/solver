@@ -218,7 +218,7 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
   );
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 function Control({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
   if (attribute.data_type === "boolean" || attribute.data_type === "enum") {
     const options =

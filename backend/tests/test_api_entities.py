@@ -40,6 +40,8 @@ trigger's entry, absent from FastAPI's:
   at all, `sort_order` not being an integer).
 - **409, string `detail`** -- `translate_db_error`'s other branch: the
   `UNIQUE (entity_type_id, key)` violation and the `entity_type_id` FK.
+  (`entity_key_not_blank` is the CHECK exception: no JSON DETAIL, but
+  the constraint name *is* the field, so it is the 422-with-`kind` shape.)
 
 Test hygiene: every row is created through a real HTTP POST, which the app
 commits inside the request, so a test-side `db.rollback()` cannot undo it.
@@ -437,6 +439,33 @@ def test_non_integer_sort_order_is_a_request_layer_422(auth_headers, entity_type
         headers=auth_headers,
     )
     _assert_blames_field(_validation_errors(response), "sort_order")
+
+
+def test_blank_entity_key_is_422_naming_key(auth_headers, entity_type_id):
+    """Migration 0009's `entity_key_not_blank` CHECK has no JSON DETAIL,
+    so without a named branch it used to collapse into the generic 409.
+    The UI already refuses an empty key; the API must name `key` the same
+    way a trigger 422 does, not hide it as a conflict."""
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/entities",
+        json={"entity_type_id": entity_type_id, "key": "   "},
+        headers=auth_headers,
+    )
+    error = _trigger_error(response)
+    assert error["kind"] == "entity_key_not_blank"
+    assert error["field"] == "key"
+    assert "key is required" in error["message"]
+
+    created = _make_entity(client, auth_headers, entity_type_id, "ahmed")
+    patch = client.patch(
+        f"/api/v1/entities/{created['id']}",
+        json={"key": "", "updated_at": created["updated_at"]},
+        headers=auth_headers,
+    )
+    patched = _trigger_error(patch)
+    assert patched["kind"] == "entity_key_not_blank"
+    assert patched["field"] == "key"
 
 
 # --- happy paths -----------------------------------------------------------

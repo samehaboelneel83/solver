@@ -47,7 +47,7 @@ def auth_headers():
 
 
 def test_registry_is_exactly_the_seven_flat_and_iam_tables():
-    """The generic CRUD registry must contain exactly the five `iam` tables
+    """The generic CRUD registry must contain exactly the six `iam` tables
     plus the three flat v1 tables -- no stray registration, and (see next
     test) none of the four immutable tables."""
     assert {(m.schema, m.table) for m in TABLE_REGISTRY} == {
@@ -56,6 +56,7 @@ def test_registry_is_exactly_the_seven_flat_and_iam_tables():
         ("iam", "role"),
         ("iam", "user_role"),
         ("iam", "role_capability"),
+        ("iam", "capability"),
         ("public", "domain"),
         ("public", "template"),
         ("public", "problem"),
@@ -76,12 +77,17 @@ def test_meta_schema_reports_capability_flags_defaulting_true(auth_headers):
     response = client.get("/api/meta/schema", headers=auth_headers)
     assert response.status_code == 200
 
-    for table in response.json():
+    by_name = {(t["schema"], t["table"]): t for t in response.json()}
+    writable = [t for t in response.json() if t["table"] != "capability"]
+    for table in writable:
         assert table["creatable"] is True
         assert table["updatable"] is True
         assert table["deletable"] is True
-
-    by_name = {(t["schema"], t["table"]): t for t in response.json()}
+    catalogue = by_name[("iam", "capability")]
+    assert catalogue["creatable"] is False
+    assert catalogue["updatable"] is False
+    assert catalogue["deletable"] is False
+    assert catalogue["write_capability"] == "iam.manage"
     assert by_name[("iam", "user_account")]["write_capability"] == "iam.manage"
     assert by_name[("iam", "role")]["write_capability"] == "iam.manage"
     assert by_name[("iam", "user_role")]["write_capability"] == "iam.manage"
@@ -95,8 +101,8 @@ def test_meta_schema_reports_capability_flags_defaulting_true(auth_headers):
 def test_capability_flags_suppress_write_routes():
     """A router built with updatable=False, deletable=False exposes GET and
     POST but no PUT or DELETE. Asserted against the router's own route
-    table, not a live request -- no currently registered table is
-    read-only, so a request-level test would have nothing to exercise."""
+    table, not a live request -- `iam.capability` is the live read-only
+    table (no POST either); this fixture still checks the two-flag case."""
     create_schema, update_schema, read_schema = make_crud_schemas(
         Domain, name="DomainCapabilityTest", readonly={"id"}, server_default={"created_at"}
     )
@@ -231,3 +237,26 @@ def test_options_route_for_iam_table_still_resolves_uuid_ids(auth_headers):
         # POST (a separate, already-committed session), so it must be
         # deleted through the API rather than relied on to roll back.
         client.delete(f"/api/iam/role/{role_id}", headers=auth_headers)
+
+
+def test_capability_catalogue_is_readable_and_not_writable(auth_headers):
+    """The grant form reads `iam.capability`; the table itself is the
+    catalogue, not a second list, and nothing writes it through the
+    factory — a new verb is still an INSERT in a migration."""
+    client = TestClient(app)
+    listed = client.get("/api/iam/capability/", headers=auth_headers)
+    assert listed.status_code == 200
+    codes = {row["code"] for row in listed.json()["items"]}
+    assert {"domain.edit", "iam.manage", "model.publish", "run.submit"} <= codes
+
+    one = client.get("/api/iam/capability/domain.edit", headers=auth_headers)
+    assert one.status_code == 200
+    assert one.json()["code"] == "domain.edit"
+    assert one.json()["group"] == "domain"
+
+    created = client.post(
+        "/api/iam/capability/",
+        headers=auth_headers,
+        json={"code": "made.up", "group": "test", "description": "should not land"},
+    )
+    assert created.status_code == 405

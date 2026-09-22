@@ -15,10 +15,10 @@ import { parseRouteId } from "../lib/routeId";
  *
  * Read-only is the API's shape, not a shortcut: `model_version` is
  * immutable -- PUT, PATCH and DELETE all answer 405, the version number
- * and `ir_hash` are assigned by the database, and posting an IR is a
- * modelling action no screen owns yet (the compiler that would produce one
- * does not exist). So this lists what is there and shows one version's IR;
- * it does not pretend to be an editor.
+ * and `ir_hash` are assigned by the database, and a new version is posted
+ * from the Model editor (`/model`), not from this list. So this lists
+ * what is there and shows one version's IR; it does not pretend to be
+ * an editor.
  *
  * Problems come from the generic `/api/problem/` table (v1 moved `problem`
  * into `public`, Ruling 27), scoped with `?f_domain_id=`; versions come
@@ -36,8 +36,12 @@ export default function ModelVersions() {
     <div className="max-w-5xl">
       <h1 className="mb-1 text-lg font-semibold text-slate-900">Model versions</h1>
       <p className="mb-4 text-sm text-slate-500">
-        Every version of a problem&rsquo;s model, newest first. Versions are immutable: a new one is created by
-        submitting a model, and nothing here changes one.
+        Every version of a problem&rsquo;s model, newest first. Versions are immutable: a new one is created from
+        the{" "}
+        <Link to="/model" className="text-blue-600 underline">
+          Model editor
+        </Link>
+        , and nothing here changes one.
       </p>
       {domainId === null ? (
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
@@ -172,8 +176,11 @@ function VersionList({
   if (versions.length === 0) {
     return (
       <p className="mb-6 text-sm text-slate-600">
-        No versions of this problem yet. A version appears here by submitting a model for this problem; there is
-        no way to write one by hand, because its number and content hash are assigned when it is stored.
+        No versions of this problem yet. Submit a model from the{" "}
+        <Link to="/model" className="text-blue-600 underline">
+          Model editor
+        </Link>
+        ; its number and content hash are assigned when it is stored. There is no way to write one by hand.
       </p>
     );
   }

@@ -88,8 +88,14 @@ function shouldIgnoreRowClick(event: React.MouseEvent<HTMLElement>): boolean {
  * "…/undefined". Defensive ahead of the next project's move to composite
  * primary keys, where a single `id` column may not exist at all.
  */
-function hasUsableId(row: Row): boolean {
-  return row.id !== null && row.id !== undefined && row.id !== "";
+/**
+ * Most factory tables use `id`. `iam.capability` is keyed by `code`
+ * (`domain.edit`); without this a row would render with no link.
+ */
+function rowIdentity(row: Row): string | undefined {
+  if (row.id !== null && row.id !== undefined && row.id !== "") return String(row.id);
+  if (typeof row.code === "string" && row.code !== "") return row.code;
+  return undefined;
 }
 
 /**
@@ -372,7 +378,7 @@ export default function DataTable({
     if (!onDelete) return;
     const label = recordLabel({ fields }, row) ?? "this row";
     if (window.confirm(`Delete "${label}"? This cannot be undone.`)) {
-      onDelete(String(row.id), label);
+      onDelete(rowIdentity(row) ?? "", label);
     }
   }
 
@@ -434,7 +440,7 @@ export default function DataTable({
           only one is visible at a time via the `md:` classes. */}
       <div className="grid grid-cols-1 gap-3 md:hidden" data-testid="datatable-cards">
         {rows.map((row, index) => {
-          const rowId = hasUsableId(row) ? String(row.id) : undefined;
+          const rowId = rowIdentity(row);
           const rowHref = rowId !== undefined ? `/${schema}/${table}/${rowId}` : undefined;
           const label = recordLabel({ fields }, row) ?? "this row";
           const firstField = displayFields[0];
@@ -541,7 +547,7 @@ export default function DataTable({
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => {
-              const rowId = hasUsableId(row) ? String(row.id) : undefined;
+              const rowId = rowIdentity(row);
               const rowHref = rowId !== undefined ? `/${schema}/${table}/${rowId}` : undefined;
               const label = recordLabel({ fields }, row) ?? "this row";
               return (

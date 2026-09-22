@@ -17,7 +17,7 @@ type ToastContextValue = {
 // every confirmation it tries to show.
 function warnDropped() {
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
+     
     console.warn("useToast() called outside ToastProvider; the message was dropped");
   }
 }

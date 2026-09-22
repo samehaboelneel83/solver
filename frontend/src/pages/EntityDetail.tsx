@@ -59,6 +59,8 @@ export default function EntityDetail() {
   const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
   const canEdit = can(writeCapability(table));
+  const canCreate = canEdit && table?.creatable !== false;
+  const canUpdate = canEdit && table?.updatable !== false;
   const listUrl = `/${schemaName}/${tableName}`;
   const [showIds, toggleShowIds] = useShowIdentifiers();
 
@@ -285,7 +287,7 @@ export default function EntityDetail() {
         isEdit={!isNew}
         isSubmitting={createEntity.isPending || updateEntity.isPending}
         serverError={serverFieldError}
-        readOnly={!canEdit}
+        readOnly={isNew ? !canCreate : !canUpdate}
       />
       <div className="mt-2 flex max-w-xl items-center gap-4">
         {/* H-9: same fix as the breadcrumb above -- inline-block + py-1 for a 24px+ tall target. */}

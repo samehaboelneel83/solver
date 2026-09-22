@@ -305,8 +305,8 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
   const relationshipId = Number(edgeId);
   const query = useRelationship(Number.isSafeInteger(relationshipId) ? relationshipId : null);
   const typeQuery = useRelationshipType(query.data?.relationship_type_id ?? null);
-  const attributes = typeQuery.data?.attributes ?? [];
-  const typed = attributes.length > 0;
+  const attributes = typeQuery.data?.attributes;
+  const typed = (attributes?.length ?? 0) > 0;
   const nodeLabel = (id: string) => graph.nodes.find((node) => node.id === id)?.label ?? `#${id}`;
   const fromLabel = edge ? nodeLabel(edge.source) : "";
   const toLabel = edge ? nodeLabel(edge.target) : "";
@@ -342,7 +342,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
   }, [query.data]);
 
   useEffect(() => {
-    if (!query.data || attributes.length === 0) return;
+    if (!query.data || !attributes?.length) return;
     setDrafts(draftsFromAttrs(attributes, query.data.attrs ?? {}));
   }, [query.data, attributes]);
 
@@ -354,7 +354,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
     setStale(null);
     setServerErrors(null);
     let attrs: Record<string, unknown>;
-    if (typed) {
+    if (typed && attributes) {
       const built = buildAttrs(attributes, drafts);
       if (!built.ok) {
         replace(built.errors);
@@ -381,7 +381,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
       seeded.current = text;
       setDraft(text);
       setStored(saved.attrs ?? {});
-      setDrafts(draftsFromAttrs(attributes, saved.attrs ?? {}));
+      setDrafts(draftsFromAttrs(attributes ?? [], saved.attrs ?? {}));
       setUpdatedAt(saved.updated_at);
       toast.success(`${edge!.type} saved`);
     } catch (err) {
@@ -390,7 +390,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
         setStale(formatApiError(err));
         return;
       }
-      if (typed) {
+      if (typed && attributes) {
         const result = entityServerErrors(err, attributes.map((attribute) => attribute.name));
         setServerErrors(result.fields);
         setError(result.general);
@@ -406,7 +406,7 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
       const fresh = (await query.refetch()).data;
       if (!fresh) return;
       const freshText = JSON.stringify(fresh.attrs ?? {}, null, 2);
-      if (typed) {
+      if (typed && attributes) {
         const baseline = draftsFromAttrs(attributes, stored);
         const merged = mergeReload(baseline, drafts, draftsFromAttrs(attributes, fresh.attrs ?? {}));
         setDrafts(merged);
@@ -468,10 +468,10 @@ function EdgePanel({ graph, edgeId, onClose }: { graph: GraphResponse; edgeId: s
       <form onSubmit={handleSubmit} className="space-y-2" data-testid="edge-property-form">
         {typed ? (
           <AttrsForm
-            attributes={attributes}
+            attributes={attributes ?? []}
             drafts={drafts}
             errors={errors}
-            staleKeys={staleAttrKeys(attributes, stored)}
+            staleKeys={staleAttrKeys(attributes ?? [], stored)}
             onChange={(name, value) => setDrafts((prev) => ({ ...prev, [name]: value }))}
           />
         ) : (

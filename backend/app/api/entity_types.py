@@ -51,13 +51,15 @@ one trigger *on* `entity_type` -- `entity_type_guard` -- but it judges
 DELETEs and domain moves, not the column values this section is about; see
 the DELETE route below.)
 
-Migration 0009 added three more CHECKs. Two are shadowed here, so they are
-422s naming their field: `attribute_def_default_value_matches_type` (a
-`default_value` its own `data_type` would reject -- Task 14b, restated as
-`_check_default_value`) and the `colour ~ '^#[0-9a-f]{6}$'` pattern on
+Migration 0009 added three more CHECKs. All three are 422s naming their
+field: `attribute_def_default_value_matches_type` (a `default_value` its
+own `data_type` would reject -- Task 14b, restated as
+`_check_default_value`), the `colour ~ '^#[0-9a-f]{6}$'` pattern on
 `entity_type.colour` (`app.api.validation.validate_colour`, which also
-normalises case). One is not: `attribute_def_enum_values_not_empty` (an
-`enum` whose list is empty) still reaches the client as the generic 409.
+normalises case), and `attribute_def_enum_values_not_empty` (an `enum`
+whose list is empty or contains NULL), shadowed in `_check_enum_pairing`
+and named in `translate_db_error` so a writer that bypasses this router
+still gets a field-shaped 422.
 
 The cost is that this router no longer reaches those CHECKs. They remain
 the backstop for every other writer -- the seed, a migration, psql, a
@@ -121,6 +123,14 @@ def _check_enum_pairing(data_type: str, enum_values: list[str] | None) -> None:
         raise field_error(
             "enum_values",
             "an attribute of type 'enum' must list its allowed values",
+            enum_values,
+        )
+    if data_type == "enum" and (
+        len(enum_values) == 0 or any(value is None for value in enum_values)
+    ):
+        raise field_error(
+            "enum_values",
+            "an attribute of type 'enum' must list at least one allowed value",
             enum_values,
         )
     if data_type != "enum" and enum_values is not None:

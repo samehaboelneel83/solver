@@ -558,7 +558,7 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
                 is_fk: true,
                 fk_table: "iam.role",
               },
-              { name: "capability_code", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+              { name: "capability_code", type: "string", required: true, writable: true, is_fk: true, fk_table: "iam.capability" },
             ],
           },
         ]);
@@ -568,6 +568,9 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
       }
       if (path === "/api/iam/role/options?ids=role-1") {
         return Promise.resolve([{ id: "role-1", label: "planner" }]);
+      }
+      if (path.startsWith("/api/iam/capability/options")) {
+        return Promise.resolve([{ id: "run.submit", label: "run.submit — Solve a scenario" }]);
       }
       if (path.startsWith("/api/iam/role_capability/") && options?.method === "POST") {
         return Promise.resolve({ id: "grant-1", role_id: "role-1", capability_code: "run.submit" });
@@ -592,7 +595,10 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
     const row = related.parentElement?.parentElement ?? related.closest("section") ?? document.body;
     fireEvent.click(within(row instanceof HTMLElement ? row : document.body).getByRole("link", { name: "New" }));
 
-    fireEvent.change(await screen.findByTestId("field-capability_code"), { target: { value: "run.submit" } });
+    const capability = await screen.findByTestId("field-capability_code");
+    fireEvent.focus(capability);
+    fireEvent.change(capability, { target: { value: "run" } });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /run\.submit/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
@@ -1092,7 +1098,7 @@ describe("EntityDetail: a concurrent edit (Ruling 42)", () => {
     fireEvent.click(screen.getByText("Save"));
     await screen.findByTestId("stale-record");
 
-    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string, options?: RequestInit) => {
+    (apiFetch as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
       if (path === "/api/meta/schema") return Promise.resolve(schema);
       if (path === "/api/domain/7") return Promise.resolve(changed);
       return Promise.resolve({ items: [], total: 0 });

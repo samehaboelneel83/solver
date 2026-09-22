@@ -17,6 +17,10 @@
 import "react";
 
 declare module "react" {
+  // The parameter must be named `T` to merge with @types/react. `_T`
+  // looks unused-friendly and replaces the interface instead, so
+  // `children` and the rest of HTMLAttributes vanish.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface HTMLAttributes<T> {
     inert?: "" | undefined;
   }

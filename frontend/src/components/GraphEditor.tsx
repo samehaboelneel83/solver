@@ -20,7 +20,6 @@ import {
   parentIds,
 } from "../lib/hierarchyCollapse";
 import {
-  EMPTY_PALETTE,
   objectsPalette,
   type GraphMode,
   type GraphPalette,
@@ -180,25 +179,25 @@ export function applyGraphToCy(
 
   const existingNodeIds = new Set<string>();
   const existingEdgeIds = new Set<string>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (cy as any)
     .nodes()
     .forEach((ele: any) => existingNodeIds.add(ele.id()));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (cy as any)
     .edges()
     .forEach((ele: any) => existingEdgeIds.add(ele.id()));
 
   existingNodeIds.forEach((id) => {
     if (!desiredNodes.has(id)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (cy as any).remove?.((cy as any).getElementById(id));
       structureChanged = true;
     }
   });
   existingEdgeIds.forEach((id) => {
     if (!desiredEdges.has(id)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (cy as any).remove?.((cy as any).getElementById(id));
     }
   });
@@ -206,7 +205,7 @@ export function applyGraphToCy(
   const newNodes: GraphNode[] = [];
   desiredNodes.forEach((node, id) => {
     if (existingNodeIds.has(id)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const ele = (cy as any).getElementById(id);
       ele.data({ label: node.label, type: node.type, ...nodeStyle(id) });
       const currentParent = ele.data("parent") ?? undefined;
@@ -230,7 +229,7 @@ export function applyGraphToCy(
   const newEdges: GraphEdge[] = [];
   desiredEdges.forEach((edge, id) => {
     if (existingEdgeIds.has(id)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const ele = (cy as any).getElementById(id);
       ele.data({ label: edge.label, type: edge.type, ...edgeStyle(id) });
     } else if (!validNodeIds.has(edge.source) || !validNodeIds.has(edge.target)) {
@@ -241,12 +240,12 @@ export function applyGraphToCy(
   });
 
   if (skippedEdgeCount > 0 && typeof console !== "undefined") {
-    // eslint-disable-next-line no-console
+     
     console.warn(`applyGraphToCy: skipped ${skippedEdgeCount} edge(s) referencing a missing node`);
   }
 
   if (newNodes.length > 0 || newEdges.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const extent = (cy as any).extent?.() ?? { x1: 0, y1: 0, x2: 0, y2: 0 };
     const center = { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
     const elementsToAdd = [
@@ -276,7 +275,7 @@ export function applyGraphToCy(
         },
       })),
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (cy as any).add?.(elementsToAdd);
     if (newNodes.length > 0) {
       structureChanged = true;
@@ -349,7 +348,7 @@ export default function GraphEditor({
   const isTypes = mode === "types";
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const ehRef = useRef<any>(null);
   const graphRef = useRef<GraphResponse | null>(null);
   const hasLaidOutRef = useRef(false);
@@ -472,19 +471,19 @@ export default function GraphEditor({
     const cy = cytoscape({
       container: containerRef.current,
       elements: [],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       style: graphStylesheet() as any,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const eh = (cy as any).edgehandles({});
     ehRef.current = eh;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     cy.on("tap", "node", (evt: any) => {
       onSelectionChangeRef.current?.({ kind: "node", id: evt.target.id() });
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     cy.on("tap", "edge", (evt: any) => {
       // The wire id, not the canvas id -- see `cyEdgeId`.
       onSelectionChangeRef.current?.({
@@ -492,7 +491,7 @@ export default function GraphEditor({
         id: evt.target.data("graphId") ?? evt.target.id(),
       });
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     cy.on("tap", (evt: any) => {
       if (evt.target === cy) {
         onSelectionChangeRef.current?.(null);
@@ -536,7 +535,7 @@ export default function GraphEditor({
       ehRef.current = null;
       hasLaidOutRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   useEffect(() => {
@@ -681,7 +680,7 @@ export default function GraphEditor({
     if (!focusedNodeId || !shownNodeIds || shownNodeIds.has(focusedNodeId)) {
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (cyRef.current as any)?.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
     setFocusedNodeId(null);
   }, [shownNodeIds, focusedNodeId]);
@@ -811,7 +810,7 @@ export default function GraphEditor({
     const runGridFallback = () => {
       setLayoutStatus("ELK layout produced no positions — showing a grid");
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         (cy.layout(GRID_LAYOUT as any) as any)?.run?.();
       } catch {
         // Nothing more we can do -- leave the note above visible so the user knows why the
@@ -819,7 +818,7 @@ export default function GraphEditor({
       }
     };
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const lay: any = cy.layout(ELK_LAYOUT as any);
       lay.on?.("layoutstart", () => setLayoutStatus("Laying out…"));
       lay.on?.("layoutstop", () => {
@@ -828,7 +827,7 @@ export default function GraphEditor({
         // shared-position-object bug, or ELK genuinely failing to produce output for some
         // graph) is worse than no layout at all -- detect it and fall back to a plain grid
         // rather than leaving the user staring at one dot.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const nodesColl: any = (cy as any).nodes?.();
         const positions =
           nodesColl && typeof nodesColl.map === "function"
@@ -869,7 +868,7 @@ export default function GraphEditor({
     } else {
       eh.disableDrawMode?.();
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (cy as any).autoungrabify?.(next);
   }
 
@@ -890,7 +889,7 @@ export default function GraphEditor({
   // is what actually decides what is painted -- and the three filters already funnel into this
   // one property precisely so that everything downstream can ask one question.
   function orderedNodeIds(cy: Core): string[] {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const nodesColl: any = (cy as any).nodes?.();
     const items: { id: string; x: number; y: number }[] =
       nodesColl && typeof nodesColl.map === "function"
@@ -914,7 +913,7 @@ export default function GraphEditor({
     if (!cy) {
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const anyCy = cy as any;
     if (focusedNodeId && focusedNodeId !== id) {
       anyCy.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
@@ -936,7 +935,7 @@ export default function GraphEditor({
     if (!cy) {
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const anyCy = cy as any;
     if (focusedNodeId) {
       anyCy.getElementById?.(focusedNodeId)?.removeClass?.("kb-focus");
@@ -955,7 +954,7 @@ export default function GraphEditor({
   }
 
   function incidentEdgeIds(cy: Core, nodeId: string): string[] {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const edgesColl: any = (cy as any).edges?.();
     const ids: string[] = [];
     edgesColl?.forEach?.((edge: any) => {
@@ -1080,7 +1079,7 @@ export default function GraphEditor({
         event.preventDefault();
         const cy = cyRef.current;
         if (focusedEdgeCyId && cy) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const edge = (cy as any).getElementById?.(focusedEdgeCyId);
           const graphId = edge?.data?.("graphId") ?? focusedEdgeCyId;
           onSelectionChangeRef.current?.({ kind: "edge", id: String(graphId) });
@@ -1196,8 +1195,8 @@ export default function GraphEditor({
     }
     const next: FieldErrors = {};
     const key = createKey.trim();
-    // The server has no CHECK on `entity.key` (Task 6's deferred item), and
-    // the key is what model expressions address the entity by.
+    // Client-side copy of 0009's `entity_key_not_blank` CHECK (API 422 on
+    // `key`); the key is what model expressions address the entity by.
     if (key === "") {
       next.key = "Key: a key is required -- it is how model expressions refer to this entity.";
     }

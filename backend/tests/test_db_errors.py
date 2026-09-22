@@ -334,6 +334,46 @@ def test_check_violation_with_no_detail_at_all_falls_back_to_409():
     assert http.status_code == 409
 
 
+def test_entity_key_not_blank_check_is_422_naming_key():
+    """0009's CHECK has no JSON DETAIL; the constraint name *is* the field."""
+    exc = fake_dbapi_error(
+        pgcode="23514",
+        message_detail=None,
+        constraint_name="entity_key_not_blank",
+    )
+    http = translate_db_error(exc, table="entity")
+    assert http.status_code == 422
+    assert http.detail == [
+        {
+            "type": "value_error",
+            "loc": ["body", "key"],
+            "msg": (
+                "a key is required -- it is how model "
+                "expressions refer to this entity."
+            ),
+            "kind": "entity_key_not_blank",
+        }
+    ]
+
+
+def test_empty_enum_values_check_is_422_naming_enum_values():
+    exc = fake_dbapi_error(
+        pgcode="23514",
+        message_detail=None,
+        constraint_name="attribute_def_enum_values_not_empty",
+    )
+    http = translate_db_error(exc, table="attribute_def")
+    assert http.status_code == 422
+    assert http.detail == [
+        {
+            "type": "value_error",
+            "loc": ["body", "enum_values"],
+            "msg": "an attribute of type 'enum' must list at least one allowed value",
+            "kind": "attribute_def_enum_values_not_empty",
+        }
+    ]
+
+
 def test_unhandled_pgcode_is_reraised():
     exc = fake_dbapi_error(pgcode="42601")  # syntax_error -- a ProgrammingError class
     with pytest.raises(_FakeDBAPIError):

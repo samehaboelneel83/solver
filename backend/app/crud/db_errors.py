@@ -90,6 +90,24 @@ from app.crud.errors import conflict_detail
 # would need adding here (or a broader `code.startswith("23")` fallback).
 _CONFLICT_CODES = {"23503", "23505", "23502"}
 
+# Plain CHECKs with no JSON DETAIL whose constraint name *is* the field.
+# Everything else without DETAIL stays Ruling 16's generic 409.
+_NAMED_CHECK_422 = {
+    "entity_key_not_blank": {
+        "loc": ["body", "key"],
+        "msg": (
+            "a key is required -- it is how model "
+            "expressions refer to this entity."
+        ),
+        "kind": "entity_key_not_blank",
+    },
+    "attribute_def_enum_values_not_empty": {
+        "loc": ["body", "enum_values"],
+        "msg": "an attribute of type 'enum' must list at least one allowed value",
+        "kind": "attribute_def_enum_values_not_empty",
+    },
+}
+
 
 def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
     """Map a DBAPIError raised by a v1 trigger (or a plain constraint) to an
@@ -98,10 +116,10 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
     - 23514 (check_violation) with a well-formed JSON DETAIL -> 422 in the
       list shape described in the module docstring, one entry whose `loc`
       names the field and which carries the trigger's `kind`.
-    - 23514 without a parseable JSON DETAIL -> falls through to the 409
-      path below. conflict_detail() has no bespoke branch for "23514", so
-      this returns its generic catch-all message rather than a tailored
-      one -- still a reasonable 409, just not a field-specific one.
+    - 23514 without a parseable JSON DETAIL -> 409 via conflict_detail(),
+      except the named CHECKs in `_NAMED_CHECK_422` (migration 0009):
+      those names *are* the field, so they are 422s rather than a
+      generic conflict.
     - 23503 / 23505 / 23502 -> 409 via the existing conflict_detail(),
       reused unchanged -- except a 23503 with no ``constraint_name`` and
       a ``message_primary``. That is migration 0009's `entity_type_guard`
@@ -145,7 +163,24 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
                         }
                     ],
                 )
-        # No parseable JSON DETAIL -- fall through to the generic 409 path.
+        # No parseable JSON DETAIL. A CHECK whose name *is* the field is
+        # still a 422; everything else is the generic 409.
+        constraint = (
+            (getattr(diag, "constraint_name", None) or "") if diag is not None else ""
+        )
+        named = _NAMED_CHECK_422.get(constraint)
+        if named is not None:
+            return HTTPException(
+                status_code=422,
+                detail=[
+                    {
+                        "type": "value_error",
+                        "loc": named["loc"],
+                        "msg": named["msg"],
+                        "kind": named["kind"],
+                    }
+                ],
+            )
         return HTTPException(status_code=409, detail=conflict_detail(exc, table))
 
     if code in _CONFLICT_CODES:

@@ -34,7 +34,7 @@ import { EDITOR_ME, VIEWER_ME, editorQueryClient } from "../test/me";
  * `refusedAdds` and `throwCount` are exposed so a test can assert that
  * the double really did refuse, rather than inferring it from an absence.
  */
-const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore, cyStats } =
+const { mockCytoscapeInstance, mockCytoscape, registeredHandlersRef, elementStore } =
   vi.hoisted(() => {
   const handlersRef: { current: Record<string, (...args: any[]) => void> } = { current: {} };
   const stats = { refusedAdds: [] as string[], throws: [] as string[] };

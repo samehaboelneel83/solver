@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.validation import field_error
 from app.core.security import hash_password
 from app.crud.factory import build_crud_router
-from app.models.iam import Organization, Role, RoleCapability, UserAccount, UserRole
+from app.models.iam import Capability, Organization, Role, RoleCapability, UserAccount, UserRole
 from app.models.v1_domain import Domain
 from app.models.v1_problem import Problem, Template
 from app.schemas.generate import make_crud_schemas
@@ -107,6 +107,24 @@ router.include_router(
         read_schema=RoleCapabilityRead,
         schema_name="iam",
         table_name="role_capability",
+        write_capability="iam.manage",
+    )
+)
+
+CapabilityCreate, CapabilityUpdate, CapabilityRead = make_crud_schemas(
+    Capability, name="Capability", readonly={"code"}
+)
+router.include_router(
+    build_crud_router(
+        model=Capability,
+        create_schema=CapabilityCreate,
+        update_schema=CapabilityUpdate,
+        read_schema=CapabilityRead,
+        schema_name="iam",
+        table_name="capability",
+        creatable=False,
+        updatable=False,
+        deletable=False,
         write_capability="iam.manage",
     )
 )

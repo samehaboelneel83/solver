@@ -17,6 +17,7 @@ import {
   type Scenario,
   type ScenarioPatch,
 } from "../api/v1";
+import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
@@ -124,6 +125,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
 }
 
 function ForProblem({ problemId }: { problemId: Id }) {
+  const { can } = useCapabilities();
+  const canPublish = can("model.publish");
   const scenarios = useScenarios(problemId, { limit: 500, offset: 0 });
   const versions = useVersions(problemId, { limit: 50, offset: 0 });
   const [editing, setEditing] = useState<Scenario | "new" | null>(null);
@@ -167,13 +170,15 @@ function ForProblem({ problemId }: { problemId: Id }) {
               </span>
               <span className="text-xs text-slate-600">{describePatch(scenario.patch)}</span>
               <span className="ml-auto flex gap-2">
-                <button
-                  type="button"
-                  className="rounded px-2 py-1 text-blue-700 underline"
-                  onClick={() => setEditing(scenario)}
-                >
-                  Edit
-                </button>
+                {canPublish && (
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-blue-700 underline"
+                    onClick={() => setEditing(scenario)}
+                  >
+                    Edit
+                  </button>
+                )}
                 <Link to={`/runs?problem=${problemId}&scenario=${scenario.id}`} className="rounded px-2 py-1 text-blue-700 underline">
                   Solve
                 </Link>
@@ -184,13 +189,15 @@ function ForProblem({ problemId }: { problemId: Id }) {
       )}
 
       {editing === null ? (
-        <button
-          type="button"
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          onClick={() => setEditing("new")}
-        >
-          New scenario
-        </button>
+        canPublish ? (
+          <button
+            type="button"
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            onClick={() => setEditing("new")}
+          >
+            New scenario
+          </button>
+        ) : null
       ) : (
         <ScenarioForm
           problemId={problemId}
@@ -234,16 +241,16 @@ function ScenarioForm({
   const [failure, setFailure] = useState<string | null>(null);
 
   const version = useVersion(modelVersionId);
-  const constraints =
-    ((version.data?.ir as { constraints?: { id: string; note?: string; severity?: string }[] })
-      ?.constraints ?? []);
+  const constraints = (
+    version.data?.ir as { constraints?: { id: string; note?: string; severity?: string }[] } | undefined
+  )?.constraints;
 
   useEffect(() => {
     // A rule chosen in one version may not exist in another, and a patch
     // naming an unknown rule is refused. Dropping the choices that no longer
     // apply is better than sending a patch the server will reject.
     if (!version.data) return;
-    const known = new Set(constraints.map((c) => c.id));
+    const known = new Set((constraints ?? []).map((c) => c.id));
     setChoices((current) => {
       const kept = Object.fromEntries(Object.entries(current).filter(([id]) => known.has(id)));
       return Object.keys(kept).length === Object.keys(current).length ? current : kept;
@@ -307,13 +314,13 @@ function ScenarioForm({
 
       {version.isLoading ? (
         <Skeleton rows={3} cols={2} />
-      ) : constraints.length === 0 ? (
+      ) : (constraints ?? []).length === 0 ? (
         <p className="text-sm text-slate-600">
           This version has no rules to change, so a scenario of it asks the model as written.
         </p>
       ) : (
         <ul className="space-y-2">
-          {constraints.map((constraint) => {
+          {(constraints ?? []).map((constraint) => {
             const current = choices[constraint.id]?.choice ?? "as_is";
             return (
               <li key={constraint.id} className="rounded border border-slate-200 p-2">

@@ -28,6 +28,8 @@ export default function EntityList() {
   const { data: tables, fetchStatus: schemaFetchStatus } = useSchema();
   const table = tables?.find((t) => t.schema === schemaName && t.table === tableName);
   const canEdit = can(writeCapability(table));
+  const canCreate = canEdit && table?.creatable !== false;
+  const canRemove = canEdit && table?.deletable !== false;
   const [showIds] = useShowIdentifiers();
 
   // Shared fallback while the schema is still loading (or for a route with
@@ -59,7 +61,7 @@ export default function EntityList() {
   // Keep the input in sync when the URL changes from elsewhere (back/forward).
   useEffect(() => {
     setSearchInput(q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [q]);
 
   // Debounce the search box before it hits the URL/request.
@@ -174,7 +176,7 @@ export default function EntityList() {
             </p>
           )}
         </div>
-        {canEdit && (
+        {canCreate && (
         <Link
           to={newHref}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
@@ -246,7 +248,7 @@ export default function EntityList() {
           schema={schemaName}
           table={tableName}
           tableLabel={headingLabel}
-          newHref={canEdit ? newHref : undefined}
+          newHref={canCreate ? newHref : undefined}
           fields={table.fields}
           rows={data.items}
           total={data.total}
@@ -257,7 +259,7 @@ export default function EntityList() {
           onSort={handleSort}
           onPageChange={handlePageChange}
           onDelete={
-            canEdit
+            canRemove
               ? (id, label) => {
                   setDeleteError(null);
                   deleteEntity.mutate(id, {

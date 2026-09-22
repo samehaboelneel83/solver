@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -22,7 +23,29 @@ from app.seed import seed_admin
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Problem Solver Platform API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        create_analytics_schema(get_clickhouse_client())
+    except Exception:
+        logger.exception("Could not create ClickHouse analytics schema; continuing")
+    db = SessionLocal()
+    try:
+        seed_admin(db)
+    except Exception:
+        db.rollback()
+        logger.warning(
+            "Skipped admin seeding — have you run `alembic upgrade head`? "
+            "Run: docker compose run --rm --no-deps -T backend alembic upgrade head",
+            exc_info=True,
+        )
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="Problem Solver Platform API", lifespan=lifespan)
 
 # Before routing, and so before authentication: a NUL (U+0000) anywhere in
 # a query string or a JSON/form body is a 422 naming the field, not the
@@ -55,23 +78,3 @@ app.include_router(settings_router)
 # route moved from /api/graph/domain to /api/v1/graph with it.
 app.include_router(graph_router)
 app.include_router(crud_router)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    try:
-        create_analytics_schema(get_clickhouse_client())
-    except Exception:
-        logger.exception("Could not create ClickHouse analytics schema; continuing")
-    db = SessionLocal()
-    try:
-        seed_admin(db)
-    except Exception:
-        db.rollback()
-        logger.warning(
-            "Skipped admin seeding — have you run `alembic upgrade head`? "
-            "Run: docker compose run --rm --no-deps -T backend alembic upgrade head",
-            exc_info=True,
-        )
-    finally:
-        db.close()

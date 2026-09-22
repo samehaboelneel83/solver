@@ -98,7 +98,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, requires
 from app.api.concurrency import check_not_stale, stale_record_conflict
-from app.api.validation import field_error, validate_name
+from app.api.validation import field_error, reject_null, validate_name
 from app.core.db import get_db
 from app.api.quantity import Quantity, QuantityOut
 from app.crud.db_errors import translate_db_error
@@ -112,14 +112,6 @@ router = APIRouter(prefix="/api/v1", tags=["parameters"])
 # Ids are `bigint`. Lax on purpose, like every other id on the platform;
 # only the range is bounded, for the same 22003 reason.
 BigintId = Annotated[int, Field(ge=-(2**63), le=2**63 - 1)]
-
-def _not_null(value, info):
-    """PATCH: omitting a field means "unchanged", but an explicit `null`
-    for a NOT NULL column would otherwise reach the database as a 409."""
-    if value is None:
-        raise ValueError(f"{info.field_name} cannot be null")
-    return value
-
 
 # --- schemas ---------------------------------------------------------------
 
@@ -157,7 +149,7 @@ class ParameterDefUpdate(BaseModel):
     unit: str | None = None
 
     _check_name = field_validator("name")(validate_name)
-    _check_not_null = field_validator("name", "index_type_ids", "default_value")(_not_null)
+    _check_not_null = field_validator("name", "index_type_ids", "default_value")(reject_null)
 
 
 class ParameterDefList(BaseModel):

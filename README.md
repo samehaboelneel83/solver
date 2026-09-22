@@ -11,7 +11,7 @@ take them in order (`lex`).
 
 This repository is the running product around that loop: containerized
 infrastructure, the **schema v1** PostgreSQL schema (tables in `public`, plus
-the 4 `iam` tables), an empty ClickHouse analytics schema, a FastAPI backend
+the 6 `iam` tables), an empty ClickHouse analytics schema, a FastAPI backend
 that is part purpose-built and part generic CRUD, and a React admin UI.
 Solving is async: `POST /api/v1/scenarios/{id}/runs` queues a `run`; a worker
 records the roster, `constraint_result` (including slack), and, on
@@ -31,7 +31,7 @@ Everything outside `iam` lives in `public`. There are three groups:
 | **Domain** | `domain`, `entity_type`, `attribute_def`, `entity`, `relationship_type`, `relationship`, `parameter_def`, `parameter_value` |
 | **Problem** | `template`, `problem`, `model_version`, `scenario` |
 | **Run** | `dataset`, `run`, `solution`, `constraint_result` |
-| **Access** | `iam.organization`, `iam.user_account`, `iam.role`, `iam.user_role` |
+| **Access** | `iam.organization`, `iam.user_account`, `iam.role`, `iam.user_role`, `iam.role_capability`, `iam.capability` |
 
 Two things about this shape drive most of the code:
 
@@ -45,7 +45,7 @@ Two things about this shape drive most of the code:
   read/create router whose `PUT`/`PATCH`/`DELETE` answer `405`; the other three
   have no router at all.
 
-`GET /api/meta/schema` lists **8** tables, not 20: the five `iam` tables and
+`GET /api/meta/schema` lists **9** tables, not 20: the six `iam` tables and
 the three flat `public` tables (`domain`, `template`, `problem`) go through the
 generic CRUD factory. Everything else has a purpose-built router, or no router
 at all — see the comment block in `backend/app/api/routers.py` for the reasoning
@@ -170,7 +170,7 @@ table and some are the generic metadata-driven ones.
 | `/parameters` | Parameter definitions and a grid for their cells |
 | `/model` | The Model editor (below) — writes a new `model_version` |
 | `/versions` | A problem's model versions, **read-only**, with an IR viewer |
-| `/scenarios` | Patches over a version: disable, harden, or soften a rule |
+| `/scenarios` | Patches over a version: disable, harden, or soften a rule. New / Edit need `model.publish`; Solve stays |
 | `/runs` | Solve a scenario and read the answer (below) |
 | `/graph` | The Graph Editor (below) |
 
@@ -421,7 +421,7 @@ anything failed:
 | step | what it is |
 | --- | --- |
 | frontend deps | `npm ci`, but only when `node_modules` is missing or older than `package-lock.json`. A stale `node_modules` fails with "cannot find module" errors that read exactly like broken source code. |
-| frontend lint | skipped — there is no lint config (see **Known limitations**). |
+| frontend lint | `npm run lint` — ESLint with `--max-warnings 0` (see **Known limitations**). |
 | frontend typecheck | `tsc --noEmit`. A separate signal from the tests: vitest transpiles each file and never type-checks, so a type error does not fail the suite. |
 | frontend tests | `vitest run` — 1268 tests across 62 files. |
 | frontend build | `npm run build` — a third signal again: `tsc -b` plus a real rollup resolve. |
@@ -594,12 +594,16 @@ python scripts/graph_smoke_check.py
   `iam.manage`, not `domain.edit` — a modeller shapes the domain, they do
   not decide who else may. Changing your own name, email or password is
   `PATCH /api/v1/me`, not that grant: Settings offers it to whoever is
-  signed in. The Access nav offers Users, Roles, User roles and Role
-  capabilities only to an account that holds `iam.manage`, and
+  signed in.   The Access nav offers Users, Roles, User roles, Role
+  capabilities and Capabilities only to an account that holds `iam.manage`, and
   Organizations only to one that holds `domain.edit`. A planner sees
   none of those links, and the Access heading goes with them. Assigning a role is
   not saying what that role may do — the grant is a `role_capability`
-  row, the same factory form. Creating a problem or a template is
+  row, the same factory form, and `capability_code` is a foreign key to
+  `iam.capability` — the same picker as any other reference, not a
+  datalist of codes. That catalogue is itself a factory table, read-only:
+  New / Save / Delete stay off, and POST is 405. A new verb is still an
+  INSERT in a migration. Creating a problem or a template is
   `model.publish`, not `domain.edit` — starting a model is not shaping
   entity types. The Problem nav offers Templates only to an account that
   holds that grant; Problems and the Model editor stay, because a planner
@@ -632,18 +636,15 @@ python scripts/graph_smoke_check.py
   sitting under it. Equals and Expand all put them back. The keyboard only
   walks what is still drawn, the same rule a filter already uses. No extra
   Cytoscape extension.
-- **There is no lint config, deliberately.** `scripts/check.sh` will run a
-  `lint` script if `frontend/package.json` ever grows one, and reports it as
-  skipped until then. The stock ESLint config for a Vite React-TS project was
-  measured against this tree first: **260 problems in 36 of 146 files**, 207 of
-  them `@typescript-eslint/no-explicit-any`. Turning that rule off and allowing
-  `_`-prefixed unused bindings still leaves 34. A config that starts on a wall
-  of violations gets a blanket `--max-warnings` and stops meaning anything, so
-  none was committed — the rules debate has to happen first. Two things the
-  measurement did surface, worth knowing: three genuinely unused imports
-  (`ExpressionBuilder.tsx`'s `ExpressionField`, `validate.ts`'s
-  `isExpressionGroup`, `dom.d.ts`'s type parameter `T`) that `tsc` does not
-  flag because `noUnusedLocals` is off, and roughly 28 `eslint-disable`
-  comments already in the source, including ones for `no-console` and
-  `no-bitwise` — pragmas written for a linter that has never existed here.
+- **Lint is on, and it is green.** `npm run lint` is the stock Vite React-TS
+  set minus the rules that would start this tree on a wall:
+  `@typescript-eslint/no-explicit-any` (a typing debate), react-hooks v7's
+  compiler rules (`set-state-in-effect`, `refs`), and
+  `react-refresh/only-export-components` (HMR, not product). Unused
+  bindings that start with `_` are allowed. `scripts/check.sh` runs it
+  because `package.json` now has a `lint` script; `--max-warnings 0` so a
+  new unused import fails the step. Twelve disable comments remain: ten
+  `react-hooks/exhaustive-deps` on mount-only effects, Login's
+  `no-control-regex` for the `next` sanitiser, and `dom.d.ts` keeping
+  the React merge parameter named `T` (`_T` replaces the interface).
 - Neither image has a bind mount; see "Rebuilding after a code change".

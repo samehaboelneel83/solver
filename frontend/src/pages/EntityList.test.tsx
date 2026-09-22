@@ -28,8 +28,11 @@ const schemaResponse = [
   },
 ];
 
-function renderWithProviders(initialEntry: string, options: { retry?: boolean } = {}) {
-  const queryClient = editorQueryClient(EDITOR_ME, {
+function renderWithProviders(
+  initialEntry: string,
+  options: { retry?: boolean; me?: typeof EDITOR_ME } = {}
+) {
+  const queryClient = editorQueryClient(options.me ?? EDITOR_ME, {
     defaultOptions: { queries: { retry: options.retry ?? false } },
   });
   return render(
@@ -83,6 +86,35 @@ describe("EntityList", () => {
 
     renderWithProviders("/iam/user_account");
     await screen.findByRole("table");
+    expect(screen.queryByRole("link", { name: "New" })).not.toBeInTheDocument();
+  });
+
+  it("hides New on a table the schema marks as not creatable", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "iam",
+            table: "capability",
+            write_capability: "iam.manage",
+            creatable: false,
+            updatable: false,
+            deletable: false,
+            fields: [
+              { name: "code", type: "string", required: true, writable: false, is_fk: false, fk_table: null, label_field: true },
+              { name: "description", type: "string", required: true, writable: false, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [{ code: "domain.edit", description: "shape the domain" }], total: 1 });
+    });
+
+    renderWithProviders("/iam/capability", {
+      me: { username: "admin", display_name: null, capabilities: ["iam.manage"] },
+    });
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("domain.edit")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "New" })).not.toBeInTheDocument();
   });
 

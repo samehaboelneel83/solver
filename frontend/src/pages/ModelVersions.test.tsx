@@ -135,7 +135,8 @@ describe("ModelVersions: the list", () => {
     renderPage("/versions?problem=12");
 
     const note = await screen.findByText(/no versions of this problem yet/i);
-    expect(note.textContent).toMatch(/submitting a model/i);
+    expect(note.textContent).toMatch(/model editor/i);
+    expect(within(note).getByRole("link", { name: "Model editor" })).toHaveAttribute("href", "/model");
   });
 
   it("offers nothing that would create, change or delete a version", async () => {

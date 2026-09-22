@@ -156,6 +156,28 @@ describe("DataTable", () => {
       expect(link).toHaveAttribute("href", "/domain/entity_type/1");
     });
 
+    it("links a row keyed by code when there is no id", async () => {
+      renderTable(
+        <DataTable
+          schema="iam"
+          table="capability"
+          tableLabel="Capabilities"
+          fields={[
+            { name: "code", type: "string", required: true, writable: false, is_fk: false, fk_table: null, label_field: true },
+            { name: "description", type: "string", required: true, writable: false, is_fk: false, fk_table: null },
+          ]}
+          rows={[{ code: "domain.edit", description: "shape the domain" }]}
+          total={1}
+          limit={20}
+          offset={0}
+          onPageChange={vi.fn()}
+        />
+      );
+
+      const link = within(screen.getByRole("table")).getByRole("link", { name: "domain.edit" });
+      expect(link).toHaveAttribute("href", "/iam/capability/domain.edit");
+    });
+
     // Defensive guard: the first cell's link/row-click target is built as a real
     // `<a href="…">` from `String(row.id)`, now rendered twice per row (table +
     // small-screen card). On master this id was only ever read inside an
@@ -167,8 +189,10 @@ describe("DataTable", () => {
       renderTable(
         <DataTable
           {...baseProps}
-          fields={fields}
-          rows={[{ code: "employee" }]}
+          fields={[
+            { name: "name", type: "string" as const, required: true, writable: true, is_fk: false, fk_table: null },
+          ]}
+          rows={[{ name: "employee" }]}
           total={1}
           limit={20}
           offset={0}

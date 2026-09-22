@@ -58,6 +58,11 @@ function stub(overrides: Record<string, unknown> = {}) {
     if (path.startsWith("/api/v1/versions/21")) return Promise.resolve({ ...VERSIONS.items[1], ir: IR_21 });
     if (path.startsWith("/api/v1/versions/22")) return Promise.resolve({ ...VERSIONS.items[0], ir: IR_22 });
     if (path.startsWith("/api/v1/scenarios")) return Promise.resolve(overrides.scenarios ?? SCENARIOS);
+    if (path.startsWith("/api/v1/me")) {
+      return Promise.resolve(
+        overrides.me ?? { username: "admin", display_name: null, capabilities: ["model.publish", "run.submit"] }
+      );
+    }
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -106,6 +111,16 @@ describe("Scenarios", () => {
 
     expect(await screen.findByText("relaxed_cover")).toBeInTheDocument();
     expect(screen.getByText(/bends c_cover_demand at 100/)).toBeInTheDocument();
+  });
+
+  it("shows the list and Solve, not New or Edit, to an account that may not publish", async () => {
+    stub({ me: { username: "planner", display_name: null, capabilities: ["run.submit"] } });
+    renderPage();
+
+    expect(await screen.findByText("relaxed_cover")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^solve$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new scenario/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
   });
 
   it("offers the version's own rules to patch", async () => {

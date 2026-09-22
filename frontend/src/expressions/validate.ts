@@ -2,7 +2,6 @@ import { parseAttrValue } from "../components/attrTypes";
 import type { AttrType } from "../api/v1";
 import {
   EXPRESSION_VERSION,
-  isExpressionGroup,
   type ExpressionDocument,
   type ExpressionGroup,
   type ExpressionRule,

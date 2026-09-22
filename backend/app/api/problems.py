@@ -229,7 +229,7 @@ class ScenarioPatch(BaseModel):
 
 
 class ScenarioRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: int
     problem_id: int
@@ -240,6 +240,8 @@ class ScenarioRead(BaseModel):
 
 
 class ScenarioCreate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     problem_id: BigintId
     model_version_id: BigintId
     name: str
@@ -250,6 +252,8 @@ class ScenarioUpdate(BaseModel):
     """`problem_id` is deliberately absent (and so ignored if sent): moving
     a scenario to another problem would detach it from its own version and
     from every run already made under it."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     name: str | None = None
     model_version_id: BigintId | None = None

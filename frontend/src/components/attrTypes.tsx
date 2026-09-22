@@ -85,12 +85,11 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
 /**
  * Turns what the user typed into the JSON value `default_value` stores, or
- * says why it can't. This is the only guard there is: the server stores
- * `default_value` without checking it against `data_type` (Task 5's
- * deferred item), and the entity trigger then materialises it into every
- * new entity -- so a wrong default saved here makes every later entity
- * write of this type fail. Empty always means "no default" (SQL NULL,
- * Ruling 18).
+ * says why it can't. Migration 0009's `attribute_def_default_value_matches_type`
+ * CHECK (and `_check_default_value`) refuse a mismatch; this is the first
+ * guard so a wrong default is named on the field before a round-trip. The
+ * entity trigger then materialises a stored default into every new entity.
+ * Empty always means "no default" (SQL NULL, Ruling 18).
  *
  * The rules are the entity trigger's (`entity_validate`, migration 0006)
  * made stricter where the trigger is loose: `integer` takes digits only

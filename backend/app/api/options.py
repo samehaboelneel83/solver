@@ -39,7 +39,10 @@ def _register_options_route(meta: TableMeta) -> None:
     # `item_id` path param (factory.py) -- bigint for schema v1's flat
     # tables, UUID for the untouched `iam` ones -- so `ids=` parses each
     # table's real id type instead of assuming UUID for everything.
-    id_type = _python_type(inspect(model).primary_key[0])
+    pk = inspect(model).primary_key[0]
+    id_type = _python_type(pk)
+    pk_key = pk.key
+    pk_attr = getattr(model, pk_key)
 
     def get_options(
         q: str | None = Query(None),
@@ -68,14 +71,20 @@ def _register_options_route(meta: TableMeta) -> None:
             # distinct FK id on a page into one call), so `limit` -- which
             # exists to cap an unbounded `q`/browse listing -- does not
             # apply here; only the 200-id cap above bounds the query.
-            rows = query.filter(model.id.in_(id_values)).all()
-            return [{"id": str(row.id), "label": label_for(db, row, meta.schema, meta.table)} for row in rows]
+            rows = query.filter(pk_attr.in_(id_values)).all()
+            return [
+                {"id": str(getattr(row, pk_key)), "label": label_for(db, row, meta.schema, meta.table)}
+                for row in rows
+            ]
 
         if q and columns:
             query = query.filter(or_(*[col.ilike(f"%{q}%") for col in columns]))
 
         rows = query.limit(limit).all()
-        return [{"id": str(row.id), "label": label_for(db, row, meta.schema, meta.table)} for row in rows]
+        return [
+            {"id": str(getattr(row, pk_key)), "label": label_for(db, row, meta.schema, meta.table)}
+            for row in rows
+        ]
 
     get_options.__name__ = f"get_options_{meta.schema}_{meta.table}"
     # Mirrors factory.py's `schema_name == "public"` prefix collapse, so

@@ -380,6 +380,34 @@ def test_enum_attribute_without_enum_values_is_422(auth_headers, domain_id):
     assert "enum" in entry["msg"].lower(), entry
 
 
+def test_enum_attribute_with_empty_enum_values_is_422(auth_headers, domain_id):
+    """`attribute_def_enum_values_not_empty`: `[]` is not NULL, so the
+    pairing CHECK lets it through and this used to collapse into 409."""
+    client = TestClient(app)
+    entity_type = _make_entity_type(client, auth_headers, domain_id, "employee")
+    response = client.post(
+        f"/api/v1/entity-types/{entity_type['id']}/attributes",
+        json={"name": "skill", "data_type": "enum", "enum_values": []},
+        headers=auth_headers,
+    )
+    entry = _assert_blames_field(_validation_errors(response), "enum_values")
+    assert "at least one" in entry["msg"].lower(), entry
+
+    created = client.post(
+        f"/api/v1/entity-types/{entity_type['id']}/attributes",
+        json={"name": "skill", "data_type": "enum", "enum_values": ["cook"]},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    patch = client.patch(
+        f"/api/v1/attributes/{created.json()['id']}",
+        json={"enum_values": []},
+        headers=auth_headers,
+    )
+    patched = _assert_blames_field(_validation_errors(patch), "enum_values")
+    assert "at least one" in patched["msg"].lower(), patched
+
+
 def test_non_enum_attribute_with_enum_values_is_422(auth_headers, domain_id):
     """`CHECK ((data_type = 'enum') = (enum_values IS NOT NULL))`, other half."""
     client = TestClient(app)

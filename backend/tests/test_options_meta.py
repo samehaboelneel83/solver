@@ -226,11 +226,9 @@ def test_user_account_label_is_username(auth_headers):
 
 
 def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
-    """The positive `choices` half of this test is gone with its tables: no
-    field on any of the factory tables other than `role_capability`
-    matches meta.py's CHOICES map. What is still checked is the `default`
-    reporting and that plain text fields report neither a default nor
-    choices. `capability_code` is the one field that does carry choices."""
+    """Plain text fields report neither a default nor choices. The grant
+    field is a foreign key to the catalogue, not a second handwritten
+    list."""
     client = TestClient(app)
 
     response = client.get("/api/meta/schema", headers=auth_headers)
@@ -247,9 +245,59 @@ def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
     assert not name_field.get("choices")
 
     capability_fields = {f["name"]: f for f in tables[("iam", "role_capability")]["fields"]}
-    assert "iam.manage" in capability_fields["capability_code"]["choices"]
-    assert "run.submit" in capability_fields["capability_code"]["choices"]
+    assert capability_fields["capability_code"]["is_fk"] is True
+    assert capability_fields["capability_code"]["fk_table"] == "iam.capability"
+    assert not capability_fields["capability_code"].get("choices")
     assert capability_fields["capability_code"]["label"] == "Capability"
+
+
+def test_capability_options_use_the_code_as_the_id(auth_headers):
+    """`iam.capability` is keyed by `code`, not `id`. The grant picker
+    stores that code; options must not assume every factory table has
+    `id`."""
+    client = TestClient(app)
+    listed = client.get("/api/iam/capability/options?q=domain", headers=auth_headers)
+    assert listed.status_code == 200
+    codes = {row["id"] for row in listed.json()}
+    assert "domain.edit" in codes
+    labels = {row["id"]: row["label"] for row in listed.json()}
+    assert "domain.edit" in labels["domain.edit"]
+
+    one = client.get("/api/iam/capability/options?ids=domain.edit", headers=auth_headers)
+    assert one.status_code == 200
+    assert one.json() == [
+        {
+            "id": "domain.edit",
+            "label": one.json()[0]["label"],
+        }
+    ]
+    assert "domain.edit" in one.json()[0]["label"]
+
+
+def test_role_capability_options_include_an_inserted_capability(auth_headers):
+    """A new capability is an INSERT (0013). The grant picker reads the
+    catalogue options, not a second list in the schema."""
+    from sqlalchemy import text
+
+    client = TestClient(app)
+    db = SessionLocal()
+    code = f"probe.{uuid.uuid4().hex[:8]}"
+    try:
+        db.execute(
+            text(
+                'INSERT INTO iam.capability (code, "group", description)'
+                " VALUES (:c, 'test', 'throwaway')"
+            ),
+            {"c": code},
+        )
+        db.commit()
+        response = client.get(f"/api/iam/capability/options?q={code}", headers=auth_headers)
+        assert response.status_code == 200
+        assert any(row["id"] == code for row in response.json())
+    finally:
+        db.execute(text("DELETE FROM iam.capability WHERE code = :c"), {"c": code})
+        db.commit()
+        db.close()
 
 
 def test_schema_reports_table_labels(auth_headers):

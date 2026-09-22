@@ -73,11 +73,11 @@ WEB_URL="${SMOKE_WEB_URL:-http://localhost:3010}"
 PGUSER_NAME="${POSTGRES_USER:-solver}"
 PGDB_NAME="${POSTGRES_DB:-solver}"
 
-# schema v1 registers exactly seven tables in TABLE_REGISTRY: the four `iam`
+# schema v1 registers exactly nine tables in TABLE_REGISTRY: the six `iam`
 # tables plus public.domain / template / problem. The eight DOMAIN tables,
 # `scenario` and the four immutable RUN tables are deliberately excluded
 # (see backend/app/api/routers.py). v0 registered 31.
-EXPECTED_TABLE_COUNT=7
+EXPECTED_TABLE_COUNT=9
 
 # Revision ids in backend/alembic/versions are zero-padded sequential
 # numbers, so a plain string comparison orders them. 0005 is the last v0

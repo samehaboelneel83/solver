@@ -214,12 +214,16 @@ export default function GraphDemo() {
   }, [graph, searchParams, mode]);
 
   // Memoized so GraphEditor's `[filter, data]` effect (which re-styles every
-  // node/edge) only reruns when the criteria actually change.
+  // node/edge) only reruns when the criteria actually change. `graph?.edges`
+  // is the input; a new wrapper with the same edges must not restyle.
+   
   const filter = useMemo(
     () =>
       graph
         ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges, expressionMatchIds)
         : undefined,
+    // edges, not the graph object — a new wrapper with the same edges must not restyle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [filterState, selectedNodeId, graph?.edges, expressionMatchIds]
   );
 

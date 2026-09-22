@@ -52,6 +52,7 @@ def test_meta_schema_lists_exactly_the_registered_tables(auth_headers):
         ("iam", "role"),
         ("iam", "user_role"),
         ("iam", "role_capability"),
+        ("iam", "capability"),
         ("public", "domain"),
         ("public", "template"),
         ("public", "problem"),

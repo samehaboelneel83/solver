@@ -77,9 +77,9 @@ properties are worth stating here rather than only there:
 rule in the DDL, and inventing one the database does not have is what
 makes the two layers drift (the reasoning Task 5 recorded for
 `enum_values`). Migration 0009 (rule 2) does add one CHECK --
-`entity_key_not_blank`, `key ~ '[^[:space:]]'` -- which this router does
-not shadow, so an empty or whitespace-only key arrives as
-`translate_db_error`'s 409 rather than a 422.
+`entity_key_not_blank`, `key ~ '[^[:space:]]'` -- and
+`translate_db_error` names that constraint as a 422 on `key` rather than
+collapsing it into the generic CHECK 409.
 """
 
 from datetime import datetime

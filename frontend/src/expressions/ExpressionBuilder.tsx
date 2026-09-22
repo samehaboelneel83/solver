@@ -17,7 +17,7 @@ import {
   type ExpressionDocument,
 } from "./document";
 import { defaultFieldId, defaultOperatorFor, defaultValueFor } from "./defaults";
-import { groupFields, type ExpressionField, type FieldCatalogue } from "./fields";
+import { groupFields, type FieldCatalogue } from "./fields";
 import { EXPRESSION_OPERATORS, operatorsForField } from "./operators";
 import { validateExpression } from "./validate";
 

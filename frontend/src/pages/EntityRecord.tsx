@@ -335,8 +335,9 @@ function RecordForm({
     setGeneral(null);
     const next: FieldErrors = {};
 
-    // The server has no CHECK on `entity.key` (Task 6's deferred item), so
-    // this is the only guard: the key feeds IR expressions and
+    // Client-side copy of 0009's `entity_key_not_blank` CHECK -- the API
+    // maps that constraint to a 422 on `key`; this keeps the same sentence
+    // on the field before a round-trip. The key feeds IR expressions and
     // `snapshot_dataset()`, where an empty one would be unaddressable.
     const trimmedKey = key.trim();
     if (trimmedKey === "") next.key = "Key: a key is required -- it is how model expressions refer to this entity.";

@@ -38,16 +38,6 @@ CHOICES: dict[tuple[str | None, str], list[str]] = {
         "datetime",
         "json",
     ],
-    # The starting vocabulary (0013 + 0014). A new capability is an
-    # INSERT; add it here so the grant form offers it.
-    ("role_capability", "capability_code"): [
-        "domain.edit",
-        "model.publish",
-        "run.submit",
-        "solver.configure",
-        "iam.manage",
-        "settings.edit",
-    ],
 }
 
 
@@ -82,6 +72,7 @@ FIELD_LABELS: dict[tuple[str | None, str], str] = {
 TABLE_LABELS: dict[str, tuple[str, str]] = {
     "entity": ("Entity", "Entities"),
     "role_capability": ("Role capability", "Role capabilities"),
+    "capability": ("Capability", "Capabilities"),
 }
 
 

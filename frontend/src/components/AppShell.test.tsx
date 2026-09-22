@@ -69,7 +69,7 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
       // Organizations are domain.edit; Users / Roles / User roles /
-      // Role capabilities are iam.manage. A modeller shapes the domain
+      // Role capabilities / Capabilities are iam.manage. A modeller shapes the domain
       // (and so still sees Organizations) and does not grant roles.
       // Templates are model.publish — this default account has that grant.
       expect(screen.getByRole("link", { name: "Organizations" })).toHaveAttribute("href", "/iam/organization");
@@ -77,6 +77,7 @@ describe("AppShell", () => {
       expect(screen.queryByRole("link", { name: "Roles" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "User roles" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Role capabilities" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Capabilities" })).not.toBeInTheDocument();
     });
 
     it("hides Templates, Organizations and Access when the account cannot write them", async () => {
@@ -123,6 +124,7 @@ describe("AppShell", () => {
         "href",
         "/iam/role_capability"
       );
+      expect(screen.getByRole("link", { name: "Capabilities" })).toHaveAttribute("href", "/iam/capability");
     });
 
     it("links Entity types from the Domain group (Task 11)", async () => {

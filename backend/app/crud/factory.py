@@ -203,19 +203,20 @@ def build_crud_router(
         # all -- without one, Postgres is free to return rows in a different
         # order across two otherwise-identical queries (e.g. after a
         # concurrent write, or just because it felt like it), which can skip
-        # or repeat rows across pages. `id` (every model's primary key,
-        # UUID for `iam` tables and bigint elsewhere) is unique and never
-        # null, so it's always a valid sort key: the sole
+        # or repeat rows across pages. The model's own primary key is unique
+        # and never null (`id` on most factory tables; `code` on
+        # `iam.capability`), so it's always a valid sort key: the sole
         # order when none was requested, and a tiebreaker appended after any
         # requested order_by (whose own column may not be unique).
+        pk_attr = getattr(model, inspect(model).primary_key[0].key)
         if order_by is not None:
             attr = filterable.get(order_by)
             if attr is None:
                 raise field_error("order_by", f"unknown column {order_by}", order_by, where="query")
             primary = attr.desc() if order_normalized == "desc" else attr.asc()
-            query = query.order_by(primary, model.id.asc())
+            query = query.order_by(primary, pk_attr.asc())
         else:
-            query = query.order_by(model.id.asc())
+            query = query.order_by(pk_attr.asc())
 
         try:
             total = query.count()

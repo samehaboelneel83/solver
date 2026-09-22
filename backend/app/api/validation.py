@@ -111,9 +111,7 @@ def reject_null(value: Any, info) -> Any:
     naming the field.
 
     Pydantic does not run validators on defaults, so this fires only when
-    the client actually sent `null`. (`parameters.py` keeps an identical
-    private `_not_null` from Task 8; the two can be merged whenever that
-    module is next touched.)"""
+    the client actually sent `null`."""
     if value is None:
         raise ValueError(f"{info.field_name} cannot be null")
     return value
