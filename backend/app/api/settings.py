@@ -90,6 +90,15 @@ def write_setting(
             detail="the platform level takes no scope_id; a domain or problem level needs one",
         )
 
+    # The platform level governs every organization's runs, so only an
+    # operator organization may change it (migration 0032); the database
+    # refuses it too, but this says why.
+    if payload.scope == "platform" and not db.execute(text("SELECT app_is_operator()")).scalar_one():
+        raise HTTPException(
+            status_code=403,
+            detail="platform settings apply to every organization; only an operator organization may change them",
+        )
+
     if payload.value is None:
         db.execute(
             text(

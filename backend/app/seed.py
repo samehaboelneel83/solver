@@ -477,10 +477,15 @@ def seed_admin(db: Session) -> None:
 
     org = db.query(Organization).filter(Organization.code == "default").first()
     if org is None:
-        org = Organization(code="default", name="Default Organization")
+        org = Organization(code="default", name="Default Organization", is_operator=True)
         db.add(org)
         db.commit()
         db.refresh(org)
+    elif not org.is_operator:
+        # The seed organization runs the platform (migration 0032). A
+        # database migrated before it existed gets the flag here.
+        org.is_operator = True
+        db.commit()
 
     admin = db.query(UserAccount).filter(UserAccount.username == settings.admin_username).first()
     if admin is None:

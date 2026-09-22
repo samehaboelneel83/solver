@@ -137,6 +137,18 @@ def translate_db_error(exc: DBAPIError, table: str) -> HTTPException:
     code = getattr(exc.orig, "pgcode", "") or ""
     diag = getattr(exc.orig, "diag", None)
 
+    # Tenancy (migration 0032): a parent in another organization is, to
+    # this caller, a parent that does not exist -- the same 409 a missing
+    # parent has always been; a write its organization may not make is a
+    # permission it does not have.
+    if code == "P0002":
+        return HTTPException(
+            status_code=409,
+            detail=getattr(diag, "message_primary", None) or "that does not exist",
+        )
+    if code == "42501":
+        return HTTPException(status_code=403, detail="this organization may not make that change")
+
     if code == "23514":
         raw_detail = getattr(diag, "message_detail", None) if diag is not None else None
         if raw_detail:

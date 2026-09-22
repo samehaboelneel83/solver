@@ -1,7 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 
 from app.api.auth import router as auth_router
 from app.api.entities import router as entities_router
@@ -65,6 +67,33 @@ app = FastAPI(title="Problem Solver Platform API", lifespan=lifespan)
 # one edge-level guard rather than a rule per field -- see the module
 # docstring for why `translate_db_error` cannot cover this case.
 app.add_middleware(NulByteGuard)
+
+
+@app.exception_handler(DBAPIError)
+async def tenancy_errors(_request: Request, exc: DBAPIError):
+    """What the tenancy triggers and policies raise (migration 0032), for
+    every route rather than each one.
+
+    - P0002: a row names a parent this organization cannot see. It is
+      reported exactly as a parent that does not exist has always been --
+      a 409 with a string detail -- so a tenant learns nothing about
+      another's ids.
+    - 42501: a write the caller's organization may not make, such as a
+      platform-wide definition by a non-operator -- a 403.
+
+    Anything else is re-raised: a 500 stays a 500.
+    """
+    code = getattr(exc.orig, "pgcode", "") or ""
+    diag = getattr(exc.orig, "diag", None)
+    message = getattr(diag, "message_primary", None) or "that does not exist"
+    if code == "P0002":
+        return JSONResponse(status_code=409, content={"detail": message})
+    if code == "42501":
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "this organization may not make that change"},
+        )
+    raise exc
 
 app.include_router(health_router)
 app.include_router(auth_router)

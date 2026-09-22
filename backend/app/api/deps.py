@@ -4,7 +4,7 @@ from jose import JWTError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db
+from app.core.db import enter_tenant, get_db
 from app.core.security import decode_access_token
 from app.models.iam import UserAccount
 
@@ -30,6 +30,13 @@ def get_current_user(
     user = db.query(UserAccount).filter(UserAccount.username == username).first()
     if user is None or not user.is_active:
         raise credentials_exception
+    # From here on the request sees only its own organization's rows: the
+    # database enforces it (migration 0032), not each route.
+    enter_tenant(db, user.organization_id)
+    # The commit that switched tenant expired the user; load it again now,
+    # as the tenant, so a caller holding it after the session closes can
+    # still read it.
+    db.refresh(user)
     return user
 
 

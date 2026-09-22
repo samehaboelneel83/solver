@@ -20,6 +20,12 @@ class Organization(UUIDPKMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Migration 0032: an operator organization may change what every
+    # organization shares -- roles, capabilities, setting keys, templates,
+    # platform settings -- and manage other organizations' people.
+    is_operator: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Migration 0023 -- the generic form sends every filled field.
     updated_at: Mapped[datetime] = mapped_column(

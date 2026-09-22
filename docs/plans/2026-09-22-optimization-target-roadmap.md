@@ -266,6 +266,20 @@ with the same seed reproduce; gap visible in the Runs UI.
 - Tests: two-org fixtures; every list/detail/cancel route asserted isolated; property test that no query
   in `api/` lacks the org filter (grep-level lint in `scripts/check.sh`).
 
+**Progress (2026-09-22):** tenancy and D1 are done, as migration `0032` (on
+the decision's stated assumption: a tenant is an `iam.organization`, a
+domain belongs to one). Every tenant table carries `organization_id`, filled
+from the parent by trigger, and a row whose parents are in different
+organizations is refused. RLS is enforced for the role API requests switch
+to (`solver_app`) -- the app connects as a superuser, which bypasses RLS --
+and fails closed without `app.org_id`; each request is pinned to one
+connection so the tenant cannot be lost at a commit. Roles, capabilities,
+setting keys, templates and platform settings are shared and writable only
+by an operator organization (`is_operator`, the seed `default`). Instead of
+a grep lint, `tests/test_tenancy.py` asserts every public table is a tenant
+table under RLS or on an explicit shared list. Still open: API keys, quotas,
+fair claim, rate limit.
+
 ---
 
 ## Phase 8 — Observability and live progress (~2 weeks)
