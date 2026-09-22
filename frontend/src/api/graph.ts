@@ -69,6 +69,9 @@ export type GraphView = {
   error: Error | null;
   fetchStatus: "fetching" | "paused" | "idle";
   refetch: () => void;
+  /** The optimization view only: the IR the graph was built from, which
+   * the Blockly style draws term by term. */
+  ir?: Record<string, unknown> | null;
 };
 
 /**
@@ -125,6 +128,7 @@ export function useGraphView(
       // versions) is an empty drawing, not a load that never finishes.
       data: model?.graph ?? (modelVersionId === null && !entityTypes.isLoading ? EMPTY_MODEL.graph : undefined),
       palette: model?.palette ?? EMPTY_PALETTE,
+      ir: (ir as Record<string, unknown> | undefined) ?? null,
       isLoading: entityTypes.isLoading || (modelVersionId !== null && version.isLoading),
       error: entityTypes.error ?? version.error ?? null,
       fetchStatus:

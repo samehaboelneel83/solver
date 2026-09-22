@@ -518,6 +518,29 @@ describe("GraphDemo view mode", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/graph?mode=types");
   });
 
+  it("offers the optimization view's drawing styles only in that view, and remembers the choice", async () => {
+    const first = renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-objects")).toBeInTheDocument());
+    expect(screen.queryByTestId("model-style-toggle")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("graph-mode-model"));
+    await waitFor(() => expect(screen.getByTestId("model-style-toggle")).toBeInTheDocument());
+    expect(
+      [...screen.getByTestId("model-style-toggle").querySelectorAll("button")].map((b) => b.textContent)
+    ).toEqual(["Graph", "Blockly", "Rete.js", "React Flow"]);
+    expect(screen.getByTestId("model-style-graph")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByTestId("model-style-rete"));
+    expect(screen.getByTestId("model-style-rete")).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("solver_model_style")).toBe("rete");
+    // Layout and Fit act on the graph canvas; another style has its own.
+    expect(screen.queryByRole("button", { name: "Re-run automatic layout" })).not.toBeInTheDocument();
+    first.unmount();
+
+    renderAt(["/graph?mode=model"]);
+    await waitFor(() => expect(screen.getByTestId("model-style-rete")).toHaveAttribute("aria-pressed", "true"));
+  });
+
   it("a link's ?mode= wins over the stored choice, and is then stored", async () => {
     localStorage.setItem(GRAPH_MODE_STORAGE_KEY, "objects");
     renderAt(["/graph?mode=types"]);

@@ -1,4 +1,6 @@
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import ModelStyleView from "./modelStyles/ModelStyleView";
+import { MODEL_STYLES, MODEL_STYLE_NAME, MODEL_STYLE_TITLE, type ModelStyle } from "./modelStyles/types";
 import { Link } from "react-router-dom";
 import cytoscape, { Core, NodeSingular } from "cytoscape";
 // @ts-expect-error -- cytoscape-elk ships no bundled type declarations
@@ -615,6 +617,27 @@ const VIEW_TITLE: Record<GraphMode, string> = {
 /** In the order the toggle offers them: the schema, the data, the model. */
 const VIEW_ORDER: readonly GraphMode[] = ["types", "objects", "model"];
 
+// Which drawing style the optimization view uses, remembered per browser.
+// Storage can be missing or refuse (a private window): the graph it is.
+const MODEL_STYLE_KEY = "solver_model_style";
+
+function readModelStyle(): ModelStyle {
+  try {
+    const stored = localStorage.getItem(MODEL_STYLE_KEY);
+    return (MODEL_STYLES as readonly string[]).includes(stored ?? "") ? (stored as ModelStyle) : "graph";
+  } catch {
+    return "graph";
+  }
+}
+
+function storeModelStyle(style: ModelStyle): void {
+  try {
+    localStorage.setItem(MODEL_STYLE_KEY, style);
+  } catch {
+    // Not remembered; still switched.
+  }
+}
+
 /**
  * What tapping (or pressing Enter on) an element selects.
  *
@@ -755,6 +778,15 @@ export default function GraphEditor({
   // Keyboard connect: the node C was pressed on, waiting for Enter on another.
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState("");
+  // The optimization view's drawing style: the Cytoscape graph, or one of
+  // three others drawn over it (see `modelStyles/`).
+  const [modelStyle, setModelStyleState] = useState<ModelStyle>(readModelStyle);
+  const setModelStyle = (style: ModelStyle) => {
+    setModelStyleState(style);
+    storeModelStyle(style);
+    setLiveMessage(`Optimization view drawn as ${MODEL_STYLE_NAME[style]}`);
+  };
+  const otherStyle = isModel && modelStyle !== "graph" ? modelStyle : null;
   // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
   // closes it and returns focus here, rather than dropping focus back to the document body.
   const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -799,6 +831,7 @@ export default function GraphEditor({
     error: loadError,
     refetch: refetchGraph,
     fetchStatus: graphFetchStatus,
+    ir: modelIr,
   } = useGraphView(domainId, hierarchyTypeId, mode, modelTarget?.versionId ?? null);
   // Collapse only when a hierarchy is actually nesting the canvas. A
   // flat objects view, and the types view, have no compound parents to
@@ -1748,6 +1781,32 @@ export default function GraphEditor({
         {isModel && modelTarget && (
           <ModelPicker target={modelTarget} onChange={(request) => onModelTargetChange?.(request)} />
         )}
+        {isModel && (
+          <div
+            role="group"
+            aria-label="Optimization view style"
+            className="flex overflow-hidden rounded-md border border-slate-300"
+            data-testid="model-style-toggle"
+          >
+            {MODEL_STYLES.map((style) => (
+              <button
+                key={style}
+                type="button"
+                onClick={() => setModelStyle(style)}
+                aria-pressed={modelStyle === style}
+                title={MODEL_STYLE_TITLE[style]}
+                className={`px-2 py-1 text-sm ${
+                  modelStyle === style ? "bg-blue-700 text-white" : "bg-white text-slate-700"
+                }`}
+                data-testid={`model-style-${style}`}
+              >
+                {MODEL_STYLE_NAME[style]}
+              </button>
+            ))}
+          </div>
+        )}
+        {!otherStyle && (
+        <>
         <button
           onClick={runLayout}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -1766,6 +1825,8 @@ export default function GraphEditor({
         >
           Fit
         </button>
+        </>
+        )}
         {nesting && (
           <>
             <button
@@ -2115,6 +2176,19 @@ export default function GraphEditor({
         <div data-testid="graph-live" aria-live="polite" className="sr-only">
           {liveMessage}
         </div>
+        {/* The other styles draw over the canvas rather than replacing it:
+            Cytoscape keeps its state, so switching back is instant. */}
+        {otherStyle && data && data.nodes.length > 0 && (
+          <div className="absolute inset-0 z-10 bg-white" data-testid="model-style-view">
+            <ModelStyleView
+              style={otherStyle}
+              graph={data}
+              palette={palette}
+              ir={modelIr}
+              onSelect={(id) => onSelectionChangeRef.current?.({ kind: "node", id })}
+            />
+          </div>
+        )}
         {/* A-6: with no nodes at all, the canvas was just an empty rectangle under the toolbar
             with nothing explaining why -- this overlay names the state and gives the one action
             that gets out of it. */}
