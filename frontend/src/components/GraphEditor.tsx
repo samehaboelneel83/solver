@@ -27,6 +27,7 @@ import {
   type GraphPalette,
 } from "../lib/typesGraph";
 import { runErLayout } from "../lib/erLayout";
+import { packLoose } from "../lib/looseNodes";
 import ModelPicker from "./ModelPicker";
 import type { ModelTarget, ModelTargetRequest } from "../hooks/useModelTarget";
 import AttrsForm, { buildAttrs, type AttrDrafts } from "./AttrsForm";
@@ -481,6 +482,98 @@ export function applyGraphToCy(
 }
 
 const GRID_LAYOUT = { name: "grid" } as const;
+
+/**
+ * After ELK: move the entities with no relationships out of the one tall
+ * column ELK stacks them in, into rows under the connected drawing
+ * (`lib/looseNodes.ts`), then fit. Only top-level nodes are moved -- a node
+ * inside a hierarchy box belongs to its box. Exported for its test.
+ */
+export function packLooseNodes(cy: Core): void {
+  const all: any = (cy as any).nodes?.();
+  if (!all || typeof all.filter !== "function") return;
+  const loose: any = all.filter(
+    (n: any) => n.degree(false) === 0 && !n.isParent() && !n.isChild()
+  );
+  if (loose.length === 0) return;
+  const rest: any = (cy as any).elements().not(loose);
+  const bb = rest.length > 0 ? rest.boundingBox({ includeLabels: true }) : null;
+  const sizes = loose.map((n: any) => {
+    const box = n.boundingBox({ includeLabels: true });
+    const at = n.position();
+    return {
+      id: n.id(),
+      w: box.w,
+      h: box.h,
+      dx: at.x - (box.x1 + box.x2) / 2,
+      dy: at.y - (box.y1 + box.y2) / 2,
+    };
+  });
+  const aspect = cy.width() / Math.max(cy.height(), 1);
+  const placed = packLoose(bb && { x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 }, sizes, aspect);
+  (cy as any).batch(() => {
+    loose.forEach((n: any) => n.position(placed[n.id()]));
+  });
+}
+
+/** The Graph View layout run top-down: layers become rows. */
+const ELK_DOWN_LAYOUT = { ...ELK_LAYOUT, elk: { ...ELK_LAYOUT.elk, "elk.direction": "DOWN" } };
+
+/** A two-node graph fitted to the canvas would draw its pictures at 3x;
+ * past this they only get blurrier. */
+const MAX_FIT_ZOOM = 1.25;
+const RELAYOUT_MAX_NODES = 400;
+
+/** Fit everything, but never enlarge past `MAX_FIT_ZOOM`. */
+export function fitReadably(cy: Core): void {
+  if (typeof (cy as any).fit !== "function") return;
+  cy.fit(undefined, 30);
+  if (cy.zoom() > MAX_FIT_ZOOM) {
+    cy.zoom(MAX_FIT_ZOOM);
+    cy.center();
+  }
+}
+
+/** True when the drawing is more than twice as tall-for-its-width as the
+ * canvas, or twice as wide -- and the graph is small enough to lay out again. */
+export function shapeMismatch(cy: Core): boolean {
+  try {
+    const nodes: any = (cy as any).nodes();
+    if (!nodes || nodes.length < 2 || nodes.length > RELAYOUT_MAX_NODES) return false;
+    const bb = (cy as any).elements().boundingBox({ includeLabels: true });
+    const drawing = bb.w / Math.max(bb.h, 1);
+    const canvas = cy.width() / Math.max(cy.height(), 1);
+    const ratio = drawing / canvas;
+    return ratio < 0.5 || ratio > 2;
+  } catch {
+    return false;
+  }
+}
+
+type Snapshot = Record<string, { x: number; y: number }>;
+
+function snapshotPositions(cy: Core): Snapshot {
+  const out: Snapshot = {};
+  (cy as any).nodes().forEach((n: any) => {
+    // Copied: cytoscape hands out its own position object, which a later
+    // layout mutates in place.
+    const at = n.position();
+    out[n.id()] = { x: at.x, y: at.y };
+  });
+  return out;
+}
+
+function restorePositions(cy: Core, snapshot: Snapshot): void {
+  (cy as any).batch(() => {
+    (cy as any).nodes().forEach((n: any) => {
+      const at = snapshot[n.id()];
+      // A fresh object per node, for the same reason. A parent box is left
+      // alone: its position is derived from its children, and moving it
+      // would drag them.
+      if (at && !n.isParent()) n.position({ x: at.x, y: at.y });
+    });
+  });
+}
 
 const MODEL_LAYOUT = {
   name: "elk",
@@ -1126,17 +1219,22 @@ export default function GraphEditor({
         // canvas looks the way it does, rather than pretending the layout succeeded.
       }
     };
-    try {
-       
-      const lay: any = cy.layout(ELK_LAYOUT as any);
+    const runElk = (options: object, onStop: () => void) => {
+      const lay: any = cy.layout(options as any);
       lay.on?.("layoutstart", () => setLayoutStatus("Laying out…"));
-      lay.on?.("layoutstop", () => {
+      lay.on?.("layoutstop", onStop);
+      const runResult = lay.run();
+      Promise.resolve(runResult).catch(fail);
+      lay.promiseOn?.("layoutstop")?.catch(fail);
+    };
+    try {
+      runElk(ELK_LAYOUT, () => {
         setLayoutStatus(null);
         // A layout that "succeeds" but leaves every node stacked on the same point (e.g. a
         // shared-position-object bug, or ELK genuinely failing to produce output for some
         // graph) is worse than no layout at all -- detect it and fall back to a plain grid
         // rather than leaving the user staring at one dot.
-         
+
         const nodesColl: any = (cy as any).nodes?.();
         const positions =
           nodesColl && typeof nodesColl.map === "function"
@@ -1144,11 +1242,27 @@ export default function GraphEditor({
             : [];
         if (positionsAreDegenerate(positions)) {
           runGridFallback();
+          return;
         }
+        packLooseNodes(cy);
+        fitReadably(cy);
+        // Pictures need room: a drawing far narrower (or wider) than the canvas
+        // fits at a zoom where nothing can be read. Try the other direction
+        // once, and keep whichever fits larger. Small graphs only -- a second
+        // ELK run on a big one costs more than it can win.
+        if (!shapeMismatch(cy)) return;
+        const first = snapshotPositions(cy);
+        const firstZoom = cy.zoom();
+        runElk(ELK_DOWN_LAYOUT, () => {
+          setLayoutStatus(null);
+          packLooseNodes(cy);
+          fitReadably(cy);
+          if (cy.zoom() < firstZoom) {
+            restorePositions(cy, first);
+            fitReadably(cy);
+          }
+        });
       });
-      const runResult = lay.run();
-      Promise.resolve(runResult).catch(fail);
-      lay.promiseOn?.("layoutstop")?.catch(fail);
     } catch {
       fail();
     }
