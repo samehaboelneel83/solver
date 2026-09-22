@@ -301,7 +301,7 @@ class EntityTypeRead(BaseModel):
     # deterministic fallback, and inventing one here would make "no colour"
     # unexpressible on the wire.
     colour: str | None
-    # Migration 0031: a gallery key or an uploaded image's data: URI. NULL
+    # Migration 0033: a gallery key or an uploaded image's data: URI. NULL
     # means "not chosen" -- the Graph View picks a default from the name and
     # role -- for the same reason as `colour`.
     icon: str | None

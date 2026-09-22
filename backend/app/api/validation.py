@@ -80,7 +80,7 @@ def validate_colour(value: str | None) -> str | None:
     return value.lower()
 
 
-# `entity_type.icon` (migration 0031): a gallery key, or an uploaded image
+# `entity_type.icon` (migration 0033): a gallery key, or an uploaded image
 # as a base64 data: URI. The CHECK only sees the shape; this decodes it.
 ICON_MAX_BYTES = 200 * 1024
 _ICON_KEY_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")

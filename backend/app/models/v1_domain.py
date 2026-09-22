@@ -102,7 +102,7 @@ class EntityType(Base):
     # Migration 0009: lowercase '#rrggbb' (CHECK entity_type_colour_hex);
     # NULL means "not chosen", and the UI assigns a fallback.
     colour: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Migration 0031: a gallery key or an uploaded image's data: URI
+    # Migration 0033: a gallery key or an uploaded image's data: URI
     # (CHECK entity_type_icon_form). NULL means "not chosen", and the UI
     # picks a default from the name and role.
     icon: Mapped[str | None] = mapped_column(Text, nullable=True)

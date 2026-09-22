@@ -1,4 +1,4 @@
-"""`entity_type.icon` (migration 0031): the picture the Graph View draws a
+"""`entity_type.icon` (migration 0033): the picture the Graph View draws a
 type's entities with.
 
 One column, two forms: a gallery key (`hotel`, the frontend's bundled
@@ -184,7 +184,9 @@ def test_database_check_backs_up_the_request_layer(domain_id):
     """The CHECK still fires for a writer that is not this router."""
     db = SessionLocal()
     try:
-        with pytest.raises(IntegrityError):
+        # Named, so a refusal for another reason (a NOT NULL, a tenancy
+        # rule) cannot pass for this CHECK.
+        with pytest.raises(IntegrityError, match="entity_type_icon_form"):
             db.execute(
                 text(
                     "INSERT INTO entity_type (domain_id, name, icon)"

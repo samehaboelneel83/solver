@@ -1,5 +1,5 @@
 /**
- * Entity type pictures for the Graph View (migration 0031).
+ * Entity type pictures for the Graph View (migration 0033).
  *
  * `entity_type.icon` is a gallery key from `ICONS`, an uploaded image's
  * `data:` URI, or null. Null -- and a key this build does not know -- means

@@ -11,7 +11,7 @@ import {
 } from "../lib/entityIcons";
 
 /**
- * The picture control for an entity type (migration 0031): what the Graph
+ * The picture control for an entity type (migration 0033): what the Graph
  * View draws the type's entities with.
  *
  * Three states, all reachable: **the default** (null -- chosen from the

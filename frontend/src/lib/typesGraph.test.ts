@@ -441,7 +441,7 @@ describe("objectsPalette", () => {
     expect(orphan.nodeLabel["9"]).toBe(labelForeground(fallbackColour("ghost")));
   });
 
-  // --- migration 0031: pictures -------------------------------------------
+  // --- migration 0033: pictures -------------------------------------------
 
   it("draws every entity as its type's picture, one image per type", () => {
     const palette = objectsPalette({

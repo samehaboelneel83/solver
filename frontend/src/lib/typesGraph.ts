@@ -200,7 +200,7 @@ export function objectsPalette(graph: GraphResponse): GraphPalette {
   const relationshipTypeByName = new Map(
     graph.relationship_types.map((option) => [option.name, option])
   );
-  // Migration 0031: an entity is drawn as its type's picture. A node with
+  // Migration 0033: an entity is drawn as its type's picture. A node with
   // children is a compound box, which a picture would sit on top of, so it
   // is marked `object-group` and keeps the tinted box -- set explicitly
   // rather than left out, because `applyGraphToCy` MERGES data and a node

@@ -151,7 +151,7 @@ export type EntityType = {
    * a deterministic fallback (`lib/colour.ts`). The API accepts either
    * case and stores lower case. */
   colour: string | null;
-  /** Migration 0031: a gallery key (`lib/entityIcons.ts`) or an uploaded
+  /** Migration 0033: a gallery key (`lib/entityIcons.ts`) or an uploaded
    * image's `data:` URI, or null for "not chosen" -- the Graph View then
    * picks a default from the name and role. */
   icon: string | null;

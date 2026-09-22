@@ -69,7 +69,7 @@ type GraphEditorProps = {
 
 const ELK_LAYOUT = {
   name: "elk",
-  // Migration 0031: a node is a picture with its name above it, so the name
+  // Migration 0033: a node is a picture with its name above it, so the name
   // is part of what must not overlap -- ELK is told the label's box too, and
   // given room for the edge labels between the pictures.
   nodeDimensionsIncludeLabels: true,
@@ -142,7 +142,7 @@ export function graphStylesheet() {
       },
     },
     {
-      // The Graph View (migration 0031): an entity is its type's picture --
+      // The Graph View (migration 0033): an entity is its type's picture --
       // the icon with the type's name under it, one image per type
       // (`lib/entityIcons.ts`) -- and the entity's own name above it, as a
       // map legend reads. The fill is made transparent rather than removed so
