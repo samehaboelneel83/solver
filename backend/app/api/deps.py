@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy import text
@@ -13,7 +13,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> UserAccount:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -54,6 +54,10 @@ def get_current_user(
     # From here on the request sees only its own organization's rows: the
     # database enforces it (migration 0032), not each route.
     enter_tenant(db, user.organization_id)
+    # For the request's log line (`app.main.log_request`): a dependency runs
+    # in a copied context, so a context variable set here would not reach it.
+    request.state.org_id = str(user.organization_id)
+    request.state.username = user.username
     # The commit that switched tenant expired the user; load it again now,
     # as the tenant, so a caller holding it after the session closes can
     # still read it.

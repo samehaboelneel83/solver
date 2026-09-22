@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -22,6 +23,7 @@ from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
+from app.core import logs
 from app.core.db import SessionLocal, get_clickhouse_client
 from app.core.nul_guard import NulByteGuard
 from app.seed import ensure_weekly_rota_template, seed_admin
@@ -32,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # After uvicorn has set up its own logging, so ours replaces it.
+    logs.configure("api")
     try:
         create_analytics_schema(get_clickhouse_client())
     except Exception:
@@ -75,6 +79,33 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Problem Solver Platform API", lifespan=lifespan)
+
+_requests = logs.get("solver.api")
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    """One line per request: what was asked, by which organization, the
+    answer's status and how long it took. The organization is known only
+    once the request has been authenticated (`get_current_user` puts it on
+    `request.state`); a request that never was has none."""
+    started = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        _requests.info(
+            "request",
+            method=request.method,
+            path=request.url.path,
+            status=status,
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            org_id=getattr(request.state, "org_id", None),
+            user=getattr(request.state, "username", None),
+        )
+
 
 # Before routing, and so before authentication: a NUL (U+0000) anywhere in
 # a query string or a JSON/form body is a 422 naming the field, not the

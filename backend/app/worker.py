@@ -26,6 +26,7 @@ from types import FrameType
 
 from sqlalchemy import text
 
+from app.core import logs
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
 
@@ -89,15 +90,22 @@ def work_once(db) -> int | None:
     run_id = claim_next(db)
     if run_id is None:
         return None
-    logger.info("run %s: solving", run_id)
+    # Every line about this run, here and in the solve, carries its id and
+    # organization; the solver is added once one is chosen (`_execute`).
+    org_id = db.execute(
+        text("SELECT organization_id FROM run WHERE id = :r"), {"r": run_id}
+    ).scalar_one_or_none()
+    logs.bind(run_id=run_id, org_id=str(org_id) if org_id else None)
+    log = logs.get("solver.worker")
+    log.info("run claimed")
     try:
         outcome = execute_run(db, run_id)
-        logger.info("run %s: %s (objective %s)", run_id, outcome.status, outcome.objective)
+        log.info("run settled", status=outcome.status, objective=outcome.objective)
     except Exception:
         # A claimed run that raises would otherwise stay `running` for ever,
         # and the next worker would skip it. Record the failure on the run.
         db.rollback()
-        logger.exception("run %s: failed", run_id)
+        log.exception("run failed")
         db.execute(
             text(
                 "UPDATE run SET status = 'error', error = :e, finished_at = now()"
@@ -106,11 +114,13 @@ def work_once(db) -> int | None:
             {"e": "the worker failed while solving; see the worker log", "r": run_id},
         )
         db.commit()
+    finally:
+        logs.clear()
     return run_id
 
 
 def main() -> None:  # pragma: no cover -- the loop itself
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logs.configure("worker")
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 

@@ -1,4 +1,5 @@
 import pytest
+from starlette.requests import Request
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -44,14 +45,17 @@ def test_get_current_user_accepts_valid_token():
     settings = get_settings()
     token = create_access_token(subject=settings.admin_username)
     db = SessionLocal()
-    user = get_current_user(token=token, db=db)
+    request = Request({"type": "http"})
+    user = get_current_user(request, token=token, db=db)
     db.close()
     assert user.username == settings.admin_username
+    # For the request's log line (`app.main.log_request`).
+    assert request.state.org_id == str(user.organization_id)
 
 
 def test_get_current_user_rejects_invalid_token():
     db = SessionLocal()
     with pytest.raises(HTTPException) as exc_info:
-        get_current_user(token="garbage", db=db)
+        get_current_user(Request({"type": "http"}), token="garbage", db=db)
     db.close()
     assert exc_info.value.status_code == 401

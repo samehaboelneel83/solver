@@ -43,6 +43,7 @@ from app.solve.compile import (
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.core.logs import bind as bind_log
 from app.settings_resolve import resolve
 
 logger = logging.getLogger(__name__)
@@ -491,6 +492,7 @@ def _execute(
         )
         try:
             backend, why = choose(found, params.get("requested_solver"))
+            bind_log(solver=backend.name)
         except NoBackend as exc:
             db.execute(
                 text(
