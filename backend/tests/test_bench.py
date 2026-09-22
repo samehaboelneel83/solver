@@ -180,7 +180,7 @@ def test_results_are_stored_for_the_history(db):
 # -- the nightly job --------------------------------------------------------
 
 
-def _row(instance="rota-L-0", backend="cp-sat", seed=1, status="optimal", objective=10.0,
+def _night(instance="rota-L-0", backend="cp-sat", seed=1, status="optimal", objective=10.0,
          solve_s=1.0, wrong=False):
     return {"instance": instance, "backend": backend, "seed": seed, "status": status,
             "objective": objective, "solve_s": solve_s, "wrong": wrong}
@@ -189,7 +189,7 @@ def _row(instance="rota-L-0", backend="cp-sat", seed=1, status="optimal", object
 def test_nightly_finds_nothing_when_nothing_changed():
     from bench.nightly import compare
 
-    night = [_row(), _row(backend="highs", solve_s=1.4)]
+    night = [_night(), _night(backend="highs", solve_s=1.4)]
     assert compare(night, [dict(r) for r in night]) == []
 
 
@@ -197,16 +197,16 @@ def test_nightly_reports_each_kind_of_worse():
     from bench.nightly import compare
 
     before = [
-        _row(instance="a", objective=10.0),
-        _row(instance="b", status="optimal", objective=5.0),
-        _row(instance="c", solve_s=1.0),
+        _night(instance="a", objective=10.0),
+        _night(instance="b", status="optimal", objective=5.0),
+        _night(instance="c", solve_s=1.0),
     ]
     tonight = [
-        _row(instance="a", objective=11.0),                      # the optimum moved
-        _row(instance="b", status="feasible", objective=6.0),    # proof lost
-        _row(instance="c", solve_s=4.5),                         # (4.5+1)/(1+1) = 2.75x
-        _row(instance="d", status="error", objective=None),
-        _row(instance="e", wrong=True),
+        _night(instance="a", objective=11.0),                      # the optimum moved
+        _night(instance="b", status="feasible", objective=6.0),    # proof lost
+        _night(instance="c", solve_s=4.5),                         # (4.5+1)/(1+1) = 2.75x
+        _night(instance="d", status="error", objective=None),
+        _night(instance="e", wrong=True),
     ]
     problems = compare(before, tonight)
     assert any(p.startswith("optimum moved: a was 10.0, now 11.0") for p in problems)
@@ -221,14 +221,14 @@ def test_nightly_does_not_call_noise_on_a_fast_solve_a_regression():
     """20 ms to 90 ms is 4.5x raw, but (0.09+1)/(0.02+1) = 1.07 shifted."""
     from bench.nightly import compare
 
-    assert compare([_row(solve_s=0.02)], [_row(solve_s=0.09)]) == []
+    assert compare([_night(solve_s=0.02)], [_night(solve_s=0.09)]) == []
 
 
 def test_nightly_first_night_only_checks_tonight():
     from bench.nightly import compare
 
-    assert compare(None, [_row()]) == []
-    assert compare(None, [_row(wrong=True)]) != []
+    assert compare(None, [_night()]) == []
+    assert compare(None, [_night(wrong=True)]) != []
 
 
 def test_nightly_runs_end_to_end_and_compares_with_the_night_before(tmp_path):
