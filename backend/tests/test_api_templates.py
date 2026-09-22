@@ -159,6 +159,77 @@ def test_applying_weekly_rota_to_an_empty_domain_plants_the_types(auth_headers, 
         db.commit()
 
 
+def test_weekly_rota_applied_to_an_empty_domain_solves_to_optimal(auth_headers, db):
+    """A new user's first click must lead to an answer, not "no answer exists".
+
+    The seeded people cannot meet the seeded demand -- that is the demo's
+    point -- so the template's coverage rule is a target, not a wall.
+    Worked by hand, with coverage soft at 100 per missing person:
+
+    * hours caps allow 40/8 + 32/8 + 40/8 + 20/8 + 40/8 = 5+4+5+2+5 = 21
+      shifts; every one fills a demanded slot (each costs 1, saves 100);
+    * demand is 5 weekdays x (4+3+2) + 2 weekend days x (2+2+2) = 57, so 36
+      slots stay short: 3600;
+    * North Region's late-shift target (3 a day, weight 4) can only count
+      Ahmed and Bilal, at most 2 a day and 5+4 = 9 over the week, so 21-9 =
+      12 short: 48 -- their evenings fill demanded slots, so coverage loses
+      nothing by it;
+    * objective = 21 + 3600 + 48 = 3669.
+    """
+    from app.solve.service import claim_next, enqueue_run, execute_run
+
+    template_id = ensure_weekly_rota_template(db)
+    db.commit()
+    client = TestClient(app)
+    response = client.post(
+        f"/api/v1/templates/{template_id}/apply",
+        json={"domain_name": "weekly_rota_first_click", "name": "rota"},
+        headers=auth_headers,
+    )
+    try:
+        assert response.status_code == 201, response.text
+        run_id = enqueue_run(db, response.json()["scenario_id"], time_limit=30.0)
+        assert claim_next(db) == run_id
+        outcome = execute_run(db, run_id)
+
+        assert outcome.status == "optimal"
+        assert outcome.objective == 3669
+        assert len(outcome.assignments["assign"]) == 21
+    finally:
+        if response.status_code == 201:
+            db.execute(
+                text("DELETE FROM run WHERE scenario_id = :s"),
+                {"s": response.json()["scenario_id"]},
+            )
+            db.execute(
+                text("DELETE FROM domain WHERE id = :d"),
+                {"d": response.json()["domain_id"]},
+            )
+        db.execute(text("DELETE FROM template WHERE name = 'weekly_rota'"))
+        db.commit()
+
+
+def test_the_template_softens_coverage_and_nothing_else():
+    """The template is the demo's model with one change. The demo keeps its
+    hard coverage rule: it is the platform's worked example of an
+    infeasible model being explained."""
+    from app.seed import _IR, weekly_rota_template_ir
+
+    template = weekly_rota_template_ir()
+    by_id = {c["id"]: c for c in template["constraints"]}
+    assert by_id["c_cover_demand"]["severity"] == "soft"
+    assert by_id["c_cover_demand"]["weight"] == 100
+    assert {c["id"]: c for c in _IR["constraints"]}["c_cover_demand"]["severity"] == "hard"
+
+    def without_cover(ir):
+        return {**ir, "constraints": [c for c in ir["constraints"] if c["id"] != "c_cover_demand"]}
+
+    assert without_cover(template) == without_cover(_IR)
+    rest = {k: v for k, v in by_id["c_cover_demand"].items() if k not in ("severity", "weight")}
+    original = {c["id"]: c for c in _IR["constraints"]}["c_cover_demand"]
+    assert rest == {k: v for k, v in original.items() if k != "severity"}
+
+
 def test_applying_to_a_domain_that_already_has_people_does_not_duplicate_them(
     seeded, auth_headers, db
 ):

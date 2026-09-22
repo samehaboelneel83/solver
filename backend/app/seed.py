@@ -284,6 +284,27 @@ _SCENARIO_PATCH: dict[str, Any] = {"soften": {"c_cover_demand": 100}}
 WEEKLY_ROTA_TEMPLATE = "weekly_rota"
 
 
+def weekly_rota_template_ir() -> dict[str, Any]:
+    """The model a domain starts from: the demo's, with coverage a target.
+
+    The seeded people cannot meet the seeded demand (21 shifts of capacity
+    against 57 demanded), and no demand this data carries could make the
+    hard rule meetable: a weekday wants nine people and there are five. As
+    a *starting* model that meant a new user's first Solve said "no answer
+    exists". So the template takes the demo's `relaxed_cover` softening --
+    the same patch, the same penalty -- and solves to an optimal roster
+    that shows the shortfall. The demo keeps its hard rule: it is the
+    worked example of an infeasible model being explained.
+    """
+    softened = _SCENARIO_PATCH["soften"]
+    constraints = []
+    for spec in _IR["constraints"]:
+        if spec["id"] in softened:
+            spec = {**spec, "severity": "soft", "weight": int(softened[spec["id"]])}
+        constraints.append(spec)
+    return {**_IR, "constraints": constraints}
+
+
 def _weekly_rota_domain_seed() -> dict[str, Any]:
     """The types, records and demand cells `plant_domain_seed` walks.
 
@@ -457,14 +478,14 @@ def ensure_weekly_rota_template(db: Session) -> int:
         db.execute(
             update(Template)
             .where(Template.id == found)
-            .values(domain_seed=seed, default_ir=_IR)
+            .values(domain_seed=seed, default_ir=weekly_rota_template_ir())
         )
         return found
     row = Template(
         name=WEEKLY_ROTA_TEMPLATE,
         ir_version="1",
         domain_seed=seed,
-        default_ir=_IR,
+        default_ir=weekly_rota_template_ir(),
     )
     db.add(row)
     db.flush()
