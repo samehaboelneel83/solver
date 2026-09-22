@@ -16,7 +16,7 @@ lane; no LLM / NL→IR work.
 
 ## P0 — known problems
 
-- [ ] (P0) Intermittent frontend test failure — done when the race in the editor is found and fixed, and `vitest` passes 10 runs in a row.
+- [x] (P0) Intermittent frontend test failure — done when the race in the editor is found and fixed, and `vitest` passes 10 runs in a row. *(`fb8843c`: react-querybuilder's mount report wrote a stale rule over fresh edits; 10 plain + 6 shuffled runs green.)*
 - [ ] (P0) `weekly_rota` on an empty domain is infeasible — done when applying the template to a new domain and solving gives an optimal answer, pinned by a test.
 - [ ] (P0) Non-superuser Postgres login role for the app — done when API and worker connect as a role without superuser/BYPASSRLS, migrations still run as the owner, and tenant isolation holds live.
 
