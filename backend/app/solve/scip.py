@@ -64,12 +64,15 @@ def solve(
     time_limit: float = 10.0,
     workers: int = 1,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     import pyscipopt
 
     model = pyscipopt.Model()
     model.hideOutput()
     model.setParam("limits/time", float(time_limit))
+    if seed is not None:
+        model.setParam("randomization/randomseedshift", int(seed))
 
     variables = {key: _declare(model, key, spec) for key, spec in compiled.variables.items()}
     for constraint in compiled.constraints:
@@ -122,12 +125,15 @@ def solve(
         status = "optimal"
     elif scip_status == "infeasible":
         status = "infeasible"
+    elif scip_status == "unbounded":
+        status = "unbounded"
     elif solved and scip_status in _STOPPED:
         status = "feasible"
     else:
         status = "unknown"
 
     best = model.getBestSol() if solved else None
+    bound = model.getDualbound() if best is not None and has_objective else None
     return Solution(
         status=status,
         optimal=status == "optimal",
@@ -144,6 +150,7 @@ def solve(
             if best is not None
             else {}
         ),
+        best_bound=bound if bound is not None and abs(bound) < 1e20 else None,
         wall_seconds=round(model.getSolvingTime(), 3),
         solver=_name(),
     )

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Runs, { statusNote, unexpressedRules } from "./Runs";
+import Runs, { formatGap, statusNote, unexpressedRules } from "./Runs";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 
@@ -176,6 +176,27 @@ beforeEach(() => {
   mockFetch.mockReset();
   localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
   stub();
+});
+
+describe("gap and unbounded (migration 0029)", () => {
+  it("says how far an unproven answer may be from the best", () => {
+    expect(statusNote({ status: "feasible", optimality: "none", gap: 0.0231 })).toMatch(/at most 2.3% worse/);
+  });
+
+  it("falls back to the plain note when there is no bound", () => {
+    expect(statusNote({ status: "feasible", optimality: "none", gap: null })).toMatch(/not proven best/);
+  });
+
+  it("names the modelling mistake behind an unbounded run", () => {
+    expect(statusNote({ status: "unbounded" })).toMatch(/missing a limit/);
+  });
+
+  it("writes a gap a planner can read", () => {
+    expect(formatGap(0)).toBe("0%");
+    expect(formatGap(0.00000001)).toBe("under 0.01%");
+    expect(formatGap(0.123456)).toBe("12%");
+    expect(formatGap(0.5)).toBe("50%");
+  });
 });
 
 describe("statusNote (migration 0028)", () => {

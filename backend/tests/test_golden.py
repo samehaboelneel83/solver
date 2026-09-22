@@ -1,0 +1,260 @@
+"""The golden suite: small models whose answers are known, on every backend.
+
+Phase 6.1 of the target roadmap. Each model below has its status and its
+objective worked out by hand, in the comment beside it. The suite solves it
+through `solve_compiled` -- the path a run takes, including the check for an
+answer resting on a ceiling nobody set -- on EVERY available backend whose
+declared capabilities take it, and asserts they all agree with the known
+answer to 1e-6 relative.
+
+That last part is the point. A backend that mis-maps a status, drops a term
+or loses a sign disagrees with the others on at least one of these, and
+"zero wrong answers" -- the rule every future technique must pass before it
+is enabled by default -- starts here.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+
+import pytest
+
+from app.solve import compile_model
+from app.solve.backends import REGISTRY, NoBackend, choose
+from app.solve.classify import classify
+from app.solve.convexity import refine
+from app.solve.service import solve_compiled
+
+NO_DATA: dict[str, Any] = {"sets": {}, "parameters": {}, "parameter_defaults": {}, "relationships": {}}
+
+
+def v(name: str) -> dict:
+    return {"var": name, "index": []}
+
+
+def c(value) -> dict:
+    return {"const": value}
+
+
+def mul(a, b) -> dict:
+    return {"mul": [a, b]}
+
+
+def add(*terms) -> dict:
+    return {"add": list(terms)}
+
+
+def rule(rid: str, left, relation: str, right, **extra) -> dict:
+    return {"id": rid, "left": left, "relation": relation, "right": right, "severity": "hard", **extra}
+
+
+def model(variables: dict, rules: list, sense: str | None = None, terms: list | None = None, mode: str | None = None) -> dict:
+    ir: dict[str, Any] = {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {name: {"index": [], **spec} for name, spec in variables.items()},
+        "constraints": rules,
+    }
+    if sense is not None:
+        ir["objective"] = {
+            "sense": sense,
+            "terms": [{"id": f"o{i}", "weight": 1, "expression": t} for i, t in enumerate(terms or [])],
+            **({"mode": mode} if mode else {}),
+        }
+    return ir
+
+
+CONT = {"domain": "continuous", "lower": 0, "upper": 10}
+INT = {"domain": "integer", "lower": 0, "upper": 10}
+BIN = {"domain": "binary"}
+
+GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
+    # max 5x + 4y, 6x + 4y <= 24, x + 2y <= 6: the vertex (3, 1.5), 21.
+    (
+        "lp_vertex",
+        model(
+            {"x": CONT, "y": CONT},
+            [
+                rule("c1", add(mul(c(6), v("x")), mul(c(4), v("y"))), "<=", c(24)),
+                rule("c2", add(v("x"), mul(c(2), v("y"))), "<=", c(6)),
+            ],
+            "maximize",
+            [mul(c(5), v("x")), mul(c(4), v("y"))],
+        ),
+        "optimal",
+        Decimal("21"),
+    ),
+    # Weights 5, 4, 3, 2, values 10, 7, 5, 3, capacity 9: a and b, 17.
+    (
+        "ip_knapsack",
+        model(
+            {"a": BIN, "b": BIN, "c": BIN, "d": BIN},
+            [
+                rule(
+                    "cap",
+                    add(mul(c(5), v("a")), mul(c(4), v("b")), mul(c(3), v("c")), mul(c(2), v("d"))),
+                    "<=",
+                    c(9),
+                )
+            ],
+            "maximize",
+            [mul(c(10), v("a")), mul(c(7), v("b")), mul(c(5), v("c")), mul(c(3), v("d"))],
+        ),
+        "optimal",
+        Decimal("17"),
+    ),
+    # max x + 5n, x + 3n <= 10.5, x <= 2, n whole: n = 3, x = 1.5, 16.5.
+    (
+        "milp_mixed",
+        model(
+            {"x": {"domain": "continuous", "lower": 0, "upper": 2}, "n": INT},
+            [rule("c", add(v("x"), mul(c(3), v("n"))), "<=", c(10.5))],
+            "maximize",
+            [v("x"), mul(c(5), v("n"))],
+        ),
+        "optimal",
+        Decimal("16.5"),
+    ),
+    # x >= 6 and x <= 4 cannot both hold.
+    (
+        "infeasible",
+        model({"x": INT}, [rule("lo", v("x"), ">=", c(6)), rule("hi", v("x"), "<=", c(4))], "minimize", [v("x")]),
+        "infeasible",
+        None,
+    ),
+    # Maximise a quantity nothing limits: the default ceiling must not pass
+    # for an optimum.
+    (
+        "unbounded_lp",
+        model({"x": {"domain": "continuous"}}, [rule("lo", v("x"), ">=", c(1))], "maximize", [v("x")]),
+        "unbounded",
+        None,
+    ),
+    (
+        "unbounded_ip",
+        model({"n": {"domain": "integer"}}, [rule("lo", v("n"), ">=", c(1))], "maximize", [v("n")]),
+        "unbounded",
+        None,
+    ),
+    # The same, held back by a rule at exactly the ceiling's height: the
+    # answer touches the default ceiling, raising it changes nothing, and
+    # the optimum stands.
+    (
+        "ceiling_incidental",
+        model(
+            {"x": {"domain": "continuous"}},
+            [rule("hi", v("x"), "<=", c(1_000_000))],
+            "maximize",
+            [v("x")],
+        ),
+        "optimal",
+        Decimal("1000000"),
+    ),
+    # max 2x + 2y, with x + y <= 1 soft at 3 per unit: both on pays 4 - 3, one
+    # on pays 2. The penalty is part of the objective: 2.
+    (
+        "soft_rule",
+        model(
+            {"x": BIN, "y": BIN},
+            [rule("cap", add(v("x"), v("y")), "<=", c(1), severity="soft", weight=3)],
+            "maximize",
+            [mul(c(2), v("x")), mul(c(2), v("y"))],
+        ),
+        "optimal",
+        Decimal("2"),
+    ),
+    # a + b first, then c, with a + b + c <= 2: a + b = 2 wins, c = 0. The
+    # reported objective is the first term, 2.
+    (
+        "lex",
+        model(
+            {"a": BIN, "b": BIN, "c": BIN},
+            [rule("cap", add(v("a"), v("b"), v("c")), "<=", c(2))],
+            "maximize",
+            [add(v("a"), v("b")), v("c")],
+            mode="lex",
+        ),
+        "optimal",
+        Decimal("2"),
+    ),
+    # min x^2 + y^2, x + y = 10: 5 and 5, 50.
+    (
+        "qp_convex",
+        model(
+            {"x": CONT, "y": CONT},
+            [rule("sum", add(v("x"), v("y")), "=", c(10))],
+            "minimize",
+            [mul(v("x"), v("x")), mul(v("y"), v("y"))],
+        ),
+        "optimal",
+        Decimal("50"),
+    ),
+    # max x^2 + y^2, x + y = 10: everything on one, 100.
+    (
+        "qp_nonconvex",
+        model(
+            {"x": CONT, "y": CONT},
+            [rule("sum", add(v("x"), v("y")), "=", c(10))],
+            "maximize",
+            [mul(v("x"), v("x")), mul(v("y"), v("y"))],
+        ),
+        "optimal",
+        Decimal("100"),
+    ),
+    # max x + y, x * y <= 4 on [0, 10]^2: a corner, 10.4.
+    (
+        "qcqp_hyperbola",
+        model({"x": CONT, "y": CONT}, [rule("h", mul(v("x"), v("y")), "<=", c(4))], "maximize", [v("x"), v("y")]),
+        "optimal",
+        Decimal("10.4"),
+    ),
+    # min x + y, x * y >= 12, whole numbers: 3 x 4, 7.
+    (
+        "miqcqp_whole",
+        model({"x": INT, "y": INT}, [rule("a", mul(v("x"), v("y")), ">=", c(12))], "minimize", [v("x"), v("y")]),
+        "optimal",
+        Decimal("7"),
+    ),
+    # No objective: any answer that holds is optimal, and there is no value.
+    ("feasibility", model({"x": BIN}, [rule("on", v("x"), ">=", c(1))]), "optimal", None),
+]
+
+
+def _cases():
+    for name, ir, status, objective in GOLDEN:
+        compiled = compile_model(ir, NO_DATA)
+        found = refine(classify(ir, NO_DATA), compiled)
+        takers = []
+        for backend in REGISTRY:
+            if not backend.is_available():
+                continue
+            try:
+                choose(found, backend.name)
+            except NoBackend:
+                continue
+            takers.append(backend)
+        assert takers, f"{name}: no backend takes it"
+        for backend in takers:
+            yield pytest.param(ir, backend, status, objective, id=f"{name}-{backend.name}")
+
+
+@pytest.mark.parametrize("ir, backend, status, objective", list(_cases()))
+def test_golden(ir, backend, status, objective):
+    result, reason = solve_compiled(backend, compile_model(ir, NO_DATA), time_limit=20, seed=1)
+
+    assert result.status == status, reason
+    if objective is None:
+        assert result.objective is None
+    else:
+        got = Decimal(str(result.objective))
+        assert abs(got - objective) <= Decimal("1e-6") * max(Decimal(1), abs(objective)), got
+    if status == "unbounded":
+        assert reason and "without limit" in reason
+        assert result.assignments == {}
+
+
+def test_every_backend_is_exercised_by_the_golden_suite():
+    covered = {case.values[1].name for case in _cases()}
+    assert covered == {b.name for b in REGISTRY if b.is_available()}

@@ -275,6 +275,8 @@ def test_run_status_enum_labels(db):
         "unknown",
         "error",
         "cancelled",
+        # 0029 appends it: ALTER TYPE ... ADD VALUE goes on the end.
+        "unbounded",
     ]
 
 

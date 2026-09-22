@@ -56,6 +56,7 @@ const STATUS_STYLE: Record<RunStatus, string> = {
   optimal: "bg-green-100 text-green-900",
   feasible: "bg-green-50 text-green-900",
   infeasible: "bg-amber-100 text-amber-900",
+  unbounded: "bg-amber-100 text-amber-900",
   error: "bg-red-100 text-red-900",
   unknown: "bg-slate-100 text-slate-700",
   queued: "bg-slate-100 text-slate-700",
@@ -68,6 +69,7 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   optimal: "Best possible answer, proven.",
   feasible: "An answer, found before the time limit -- not proven best.",
   infeasible: "No answer exists: the rules cannot all hold at once.",
+  unbounded: "The goal can improve forever: a decision is missing a limit, or a rule is missing.",
   error: "The model could not be solved. The reason is below.",
   unknown: "The solver stopped without deciding. Try a longer time limit.",
   queued: "Waiting to start.",
@@ -85,7 +87,10 @@ const STATUS_NOTE: Record<RunStatus, string> = {
  * claim decides the words, and a missing claim (an older run) falls back to
  * the plain status note.
  */
-export function statusNote(run: { status: RunStatus; optimality?: string | null }): string {
+export function statusNote(run: { status: RunStatus; optimality?: string | null; gap?: number | null }): string {
+  if (run.status === "feasible" && typeof run.gap === "number") {
+    return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
+  }
   if (run.status === "optimal" && run.optimality === "local") {
     return "The best answer near where the search looked -- not proven the best overall. A better one may exist; solving from another start, or with a global solver, is how to find out.";
   }
@@ -93,6 +98,15 @@ export function statusNote(run: { status: RunStatus; optimality?: string | null 
     return "Best possible answer, proven: no other answer does better.";
   }
   return STATUS_NOTE[run.status];
+}
+
+/** A gap as a percentage a planner can read: two significant figures, and
+ * "under 0.01%" rather than a string of zeros. */
+export function formatGap(gap: number): string {
+  const percent = gap * 100;
+  if (percent === 0) return "0%";
+  if (percent < 0.01) return "under 0.01%";
+  return `${Number(percent.toPrecision(2))}%`;
 }
 
 export default function Runs() {
@@ -722,6 +736,8 @@ function RunDetail({ id }: { id: Id }) {
         <summary className="cursor-pointer font-semibold text-slate-900">Technical</summary>
         <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
           <Fact label="Objective" value={data.objective === null ? "—" : String(data.objective)} />
+          <Fact label="Best bound" value={data.best_bound == null ? "—" : String(Number(data.best_bound.toPrecision(10)))} />
+          <Fact label="Gap" value={data.gap == null ? "—" : formatGap(data.gap)} />
           <Fact label="Solved in" value={data.wall_time_s === null ? "—" : `${data.wall_time_s}s`} />
           <Fact label="Solver" value={data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />

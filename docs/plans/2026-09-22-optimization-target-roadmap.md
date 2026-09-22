@@ -218,6 +218,14 @@ Impact is *for this platform's problem families* (rostering, coverage, blending,
   Enabled only if the bench shows CP-SAT beating HiGHS on those instances.
 - **D11:** correct the roadmap doc.
 
+**Progress (2026-09-22):** D2, D3, D5 (with D9's marking: an answer on a
+ceiling the model never set is re-solved with it raised, and becomes
+`unbounded` if the goal improves), D6 (bound and gap recorded and shown; the
+`solve.gap_rel`/`solve.threads` settings not yet), D8 and D11 are done, in
+migration `0029`. The golden suite is `backend/tests/test_golden.py`: 14
+hand-solved models run on every backend that takes them. Still open in this
+phase: the benchmark harness (6.1 `bench/`), D4, D7, CP-SAT scaling.
+
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.
 

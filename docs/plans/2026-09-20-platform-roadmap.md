@@ -362,10 +362,11 @@ why decimal rather than float, and why no stored hash moved.
 A database-backed queue claimed with `FOR UPDATE SKIP LOCKED`, a worker
 service, snapshot-on-submit, full provenance on the run, and a UI that
 follows a run until it settles and then stops asking. Stale runs from a
-dead worker are reclaimed at start-up.
+dead worker are reclaimed at start-up and again before every job the worker
+claims (`reclaim_stale` in `work_once`).
 
 **Cancellation and heartbeat** -- done. Migration `0018` records
-`cancel_requested_at` and `last_heartbeat_at` on `run`. The worker polls
+`cancel_requested` (a boolean) and `heartbeat_at` on `run`. The worker polls
 the flag, CP-SAT / GLOP / CBC honour it, a missed heartbeat reclaims the
 row, and the Runs UI can stop a live solve instead of waiting it out.
 
@@ -381,7 +382,9 @@ The tables exist and are immutable; what is missing is everything around them.
 - **Snapshot on submit:** `snapshot_dataset()` already produces the frozen
   input and dedupes identical snapshots by hash. Wire it in.
 - **Record provenance:** solver name and version, model hash, data hash, seed,
-  time limit, gap. Two runs of the same triple must be comparable.
+  time limit, gap. Two runs of the same triple must be comparable. (The seed
+  reaches every solver, and the best bound and gap are recorded, since
+  migration `0029` -- target roadmap Phase 6, D3 and D6.)
 - **UI:** a run list, a run detail with live status, and the result.
 
 ---
@@ -459,7 +462,9 @@ for model parts.
   and reflected in the UI so unavailable actions are absent, not broken.
 - **Settings as data, at three levels** — platform, domain, problem — each
   overriding the last: default solver, time limit, optimality gap, thread
-  count, whether nonconvex problems may run at all.
+  count, whether nonconvex problems may run at all. *As built:* `solve.solver`,
+  `solve.time_limit_s` and `solve.seed` exist; the gap and thread settings do
+  not yet (target roadmap Phase 6, D6), and the worker still passes 8 threads.
 - **Templates.** The `template` table exists and is unused. A template is a
   starting model plus a domain seed: "weekly rota", "shift coverage". This is
   what makes the platform teachable, and it is cheap once Phase 1 exists.

@@ -44,7 +44,7 @@ _STATUS = {
     pywraplp.Solver.OPTIMAL: "optimal",
     pywraplp.Solver.FEASIBLE: "feasible",
     pywraplp.Solver.INFEASIBLE: "infeasible",
-    pywraplp.Solver.UNBOUNDED: "unknown",
+    pywraplp.Solver.UNBOUNDED: "unbounded",
     pywraplp.Solver.ABNORMAL: "error",
     pywraplp.Solver.NOT_SOLVED: "unknown",
 }
@@ -65,6 +65,7 @@ def solve(
     time_limit: float = 10.0,
     workers: int = 8,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     engine = available()
     if engine is None:  # pragma: no cover -- both ship with ortools
@@ -74,6 +75,10 @@ def solve(
     solver.SetTimeLimit(int(time_limit * 1000))
     if workers > 1:
         solver.SetNumThreads(workers)
+    if seed is not None and engine == "SCIP":
+        solver.SetSolverSpecificParametersAsString(
+            f"randomization/randomseedshift = {int(seed)}"
+        )
 
     variables = {key: _declare(solver, key, spec) for key, spec in compiled.variables.items()}
 
@@ -108,6 +113,9 @@ def solve(
             }
             if solved
             else {}
+        ),
+        best_bound=(
+            solver.Objective().BestBound() if solved and compiled.objective.coeffs else None
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"{engine.lower()} (ortools {_ORTOOLS_VERSION})",

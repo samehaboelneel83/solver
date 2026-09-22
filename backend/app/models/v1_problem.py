@@ -65,6 +65,7 @@ RUN_STATUS = ENUM(
     "unknown",
     "error",
     "cancelled",
+    "unbounded",
     name="run_status",
     create_type=False,
 )
@@ -222,6 +223,10 @@ class Run(Base):
     # Migration 0028: what an answer may claim -- global, local or none.
     optimality: Mapped[str | None] = mapped_column(Text, nullable=True)
     wall_time_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Migration 0029: the solver's proven limit on the goal, and how far the
+    # answer may be from it as a fraction. Null when there is no bound.
+    best_bound: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gap: Mapped[float | None] = mapped_column(Float, nullable=True)
     # infeasible: [{"constraint_id": "...", "instance": [...]}]
     conflict: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     conflict_minimal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

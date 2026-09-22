@@ -24,6 +24,10 @@ class Solution:
     duals: dict[str, float] | None = None
     # Reduced cost per variable instance, same honesty: None, not {}.
     reduced_costs: dict[tuple[str, tuple[str, ...]], float] | None = None
+    # The solver's proven limit on the goal: no answer can beat it. Equal to
+    # the objective at a proven optimum; None when the solver has none.
+    # Measured on the same objective the backend reports (migration 0029).
+    best_bound: float | None = None
 
     def chosen(self, variable: str) -> list[tuple[str, ...]]:
         """The index tuples a binary variable took as 1 -- the roster, in the

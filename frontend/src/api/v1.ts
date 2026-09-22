@@ -469,7 +469,16 @@ export type ScenarioUpdate = { name?: string; model_version_id?: Id; patch?: Sce
 /** `run_status`, straight from the database's own enum. `optimal` and
  * `feasible` are both answers; the schema keeps them apart, so the UI does
  * too -- "a solution" and "the best solution" are different claims. */
-export type RunStatus = "queued" | "running" | "optimal" | "feasible" | "infeasible" | "unknown" | "error" | "cancelled";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "optimal"
+  | "feasible"
+  | "infeasible"
+  | "unbounded"
+  | "unknown"
+  | "error"
+  | "cancelled";
 
 export type ConstraintOutcome = {
   constraint_id: string;
@@ -503,6 +512,10 @@ export type RunSummary = {
   solver_version: string | null;
   compiler_version: string | null;
   objective: number | null;
+  /** Migration 0029: no answer can beat this. Null when the solver has no bound. */
+  best_bound?: number | null;
+  /** How far the answer may be from the best, as a fraction; 0 when proven optimal. */
+  gap?: number | null;
   wall_time_s: number | null;
   error: string | null;
   queued_at: string;

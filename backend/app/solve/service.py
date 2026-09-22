@@ -19,6 +19,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from typing import Any, Iterator
 
 from sqlalchemy import text
@@ -29,6 +30,7 @@ from app.solve.classify import classify
 from app.solve.convexity import refine
 from app.solve.compile import (
     _VIOLATION,
+    DEFAULT_UPPER,
     Compiled,
     Constraint,
     Linear,
@@ -281,7 +283,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
 
     row = db.execute(
         text(
-            "SELECT r.dataset_id, r.params, s.patch, mv.ir, d.data"
+            "SELECT r.dataset_id, r.params, r.seed, s.patch, mv.ir, d.data"
             "  FROM run r"
             "  JOIN scenario s ON s.id = r.scenario_id"
             "  JOIN model_version mv ON mv.id = s.model_version_id"
@@ -295,6 +297,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     data = row["data"]
     params = row["params"] or {}
     time_limit = float(params.get("time_limit_s", 10.0))
+    seed = row["seed"]
     dataset_id = row["dataset_id"]
 
     stop = threading.Event()
@@ -333,18 +336,11 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         try:
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
-            if compiled.objective_mode == "lex":
-                result = _solve_lex(
-                    backend,
-                    compiled,
-                    time_limit=time_limit,
-                    workers=8,
-                    should_stop=stop.is_set,
-                )
-            else:
-                result = backend.solve(
-                    compiled, time_limit=time_limit, workers=8, should_stop=stop.is_set
-                )
+            result, reason = solve_compiled(
+                backend, compiled, time_limit=time_limit, seed=seed, should_stop=stop.is_set
+            )
+            if reason is not None:
+                db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
         except Unsupported as exc:
             # The model is valid and this compiler cannot express it. That is a
             # failed run with a reason, not a crash and not an empty answer.
@@ -467,7 +463,8 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
     db.execute(
         text(
             "UPDATE run SET status = :st, solver_version = :sv, objective = :obj,"
-            "               wall_time_s = :wall, finished_at = now()"
+            "               wall_time_s = :wall, finished_at = now(),"
+            "               best_bound = :bound, gap = :gap"
             " WHERE id = :r"
         ),
         {
@@ -475,6 +472,8 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
             "sv": result.solver,
             "obj": result.objective,
             "wall": result.wall_seconds,
+            "bound": result.best_bound if solved else None,
+            "gap": gap_of(result.objective, result.best_bound) if solved else None,
             "r": run_id,
         },
     )
@@ -548,6 +547,7 @@ def _solve_lex(
     time_limit: float,
     workers: int,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     """Optimise terms in order, freezing each before the next.
 
@@ -561,7 +561,7 @@ def _solve_lex(
         stages.append(compiled.penalty_objective.copy())
     if not stages:
         return backend.solve(
-            compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+            compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
         )
 
     deadline = time.monotonic() + time_limit
@@ -576,19 +576,29 @@ def _solve_lex(
             constraints=[*compiled.constraints, *freezes],
         )
         result = backend.solve(
-            stage, time_limit=remaining, workers=workers, should_stop=should_stop
+            stage, time_limit=remaining, workers=workers, should_stop=should_stop, seed=seed
         )
         wall += result.wall_seconds
         if result.status != "optimal" or not result.assignments:
             return replace(result, wall_seconds=round(wall, 3))
         value = term.evaluated_at(result.assignments)
-        freeze_rhs = number(round(value)) if compiled.is_integral else value
+        if compiled.is_integral:
+            relation, freeze_rhs = "=", number(round(value))
+        else:
+            # A continuous stage is held at its best give or take float
+            # noise: exactly `=` a value read back from a floating-point
+            # solve can be infeasible by 1e-12 and fail the next stage.
+            slack = max(Decimal("1e-6") * abs(value), Decimal("1e-9"))
+            if compiled.sense == "minimize":
+                relation, freeze_rhs = "<=", value + slack
+            else:
+                relation, freeze_rhs = ">=", value - slack
         freezes.append(
             Constraint(
                 id=f"_lex_{i}",
                 index={},
                 left=term.copy(),
-                relation="=",
+                relation=relation,
                 right=Linear(const=freeze_rhs),
             )
         )
@@ -598,7 +608,123 @@ def _solve_lex(
     if compiled.objective_terms and result.assignments:
         raw = compiled.objective_terms[0].evaluated_at(result.assignments)
         primary = int(round(raw)) if compiled.is_integral else float(raw)
-    return replace(result, wall_seconds=round(wall, 3), objective=primary)
+    # The last stage's bound is on the last stage's goal, not on the primary
+    # term reported as the objective, so no gap can honestly be given.
+    return replace(result, wall_seconds=round(wall, 3), objective=primary, best_bound=None)
+
+
+def solve_compiled(
+    backend, compiled: Compiled, *, time_limit: float, seed: int | None = None, should_stop=None
+) -> tuple[Solution, str | None]:
+    """Solve a compiled model as a run does, and say why if it is unbounded.
+
+    Both objective modes, then the check for an answer resting on a ceiling
+    the model never set (`_unbounded_ceilings`). The reason is None unless the
+    status is `unbounded`. The golden suite calls this, so what it pins is
+    what a run records.
+    """
+    started = time.monotonic()
+    result = _solve(backend, compiled, time_limit, seed, should_stop)
+    unbounded = _unbounded_ceilings(
+        backend,
+        compiled,
+        result,
+        max(0.5, time_limit - (time.monotonic() - started)),
+        seed,
+        should_stop,
+    )
+    if unbounded is None:
+        return result, None
+    return unbounded
+
+
+def _solve(backend, compiled: Compiled, time_limit: float, seed, should_stop) -> Solution:
+    if compiled.objective_mode == "lex":
+        return _solve_lex(
+            backend,
+            compiled,
+            time_limit=time_limit,
+            workers=8,
+            should_stop=should_stop,
+            seed=seed,
+        )
+    return backend.solve(
+        compiled, time_limit=time_limit, workers=8, should_stop=should_stop, seed=seed
+    )
+
+
+def _unbounded_ceilings(
+    backend, compiled: Compiled, result: Solution, time_limit: float, seed, should_stop
+) -> tuple[Solution, str] | None:
+    """An answer resting on a ceiling the model never set, shown to be unbounded.
+
+    Every variable without an upper bound gets `DEFAULT_UPPER`, so a goal that
+    can improve forever comes back `optimal` at that ceiling -- an answer to a
+    model nobody wrote. When the answer touches a defaulted ceiling, the model
+    is solved once more with those ceilings a thousand times higher. If the
+    goal improves, it was held back only by the guard: the run is `unbounded`,
+    and the reason names the variables. If not, the ceiling was incidental and
+    the answer stands.
+    """
+    if result.status not in ("optimal", "feasible") or result.objective is None:
+        return None
+    at_ceiling = sorted(
+        key
+        for key, spec in compiled.variables.items()
+        if spec.default_upper
+        and number(result.assignments.get(key, 0)) >= spec.upper - Decimal("1e-6")
+    )
+    if not at_ceiling:
+        return None
+    lifted = replace(
+        compiled,
+        variables={
+            key: replace(spec, upper=spec.upper * 1000) if spec.default_upper else spec
+            for key, spec in compiled.variables.items()
+        },
+    )
+    again = _solve(backend, lifted, time_limit, seed, should_stop)
+    if again.status not in ("optimal", "feasible") or again.objective is None:
+        return None
+    first, second = Decimal(str(result.objective)), Decimal(str(again.objective))
+    tolerance = Decimal("1e-6") * max(Decimal(1), abs(first))
+    improved = second < first - tolerance if compiled.sense == "minimize" else second > first + tolerance
+    if not improved:
+        return None
+    names = ", ".join(
+        f"{name}[{', '.join(index)}]" if index else name for name, index in at_ceiling[:5]
+    )
+    more = f" and {len(at_ceiling) - 5} more" if len(at_ceiling) > 5 else ""
+    reason = (
+        f"The goal can improve without limit. {names}{more} rose to "
+        f"{DEFAULT_UPPER:,}, a ceiling the model never set, and raising that "
+        "ceiling improved the goal again. Give it an upper bound, or add the "
+        "rule that should hold it back."
+    )
+    blank = Solution(
+        status="unbounded",
+        optimal=False,
+        objective=None,
+        assignments={},
+        wall_seconds=round(result.wall_seconds + again.wall_seconds, 3),
+        solver=result.solver,
+    )
+    return blank, reason
+
+
+def gap_of(objective, bound) -> float | None:
+    """`|objective - bound| / max(|objective|, 1e-9)`: how far the answer may
+    be from the best, as a fraction. 0 at a proven optimum; None when there is
+    no bound to measure against. Sense-agnostic because of the absolute value.
+    """
+    if objective is None or bound is None:
+        return None
+    objective, bound = float(objective), float(bound)
+    if objective == 0 and bound == 0:
+        return 0.0
+    gap = abs(objective - bound) / max(abs(objective), 1e-9)
+    # Below the six places an objective is stored to, a gap is rounding.
+    return 0.0 if gap < 1e-9 else gap
 
 
 def _record_conflict(

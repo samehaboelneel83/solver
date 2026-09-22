@@ -38,6 +38,7 @@ class SolveFn(Protocol):
         time_limit: float,
         workers: int,
         should_stop: ShouldStop | None = None,
+        seed: int | None = None,
     ) -> Solution: ...
 
 
@@ -71,11 +72,12 @@ def _cpsat_solve(
     time_limit: float,
     workers: int,
     should_stop: ShouldStop | None = None,
+    seed: int | None = None,
 ) -> Solution:
     from app.solve import cpsat
 
     return cpsat.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
     )
 
 
@@ -85,11 +87,12 @@ def _milp_solve(
     time_limit: float,
     workers: int,
     should_stop: ShouldStop | None = None,
+    seed: int | None = None,
 ) -> Solution:
     from app.solve import milp
 
     return milp.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
     )
 
 
@@ -105,11 +108,12 @@ def _lp_solve(
     time_limit: float,
     workers: int,
     should_stop: ShouldStop | None = None,
+    seed: int | None = None,
 ) -> Solution:
     from app.solve import lp
 
     return lp.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
     )
 
 
@@ -125,11 +129,12 @@ def _highs_solve(
     time_limit: float,
     workers: int,
     should_stop: ShouldStop | None = None,
+    seed: int | None = None,
 ) -> Solution:
     from app.solve import highs
 
     return highs.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
     )
 
 
@@ -145,11 +150,12 @@ def _scip_solve(
     time_limit: float,
     workers: int,
     should_stop: ShouldStop | None = None,
+    seed: int | None = None,
 ) -> Solution:
     from app.solve import scip
 
     return scip.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
     )
 
 

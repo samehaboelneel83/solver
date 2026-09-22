@@ -31,6 +31,11 @@ VarKey = tuple[str, tuple[str, ...]]
 # (the contract requires `^[a-z][a-z0-9_]*$`), so it cannot collide with one.
 _VIOLATION = "__violation"
 _VIOLATION_CEILING = 1_000_000
+# The upper bound of an integer or continuous variable the model left
+# unbounded. Every solver here needs a finite one (CP-SAT always, the rest to
+# keep an unbounded model from answering with an arbitrary number), so the
+# ceiling is kept and marked (`Variable.default_upper`) instead of dropped.
+DEFAULT_UPPER = 1_000_000
 _MAX_EMPTY_RANGES = 50
 
 
@@ -145,6 +150,10 @@ class Variable:
     domain: str
     lower: Decimal
     upper: Decimal
+    # True when the model set no upper bound and the compiler's guard
+    # (`DEFAULT_UPPER`) stands in. An answer resting on such a ceiling is not
+    # an optimum of the model; it is a sign the goal can improve without limit.
+    default_upper: bool = False
 
     @property
     def is_integral(self) -> bool:
@@ -336,12 +345,13 @@ class _Compiler:
                 # answers with an arbitrary number. A model that needs more
                 # says so.
                 lower = number(spec.get("lower", 0))
-                upper = number(spec.get("upper", 1_000_000))
+                upper = number(spec.get("upper", DEFAULT_UPPER))
             else:  # pragma: no cover -- the validator pins the vocabulary
                 raise Unsupported(f"variable domain {domain!r} is not solvable here")
+            defaulted = domain != "binary" and "upper" not in spec
             for combo in self._members(spec["index"]):
                 key: VarKey = (name, combo)
-                self.variables[key] = Variable(key, domain, lower, upper)
+                self.variables[key] = Variable(key, domain, lower, upper, defaulted)
 
     def _all_integral_so_far(self) -> bool:
         """Whether every variable *declared by the model* is integral.

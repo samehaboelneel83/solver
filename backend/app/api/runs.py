@@ -105,6 +105,10 @@ class RunSummary(BaseModel):
     solver_version: str | None
     compiler_version: str | None
     objective: QuantityOut | None
+    # Migration 0029. `best_bound`: no answer can beat it. `gap`: how far the
+    # answer may be from the best, as a fraction -- 0 when proven optimal.
+    best_bound: float | None = None
+    gap: float | None = None
     wall_time_s: float | None
     error: str | None
     queued_at: datetime

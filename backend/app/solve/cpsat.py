@@ -73,6 +73,7 @@ def solve(
     time_limit: float = 10.0,
     workers: int = 8,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return Solution(
@@ -133,6 +134,8 @@ def solve(
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_search_workers = workers
+    if seed is not None:
+        solver.parameters.random_seed = int(seed)
     with interrupt_when(should_stop, solver.StopSearch):
         status = solver.Solve(model)
 
@@ -141,6 +144,7 @@ def solve(
         status=_STATUS.get(status, "unknown"),
         optimal=status == cp_model.OPTIMAL,
         objective=int(solver.ObjectiveValue()) if solved and has_objective else None,
+        best_bound=float(solver.BestObjectiveBound()) if solved and has_objective else None,
         assignments={k: int(solver.Value(v)) for k, v in cp_vars.items()} if solved else {},
         wall_seconds=round(solver.WallTime(), 3),
         solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",

@@ -81,6 +81,7 @@ def solve(
     time_limit: float = 10.0,
     workers: int = 8,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return _blank("unknown")
@@ -96,6 +97,7 @@ def solve(
                     "compiled": compiled,
                     "time_limit": time_limit,
                     "workers": workers,
+                    "seed": seed,
                 },
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -130,6 +132,7 @@ def solve_in_process(
     *,
     time_limit: float = 10.0,
     workers: int = 8,
+    seed: int | None = None,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -139,6 +142,8 @@ def solve_in_process(
     solver.setOptionValue("time_limit", float(time_limit))
     if workers > 1:
         solver.setOptionValue("threads", int(workers))
+    if seed is not None:
+        solver.setOptionValue("random_seed", int(seed))
 
     variables = {key: _declare(solver, highspy, spec) for key, spec in compiled.variables.items()}
 
@@ -178,6 +183,12 @@ def solve_in_process(
     solver.run()
 
     status = _status(solver.getModelStatus())
+    if status == "feasible" and not _has_solution(solver):
+        # A limit (time, iterations) reached before any feasible point was
+        # found. The column values HiGHS holds then are not an answer --
+        # reading them gave invented numbers, or an infinite objective --
+        # so this is `unknown`: stopped before deciding anything.
+        status = "unknown"
     solved = status in ("optimal", "feasible")
     values = solver.allVariableValues() if solved else []
     keys = list(compiled.variables)
@@ -198,6 +209,7 @@ def solve_in_process(
             if solved
             else {}
         ),
+        best_bound=_bound(solver, compiled, status, sign) if solved and has_objective else None,
         wall_seconds=round(solver.getRunTime(), 3),
         solver=f"highs {_HIGHS_VERSION}",
         duals=_lp_duals(solver, compiled, added_ids) if solved else None,
@@ -250,6 +262,29 @@ def _blank(status: str) -> Solution:
     )
 
 
+def _bound(solver, compiled: Compiled, status: str, sign: float) -> float | None:
+    """The proven limit on the goal, on the same scale as the objective.
+
+    A mixed-integer model has HiGHS's own dual bound. A continuous one is
+    solved to optimality or not at all, and its optimum is its own bound.
+    """
+    if any(spec.is_integral for spec in compiled.variables.values()):
+        try:
+            bound = float(solver.getInfo().mip_dual_bound)
+        except Exception:  # pragma: no cover
+            return None
+        return bound * sign if abs(bound) < 1e20 else None
+    return solver.getObjectiveValue() * sign if status == "optimal" else None
+
+
+def _has_solution(solver) -> bool:
+    """Whether HiGHS holds a primal-feasible point (its solution status 2)."""
+    try:
+        return int(solver.getInfo().primal_solution_status) == 2
+    except Exception:  # pragma: no cover -- every pinned highspy has it
+        return False
+
+
 def _status(model_status) -> str:
     import highspy
 
@@ -260,7 +295,7 @@ def _status(model_status) -> str:
         ("kIterationLimit", "feasible"),
         ("kSolutionLimit", "feasible"),
         ("kInfeasible", "infeasible"),
-        ("kUnbounded", "unknown"),
+        ("kUnbounded", "unbounded"),
         ("kUnboundedOrInfeasible", "unknown"),
         ("kInterrupt", "unknown"),
         ("kHighsInterrupt", "unknown"),

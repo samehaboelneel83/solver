@@ -41,7 +41,7 @@ _STATUS = {
     pywraplp.Solver.INFEASIBLE: "infeasible",
     # An unbounded LP is a modelling fault -- a variable free to grow without
     # limit -- and it is not "no answer", so it does not borrow `infeasible`.
-    pywraplp.Solver.UNBOUNDED: "unknown",
+    pywraplp.Solver.UNBOUNDED: "unbounded",
     pywraplp.Solver.ABNORMAL: "error",
     pywraplp.Solver.NOT_SOLVED: "unknown",
 }
@@ -61,6 +61,7 @@ def solve(
     time_limit: float = 10.0,
     workers: int = 8,
     should_stop=None,
+    seed: int | None = None,
 ) -> Solution:
     discrete = [key[0] for key, spec in compiled.variables.items() if spec.is_integral]
     if discrete:
@@ -71,6 +72,9 @@ def solve(
 
     solver = pywraplp.Solver.CreateSolver(_ENGINE)
     solver.SetTimeLimit(int(time_limit * 1000))
+    if seed is not None:
+        # GLOP's own parameters, in their text form; it perturbs with them.
+        solver.SetSolverSpecificParametersAsString(f"random_seed: {int(seed)}")
 
     variables = {
         key: solver.NumVar(float(spec.lower), float(spec.upper), f"{key[0]}[{','.join(key[1])}]")
@@ -116,6 +120,12 @@ def solve(
             }
             if solved
             else {}
+        ),
+        # A simplex optimum is its own bound: the dual solution proves it.
+        best_bound=(
+            solver.Objective().Value()
+            if status == pywraplp.Solver.OPTIMAL and compiled.objective.coeffs
+            else None
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"glop (ortools {_ORTOOLS_VERSION})",
