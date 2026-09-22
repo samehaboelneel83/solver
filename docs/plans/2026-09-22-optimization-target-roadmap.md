@@ -442,6 +442,20 @@ against contract.json by a parity test**, and `validate.py` keeps the domain che
   interval formulation compared (expect interval to win by orders of magnitude on long horizons).
 - Frontend: editor support for each construct (catalogue-driven, same TermBuilder), TS validator parity.
 
+**Progress (2026-09-23):** slice 1, the contract, is done. `contract.json`
+is `version` 2 with `acceptedVersions` [1, 2]: version 2 is version 1 plus
+what this phase adds, so every stored document stays valid; both
+validators read either, the editor writes 2, `upgrade_v1` only restamps.
+`app/ir/models.py` types the IR (strict, `extra="forbid"`; terms are a
+union keyed by their kind's key, as the IR has no `kind` field), and
+`tests/test_ir_models.py` binds it to the contract -- vocabularies,
+versions, keys, name pattern and index limit equal the JSON; the shared
+fixtures run through both; every rule code is placed as structural (the
+models refuse it) or semantic (`validate.py`, still the gate). Checked
+live: a version 2 model publishes and solves, version 3 is a 422, and the
+editor opens a version 2 model. Next slices: indicators, big-M, PWL,
+scheduling, then the editor and graph styles.
+
 ---
 
 ## Phase 11 — Explanations 2.0 (~3 weeks)
