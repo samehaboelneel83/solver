@@ -1,0 +1,472 @@
+# From today's platform to a production-grade, state-of-the-art OaaS — the plan
+
+**Written for:** whoever builds this next, including a future session of this project.
+Assumes `docs/plans/2026-09-20-platform-roadmap.md` (Phases 0–5, done) and does not
+re-explain it. This plan continues its numbering: **Phases 6–17**.
+
+**Location:** this file lives at
+`docs/plans/2026-09-22-optimization-target-roadmap.md`. `backend/app/solve/scip.py`
+is left alone, because another session is working on it.
+
+---
+
+## Context
+
+Two briefs asked for, first, a production-grade audit and rebuild (IR, IIS, persistence,
+tenancy, caching, observability, live progress, tests) and, second, a state-of-the-art optimization core
+(indicators, PWL, symmetry, scheduling, decomposition, LNS, portfolios, PDLP/GPU, ML, uncertainty,
+multi-objective, nonlinear, advanced explanations). Both briefs describe an attached architecture that is
+**not this repository**. This plan sets their target against the code that actually exists
+(HEAD `40f0907`, migrations to `0028`, 1100+ backend tests).
+
+### Verdict on the briefs' premises — what does *not* need fixing
+
+| Brief says | Reality here | Action |
+|---|---|---|
+| Big-M hardcoded 1000 | No Big-M exists. Boolean structure was deferred on purpose (contract §5) | Build it properly in Phase 10 |
+| `==` soft rule has one slack | One `s ≥ 0` shared by `left+s ≥ r` and `left−s ≤ r` = |deviation|. **Correct** | None |
+| CP-SAT `int()` truncation | `_whole()` raises `NotIntegral`; routing keeps fractional models away | Optional scaling in Phase 6 |
+| SIGALRM timeouts | Not used. Solver-native limits + `stop.py` interrupt thread + heartbeat | None |
+| Celery `RLIMIT_AS` leakage | No Celery. Postgres `SKIP LOCKED` queue; HiGHS already in a child process | Per-run isolation in Phase 9 |
+| In-memory `provenance_map` | Conflicts persisted on `run.conflict` by rule id + instance | None |
+| "OR" string-match routing | Classification uses domains, degree, softness, fractional data, convexity | Richer fingerprint in Phase 13/17 |
+| Needs Redis + Celery | A DB queue is simpler, transactional with the run row, and already correct | **Do not add a broker.** Revisit only past ~50 runs/s |
+| Needs WebSocket | One-way progress → **SSE** over Postgres `LISTEN/NOTIFY`, polling stays as fallback | Phase 8 |
+| Pydantic IR | Contract is `ir/contract.json` shared by TS and Python with a parity test (principle 3) | Pydantic v2 models *generated from/tested against* the contract, not a second source — Phase 10 |
+
+### Real defects found (the audit's actual output)
+
+| # | Severity | Defect | Where |
+|---|---|---|---|
+| D1 | **Critical** | Any tenant can list and cancel any tenant's runs; domain/problem tables are not org-scoped | `api/runs.py:214`, `:406`; no `organization_id` outside `iam` |
+| D2 | **Critical** | HiGHS `kTimeLimit`/`kIterationLimit`/`kSolutionLimit` → `feasible` without checking a primal solution exists — a timeout with no incumbent returns garbage values | `solve/highs.py:253-271` |
+| D3 | High | `run.seed` is recorded but never passed to any solver → runs are not reproducible, contradicting principle 4 | `solve/service.py:105`; no `random_seed` anywhere |
+| D4 | High | Cancelling HiGHS `terminate()`s the child → the incumbent is lost | `solve/stop.py` |
+| D5 | High | `UNBOUNDED` is reported as `unknown` in all three linear adapters — a modelling error hidden as a solver shrug | `highs.py`, `milp.py`, `lp.py` |
+| D6 | High | No MIP gap / best bound recorded; ClickHouse `gap` column never written | adapters, `run` |
+| D7 | Medium | Rows/columns added one at a time (HiGHS, pywraplp) — O(n) Python calls; slow above ~10⁵ nonzeros | `highs.py`, `milp.py`, `lp.py` |
+| D8 | Medium | Lex stages freeze stage *k* as an exact `=` with no tolerance on continuous models → spurious infeasibility from float noise | `service.py _solve_lex` |
+| D9 | Medium | Missing upper bound defaults to 1,000,000 — safe for LP, poison for any future Big-M | `compile.py ~332` |
+| D10 | Medium | No resource limits on the worker; 8 threads hardcoded; one bad model can OOM the host | `worker.py`, `docker-compose.yml` |
+| D11 | Low | Roadmap doc drift: `cancel_requested_at`/`last_heartbeat_at` vs real `cancel_requested`/`heartbeat_at`; "reclaimed at start-up" vs before every job; gap/threads listed as settings but absent | `docs/plans/2026-09-20-platform-roadmap.md` |
+
+---
+
+## Design principles (carried over, plus three new)
+
+1–5 from the existing roadmap stand (structure is data; DB is last line of defence; one definition many
+consumers; reproducibility is a schema property; refusals name the field).
+
+6. **Nothing is enabled by default without a benchmark win.** Every technique ships behind a setting,
+   defaults off, and flips on only after the harness (Phase 6.1) shows it helps. Rule in §Benchmarking.
+7. **Honesty over coverage.** A technique that can return a wrong or unproven answer declares so
+   (`optimality`, `minimal`, `approximate`) — same pattern as `proves="global|local"`.
+8. **Tenancy is a column, not a convention.** Every row reachable by a tenant carries `organization_id`,
+   enforced by the DB (RLS), not only by routers.
+
+---
+
+## Target architecture
+
+```mermaid
+flowchart LR
+  subgraph Client
+    UI[React editor / runs UI]
+    SDK[API key clients]
+  end
+  subgraph API[FastAPI]
+    AUTH[auth: JWT + API keys\norg scoping + RLS]
+    QUOTA[quotas / rate limits]
+    IRV[IR v2 validator\ncontract.json + Pydantic]
+    LLM[NL→IR drafter\nvalidated, never auto-published]
+    SSE[SSE /runs/:id/events]
+    CACHE[result cache lookup]
+  end
+  subgraph PG[Postgres 16]
+    Q[(run queue\nSKIP LOCKED, fair by org)]
+    EV[(run_event\n+ LISTEN/NOTIFY)]
+    DATA[(model_version, dataset,\nsolution, constraint_result,\nconflict, bench_result)]
+  end
+  subgraph Worker[worker pool: per-run subprocess, cgroup limits]
+    FP[fingerprint + classify]
+    POL[policy: rules → learned selector]
+    PRE[presolve: bound propagation,\ncoef tightening, fixing, redundancy]
+    REF[reformulator: indicators native / tight-M,\nPWL, SOS, McCormick, robust dual]
+    DEC{decompose?}
+    COMP[independent blocks]
+    META[LNS / fix-and-optimize /\nrolling horizon]
+    PORT[portfolio racer]
+    AD[adapters: CP-SAT, HiGHS, GLOP,\nSCIP, PDLP, cuOpt*]
+    EXP[explain: native IIS, assumptions,\nmin-cost relaxation, diverse IIS,\nsensitivity → business language]
+    WS[warm start from nearest prior run]
+  end
+  GPU[GPU lane*]
+  OBS[OTel traces + Prometheus + JSON logs\nClickHouse run_fact]
+  UI & SDK --> AUTH --> QUOTA --> IRV --> CACHE --> Q
+  LLM --> IRV
+  Q --> FP --> POL --> PRE --> REF --> DEC
+  DEC -- separable --> COMP --> AD
+  DEC -- large/time-indexed --> META --> AD
+  DEC -- monolithic --> PORT --> AD
+  WS --> AD
+  AD --> EXP --> DATA
+  AD -- incumbents, bounds --> EV --> SSE --> UI
+  AD -. lp_huge .-> GPU
+  Worker --> OBS
+  API --> OBS
+```
+`*` = gated on demand (Phase 14).
+
+---
+
+## Technique triage (the brief's table)
+
+Impact is *for this platform's problem families* (rostering, coverage, blending, balancing — template-driven, 10²–10⁶ vars).
+**P** = proven industrial practice; **R** = research-stage / immature in production.
+
+| Technique | Helps | Impact | Effort | Maturity | Priority / phase |
+|---|---|---|---|---|---|
+| Correct status handling, gap, seed, batching | all | correctness | S | P | **P0 / 6** |
+| Benchmark + golden harness | all | enables everything | M | P | **P0 / 6** |
+| Tenancy, quotas, fair queue | SaaS | safety | M | P | **P0 / 7** |
+| Observability + SSE progress | ops/UX | high | M | P | P1 / 8 |
+| Per-run process isolation, limits | ops | high | S | P | P1 / 9 |
+| Native indicators (CP-SAT `OnlyEnforceIf`, SCIP) + bound-derived M | logic rules | high | M | P | P1 / 10 |
+| Interval vars, NoOverlap, Cumulative (CP-SAT) | scheduling | very high vs time-indexed | M | P | P1 / 10 |
+| PWL (SOS2 / incremental / CP-SAT element) | step costs, curves | medium | M | P | P2 / 10 |
+| Bound propagation / coef tightening presolve | Big-M models | medium (solvers do most already) | M | P | P2 / 10 — only what solvers *can't* see (IR-level bounds) |
+| Native IIS (HiGHS LP), CP-SAT assumptions | infeasible | high UX | M | P | P1 / 11 |
+| Min-cost relaxation, diverse IIS | infeasible | high UX | M | P (MARCO is P for SAT) | P1 / 11 |
+| Sensitivity in business language, ranging | LP | high UX | S | P | P1 / 11 |
+| Result cache, warm starts / hints | repeated solves | high for scenario workflow | S–M | P | P1 / 12 |
+| Symmetry breaking (identical entities) | rostering | medium on MILP, low on CP-SAT (has own) | M | P | P2 / 13 |
+| LNS / fix-and-optimize / rolling horizon | huge / long-horizon | high when monolithic stalls | L | P | P2 / 13 |
+| Portfolio racing | ambiguous class | medium, costs 2× CPU | M | P | P2 / 13 |
+| Optuna param tuning per family/tenant | repeat families | 10–40% typical | M | P | P2 / 13 |
+| Separable block detection | multi-site | high when present | S | P | P2 / 14 |
+| Benders / column generation / B&P | crew, shift, vehicle | very high on the right structure, zero elsewhere | XL | P (per-problem), R (automatic) | P3 / 14 — template-specific only |
+| Lagrangian relaxation | bounds | medium | L | P | P3 / 14 |
+| PDLP (CPU), crossover policy | LP > ~10⁷ nnz | high at that size only | S | P (OR-Tools/HiGHS) | P3 / 14 |
+| GPU (cuOpt, cuPDLP) | huge LP, VRP | high at scale | L + infra | P (young) | P4 / 14 — only on demand |
+| Epsilon-constraint Pareto + UI | trade-offs | high UX | M | P | P2 / 15 |
+| Two-stage stochastic (SAA) + scenario reduction | uncertain demand | medium-high | L | P | P3 / 15 |
+| Robust budgeted (Bertsimas–Sim) | uncertain coefs | medium | M | P | P3 / 15 |
+| Chance constraints (SAA + indicators) | service levels | medium | M | P | P3 / 15 |
+| Bilinear/McCormick, general NLP/MINLP (SCIP), IPOPT local | nonlinear | niche today | L | P | P3 / 16 |
+| Learned solver selection | routing | medium, needs ≥ few k runs | M | P (simple GBDT) | P3 / 17 |
+| NL → IR with validation | onboarding | high UX | M | P (with validator gate) | P2 / 17 |
+| GNN branching / learned primal heuristics | MILP | unproven outside lab | XL | **R** | Not planned; revisit yearly |
+| Learned variable-fixing | repeat families | medium | L | R→P (as LNS seed only) | P4 / 17, as an LNS destroy operator |
+
+---
+
+## Phase 6 — Correctness and the safety net (~3 weeks) — **do first**
+
+### 6.1 Benchmark + golden-model harness (lands before any fix, so fixes are measured)
+
+- `backend/bench/` package:
+  - `families/` — seeded **generators** per template (`weekly_rota`, `shift_coverage`, `feed_blend`,
+    `load_balance`, + one scheduling family added in Phase 10) at sizes S/M/L/XL. Output = (IR, dataset JSON)
+    that goes through the real `validate → compile → choose → solve` path.
+  - `mps/` — MIPLIB 2017 "benchmark/easy" subset (≈30 instances, stored via download script, not
+    committed) run **directly through adapters** (an `mps_to_compiled()` loader). This lane measures
+    solver-parameter techniques only; IR-level techniques can't be tested on MPS.
+  - `golden/` — ~40 small models with **known optimal objective, status and conflict set**
+    (hand-verified; includes infeasible, unbounded, time-limited, soft, lex, quadratic). Each is a
+    pytest case, run in `scripts/check.sh`.
+  - `run.py` — `python -m bench.run --family rota --sizes S,M --technique warm_start=on,off --seeds 5`
+    → JSON rows `{instance, technique, seed, status, obj, bound, gap, time, primal_integral, wrong}`.
+  - `report.py` — shifted geometric mean (shift 10 s), win/loss/tie, per-instance regressions; writes
+    `bench/results/<date>-<technique>.md`.
+- Table `bench_result` (migration `0029`) so the history is queryable; nightly CI job on L sizes.
+- **Enable-by-default rule:** ≥10% SGM improvement in time-to-optimal *or* final gap on ≥2 families,
+  no instance >2× slower, **zero wrong answers** (status or objective disagreeing with golden/another
+  backend beyond tolerance 1e-6 rel).
+- **Equivalence tests for reformulations:** for every rewrite (soft, lex, indicator, PWL, McCormick,
+  robust), enumerate all assignments of tiny models (≤12 binaries) and assert the original and rewritten
+  model agree on feasibility and objective. Lives in `backend/tests/test_reformulate_equivalence.py`.
+
+### 6.2 Fixes
+
+- **D2 status:** in `highs_worker.py`, read `info.primal_solution_status == 2` (feasible) before
+  mapping limit statuses to `feasible`; otherwise `unknown` with reason `"stopped before any solution"`.
+  Add the same guard for pywraplp `FEASIBLE`. Golden cases: timeout-with / without-incumbent.
+- **D5 unbounded:** add run status/outcome `unbounded` (migration `0030` extends the enum + UI copy:
+  "a goal can improve forever — a variable is missing a bound or a rule"). `kUnboundedOrInfeasible` →
+  re-solve with objective stripped to disambiguate.
+- **D3 seed:** a `SolveParams` dataclass (`time_limit, threads, seed, gap_rel, hint`) passed to every
+  adapter; CP-SAT `random_seed`, HiGHS `random_seed`, SCIP `randomization/randomseedshift`, pywraplp
+  via `SetSolverSpecificParametersAsString`. Test: same seed + `threads=1` → identical assignment.
+- **D6 gap:** adapters return `best_bound`; `run.best_bound`, `run.gap` (migration `0030`). Gap =
+  `|obj − bound| / max(|obj|, 1e-9)`; `0` when both are `0`; `null` when no bound; sense-agnostic
+  because of the absolute value; documented against HiGHS's own `mip_gap`. Settings `solve.gap_rel`,
+  `solve.threads` added (closes D11's third point).
+- **D4 incumbent on stop:** HiGHS child registers the MIP improving-solution callback
+  (highspy ≥ 1.8 `setCallback`/`kCallbackMipImprovingSolution` — verify against pinned version) and
+  streams incumbents over the pipe; on cancel, send `cancelSolve` via the interrupt callback, fall back
+  to `terminate()` after 3 s; the last streamed incumbent is the result, status `feasible`.
+- **D7 batching:** build CSR arrays once in `compile.py` (`Compiled.to_csr()`); HiGHS `passModel`/
+  `addRows` with arrays; pywraplp keeps per-row but through `MPModelProto` load (`LoadModelFromProto`).
+  Bench proves the win at L/XL.
+- **D8 lex tolerance:** freeze stage k as `≥/≤ obj_k ∓ max(1e-6·|obj_k|, 1e-9)` for continuous models;
+  keep exact `=` for integral ones.
+- **D9 bounds:** keep the 1e6 default for LP only, mark such variables `bound_source="default"` in
+  `Compiled` so Phase 10's reformulator refuses to derive M from them.
+- **CP-SAT fractional scaling (optional, gated):** if every fractional number has ≤ k decimals (k ≤ 4)
+  and scaled coefficients × bounds fit in 2⁵³, multiply each row by 10ᵏ, divide by the row gcd, and
+  admit it to CP-SAT. Objective scaled the same, then un-scaled when reported. Otherwise routing is unchanged.
+  Enabled only if the bench shows CP-SAT beating HiGHS on those instances.
+- **D11:** correct the roadmap doc.
+
+**Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
+with the same seed reproduce; gap visible in the Runs UI.
+
+---
+
+## Phase 7 — Multi-tenancy, auth, quotas, fair queueing (~3 weeks)
+
+**Decision 6/T needed** (see Decisions): what a tenant is. Assumed: `iam.organization`.
+
+- Migration `0031`: `organization_id uuid not null` on `domain` (and by FK chain everything below it);
+  denormalised onto `problem` and `run` for cheap filtering; backfill to the seed org.
+- **Postgres RLS** policies on those tables using `current_setting('app.org_id')`, set per request in
+  the session dependency (`api/deps.py`) and per job in the worker. Routers also filter (fast 404
+  rather than empty lists).
+- Fix D1: `GET /runs`, `GET/POST /runs/{id}/cancel` scoped; cross-org access → 404.
+- **API keys:** `iam.api_key(id, organization_id, prefix, hash, capabilities[], expires_at, last_used_at)`;
+  `Authorization: Bearer sk_<prefix>_<secret>`; bcrypt/argon2 hash; capabilities ⊆ the creator's.
+- **Quotas** `iam.quota(organization_id, max_concurrent_runs, max_queued_runs, cpu_seconds_month,
+  max_time_limit_s, max_vars)`; checked at submit (422 naming the quota), CPU-seconds metered from
+  `run.wall_time_s × threads` into `iam.usage_month`.
+- **Fair claim:** `claim_next` orders queued runs by (org's currently running count ASC, priority,
+  created_at) and skips orgs at `max_concurrent_runs` — one SQL statement with a CTE, still `SKIP LOCKED`.
+- **Rate limit:** per-key token bucket in Postgres (`UPDATE ... RETURNING`), 429 with `Retry-After`.
+- Tests: two-org fixtures; every list/detail/cancel route asserted isolated; property test that no query
+  in `api/` lacks the org filter (grep-level lint in `scripts/check.sh`).
+
+---
+
+## Phase 8 — Observability and live progress (~2 weeks)
+
+- **Logs:** `structlog` JSON, bound `run_id`, `org_id`, `trace_id`, `solver`; uvicorn and worker share config.
+- **Metrics:** `prometheus_client` — `solve_seconds{solver,class,status}` histogram, `run_gap` gauge at
+  finish, `queue_depth{org}`, `queue_wait_seconds`, `worker_busy`, `diagnose_probes_total`; `/metrics`
+  on API and a sidecar port on the worker.
+- **Tracing:** OpenTelemetry; API span injects `traceparent` into `run.params.trace`; worker extracts
+  it, spans `compile`, `choose`, `solve`, `diagnose`, `persist`. OTLP exporter configurable.
+- **ClickHouse writer:** on run settle, insert `run_fact` (schema already exists) — basis for Phase 17.
+- **Progress events:** table `run_event(run_id, seq, at, kind: incumbent|bound|log|stage, payload)`,
+  written throttled (≤2/s) from adapter callbacks (CP-SAT `CpSolverSolutionCallback`, HiGHS callback,
+  SCIP event handler); `pg_notify('run_<id>', seq)`.
+- **SSE** `GET /api/v1/runs/{id}/events` (`sse-starlette`): replays from `Last-Event-ID`, then LISTENs;
+  heartbeat comment every 15 s; closes on terminal status. Frontend `EventSource` with automatic
+  reconnect; falls back to the existing 1 s polling when SSE fails twice. Runs UI shows a live
+  incumbent/bound chart (primal–dual curve).
+- Retention: `run_event` pruned 30 days after settle (setting); `solution` kept by default,
+  `retention.solution_days` per org optional.
+
+---
+
+## Phase 9 — Worker isolation and resource control (~1–2 weeks)
+
+**Decision 4 (where solvers run) is answered here:** a worker container pool; each run solves in a **fresh
+subprocess** (generalise the HiGHS child pattern into `solve/sandbox.py`). The subprocess:
+`resource.setrlimit(RLIMIT_AS, mem_limit)`, `RLIMIT_CPU` = time_limit × threads + grace; the parent
+enforces a hard wall deadline = time_limit + 15 s → SIGTERM → SIGKILL. The parent's DB session is never
+shared with the solver.
+- Worker count and threads from settings/env, not hardcoded 8; `docker-compose` gets `mem_limit`/`cpus`.
+- An OOM or kill becomes `status=failed, reason="ran out of memory at N MB"` instead of a dead worker.
+- Windows dev: `RLIMIT` unavailable → the sandbox degrades to deadline-only, logged once.
+
+---
+
+## Phase 10 — IR v2: logic and structure (~5–6 weeks)
+
+**Contract stays the single source.** `ir/contract.json` → `"version": 2`; v1 documents are valid v2
+(pure superset), and a migration function `upgrade_v1()` is kept anyway. Pydantic v2 models in
+`backend/app/ir/models.py` (strict, `extra="forbid"`, discriminated unions on `kind`) are **checked
+against contract.json by a parity test**, and `validate.py` keeps the domain checks Pydantic can't express
+(set references, index arity). Adds:
+
+| New construct | IR form (sketch) | CP-SAT | HiGHS / MILP | SCIP |
+|---|---|---|---|---|
+| Implication / indicator | `{"when": <binary var term>, "then": <rule>}` | `OnlyEnforceIf` | tight Big-M: `M = maxactivity(left−right)` from **declared** bounds; refuse with reason if any bound is `default` | `addConsIndicator` |
+| Disjunction | `{"any_of": [rule, ...], "at_least": k}` | reified bools + `AddBoolOr`/sum | one binary per branch + tight M | indicators |
+| all_different | `{"all_different": term over set}` | `AddAllDifferent` | refuse → route to CP-SAT | refuse |
+| Interval / NoOverlap / Cumulative | variable kind `interval {start, size, end, optional_when}`; rules `no_overlap`, `cumulative {demand, capacity}` | native | refuse with "scheduling rule — solved by CP-SAT" | refuse |
+| Piecewise-linear | term `pwl {x, breakpoints[], values[]}` | `AddElement` / table on integer x | convex & minimised → epigraph (no binaries); else **incremental** (δ-formulation; stronger LP relaxation than convex-combination with binaries) | SOS2 |
+| abs / min / max | terms | `AddAbsEquality`, `AddMin/MaxEquality` | epigraph when convex-compatible, else binaries | native |
+
+- **Reformulator** `backend/app/solve/reformulate.py`: runs between `compile` and the adapter, driven by
+  the backend's declared capabilities (`supports_indicator`, `supports_sos`, `supports_interval` added to the
+  registry) and never rewrites what the backend can take natively. Every rewrite is recorded in
+  `Compiled.provenance` (row → rule id, instance, rewrite kind) and persisted in `run.params.reformulations`.
+- **IR-level presolve** `solve/presolve.py`: bound propagation through the IR's linear rules (a few
+  FBBT rounds) **only to tighten M and PWL domains** before rewriting; solver presolves do the rest, so
+  redundancy removal/coefficient tightening are *not* re-implemented (bench would not justify it).
+- **Classifier** gains `needs`: `indicator`, `scheduling`, `all-different`, `pwl-nonconvex`; `choose()`
+  then routes scheduling to CP-SAT automatically.
+- A scheduling template (`job_shop` or `nurse_shifts_with_breaks`) + bench family, time-indexed vs
+  interval formulation compared (expect interval to win by orders of magnitude on long horizons).
+- Frontend: editor support for each construct (catalogue-driven, same TermBuilder), TS validator parity.
+
+---
+
+## Phase 11 — Explanations 2.0 (~3 weeks)
+
+- **Native IIS:** HiGHS LP `getIis` (verify availability in pinned highspy; fallback to current
+  deletion filtering); CP-SAT: one enforcement literal per rule instance, `AddAssumptions`, then
+  `SufficientAssumptionsForInfeasibility()` (core, not guaranteed minimal → shrink with deletion
+  filtering on the core only, which is far cheaper than on the model). MILP: deletion filtering stays.
+  `conflict_minimal` semantics unchanged. Bench: probes and time per diagnosis.
+- **Minimum-cost relaxation** ("cheapest set of rules to give up"): every hard rule gets a
+  relaxation indicator `r_i` with cost from a new `priority` field (1–5 → weights 1, 10, 100, …) ;
+  minimise Σ cost·r_i subject to rule_i enforced unless r_i. Also a **quantitative** variant via the existing elastic
+  compiler (min weighted violation). Result persisted in `run.relaxation`, UI: "Drop *Max 5 nights*
+  for 2 nurses, or *Min coverage Tue* by 1".
+- **Diverse IISs:** MARCO-style loop: after an IIS S, add a blocking clause (not all of S enabled) over
+  the rule-level assumption literals, search again; stop at N=5 or budget; report the *hitting set*
+  ("every conflict involves *Weekend cover*").
+- **Sensitivity in business language:** LP duals ×  the rule's unit and display names →
+  "One more nurse on Tuesday lowers cost by $X (valid from 3 to 7 nurses)", ranges via HiGHS
+  `getRanging`. MILP: duals of the **fixed-integer LP** re-solve, labelled "local: holds while the
+  schedule's shape stays the same" (principle 7). What-if button creates a scenario patch and a run.
+
+---
+
+## Phase 12 — Caching and warm starts (~2 weeks)
+
+- **Result cache:** key = sha256(ir_hash, dataset_hash, scenario_patch, solver, SolveParams incl. seed).
+  A submit whose key matches a *completed, proven-optimal* run returns that run (new row with
+  `reused_from`), no solve. Proven-optimal only; feasible/time-limited results are hints, not answers.
+- **Warm start:** nearest prior run = same `model_version` lineage (or parent version), same problem,
+  most recent completed. Map assignments by variable key `(name, index-tuple)`; unknown keys dropped.
+  CP-SAT `AddHint` (+ `repair_hint` when the hint may be infeasible), HiGHS `setSolution`, SCIP
+  `addSol`/`createPartialSol`. Recorded as `run.params.warm_start_from`. Setting `solve.warm_start`
+  default **off** until bench (scenario families: perturb 5% of data, re-solve) shows the win.
+
+---
+
+## Phase 13 — Search power (~5 weeks)
+
+- **Symmetry breaking:** detect entities of one type whose frozen attributes, parameters and incident
+  relationships are identical (hash of signature) and that appear symmetrically in every rule →
+  lexicographic ordering on their aggregate load (`Σ x[e1,·] ≥ Σ x[e2,·]`). **Applied only for
+  HiGHS/MILP** (CP-SAT does its own symmetry detection; adding constraints can hurt it). Must not
+  change the optimum → equivalence test + golden. Gated by bench.
+- **LNS / fix-and-optimize** `solve/lns.py`: for models where the monolithic solve stalls (no gap
+  improvement for 20% of the budget) or size > threshold. Destroy operators over the *IR's* structure,
+  not raw variables: by entity block, by time window, by relationship neighbourhood, random; repair =
+  sub-solve with the rest fixed, warm-started. ALNS weights by improvement/time. CP-SAT already runs
+  internal LNS, so this targets **HiGHS/MILP and very large CP-SAT models** only.
+- **Rolling horizon / relax-and-fix** for models indexed by an ordered time set (detected: a set whose
+  members carry an order attribute used in `via`/ordering): solve window k with later windows
+  relaxed (LP) or dropped, fix window k's early part, slide. Labelled `optimality=none` (a heuristic).
+- **Portfolio racing** `solve/portfolio.py`: when ≥2 backends fit and the class is IP/MILP, run each in a
+  sandbox with `threads/2`; first *proven* optimum wins, others are cancelled; else best incumbent at
+  deadline. Incumbent sharing: CP-SAT's solution → HiGHS `setSolution` mid-run is not supported, so
+  sharing is limited to restarting the loser with a hint (not worth it) → **no sharing, just racing.**
+  Setting per problem; default off.
+- **Tuning:** `bench/tune.py` with Optuna (TPE) per template family over a whitelisted parameter space
+  per backend (CP-SAT: `num_workers`, `linearization_level`, `symmetry_level`; HiGHS: `mip_heuristic_effort`,
+  `presolve`, …); objective = SGM primal integral on held-out instances; results stored as a setting
+  at domain/problem level (the existing three-level settings), with `tuned_at` and the bench report link.
+
+---
+
+## Phase 14 — Scale: decomposition, first-order, GPU (~6+ weeks, demand-driven)
+
+- **Separable blocks (do this part):** build the variable–constraint incidence graph from `Compiled`;
+  connected components ⇒ independent sub-models solved in parallel (sandboxes), objective summed,
+  status = worst. Common in multi-site templates; exact, always a win when >1 component.
+- **Near-separable detection:** remove rows that link many blocks (hypergraph partitioning, e.g. `kahypar`)
+  and report "this model decomposes into k blocks with m linking rules" — input to the decision below.
+- **Benders / column generation / branch-and-price:** implemented **per template**, not automatically
+  (automatic DW, e.g. GCG, is research-grade outside SCIP). First target: shift-scheduling column generation
+  (pricing = per-employee shortest path / CP-SAT), price-and-branch heuristic first, full B&P only if gaps
+  demand it. Logic-based Benders for scheduling with assignment master + CP-SAT subproblem cuts.
+- **Lagrangian relaxation** of linking rules → bound + repaired heuristic; used as a *bound provider* for
+  gap reporting on huge instances.
+- **Decision criterion (monolithic vs decomposed):** monolithic unless (a) separable → always split;
+  (b) monolithic gap after budget > 5% *and* linking rows < 5% of rows *and* a template decomposition exists.
+- **PDLP:** registry entry `pdlp` (OR-Tools `PDLP` or HiGHS `solver=pdlp`), class LP, rank below GLOP/HiGHS;
+  selected when nnz > 10⁷ or memory estimate for simplex/barrier exceeds limit. Crossover **off** by
+  default (reported `approximate`, tolerance shown); on when the user needs duals/basis → HiGHS crossover.
+- **GPU lane:** `requires_gpu` capability; separate claim filter (`worker.lane='gpu'`); cuOpt for VRP / huge LP,
+  cuPDLP. **Only build when a tenant has instances that need it**; costs infra and an NVIDIA runtime.
+
+---
+
+## Phase 15 — Multiple objectives and uncertainty (~5 weeks)
+
+- **Pareto (epsilon-constraint)** on two objectives: reuse lex machinery; solve extremes, then N ε-steps
+  (default 10) with warm starts; persist `pareto_point` rows; UI trade-off chart, click a point → its run.
+  Weighted sums documented as missing non-convex front points.
+- **IR v3 uncertainty:** parameters may declare `uncertainty {kind: interval|scenarios, deviation, gamma}`.
+- **Robust (Bertsimas–Sim budget Γ):** exact linear dual reformulation per affected row (adds z, p_j ≥ 0);
+  equivalence tested; reports price of robustness vs nominal.
+- **Two-stage stochastic (SAA):** stage marking on variables (`stage: 1|2`); scenarios = the existing
+  `scenario` patches or sampled from distributions; extensive form for ≤ ~50 scenarios; scenario reduction
+  by k-medoids on parameter vectors; out-of-sample evaluation reported (with confidence interval).
+- **Chance constraints:** SAA with one indicator per sample and `Σ violations ≤ ε·N` (needs Phase 10 indicators).
+
+---
+
+## Phase 16 — Nonlinear stage 3b (~4 weeks) — coordinates with the in-flight SCIP work
+
+- Products in rules, and a closed function catalogue each labelled convex/concave/neither.
+- Detection: DCP-style composition rules on the term tree → `convex|concave|unknown`.
+- **McCormick** envelopes for bilinear terms with declared finite bounds (relaxation for bounds/heuristics;
+  SCIP does this internally for exact solves). SOCP detection → SCIP (or a conic solver later).
+- IPOPT as `proves="local"`; **Decision 5** decides whether a local optimum may be shown.
+
+---
+
+## Phase 17 — Learning and LLM assistance (~4 weeks, after ≥ 3 months of `run_fact` data)
+
+- **Fingerprint** (`solve/fingerprint.py`, computed on every run, stored): counts by var type, nnz, row
+  types (set partition/cover/knapsack/general), coefficient range and integrality, bound tightness,
+  indicator/scheduling counts, block count, density, objective degree.
+- **Learned selector:** gradient-boosted classifier (LightGBM) on fingerprint → best backend/params,
+  trained offline from bench + production `run_fact`; used **only when confidence > threshold**, otherwise
+  the rule policy; `why_solver` says which. Shadow mode first (predict, don't act; compare).
+- **Learned variable fixing:** predict variables stable across a family's runs → used as the *first LNS
+  destroy/repair seed* only, never as hard fixing (so a wrong prediction costs time, not correctness).
+- **NL → IR:** Claude (`claude-sonnet-5` default, `claude-opus-5` for hard models) with tool-use producing
+  an IR v2 document against the contract JSON schema; **the validator is the gate**; output is a *draft
+  version* shown as a diff in the editor; never auto-published; the model sees the domain's sets and
+  parameters but not other tenants' data. Eval set: 50 NL descriptions ↔ golden IRs, measured by golden
+  objective equality.
+- **GNN branching / learned primal heuristics:** research-stage; not planned. Revisit if a solver ships it.
+
+---
+
+## Decisions needed (block the named phase)
+
+1. **(Phase 7) What is a tenant?** Assumed `iam.organization`; confirm that domains are owned by exactly one org.
+2. **(Phase 9) Decision 4, where solvers run:** proposed answer, one subprocess per run in a worker container pool.
+3. **(Phase 16) Decision 5, local optima:** show with a warning, or refuse?
+4. **(Phase 17) LLM provider and data policy** for NL → IR (tenant data leaving the platform).
+5. **(Phase 14) GPU budget:** is there any instance today that needs it? If not, the GPU lane stays unbuilt.
+6. **Redis:** recommended **no** for now. Confirm, or name the load that justifies it.
+
+## Sequencing
+
+```
+6 correctness + bench ──┬── 7 tenancy ── 8 observability/SSE ── 9 isolation
+                        ├── 10 IR v2 logic/scheduling ── 11 explanations ── 15 multi-obj/uncertainty
+                        ├── 12 cache/warm start ── 13 search power ── 14 decomposition/PDLP/GPU
+                        └── 16 nonlinear (parallel with 10, own track)
+8 + 3 months of data ── 17 learning/LLM
+```
+Rough total: MVP-hardening (6–9) ≈ 10 weeks; v1 capability (10–13) ≈ 15 weeks; scale (14–17) demand-driven.
+
+## Verification (every phase)
+
+- `bash scripts/check.sh` green (backend + frontend + lint + new golden suite).
+- Each phase adds golden models covering its new statuses/constructs, equivalence tests for any
+  rewrite, and a bench report in `bench/results/` justifying any default flip.
+- Phase 7: cross-tenant isolation test suite; Phase 8: SSE reconnect test (kill connection mid-run,
+  resume from `Last-Event-ID`); Phase 9: an OOM model yields `failed` with a reason and the worker survives;
+  load test with `locust` (N orgs × submit bursts) asserting fair share within ±20% and p95 queue wait.
+- End-to-end manual check per phase via the `run` skill: seed demo → solve → watch live → cancel → diagnose.
