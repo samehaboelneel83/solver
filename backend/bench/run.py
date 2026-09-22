@@ -10,7 +10,11 @@ One JSON row per (instance, backend, technique value, seed):
 
 **Techniques are solve settings.** `--technique name=v1,v2` runs every value
 of one `solve_compiled` knob (`gap_rel`, `workers`) so the report can compare
-them; the first value is the baseline. A technique that is not a knob yet
+them; the first value is the baseline. `cpsat_scaling=0,1` is a routing
+setting instead: for each value it runs only the backend `choose` picks with
+the setting so (migration 0039), as a run would, and labels the rows
+`routed` with the backend in `solver` -- the comparison is of the two
+decisions, on the same instances. A technique that is not a knob yet
 cannot be benchmarked here, which is the point: it is not wired in either.
 
 **`wrong` is disagreement, not a guess.** Two backends that both claim a
@@ -56,8 +60,8 @@ def parse_technique(text: str | None) -> Technique:
     if not text:
         return Technique(None, [None])
     name, _, values = text.partition("=")
-    if name not in ("gap_rel", "workers"):
-        raise SystemExit(f"--technique takes gap_rel or workers, not {name!r}")
+    if name not in ("gap_rel", "workers", "cpsat_scaling"):
+        raise SystemExit(f"--technique takes gap_rel, workers or cpsat_scaling, not {name!r}")
     cast = float if name == "gap_rel" else int
     return Technique(name, [cast(v) for v in values.split(",") if v])
 
@@ -112,6 +116,11 @@ def run(
     source = _mps(mps_dir) if mps_dir else _generated(families, sizes, count)
     rows: list[dict[str, Any]] = []
     for family, size, name, compiled, found, compile_s, only in source:
+        if technique.name == "cpsat_scaling":
+            rows += _routed(
+                family, size, name, compiled, found, compile_s, technique, seeds, time_limit, workers
+            )
+            continue
         for backend in REGISTRY:
             if backends and backend.name not in backends:
                 continue
@@ -166,6 +175,65 @@ def run(
     mark_wrong(rows)
     mark_primal_integral(rows)
     return rows
+
+
+def _routed(family, size, name, compiled, found, compile_s, technique, seeds, time_limit, workers):
+    """One row per (value, seed): the backend a run would get, and its answer."""
+    from app.solve.backends import NoBackend, choose
+    from app.solve.scaling import admit
+
+    rows = []
+    for value in technique.values:
+        considered = admit(found, compiled) if value else found
+        try:
+            backend, _ = choose(considered)
+        except NoBackend:
+            continue
+        for seed in range(1, seeds + 1):
+            rows.append(
+                _solve_row(family, size, name, compiled, found, compile_s, backend,
+                           "cpsat_scaling", value, seed, time_limit, {"workers": workers}, label="routed")
+            )
+    return rows
+
+
+def _solve_row(family, size, name, compiled, found, compile_s, backend, technique, value, seed,
+               time_limit, knobs, *, label=None):
+    from app.solve.service import gap_of, solve_compiled
+
+    incumbents: list[tuple[float, float]] = []
+
+    def heard(kind: str, payload: dict) -> None:
+        if kind == "incumbent" and payload.get("objective") is not None:
+            incumbents.append((payload["t"], payload["objective"]))
+
+    started = time.monotonic()
+    result, _ = solve_compiled(
+        backend, compiled, time_limit=time_limit, seed=seed, on_progress=heard, **knobs
+    )
+    solve_s = round(time.monotonic() - started, 4)
+    if result.objective is not None and result.status in ("optimal", "feasible"):
+        incumbents.append((solve_s, float(result.objective)))
+    return {
+        "family": family,
+        "size": size,
+        "instance": name,
+        "class": found.model_class,
+        "backend": label or backend.name,
+        "solver": backend.name,
+        "technique": technique,
+        "value": value,
+        "seed": seed,
+        "status": result.status,
+        "objective": None if result.objective is None else float(result.objective),
+        "bound": result.best_bound,
+        "gap": gap_of(result.objective, result.best_bound),
+        "compile_s": round(compile_s, 4),
+        "solve_s": solve_s,
+        "time_limit": time_limit,
+        "sense": getattr(compiled, "sense", "minimize"),
+        "incumbents": incumbents,
+    }
 
 
 def mark_wrong(rows: list[dict[str, Any]]) -> None:

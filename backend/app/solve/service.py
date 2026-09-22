@@ -42,6 +42,7 @@ from app.solve.compile import (
 )
 from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
+from app.solve.scaling import admit as admit_scaled
 from app.settings_resolve import resolve
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,8 @@ def enqueue_run(
     from_settings["workers"] = settings["solve.workers"].source
     gap_rel = float(settings["solve.gap_rel"].value)
     from_settings["gap_rel"] = settings["solve.gap_rel"].source
+    cpsat_scaling = bool(settings["solve.cpsat_scaling"].value)
+    from_settings["cpsat_scaling"] = settings["solve.cpsat_scaling"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -157,6 +160,7 @@ def enqueue_run(
                     "time_limit_s": time_limit,
                     "workers": workers,
                     "gap_rel": gap_rel,
+                    "cpsat_scaling": cpsat_scaling,
                     "classified_as": found.model_class,
                     "why": found.reasons,
                     "needs": sorted(found.needs),
@@ -475,6 +479,10 @@ def _execute(
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
         found = refine(found, compiled)
+        if params.get("cpsat_scaling"):
+            # Fractional data made whole exactly, so CP-SAT may take it
+            # (migration 0039); a model that cannot be scaled says why.
+            found = admit_scaled(found, compiled)
         events.stage(
             "compiled",
             model_class=found.model_class,

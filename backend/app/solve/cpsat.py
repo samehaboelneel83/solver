@@ -15,6 +15,12 @@ recorded on the run. Rounding such a model into CP-SAT would answer a
 different question than the one asked, which is the one failure mode a
 multi-backend platform exists to prevent. `_whole` below is the guard that
 makes that a refusal rather than a silent rounding.
+
+**Fractional data, scaled exactly (migration 0039).** A rule whose numbers
+have a few decimal places is multiplied into whole numbers (`scaling.py`)
+-- `7.5 x <= 30` is `x <= 4` -- which changes no whole-number solution; the
+objective is scaled the same way and divided back when reported. Such a
+model reaches CP-SAT only when the setting `solve.cpsat_scaling` admits it.
 """
 
 from __future__ import annotations
@@ -32,8 +38,10 @@ from ortools.sat.python import cp_model
 # not reproducible (roadmap, Phase 3).
 _ORTOOLS_VERSION = _pkg_version("ortools")
 
+from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution
+from app.solve.scaling import NotScalable, ScaledRow, reach_of, scale
 from app.solve.progress import report
 from app.solve.stop import interrupt_when
 
@@ -118,22 +126,31 @@ def solve(
             )
         return products[(a, b)]
 
+    reach = reach_of(compiled)
     for c in compiled.constraints:
-        _add(model, cp_vars, c, product_of)
+        _add(model, cp_vars, c, product_of, reach)
 
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
+    # The objective as one scaled row: whole coefficients, and the factor its
+    # value and bound are divided by on the way out -- 1 when it was whole.
+    goal = _scaled(
+        compiled.objective.coeffs, Decimal(0), compiled.objective_quadratic, reach, "the objective"
+    )
+
+    def unscale(value):
+        if value is None or goal.factor == 1:
+            return value
+        return float(Decimal(str(value)) / goal.factor)
+
     if has_objective:
-        expr = sum(
-            cp_vars[k] * _whole(coeff, f"the objective coefficient of {k[0]!r}")
-            for k, coeff in compiled.objective.coeffs.items()
-        )
+        expr = sum(cp_vars[k] * coeff for k, coeff in goal.coeffs.items())
         # A quadratic objective, exactly: each product of two variables is a
         # new integer variable held equal to that product, so the search is
         # over the true objective -- no linearisation error, and no
         # convexity needed. That is why CP-SAT may take a nonconvex
         # whole-number model and still prove the global optimum.
-        for (a, b), coeff in compiled.objective_quadratic.items():
-            expr += product_of(a, b) * _whole(coeff, f"the objective coefficient of {a[0]!r} x {b[0]!r}")
+        for (a, b), coeff in goal.quadratic.items():
+            expr += product_of(a, b) * coeff
         model.Minimize(expr) if compiled.sense == "minimize" else model.Maximize(expr)
 
     solver = cp_model.CpSolver()
@@ -147,12 +164,12 @@ def solve(
     solver.parameters.relative_gap_limit = float(gap_rel)
     callback = None
     if on_progress is not None and has_objective:
-        callback = _Progress(on_progress)
+        callback = _Progress(on_progress, unscale)
         # Our own clock: `solver.wall_time` is only readable once the solve
         # has returned, and this fires while it runs.
         started = time.monotonic()
         solver.best_bound_callback = lambda bound: report(
-            on_progress, "bound", time.monotonic() - started, callback.best, bound
+            on_progress, "bound", time.monotonic() - started, callback.best, unscale(bound)
         )
     with interrupt_when(should_stop, solver.StopSearch):
         status = solver.Solve(model, callback) if callback else solver.Solve(model)
@@ -161,8 +178,12 @@ def solve(
     return Solution(
         status=_STATUS.get(status, "unknown"),
         optimal=status == cp_model.OPTIMAL,
-        objective=int(solver.ObjectiveValue()) if solved and has_objective else None,
-        best_bound=float(solver.BestObjectiveBound()) if solved and has_objective else None,
+        objective=(
+            _objective(solver.ObjectiveValue(), goal) if solved and has_objective else None
+        ),
+        best_bound=(
+            unscale(float(solver.BestObjectiveBound())) if solved and has_objective else None
+        ),
         assignments={k: int(solver.Value(v)) for k, v in cp_vars.items()} if solved else {},
         wall_seconds=round(solver.WallTime(), 3),
         solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",
@@ -172,14 +193,38 @@ def solve(
 class _Progress(cp_model.CpSolverSolutionCallback):
     """Each better answer CP-SAT finds, with the bound at that moment."""
 
-    def __init__(self, on_progress):
+    def __init__(self, on_progress, unscale):
         super().__init__()
         self.on_progress = on_progress
+        self.unscale = unscale
         self.best = None
 
     def on_solution_callback(self) -> None:
-        self.best = self.ObjectiveValue()
-        report(self.on_progress, "incumbent", self.WallTime(), self.best, self.BestObjectiveBound())
+        self.best = self.unscale(self.ObjectiveValue())
+        report(
+            self.on_progress, "incumbent", self.WallTime(), self.best,
+            self.unscale(self.BestObjectiveBound()),
+        )
+
+
+def _scaled(coeffs, rhs, quadratic, reach, what) -> ScaledRow:
+    """`scaling.scale`, with its refusal in this module's words: the registry
+    keeps an unscalable model away, so reaching this is a selection bug."""
+    try:
+        return scale(coeffs, rhs, quadratic, reach, what)
+    except NotScalable as exc:
+        raise NotIntegral(f"cp-sat takes whole numbers, and {exc}") from exc
+
+
+def _objective(value: float, goal: ScaledRow) -> float | int:
+    """The objective in the model's own units. A whole-number objective keeps
+    its integer shape; a scaled one is divided back exactly and reported at
+    the platform's precision."""
+    exact = Decimal(int(round(value))) / goal.factor
+    # A common factor divided out of whole coefficients comes back whole.
+    if exact == exact.to_integral_value():
+        return int(exact)
+    return report_quantity(exact)
 
 
 def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):
@@ -195,22 +240,21 @@ def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):
     return product
 
 
-def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of) -> None:
+def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of, reach) -> None:
     """`left relation right`, rearranged to `terms relation rhs` because
-    CP-SAT wants the variables on one side. A quadratic rule's products are
-    held exactly, as in the objective (`product_of`)."""
+    CP-SAT wants the variables on one side, and scaled to whole numbers
+    (`scaling.scale`) -- a no-op but for a common factor when they already
+    were. A quadratic rule's products are held exactly, as in the objective
+    (`product_of`)."""
     coeffs: dict[Any, Decimal] = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
         coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
-    rhs = _whole(c.right.const - c.left.const, f"the bound of {c.id!r}")
+    row = _scaled(coeffs, c.right.const - c.left.const, c.quadratic, reach, f"rule {c.id!r}")
+    rhs = row.rhs
 
-    expr = (
-        sum(cp_vars[k] * _whole(v, f"a coefficient of {c.id!r}") for k, v in coeffs.items())
-        if coeffs
-        else 0
-    )
-    for (a, b), coeff in c.quadratic.items():
-        expr += product_of(a, b) * _whole(coeff, f"a coefficient of {c.id!r}")
+    expr = sum(cp_vars[k] * v for k, v in row.coeffs.items()) if row.coeffs else 0
+    for (a, b), coeff in row.quadratic.items():
+        expr += product_of(a, b) * coeff
 
     if c.relation in (">=",):
         model.Add(expr >= rhs)

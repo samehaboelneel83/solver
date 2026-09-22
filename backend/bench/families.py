@@ -18,6 +18,15 @@ Families, and the class each exercises:
   nutrients.
 - `load_balance` -- the load-balance template (convex QP): share hours as
   evenly as capacities allow.
+- `rota_rates` -- the rota with money and hours in them (IP, fractional
+  data): 7.5-hour shifts under a weekly hour cap, and hourly rates to the
+  cent. Every decision is yes or no; only the numbers are fractional.
+- `knapsack` -- a multi-dimensional knapsack (IP, fractional data): pick
+  items with weights to one decimal place under several capacities, for the
+  most value to the cent.
+
+The last two are what `solve.cpsat_scaling` is about (migration 0039):
+whole-number models that only reach CP-SAT once their rules are scaled.
 """
 
 from __future__ import annotations
@@ -335,11 +344,86 @@ def load_balance(size: str, instance: int) -> tuple[dict, dict]:
     return ir, data
 
 
+# -- rota_rates (IP, fractional data) ------------------------------------------------
+
+
+def rota_rates(size: str, instance: int) -> tuple[dict, dict]:
+    ir, data = rota(size, instance)
+    rnd = random.Random(f"rota_rates-{size}-{instance}")
+    days = len(data["sets"]["day"])
+    for person in data["sets"]["person"]:
+        # Rates to the cent; weekly hours a whole number, 7.5 a shift.
+        person["cost"] = rnd.randint(1200, 2600) / 100
+        person["max_hours"] = int(person.pop("max_shifts") * 7.5) + rnd.randint(0, 3)
+    cap = next(c for c in ir["constraints"] if c["id"] == "c_cap")
+    cap["left"] = _mul({"const": 7.5}, cap["left"])
+    cap["right"] = {"attr": {"of": "p", "name": "max_hours"}}
+    assert days > 0
+    return ir, data
+
+
+# -- knapsack (IP, fractional data) ---------------------------------------------------
+
+_KNAPSACK = {"S": (20, 2), "M": (60, 4), "L": (150, 8), "XL": (400, 12)}
+
+
+def knapsack(size: str, instance: int) -> tuple[dict, dict]:
+    items, dims = _KNAPSACK[size]
+    rnd = random.Random(f"knapsack-{size}-{instance}")
+    weight = [
+        {"item": f"i{i}", "dim": f"d{d}", "value": rnd.randint(10, 300) / 10}
+        for i in range(items)
+        for d in range(dims)
+    ]
+    per_dim: dict[str, float] = {}
+    for w in weight:
+        per_dim[w["dim"]] = per_dim.get(w["dim"], 0) + w["value"]
+    ir = {
+        "version": 1,
+        "sets": ["item", "dim"],
+        "parameters": {"weight": {"index": ["item", "dim"]}},
+        "variables": {"take": {"index": ["item"], "domain": "binary"}},
+        "constraints": [
+            {
+                "id": "c_capacity",
+                "forall": [{"index": "d", "set": "dim"}],
+                "left": _sum(_mul(_par("weight", "i", "d"), _var("take", "i")), ("i", "item")),
+                "relation": "<=",
+                "right": {"attr": {"of": "d", "name": "capacity"}},
+                "severity": "hard",
+            }
+        ],
+        "objective": {
+            "sense": "maximize",
+            "terms": [
+                {
+                    "id": "o_value",
+                    "weight": 1,
+                    "expression": _sum(
+                        _mul({"attr": {"of": "i", "name": "value"}}, _var("take", "i")), ("i", "item")
+                    ),
+                }
+            ],
+        },
+    }
+    data = _data(
+        {
+            "item": [{"id": f"i{i}", "value": rnd.randint(100, 5000) / 100} for i in range(items)],
+            # About half of everything fits in each dimension.
+            "dim": [{"id": d, "capacity": int(total // 2)} for d, total in sorted(per_dim.items())],
+        },
+        {"weight": weight},
+    )
+    return ir, data
+
+
 FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota": rota,
     "facility": facility,
     "feed_blend": feed_blend,
     "load_balance": load_balance,
+    "rota_rates": rota_rates,
+    "knapsack": knapsack,
 }
 
 

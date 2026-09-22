@@ -316,14 +316,37 @@ def test_cp_sat_refuses_a_continuous_model_rather_than_rounding_it(db):
     assert "continuous" in str(excinfo.value)
 
 
-def test_cp_sat_refuses_a_fractional_coefficient_in_an_otherwise_integral_model():
+def test_cp_sat_scales_a_fractional_coefficient_exactly_rather_than_rounding_it():
+    """0.5 x <= 1.5 over integers 0..10 is x <= 3 (scaled: x <= 3). Maximising
+    x gives 3; rounding 0.5 to 0 or 1 would have given 10 or 1. Whether such
+    a model reaches CP-SAT at all is routing's decision (migration 0039)."""
+    from app.solve.compile import Compiled, Constraint, Linear, Variable
+
+    key = ("x", ())
+    compiled = Compiled(
+        variables={key: Variable(key, "integer", Decimal(0), Decimal(10))},
+        constraints=[
+            Constraint("c", {}, Linear({key: Decimal("0.5")}), "<=", Linear(const=Decimal("1.5")))
+        ],
+        objective=Linear({key: Decimal(1)}),
+        sense="maximize",
+        var_index_sets={"x": []},
+    )
+
+    result = cpsat.solve(compiled, time_limit=5.0)
+    assert result.status == "optimal"
+    assert result.objective == 3
+    assert result.assignments[key] == 3
+
+
+def test_cp_sat_refuses_a_number_with_more_decimals_than_it_scales():
     from app.solve.compile import Compiled, Constraint, Linear, Variable
 
     key = ("x", ())
     compiled = Compiled(
         variables={key: Variable(key, "binary", Decimal(0), Decimal(1))},
         constraints=[
-            Constraint("c", {}, Linear({key: Decimal("0.5")}), "<=", Linear(const=Decimal(1)))
+            Constraint("c", {}, Linear({key: Decimal("0.12345")}), "<=", Linear(const=Decimal(1)))
         ],
         objective=Linear(),
         sense="minimize",
@@ -333,7 +356,7 @@ def test_cp_sat_refuses_a_fractional_coefficient_in_an_otherwise_integral_model(
     with pytest.raises(NotIntegral) as excinfo:
         cpsat.solve(compiled, time_limit=5.0)
 
-    assert "0.5" in str(excinfo.value)
+    assert "5 decimal places" in str(excinfo.value)
 
 
 def test_glop_refuses_a_discrete_model_rather_than_solving_the_relaxation(db):

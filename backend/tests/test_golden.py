@@ -24,6 +24,7 @@ from app.solve import compile_model
 from app.solve.backends import REGISTRY, NoBackend, choose
 from app.solve.classify import classify
 from app.solve.convexity import refine
+from app.solve.scaling import admit
 from app.solve.service import solve_compiled
 
 NO_DATA: dict[str, Any] = {"sets": {}, "parameters": {}, "parameter_defaults": {}, "relationships": {}}
@@ -226,6 +227,52 @@ GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
         "infeasible",
         None,
     ),
+    # Whole decisions, fractional numbers (migration 0039): CP-SAT takes these
+    # only scaled, and must agree with the backends that take the fractions.
+    # max 2.25x + 1.5y, 7.5x + 5y <= 40, x, y whole in [0, 10]. The rule is
+    # 2.5 (3x + 2y) <= 40, i.e. 3x + 2y <= 16, and the goal is 0.75 (3x + 2y),
+    # so the best is 0.75 x 16 = 12 (x = 0, y = 8 reaches it).
+    (
+        "scaled_shift_hours",
+        model(
+            {"x": INT, "y": INT},
+            [rule("hours", add(mul(c(7.5), v("x")), mul(c(5), v("y"))), "<=", c(40))],
+            "maximize",
+            [mul(c(2.25), v("x")), mul(c(1.5), v("y"))],
+        ),
+        "optimal",
+        Decimal("12"),
+    ),
+    # Knapsack to the cent: weights 2.4, 3.1, 1.7 under 5; values 3.5, 4.25,
+    # 2.1. a+b weighs 5.5, too much; a+c 4.1 is worth 5.6; b+c 4.8 is worth
+    # 6.35; all three weigh 7.2. So 6.35.
+    (
+        "scaled_knapsack",
+        model(
+            {"a": BIN, "b": BIN, "d": BIN},
+            [
+                rule(
+                    "cap",
+                    add(mul(c(2.4), v("a")), mul(c(3.1), v("b")), mul(c(1.7), v("d"))),
+                    "<=",
+                    c(5),
+                )
+            ],
+            "maximize",
+            [mul(c(3.5), v("a")), mul(c(4.25), v("b")), mul(c(2.1), v("d"))],
+        ),
+        "optimal",
+        Decimal("6.35"),
+    ),
+    # Five decimal places: past what is scaled, so CP-SAT is never offered it
+    # (`test_scaling_admits_only_what_it_can_make_whole` pins that); the
+    # others answer. 0.12345 x <= 1 lets x = 1.
+    (
+        "five_decimals",
+        model({"x": BIN}, [rule("w", mul(c(0.12345), v("x")), "<=", c(1))], "maximize", [v("x")]),
+        "optimal",
+        Decimal("1"),
+    ),
     # No objective: any answer that holds is optimal, and there is no value.
     ("feasibility", model({"x": BIN}, [rule("on", v("x"), ">=", c(1))]), "optimal", None),
 ]
@@ -235,18 +282,27 @@ def _cases():
     for name, ir, status, objective in GOLDEN:
         compiled = compile_model(ir, NO_DATA)
         found = refine(classify(ir, NO_DATA), compiled)
+        # As a run sees it with `solve.cpsat_scaling` off, and on: a backend
+        # that takes the model either way must give the known answer.
+        either = [found, admit(found, compiled)]
         takers = []
         for backend in REGISTRY:
             if not backend.is_available():
                 continue
-            try:
-                choose(found, backend.name)
-            except NoBackend:
+            if not any(_takes(backend, considered) for considered in either):
                 continue
             takers.append(backend)
         assert takers, f"{name}: no backend takes it"
         for backend in takers:
             yield pytest.param(ir, backend, status, objective, id=f"{name}-{backend.name}")
+
+
+def _takes(backend, found) -> bool:
+    try:
+        choose(found, backend.name)
+    except NoBackend:
+        return False
+    return True
 
 
 @pytest.mark.parametrize("ir, backend, status, objective", list(_cases()))
@@ -262,6 +318,15 @@ def test_golden(ir, backend, status, objective):
     if status == "unbounded":
         assert reason and "without limit" in reason
         assert result.assignments == {}
+
+
+def test_scaling_admits_only_what_it_can_make_whole():
+    """CP-SAT takes the two scaled models, and never the five-decimal one."""
+    takers = {case.id for case in _cases()}
+    assert "scaled_shift_hours-cp-sat" in takers
+    assert "scaled_knapsack-cp-sat" in takers
+    assert "five_decimals-cp-sat" not in takers
+    assert "five_decimals-highs" in takers or "five_decimals-milp" in takers
 
 
 def test_every_backend_is_exercised_by_the_golden_suite():

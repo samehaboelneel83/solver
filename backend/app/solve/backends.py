@@ -215,6 +215,9 @@ CP_SAT = Backend(
             "quadratic",
             "quadratic-constraints",
             "nonconvex",
+            # Fractional data made whole exactly (`scaling.py`), which is only
+            # a need at all when `solve.cpsat_scaling` admits the model.
+            "scaled-fractional-data",
         }
     ),
     rank=0,
@@ -228,7 +231,9 @@ CP_SAT = Backend(
 GLOP = Backend(
     name="glop",
     classes=frozenset({"LP", "trivial"}),
-    provides=frozenset({"linear", "continuous", "fractional-data", "soft-constraints"}),
+    provides=frozenset(
+        {"linear", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints"}
+    ),
     rank=0,
     solve=_lp_solve,
     # A linear model is convex: every optimum it proves is the global one.
@@ -246,7 +251,15 @@ HIGHS = Backend(
     # nearby, and this entry declares `proves="global"`.
     classes=frozenset({"IP", "LP", "MILP", "QP", "trivial"}),
     provides=frozenset(
-        {"linear", "integral", "continuous", "fractional-data", "soft-constraints", "quadratic"}
+        {
+            "linear",
+            "integral",
+            "continuous",
+            "fractional-data",
+            "scaled-fractional-data",
+            "soft-constraints",
+            "quadratic",
+        }
     ),
     rank=1,
     solve=_highs_solve,
@@ -261,7 +274,14 @@ MILP = Backend(
     name="milp",
     classes=frozenset({"IP", "LP", "MILP", "trivial"}),
     provides=frozenset(
-        {"linear", "integral", "continuous", "fractional-data", "soft-constraints"}
+        {
+            "linear",
+            "integral",
+            "continuous",
+            "fractional-data",
+            "scaled-fractional-data",
+            "soft-constraints",
+        }
     ),
     rank=1,
     solve=_milp_solve,
@@ -286,6 +306,7 @@ SCIP = Backend(
             "integral",
             "continuous",
             "fractional-data",
+            "scaled-fractional-data",
             "soft-constraints",
             "quadratic",
             "quadratic-constraints",
