@@ -29,8 +29,19 @@ from typing import Any
 
 import structlog
 
+def _add_trace(_logger, _method, event: dict[str, Any]) -> dict[str, Any]:
+    """The trace this line belongs to (`app.core.tracing`), when there is one."""
+    from app.core.tracing import current_trace_id
+
+    found = current_trace_id()
+    if found:
+        event.setdefault("trace_id", found)
+    return event
+
+
 _SHARED = [
     structlog.contextvars.merge_contextvars,
+    _add_trace,
     structlog.stdlib.add_log_level,
     structlog.stdlib.add_logger_name,
     structlog.processors.TimeStamper(fmt="iso", utc=True),

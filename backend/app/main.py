@@ -23,7 +23,7 @@ from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
-from app.core import logs, metrics
+from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal, get_clickhouse_client
 from app.core.nul_guard import NulByteGuard
 from app.seed import ensure_weekly_rota_template, seed_admin
@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     # After uvicorn has set up its own logging, so ours replaces it.
     logs.configure("api")
+    tracing.configure("api")
     # Internal port only (compose does not publish it): queue depth names
     # organizations. See app.core.metrics.
     metrics.register_queue_depth()
@@ -95,20 +96,28 @@ async def log_request(request: Request, call_next):
     `request.state`); a request that never was has none."""
     started = time.perf_counter()
     status = 500
-    try:
-        response = await call_next(request)
-        status = response.status_code
-        return response
-    finally:
-        _requests.info(
-            "request",
-            method=request.method,
-            path=request.url.path,
-            status=status,
-            duration_ms=round((time.perf_counter() - started) * 1000, 1),
-            org_id=getattr(request.state, "org_id", None),
-            user=getattr(request.state, "username", None),
-        )
+    # The root of any trace a request starts, a submitted run's included:
+    # `enqueue_run` records it on the run and the worker continues it.
+    with tracing.span(f"{request.method} {request.url.path}", method=request.method) as current:
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            current.set_attribute("status", status)
+            return response
+        finally:
+            _log_request(request, status, started)
+
+
+def _log_request(request: Request, status: int, started: float) -> None:
+    _requests.info(
+        "request",
+        method=request.method,
+        path=request.url.path,
+        status=status,
+        duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        org_id=getattr(request.state, "org_id", None),
+        user=getattr(request.state, "username", None),
+    )
 
 
 # Before routing, and so before authentication: a NUL (U+0000) anywhere in

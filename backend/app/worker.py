@@ -26,7 +26,7 @@ from types import FrameType
 
 from sqlalchemy import text
 
-from app.core import logs, metrics
+from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
 
@@ -144,6 +144,7 @@ def _record(db, run_id: int, seconds: float) -> None:
 
 def main() -> None:  # pragma: no cover -- the loop itself
     logs.configure("worker")
+    tracing.configure("worker")
     metrics.serve("WORKER_METRICS_PORT", 9100)
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)

@@ -44,6 +44,7 @@ from app.solve.diagnose import DEFAULT_PROBE_SECONDS, explain
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.core.logs import bind as bind_log
+from app.core import tracing
 from app.settings_resolve import resolve
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,10 @@ def enqueue_run(
                 f"this model has {count:,} decisions and this organization's quota is "
                 f"{quota['max_vars']:,}",
             )
+    # The context the worker will continue: this span's, a child of the
+    # request that submitted the run when there is one.
+    with tracing.span("enqueue_run", scenario_id=scenario_id):
+        trace_carrier = tracing.carrier()
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
@@ -162,6 +167,9 @@ def enqueue_run(
                     "workers": workers,
                     "gap_rel": gap_rel,
                     "cpsat_scaling": cpsat_scaling,
+                    # The trace this run belongs to: the worker continues it
+                    # (app.core.tracing).
+                    "trace": trace_carrier,
                     "classified_as": found.model_class,
                     "why": found.reasons,
                     "needs": sorted(found.needs),
@@ -437,7 +445,9 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     stop = threading.Event()
     events = RunEvents(run_id)
     try:
-        return _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
+        # The trace the request that queued this run started, continued here.
+        with tracing.continued(params.get("trace")), tracing.span("run", run_id=run_id):
+            return _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
     finally:
         # Whatever happened -- solved, refused, cancelled, crashed -- the
         # stream's last word is the status the run ended with.
@@ -468,7 +478,10 @@ def _execute(
             # Compiled before the solver is chosen: whether a quadratic
             # objective is convex is a fact about its numbers, and it decides
             # which backends may take the model at all.
-            compiled = compile_model(ir, data)
+            with tracing.span("compile") as compiling:
+                compiled = compile_model(ir, data)
+                compiling.set_attribute("variables", len(compiled.variables))
+                compiling.set_attribute("rules", len(compiled.constraints))
         except Unsupported as exc:
             db.execute(
                 text(
@@ -491,7 +504,9 @@ def _execute(
             rules=len(compiled.constraints),
         )
         try:
-            backend, why = choose(found, params.get("requested_solver"))
+            with tracing.span("choose", model_class=found.model_class) as choosing:
+                backend, why = choose(found, params.get("requested_solver"))
+                choosing.set_attribute("solver", backend.name)
             bind_log(solver=backend.name)
         except NoBackend as exc:
             db.execute(
@@ -507,16 +522,18 @@ def _execute(
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
-            result, reason = solve_compiled(
-                backend,
-                compiled,
-                time_limit=time_limit,
-                seed=seed,
-                should_stop=stop.is_set,
-                workers=workers,
-                gap_rel=gap_rel,
-                on_progress=events.progress,
-            )
+            with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
+                result, reason = solve_compiled(
+                    backend,
+                    compiled,
+                    time_limit=time_limit,
+                    seed=seed,
+                    should_stop=stop.is_set,
+                    workers=workers,
+                    gap_rel=gap_rel,
+                    on_progress=events.progress,
+                )
+                solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
         except Unsupported as exc:
@@ -561,28 +578,30 @@ def _execute(
                     compiled.objective_term_ids, compiled.objective_terms, strict=True
                 )
             ]
-    db.execute(
-        text(
-            "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
-            " WHERE id = :r"
-        ),
-        {"s": backend.name, "extra": _json(extra), "r": run_id},
-    )
-    _record(db, run_id, compiled, result)
-    if result.objective is not None:
-        events.final(result.objective, result.best_bound, result.wall_seconds)
-    # What the answer may claim, as the backend that found it declares
-    # (migration 0028): "optimal" from a local solver is not the same claim
-    # as "optimal" from a global one, and the run must not blur the two.
-    db.execute(
-        text("UPDATE run SET optimality = :o WHERE id = :r"),
-        {"o": optimality_of(backend, result.status), "r": run_id},
-    )
+    with tracing.span("persist"):
+        db.execute(
+            text(
+                "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
+                " WHERE id = :r"
+            ),
+            {"s": backend.name, "extra": _json(extra), "r": run_id},
+        )
+        _record(db, run_id, compiled, result)
+        if result.objective is not None:
+            events.final(result.objective, result.best_bound, result.wall_seconds)
+        # What the answer may claim, as the backend that found it declares
+        # (migration 0028): "optimal" from a local solver is not the same claim
+        # as "optimal" from a global one, and the run must not blur the two.
+        db.execute(
+            text("UPDATE run SET optimality = :o WHERE id = :r"),
+            {"o": optimality_of(backend, result.status), "r": run_id},
+        )
     if result.status == "infeasible":
         # "No answer exists" is true and useless on its own. Which rules
         # cannot hold together is the thing a planner can act on, and it is
         # only findable here, where the compiled model still exists.
-        _record_conflict(db, run_id, compiled, backend, time_limit)
+        with tracing.span("diagnose", solver=backend.name):
+            _record_conflict(db, run_id, compiled, backend, time_limit)
     db.commit()
     return RunOutcome(
         run_id,
