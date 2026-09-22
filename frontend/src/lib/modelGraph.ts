@@ -20,9 +20,11 @@
  *
  * Like the ERD, this needs no endpoint of its own: it is built from a model
  * version's IR (docs/contracts/problem-ir.md) and the domain's entity types.
- * A set that names an entity type keeps that type's `type-<id>` node id, so
- * selecting it opens the same entity type panel the ERD does. Every other
- * node carries the facts the side panel shows, in `attributes.details`.
+ * A set that names an entity type keeps that type's `type-<id>` node id and
+ * colour, so one type is one thing across the views. Every node, sets
+ * included, carries the facts the side panel shows, in `attributes.details`:
+ * in this view a set is shown as the model uses it -- what it ranges over --
+ * rather than as the domain defines it, which is the ERD's job.
  */
 
 import type { EntityType } from "../api/v1";
@@ -160,9 +162,7 @@ export function buildModelView(
         ["Kind", "Set"],
         ["Ranges over", type ? `every ${name} in the domain` : `${name} (no entity type of that name)`],
       ],
-      estimateWidth([name], 10.2, 100, 40),
-      // A set that is an entity type selects as one; see the header.
-      type ? {} : { selectKind: "node", selectId: id }
+      estimateWidth([name], 10.2, 100, 40)
     );
   }
   const setOf = (name: string) => setNode.get(name);

@@ -83,8 +83,8 @@ export default function PropertyPanel({
     return <p className="text-sm text-slate-500">Select a node or edge to see its properties.</p>;
   }
   if (mode === "model") {
-    // A set that is an entity type opens that type, exactly as in the ERD;
-    // every other part of the model is shown as the model states it.
+    // Every part of the model -- sets included -- is shown as the model
+    // uses it. Defining the types themselves is the ERD's job.
     const details = modelDetails(graph.nodes.find((node) => node.id === selection.id));
     if (details) {
       const node = graph.nodes.find((candidate) => candidate.id === selection.id);
