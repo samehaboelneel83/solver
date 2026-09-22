@@ -11,7 +11,8 @@ import {
   useRun,
   useRunComparison,
   useRuns,
-  useScenario,
+  useVersion,
+useScenario,
   useScenarios,
   useSolvers,
   type ConflictItem,
@@ -218,14 +219,45 @@ function ForDomain({ domainId }: { domainId: Id }) {
           </p>
         </Empty>
       ) : scenario ? (
-        <ScenarioRuns key={scenario.id} scenarioId={scenario.id} scenarioName={scenario.name} />
+        <ScenarioRuns
+          key={scenario.id}
+          scenarioId={scenario.id}
+          scenarioName={scenario.name}
+          modelVersionId={scenario.model_version_id}
+        />
       ) : null}
     </>
   );
 }
 
-function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioName: string }) {
+/**
+ * The rules of a model version published before rules had arithmetic -- an
+ * id and a prose note, nothing a solver can read -- or an empty list when
+ * every rule is expressed.
+ *
+ * Such a version is permanent: versions are immutable, and a run points at
+ * one. So a scenario on it can never be solved, and offering "Solve" there
+ * only ever produced an errored run. This lets the screen say so first.
+ */
+export function unexpressedRules(ir: Record<string, unknown> | undefined): string[] {
+  const constraints = Array.isArray(ir?.constraints) ? (ir.constraints as Record<string, unknown>[]) : [];
+  return constraints
+    .filter((rule) => rule && (rule.left === undefined || rule.right === undefined))
+    .map((rule) => String(rule.id ?? "?"));
+}
+
+function ScenarioRuns({
+  scenarioId,
+  scenarioName,
+  modelVersionId,
+}: {
+  scenarioId: Id;
+  scenarioName: string;
+  modelVersionId: Id;
+}) {
   const { can } = useCapabilities();
+  const version = useVersion(modelVersionId);
+  const unexpressed = unexpressedRules(version.data?.ir);
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
@@ -267,7 +299,22 @@ function ScenarioRuns({ scenarioId, scenarioName }: { scenarioId: Id; scenarioNa
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        {can("run.submit") ? (
+        {unexpressed.length > 0 ? (
+          <p role="note" className="max-w-2xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            This scenario is on model version {version.data?.version}, published before rules could be
+            written as arithmetic: {unexpressed.join(", ")} {unexpressed.length === 1 ? "is named but says" : "are named but say"}{" "}
+            nothing a solver can check, so it cannot be solved. Versions never change, so point a
+            scenario at a newer version on the{" "}
+            <Link to="/scenarios" className="underline">
+              Scenarios page
+            </Link>
+            , or express the rules in the{" "}
+            <Link to="/model" className="underline">
+              Model editor
+            </Link>{" "}
+            and publish. Past runs of it are below.
+          </p>
+        ) : can("run.submit") ? (
           <button
             type="button"
             onClick={solve}

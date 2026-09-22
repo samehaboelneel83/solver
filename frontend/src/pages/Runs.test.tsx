@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Runs, { statusNote } from "./Runs";
+import Runs, { statusNote, unexpressedRules } from "./Runs";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 
@@ -129,6 +129,20 @@ function stub(overrides: Record<string, unknown> = {}) {
         }
       );
     }
+    // The scenario's model version: expressed by default.
+    if (path.startsWith("/api/v1/versions/")) {
+      return Promise.resolve(
+        overrides.version ?? {
+          id: 2,
+          problem_id: 1,
+          version: 2,
+          ir_hash: "h",
+          note: null,
+          created_at: "2026-09-20T09:00:00Z",
+          ir: { constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }] },
+        }
+      );
+    }
     if (path.startsWith("/api/v1/solvers")) {
       return Promise.resolve({
         items: [
@@ -180,6 +194,21 @@ describe("statusNote (migration 0028)", () => {
   it("keeps the plain note for a run older than the claim, and for every other status", () => {
     expect(statusNote({ status: "optimal" })).toBe("Best possible answer, proven.");
     expect(statusNote({ status: "feasible", optimality: "none" })).toMatch(/not proven best/);
+  });
+});
+
+describe("unexpressedRules", () => {
+  it("names rules that carry no arithmetic, and nothing for an expressed model", () => {
+    expect(
+      unexpressedRules({
+        constraints: [
+          { id: "c_old", note: "named only" },
+          { id: "c_new", left: { const: 0 }, relation: "<=", right: { const: 1 } },
+        ],
+      })
+    ).toEqual(["c_old"]);
+    expect(unexpressedRules({ constraints: [] })).toEqual([]);
+    expect(unexpressedRules(undefined)).toEqual([]);
   });
 });
 
@@ -592,6 +621,38 @@ describe("Runs", () => {
     expect(await screen.findByRole("button", { name: /^Solve/ })).toBeInTheDocument();
     // The chooser would only ever produce a refusal for this account.
     expect(screen.queryByLabelText(/^Solver$/)).not.toBeInTheDocument();
+  });
+
+  it("explains a scenario that can never be solved instead of offering Solve", async () => {
+    // A version published before rules had arithmetic is permanent, so every
+    // run of it errors. Say that, and where to go, before anyone presses a
+    // button whose only outcome is an error.
+    stub({
+      version: {
+        id: 1,
+        problem_id: 1,
+        version: 1,
+        ir_hash: "h",
+        note: "first",
+        created_at: "2026-09-19T09:00:00Z",
+        ir: { constraints: [{ id: "c_cover_demand", note: "each day is covered" }] },
+      },
+    });
+    renderPage();
+
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent(/c_cover_demand is named but says nothing a solver can check/);
+    expect(note).toHaveTextContent(/version 1/);
+    expect(screen.queryByRole("button", { name: /^Solve/ })).not.toBeInTheDocument();
+    // The history stays readable.
+    expect(await screen.findByText(/Run 11/)).toBeInTheDocument();
+  });
+
+  it("offers Solve for a scenario whose rules are all expressed", async () => {
+    stub();
+    renderPage();
+    expect(await screen.findByRole("button", { name: /^Solve/ })).toBeInTheDocument();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 
   it("says a problem has no scenarios rather than offering to solve nothing", async () => {
