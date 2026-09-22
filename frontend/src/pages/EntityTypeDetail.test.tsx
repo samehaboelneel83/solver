@@ -22,6 +22,7 @@ const TYPE: EntityType = {
   name: "employee",
   role: "agent",
   colour: null,
+  icon: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 3, sort_order: 1 },
@@ -155,7 +156,7 @@ describe("EntityTypeDetail", () => {
       path: "/api/v1/entity-types/5",
       // Ruling 42: the `updated_at` the form read goes back with every
       // save, so the server can refuse one built on a superseded read.
-      body: { name: "staff", role: "resource", colour: null, updated_at: "2026-09-20T09:00:00+00:00" },
+      body: { name: "staff", role: "resource", colour: null, icon: null, updated_at: "2026-09-20T09:00:00+00:00" },
     });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type saved/i));
   });
@@ -375,7 +376,7 @@ describe("EntityTypeDetail", () => {
       method: "PATCH",
       path: "/api/v1/entity-types/5",
       // Lower case, whatever was typed: the column only ever holds that form.
-      body: { name: "employee", role: "agent", colour: "#ff8800", updated_at: "2026-09-20T09:00:00+00:00" },
+      body: { name: "employee", role: "agent", colour: "#ff8800", icon: null, updated_at: "2026-09-20T09:00:00+00:00" },
     });
   });
 

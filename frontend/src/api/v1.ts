@@ -151,6 +151,10 @@ export type EntityType = {
    * a deterministic fallback (`lib/colour.ts`). The API accepts either
    * case and stores lower case. */
   colour: string | null;
+  /** Migration 0031: a gallery key (`lib/entityIcons.ts`) or an uploaded
+   * image's `data:` URI, or null for "not chosen" -- the Graph View then
+   * picks a default from the name and role. */
+  icon: string | null;
   /** Ordered by name. Carried on the list route too. */
   attributes: AttributeDef[];
   /** Migration 0010, Ruling 42. An opaque token, never parsed here: it is
@@ -165,14 +169,16 @@ export type EntityTypeCreate = {
   name: string;
   role?: EntityRole;
   colour?: string | null;
+  icon?: string | null;
 };
-/** An explicit `null` clears the colour; an omitted key leaves it alone.
+/** An explicit `null` clears the colour (or the icon); an omitted key leaves it alone.
  * `updated_at` is the value the form last read -- it is compared, never
  * stored (Ruling 42); omitting it means "no conflict check". */
 export type EntityTypeUpdate = {
   name?: string;
   role?: EntityRole;
   colour?: string | null;
+  icon?: string | null;
   updated_at?: string;
 };
 

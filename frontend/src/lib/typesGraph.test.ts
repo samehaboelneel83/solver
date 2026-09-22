@@ -14,6 +14,7 @@ import {
   typeNodeId,
 } from "./typesGraph";
 import { LABEL_DARK, LABEL_LIGHT, fallbackColour, labelForeground } from "./colour";
+import { ICONS, nodeImage } from "./entityIcons";
 import type { EntityType, RelationshipType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
 
@@ -35,6 +36,7 @@ const EMPLOYEE: EntityType = {
   name: "employee",
   role: "agent",
   colour: "#1f77b4",
+  icon: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     {
@@ -58,6 +60,7 @@ const UNIT: EntityType = {
   role: "org",
   // No colour: this is the one that must get a deterministic fallback.
   colour: null,
+  icon: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [],
 };
@@ -436,5 +439,50 @@ describe("objectsPalette", () => {
     });
     expect(orphan.nodeFill["9"]).toBe(fallbackColour("ghost"));
     expect(orphan.nodeLabel["9"]).toBe(labelForeground(fallbackColour("ghost")));
+  });
+
+  // --- migration 0031: pictures -------------------------------------------
+
+  it("draws every entity as its type's picture, one image per type", () => {
+    const palette = objectsPalette({
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        { id: "3", type: "employee", label: "sara", parent: null, attributes: {} },
+      ],
+    });
+    const ahmed = palette.nodeData?.["2"];
+    expect(ahmed?.er).toBe("object");
+    expect(ahmed?.image).toBe(nodeImage({ name: "employee", colour: "#1f77b4" }).image);
+    // Two employees share the one image rather than building two.
+    expect(palette.nodeData?.["3"]?.image).toBe(ahmed?.image);
+    expect(ahmed?.w).toBeGreaterThan(0);
+    expect(ahmed?.h).toBeGreaterThan(0);
+  });
+
+  it("uses the type's chosen icon, and its role when the name says nothing", () => {
+    const palette = objectsPalette({
+      ...graph,
+      entity_types: [
+        { id: "11", code: "employee", name: "employee", is_abstract: false, colour: "#1f77b4", icon: "hotel" },
+        { id: "22", code: "unit", name: "unit", is_abstract: false, colour: null, role: "location" },
+      ],
+    });
+    const svg = (id: string) => decodeURIComponent(palette.nodeData![id]!.image!.split(",")[1]);
+    expect(svg("2")).toContain(ICONS.hotel.svg);
+    // "unit" is an organisation word, which wins over the role.
+    expect(svg("1")).toContain(ICONS.building.svg);
+  });
+
+  it("keeps a compound node as a tinted box, not a picture", () => {
+    const palette = objectsPalette({
+      ...graph,
+      nodes: [
+        { id: "1", type: "unit", label: "hq", parent: null, attributes: {} },
+        { id: "2", type: "employee", label: "ahmed", parent: "1", attributes: {} },
+      ],
+    });
+    expect(palette.nodeData?.["1"]).toEqual({ er: "object-group" });
+    expect(palette.nodeData?.["2"]?.er).toBe("object");
   });
 });

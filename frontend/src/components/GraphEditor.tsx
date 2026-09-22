@@ -69,7 +69,18 @@ type GraphEditorProps = {
 
 const ELK_LAYOUT = {
   name: "elk",
-  elk: { algorithm: "layered", "elk.hierarchyHandling": "INCLUDE_CHILDREN" },
+  // Migration 0031: a node is a picture with its name above it, so the name
+  // is part of what must not overlap -- ELK is told the label's box too, and
+  // given room for the edge labels between the pictures.
+  nodeDimensionsIncludeLabels: true,
+  elk: {
+    algorithm: "layered",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.spacing.nodeNode": 48,
+    "elk.layered.spacing.nodeNodeBetweenLayers": 90,
+    "elk.spacing.edgeLabel": 6,
+    "elk.spacing.componentComponent": 60,
+  },
 } as const;
 
 // Only reached when an element has no palette entry at all -- i.e. the two
@@ -84,6 +95,9 @@ const FALLBACK_EDGE = "#94a3b8";
 // node labels sit on a user-chosen colour, and only those are computed.
 const EDGE_LABEL = "#0f172a";
 const EDGE_LABEL_HALO = "#ffffff";
+/** An entity's name above its picture: the warm brown of a map legend's
+ * place names. 7:1 on white. */
+const ENTITY_NAME = "#9a3412";
 
 /**
  * The canvas stylesheet. Exported so the data-driven fills can be asserted
@@ -124,6 +138,36 @@ export function graphStylesheet() {
         "border-width": 1,
         "border-color": "data(colour)",
         color: EDGE_LABEL,
+        "text-outline-color": EDGE_LABEL_HALO,
+      },
+    },
+    {
+      // The Graph View (migration 0031): an entity is its type's picture --
+      // the icon with the type's name under it, one image per type
+      // (`lib/entityIcons.ts`) -- and the entity's own name above it, as a
+      // map legend reads. The fill is made transparent rather than removed so
+      // the whole rectangle stays the tap target, and the rings below
+      // (`.graph-highlighted`, `.kb-focus`) still draw as a border around it.
+      // The label sits on the canvas, not on a fill, so it takes the fixed
+      // dark-on-white-halo pair rather than the fill-derived colour.
+      selector: 'node[er = "object"]',
+      style: {
+        shape: "round-rectangle",
+        width: "data(w)",
+        height: "data(h)",
+        "background-image": "data(image)",
+        "background-fit": "contain",
+        "background-opacity": 0,
+        "background-image-opacity": 1,
+        "border-width": 0,
+        "text-valign": "top",
+        "text-halign": "center",
+        "text-margin-y": -3,
+        "text-wrap": "ellipsis",
+        "text-max-width": "160px",
+        "font-size": "11px",
+        "font-weight": "bold",
+        color: ENTITY_NAME,
         "text-outline-color": EDGE_LABEL_HALO,
       },
     },

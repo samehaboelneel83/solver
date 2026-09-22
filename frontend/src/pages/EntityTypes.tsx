@@ -145,7 +145,7 @@ function TypeList({ domainId }: { domainId: Id }) {
   );
 }
 
-const TYPE_FIELDS = ["name", "role", "colour"];
+const TYPE_FIELDS = ["name", "role", "colour", "icon"];
 
 /** The name + role + colour form shared by "new type" (here) and the type
  * editor. `colour` is optional: null means the graph picks a stable one

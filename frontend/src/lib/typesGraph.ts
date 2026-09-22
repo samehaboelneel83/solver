@@ -57,6 +57,7 @@ import { CARDINALITY_LABEL } from "./cardinality";
 export { CARDINALITY_LABEL };
 import type { GraphResponse } from "../types/graph";
 import { labelForeground, typeColour } from "./colour";
+import { nodeImage } from "./entityIcons";
 
 /** The three views: `types` is the ERD, `objects` the entity graph, and
  * `model` the optimization view (lib/modelGraph.ts). The values predate the
@@ -103,9 +104,17 @@ export type ErData = {
     | "constraint"
     | "objective"
     | "uses"
-    | "ranges";
+    | "ranges"
+    // The objects view (Graph View): an entity drawn as its type's picture,
+    // and a compound node (one with children), which keeps the tinted box.
+    | "object"
+    | "object-group";
   /** Drawn width in px, estimated from the label (nodes only). */
   w?: number;
+  /** Drawn height in px, for an `object` node's picture. */
+  h?: number;
+  /** An `object` node's picture, a `data:` URI (`lib/entityIcons.ts`). */
+  image?: string;
   /** A connector's cardinality at its entity end: `1`, `n` or `m`. */
   end?: string;
   /** Which end of the connector the entity is at, so the cardinality is
@@ -191,12 +200,31 @@ export function objectsPalette(graph: GraphResponse): GraphPalette {
   const relationshipTypeByName = new Map(
     graph.relationship_types.map((option) => [option.name, option])
   );
+  // Migration 0031: an entity is drawn as its type's picture. A node with
+  // children is a compound box, which a picture would sit on top of, so it
+  // is marked `object-group` and keeps the tinted box -- set explicitly
+  // rather than left out, because `applyGraphToCy` MERGES data and a node
+  // that gains a child would otherwise keep its old `er: "object"`.
+  palette.nodeData = {};
+  const parents = new Set(graph.nodes.map((node) => node.parent).filter(Boolean));
   for (const node of graph.nodes) {
     const option = entityTypeByName.get(node.type);
     // A node whose type is missing from the options can only happen if the
     // two halves of the payload disagree; keying the fallback on the name
     // keeps it stable rather than throwing.
-    paletteEntry(palette, node.id, typeColour(option ?? { id: node.type, colour: null }));
+    const fill = typeColour(option ?? { id: node.type, colour: null });
+    paletteEntry(palette, node.id, fill);
+    if (parents.has(node.id)) {
+      palette.nodeData[node.id] = { er: "object-group" };
+    } else {
+      const drawn = nodeImage({
+        name: option?.name ?? node.type,
+        role: option?.role,
+        icon: option?.icon,
+        colour: fill,
+      });
+      palette.nodeData[node.id] = { er: "object", image: drawn.image, w: drawn.w, h: drawn.h };
+    }
   }
   for (const edge of graph.edges) {
     const option = relationshipTypeByName.get(edge.type);

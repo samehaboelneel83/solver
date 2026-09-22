@@ -271,6 +271,8 @@ def get_domain_graph(
                 name=et.name,
                 is_abstract=False,
                 colour=et.colour,
+                icon=et.icon,
+                role=et.role,
             )
             for et in entity_types
         ],

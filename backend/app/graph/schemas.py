@@ -33,6 +33,12 @@ class EntityTypeOption(BaseModel):
     # a deterministic fallback from the type's id when it is None -- so
     # None must stay expressible here rather than being defaulted away.
     colour: str | None = None
+    # Migration 0031: `entity_type.icon`, a gallery key or a data: URI, or
+    # None. With `role`, what the Graph View's default picture is chosen
+    # from when the type has no icon of its own -- so None stays
+    # expressible here, like `colour`.
+    icon: str | None = None
+    role: str = "other"
 
 
 class RelationshipTypeOption(BaseModel):

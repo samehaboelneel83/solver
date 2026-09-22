@@ -12,6 +12,7 @@ import {
   useFieldErrors,
   type FieldErrors,
 } from "../components/attrTypes";
+import IconField from "../components/IconField";
 import OfflineNotice from "../components/OfflineNotice";
 import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
@@ -32,6 +33,7 @@ import {
 } from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { typeColour } from "../lib/colour";
 import { parseRouteId } from "../lib/routeId";
 import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 import { ENTITY_TYPE_FIELDS, EntityTypeFields } from "./EntityTypes";
@@ -118,12 +120,13 @@ function Editor({ type, reload }: { type: EntityType; reload: () => Promise<Enti
 /** The three controls this form holds, as the reload merge compares
  * them. The attributes below are edited through their own routes and are
  * not part of the type's own row -- see `test_api_concurrency.py`. */
-type TypeDrafts = { name: string; role: EntityRole; colour: string | null };
+type TypeDrafts = { name: string; role: EntityRole; colour: string | null; icon: string | null };
 
 const typeDraftsOf = (type: EntityType): TypeDrafts => ({
   name: type.name,
   role: type.role,
   colour: type.colour,
+  icon: type.icon ?? null,
 });
 
 function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<EntityType | null> }) {
@@ -131,6 +134,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
   const [name, setName] = useState(type.name);
   const [role, setRole] = useState<EntityRole>(type.role);
   const [colour, setColour] = useState<string | null>(type.colour);
+  const [icon, setIcon] = useState<string | null>(type.icon ?? null);
   // See `EntityTypes.CreateTypeForm`: an unparseable entry has no value to
   // hold, so the reason it has none is held instead.
   const [colourProblem, setColourProblem] = useState<string | null>(null);
@@ -153,11 +157,12 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
       const fresh = await reload();
       if (!fresh) return;
       const freshDrafts = typeDraftsOf(fresh);
-      const current: TypeDrafts = { name, role, colour };
+      const current: TypeDrafts = { name, role, colour, icon };
       const merged = mergeReload(seeded.current, current, freshDrafts);
       setName(merged.name);
       setRole(merged.role);
       setColour(merged.colour);
+      setIcon(merged.icon);
       const brought = reloadedKeys(seeded.current, current, freshDrafts);
       setUpdatedAt(fresh.updated_at);
       setStale(null);
@@ -185,7 +190,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
     try {
       const saved = await updateType.mutateAsync({
         id: type.id,
-        body: { name, role, colour, updated_at: updatedAt },
+        body: { name, role, colour, icon, updated_at: updatedAt },
       });
       setUpdatedAt(saved.updated_at);
       seeded.current = typeDraftsOf(saved);
@@ -231,6 +236,21 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
             setRole(value);
             if (errors.role) {
               const { role: _drop, ...rest } = errors;
+              replace(rest);
+            }
+          }}
+        />
+        <IconField
+          value={icon}
+          typeName={name || type.name}
+          role={role}
+          colour={typeColour({ id: String(type.id), colour })}
+          error={errors.icon}
+          disabled={!can("domain.edit")}
+          onChange={(value) => {
+            setIcon(value);
+            if (errors.icon) {
+              const { icon: _drop, ...rest } = errors;
               replace(rest);
             }
           }}

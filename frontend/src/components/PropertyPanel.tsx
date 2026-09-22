@@ -20,6 +20,8 @@ import {
 } from "../api/v1";
 import AttrsForm, { buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "./AttrsForm";
 import ColourField from "./ColourField";
+import IconField from "./IconField";
+import { typeColour } from "../lib/colour";
 import { FieldLabel, INPUT_CLASS, roleLabel, useFieldErrors, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
 import { confirmDeleteRelationship, deletedRelationshipMessage } from "../lib/relationships";
@@ -581,10 +583,10 @@ function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => v
   if (!query.data) return <p className="text-sm text-slate-500">Loading…</p>;
   const type = query.data;
 
-  async function save(colour: string | null) {
+  async function save(body: { colour?: string | null; icon?: string | null }) {
     setError(null);
     try {
-      await update.mutateAsync({ id: type.id, body: { colour } });
+      await update.mutateAsync({ id: type.id, body });
       toast.success(`${type.name} saved`);
     } catch (err) {
       setError(formatApiError(err));
@@ -614,8 +616,18 @@ function EntityTypePanel({ nodeId, onClose }: { nodeId: string; onClose: () => v
         fallbackKey={String(type.id)}
         sampleText={type.name}
         disabled={update.isPending || !canEdit}
-        onChange={save}
+        onChange={(colour) => save({ colour })}
       />
+      <div className="mt-3">
+        <IconField
+          value={type.icon ?? null}
+          typeName={type.name}
+          role={type.role}
+          colour={typeColour({ id: String(type.id), colour: type.colour })}
+          disabled={update.isPending || !canEdit}
+          onChange={(icon) => save({ icon })}
+        />
+      </div>
       <div className={`${BUTTON_ROW} mt-3`}>
         <Link
           to={`/entity-types/${type.id}`}

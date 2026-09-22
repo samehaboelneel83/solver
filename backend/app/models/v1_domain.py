@@ -102,6 +102,10 @@ class EntityType(Base):
     # Migration 0009: lowercase '#rrggbb' (CHECK entity_type_colour_hex);
     # NULL means "not chosen", and the UI assigns a fallback.
     colour: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0031: a gallery key or an uploaded image's data: URI
+    # (CHECK entity_type_icon_form). NULL means "not chosen", and the UI
+    # picks a default from the name and role.
+    icon: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Migration 0010. Maintained by the `entity_type_set_updated_at`
     # trigger, never by this application: `server_default` plus
     # `server_onupdate` would only describe what the database does, and

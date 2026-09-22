@@ -35,6 +35,7 @@ const type = (id: number, name: string, colour: string | null = null): EntityTyp
   name,
   role: "other",
   colour,
+  icon: null,
   updated_at: "2026-09-22T00:00:00+00:00",
   attributes: [],
 });

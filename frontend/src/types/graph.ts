@@ -28,6 +28,12 @@ export type EntityTypeOption = {
    * this contract Task 7 could not map, because the column did not exist
    * then; the user has since asked for behaviour that needs it. */
   colour: string | null;
+  /** Migration 0031: `entity_type.icon` -- a gallery key or a `data:` URI,
+   * or null, in which case the Graph View picks a default from the name and
+   * `role` (see `lib/entityIcons.ts`). Optional so payloads built before
+   * the column existed (and test fixtures) still type-check. */
+  icon?: string | null;
+  role?: string;
 };
 
 export type RelationshipTypeOption = {

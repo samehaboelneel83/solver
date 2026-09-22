@@ -1650,6 +1650,24 @@ describe("GraphEditor", () => {
       expect(compound.style.color).toBe("#0f172a");
     });
 
+    it("draws an entity as its picture, with its name above it", () => {
+      const style = graphStylesheet();
+      const object = style.find((rule: any) => rule.selector === 'node[er = "object"]') as any;
+      expect(object.style["background-image"]).toBe("data(image)");
+      expect(object.style.width).toBe("data(w)");
+      expect(object.style.height).toBe("data(h)");
+      // The picture carries the type name; the fill behind it is invisible.
+      expect(object.style["background-opacity"]).toBe(0);
+      expect(object.style["text-valign"]).toBe("top");
+      // On the canvas, not on a fill: a fixed readable pair.
+      expect(object.style.color).not.toBe("data(labelColour)");
+      expect(object.style["text-outline-color"]).toBe("#ffffff");
+      // The focus and highlight rings come later, so they still win.
+      const at = (selector: string) => style.findIndex((rule: any) => rule.selector === selector);
+      expect(at('node[er = "object"]')).toBeLessThan(at(".kb-focus"));
+      expect(at('node[er = "object"]')).toBeLessThan(at(".graph-highlighted"));
+    });
+
     it("writes each node's fill and readable label colour into cytoscape data", () => {
       const cy = mockCytoscapeInstance as unknown as any;
       applyGraphToCy(cy, GRAPH as any);

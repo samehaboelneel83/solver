@@ -44,6 +44,7 @@ export const UNIT_TYPE: EntityType = {
   name: "unit",
   role: "resource",
   colour: "#1f77b4",
+  icon: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     attr(1, "active", "boolean"),
@@ -63,6 +64,7 @@ export const SHIFT_TYPE: EntityType = {
   name: "shift",
   role: "time",
   colour: null,
+  icon: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
     // Same NAME as unit's, different DATA TYPE -- on purpose.

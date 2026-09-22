@@ -80,7 +80,7 @@ from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user, requires
-from app.api.validation import field_error, validate_colour, validate_name
+from app.api.validation import field_error, validate_colour, validate_icon, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
@@ -301,6 +301,10 @@ class EntityTypeRead(BaseModel):
     # deterministic fallback, and inventing one here would make "no colour"
     # unexpressible on the wire.
     colour: str | None
+    # Migration 0031: a gallery key or an uploaded image's data: URI. NULL
+    # means "not chosen" -- the Graph View picks a default from the name and
+    # role -- for the same reason as `colour`.
+    icon: str | None
     # A type and its attributes are edited as one thing, so the read model
     # carries both -- on the list route too, which is what lets the UI show
     # "employee (3 attributes)" without an N+1 of follow-up requests.
@@ -318,9 +322,11 @@ class EntityTypeCreate(BaseModel):
     # Mirrors the column's server default, so the field can be omitted.
     role: EntityRole = "other"
     colour: str | None = None
+    icon: str | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_colour = field_validator("colour")(validate_colour)
+    _check_icon = field_validator("icon")(validate_icon)
 
 
 class EntityTypeUpdate(BaseModel):
@@ -331,12 +337,14 @@ class EntityTypeUpdate(BaseModel):
     name: str | None = None
     role: EntityRole | None = None
     colour: str | None = None
+    icon: str | None = None
     # Ruling 42 -- the `updated_at` the client last read, popped before
     # the rest are assigned. See `app/api/concurrency.py`.
     updated_at: datetime | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_colour = field_validator("colour")(validate_colour)
+    _check_icon = field_validator("icon")(validate_icon)
 
 
 class EntityTypeList(BaseModel):
@@ -422,6 +430,7 @@ def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityType
         name=entity_type.name,
         role=entity_type.role,
         colour=entity_type.colour,
+        icon=entity_type.icon,
         updated_at=entity_type.updated_at,
         attributes=[AttributeDefRead.model_validate(a) for a in attributes],
     )
