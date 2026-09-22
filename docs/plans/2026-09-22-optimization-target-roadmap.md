@@ -362,8 +362,14 @@ dependency's context is a copy). Metrics are done too
 histogram), `runs_total`, `queue_wait_seconds` and `worker_busy` on 9100,
 the API `queue_depth{org}` (counted at scrape) on 9101 -- internal ports,
 not published, since queue depth names organizations; no Prometheus server
-is deployed yet, and `diagnose_probes_total` is not counted. Still open in
-this phase: OpenTelemetry tracing, the ClickHouse `run_fact` writer, and
+is deployed yet, and `diagnose_probes_total` is not counted. Tracing is done
+(`app.core.tracing`): the API's request span is the root, `enqueue_run`
+puts its context on `run.params.trace`, and the worker continues it under
+a `run` span with `compile`, `choose`, `solve`, `diagnose` and `persist`;
+exported as JSON log lines by default, or over OTLP. Its first finding:
+`choose` takes ~200 ms of a run whose solve takes 1 ms -- every backend's
+`is_available()` is asked on every run. Still open in
+this phase: the ClickHouse `run_fact` writer, and
 `run_event` retention.
 
 ---
