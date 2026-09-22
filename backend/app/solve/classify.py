@@ -81,8 +81,20 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         reasons.append(f"variable domains {sorted(domains)} are not ones this platform knows")
         return Classification("unsupported", reasons, needs, planner)
 
-    reasons.append("all terms are linear (the contract refuses a product of two variables)")
-    planner.append("every rule is linear")
+    if _quadratic_objective(ir):
+        # The contract allows a product of two variables only in a weighted
+        # objective, so a quadratic model is one with linear rules and a
+        # quadratic goal. Its class says whether any decision is whole.
+        model_class = "QP" if model_class == "LP" else "MIQP"
+        needs.add("quadratic")
+        reasons.append(
+            "the objective multiplies two variables together, so it is quadratic; "
+            "every rule is linear"
+        )
+        planner.append("the goal multiplies decisions together; every rule is linear")
+    else:
+        reasons.append("all terms are linear (the contract refuses a product of two variables)")
+        planner.append("every rule is linear")
 
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
         needs.add("soft-constraints")
@@ -101,6 +113,45 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
 
     return Classification(model_class, reasons, needs, planner)
+
+
+def _quadratic_objective(ir: dict[str, Any]) -> bool:
+    """Whether any objective term multiplies two variables together."""
+    return any(
+        _degree(term.get("expression")) >= 2 for term in (ir.get("objective") or {}).get("terms", [])
+    )
+
+
+def _degree(term: Any) -> int:
+    if not isinstance(term, dict):
+        return 0
+    if "var" in term:
+        return 1
+    if "sum" in term:
+        return _degree(term["sum"])
+    if isinstance(term.get("add"), list):
+        return max((_degree(child) for child in term["add"]), default=0)
+    if isinstance(term.get("mul"), list):
+        return sum(_degree(child) for child in term["mul"])
+    return 0
+
+
+def with_convexity(found: Classification, convex: bool | None, reason: str) -> Classification:
+    """The classification, told whether the compiled objective is convex.
+
+    Convexity is a fact about the numbers, so it is known only after the
+    model is compiled against its data -- which is why this is a second step
+    rather than part of `classify`. A model not proven convex needs a backend
+    that does not depend on convexity; `nonconvex` is how the registry asks.
+    """
+    if "quadratic" not in found.needs or convex is True:
+        return found
+    return Classification(
+        found.model_class,
+        [*found.reasons, reason],
+        found.needs | {"nonconvex"},
+        [*found.planner, "the goal may have more than one low point, so the best one has to be searched for"],
+    )
 
 
 def _fractional(ir: dict[str, Any], data: dict[str, Any] | None) -> str | None:

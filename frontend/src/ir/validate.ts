@@ -875,15 +875,40 @@ class ShapeChecker {
       const problem = this.checkTerm(factors[i], [...loc, "mul", i], scope, depth + 1);
       if (problem) return problem;
     }
-    if (factors.filter(mentionsAVariable).length > 1) {
+    // Degree, not "how many factors mention a variable": a product of two
+    // variables is allowed in a weighted objective, and x * (y * z) must still
+    // be refused there, which counting factors cannot see.
+    const order = degree(term);
+    if (order <= 1) return null;
+    if (!this.quadraticAllowed(loc)) {
       return refusal(
         "mul_not_linear",
         [...loc, "mul"],
-        "both factors of this product contain a variable, which makes it quadratic; version " +
-          `${IR_VERSION} expresses linear models only`
+        "both factors of this product contain a variable, which makes it quadratic; " +
+          (loc[0] === "objective"
+            ? "a lexicographic objective is solved one term at a time, holding each at its best, " +
+              "and holding a quadratic term would need a quadratic rule"
+            : "a rule must stay linear, and only a weighted objective may be quadratic")
+      );
+    }
+    if (order > 2) {
+      return refusal(
+        "mul_not_quadratic",
+        [...loc, "mul"],
+        `this product multiplies ${order} variables together; an objective may be quadratic -- ` +
+          "two variables at most -- and no higher"
       );
     }
     return null;
+  }
+
+  /** Only a weighted objective's terms may be quadratic. Every rule stays
+   * linear, and so does a lexicographic objective (see `termMul`). */
+  private quadraticAllowed(loc: IrLoc): boolean {
+    if (loc[0] !== "objective") return false;
+    const objective = this.ir.objective;
+    const mode = isObject(objective) && typeof objective.mode === "string" ? objective.mode : "weighted";
+    return mode === "weighted";
   }
 
   checkObjective(): IrRefusal | null {
@@ -976,15 +1001,15 @@ class ShapeChecker {
 
 /** Whether a term tree holds a `var` anywhere. Only ever called on a term
  * `checkTerm` has already accepted, so the shapes are known. */
-function mentionsAVariable(term: unknown): boolean {
-  if (!isObject(term)) return false;
-  if ("var" in term) return true;
-  if ("sum" in term) return mentionsAVariable(term.sum);
-  for (const key of ["add", "mul"] as const) {
-    const children = term[key];
-    if (Array.isArray(children)) return children.some(mentionsAVariable);
-  }
-  return false;
+/** How many variables multiply together in the worst part of a term: 0 for
+ * data, 1 for linear, 2 for quadratic. Mirrors `_degree` in validate.py. */
+function degree(term: unknown): number {
+  if (!isObject(term)) return 0;
+  if ("var" in term) return 1;
+  if ("sum" in term) return degree(term.sum);
+  if (Array.isArray(term.add)) return Math.max(0, ...term.add.map(degree));
+  if (Array.isArray(term.mul)) return term.mul.reduce((total: number, child: unknown) => total + degree(child), 0);
+  return 0;
 }
 
 /**

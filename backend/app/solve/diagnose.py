@@ -153,7 +153,7 @@ def _only(compiled: Compiled, constraints: list[Constraint]) -> Compiled:
     objective in would spend the probe's clock proving optimality of an answer
     nobody reads.
     """
-    return replace(compiled, constraints=list(constraints), objective=Linear())
+    return replace(compiled, constraints=list(constraints), objective=Linear(), objective_quadratic={})
 
 
 def _instance(c: Constraint) -> list[str]:

@@ -104,11 +104,20 @@ def solve(
     for c in compiled.constraints:
         _add(model, cp_vars, c)
 
-    if compiled.objective.coeffs:
+    has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
+    if has_objective:
         expr = sum(
             cp_vars[k] * _whole(coeff, f"the objective coefficient of {k[0]!r}")
             for k, coeff in compiled.objective.coeffs.items()
         )
+        # A quadratic objective, exactly: each product of two variables is a
+        # new integer variable held equal to that product, so the search is
+        # over the true objective -- no linearisation error, and no
+        # convexity needed. That is why CP-SAT may take a nonconvex
+        # whole-number model and still prove the global optimum.
+        for (a, b), coeff in compiled.objective_quadratic.items():
+            product = _product(model, cp_vars[a], cp_vars[b], compiled.variables[a], compiled.variables[b])
+            expr += product * _whole(coeff, f"the objective coefficient of {a[0]!r} x {b[0]!r}")
         model.Minimize(expr) if compiled.sense == "minimize" else model.Maximize(expr)
 
     solver = cp_model.CpSolver()
@@ -121,11 +130,24 @@ def solve(
     return Solution(
         status=_STATUS.get(status, "unknown"),
         optimal=status == cp_model.OPTIMAL,
-        objective=int(solver.ObjectiveValue()) if solved and compiled.objective.coeffs else None,
+        objective=int(solver.ObjectiveValue()) if solved and has_objective else None,
         assignments={k: int(solver.Value(v)) for k, v in cp_vars.items()} if solved else {},
         wall_seconds=round(solver.WallTime(), 3),
         solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",
     )
+
+
+def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):
+    """An integer variable equal to `x * y`, bounded by the corners of the two
+    ranges -- the smallest and largest a product of values in them can be."""
+    corners = [
+        _whole(p, "a product bound") * _whole(q, "a product bound")
+        for p in (spec_x.lower, spec_x.upper)
+        for q in (spec_y.lower, spec_y.upper)
+    ]
+    product = model.NewIntVar(min(corners), max(corners), "")
+    model.AddMultiplicationEquality(product, [x, y])
+    return product
 
 
 def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint) -> None:

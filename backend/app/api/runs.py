@@ -327,21 +327,28 @@ def classify_model(
     from app.solve.backends import planner_choice_for
     from app.solve.classify import classify
     from app.solve.compile import Unsupported, compile_model
+    from app.solve.convexity import refine
     from app.solve.preview import live_data
 
     data = None
     empty_ranges: list[dict[str, Any]] = []
+    compiled = None
     if payload.problem_id is not None:
         problem = db.get(Problem, payload.problem_id)
         if problem is None:
             raise HTTPException(status_code=404, detail="problem not found")
         data = live_data(db, problem.domain_id, payload.ir)
         try:
-            empty_ranges = compile_model(payload.ir, data).empty_ranges
+            compiled = compile_model(payload.ir, data)
+            empty_ranges = compiled.empty_ranges
         except Unsupported:
             empty_ranges = []
 
     found = classify(payload.ir, data)
+    if compiled is not None:
+        # The same convexity step a run takes, so the editor does not name
+        # a solver for a quadratic model the run would then refuse.
+        found = refine(found, compiled)
     return {
         "model_class": found.model_class,
         "needs": sorted(found.needs),

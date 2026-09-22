@@ -71,6 +71,18 @@ function estimateWidth(lines: string[], pxPerChar: number, min: number, padding:
   return Math.max(min, longest * pxPerChar + padding);
 }
 
+/** How many variables multiply together in the worst part of a term. The
+ * contract's own rule (`degree` in ir/validate.ts): 1 is linear, 2 quadratic. */
+function degree(term: unknown): number {
+  if (!term || typeof term !== "object") return 0;
+  const t = term as Record<string, unknown>;
+  if (typeof t.var === "string") return 1;
+  if (t.sum !== undefined) return degree(t.sum);
+  if (Array.isArray(t.add)) return Math.max(0, ...t.add.map(degree));
+  if (Array.isArray(t.mul)) return t.mul.reduce((total: number, child) => total + degree(child), 0);
+  return 0;
+}
+
 /** What a term reads: variables, parameters, and the sets whose attributes
  * it uses as numbers. Walks every term kind the contract has. */
 function collect(
@@ -235,9 +247,15 @@ export function buildModelView(
   const terms = ir.objective?.terms ?? [];
   if (ir.objective && terms.length) {
     const sense = ir.objective.sense ?? "minimize";
-    const lines = [sense, `${terms.length} term${terms.length === 1 ? "" : "s"}`];
+    // A goal that multiplies decisions together says so: it is what decides
+    // which solvers may take the model, and whether convexity is checked.
+    const quadratic = terms.some((term) => degree(term.expression) >= 2);
+    const lines = [
+      sense,
+      `${terms.length} term${terms.length === 1 ? "" : "s"}${quadratic ? " · quadratic" : ""}`,
+    ];
     addNode(OBJECTIVE_NODE_ID, "objective", "objective", lines, "#16a34a",
-      [["Kind", "Objective"], ["Sense", sense],
+      [["Kind", quadratic ? "Objective (quadratic)" : "Objective"], ["Sense", sense],
         ...terms.map((term): Detail => [term.id ?? "term", `${term.weight ?? 1} × ${describeTerm(term.expression)}`])],
       estimateWidth(lines, 8.4, 110, 50));
     const found = { vars: new Set<string>(), pars: new Set<string>(), attrs: new Map<string, Set<string>>() };

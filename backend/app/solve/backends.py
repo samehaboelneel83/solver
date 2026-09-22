@@ -147,8 +147,12 @@ def _highs_available() -> bool:
 # milp remains the generalist fallback that ships inside ortools.
 CP_SAT = Backend(
     name="cp-sat",
-    classes=frozenset({"IP", "trivial"}),
-    provides=frozenset({"linear", "integral", "soft-constraints"}),
+    # MIQP here means an all-integer quadratic model: CP-SAT has no
+    # continuous variables, so a mixed one is kept away by `continuous`.
+    classes=frozenset({"IP", "MIQP", "trivial"}),
+    # `quadratic` and `nonconvex` both: products of whole numbers are searched
+    # exactly, so the optimum is the global one whatever the curvature.
+    provides=frozenset({"linear", "integral", "soft-constraints", "quadratic", "nonconvex"}),
     rank=0,
     solve=_cpsat_solve,
     # A linear model is convex: every optimum it proves is the global one.
@@ -172,9 +176,13 @@ GLOP = Backend(
 
 HIGHS = Backend(
     name="highs",
-    classes=frozenset({"IP", "LP", "MILP", "trivial"}),
+    # QP: continuous only -- HiGHS has no integer quadratic search -- and
+    # convex only: it provides `quadratic` but not `nonconvex`, because on a
+    # nonconvex objective it could stop at an answer that is only the best
+    # nearby, and this entry declares `proves="global"`.
+    classes=frozenset({"IP", "LP", "MILP", "QP", "trivial"}),
     provides=frozenset(
-        {"linear", "integral", "continuous", "fractional-data", "soft-constraints"}
+        {"linear", "integral", "continuous", "fractional-data", "soft-constraints", "quadratic"}
     ),
     rank=1,
     solve=_highs_solve,
@@ -244,7 +252,7 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
     if not fits:
         raise NoBackend(
             f"no available solver takes a {found.model_class} model needing "
-            f"{', '.join(sorted(found.needs))}"
+            f"{', '.join(sorted(found.needs))}" + _why_nothing_fits(found)
         )
     chosen = fits[0]
     others = [b.name for b in fits[1:]]
@@ -252,6 +260,28 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
     if others:
         reason += f"; {', '.join(others)} could also take it"
     return chosen, reason
+
+
+def _why_nothing_fits(found: Classification) -> str:
+    """The quadratic dead ends, in words. Both are refusals on purpose: the
+    alternative is solving with a method that may return an answer that is
+    not the best and cannot say so."""
+    if "quadratic" not in found.needs:
+        return ""
+    if "nonconvex" in found.needs:
+        return (
+            ". Its objective is not proven convex, and this build has no global "
+            "nonlinear solver: a local one could stop at an answer that is only the "
+            "best nearby and report it as optimal, so the model is refused rather "
+            "than answered wrongly. Making every decision a whole number lets the "
+            "exact integer solver take it"
+        )
+    if "continuous" in found.needs and "integral" in found.needs:
+        return (
+            ". A quadratic goal over a mix of whole-number and continuous decisions "
+            "needs a mixed-integer quadratic solver, which this build does not have"
+        )
+    return ""
 
 
 def planner_choice_for(found: Classification) -> str | None:

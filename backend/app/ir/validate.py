@@ -790,14 +790,42 @@ class _ShapeChecker:
             problem = self.check_term(factor, [*loc, "mul", i], scope, depth + 1)
             if problem:
                 return problem
-        if sum(1 for factor in factors if _mentions_a_variable(factor)) > 1:
+        # Degree, not "how many factors mention a variable": a product of two
+        # variables is allowed in a weighted objective (a quadratic program),
+        # and x * (y * z) must still be refused there, which counting factors
+        # cannot see.
+        degree = _degree(term)
+        if degree <= 1:
+            return None
+        if not self._quadratic_allowed(loc):
             return Refusal(
                 "mul_not_linear",
                 [*loc, "mul"],
-                f"both factors of this product contain a variable, which makes it quadratic; "
-                f"version {IR_VERSION} expresses linear models only",
+                "both factors of this product contain a variable, which makes it quadratic; "
+                + (
+                    "a lexicographic objective is solved one term at a time, holding each at "
+                    "its best, and holding a quadratic term would need a quadratic rule"
+                    if loc[:1] == ["objective"]
+                    else "a rule must stay linear, and only a weighted objective may be quadratic"
+                ),
+            )
+        if degree > 2:
+            return Refusal(
+                "mul_not_quadratic",
+                [*loc, "mul"],
+                f"this product multiplies {degree} variables together; an objective may be "
+                "quadratic -- two variables at most -- and no higher",
             )
         return None
+
+    def _quadratic_allowed(self, loc: Loc) -> bool:
+        """Only a weighted objective's terms may be quadratic. Every rule stays
+        linear, and so does a lexicographic objective (see `_term_mul`)."""
+        if loc[:1] != ["objective"]:
+            return False
+        objective = self.ir.get("objective")
+        mode = objective.get("mode", "weighted") if isinstance(objective, dict) else "weighted"
+        return mode == "weighted"
 
     # -- objective ---------------------------------------------------------
 
@@ -881,19 +909,21 @@ def _is_scalar(value: Any) -> bool:
     return isinstance(value, (str, int, float, bool))
 
 
-def _mentions_a_variable(term: Any) -> bool:
-    """Whether a term tree holds a `var` anywhere. Only ever called on a
-    term `check_term` has already accepted, so the shapes are known."""
+def _degree(term: Any) -> int:
+    """How many variables multiply together in the worst part of a term: 0 for
+    data, 1 for linear, 2 for quadratic. Only ever called on a term whose
+    factors `check_term` has already accepted, so the shapes are known."""
     if not isinstance(term, dict):
-        return False
+        return 0
     if "var" in term:
-        return True
+        return 1
     if "sum" in term:
-        return _mentions_a_variable(term["sum"])
-    for key in ("add", "mul"):
-        if key in term:
-            return any(_mentions_a_variable(child) for child in term[key])
-    return False
+        return _degree(term["sum"])
+    if "add" in term:
+        return max((_degree(child) for child in term["add"]), default=0)
+    if "mul" in term:
+        return sum(_degree(child) for child in term["mul"])
+    return 0
 
 
 def check_shape(ir: Any) -> Refusal | None:

@@ -161,6 +161,12 @@ class Compiled:
     # Soft-constraint penalties, already pointed the way the sense wants.
     # Weighted mode folds them into `objective`; lex solves them last.
     penalty_objective: Linear = field(default_factory=Linear)
+    # The quadratic part of a weighted objective: coefficient per PAIR of
+    # variables, the pair in sorted order so x*y and y*x are one entry, and
+    # x*x keyed (x, x). Empty for every linear model, which is every model
+    # but a quadratic program. The contract keeps rules linear and allows
+    # this only in a weighted objective, so nothing else carries one.
+    objective_quadratic: dict[tuple[VarKey, VarKey], Decimal] = field(default_factory=dict)
     # constraint id -> the violation variables minted for its instances, so a
     # result can say *which* instance was broken and by how much, not merely
     # that a penalty was paid.
@@ -185,7 +191,11 @@ class Compiled:
         """
         if any(not v.is_integral for v in self.variables.values()):
             return False
-        numbers = [self.objective.const, *self.objective.coeffs.values()]
+        numbers = [
+            self.objective.const,
+            *self.objective.coeffs.values(),
+            *self.objective_quadratic.values(),
+        ]
         for c in self.constraints:
             numbers += [c.left.const, c.right.const, *c.left.coeffs.values()]
             numbers += list(c.right.coeffs.values())
@@ -260,7 +270,7 @@ class _Compiler:
         self._declare_variables()
         for spec in self.ir.get("constraints", []):
             self._expand_constraint(spec)
-        objective, sense, mode, term_ids, terms, penalties = self._objective()
+        objective, sense, mode, term_ids, terms, penalties, quadratic = self._objective()
         return Compiled(
             variables=self.variables,
             constraints=self.constraints,
@@ -270,6 +280,7 @@ class _Compiler:
             objective_term_ids=term_ids,
             objective_terms=terms,
             penalty_objective=penalties,
+            objective_quadratic=quadratic,
             var_index_sets={n: v["index"] for n, v in self.ir.get("variables", {}).items()},
             violations=self.violations,
             penalty_of=self.penalty_of,
@@ -578,9 +589,61 @@ class _Compiler:
 
     # -- objective --------------------------------------------------------
 
-    def _objective(self) -> tuple[Linear, str, str, list[str], list[Linear], Linear]:
+    def _poly(self, term: dict[str, Any], env: dict[str, tuple[str, dict]]) -> tuple[Linear, Quadratic]:
+        """A term as a polynomial of degree two at most: a linear part and a
+        quadratic part. Only an objective is compiled this way -- the
+        contract keeps every rule linear -- and only a product can raise the
+        degree, so every other kind defers to `_term`.
+        """
+        if "sum" in term:
+            over = term.get("over") or []
+            inner = self._bindings(over, env)
+            if over and not inner and self._current_id:
+                self._note_empty(self._current_id, "sum", dict(env_keys(env)))
+            linear, quadratic = Linear(), {}
+            for env2 in inner:
+                part, square = self._poly(term["sum"], env2)
+                linear.add(part)
+                _add_quadratic(quadratic, square)
+            return linear, quadratic
+
+        if "add" in term:
+            linear, quadratic = Linear(), {}
+            for part in term["add"]:
+                piece, square = self._poly(part, env)
+                linear.add(piece)
+                _add_quadratic(quadratic, square)
+            return linear, quadratic
+
+        if "mul" in term:
+            (a, qa), (b, qb) = (self._poly(f, env) for f in term["mul"])
+            # A quadratic factor times a constant stays quadratic. The
+            # validator refused anything of higher degree.
+            if qa or qb:
+                if qa and b.is_constant:
+                    return a.scaled(b.const), _scaled(qa, b.const)
+                if qb and a.is_constant:
+                    return b.scaled(a.const), _scaled(qb, a.const)
+                raise Unsupported("a product of more than two variables is not quadratic")  # pragma: no cover
+            # (sum a_i x_i + a0)(sum b_j x_j + b0): the cross terms are the
+            # quadratic part, and each constant scales the other side.
+            quadratic: Quadratic = {}
+            for ka, ca in a.coeffs.items():
+                for kb, cb in b.coeffs.items():
+                    _add_quadratic(quadratic, {_pair(ka, kb): ca * cb})
+            linear = Linear(const=a.const * b.const)
+            linear.add(Linear(coeffs=dict(b.coeffs)), factor=a.const)
+            linear.add(Linear(coeffs=dict(a.coeffs)), factor=b.const)
+            return linear, quadratic
+
+        return self._term(term, env), {}
+
+    def _objective(
+        self,
+    ) -> tuple[Linear, str, str, list[str], list[Linear], Linear, Quadratic]:
         spec = self.ir.get("objective") or {}
         total = Linear()
+        quadratic: Quadratic = {}
         term_ids: list[str] = []
         terms: list[Linear] = []
         for term in spec.get("terms", []):
@@ -590,10 +653,12 @@ class _Compiler:
                     f"objective term {term.get('id')!r} carries no expression, so it "
                     "contributes nothing that can be optimised"
                 )
-            linear = self._term(expression, {})
+            linear, square = self._poly(expression, {})
+            weight = number(term.get("weight", 1))
             term_ids.append(str(term.get("id")))
             terms.append(linear.copy())
-            total.add(linear, factor=number(term.get("weight", 1)))
+            total.add(linear, factor=weight)
+            _add_quadratic(quadratic, _scaled(square, weight))
 
         # Penalties push the objective the way it does not want to go: they
         # cost when minimising and subtract when maximising, so a soft
@@ -605,7 +670,29 @@ class _Compiler:
         for key, penalty in self._penalties:
             penalties.add(Linear(coeffs={key: Decimal(1)}), factor=number(penalty) * direction)
         total.add(penalties.copy())
-        return total, sense, mode, term_ids, terms, penalties
+        return total, sense, mode, term_ids, terms, penalties, quadratic
+
+
+Quadratic = dict[tuple[VarKey, VarKey], Decimal]
+
+
+def _pair(a: VarKey, b: VarKey) -> tuple[VarKey, VarKey]:
+    """One key per unordered pair, so x*y and y*x add up rather than being
+    two terms a solver would see separately."""
+    return (a, b) if a <= b else (b, a)
+
+
+def _add_quadratic(into: Quadratic, more: Quadratic) -> None:
+    for key, coeff in more.items():
+        total = into.get(key, Decimal(0)) + coeff
+        if total == 0:
+            into.pop(key, None)
+        else:
+            into[key] = total
+
+
+def _scaled(quadratic: Quadratic, factor: Decimal | int) -> Quadratic:
+    return {key: coeff * factor for key, coeff in quadratic.items() if coeff * factor != 0}
 
 
 def env_keys(env: dict[str, tuple[str, dict]]) -> list[tuple[str, str]]:

@@ -147,12 +147,33 @@ def solve_in_process(
         if _add(solver, variables, constraint):
             added_ids.append(constraint.id)
 
-    if compiled.objective.coeffs or compiled.objective.const:
-        expression = _expression(variables, compiled.objective.coeffs)
-        cost = expression + float(compiled.objective.const) if expression is not None else float(
-            compiled.objective.const
+    has_objective = bool(
+        compiled.objective.coeffs or compiled.objective.const or compiled.objective_quadratic
+    )
+    # HiGHS solves a quadratic program as a minimisation only, so a maximised
+    # QP goes in negated and its value comes out negated back.
+    sign = -1.0 if compiled.objective_quadratic and compiled.sense != "minimize" else 1.0
+    if has_objective:
+        expression = _expression(
+            variables, {key: coeff * _decimal(sign) for key, coeff in compiled.objective.coeffs.items()}
         )
-        solver.minimize(cost) if compiled.sense == "minimize" else solver.maximize(cost)
+        offset = float(compiled.objective.const) * sign
+        objective_sense = (
+            highspy.ObjSense.kMinimize
+            if compiled.sense == "minimize" or compiled.objective_quadratic
+            else highspy.ObjSense.kMaximize
+        )
+        # `setObjective`, not `minimize()`/`maximize()`: those also SOLVE,
+        # and the `run()` below then solved every model a second time.
+        if expression is not None:
+            solver.setObjective(expression + offset, objective_sense)
+        else:
+            # A purely quadratic objective has no linear part, and
+            # `setObjective` refuses a bare number: set its pieces directly.
+            solver.changeObjectiveSense(objective_sense)
+            solver.changeObjectiveOffset(offset)
+        if compiled.objective_quadratic:
+            solver.passHessian(_hessian(highspy, solver, variables, compiled.objective_quadratic, sign))
 
     solver.run()
 
@@ -165,8 +186,8 @@ def solve_in_process(
         status=status,
         optimal=status == "optimal",
         objective=(
-            _report(compiled, solver.getObjectiveValue())
-            if solved and (compiled.objective.coeffs or compiled.objective.const)
+            _report(compiled, solver.getObjectiveValue() * sign)
+            if solved and has_objective
             else None
         ),
         assignments=(
@@ -266,6 +287,47 @@ def _read(spec: Variable, value: float) -> float | int:
 
 def _report(compiled: Compiled, value: float) -> float | int:
     return report_quantity(value, integral=compiled.is_integral)
+
+
+def _decimal(value: float) -> Decimal:
+    return Decimal(str(value))
+
+
+def _hessian(highspy, solver, variables: dict, quadratic: dict, sign: float):
+    """The objective's quadratic part as HiGHS takes it.
+
+    HiGHS minimises `c'x + 1/2 x'Qx`, reading Q's lower triangle column by
+    column. A term `c * x_i * x_j` (i != j) is `1/2 (Q_ij + Q_ji) x_i x_j`
+    with Q symmetric, so it contributes `c` to Q_ij; a square `c * x_i^2` is
+    `1/2 Q_ii x_i^2`, so it contributes `2c` to the diagonal.
+    """
+    import numpy as np
+
+    entries: dict[tuple[int, int], float] = {}
+    for (a, b), coeff in quadratic.items():
+        i, j = variables[a].index, variables[b].index
+        row, col = max(i, j), min(i, j)
+        value = float(coeff) * sign * (2.0 if i == j else 1.0)
+        entries[(row, col)] = entries.get((row, col), 0.0) + value
+
+    dim = solver.getNumCol()
+    by_column: list[list[tuple[int, float]]] = [[] for _ in range(dim)]
+    for (row, col), value in sorted(entries.items(), key=lambda item: (item[0][1], item[0][0])):
+        by_column[col].append((row, value))
+    start, index, values = [0], [], []
+    for column in by_column:
+        for row, value in column:
+            index.append(row)
+            values.append(value)
+        start.append(len(index))
+
+    hessian = highspy.HighsHessian()
+    hessian.dim_ = dim
+    hessian.format_ = highspy.HessianFormat.kTriangular
+    hessian.start_ = np.array(start, dtype=np.int32)
+    hessian.index_ = np.array(index, dtype=np.int32)
+    hessian.value_ = np.array(values, dtype=np.float64)
+    return hessian
 
 
 def _expression(variables: dict, coeffs: dict):

@@ -276,7 +276,12 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "mul_not_linear",
     where: "shape",
-    text: "at most one factor of a `mul` contains a variable",
+    text: "a `mul` in a rule, or in a lexicographic objective, has at most one factor that contains a variable",
+  },
+  {
+    code: "mul_not_quadratic",
+    where: "shape",
+    text: "a weighted objective term is at most quadratic: no product of more than two variables",
   },
   { code: "depth_exceeded", where: "shape", text: "a term nests no deeper than the limit" },
   { code: "terms_exceeded", where: "shape", text: "an IR holds no more terms than the limit" },

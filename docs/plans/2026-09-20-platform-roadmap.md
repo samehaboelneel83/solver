@@ -255,11 +255,34 @@ dataset does. So `classify()` takes the frozen dataset as an optional second
 input and may add `fractional-data` to what a backend must provide. It never
 changes the class.
 
-**Still open:** the nonlinear classes (QP, NLP, MINLP) in the table below.
-These are blocked on term forms, not on schema -- `mul` admits at most one
-variable factor, so no model this contract expresses is nonlinear. The
-convexity honesty rule further down this section is a **precondition** for
-that work, not a follow-up to it.
+**Nonlinear, stage 1 -- the honesty rule -- DONE** (migration `0028`). Every
+run records `optimality`: `global`, `local` or `none`. It comes from what each
+backend declares its optimum proves -- a required registry field, so a local
+solver cannot be added without saying so -- and a local optimum is shown as
+"not proven the best overall", never as the best answer. It landed before any
+nonlinear model could exist, on purpose.
+
+**Nonlinear, stage 2 -- quadratic objectives -- DONE.** A weighted objective
+may multiply two variables (contract §4); rules stay linear. QP is the right
+first nonlinear class because its convexity is *decidable* -- an eigenvalue
+check on the compiled coefficients -- so an optimum can be proven global
+rather than hoped to be:
+
+- an all-integer quadratic model (`MIQP`) goes to **CP-SAT**, which holds each
+  product of two variables equal to a new integer exactly, so it proves the
+  global optimum convex or not;
+- a continuous one (`QP`) goes to **HiGHS** only when proven convex (or
+  concave, when maximising);
+- a continuous model not proven convex, or a quadratic goal over mixed
+  decisions, is **refused with the reason** -- this build has no global
+  nonlinear solver, and a local one would call a nearby answer optimal.
+
+**Still open:** stage 3, general nonlinear terms (NLP / MINLP): products in
+rules and a closed set of functions, each labelled convex, concave or
+neither. SCIP is the candidate global solver; a local one (IPOPT) may join
+only declaring `proves="local"`. The Model editor's live "which solver will
+take this" runs the same convexity step as a run (`convexity.refine`), so the
+two cannot disagree about a quadratic model.
 
 **Goal:** the platform picks an appropriate technique, explains its choice, and
 lets a user override it.

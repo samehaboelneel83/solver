@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.solve.backends import NoBackend, choose, optimality_of
 from app.solve.classify import classify
+from app.solve.convexity import refine
 from app.solve.compile import (
     _VIOLATION,
     Compiled,
@@ -302,6 +303,22 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         if _honour_cancel(db, run_id):
             return _cancelled_outcome(db, run_id)
         try:
+            # Compiled before the solver is chosen: whether a quadratic
+            # objective is convex is a fact about its numbers, and it decides
+            # which backends may take the model at all.
+            compiled = compile_model(ir, data)
+        except Unsupported as exc:
+            db.execute(
+                text(
+                    "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                    " WHERE id = :r"
+                ),
+                {"e": str(exc), "r": run_id},
+            )
+            db.commit()
+            return RunOutcome(run_id, dataset_id, "error", None, {})
+        found = refine(found, compiled)
+        try:
             backend, why = choose(found, params.get("requested_solver"))
         except NoBackend as exc:
             db.execute(
@@ -314,7 +331,6 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             return RunOutcome(run_id, dataset_id, "error", None, {})
 
         try:
-            compiled = compile_model(ir, data)
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
             if compiled.objective_mode == "lex":

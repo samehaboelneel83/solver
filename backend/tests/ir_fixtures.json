@@ -916,6 +916,57 @@
           }
         ]
       }
+    },
+    {
+      "name": "quadratic_objective",
+      "why": "x*x in a weighted objective: a quadratic program. Allowed since the objective may be quadratic while every rule stays linear, and the fixture keeps both validators agreeing that it is",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "z": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_spread",
+              "weight": 1,
+              "expression": {
+                "mul": [
+                  {
+                    "var": "x",
+                    "index": []
+                  },
+                  {
+                    "var": "x",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -3914,6 +3965,131 @@
             "severity": "hard"
           }
         ]
+      }
+    },
+    {
+      "code": "mul_not_quadratic",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "mul"
+      ],
+      "why": "x*(y*z) is cubic. Counting factors that mention a variable sees two here and would pass it; only the degree catches it, which is why the check counts degree",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "z": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cubic",
+              "weight": 1,
+              "expression": {
+                "mul": [
+                  {
+                    "var": "x",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "var": "y",
+                        "index": []
+                      },
+                      {
+                        "var": "z",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "mul_not_linear",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "mul"
+      ],
+      "why": "a lexicographic objective holds each term at its best before the next: holding a quadratic term there would need a quadratic rule, so only a weighted objective may be quadratic",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "z": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "minimize",
+          "mode": "lex",
+          "terms": [
+            {
+              "id": "o_first",
+              "expression": {
+                "mul": [
+                  {
+                    "var": "x",
+                    "index": []
+                  },
+                  {
+                    "var": "y",
+                    "index": []
+                  }
+                ]
+              },
+              "weight": 1
+            }
+          ]
+        }
       }
     }
   ]

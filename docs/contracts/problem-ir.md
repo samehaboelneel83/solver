@@ -385,9 +385,16 @@ Rules the validator enforces on them:
   and is a different model; it is refused.
 - **Every index is bound.** By an enclosing `forall` or `over`. A free index has
   no range, so the constraint has no instances.
-- **Products are linear.** At most one factor of a `mul` may contain a variable.
-  `x * x` is refused here, so the platform says "v1 expresses linear models" —
-  rather than a solver failing later with a message about the model class.
+- **Products are linear in rules, and at most quadratic in a weighted
+  objective.** A term's *degree* is how many variables multiply together in
+  its worst part. In a constraint, and in a lexicographic objective, it is at
+  most 1: `x * y` there is refused as `mul_not_linear`. In a weighted
+  objective it may be 2 -- `x * y`, `x * x` -- which makes the model a
+  quadratic program; `x * (y * z)` is refused as `mul_not_quadratic`.
+  Degree, not "how many factors mention a variable", because the second
+  counts two factors in `x * (y * z)` and would pass a cubic. A lexicographic
+  objective stays linear because it is solved one term at a time, holding
+  each at its best, and holding a quadratic term would need a quadratic rule.
 - **Numbers throughout, and finite ones.** `const` is a number. Parameters are
   `numeric(15, 6)` by the schema. An `attr` used as a number must have data
   type `integer` or `number` — a `text` or `date` attribute is still refused,
@@ -536,7 +543,7 @@ be classified into that family yet.
 
 **Nested or negated filters**, `or`, and comparing one attribute to another.
 
-**Named subexpressions**, quadratic terms, division, `min`/`max`, absolute
+**Named subexpressions**, quadratic *rules* (a quadratic objective is admitted -- §4), division, `min`/`max`, absolute
 value, conditionals.
 
 **Pareto**. `lex` is the other ordering this version expresses; a frontier of

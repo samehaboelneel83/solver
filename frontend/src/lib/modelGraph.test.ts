@@ -156,6 +156,25 @@ describe("buildModelView on models that are not tidy", () => {
     expect(built.edges).toEqual([]);
   });
 
+  it("says when the goal is quadratic", () => {
+    const { graph: built } = buildModelView(
+      {
+        sets: [],
+        parameters: {},
+        variables: { x: { index: [], domain: "continuous", lower: 0, upper: 1 } },
+        constraints: [],
+        objective: {
+          sense: "minimize",
+          terms: [{ id: "o", weight: 1, expression: { mul: [{ var: "x", index: [] }, { var: "x", index: [] }] } }],
+        },
+      },
+      []
+    );
+    const objective = built.nodes.find((node) => node.id === OBJECTIVE_NODE_ID);
+    expect(objective?.label).toBe("minimize\n1 term · quadratic");
+    expect(modelDetails(objective)).toContainEqual(["Kind", "Objective (quadratic)"]);
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);
