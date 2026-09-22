@@ -39,7 +39,7 @@ lane; no LLM / NL→IR work.
 
 ## Phase 9 — isolation
 
-- [ ] (9) Sandboxed solves with memory/CPU limits — done when each solve runs in its own subprocess with `RLIMIT_AS`/`RLIMIT_CPU` and a hard wall deadline, an OOM model ends `failed` with a reason and the worker survives, and compose sets `mem_limit`/`cpus`.
+- [x] (9) Sandboxed solves with memory/CPU limits — done when each solve runs in its own subprocess with `RLIMIT_AS`/`RLIMIT_CPU` and a hard wall deadline, an OOM model ends `failed` with a reason and the worker survives, and compose sets `mem_limit`/`cpus`. *(`6342afb`, `4a63e05`: `app.solve.sandbox`. The run status is `error` -- the enum has no `failed` -- with the reason; live, a 64 MB worker ended run 61 "ran out of memory (limit 64 MB)" and solved run 62 at 4096 MB, 0 restarts.)*
 
 ## Phase 10 — IR v2, in slices
 

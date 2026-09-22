@@ -393,6 +393,23 @@ shared with the solver.
 - An OOM or kill becomes `status=failed, reason="ran out of memory at N MB"` instead of a dead worker.
 - Windows dev: `RLIMIT` unavailable → the sandbox degrades to deadline-only, logged once.
 
+**Progress (2026-09-23):** done as `app/solve/sandbox.py`. A run's solve and
+its diagnosis each run in a child forked from a `forkserver` that has the
+solvers preloaded (a fresh interpreter per run would cost seconds): an
+`RLIMIT_AS` of `SOLVE_MEMORY_MB` (4096), an `RLIMIT_CPU` of time limit x
+workers + 30 s, and a wall deadline of time limit + 15 s, SIGTERM then
+SIGKILL. Progress and a stop request cross the pipe. An allocation that
+fails -- as MemoryError, ENOMEM, an extension that cannot be mapped or
+bad_alloc -- the CPU allowance, a crash or the deadline become a run with
+status `error` (the enum has no `failed`) and that reason; the worker goes
+on. compose caps the worker at 12g / 8 CPUs and the API at 2g / 4.
+Checked live: at 64 MB a run ends "ran out of memory (limit 64 MB)" and the
+same worker solves the next at 4096 MB. The cost: the backend suite went
+from ~218 s to ~275 s, one fork per run. On Windows (no fork) the sandbox
+is off and solves are in-process (`SOLVE_SANDBOX=0`), rather than the
+deadline-only mode sketched above. Worker count stays one process per
+container; run more containers for more parallel runs.
+
 ---
 
 ## Phase 10 — IR v2: logic and structure (~5–6 weeks)
