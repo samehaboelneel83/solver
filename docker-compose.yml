@@ -100,6 +100,8 @@ services:
     environment:
       MIGRATION_DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
+      # Address space each solve may use (app.solve.sandbox).
+      SOLVE_MEMORY_MB: ${SOLVE_MEMORY_MB:-4096}
     command: ["python", "-m", "app.worker"]
     # Prometheus metrics, on the compose network only.
     expose:
