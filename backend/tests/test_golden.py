@@ -217,6 +217,15 @@ GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
         "optimal",
         Decimal("7"),
     ),
+    # A rule with nothing left to decide that cannot hold -- what `sum of
+    # x[e] >= 1` becomes when e ranges over nobody. HiGHS once dropped such a
+    # row and answered a model that has no answer.
+    (
+        "constant_false_rule",
+        model({"x": BIN}, [rule("never", c(0), ">=", c(1))], "maximize", [v("x")]),
+        "infeasible",
+        None,
+    ),
     # No objective: any answer that holds is optimal, and there is no value.
     ("feasibility", model({"x": BIN}, [rule("on", v("x"), ">=", c(1))]), "optimal", None),
 ]

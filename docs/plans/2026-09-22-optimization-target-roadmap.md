@@ -220,11 +220,18 @@ Impact is *for this platform's problem families* (rostering, coverage, blending,
 
 **Progress (2026-09-22):** D2, D3, D5 (with D9's marking: an answer on a
 ceiling the model never set is re-solved with it raised, and becomes
-`unbounded` if the goal improves), D6 (bound and gap recorded and shown; the
-`solve.gap_rel`/`solve.threads` settings not yet), D8 and D11 are done, in
-migration `0029`. The golden suite is `backend/tests/test_golden.py`: 14
-hand-solved models run on every backend that takes them. Still open in this
-phase: the benchmark harness (6.1 `bench/`), D4, D7, CP-SAT scaling.
+`unbounded` if the goal improves), D6, D8 and D11 are done (migration
+`0029`); the `solve.gap_rel` setting is migration `0030`, runs use
+`solve.workers`, and "optimal" requires a recorded gap of at most 1e-6. D4 is
+done: HiGHS is stopped through its own `cancelSolve()` and a stopped run keeps
+the answer it had. D7 is done for HiGHS -- rows and columns go in as arrays,
+2.0 s to 0.23 s on a 200,000-entry model -- which also fixed a dropped
+constant rule (`0 >= 1` vanished and an infeasible model got an answer).
+The golden suite is `backend/tests/test_golden.py`: 15 hand-solved models on
+every backend that takes them. Still open in this phase: the benchmark
+harness (6.1 `bench/`), D7 for the pywraplp backends (GLOP and the MILP
+wrapper spend ~0.7 s on the same model; not yet measured against a proto
+load), and CP-SAT scaling.
 
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.

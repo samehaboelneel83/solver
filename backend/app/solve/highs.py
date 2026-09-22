@@ -165,12 +165,14 @@ def solve_in_process(
     # The setting decides, 0 by default.
     solver.setOptionValue("mip_rel_gap", float(gap_rel))
 
-    variables = {key: _declare(solver, highspy, spec) for key, spec in compiled.variables.items()}
-
-    added_ids: list[str] = []
-    for constraint in compiled.constraints:
-        if _add(solver, variables, constraint):
-            added_ids.append(constraint.id)
+    # The whole model goes in as arrays, a handful of calls however large it
+    # is (target roadmap D7). One `addVariable`/`addConstr` per column and row
+    # cost two seconds of Python on a 200,000-entry model HiGHS then solved
+    # in three milliseconds.
+    keys = list(compiled.variables)
+    position = {key: i for i, key in enumerate(keys)}
+    _add_columns(highspy, solver, compiled, keys)
+    added_ids = _add_rows(highspy, solver, compiled.constraints, position)
 
     has_objective = bool(
         compiled.objective.coeffs or compiled.objective.const or compiled.objective_quadratic
@@ -179,26 +181,9 @@ def solve_in_process(
     # QP goes in negated and its value comes out negated back.
     sign = -1.0 if compiled.objective_quadratic and compiled.sense != "minimize" else 1.0
     if has_objective:
-        expression = _expression(
-            variables, {key: coeff * _decimal(sign) for key, coeff in compiled.objective.coeffs.items()}
-        )
-        offset = float(compiled.objective.const) * sign
-        objective_sense = (
-            highspy.ObjSense.kMinimize
-            if compiled.sense == "minimize" or compiled.objective_quadratic
-            else highspy.ObjSense.kMaximize
-        )
-        # `setObjective`, not `minimize()`/`maximize()`: those also SOLVE,
-        # and the `run()` below then solved every model a second time.
-        if expression is not None:
-            solver.setObjective(expression + offset, objective_sense)
-        else:
-            # A purely quadratic objective has no linear part, and
-            # `setObjective` refuses a bare number: set its pieces directly.
-            solver.changeObjectiveSense(objective_sense)
-            solver.changeObjectiveOffset(offset)
+        _set_objective(highspy, solver, compiled, position, sign)
         if compiled.objective_quadratic:
-            solver.passHessian(_hessian(highspy, solver, variables, compiled.objective_quadratic, sign))
+            solver.passHessian(_hessian(highspy, len(keys), position, compiled.objective_quadratic, sign))
 
     # `solve()` with keyboard-interrupt handling, not `run()`: HiGHS then
     # solves on a thread, and an interrupt -- the SIGTERM the parent sends
@@ -337,16 +322,6 @@ def _status(model_status) -> str:
     return mapping.get(model_status, "error")
 
 
-def _declare(solver, highspy, spec: Variable):
-    if spec.domain == "binary":
-        return solver.addBinary()
-    if spec.domain == "integer":
-        return solver.addVariable(
-            lb=float(spec.lower), ub=float(spec.upper), type=highspy.HighsVarType.kInteger
-        )
-    return solver.addVariable(lb=float(spec.lower), ub=float(spec.upper))
-
-
 def _read(spec: Variable, value: float) -> float | int:
     return report_quantity(value, integral=spec.is_integral)
 
@@ -355,11 +330,7 @@ def _report(compiled: Compiled, value: float) -> float | int:
     return report_quantity(value, integral=compiled.is_integral)
 
 
-def _decimal(value: float) -> Decimal:
-    return Decimal(str(value))
-
-
-def _hessian(highspy, solver, variables: dict, quadratic: dict, sign: float):
+def _hessian(highspy, dim: int, position: dict, quadratic: dict, sign: float):
     """The objective's quadratic part as HiGHS takes it.
 
     HiGHS minimises `c'x + 1/2 x'Qx`, reading Q's lower triangle column by
@@ -371,12 +342,11 @@ def _hessian(highspy, solver, variables: dict, quadratic: dict, sign: float):
 
     entries: dict[tuple[int, int], float] = {}
     for (a, b), coeff in quadratic.items():
-        i, j = variables[a].index, variables[b].index
+        i, j = position[a], position[b]
         row, col = max(i, j), min(i, j)
         value = float(coeff) * sign * (2.0 if i == j else 1.0)
         entries[(row, col)] = entries.get((row, col), 0.0) + value
 
-    dim = solver.getNumCol()
     by_column: list[list[tuple[int, float]]] = [[] for _ in range(dim)]
     for (row, col), value in sorted(entries.items(), key=lambda item: (item[0][1], item[0][0])):
         by_column[col].append((row, value))
@@ -396,37 +366,82 @@ def _hessian(highspy, solver, variables: dict, quadratic: dict, sign: float):
     return hessian
 
 
-def _expression(variables: dict, coeffs: dict):
-    parts = [variables[key] * float(coeff) for key, coeff in coeffs.items() if coeff]
-    if not parts:
-        return None
-    total = parts[0]
-    for part in parts[1:]:
-        total = total + part
-    return total
+def _add_columns(highspy, solver, compiled: Compiled, keys: list) -> None:
+    import numpy as np
+
+    specs = [compiled.variables[key] for key in keys]
+    lower = np.array([float(spec.lower) for spec in specs], dtype=np.float64)
+    upper = np.array([float(spec.upper) for spec in specs], dtype=np.float64)
+    solver.addVars(len(specs), lower, upper)
+    integral = [i for i, spec in enumerate(specs) if spec.is_integral]
+    if integral:
+        solver.changeColsIntegrality(
+            len(integral),
+            np.array(integral, dtype=np.int32),
+            np.array([highspy.HighsVarType.kInteger] * len(integral)),
+        )
 
 
-def _add(solver, variables: dict, c: Constraint) -> bool:
-    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
-        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
-    coeffs: dict = dict(c.left.coeffs)
-    for key, coeff in c.right.coeffs.items():
-        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
-    rhs = float(c.right.const - c.left.const)
-    expression = _expression(variables, coeffs)
-    if expression is None:
-        return False
+def _add_rows(highspy, solver, constraints: list[Constraint], position: dict) -> list[str]:
+    """Every rule as one row, all in one call. Returns the rule id of each row.
 
-    if c.relation == ">=":
-        solver.addConstr(expression >= rhs)
-    elif c.relation == "<=":
-        solver.addConstr(expression <= rhs)
-    elif c.relation in ("=", "=="):
-        solver.addConstr(expression == rhs)
-    elif c.relation == "<":
-        solver.addConstr(expression <= rhs - 1)
-    elif c.relation == ">":
-        solver.addConstr(expression >= rhs + 1)
-    else:  # pragma: no cover -- the contract's relation vocabulary
-        raise ValueError(f"unknown relation {c.relation!r}")
-    return True
+    A rule left with no variables still becomes a row -- an empty one whose
+    bounds either hold or cannot. Dropping it, as this adapter once did, let a
+    rule like `0 >= 1` vanish and a model that has no answer get one.
+    """
+    import numpy as np
+
+    inf = highspy.kHighsInf
+    lower, upper, starts, index, values, ids = [], [], [], [], [], []
+    for c in constraints:
+        if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
+            raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
+        coeffs: dict = dict(c.left.coeffs)
+        for key, coeff in c.right.coeffs.items():
+            coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
+        rhs = float(c.right.const - c.left.const)
+        low, high = {
+            ">=": (rhs, inf),
+            "<=": (-inf, rhs),
+            "=": (rhs, rhs),
+            "==": (rhs, rhs),
+            "<": (-inf, rhs - 1),
+            ">": (rhs + 1, inf),
+        }[c.relation]
+        starts.append(len(index))
+        for key, coeff in coeffs.items():
+            if coeff:
+                index.append(position[key])
+                values.append(float(coeff))
+        lower.append(low)
+        upper.append(high)
+        ids.append(c.id)
+    if ids:
+        solver.addRows(
+            len(ids),
+            np.array(lower, dtype=np.float64),
+            np.array(upper, dtype=np.float64),
+            len(index),
+            np.array(starts, dtype=np.int32),
+            np.array(index, dtype=np.int32),
+            np.array(values, dtype=np.float64),
+        )
+    return ids
+
+
+def _set_objective(highspy, solver, compiled: Compiled, position: dict, sign: float) -> None:
+    import numpy as np
+
+    costs = {position[key]: float(coeff) * sign for key, coeff in compiled.objective.coeffs.items() if coeff}
+    if costs:
+        solver.changeColsCost(
+            len(costs),
+            np.array(list(costs), dtype=np.int32),
+            np.array(list(costs.values()), dtype=np.float64),
+        )
+    solver.changeObjectiveOffset(float(compiled.objective.const) * sign)
+    solver.changeObjectiveSense(
+        highspy.ObjSense.kMinimize
+        if compiled.sense == "minimize" or compiled.objective_quadratic
+        else highspy.ObjSense.kMaximize
+    )
