@@ -58,6 +58,16 @@ def empty_queue(db):
     db.commit()
 
 
+@pytest.fixture
+def without_scip(monkeypatch):
+    """A build without the global solver (`app.solve.scip`). The refusals
+    below are what such a build must still do; `test_scip` pins that a build
+    with it solves these models instead."""
+    from app.solve import scip
+
+    monkeypatch.setattr(scip, "_available", False)
+
+
 def _ir(domain: str, sense: str = "minimize") -> dict:
     """Share 10 units over the items; the objective is the sum of squares."""
     return {
@@ -204,7 +214,7 @@ def test_a_continuous_quadratic_model_is_QP_and_goes_to_highs_when_convex(db):
     assert backend is HIGHS
 
 
-def test_a_nonconvex_continuous_model_is_refused_and_says_why(db):
+def test_a_nonconvex_continuous_model_is_refused_and_says_why(db, without_scip):
     """The refusal is the feature: a local solver would return an answer and
     call it optimal."""
     _, ir, data = _model(db, 2, "continuous", sense="maximize")
@@ -228,7 +238,7 @@ def test_an_all_integer_quadratic_model_goes_to_cp_sat_convex_or_not(db):
     assert backend is CP_SAT
 
 
-def test_a_quadratic_goal_over_mixed_decisions_is_refused_and_says_why():
+def test_a_quadratic_goal_over_mixed_decisions_is_refused_and_says_why(without_scip):
     ir = _ir("continuous")
     ir["variables"]["open"] = {"index": [], "domain": "binary"}
     found = classify(ir)
@@ -319,7 +329,7 @@ def test_a_convex_qp_run_is_solved_and_says_its_optimum_is_global(db):
     assert row["objective"] == Decimal("50")
 
 
-def test_a_nonconvex_qp_run_is_an_error_with_the_reason_not_a_wrong_answer(db):
+def test_a_nonconvex_qp_run_is_an_error_with_the_reason_not_a_wrong_answer(db, without_scip):
     version, _, _ = _model(db, 2, "continuous", sense="maximize")
 
     row = _run(db, version)
@@ -332,7 +342,7 @@ def test_a_nonconvex_qp_run_is_an_error_with_the_reason_not_a_wrong_answer(db):
 # -- the Model editor agrees with the run -------------------------------------
 
 
-def test_the_editor_names_no_solver_for_a_model_the_run_would_refuse(db):
+def test_the_editor_names_no_solver_for_a_model_the_run_would_refuse(db, without_scip):
     """`POST /api/v1/classify` is the editor's "which kind of solver will take
     this". It takes the same convexity step a run does, so it cannot promise
     a solver for a nonconvex model that the run then refuses."""

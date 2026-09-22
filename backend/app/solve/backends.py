@@ -139,6 +139,26 @@ def _highs_available() -> bool:
     return highs.available()
 
 
+def _scip_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+) -> Solution:
+    from app.solve import scip
+
+    return scip.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop
+    )
+
+
+def _scip_available() -> bool:
+    from app.solve import scip
+
+    return scip.available()
+
+
 # Ranks are global, so they encode one ordering across every class. That
 # works because the `classes` sets keep each backend out of the comparison
 # where it would be the wrong technique: glop and cp-sat both rank 0 and never
@@ -208,7 +228,36 @@ MILP = Backend(
     planner_choice="A mixed solver will take this by default.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP)
+SCIP = Backend(
+    name="scip",
+    # Only the quadratic classes: a linear model is better served by every
+    # backend above, and rank 2 keeps it that way even if this list grows.
+    classes=frozenset({"QP", "MIQP"}),
+    # `nonconvex` and a mix of `integral` and `continuous` together: the two
+    # cases stage 2 refused. Spatial branch-and-bound bounds each product on
+    # every branch, so nonconvexity costs time, never correctness.
+    provides=frozenset(
+        {
+            "linear",
+            "integral",
+            "continuous",
+            "fractional-data",
+            "soft-constraints",
+            "quadratic",
+            "nonconvex",
+        }
+    ),
+    rank=2,
+    solve=_scip_solve,
+    # Its `optimal` closes the gap between the best answer and a proven bound
+    # over the whole space, convex or not: a global optimum.
+    proves="global",
+    is_available=_scip_available,
+    note="SCIP; spatial branch-and-bound, the global solver for quadratic models nothing else takes",
+    planner_choice="A global nonlinear solver will take this by default.",
+)
+
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP)
 
 
 class NoBackend(Exception):

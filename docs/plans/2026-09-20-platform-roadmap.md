@@ -274,13 +274,24 @@ rather than hoped to be:
 - a continuous one (`QP`) goes to **HiGHS** only when proven convex (or
   concave, when maximising);
 - a continuous model not proven convex, or a quadratic goal over mixed
-  decisions, is **refused with the reason** -- this build has no global
-  nonlinear solver, and a local one would call a nearby answer optimal.
+  decisions, goes to **SCIP** (stage 3a, below). A build without PySCIPOpt
+  still refuses these with the reason, because a local solver would call a
+  nearby answer optimal.
 
-**Still open:** stage 3, general nonlinear terms (NLP / MINLP): products in
+**Nonlinear, stage 3a -- a global solver -- DONE.** SCIP, through PySCIPOpt
+(`app/solve/scip.py`), is rank 2 and takes only `QP` and `MIQP`, so a convex
+QP stays with HiGHS and an all-integer one with CP-SAT. Its spatial
+branch-and-bound proves the optimum global whatever the curvature, so it
+declares `proves="global"`. The quadratic part of the objective goes in as
+one constraint on an auxiliary variable. It runs in the worker process: unlike
+`libHighs`, its bundled SCIP does not clash with OR-Tools'. The templates
+`feed_blend` (LP) and `load_balance` (convex QP) make continuous and quadratic
+solving visible in the product.
+
+**Still open:** stage 3b, general nonlinear terms (NLP / MINLP): products in
 rules and a closed set of functions, each labelled convex, concave or
-neither. SCIP is the candidate global solver; a local one (IPOPT) may join
-only declaring `proves="local"`. The Model editor's live "which solver will
+neither. SCIP already takes them. A local solver (IPOPT) may join, but only
+declaring `proves="local"`. The Model editor's live "which solver will
 take this" runs the same convexity step as a run (`convexity.refine`), so the
 two cannot disagree about a quadratic model.
 
