@@ -196,12 +196,25 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toast = useToast();
 
   const [draft, setDraft] = useState<Draft | null>(null);
+  // What the draft was seeded from: a version id, or "scratch". The draft is
+  // re-seeded exactly when this stops matching what the page shows.
+  //
+  // It used to be "seed when the draft is empty", with every change of
+  // starting point clearing the draft and moving the URL in one handler. If
+  // the URL move landed a render after the clear -- it can -- the effect saw
+  // an empty draft beside the OLD version and seeded from it; by the time the
+  // URL caught up the draft was no longer empty, so it was never re-seeded.
+  // The page then said "starting from version 1" over version 2's rules, and
+  // publishing would have built on the wrong one.
+  const [seededFrom, setSeededFrom] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const ir = (scratch ? EMPTY_MODEL : latest.data?.ir) as Record<string, unknown> | undefined;
+  const seedKey = scratch ? "scratch" : baseId === null ? null : `version-${baseId}`;
 
   useEffect(() => {
-    if (!ir || draft) return;
+    if (!ir || seedKey === null || (draft && seededFrom === seedKey)) return;
+    setSeededFrom(seedKey);
     setDraft({
       sets: [...((ir.sets as string[]) ?? [])],
       parameters: { ...((ir.parameters as Draft["parameters"]) ?? {}) },
@@ -215,7 +228,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         ),
       },
     });
-  }, [ir, draft]);
+    // `draft` is read only to ask "is there one yet"; listing it would re-run
+    // this on every keystroke for nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ir, seedKey, seededFrom]);
 
   const context: ModelContext | null = useMemo(() => {
     if (!ir || !draft) return null;
@@ -351,6 +367,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           className="mt-3 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
           onClick={() => {
             setScratch(true);
+            setSeededFrom("scratch");
             setDraft({
               sets: [],
               parameters: {},
@@ -382,7 +399,6 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       {
         onSuccess: (created: { id: Id; version: number }) => {
           toast.success(`Published version ${created.version}`);
-          setDraft(null);
           setScratch(false);
           setSearchParams(
             { problem: String(problemId), version: String(created.id) },
@@ -407,7 +423,6 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             className={`${INPUT_CLASS} max-w-sm`}
             value={String(baseId ?? "")}
             onChange={(event) => {
-              setDraft(null);
               setSearchParams(
                 { problem: String(problemId), version: event.target.value },
                 { replace: true }
@@ -441,7 +456,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         )}
         constraints={draft.constraints}
         objectiveTerms={draft.objective.terms}
-        onChange={(next) => setDraft({ ...draft, ...next })}
+        onChange={(next) => setDraft((current) => current && { ...current, ...next })}
       />
 
       <section aria-labelledby="constraints-heading" className="mb-6">
@@ -461,16 +476,20 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                 .map((c) => c.id)}
               context={context}
               onChange={(next) =>
-                setDraft({
-                  ...draft,
-                  constraints: draft.constraints.map((c, i) => (i === position ? next : c)),
-                })
+                setDraft((current) =>
+                  current && {
+                    ...current,
+                    constraints: current.constraints.map((c, i) => (i === position ? next : c)),
+                  }
+                )
               }
               onRemove={() =>
-                setDraft({
-                  ...draft,
-                  constraints: draft.constraints.filter((_, i) => i !== position),
-                })
+                setDraft((current) =>
+                  current && {
+                    ...current,
+                    constraints: current.constraints.filter((_, i) => i !== position),
+                  }
+                )
               }
             />
           ))}
@@ -479,14 +498,15 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           type="button"
           className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
           onClick={() =>
-            setDraft({
-              ...draft,
-              constraints: [
-                ...draft.constraints,
+            setDraft((current) =>
+              current && {
+                ...current,
+                constraints: [
+                  ...current.constraints,
                 {
                   id: freeNumberedId(
                     "c_",
-                    draft.constraints.map((constraint) => constraint.id)
+                    current.constraints.map((constraint) => constraint.id)
                   ),
                   // No set yet → a global rule (omit forall). Naming an
                   // empty set would publish a binding the contract refuses.
@@ -498,8 +518,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                   right: { const: 0 },
                   severity: "hard",
                 } as Constraint,
-              ],
-            })
+                ],
+              }
+            )
           }
         >
           Add a rule
@@ -513,7 +534,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <ObjectiveEditor
           objective={draft.objective}
           context={context}
-          onChange={(objective) => setDraft({ ...draft, objective })}
+          onChange={(objective) => setDraft((current) => current && { ...current, objective })}
         />
       </section>
 
