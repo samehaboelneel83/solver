@@ -32,18 +32,19 @@ to_host_path() {
   if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
-REPO="$(to_host_path "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(to_host_path "$ROOT")"
 TASK="solver-nightly"
 
 case "${1:-}" in
   --install)
     bash_exe="$(to_host_path "$(command -v bash)")"
-    schtasks //Create //F //TN "$TASK" //SC DAILY //ST 03:00 \
-      //TR "\"$bash_exe\" -lc \"bash '$REPO/scripts/nightly.sh'\""
+    schtasks /Create /F /TN "$TASK" /SC DAILY /ST 03:00 \
+      /TR "\"$bash_exe\" -l \"$REPO/scripts/nightly.sh\""
     exit $?
     ;;
   --uninstall)
-    schtasks //Delete //F //TN "$TASK"
+    schtasks /Delete /F /TN "$TASK"
     exit $?
     ;;
   "") ;;
@@ -53,7 +54,13 @@ esac
 NIGHT="$(date +%F)"
 OUT="$REPO/backend/bench/nightly_results"
 mkdir -p "$OUT"
-WORKTREE="$(to_host_path "$(dirname "$REPO")")/solver-nightly"
+# Under the task scheduler nobody sees the console: keep the job's own
+# errors (a worktree that would not check out, docker not running).
+exec 2>>"$OUT/$NIGHT-job.log"
+# Absolute, beside the repository. (Built from the host path it came out
+# as a bare `D/solver-nightly` -- relative, so under the scheduler, whose
+# working directory is system32, it pointed there.)
+WORKTREE="$(to_host_path "$(dirname "$ROOT")/solver-nightly")"
 
 git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
 git -C "$REPO" worktree add --detach --force "$WORKTREE" master >/dev/null
