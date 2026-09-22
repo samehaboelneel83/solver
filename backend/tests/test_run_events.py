@@ -192,3 +192,14 @@ def test_another_organization_cannot_watch_a_run(tenants, db):
     run_id = _run(db, IR, "events-private")
     with TestClient(app).stream("GET", f"/api/v1/runs/{run_id}/events", headers=tenants["b"]) as response:
         assert response.status_code == 404
+
+
+def test_a_run_settled_in_presolve_still_has_a_point_to_show(db):
+    """A model small enough to be decided before the search begins reports
+    nothing as it solves -- there is no "while". Its answer is recorded as
+    one point, so every solved run has a curve rather than an empty box."""
+    run_id = _run(db, IR, "events-presolve")
+
+    progress = [payload for kind, payload in _events(db, run_id) if kind == "incumbent"]
+    objective = db.execute(text("SELECT objective FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    assert progress[-1]["objective"] == float(objective)

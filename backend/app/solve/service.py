@@ -559,6 +559,8 @@ def _execute(
         {"s": backend.name, "extra": _json(extra), "r": run_id},
     )
     _record(db, run_id, compiled, result)
+    if result.objective is not None:
+        events.final(result.objective, result.best_bound, result.wall_seconds)
     # What the answer may claim, as the backend that found it declares
     # (migration 0028): "optimal" from a local solver is not the same claim
     # as "optimal" from a global one, and the run must not blur the two.
@@ -979,6 +981,24 @@ class RunEvents:
         with self.lock:
             self._flush()
             self._write("stage", {"stage": name, **facts})
+
+    def final(self, objective, bound, seconds: float) -> None:
+        """The answer a run ended with, as a point of its own.
+
+        A model small enough to be settled in presolve reports nothing while
+        it solves -- there is no "while" -- and its curve would be empty.
+        This gives every solved run at least the point it ended at.
+        """
+        with self.lock:
+            self._flush()
+            self._write(
+                "incumbent",
+                {
+                    "t": round(float(seconds or 0), 3),
+                    "objective": None if objective is None else float(objective),
+                    "bound": None if bound is None else float(bound),
+                },
+            )
 
     def progress(self, kind: str, payload: dict) -> None:
         with self.lock:
