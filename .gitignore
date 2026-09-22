@@ -11,3 +11,9 @@ dist/
 # Superpowers SDD workspace: ledgers, briefs, task reports and review diffs.
 # Local working record, not project history (review diffs are regenerable from git).
 .superpowers/
+
+# One-off browser checks written while verifying a change in a real browser
+# (Playwright scripts named `_browser_check_*.mjs`). They drive the live stack
+# with fixed ids and are not part of the test suite; kept locally, never
+# committed by accident.
+frontend/_browser_check_*.mjs
