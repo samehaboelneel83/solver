@@ -80,7 +80,7 @@ describe("AppShell", () => {
       expect(screen.queryByRole("link", { name: "Capabilities" })).not.toBeInTheDocument();
     });
 
-    it("hides Templates, Organizations and Access when the account cannot write them", async () => {
+    it("hides Templates and Organizations when the account cannot write them, leaving Access its API keys", async () => {
       (apiFetch as any).mockImplementation((path: string) => {
         if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
         if (path.startsWith("/api/v1/me")) {
@@ -99,7 +99,10 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Model editor" })).toHaveAttribute("href", "/model");
       expect(screen.queryByRole("link", { name: "Templates" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Organizations" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /^Access/ })).not.toBeInTheDocument();
+      // Anyone may make keys for their own programs (migration 0035), so the
+      // Access group stays, holding that alone.
+      expect(screen.getByRole("link", { name: "API keys" })).toHaveAttribute("href", "/api-keys");
+      expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     });
 
     it("shows Users, Roles and User roles only when the account may grant roles", async () => {

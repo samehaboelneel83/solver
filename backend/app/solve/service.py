@@ -233,7 +233,7 @@ def quota_of(db: Session, organization_id) -> dict[str, Any]:
     row = db.execute(
         text(
             "SELECT max_concurrent_runs, max_queued_runs, max_time_limit_s, max_vars,"
-            "       cpu_seconds_month"
+            "       cpu_seconds_month, requests_per_minute"
             "  FROM iam.quota WHERE organization_id = :o"
         ),
         {"o": organization_id},

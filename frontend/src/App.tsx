@@ -15,6 +15,7 @@ import EntityRecord from "./pages/EntityRecord";
 import Parameters from "./pages/Parameters";
 import ModelVersions from "./pages/ModelVersions";
 import Runs from "./pages/Runs";
+import ApiKeys from "./pages/ApiKeys";
 import Settings from "./pages/Settings";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="versions" element={<ModelVersions />} />
         <Route path="runs" element={<Runs />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="api-keys" element={<ApiKeys />} />
         <Route path="model" element={<ModelEditor />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />

@@ -282,8 +282,15 @@ migration `0034`: `iam.quota` (null = unlimited; checked at submit, 422
 naming the quota; `max_concurrent_runs` at claim), CPU-seconds metered by a
 trigger into `iam.usage_month`, and `claim_next` takes the oldest run of the
 organization with the fewest in progress, serialised by an advisory lock so
-the concurrency quota is exact. Run priority is not modelled yet. Still
-open: API keys, rate limit.
+the concurrency quota is exact. Run priority is not modelled yet. API keys
+and the rate limit are migration `0035`: `sk_<prefix>_<secret>`, a keyed
+SHA-256 of the secret (random, so a slow hash would only cost every request
+time), capabilities a subset of the maker's and intersected with them on
+every request; a key cannot mint or revoke keys. The rate limit is a
+per-caller token bucket in Postgres at the quota's `requests_per_minute`,
+429 with `Retry-After`; refused requests spend nothing. A page at
+`/api-keys` makes (showing the token once), lists and revokes keys. Phase 7
+is complete.
 
 ---
 

@@ -20,4 +20,7 @@ def test_iam_tables_exist_after_migration():
         # Migration 0034: per-organization limits, and what each used.
         "quota",
         "usage_month",
+        # Migration 0035: keys for programs, and the rate limit's buckets.
+        "api_key",
+        "rate_bucket",
     }

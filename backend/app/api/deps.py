@@ -4,6 +4,7 @@ from jose import JWTError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core import api_keys
 from app.core.db import enter_tenant, get_db
 from app.core.security import decode_access_token
 from app.models.iam import UserAccount
@@ -19,17 +20,37 @@ def get_current_user(
         detail="could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    try:
-        payload = decode_access_token(token)
-        username = payload.get("sub")
-        if username is None:
+    key = None
+    if api_keys.is_api_key(token):
+        # A program's key (migration 0035): it acts as the user who made it,
+        # with at most the capabilities it was given.
+        key = api_keys.resolve(db, token)
+        if key is None:
             raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = db.query(UserAccount).filter(UserAccount.username == username).first()
+        user = db.get(UserAccount, key.user_id)
+    else:
+        try:
+            payload = decode_access_token(token)
+            username = payload.get("sub")
+            if username is None:
+                raise credentials_exception
+        except JWTError:
+            raise credentials_exception
+        user = db.query(UserAccount).filter(UserAccount.username == username).first()
     if user is None or not user.is_active:
         raise credentials_exception
+
+    # Counted per key, or per person signed in, against the organization's
+    # `requests_per_minute` -- before anything else is done for the request.
+    try:
+        api_keys.take_token(db, f"key:{key.id}" if key else f"user:{user.id}", user.organization_id)
+    except api_keys.RateLimited as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
     # From here on the request sees only its own organization's rows: the
     # database enforces it (migration 0032), not each route.
     enter_tenant(db, user.organization_id)
@@ -37,6 +58,9 @@ def get_current_user(
     # as the tenant, so a caller holding it after the session closes can
     # still read it.
     db.refresh(user)
+    # Not mapped columns: what this request may do if it came with a key.
+    user.api_key_id = key.id if key else None  # type: ignore[attr-defined]
+    user.api_key_capabilities = key.capabilities if key else None  # type: ignore[attr-defined]
     return user
 
 
@@ -49,7 +73,10 @@ def get_current_user(
 
 
 def capabilities_of(db: Session, user: UserAccount) -> set[str]:
-    """Everything this user may do, from every role they hold."""
+    """Everything this user may do, from every role they hold -- and, for a
+    request made with an API key, only what the key was also given. The
+    intersection is taken now, not when the key was made, so a key loses a
+    capability the moment its user does."""
     rows = db.execute(
         text(
             "SELECT DISTINCT rc.capability_code"
@@ -59,7 +86,9 @@ def capabilities_of(db: Session, user: UserAccount) -> set[str]:
         ),
         {"u": str(user.id)},
     ).scalars().all()
-    return set(rows)
+    held = set(rows)
+    limit = getattr(user, "api_key_capabilities", None)
+    return held & limit if limit is not None else held
 
 
 def requires(capability: str):

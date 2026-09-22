@@ -24,7 +24,14 @@ from app.solve.service import month_usage, quota_of
 
 router = APIRouter(prefix="/api/v1", tags=["quota"])
 
-LIMITS = ("max_concurrent_runs", "max_queued_runs", "max_time_limit_s", "max_vars", "cpu_seconds_month")
+LIMITS = (
+    "max_concurrent_runs",
+    "max_queued_runs",
+    "max_time_limit_s",
+    "max_vars",
+    "cpu_seconds_month",
+    "requests_per_minute",
+)
 
 
 class QuotaWrite(BaseModel):
@@ -33,6 +40,7 @@ class QuotaWrite(BaseModel):
     max_time_limit_s: float | None = Field(default=None, gt=0)
     max_vars: int | None = Field(default=None, ge=1)
     cpu_seconds_month: float | None = Field(default=None, gt=0)
+    requests_per_minute: int | None = Field(default=None, ge=1)
 
 
 def _view(db: Session, organization_id) -> dict[str, Any]:
@@ -67,15 +75,16 @@ def write_quota(
     db.execute(
         text(
             "INSERT INTO iam.quota (organization_id, max_concurrent_runs, max_queued_runs,"
-            "  max_time_limit_s, max_vars, cpu_seconds_month)"
+            "  max_time_limit_s, max_vars, cpu_seconds_month, requests_per_minute)"
             " VALUES (:o, :max_concurrent_runs, :max_queued_runs, :max_time_limit_s, :max_vars,"
-            "  :cpu_seconds_month)"
+            "  :cpu_seconds_month, :requests_per_minute)"
             " ON CONFLICT (organization_id) DO UPDATE SET"
             "  max_concurrent_runs = EXCLUDED.max_concurrent_runs,"
             "  max_queued_runs = EXCLUDED.max_queued_runs,"
             "  max_time_limit_s = EXCLUDED.max_time_limit_s,"
             "  max_vars = EXCLUDED.max_vars,"
             "  cpu_seconds_month = EXCLUDED.cpu_seconds_month,"
+            "  requests_per_minute = EXCLUDED.requests_per_minute,"
             "  updated_at = now()"
         ),
         {"o": organization_id, **values},

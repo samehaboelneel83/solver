@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 
+from app.api.api_keys import router as api_keys_router
 from app.api.auth import router as auth_router
 from app.api.entities import router as entities_router
 from app.api.entity_types import router as entity_types_router
@@ -114,6 +115,7 @@ app.include_router(parameters_router)
 app.include_router(problems_router)
 app.include_router(runs_router)
 app.include_router(quota_router)
+app.include_router(api_keys_router)
 app.include_router(settings_router)
 # Re-mounted in Task 7. Task 1 had unmounted it because every query behind
 # it read the v0 domain.* tables that migration 0006_schema_v1_domain

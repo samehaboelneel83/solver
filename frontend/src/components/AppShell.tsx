@@ -111,6 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
     key: "access",
     label: "Access",
     items: [
+      { to: "/api-keys", label: "API keys" },
       { to: "/iam/organization", label: "Organizations", capability: "domain.edit" },
       { to: "/iam/user_account", label: "Users", capability: "iam.manage" },
       { to: "/iam/role", label: "Roles", capability: "iam.manage" },

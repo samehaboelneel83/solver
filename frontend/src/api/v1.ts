@@ -619,6 +619,27 @@ export type MeUpdate = {
 
 export const updateMe = (body: MeUpdate) => send<Me>("PATCH", "/api/v1/me", body);
 
+/** A credential for a program (migration 0035). The token itself is in
+ * `ApiKeyCreated` only: the server never shows it again. */
+export type ApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  user_id: string;
+  username: string;
+  capabilities: string[];
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+export type ApiKeyCreated = ApiKey & { token: string };
+export type ApiKeyCreate = { name: string; capabilities?: string[]; expires_in_days?: number | null };
+
+export const listApiKeys = () => apiFetch<{ items: ApiKey[] }>("/api/v1/api-keys");
+export const createApiKey = (body: ApiKeyCreate) => send<ApiKeyCreated>("POST", "/api/v1/api-keys", body);
+export const revokeApiKey = (id: string) => remove(`/api/v1/api-keys/${id}`);
+
 export type SettingScope = "platform" | "domain" | "problem";
 
 export type SettingValue = {
@@ -1020,6 +1041,12 @@ export function useMe() {
   return useQuery({ queryKey: [V1, "me"], queryFn: getMe, staleTime: 5 * 60 * 1000 });
 }
 export const useUpdateMe = () => useV1Mutation(updateMe);
+
+export function useApiKeys() {
+  return useQuery({ queryKey: [V1, "api-keys"], queryFn: listApiKeys });
+}
+export const useCreateApiKey = () => useV1Mutation(createApiKey);
+export const useRevokeApiKey = () => useV1Mutation(revokeApiKey);
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
