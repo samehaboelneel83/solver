@@ -35,7 +35,7 @@ lane; no LLM / NL→IR work.
 - [x] (8) Metrics and `/metrics` — done when `solve_seconds`, `run_gap`, `queue_depth`, `queue_wait_seconds`, `worker_busy` are exported on the API and a worker port and scraped live. *(`6470b48`: internal ports 9101 (API) and 9100 (worker), unpublished; scraped from the compose network. No Prometheus server is deployed.)*
 - [x] (8) OpenTelemetry tracing — done when a run's API span and its worker spans (`compile`, `choose`, `solve`, `diagnose`, `persist`) share one trace through `run.params.trace`, exporter configurable. *(`c2cc8c9`: `OTEL_TRACES_EXPORTER` log/otlp/none; checked live across both containers.)*
 - [x] (8) ClickHouse `run_fact` writer — done when every settled run inserts one `run_fact` row, verified live. *(`efcd359`, migration 0040: an outbox swept by the worker; live backfill 37/37, and a new run's fact within seconds.)*
-- [ ] (8) `run_event` retention — done when events older than the setting (default 30 days after settle) are pruned by the worker, pinned by a test.
+- [x] (8) `run_event` retention — done when events older than the setting (default 30 days after settle) are pruned by the worker, pinned by a test. *(`9b4d2b4`, migration 0041: `run.event_retention_days`, per problem/domain/platform; pruned live at worker start.)*
 
 ## Phase 9 — isolation
 

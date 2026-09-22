@@ -373,7 +373,12 @@ done (`app.analytics`, migration `0040`): the worker sweeps settled runs
 whose fact is unwritten (`run.fact_written_at`, an outbox) into a
 ReplacingMergeTree keyed by run, so every way a run settles is covered and
 a ClickHouse outage only delays it; the first sweep backfilled every run.
-Still open in this phase: `run_event` retention.
+Retention is done too
+(`app.retention`, migration `0041`): `run.event_retention_days` (30, 0 =
+for ever), resolved per run at every settings level, pruned by the worker
+at start-up and hourly; the run, its answer and its fact stay. Not built:
+`retention.solution_days` (the plan calls it optional; `run.retention_days`
+has existed since 0014 and nothing enforces it). **Phase 8 is complete.**
 
 ---
 
