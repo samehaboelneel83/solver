@@ -160,6 +160,8 @@ _RANGES: dict[str, tuple[float | None, float | None]] = {
     "solve.gap_rel": (0, 0.5),
     "solve.seed": (0, 2_147_483_647),
     "run.retention_days": (1, None),
+    # 0 keeps a run's events for ever (app.retention).
+    "run.event_retention_days": (0, None),
 }
 
 
@@ -168,7 +170,7 @@ def _refuse_out_of_range(key: str, value: Any) -> None:
     if (low is not None and value < low) or (high is not None and value > high):
         span = f"from {low}" + (f" to {high}" if high is not None else " up")
         raise HTTPException(status_code=422, detail=f"{key} takes values {span}, and {value!r} is not one")
-    if key in ("solve.workers", "solve.seed", "run.retention_days") and value != int(value):
+    if key in ("solve.workers", "solve.seed", "run.retention_days", "run.event_retention_days") and value != int(value):
         raise HTTPException(status_code=422, detail=f"{key} is a whole number, and {value!r} is not")
 
 

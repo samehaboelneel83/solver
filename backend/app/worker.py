@@ -27,6 +27,7 @@ from types import FrameType
 from sqlalchemy import text
 
 from app.analytics import publish_facts
+from app.retention import prune_run_events
 from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
@@ -37,6 +38,9 @@ POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "1.0"))
 # Silence longer than this means the worker is gone. Short enough that a
 # crashed solve is noticed; long enough that a slow heartbeat is not a theft.
 STALE_AFTER_SECONDS = int(os.environ.get("WORKER_STALE_AFTER_SECONDS", "20"))
+# How often expired run events are pruned (app.retention). Retention is in
+# days, so hourly is plenty.
+PRUNE_EVERY_SECONDS = float(os.environ.get("WORKER_PRUNE_EVERY_SECONDS", "3600"))
 
 _stop = False
 
@@ -170,7 +174,15 @@ def main() -> None:  # pragma: no cover -- the loop itself
     try:
         reclaim_stale(db)
         logger.info("worker ready; polling every %ss", POLL_SECONDS)
+        pruned_at = 0.0
         while not _stop:
+            if time.monotonic() - pruned_at >= PRUNE_EVERY_SECONDS:
+                try:
+                    prune_run_events(db)
+                except Exception:
+                    db.rollback()
+                    logger.warning("could not prune run events", exc_info=True)
+                pruned_at = time.monotonic()
             solved = work_once(db)
             # Every settled run's fact, whoever settled it; a ClickHouse
             # outage leaves them for the next pass (app.analytics).
