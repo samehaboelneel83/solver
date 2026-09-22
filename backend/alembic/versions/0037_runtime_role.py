@@ -18,12 +18,11 @@ creating roles, reading the server's files.
   `solver_app`, the policies apply as before: row-level security follows
   the current role, not the one that logged in.
 
-What this does NOT close: `RESET ROLE` needs no privilege, so a statement
-injected into a request could step back from `solver_app` to this role and
-read or write every tenant. Removing that needs API requests to log in as a
-role without BYPASSRLS, with the lookups made before the tenant is known
-(signing in, API keys) done another way; it is its own item in the
-execution queue. This one removes what only a superuser could do.
+What no role can close: the tenant is the session setting `app.org_id`,
+and `set_config()` on it needs no privilege, just as `RESET ROLE` does not.
+SQL injected into a request could change tenant whatever role it ran as.
+Row-level security here guards against the app's own bugs; the defence
+against injection is that every query is parameterised.
 
 Created NOLOGIN: a password does not belong in the repository.
 `scripts/runtime_role.sh` gives it one at deploy time and writes the URL

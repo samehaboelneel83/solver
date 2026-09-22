@@ -283,7 +283,14 @@ migration `0034`: `iam.quota` (null = unlimited; checked at submit, 422
 naming the quota; `max_concurrent_runs` at claim), CPU-seconds metered by a
 trigger into `iam.usage_month`, and `claim_next` takes the oldest run of the
 organization with the fewest in progress, serialised by an advisory lock so
-the concurrency quota is exact. Run priority is not modelled yet. API keys
+the concurrency quota is exact. Run priority is not modelled yet. The
+tenant a request's session carries is `app.org_id`, which any SQL in that
+session can change with `set_config()`: RLS stops application bugs, not
+injection (parameterised SQL does). If that ever has to hold against
+injection too, the idea on record is a signed tenant -- the API sets
+`app.org_id` with an HMAC of it under a secret only a SECURITY DEFINER
+`app_org()` can read, and the policies call that -- together with an API
+login without BYPASSRLS and definer functions for sign-in and API keys. API keys
 and the rate limit are migration `0035`: `sk_<prefix>_<secret>`, a keyed
 SHA-256 of the secret (random, so a slow hash would only cost every request
 time), capabilities a subset of the maker's and intersected with them on
