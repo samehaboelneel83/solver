@@ -167,12 +167,22 @@ def _scip_available() -> bool:
 # milp remains the generalist fallback that ships inside ortools.
 CP_SAT = Backend(
     name="cp-sat",
-    # MIQP here means an all-integer quadratic model: CP-SAT has no
+    # MIQP and MIQCQP here mean all-integer quadratic models: CP-SAT has no
     # continuous variables, so a mixed one is kept away by `continuous`.
-    classes=frozenset({"IP", "MIQP", "trivial"}),
-    # `quadratic` and `nonconvex` both: products of whole numbers are searched
-    # exactly, so the optimum is the global one whatever the curvature.
-    provides=frozenset({"linear", "integral", "soft-constraints", "quadratic", "nonconvex"}),
+    classes=frozenset({"IP", "MIQP", "MIQCQP", "trivial"}),
+    # `quadratic`, `quadratic-constraints` and `nonconvex`: products of whole
+    # numbers are held exactly, in a goal or a rule, so the optimum is the
+    # global one whatever the curvature.
+    provides=frozenset(
+        {
+            "linear",
+            "integral",
+            "soft-constraints",
+            "quadratic",
+            "quadratic-constraints",
+            "nonconvex",
+        }
+    ),
     rank=0,
     solve=_cpsat_solve,
     # A linear model is convex: every optimum it proves is the global one.
@@ -232,7 +242,7 @@ SCIP = Backend(
     name="scip",
     # Only the quadratic classes: a linear model is better served by every
     # backend above, and rank 2 keeps it that way even if this list grows.
-    classes=frozenset({"QP", "MIQP"}),
+    classes=frozenset({"QP", "MIQP", "QCQP", "MIQCQP"}),
     # `nonconvex` and a mix of `integral` and `continuous` together: the two
     # cases stage 2 refused. Spatial branch-and-bound bounds each product on
     # every branch, so nonconvexity costs time, never correctness.
@@ -244,6 +254,7 @@ SCIP = Backend(
             "fractional-data",
             "soft-constraints",
             "quadratic",
+            "quadratic-constraints",
             "nonconvex",
         }
     ),
@@ -315,6 +326,13 @@ def _why_nothing_fits(found: Classification) -> str:
     """The quadratic dead ends, in words. Both are refusals on purpose: the
     alternative is solving with a method that may return an answer that is
     not the best and cannot say so."""
+    if "quadratic-constraints" in found.needs:
+        return (
+            ". A rule multiplies decisions together, and this build has no global "
+            "nonlinear solver: a local one could stop at an answer that is only the "
+            "best nearby and report it as optimal. Making every decision a whole "
+            "number lets the exact integer solver take it"
+        )
     if "quadratic" not in found.needs:
         return ""
     if "nonconvex" in found.needs:

@@ -86,9 +86,9 @@ describe("TermBuilder", () => {
     expect(screen.getByText(/text, dates and times cannot appear/i)).toBeInTheDocument();
   });
 
-  it("warns that a product of two variable terms is not linear", () => {
-    // The contract refuses this; saying so here means the person is not told
-    // by a server refusal after they publish.
+  it("says a product of two variable terms is quadratic, without calling it an error", () => {
+    // A rule and a weighted goal may multiply two decisions; the note says
+    // what that changes rather than refusing it.
     renderTerm({
       mul: [
         { var: "assign", index: ["e", "d", "s"] },
@@ -96,7 +96,17 @@ describe("TermBuilder", () => {
       ],
     } as Term);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/not linear/i);
+    expect(screen.getByRole("note")).toHaveTextContent(/quadratic/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("warns that a product of three variable terms is refused", () => {
+    // The contract refuses this; saying so here means the person is not told
+    // by a server refusal after they publish.
+    const assign = { var: "assign", index: ["e", "d", "s"] };
+    renderTerm({ mul: [assign, { mul: [assign, assign] }] } as Term);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/multiplies 3 decisions/i);
   });
 
   it("does not warn when one side is a plain number", () => {

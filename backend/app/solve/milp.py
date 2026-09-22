@@ -148,6 +148,8 @@ def _read(spec: Variable, value: float) -> float | int:
 
 def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:
     """`left relation right`, rearranged so the variables sit on one side."""
+    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
+        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
     coeffs: dict = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
         coeffs[key] = coeffs.get(key, Decimal(0)) - coeff

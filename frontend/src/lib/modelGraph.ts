@@ -214,10 +214,17 @@ export function buildModelView(
     const soft = rule.severity === "soft";
     const price = rule.weight ?? rule.penalty;
     const relation = rule.relation ? RELATION_WORD[rule.relation] ?? rule.relation : "?";
-    const lines = [rule.id, soft ? `may bend · ${price ?? 1} per unit` : "must hold"];
+    const quadratic = Math.max(degree(rule.left), degree(rule.right)) >= 2;
+    const lines = [
+      rule.id,
+      (soft ? `may bend · ${price ?? 1} per unit` : "must hold") + (quadratic ? " · quadratic" : ""),
+    ];
     const expressed = rule.left !== undefined && rule.right !== undefined;
     const details: Detail[] = [
-      ["Kind", soft ? "Rule that may bend (soft)" : "Rule that must hold (hard)"],
+      [
+        "Kind",
+        (soft ? "Rule that may bend (soft)" : "Rule that must hold (hard)") + (quadratic ? ", quadratic" : ""),
+      ],
       ["Rule", expressed ? `${describeTerm(rule.left)} ${relation} ${describeTerm(rule.right)}` : "(no expression: published before the IR contract)"],
     ];
     if (rule.forall?.length) details.push(["For every", rule.forall.map(describeBinding).join(", ")]);

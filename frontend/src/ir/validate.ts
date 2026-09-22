@@ -876,8 +876,8 @@ class ShapeChecker {
       if (problem) return problem;
     }
     // Degree, not "how many factors mention a variable": a product of two
-    // variables is allowed in a weighted objective, and x * (y * z) must still
-    // be refused there, which counting factors cannot see.
+    // variables is allowed in a rule and in a weighted objective, and
+    // x * (y * z) must still be refused there, which counting factors cannot see.
     const order = degree(term);
     if (order <= 1) return null;
     if (!this.quadraticAllowed(loc)) {
@@ -888,23 +888,25 @@ class ShapeChecker {
           (loc[0] === "objective"
             ? "a lexicographic objective is solved one term at a time, holding each at its best, " +
               "and holding a quadratic term would need a quadratic rule"
-            : "a rule must stay linear, and only a weighted objective may be quadratic")
+            : "only a rule or a weighted objective may be quadratic")
       );
     }
     if (order > 2) {
       return refusal(
         "mul_not_quadratic",
         [...loc, "mul"],
-        `this product multiplies ${order} variables together; an objective may be quadratic -- ` +
-          "two variables at most -- and no higher"
+        `this product multiplies ${order} variables together; ${
+          loc[0] === "constraints" ? "a rule" : "an objective"
+        } may be quadratic -- two variables at most -- and no higher`
       );
     }
     return null;
   }
 
-  /** Only a weighted objective's terms may be quadratic. Every rule stays
-   * linear, and so does a lexicographic objective (see `termMul`). */
+  /** A rule and a weighted objective's terms may be quadratic; a
+   * lexicographic objective stays linear (see `termMul`). */
   private quadraticAllowed(loc: IrLoc): boolean {
+    if (loc[0] === "constraints") return true;
     if (loc[0] !== "objective") return false;
     const objective = this.ir.objective;
     const mode = isObject(objective) && typeof objective.mode === "string" ? objective.mode : "weighted";

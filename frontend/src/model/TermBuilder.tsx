@@ -15,7 +15,7 @@ import {
   isGeneratedIndex,
   seedForSet,
   arithmeticAttributes,
-  mentionsVariable,
+  degree,
   TERM_LABELS,
   termKind,
   viaOf,
@@ -283,13 +283,18 @@ function Body({
   }
 
   const term = value as { mul: [Term, Term] };
-  const bothHaveVariables = mentionsVariable(term.mul[0]) && mentionsVariable(term.mul[1]);
+  const order = degree(term);
   return (
     <div className="space-y-2">
-      {bothHaveVariables && (
+      {order > 2 && (
         <p role="alert" className="text-xs text-red-600">
-          Both sides use a variable, so this is not linear. One side must be a number, a parameter
-          or an attribute.
+          This multiplies {order} decisions together. A rule or a goal may multiply two at most.
+        </p>
+      )}
+      {order === 2 && (
+        <p role="note" className="text-xs text-slate-600">
+          This multiplies two decisions together, so it is quadratic. The model then goes to a solver
+          that can still prove its answer is the best one.
         </p>
       )}
       {[0, 1].map((position) => (

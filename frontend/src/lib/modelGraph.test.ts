@@ -175,6 +175,22 @@ describe("buildModelView on models that are not tidy", () => {
     expect(modelDetails(objective)).toContainEqual(["Kind", "Objective (quadratic)"]);
   });
 
+  it("says when a rule is quadratic", () => {
+    const x = { var: "x", index: [] };
+    const { graph: built } = buildModelView(
+      {
+        sets: [],
+        parameters: {},
+        variables: { x: { index: [], domain: "continuous", lower: 0, upper: 5 } },
+        constraints: [{ id: "c_disc", left: { mul: [x, x] }, relation: "<=", right: { const: 25 }, severity: "hard" }],
+      },
+      []
+    );
+    const rule = built.nodes.find((node) => node.id === "model-con-c_disc");
+    expect(rule?.label).toBe("c_disc" + "\n" + "must hold · quadratic");
+    expect(modelDetails(rule)).toContainEqual(["Kind", "Rule that must hold (hard), quadratic"]);
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);

@@ -352,19 +352,20 @@ export function describeTerm(term: Term | undefined | null): string {
   }
 }
 
-/** Does this term mention a variable? The contract refuses a product of two
- * that do, so the editor can say it before the server does. */
-export function mentionsVariable(term: Term): boolean {
+/** How many decisions this term multiplies together: 0 for a number, 1 for
+ * a linear term, 2 for a quadratic one. The contract allows two at most in a
+ * rule or a weighted goal, so the editor can say so before the server does. */
+export function degree(term: Term): number {
   switch (termKind(term)) {
     case "var":
-      return true;
+      return 1;
     case "sum":
-      return mentionsVariable((term as { sum: Term }).sum);
+      return degree((term as { sum: Term }).sum);
     case "add":
-      return (term as { add: Term[] }).add.some(mentionsVariable);
+      return Math.max(0, ...(term as { add: Term[] }).add.map(degree));
     case "mul":
-      return (term as { mul: [Term, Term] }).mul.some(mentionsVariable);
+      return (term as { mul: [Term, Term] }).mul.reduce((total, factor) => total + degree(factor), 0);
     default:
-      return false;
+      return 0;
   }
 }

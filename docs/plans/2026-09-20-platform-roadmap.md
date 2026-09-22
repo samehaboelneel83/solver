@@ -288,10 +288,18 @@ one constraint on an auxiliary variable. It runs in the worker process: unlike
 `feed_blend` (LP) and `load_balance` (convex QP) make continuous and quadratic
 solving visible in the product.
 
-**Still open:** stage 3b, general nonlinear terms (NLP / MINLP): products in
-rules and a closed set of functions, each labelled convex, concave or
-neither. SCIP already takes them. A local solver (IPOPT) may join, but only
-declaring `proves="local"`. The Model editor's live "which solver will
+**Nonlinear, stage 3b -- quadratic rules -- DONE.** A rule may multiply two
+decisions (contract §4), making the model a QCQP, or an MIQCQP when some
+decisions are whole. A quadratic rule can make the set of allowed answers
+nonconvex, so only backends that prove a global optimum whatever the shape
+declare `quadratic-constraints`: CP-SAT for an all-integer model, which holds
+each product exactly, and SCIP for everything else. HiGHS, GLOP and the MILP
+wrapper never see one. No rule-convexity check is needed until a solver that
+depends on convexity joins.
+
+**Still open:** stage 3c, a closed set of functions (`pow`, `exp`, `log`,
+`abs`) each labelled convex, concave or neither, which SCIP can take. A local
+solver (IPOPT) may join, but only declaring `proves="local"`. The Model editor's live "which solver will
 take this" runs the same convexity step as a run (`convexity.refine`), so the
 two cannot disagree about a quadratic model.
 

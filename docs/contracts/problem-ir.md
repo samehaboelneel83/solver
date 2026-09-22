@@ -385,16 +385,19 @@ Rules the validator enforces on them:
   and is a different model; it is refused.
 - **Every index is bound.** By an enclosing `forall` or `over`. A free index has
   no range, so the constraint has no instances.
-- **Products are linear in rules, and at most quadratic in a weighted
-  objective.** A term's *degree* is how many variables multiply together in
-  its worst part. In a constraint, and in a lexicographic objective, it is at
-  most 1: `x * y` there is refused as `mul_not_linear`. In a weighted
-  objective it may be 2 -- `x * y`, `x * x` -- which makes the model a
-  quadratic program; `x * (y * z)` is refused as `mul_not_quadratic`.
-  Degree, not "how many factors mention a variable", because the second
-  counts two factors in `x * (y * z)` and would pass a cubic. A lexicographic
-  objective stays linear because it is solved one term at a time, holding
-  each at its best, and holding a quadratic term would need a quadratic rule.
+- **Products are at most quadratic in rules and in a weighted objective,
+  and linear in a lexicographic one.** A term's *degree* is how many
+  variables multiply together in its worst part. In a constraint and in a
+  weighted objective it may be 2 -- `x * y`, `x * x`; `x * (y * z)` is
+  refused as `mul_not_quadratic`. A quadratic objective makes the model a
+  QP or MIQP; a quadratic rule makes it a QCQP or MIQCQP, which only a solver
+  that proves a global optimum whatever the curvature is offered (CP-SAT
+  when every decision is whole, SCIP otherwise). In a lexicographic
+  objective the degree is at most 1: `x * y` there is refused as
+  `mul_not_linear`, because it is solved one term at a time, holding each at
+  its best, and holding a quadratic term would turn every later stage into a
+  quadratic rule. Degree, not "how many factors mention a variable", because
+  the second counts two factors in `x * (y * z)` and would pass a cubic.
 - **Numbers throughout, and finite ones.** `const` is a number. Parameters are
   `numeric(15, 6)` by the schema. An `attr` used as a number must have data
   type `integer` or `number` — a `text` or `date` attribute is still refused,
@@ -543,7 +546,7 @@ be classified into that family yet.
 
 **Nested or negated filters**, `or`, and comparing one attribute to another.
 
-**Named subexpressions**, quadratic *rules* (a quadratic objective is admitted -- §4), division, `min`/`max`, absolute
+**Named subexpressions**, products of more than two variables (quadratic rules and objectives are admitted -- §4), division, `min`/`max`, absolute
 value, conditionals.
 
 **Pareto**. `lex` is the other ordering this version expresses; a frontier of

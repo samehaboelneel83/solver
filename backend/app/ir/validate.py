@@ -791,8 +791,8 @@ class _ShapeChecker:
             if problem:
                 return problem
         # Degree, not "how many factors mention a variable": a product of two
-        # variables is allowed in a weighted objective (a quadratic program),
-        # and x * (y * z) must still be refused there, which counting factors
+        # variables is allowed in a rule and in a weighted objective, and
+        # x * (y * z) must still be refused there, which counting factors
         # cannot see.
         degree = _degree(term)
         if degree <= 1:
@@ -806,21 +806,24 @@ class _ShapeChecker:
                     "a lexicographic objective is solved one term at a time, holding each at "
                     "its best, and holding a quadratic term would need a quadratic rule"
                     if loc[:1] == ["objective"]
-                    else "a rule must stay linear, and only a weighted objective may be quadratic"
+                    else "only a rule or a weighted objective may be quadratic"
                 ),
             )
         if degree > 2:
             return Refusal(
                 "mul_not_quadratic",
                 [*loc, "mul"],
-                f"this product multiplies {degree} variables together; an objective may be "
+                f"this product multiplies {degree} variables together; "
+                f"{'a rule' if loc[:1] == ['constraints'] else 'an objective'} may be "
                 "quadratic -- two variables at most -- and no higher",
             )
         return None
 
     def _quadratic_allowed(self, loc: Loc) -> bool:
-        """Only a weighted objective's terms may be quadratic. Every rule stays
-        linear, and so does a lexicographic objective (see `_term_mul`)."""
+        """A rule and a weighted objective's terms may be quadratic; a
+        lexicographic objective stays linear (see `_term_mul`)."""
+        if loc[:1] == ["constraints"]:
+            return True
         if loc[:1] != ["objective"]:
             return False
         objective = self.ir.get("objective")

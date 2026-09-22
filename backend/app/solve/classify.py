@@ -81,19 +81,30 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         reasons.append(f"variable domains {sorted(domains)} are not ones this platform knows")
         return Classification("unsupported", reasons, needs, planner)
 
-    if _quadratic_objective(ir):
-        # The contract allows a product of two variables only in a weighted
-        # objective, so a quadratic model is one with linear rules and a
-        # quadratic goal. Its class says whether any decision is whole.
-        model_class = "QP" if model_class == "LP" else "MIQP"
-        needs.add("quadratic")
+    quadratic_goal = _quadratic_objective(ir)
+    quadratic_rules = _quadratic_rules(ir)
+    mixed_or_whole = model_class != "LP"
+    if quadratic_rules:
+        # A rule that multiplies two decisions: a quadratically constrained
+        # model, whatever the goal. Its class says whether any decision is
+        # whole. Its feasible region may be nonconvex, which is why only a
+        # solver that proves a global optimum regardless is offered one.
+        model_class = "MIQCQP" if mixed_or_whole else "QCQP"
+        needs.add("quadratic-constraints")
+        verb = "multiplies" if len(quadratic_rules) == 1 else "multiply"
+        names = ", ".join(quadratic_rules)
         reasons.append(
-            "the objective multiplies two variables together, so it is quadratic; "
-            "every rule is linear"
+            f"{names} {verb} two variables together, so the model has quadratic rules"
         )
-        planner.append("the goal multiplies decisions together; every rule is linear")
-    else:
-        reasons.append("all terms are linear (the contract refuses a product of two variables)")
+        planner.append("a rule multiplies decisions together")
+    if quadratic_goal:
+        if not quadratic_rules:
+            model_class = "MIQP" if mixed_or_whole else "QP"
+        needs.add("quadratic")
+        reasons.append("the objective multiplies two variables together, so it is quadratic")
+        planner.append("the goal multiplies decisions together")
+    if not quadratic_rules:
+        reasons.append("every rule is linear")
         planner.append("every rule is linear")
 
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
@@ -120,6 +131,16 @@ def _quadratic_objective(ir: dict[str, Any]) -> bool:
     return any(
         _degree(term.get("expression")) >= 2 for term in (ir.get("objective") or {}).get("terms", [])
     )
+
+
+def _quadratic_rules(ir: dict[str, Any]) -> list[str]:
+    """The ids of the rules that multiply two variables together."""
+    return [
+        str(spec.get("id"))
+        for spec in ir.get("constraints", [])
+        if isinstance(spec, dict)
+        and max(_degree(spec.get("left")), _degree(spec.get("right"))) >= 2
+    ]
 
 
 def _degree(term: Any) -> int:

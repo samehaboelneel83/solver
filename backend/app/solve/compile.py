@@ -131,6 +131,12 @@ class Constraint:
     left: Linear
     relation: str
     right: Linear
+    # The quadratic part of `left - right`: coefficient per pair of variables,
+    # as `Compiled.objective_quadratic`. It belongs to the left side, so the
+    # rule reads `left + quadratic  relation  right`. Empty for a linear rule;
+    # only a backend that provides `quadratic-constraints` is offered one
+    # that is not.
+    quadratic: dict[tuple[VarKey, VarKey], Decimal] = field(default_factory=dict)
 
 
 @dataclass
@@ -198,7 +204,7 @@ class Compiled:
         ]
         for c in self.constraints:
             numbers += [c.left.const, c.right.const, *c.left.coeffs.values()]
-            numbers += list(c.right.coeffs.values())
+            numbers += [*c.right.coeffs.values(), *c.quadratic.values()]
         return all(n == n.to_integral_value() for n in numbers)
 
 
@@ -212,6 +218,7 @@ def slack_of(constraint: Constraint, assignments: dict[VarKey, Any]) -> Decimal:
     backend already knows.
     """
     left = constraint.left.evaluated_at(assignments, skip_names={_VIOLATION})
+    left += quadratic_at(constraint.quadratic, assignments)
     right = constraint.right.evaluated_at(assignments, skip_names={_VIOLATION})
     if constraint.relation in (">=", ">"):
         return left - right
@@ -392,8 +399,10 @@ class _Compiler:
             return
         self._current_id = spec["id"]
         for env in envs:
-            left = self._term(spec["left"], env)
-            right = self._term(spec["right"], env)
+            left, square = self._poly(spec["left"], env)
+            right, right_square = self._poly(spec["right"], env)
+            # Both sides' products move to the left, as `Constraint.quadratic`.
+            _add_quadratic(square, _scaled(right_square, -1))
             index = dict(env_keys(env))
 
             if soft:
@@ -427,14 +436,17 @@ class _Compiler:
                             Linear(dict(left.coeffs), left.const).add(slack),
                             ">=",
                             right,
+                            dict(square),
                         )
                     )
                     left = Linear(dict(left.coeffs), left.const).add(slack, factor=-1)
-                    self.constraints.append(Constraint(spec["id"], index, left, "<=", right))
+                    self.constraints.append(
+                        Constraint(spec["id"], index, left, "<=", right, dict(square))
+                    )
                     continue
 
             self.constraints.append(
-                Constraint(spec["id"], index, left, spec["relation"], right)
+                Constraint(spec["id"], index, left, spec["relation"], right, square)
             )
         self._current_id = None
 
@@ -591,8 +603,8 @@ class _Compiler:
 
     def _poly(self, term: dict[str, Any], env: dict[str, tuple[str, dict]]) -> tuple[Linear, Quadratic]:
         """A term as a polynomial of degree two at most: a linear part and a
-        quadratic part. Only an objective is compiled this way -- the
-        contract keeps every rule linear -- and only a product can raise the
+        quadratic part. Rules and objectives are both compiled this way; the
+        contract keeps them to degree two, and only a product can raise the
         degree, so every other kind defers to `_term`.
         """
         if "sum" in term:
@@ -680,6 +692,17 @@ def _pair(a: VarKey, b: VarKey) -> tuple[VarKey, VarKey]:
     """One key per unordered pair, so x*y and y*x add up rather than being
     two terms a solver would see separately."""
     return (a, b) if a <= b else (b, a)
+
+
+def quadratic_at(quadratic: Quadratic, assignments: dict[VarKey, Any]) -> Decimal:
+    """The value of a quadratic part at an assignment."""
+    return sum(
+        (
+            coeff * number(assignments.get(a, 0)) * number(assignments.get(b, 0))
+            for (a, b), coeff in quadratic.items()
+        ),
+        Decimal(0),
+    )
 
 
 def _add_quadratic(into: Quadratic, more: Quadratic) -> None:

@@ -967,6 +967,43 @@
           ]
         }
       }
+    },
+    {
+      "name": "quadratic_rule",
+      "why": "x*x in a rule: a quadratically constrained model. Allowed since a global solver (SCIP) or an exact one (CP-SAT, all-integer) can prove its optimum; the fixture keeps both validators agreeing that it is",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "left": {
+              "mul": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "x",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -2733,20 +2770,24 @@
       }
     },
     {
-      "code": "mul_not_linear",
+      "code": "mul_not_quadratic",
       "loc": [
         "constraints",
         0,
         "left",
         "mul"
       ],
-      "why": "x*x is quadratic. v1 admits linear models only, and the refusal is where the platform says so rather than the solver failing later",
+      "why": "x*(x*y) in a rule is cubic. A rule may be quadratic -- two variables at most -- and no higher, the same ceiling as a weighted objective",
       "ir": {
         "version": 1,
         "sets": [],
         "parameters": {},
         "variables": {
           "x": {
+            "index": [],
+            "domain": "binary"
+          },
+          "y": {
             "index": [],
             "domain": "binary"
           }
@@ -2761,8 +2802,16 @@
                   "index": []
                 },
                 {
-                  "var": "x",
-                  "index": []
+                  "mul": [
+                    {
+                      "var": "x",
+                      "index": []
+                    },
+                    {
+                      "var": "y",
+                      "index": []
+                    }
+                  ]
                 }
               ]
             },
@@ -4042,7 +4091,7 @@
         "expression",
         "mul"
       ],
-      "why": "a lexicographic objective holds each term at its best before the next: holding a quadratic term there would need a quadratic rule, so only a weighted objective may be quadratic",
+      "why": "a lexicographic objective holds each term at its best before the next; holding a quadratic term would turn every later stage into a quadratic rule, so the contract keeps a lexicographic objective linear and only a weighted one may be quadratic",
       "ir": {
         "version": 1,
         "sets": [],

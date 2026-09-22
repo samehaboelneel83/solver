@@ -341,6 +341,8 @@ def _expression(variables: dict, coeffs: dict):
 
 
 def _add(solver, variables: dict, c: Constraint) -> bool:
+    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
+        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
     coeffs: dict = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
         coeffs[key] = coeffs.get(key, Decimal(0)) - coeff

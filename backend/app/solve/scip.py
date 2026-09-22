@@ -20,6 +20,9 @@ the run is `feasible` with no claim about being best.
 HiGHS and an all-integer one to CP-SAT, which are faster on their own
 ground. SCIP only takes what nothing else can.
 
+**Quadratic rules** (a product of two decisions in a rule) go in unchanged:
+SCIP takes a quadratic constraint natively, convex or not.
+
 **How the objective goes in.** SCIP's objective is linear. The quadratic
 part is moved into one constraint on an auxiliary variable `t` -- `t >= q(x)`
 when minimising, `t <= q(x)` when maximising -- and `t` joins the objective.
@@ -172,7 +175,7 @@ def _add(model, variables: dict, c: Constraint) -> None:
         coeffs[key] = coeffs.get(key, 0) - coeff
     coeffs = {key: coeff for key, coeff in coeffs.items() if coeff}
     rhs = float(c.right.const - c.left.const)
-    if not coeffs:
+    if not coeffs and not c.quadratic:
         # Nothing left to decide: SCIP refuses a constraint on a constant, so
         # a true one is dropped and a false one stands as `0 >= 1`.
         if not _holds(0.0, c.relation, rhs):
@@ -180,6 +183,12 @@ def _add(model, variables: dict, c: Constraint) -> None:
             model.addCons(never >= 1)
         return
     expression = pyscipopt.quicksum(float(coeff) * variables[key] for key, coeff in coeffs.items())
+    if c.quadratic:
+        # A quadratic rule goes in as it is: SCIP bounds each product on
+        # every branch, so a nonconvex rule is searched, not approximated.
+        expression = expression + pyscipopt.quicksum(
+            float(coeff) * variables[a] * variables[b] for (a, b), coeff in c.quadratic.items()
+        )
 
     if c.relation == ">=":
         model.addCons(expression >= rhs)

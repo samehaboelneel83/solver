@@ -101,8 +101,19 @@ def solve(
         for key, v in compiled.variables.items()
     }
 
+    # One product variable per pair, however many rules and objective terms
+    # mention it: the pair means the same number everywhere.
+    products: dict = {}
+
+    def product_of(a, b):
+        if (a, b) not in products:
+            products[(a, b)] = _product(
+                model, cp_vars[a], cp_vars[b], compiled.variables[a], compiled.variables[b]
+            )
+        return products[(a, b)]
+
     for c in compiled.constraints:
-        _add(model, cp_vars, c)
+        _add(model, cp_vars, c, product_of)
 
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
     if has_objective:
@@ -116,8 +127,7 @@ def solve(
         # convexity needed. That is why CP-SAT may take a nonconvex
         # whole-number model and still prove the global optimum.
         for (a, b), coeff in compiled.objective_quadratic.items():
-            product = _product(model, cp_vars[a], cp_vars[b], compiled.variables[a], compiled.variables[b])
-            expr += product * _whole(coeff, f"the objective coefficient of {a[0]!r} x {b[0]!r}")
+            expr += product_of(a, b) * _whole(coeff, f"the objective coefficient of {a[0]!r} x {b[0]!r}")
         model.Minimize(expr) if compiled.sense == "minimize" else model.Maximize(expr)
 
     solver = cp_model.CpSolver()
@@ -150,9 +160,10 @@ def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):
     return product
 
 
-def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint) -> None:
+def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of) -> None:
     """`left relation right`, rearranged to `terms relation rhs` because
-    CP-SAT wants the variables on one side."""
+    CP-SAT wants the variables on one side. A quadratic rule's products are
+    held exactly, as in the objective (`product_of`)."""
     coeffs: dict[Any, Decimal] = dict(c.left.coeffs)
     for key, coeff in c.right.coeffs.items():
         coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
@@ -163,6 +174,8 @@ def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint) -> None:
         if coeffs
         else 0
     )
+    for (a, b), coeff in c.quadratic.items():
+        expr += product_of(a, b) * _whole(coeff, f"a coefficient of {c.id!r}")
 
     if c.relation in (">=",):
         model.Add(expr >= rhs)
