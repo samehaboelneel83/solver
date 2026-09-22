@@ -332,3 +332,51 @@ def test_the_report_shows_the_primal_integral():
          "solve_s": 2.0, "time_limit": 10.0, "wrong": False, "primal_integral": 0.75},
     ]
     assert "| 0.750 |" in markdown(rows, "x")
+
+
+# -- MIPLIB's published answers ------------------------------------------------------
+
+
+def test_the_solution_file_gives_proven_optima_and_infeasibility_only(tmp_path):
+    from bench.mps import SOLU_FILE, known_optima
+
+    (tmp_path / SOLU_FILE).write_text(
+        "=opt=      pk1                                      11\n"
+        "=opt=      glass4                                   1200012599.972384\n"
+        "=inf=      bnatt500\n"
+        "=best=     some-open-one                            42\n"
+    )
+    assert known_optima(str(tmp_path)) == {"pk1": 11.0, "glass4": 1200012599.972384, "bnatt500": "infeasible"}
+    assert known_optima(str(tmp_path / "nowhere")) == {}
+
+
+def test_an_answer_the_backends_agree_on_is_still_wrong_if_miplib_says_otherwise():
+    """Both backends say 12 for pk1; MIPLIB proved 11. Agreeing is not proof."""
+    from bench.run import mark_against_known
+
+    rows = [
+        {"instance": "pk1", "status": "optimal", "objective": 12.0, "wrong": False},
+        {"instance": "pk1", "status": "optimal", "objective": 12.0, "wrong": False},
+        {"instance": "neos5", "status": "optimal", "objective": 15.0000001, "wrong": False},
+        {"instance": "neos5", "status": "feasible", "objective": 16.0, "wrong": False},
+        {"instance": "bnatt500", "status": "optimal", "objective": 3.0, "wrong": False},
+        {"instance": "unknown", "status": "optimal", "objective": 1.0, "wrong": False},
+    ]
+    mark_against_known(rows, {"pk1": 11.0, "neos5": 15.0, "bnatt500": "infeasible"})
+    assert [r["wrong"] for r in rows] == [True, True, False, False, True, False]
+    assert rows[0]["known"] == 11.0 and rows[-1]["known"] is None
+
+
+def test_an_unproven_answer_better_than_the_published_optimum_is_wrong():
+    """Minimising pk1 (optimum 11): a feasible 10 is impossible; 14 is just
+    unfinished. Maximising the same way round."""
+    from bench.run import mark_against_known
+
+    rows = [
+        {"instance": "pk1", "status": "feasible", "objective": 10.0, "wrong": False, "sense": "minimize"},
+        {"instance": "pk1", "status": "feasible", "objective": 14.0, "wrong": False, "sense": "minimize"},
+        {"instance": "m", "status": "feasible", "objective": 101.0, "wrong": False, "sense": "maximize"},
+        {"instance": "m", "status": "feasible", "objective": 99.0, "wrong": False, "sense": "maximize"},
+    ]
+    mark_against_known(rows, {"pk1": 11.0, "m": 100.0})
+    assert [r["wrong"] for r in rows] == [True, False, True, False]

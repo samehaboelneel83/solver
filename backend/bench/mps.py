@@ -29,6 +29,30 @@ INF = Decimal("Infinity")
 # Backends this lane runs: the two that take infinite bounds.
 MPS_BACKENDS = ("highs", "milp")
 
+#: What `bench.download_miplib` saves MIPLIB's solution file as.
+SOLU_FILE = "miplib2017.solu"
+
+
+def known_optima(directory: str) -> dict[str, float | str]:
+    """The published answer per instance, from MIPLIB's solution file in
+    `directory`: a proven optimal value, or "infeasible". Lines marked
+    `=best=` (an incumbent nobody has proven) are not answers and are left
+    out. Empty when the file is absent."""
+    import os
+
+    path = os.path.join(directory, SOLU_FILE)
+    if not os.path.exists(path):
+        return {}
+    found: dict[str, float | str] = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) >= 3 and parts[0] == "=opt=":
+                found[parts[1]] = float(parts[2])
+            elif len(parts) >= 2 and parts[0] == "=inf=":
+                found[parts[1]] = "infeasible"
+    return found
+
 
 def read(path: str | Path) -> Compiled:
     opener = gzip.open if str(path).endswith(".gz") else open

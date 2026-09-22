@@ -173,8 +173,48 @@ def run(
                         }
                     )
     mark_wrong(rows)
+    if mps_dir:
+        from bench.mps import known_optima
+
+        mark_against_known(rows, known_optima(mps_dir))
     mark_primal_integral(rows)
     return rows
+
+
+def mark_against_known(rows: list[dict[str, Any]], known: dict[str, float | str]) -> None:
+    """Also wrong: a proven answer that contradicts the published one, or an
+    unproven one better than a published optimum.
+
+    The backends agreeing with each other is not proof -- two can share a
+    reading of the file that drops an objective constant. Each row records
+    the published answer as `known`."""
+    for row in rows:
+        answer = known.get(row["instance"])
+        row["known"] = answer
+        if answer is None:
+            continue
+        if row["status"] == "feasible" and row["objective"] is not None and answer != "infeasible":
+            # Unproven, but no answer can beat a proven optimum: one that
+            # does means the model was read or solved wrong.
+            beyond = TOLERANCE * max(1.0, abs(answer))
+            better = (
+                row["objective"] > answer + beyond
+                if row.get("sense") == "maximize"
+                else row["objective"] < answer - beyond
+            )
+            if better:
+                row["wrong"] = True
+            continue
+        if row["status"] not in PROVEN:
+            continue
+        if answer == "infeasible":
+            contradicts = row["status"] != "infeasible"
+        elif row["status"] != "optimal" or row["objective"] is None:
+            contradicts = True
+        else:
+            contradicts = abs(row["objective"] - answer) > TOLERANCE * max(1.0, abs(answer))
+        if contradicts:
+            row["wrong"] = True
 
 
 def _routed(family, size, name, compiled, found, compile_s, technique, seeds, time_limit, workers):
