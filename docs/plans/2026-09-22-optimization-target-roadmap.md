@@ -253,7 +253,10 @@ routed technique: every optimum agreed; CP-SAT won 17 of 18 up to L but
 was 2.6x and 9.4x slower on the XL rota, so it stays off
 (`bench/results/2026-09-23-cpsat-scaling.md`). A run records `needs` at
 submit, before scaling admits it, so a scaled run still lists
-`fractional-data` there. Still open in this phase: MIPLIB instances.
+`fractional-data` there. The MIPLIB lane has run (2026-09-23): the ten
+default instances plus MIPLIB's solution file, every answer checked
+against the published optimum; 0 wrong, air05 and p200x1188c proven equal
+to it (`bench/results/2026-09-23-miplib.md`). **Phase 6 is complete.**
 
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.

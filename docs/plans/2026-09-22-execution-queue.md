@@ -27,7 +27,7 @@ lane; no LLM / NL→IR work.
 - [x] (6) Primal integral — done when the bench computes it from streamed incumbents, it appears in `bench.run` rows and the report, checked against a hand-computed curve. *(`8d4904a`, migration 0038: `bench.primal`; stored in `bench_result.primal_integral`.)*
 - [x] (6) Array-building for GLOP and the MILP wrapper (measure first) — done when a proto/array load is measured against today's per-row build on the 200,000-entry model and adopted only if it wins, with the numbers committed. *(`d803b6b`: proto load 0.435 s → 0.043 s on 200,000 entries, 1.56 s → 0.37 s on facility-XL; `bench/results/2026-09-23-pywraplp-build.md`.)*
 - [x] (6) CP-SAT fractional scaling — done when fractional models with ≤4 decimals can be admitted to CP-SAT behind a setting (default off), with golden cases and a bench report deciding the default. *(`f823737`, migration 0039: `solve.cpsat_scaling`; the bench says it stays off -- CP-SAT wins up to L but is 2.6x/9.4x slower on the XL rota.)*
-- [ ] (6) Download MIPLIB — done when `bench.download_miplib` has fetched the easy subset and the MPS lane has run on it with a committed result.
+- [x] (6) Download MIPLIB — done when `bench.download_miplib` has fetched the easy subset and the MPS lane has run on it with a committed result. *(ten instances plus MIPLIB's solution file; 0 wrong against the published optima; `bench/results/2026-09-23-miplib.md`.)*
 
 ## Phase 8 — observability
 
