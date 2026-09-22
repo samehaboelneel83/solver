@@ -352,9 +352,14 @@ from `Last-Event-ID`, then LISTENs, with a keep-alive every 15 s, closing
 when the run settles; the browser reads it with `fetch` rather than
 `EventSource` (which cannot send the Authorization header) and falls back to
 the existing polling after repeated failures. The Runs page draws the
-answer and the bound closing on each other, live and in replay. Still open
-in this phase: structured logs, Prometheus metrics, OpenTelemetry tracing,
-the ClickHouse `run_fact` writer, and `run_event` retention.
+answer and the bound closing on each other, live and in replay. Structured logs are
+done (2026-09-23): `app.core.logs` renders every line as JSON through
+structlog -- stdlib and uvicorn lines too -- with the worker binding
+`run_id`, `org_id` and then `solver`, and the API writing one line per
+request with the organization (carried on `request.state`, since a
+dependency's context is a copy). Still open in this phase: Prometheus
+metrics, OpenTelemetry tracing, the ClickHouse `run_fact` writer, and
+`run_event` retention.
 
 ---
 
