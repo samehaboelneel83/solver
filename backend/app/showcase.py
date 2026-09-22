@@ -20,7 +20,7 @@ more than another. Even would be 30 each; Chloe can take only 15 and Dev only
 squares of 3937.5. The model is classified QP, proven convex, and its optimum
 is reported as the global one.
 
-Both are refreshed on every start, like `weekly_rota`, so a live database
+Both are refreshed on every start, as `weekly_rota` is, so a live database
 cannot drift from this file.
 """
 

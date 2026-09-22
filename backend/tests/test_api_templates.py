@@ -9,6 +9,7 @@ domain.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -205,6 +206,35 @@ def test_weekly_rota_applied_to_an_empty_domain_solves_to_optimal(auth_headers, 
                 text("DELETE FROM domain WHERE id = :d"),
                 {"d": response.json()["domain_id"]},
             )
+        db.execute(text("DELETE FROM template WHERE name = 'weekly_rota'"))
+        db.commit()
+
+
+def test_start_up_refreshes_the_weekly_rota_template(db):
+    """A fix to the template has to reach a live database. Only
+    `python -m app.seed` used to refresh it, so a deploy left the old,
+    infeasible model in place; start-up now refreshes it like the showcase
+    templates."""
+    from app.seed import _IR, weekly_rota_template_ir
+
+    db.execute(text("DELETE FROM template WHERE name = 'weekly_rota'"))
+    db.execute(
+        text(
+            "INSERT INTO template (name, ir_version, domain_seed, default_ir)"
+            " VALUES ('weekly_rota', '1', '{}', CAST(:ir AS jsonb))"
+        ),
+        {"ir": json.dumps(_IR)},
+    )
+    db.commit()
+    try:
+        with TestClient(app):
+            pass
+        db.expire_all()
+        stored = db.execute(
+            text("SELECT default_ir FROM template WHERE name = 'weekly_rota'")
+        ).scalar_one()
+        assert stored == weekly_rota_template_ir()
+    finally:
         db.execute(text("DELETE FROM template WHERE name = 'weekly_rota'"))
         db.commit()
 

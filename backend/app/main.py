@@ -24,7 +24,7 @@ from app.api.routers import router as crud_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
 from app.core.nul_guard import NulByteGuard
-from app.seed import seed_admin
+from app.seed import ensure_weekly_rota_template, seed_admin
 from app.showcase import ensure_showcase_templates
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,18 @@ async def lifespan(_app: FastAPI):
             "Run: docker compose run --rm --no-deps -T backend alembic upgrade head",
             exc_info=True,
         )
+    finally:
+        db.close()
+    # The weekly_rota template, refreshed like the showcase ones below. It used
+    # to be refreshed only by `python -m app.seed`, so a fix to the template
+    # never reached a live database.
+    db = SessionLocal()
+    try:
+        ensure_weekly_rota_template(db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("Skipped the weekly_rota template", exc_info=True)
     finally:
         db.close()
     # The feed-blend and load-balance templates, which show the linear and
