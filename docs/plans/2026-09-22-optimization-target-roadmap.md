@@ -238,8 +238,11 @@ enable-by-default verdict. First result: `bench/results/2026-09-22-rota-cpsat-th
 The nightly job is `scripts/nightly.sh` (2026-09-23): every check on a
 clean `master`, then `bench.nightly` on the L instances, stored and
 compared with the previous night, scheduled at 03:00 -- the CI, since there
-is no remote for a hosted one. Still open in this phase: the primal
-integral (needs streamed incumbents), D7 for the pywraplp backends (GLOP and
+is no remote for a hosted one. The primal integral is `bench.primal`
+(2026-09-23, migration `0038`): Berthold's area under the primal gap, from
+the incumbents a backend streams plus its final answer, in every row, the
+report and `bench_result`; backends that stream nothing (GLOP, the MILP
+wrapper) are charged until they finish. Still open in this phase: D7 for the pywraplp backends (GLOP and
 the MILP wrapper spend ~0.7 s on a 200,000-entry model; not yet measured
 against a proto load), and CP-SAT fractional scaling.
 
