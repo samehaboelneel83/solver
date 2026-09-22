@@ -26,7 +26,7 @@ from types import FrameType
 
 from sqlalchemy import text
 
-from app.core import logs
+from app.core import logs, metrics
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
 
@@ -92,15 +92,25 @@ def work_once(db) -> int | None:
         return None
     # Every line about this run, here and in the solve, carries its id and
     # organization; the solver is added once one is chosen (`_execute`).
-    org_id = db.execute(
-        text("SELECT organization_id FROM run WHERE id = :r"), {"r": run_id}
-    ).scalar_one_or_none()
+    claimed = db.execute(
+        text(
+            "SELECT organization_id,"
+            "       extract(epoch FROM coalesce(started_at, now()) - queued_at) AS waited"
+            "  FROM run WHERE id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+    org_id = claimed["organization_id"]
     logs.bind(run_id=run_id, org_id=str(org_id) if org_id else None)
     log = logs.get("solver.worker")
-    log.info("run claimed")
+    log.info("run claimed", waited_s=round(float(claimed["waited"] or 0), 3))
+    metrics.QUEUE_WAIT.observe(max(0.0, float(claimed["waited"] or 0)))
+    metrics.WORKER_BUSY.set(1)
+    started = time.monotonic()
     try:
         outcome = execute_run(db, run_id)
         log.info("run settled", status=outcome.status, objective=outcome.objective)
+        _record(db, run_id, time.monotonic() - started)
     except Exception:
         # A claimed run that raises would otherwise stay `running` for ever,
         # and the next worker would skip it. Record the failure on the run.
@@ -115,12 +125,26 @@ def work_once(db) -> int | None:
         )
         db.commit()
     finally:
+        metrics.WORKER_BUSY.set(0)
         logs.clear()
     return run_id
 
 
+def _record(db, run_id: int, seconds: float) -> None:
+    """The settled run, into the metrics: its solver, class, status and gap."""
+    row = db.execute(
+        text(
+            "SELECT status, solver, gap, params->>'classified_as' AS model_class"
+            "  FROM run WHERE id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+    metrics.record_run(row["solver"], row["model_class"], row["status"], seconds, row["gap"])
+
+
 def main() -> None:  # pragma: no cover -- the loop itself
     logs.configure("worker")
+    metrics.serve("WORKER_METRICS_PORT", 9100)
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 

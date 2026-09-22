@@ -66,6 +66,10 @@ services:
       CLICKHOUSE_HOST: clickhouse
     ports:
       - "8010:8000"
+    # Prometheus metrics (app/core/metrics.py): on the compose network only,
+    # never published -- queue depth names organizations.
+    expose:
+      - "9101"
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,6 +98,9 @@ services:
       MIGRATION_DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
     command: ["python", "-m", "app.worker"]
+    # Prometheus metrics, on the compose network only.
+    expose:
+      - "9100"
     depends_on:
       postgres:
         condition: service_healthy

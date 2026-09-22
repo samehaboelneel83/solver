@@ -28,6 +28,9 @@ def captured():
     root = logging.getLogger()
     saved = (list(root.handlers), root.level, structlog.get_config())
     stream = io.StringIO()
+    # A test that ran `execute_run` directly (the worker clears after each
+    # run; a direct call does not) must not lend this one its fields.
+    logs.clear()
 
     def lines() -> list[dict]:
         return [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
