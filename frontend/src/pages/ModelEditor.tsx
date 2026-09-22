@@ -446,8 +446,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <section aria-labelledby="constraints-heading" className="mb-6">
         <h2 id="constraints-heading" className="mb-2 text-base font-semibold text-slate-900">
-          Rules
+          What must be true
         </h2>
+        {draft.constraints.length === 0 && (
+          <p className="mb-2 text-sm text-slate-600">No rules yet. Add one that must hold.</p>
+        )}
         <div className="space-y-1">
           {draft.constraints.map((constraint, position) => (
             <ConstraintCard
@@ -505,7 +508,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <section aria-labelledby="objective-heading" className="mb-6">
         <h2 id="objective-heading" className="mb-2 text-base font-semibold text-slate-900">
-          Objective
+          What to make best
         </h2>
         <ObjectiveEditor
           objective={draft.objective}
@@ -725,7 +728,7 @@ function ConstraintCard({
               value={constraint.severity ?? "hard"}
               options={SEVERITIES.map((s) => ({
                 value: s,
-                label: s === "hard" ? "must hold" : "can bend, at a cost",
+                label: s === "hard" ? "required" : "preferred",
               }))}
               onChange={(severity) => {
                 const next = severity as Constraint["severity"];
@@ -744,7 +747,7 @@ function ConstraintCard({
             {constraint.severity === "soft" && (
               <div>
                 <label className="block text-xs text-slate-600" htmlFor={`${idField}-weight`}>
-                  Cost per unit broken
+                  How much it matters
                 </label>
                 <input
                   id={`${idField}-weight`}
@@ -823,6 +826,11 @@ function ObjectiveEditor({
       />
 
       <div className="mt-3 space-y-1">
+        {objective.terms.length === 0 && (
+          <p className="text-sm text-slate-600">
+            No goals yet. Leave it empty for a feasibility problem, or add one.
+          </p>
+        )}
         {objective.terms.map((term, position) => {
           const otherIds = objective.terms
             .filter((_, i) => i !== position)

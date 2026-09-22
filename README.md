@@ -300,16 +300,18 @@ The page has three parts, in the order a model is actually written:
    decides (`binary`, `integer` or `continuous` — shown as **yes or no**,
    **a whole number**, or **any number**, and changeable on an existing
    variable). An integer or continuous variable may also say **no less
-   than** / **no more than**. Removing a declaration that
-   a rule still uses is refused here, naming the rule, rather than after
-   publish.
-2. **Rules.** Each constraint has an id (the same one a scenario patch and
+   than** / **no more than**. When both bounds are set and the lower is
+   above the upper, the field names that the variable has no admissible
+   value. Removing a declaration that a rule still uses is refused here,
+   naming the rule, rather than after publish.
+2. **What must be true.** Each constraint has an id (the same one a scenario patch and
    `constraint_result` will use) — a bad or duplicated name is refused on
    the field, not only when Publish is clicked — an optional `forall` of index bindings, a
    left-hand term, a relation (`<=`, `=`, `>=`), a right-hand term, and
-   `hard` or `soft`. A soft one carries a positive integer **weight** — the
-   cost of one unit of violation. Making a soft rule mandatory drops that
-   cost from the document — a hard rule must not carry one. Making a
+   `hard` or `soft` — shown as **required** or **preferred**. A soft one
+   carries a positive integer **weight** (labelled **How much it matters**)
+   — the cost of one unit of violation. Making a soft rule mandatory drops
+   that cost from the document — a hard rule must not carry one. Making a
    mandatory rule soft gives it a cost of 1. A blank **What it means** is
    dropped on publish rather than stored as an empty string. Removing the
    last **For every** index omits `forall` entirely — a rule may hold once,
@@ -328,11 +330,14 @@ The page has three parts, in the order a model is actually written:
    everything under it, or itself and everything under it. A relationship
    whose two ends differ (`works_in`) has no depth — only one hop.
    **Add an index** / **Add a rule** names the next set that is not already
-   bound (`e` for employee), not a generic `i`. A new rule or goal reuses
-   the smallest free `c_N` / `o_N` id, so removing a middle one does not
-   leave a gap forever. With no set declared yet, **Add a rule** starts a
-   global rule (no `forall`) rather than a binding over an empty name.
-3. **Objective.** Minimize or maximize a weighted sum of terms, or take
+   bound (`e` for employee), not a generic `i`. A bad or duplicated
+   **Index** is refused on the field (same lower-case name rule as a
+   constraint id). With no set declared, **Add an index** is not offered.
+   A new rule or goal reuses the smallest free `c_N` / `o_N` id, so
+   removing a middle one does not leave a gap forever. With no set
+   declared yet, **Add a rule** starts a global rule (no `forall`) rather
+   than a binding over an empty name.
+3. **What to make best.** Minimize or maximize a weighted sum of terms, or take
    them in order (`lex`): the page then shows **1st** / **2nd** and
    Earlier / Later instead of a weight that would do nothing. Omit the
    objective entirely for a pure feasibility problem; an empty objective and a missing
@@ -414,6 +419,10 @@ The detail leads in planner language, not solver names:
   A linear solver also reports a **shadow price** (migration `0019`): how
   much the goal would move if that rule moved, and **reduced costs**
   (migration `0020`) on decisions that would move it. CP-SAT leaves both blank.
+  Continuous objectives, duals and reduced costs are cut to six decimal
+  places before they are recorded — the same scale as `numeric(15, 6)` —
+  so a solver float like milp's `53.99999999999999` does not become a
+  different answer from glop's `54`.
 
 Solver, class, `why_solver` and wall time sit under **Technical**. The solver
 dropdown on submit is optional and gated on `solver.configure`; the default

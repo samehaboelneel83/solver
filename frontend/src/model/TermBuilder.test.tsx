@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import TermBuilder, { BindingsEditor } from "./TermBuilder";
@@ -185,6 +186,47 @@ describe("TermBuilder", () => {
 
     const kinds = screen.getByLabelText(/kind of term/i) as HTMLSelectElement;
     expect(Array.from(kinds.options).map((o) => o.value)).not.toContain("sum");
+  });
+
+  it("does not offer Add an index when there is no set to bind", () => {
+    render(
+      <BindingsEditor
+        bindings={[]}
+        onChange={vi.fn()}
+        context={{ ...CONTEXT, sets: [] }}
+        outer={[]}
+        legend="For every"
+        minBindings={0}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /add an index/i })).not.toBeInTheDocument();
+  });
+
+  it("names a bad or duplicated Index on the field", () => {
+    function Harness() {
+      const [bindings, setBindings] = useState<Binding[]>([
+        { index: "d", set: "day" },
+        { index: "e", set: "employee" },
+      ]);
+      return (
+        <BindingsEditor
+          bindings={bindings}
+          onChange={setBindings}
+          context={CONTEXT}
+          outer={[]}
+          legend="For every"
+        />
+      );
+    }
+    render(<Harness />);
+
+    const indexes = screen.getAllByLabelText("Index");
+    fireEvent.change(indexes[1], { target: { value: "d" } });
+    expect(screen.getAllByText(/already bound here/i).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getAllByLabelText("Index")[1], { target: { value: "E" } });
+    expect(screen.getByText(/lower-case/i)).toBeInTheDocument();
   });
 });
 

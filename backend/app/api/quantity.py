@@ -63,6 +63,25 @@ def as_json_number(value: Decimal | None):
     return int(value) if value == value.to_integral_value() else float(value)
 
 
+#: Six decimal places — the scale of `numeric(15, 6)` (migration 0015).
+QUANTITY_SCALE = Decimal("0.000001")
+
+
+def report_quantity(value: float | int, *, integral: bool = False) -> float | int:
+    """A solver float at the platform's precision.
+
+    Branch-and-cut and simplex return IEEE doubles; writing them straight
+    into `run.objective` lets two runs of the same continuous model disagree
+    at the seventeenth digit. Quantising to six places matches the column
+    and cuts the floating-point tail (e.g. milp's `53.99999999999999` for a
+    true 54). An integral model still rounds to a whole number first — the
+    same rule `_report` used before this lived in one place.
+    """
+    if integral:
+        return round(value)
+    return as_json_number(Decimal(str(value)).quantize(QUANTITY_SCALE))
+
+
 #: Sent in, checked, and sent back out. The order of the metadata matters:
 #: the constraints attach to the decimal and the converter wraps the result,
 #: so a JSON number becomes an exact decimal first and is then measured.

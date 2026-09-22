@@ -276,4 +276,12 @@ describe("DeclarationsEditor", () => {
       })
     );
   });
+
+  it("says when no less than is above no more than", () => {
+    renderEditor({
+      variables: { hours: { index: ["day"], domain: "integer", lower: 10, upper: 5 } },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/no less than 10 is above no more than 5/i);
+  });
 });

@@ -29,6 +29,7 @@ from importlib.metadata import version as _pkg_version
 
 from ortools.linear_solver import pywraplp
 
+from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution
 from app.solve.stop import interrupt_when
@@ -119,8 +120,9 @@ def _report(compiled: Compiled, value: float) -> float | int:
     The arithmetic runs in `Decimal` from migration 0015 onwards, but an
     integer program's optimum is still an integer, and letting it come back
     as `2.0000000001` would make two runs of the same model look different.
+    A continuous optimum is cut to six decimal places — numeric(15, 6).
     """
-    return round(value) if compiled.is_integral else value
+    return report_quantity(value, integral=compiled.is_integral)
 
 
 def _declare(solver: pywraplp.Solver, key, spec: Variable):
@@ -134,14 +136,14 @@ def _declare(solver: pywraplp.Solver, key, spec: Variable):
 
 def _read(spec: Variable, value: float) -> float | int:
     """An integer variable's value comes back as a float and is rounded; a
-    continuous one is kept as it is.
+    continuous one is kept at six decimal places.
 
     Rounding an integer rather than truncating it, because 0.9999999 is a 1
     that took a floating-point detour and `int()` reads it as 0 -- a roster
-    that silently loses a shift. Rounding a *continuous* value would be the
-    opposite error: 0.6 of an hour is the answer, not 1.
+    that silently loses a shift. Rounding a *continuous* value to a whole
+    number would be the opposite error: 0.6 of an hour is the answer, not 1.
     """
-    return round(value) if spec.is_integral else value
+    return report_quantity(value, integral=spec.is_integral)
 
 
 def _add(solver: pywraplp.Solver, variables: dict, c: Constraint) -> None:

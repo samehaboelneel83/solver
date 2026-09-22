@@ -292,7 +292,7 @@ describe("ModelEditor", () => {
     });
     renderPage();
 
-    expect(await screen.findByLabelText(/cost per unit broken/i)).toHaveValue("4");
+    expect(await screen.findByLabelText(/how much it matters/i)).toHaveValue("4");
   });
 
   it("drops the cost when a soft rule is made mandatory", async () => {
@@ -305,12 +305,12 @@ describe("ModelEditor", () => {
       },
     });
     renderPage();
-    await screen.findByLabelText(/cost per unit broken/i);
+    await screen.findByLabelText(/how much it matters/i);
 
     fireEvent.change(screen.getByLabelText("Strength"), {
       target: { value: "hard" },
     });
-    expect(screen.queryByLabelText(/cost per unit broken/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/how much it matters/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
@@ -326,7 +326,7 @@ describe("ModelEditor", () => {
     fireEvent.change(screen.getByLabelText("Strength"), {
       target: { value: "soft" },
     });
-    expect(await screen.findByLabelText(/cost per unit broken/i)).toHaveValue("1");
+    expect(await screen.findByLabelText(/how much it matters/i)).toHaveValue("1");
   });
 
   it("does not let a soft cost fall below 1 in the field", async () => {
@@ -337,7 +337,7 @@ describe("ModelEditor", () => {
       },
     });
     renderPage();
-    const cost = await screen.findByLabelText(/cost per unit broken/i);
+    const cost = await screen.findByLabelText(/how much it matters/i);
     fireEvent.change(cost, { target: { value: "0" } });
     expect(cost).toHaveValue("4");
     fireEvent.change(cost, { target: { value: "2" } });
@@ -584,7 +584,58 @@ describe("ModelEditor", () => {
 
     expect(await screen.findByDisplayValue("c_1")).toBeInTheDocument();
     expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /add an index/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add an index/i })).not.toBeInTheDocument();
+  });
+
+  it("names the rule and goal sections in planner language", async () => {
+    stub({ versions: { items: [], total: 0 } });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /start a model/i }));
+
+    expect(screen.getByRole("heading", { name: /what must be true/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /what to make best/i })).toBeInTheDocument();
+    expect(screen.getByText(/no rules yet/i)).toBeInTheDocument();
+  });
+
+  it("calls a hard rule required and a soft one preferred", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [{ ...IR_V2.constraints[0], severity: "soft", weight: 4 }],
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("c_cover");
+
+    const strength = screen.getByLabelText("Strength") as HTMLSelectElement;
+    expect(strength.options[strength.selectedIndex].text).toMatch(/preferred/i);
+
+    fireEvent.change(strength, { target: { value: "hard" } });
+    expect(
+      (screen.getByLabelText("Strength") as HTMLSelectElement).options[
+        (screen.getByLabelText("Strength") as HTMLSelectElement).selectedIndex
+      ].text
+    ).toMatch(/required/i);
+  });
+
+  it("invites a goal when the objective is empty, rather than a blank box", async () => {
+    stub({ versions: { items: [], total: 0 } });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /start a model/i }));
+
+    expect(screen.getByText(/no goals yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/feasibility/i)).toBeInTheDocument();
+  });
+
+  it("names a preferred rule's cost as how much it matters", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [{ ...IR_V2.constraints[0], severity: "soft", weight: 4 }],
+      },
+    });
+    renderPage();
+    expect(await screen.findByLabelText(/how much it matters/i)).toHaveValue("4");
   });
 
   it("publishes a cleared filter without an empty where key", async () => {

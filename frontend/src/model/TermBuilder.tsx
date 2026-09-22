@@ -2,7 +2,7 @@ import { useId, type ReactNode } from "react";
 import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
-import { TERM_KINDS } from "../ir/contract";
+import { TERM_KINDS, isName } from "../ir/contract";
 import type { TermKind, TraversalDepth } from "../ir";
 import {
   boundIndices,
@@ -379,6 +379,10 @@ export function BindingsEditor({
                 <TextField
                   label="Index"
                   value={binding.index}
+                  problem={indexProblem(binding.index, [
+                    ...outer,
+                    ...bindings.filter((_, i) => i !== position),
+                  ])}
                   onChange={(next) => replace(position, { ...binding, index: next })}
                 />
                 <Select
@@ -475,16 +479,30 @@ export function BindingsEditor({
             onChange(bindings.map((b, i) => (i === at ? next : b)));
           }
         })}
-        <button
-          type="button"
-          className="rounded px-2 py-1 text-xs text-blue-700 underline"
-          onClick={() => onChange([...bindings, nextBinding([...outer, ...bindings], context)])}
-        >
-          Add an index
-        </button>
+        {context.sets.length > 0 && (
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-xs text-blue-700 underline"
+            onClick={() => onChange([...bindings, nextBinding([...outer, ...bindings], context)])}
+          >
+            Add an index
+          </button>
+        )}
       </TreeView>
     </TreeItem>
   );
+}
+
+/** Why this index name cannot stand, or null when it is fine. */
+function indexProblem(index: string, taken: Binding[]): string | null {
+  if (!index) return "An index needs a name.";
+  if (!isName(index)) {
+    return "A name starts with a letter and uses lower-case letters, digits and underscores.";
+  }
+  if (taken.some((binding) => binding.index === index)) {
+    return `The index '${index}' is already bound here.`;
+  }
+  return null;
 }
 
 /**
@@ -649,10 +667,12 @@ function TextField({
   label,
   value,
   onChange,
+  problem,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  problem?: string | null;
 }) {
   const id = useId();
   return (
@@ -664,8 +684,15 @@ function TextField({
         id={id}
         className={`${INPUT_CLASS} w-24 text-xs`}
         value={value}
+        aria-invalid={problem ? "true" : undefined}
+        aria-describedby={problem ? `${id}-problem` : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
+      {problem && (
+        <p id={`${id}-problem`} role="alert" className="mt-1 text-xs text-red-600">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

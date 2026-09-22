@@ -29,6 +29,7 @@ from importlib.metadata import version as _pkg_version
 from importlib.util import find_spec
 from pathlib import Path
 
+from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.result import Solution, fold_duals
 from app.solve.stop import interrupt_when
@@ -195,7 +196,9 @@ def _lp_duals(solver, compiled: Compiled, added_ids: list[str]) -> dict[str, flo
         return None
     if len(raw) != len(added_ids):
         return None
-    return fold_duals(zip(added_ids, (float(value) for value in raw)))
+    return fold_duals(
+        zip(added_ids, (report_quantity(float(value)) for value in raw))
+    )
 
 
 def _lp_reduced(solver, compiled: Compiled, keys: list) -> dict | None:
@@ -212,7 +215,7 @@ def _lp_reduced(solver, compiled: Compiled, keys: list) -> dict | None:
         return None
     if len(raw) != len(keys):
         return None
-    return {key: float(value) for key, value in zip(keys, raw)}
+    return {key: report_quantity(float(value)) for key, value in zip(keys, raw)}
 
 
 def _blank(status: str) -> Solution:
@@ -258,11 +261,11 @@ def _declare(solver, highspy, spec: Variable):
 
 
 def _read(spec: Variable, value: float) -> float | int:
-    return round(value) if spec.is_integral else value
+    return report_quantity(value, integral=spec.is_integral)
 
 
 def _report(compiled: Compiled, value: float) -> float | int:
-    return round(value) if compiled.is_integral else value
+    return report_quantity(value, integral=compiled.is_integral)
 
 
 def _expression(variables: dict, coeffs: dict):

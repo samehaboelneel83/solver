@@ -26,6 +26,7 @@ from importlib.metadata import version as _pkg_version
 
 from ortools.linear_solver import pywraplp
 
+from app.api.quantity import report_quantity
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution, fold_duals
 from app.solve.stop import interrupt_when
@@ -88,7 +89,11 @@ def solve(
         status = solver.Solve()
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
     duals = (
-        fold_duals((spec_id, row.dual_value()) for spec_id, row in rows if row is not None)
+        fold_duals(
+            (spec_id, report_quantity(row.dual_value()))
+            for spec_id, row in rows
+            if row is not None
+        )
         if solved
         else None
     )
@@ -100,16 +105,28 @@ def solve(
         # branch-and-bound has, so a solved LP is an optimal one.
         optimal=status == pywraplp.Solver.OPTIMAL,
         objective=(
-            solver.Objective().Value() if solved and compiled.objective.coeffs else None
+            report_quantity(solver.Objective().Value())
+            if solved and compiled.objective.coeffs
+            else None
         ),
         assignments=(
-            {key: var.solution_value() for key, var in variables.items()} if solved else {}
+            {
+                key: report_quantity(var.solution_value())
+                for key, var in variables.items()
+            }
+            if solved
+            else {}
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"glop (ortools {_ORTOOLS_VERSION})",
         duals=duals,
         reduced_costs=(
-            {key: var.reduced_cost() for key, var in variables.items()} if solved else None
+            {
+                key: report_quantity(var.reduced_cost())
+                for key, var in variables.items()
+            }
+            if solved
+            else None
         ),
     )
 

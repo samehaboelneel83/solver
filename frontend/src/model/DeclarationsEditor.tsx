@@ -203,35 +203,45 @@ export default function DeclarationsEditor({
                 </select>
               </div>
               {spec.domain !== "binary" && (
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  <BoundField
-                    id={`var-lower-${name}`}
-                    label={`${name} no less than`}
-                    value={spec.lower}
-                    integer={spec.domain === "integer"}
-                    onChange={(lower) =>
-                      apply({
-                        variables: {
-                          ...variables,
-                          [name]: boundPatch(spec, "lower", lower),
-                        },
-                      })
-                    }
-                  />
-                  <BoundField
-                    id={`var-upper-${name}`}
-                    label={`${name} no more than`}
-                    value={spec.upper}
-                    integer={spec.domain === "integer"}
-                    onChange={(upper) =>
-                      apply({
-                        variables: {
-                          ...variables,
-                          [name]: boundPatch(spec, "upper", upper),
-                        },
-                      })
-                    }
-                  />
+                <div className="mt-2">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <BoundField
+                      id={`var-lower-${name}`}
+                      label={`${name} no less than`}
+                      value={spec.lower}
+                      integer={spec.domain === "integer"}
+                      onChange={(lower) =>
+                        apply({
+                          variables: {
+                            ...variables,
+                            [name]: boundPatch(spec, "lower", lower),
+                          },
+                        })
+                      }
+                    />
+                    <BoundField
+                      id={`var-upper-${name}`}
+                      label={`${name} no more than`}
+                      value={spec.upper}
+                      integer={spec.domain === "integer"}
+                      onChange={(upper) =>
+                        apply({
+                          variables: {
+                            ...variables,
+                            [name]: boundPatch(spec, "upper", upper),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  {spec.lower !== undefined &&
+                    spec.upper !== undefined &&
+                    spec.lower > spec.upper && (
+                      <p role="alert" className="mt-1 text-xs text-red-600">
+                        {name}: no less than {spec.lower} is above no more than {spec.upper}, so
+                        it has no admissible value.
+                      </p>
+                    )}
                 </div>
               )}
             </div>
