@@ -368,9 +368,12 @@ puts its context on `run.params.trace`, and the worker continues it under
 a `run` span with `compile`, `choose`, `solve`, `diagnose` and `persist`;
 exported as JSON log lines by default, or over OTLP. Its first finding:
 `choose` takes ~200 ms of a run whose solve takes 1 ms -- every backend's
-`is_available()` is asked on every run. Still open in
-this phase: the ClickHouse `run_fact` writer, and
-`run_event` retention.
+`is_available()` is asked on every run. The `run_fact` writer is
+done (`app.analytics`, migration `0040`): the worker sweeps settled runs
+whose fact is unwritten (`run.fact_written_at`, an outbox) into a
+ReplacingMergeTree keyed by run, so every way a run settles is covered and
+a ClickHouse outage only delays it; the first sweep backfilled every run.
+Still open in this phase: `run_event` retention.
 
 ---
 
