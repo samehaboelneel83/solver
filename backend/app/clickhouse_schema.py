@@ -1,6 +1,6 @@
 _STATEMENTS = [
     """
-    CREATE TABLE IF NOT EXISTS analytics.solver_runs
+    CREATE TABLE IF NOT EXISTS {db}.solver_runs
     (
         organization_id UUID,
         problem_id UUID,
@@ -23,7 +23,7 @@ _STATEMENTS = [
     ORDER BY (organization_id, problem_id, started_at)
     """,
     """
-    CREATE TABLE IF NOT EXISTS analytics.solution_metrics
+    CREATE TABLE IF NOT EXISTS {db}.solution_metrics
     (
         organization_id UUID,
         problem_id UUID,
@@ -38,7 +38,7 @@ _STATEMENTS = [
     ORDER BY (organization_id, problem_id, metric_code, measured_at)
     """,
     """
-    CREATE TABLE IF NOT EXISTS analytics.constraint_violations
+    CREATE TABLE IF NOT EXISTS {db}.constraint_violations
     (
         organization_id UUID,
         problem_id UUID,
@@ -53,6 +53,40 @@ _STATEMENTS = [
     ENGINE = MergeTree
     ORDER BY (organization_id, problem_id, constraint_id, occurred_at)
     """,
+    # One row per settled run (app.analytics). Replacing, keyed by run: a
+    # run written twice is one row once merged, and `FINAL` reads it so now.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.run_fact
+    (
+        run_id UInt64,
+        organization_id UUID,
+        domain_id UInt64,
+        problem_id UInt64,
+        scenario_id UInt64,
+        model_version_id UInt64,
+        solver LowCardinality(String),
+        model_class LowCardinality(String),
+        status LowCardinality(String),
+        optimality LowCardinality(String),
+        objective Nullable(Float64),
+        best_bound Nullable(Float64),
+        gap Nullable(Float64),
+        wall_time_s Nullable(Float64),
+        time_limit_s Float64,
+        workers UInt16,
+        seed Int64,
+        variables Nullable(UInt32),
+        rules Nullable(UInt32),
+        trace_id String,
+        queued_at DateTime64(3, 'UTC'),
+        started_at Nullable(DateTime64(3, 'UTC')),
+        finished_at Nullable(DateTime64(3, 'UTC')),
+        queue_wait_s Nullable(Float64),
+        written_at DateTime64(3, 'UTC')
+    )
+    ENGINE = ReplacingMergeTree(written_at)
+    ORDER BY (organization_id, run_id)
+    """,
 ]
 
 
@@ -62,4 +96,6 @@ def create_analytics_schema(client) -> None:
     Safe to call on every backend startup.
     """
     for statement in _STATEMENTS:
-        client.command(statement)
+        # The client's own database: `analytics` live, `analytics_test`
+        # under pytest (conftest), so a test never writes the live one.
+        client.command(statement.replace("{db}", client.database))

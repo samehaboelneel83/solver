@@ -26,6 +26,7 @@ from types import FrameType
 
 from sqlalchemy import text
 
+from app.analytics import publish_facts
 from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
@@ -142,6 +143,21 @@ def _record(db, run_id: int, seconds: float) -> None:
     metrics.record_run(row["solver"], row["model_class"], row["status"], seconds, row["gap"])
 
 
+def _analytics_client():
+    """A ClickHouse client with the analytics tables in place, or None while
+    ClickHouse cannot be reached (tried again on the next pass)."""
+    from app.clickhouse_schema import create_analytics_schema
+    from app.core.db import get_clickhouse_client
+
+    try:
+        client = get_clickhouse_client()
+        create_analytics_schema(client)
+        return client
+    except Exception:
+        logger.warning("ClickHouse is not reachable; run facts will wait", exc_info=True)
+        return None
+
+
 def main() -> None:  # pragma: no cover -- the loop itself
     logs.configure("worker")
     tracing.configure("worker")
@@ -149,12 +165,20 @@ def main() -> None:  # pragma: no cover -- the loop itself
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 
+    client = _analytics_client()
     db = SessionLocal()
     try:
         reclaim_stale(db)
         logger.info("worker ready; polling every %ss", POLL_SECONDS)
         while not _stop:
-            if work_once(db) is None:
+            solved = work_once(db)
+            # Every settled run's fact, whoever settled it; a ClickHouse
+            # outage leaves them for the next pass (app.analytics).
+            if client is None:
+                client = _analytics_client()
+            if client is not None:
+                publish_facts(db, client)
+            if solved is None:
                 time.sleep(POLL_SECONDS)
     finally:
         db.close()

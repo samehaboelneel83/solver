@@ -152,6 +152,22 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # live owner's URL; left in place, the upgrade below would migrate the live
 # database and leave the test one empty.
 os.environ.pop("MIGRATION_DATABASE_URL", None)
+# ClickHouse too: the suite writes `analytics_test`, never the live
+# `analytics` (app.analytics, app.clickhouse_schema).
+os.environ["CLICKHOUSE_DB"] = os.environ.get("TEST_CLICKHOUSE_DB", "analytics_test")
+try:
+    import clickhouse_connect
+
+    _ch = clickhouse_connect.get_client(
+        host=os.environ.get("CLICKHOUSE_HOST", "clickhouse"),
+        port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
+        username=os.environ.get("CLICKHOUSE_USER", "default"),
+        password=os.environ.get("CLICKHOUSE_PASSWORD", ""),
+    )
+    _ch.command(f"DROP DATABASE IF EXISTS {os.environ['CLICKHOUSE_DB']}")
+    _ch.command(f"CREATE DATABASE {os.environ['CLICKHOUSE_DB']}")
+except Exception:  # pragma: no cover -- tests that need ClickHouse will say so
+    pass
 
 _backend_dir = Path(__file__).resolve().parent.parent
 _alembic_ini = _backend_dir / "alembic.ini"
