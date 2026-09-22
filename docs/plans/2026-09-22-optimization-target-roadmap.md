@@ -245,8 +245,15 @@ report and `bench_result`; backends that stream nothing (GLOP, the MILP
 wrapper) are charged until they finish. D7 is done for the pywraplp backends too (2026-09-23): GLOP and
 the MILP wrapper load one `MPModelProto` -- 0.435 s to 0.043 s on 200,000
 entries, measured against the expression build and per-entry coefficients
-first (`bench/results/2026-09-23-pywraplp-build.md`). Still open in this
-phase: CP-SAT fractional scaling.
+first (`bench/results/2026-09-23-pywraplp-build.md`). CP-SAT fractional scaling
+is `app/solve/scaling.py` behind `solve.cpsat_scaling` (migration `0039`):
+each rule times 10^k over its gcd, exact, at most 4 decimals and under
+2^53. Measured with two new families (`rota_rates`, `knapsack`) and a
+routed technique: every optimum agreed; CP-SAT won 17 of 18 up to L but
+was 2.6x and 9.4x slower on the XL rota, so it stays off
+(`bench/results/2026-09-23-cpsat-scaling.md`). A run records `needs` at
+submit, before scaling admits it, so a scaled run still lists
+`fractional-data` there. Still open in this phase: MIPLIB instances.
 
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.

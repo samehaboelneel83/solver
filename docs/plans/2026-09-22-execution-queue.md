@@ -26,7 +26,7 @@ lane; no LLM / NL→IR work.
 - [x] (6) CI + nightly benchmark — done when a CI job runs `scripts/check.sh` and a scheduled job runs the L-size bench with `--store`, both runnable locally. *(`49de003`, `08ed49e`: `scripts/nightly.sh`, scheduled as the Windows task `solver-nightly` at 03:00. A hosted workflow was not written: there is no git remote for it to run on.)*
 - [x] (6) Primal integral — done when the bench computes it from streamed incumbents, it appears in `bench.run` rows and the report, checked against a hand-computed curve. *(`8d4904a`, migration 0038: `bench.primal`; stored in `bench_result.primal_integral`.)*
 - [x] (6) Array-building for GLOP and the MILP wrapper (measure first) — done when a proto/array load is measured against today's per-row build on the 200,000-entry model and adopted only if it wins, with the numbers committed. *(`d803b6b`: proto load 0.435 s → 0.043 s on 200,000 entries, 1.56 s → 0.37 s on facility-XL; `bench/results/2026-09-23-pywraplp-build.md`.)*
-- [ ] (6) CP-SAT fractional scaling — done when fractional models with ≤4 decimals can be admitted to CP-SAT behind a setting (default off), with golden cases and a bench report deciding the default.
+- [x] (6) CP-SAT fractional scaling — done when fractional models with ≤4 decimals can be admitted to CP-SAT behind a setting (default off), with golden cases and a bench report deciding the default. *(`f823737`, migration 0039: `solve.cpsat_scaling`; the bench says it stays off -- CP-SAT wins up to L but is 2.6x/9.4x slower on the XL rota.)*
 - [ ] (6) Download MIPLIB — done when `bench.download_miplib` has fetched the easy subset and the MPS lane has run on it with a committed result.
 
 ## Phase 8 — observability
