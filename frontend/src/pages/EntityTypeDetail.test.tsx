@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import EntityTypeDetail from "./EntityTypeDetail";
 import { ToastProvider } from "../components/ToastProvider";
 import type { EntityType } from "../api/v1";
-import { editorQueryClient } from "../test/me";
+import { EDITOR_ME, VIEWER_ME, editorQueryClient } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -24,9 +24,9 @@ const TYPE: EntityType = {
   colour: null,
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: [
-    { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 3 },
-    { id: 12, entity_type_id: 5, name: "on_call", data_type: "boolean", required: false, unit: null, enum_values: null, default_value: false },
-    { id: 13, entity_type_id: 5, name: "shift_kind", data_type: "enum", required: false, unit: null, enum_values: ["day", "night"], default_value: null },
+    { id: 11, entity_type_id: 5, name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 3, sort_order: 1 },
+    { id: 12, entity_type_id: 5, name: "on_call", data_type: "boolean", required: false, unit: null, enum_values: null, default_value: false, sort_order: 2 },
+    { id: 13, entity_type_id: 5, name: "shift_kind", data_type: "enum", required: false, unit: null, enum_values: ["day", "night"], default_value: null, sort_order: 3 },
   ],
 };
 
@@ -66,8 +66,8 @@ function LocationDisplay() {
   return <div data-testid="location">{location.pathname}</div>;
 }
 
-function renderPage(path = "/entity-types/5") {
-  const queryClient = editorQueryClient();
+function renderPage(path = "/entity-types/5", me: Parameters<typeof editorQueryClient>[0] = EDITOR_ME) {
+  const queryClient = editorQueryClient(me);
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -129,10 +129,11 @@ describe("EntityTypeDetail", () => {
     // which is a vocabulary this table alone used to speak.
     // Read by POSITION: the Required column says "No" on this row too, so
     // "somewhere on the row it says No" would pass against the old "False".
-    // The name is a <th scope="row">, so the cells start at Data type.
+    // The name is a <th scope="row">, so the cells are Sort order, then
+    // Data type onwards.
     const onCall = within(rowFor("on_call")).getAllByRole("cell");
-    expect(onCall[0]).toHaveTextContent("Yes / no");
-    expect(onCall[4]).toHaveTextContent(/^No$/);
+    expect(onCall[1]).toHaveTextContent("Yes / no");
+    expect(onCall[5]).toHaveTextContent(/^No$/);
     expect(rowFor("on_call").textContent).not.toContain("False");
     const kind = rowFor("shift_kind");
     expect(within(kind).getByText("day, night")).toBeInTheDocument();
@@ -294,7 +295,9 @@ describe("EntityTypeDetail", () => {
     expect(writes()[0]).toEqual({
       method: "PATCH",
       path: "/api/v1/attributes/11",
-      body: { name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 4 },
+      // `sort_order` travels with every save of an existing attribute: the
+      // field is prefilled, so it is sent back unchanged unless edited.
+      body: { name: "grade", data_type: "integer", required: true, unit: "level", enum_values: null, default_value: 4, sort_order: 1 },
     });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/attribute "grade" saved/i));
   });
@@ -475,5 +478,98 @@ describe("EntityTypeDetail: a concurrent edit (Ruling 42)", () => {
     await waitFor(() => expect(within(typeForm()).getByLabelText(/^Role/)).toHaveValue("resource"));
     expect(within(typeForm()).getByLabelText(/^Name/)).toHaveValue("staff");
     expect(screen.queryByTestId("stale-record")).toBeNull();
+  });
+});
+
+describe("EntityTypeDetail: attribute order (migration 0027)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lists attributes in the order the server gives, with each one's sort order", async () => {
+    serve();
+    renderPage();
+    await loaded();
+
+    const rows = within(attributesTable()).getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getByRole("rowheader").textContent)).toEqual([
+      "grade",
+      "on_call",
+      "shift_kind",
+    ]);
+    expect(within(rowFor("grade")).getByText("1")).toBeInTheDocument();
+    expect(within(rowFor("shift_kind")).getByText("3")).toBeInTheDocument();
+  });
+
+  it("moves an attribute by sending the whole list, swapped", async () => {
+    // The whole list, so the server can refuse anything that is not exactly
+    // this type's attributes -- two people reordering at once get a refusal
+    // rather than an interleaving neither chose.
+    serve((path) =>
+      path === "/api/v1/entity-types/5/attribute-order" ? Promise.resolve(TYPE.attributes) : undefined
+    );
+    renderPage();
+    await loaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move on_call up" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toEqual({
+      method: "PUT",
+      path: "/api/v1/entity-types/5/attribute-order",
+      body: { attribute_ids: [12, 11, 13] },
+    });
+  });
+
+  it("offers no move past either end", async () => {
+    serve();
+    renderPage();
+    await loaded();
+
+    expect(screen.getByRole("button", { name: "Move grade up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move shift_kind down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move on_call up" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Move on_call down" })).toBeEnabled();
+  });
+
+  it("says why when the server refuses a reorder", async () => {
+    serve((path) =>
+      path === "/api/v1/entity-types/5/attribute-order"
+        ? Promise.reject(
+            new ApiError(
+              422,
+              JSON.stringify({
+                detail: [
+                  {
+                    type: "value_error",
+                    loc: ["body", "attribute_ids"],
+                    msg: "the order must list every attribute of this type exactly once; missing [14]",
+                  },
+                ],
+              })
+            )
+          )
+        : undefined
+    );
+    renderPage();
+    await loaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move on_call down" }));
+
+    expect(await screen.findByText(/every attribute of this type exactly once/)).toBeInTheDocument();
+  });
+
+  it("shows the order but no way to change it to a viewer", async () => {
+    serve();
+    renderPage("/entity-types/5", VIEWER_ME);
+    await loaded();
+
+    expect(within(rowFor("grade")).getByText("1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Move / })).toBeNull();
   });
 });

@@ -448,8 +448,9 @@ Carried from the migration's ledger; none of it blocks, all of it compounds:
 - **The checks script** (branch `checks`) — **done.** `scripts/check.sh`
   runs both suites the one correct way; `scripts/install-hooks.sh` installs
   the pre-commit hook. Merged at `f30f1b6`.
-- **Lint** was measured and deliberately left out: a stock config reports 260
-  problems, a reduced one still 34. Revisit deliberately, not by accident.
+- **Lint** — **done.** `npm run lint` is on with `--max-warnings 0`;
+  `scripts/check.sh` runs it. Twelve disable comments remain, recorded
+  in the README.
 
 ---
 

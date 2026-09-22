@@ -312,6 +312,28 @@ describe("deriveFilterCriteria", () => {
     expect(result.highlightIds).toBeNull();
   });
 
+  it("reaches through an ER diamond to the type on the other side", () => {
+    // employee -- works_in -- unit. The connection a person means is to unit;
+    // stopping at the diamond would light the relationship and dim the thing
+    // it relates employee to.
+    const er = [
+      { id: "l1", source: "type-1", target: "reltype-9", type: "works_in", label: "", attributes: {} },
+      { id: "l2", source: "type-2", target: "reltype-9", type: "works_in", label: "", attributes: {} },
+      { id: "l3", source: "type-3", target: "reltype-8", type: "other", label: "", attributes: {} },
+    ];
+    const state: FilterState = { selectedTypes: null, search: "", highlighting: true };
+    const result = deriveFilterCriteria(state, "type-1", er, null, new Set(["reltype-9", "reltype-8"]));
+
+    expect([...(result.highlightIds ?? [])].sort()).toEqual(["reltype-9", "type-1", "type-2"]);
+  });
+
+  it("stops at an ordinary neighbour, as it always did", () => {
+    const state: FilterState = { selectedTypes: null, search: "", highlighting: true };
+    // No pass-through nodes: the objects view.
+    const result = deriveFilterCriteria(state, "e1", edges, null, new Set());
+    expect(result.highlightIds).toHaveLength(2);
+  });
+
   it("passes selectedTypes and search through unchanged", () => {
     const state: FilterState = { selectedTypes: ["employee"], search: "ahmed", highlighting: false };
     const result = deriveFilterCriteria(state, null, edges);

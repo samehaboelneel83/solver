@@ -116,6 +116,20 @@ describe("TermBuilder", () => {
     expect(screen.getByRole("button", { name: /expand a sum over a set/i })).toBeInTheDocument();
   });
 
+  it("does not list the same index twice when a sum rebinds a set already bound outside", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderTerm({
+      sum: { var: "assign", index: ["e", "d", "s"] },
+      over: [{ index: "d", set: "day" }],
+    } as Term);
+
+    const day = screen.getByLabelText("day index") as HTMLSelectElement;
+    const values = Array.from(day.options).map((option) => option.value).filter(Boolean);
+    expect(values).toEqual(["d"]);
+    expect(error.mock.calls.flat().join(" ")).not.toMatch(/same key/i);
+    error.mockRestore();
+  });
+
   it("folds the Of block on its own chevron", () => {
     renderTerm({
       sum: { var: "assign", index: ["e", "d", "s"] },
@@ -146,6 +160,31 @@ describe("TermBuilder", () => {
     // Not an empty shell: the new term arrives subscripted by the bound
     // indices of the right sets.
     expect(onChange).toHaveBeenCalledWith({ var: "assign", index: ["e", "d", "s"] });
+  });
+
+  it("starts a sum over the next set that is not already bound", () => {
+    const onChange = renderTerm({ const: 0 } as Term, [{ index: "e", set: "employee" }]);
+
+    fireEvent.change(screen.getAllByLabelText(/kind of term/i)[0], { target: { value: "sum" } });
+
+    expect(onChange).toHaveBeenCalledWith({
+      sum: { const: 1 },
+      over: [{ index: "d", set: "day" }],
+    });
+  });
+
+  it("does not offer a sum when the model has no set to range over", () => {
+    render(
+      <TermBuilder
+        value={{ const: 0 }}
+        onChange={vi.fn()}
+        context={{ ...CONTEXT, sets: [] }}
+        bound={[]}
+      />
+    );
+
+    const kinds = screen.getByLabelText(/kind of term/i) as HTMLSelectElement;
+    expect(Array.from(kinds.options).map((o) => o.value)).not.toContain("sum");
   });
 });
 
@@ -207,6 +246,37 @@ describe("BindingsEditor", () => {
     expect(screen.queryByRole("group", { name: /filter for/i })).not.toBeInTheDocument();
   });
 
+  it("can remove the last For every index when the rule may range over nothing", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[{ index: "d", set: "day" }]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+        minBindings={0}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /remove d in day/i }));
+    expect(onChange).toHaveBeenCalledWith([]);
+  });
+
+  it("keeps the last Summed over index — a sum with no range is refused", () => {
+    render(
+      <BindingsEditor
+        bindings={[{ index: "e", set: "employee" }]}
+        onChange={vi.fn()}
+        context={CONTEXT}
+        outer={[]}
+        legend="Summed over"
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /remove e in employee/i })).not.toBeInTheDocument();
+  });
+
   it("names a new index without shadowing one already bound", () => {
     const onChange = vi.fn();
     render(
@@ -229,6 +299,110 @@ describe("BindingsEditor", () => {
     // would silently change which entity a term refers to.
     expect(added.index).not.toBe("i");
     expect(added.index).not.toBe("i2");
+  });
+
+  it("names a new index after the next set that is not already bound", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[{ index: "d", set: "day" }, { index: "s", set: "shift" }]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add an index/i }));
+
+    const lastCall = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(lastCall[0].at(-1)).toEqual({ index: "e", set: "employee" });
+  });
+
+  it("reuses the first set with a free name when every set is already bound", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[
+          { index: "e", set: "employee" },
+          { index: "d", set: "day" },
+          { index: "s", set: "shift" },
+          { index: "u", set: "unit" },
+        ]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add an index/i }));
+
+    const lastCall = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(lastCall[0].at(-1)).toEqual({ index: "e2", set: "employee" });
+  });
+
+  it("renames an auto index when the set changes, and drops a walk that no longer fits", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[{ index: "e", set: "employee", via: { rel: "works_in", to: "u" } }]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[{ index: "u", set: "unit" }]}
+        legend="For every"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Set"), { target: { value: "day" } });
+
+    const lastCall = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(lastCall[0][0]).toEqual({ index: "d", set: "day" });
+  });
+
+  it("keeps a name the person chose when the set changes", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[{ index: "person", set: "employee" }]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Set"), { target: { value: "day" } });
+
+    const lastCall = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(lastCall[0][0]).toEqual({ index: "person", set: "day" });
+  });
+
+  it("omits where when the filter is cleared, rather than publishing an empty list", () => {
+    const onChange = vi.fn();
+    render(
+      <BindingsEditor
+        bindings={[
+          {
+            index: "d",
+            set: "day",
+            where: [{ attr: "is_weekend", op: "=", value: true }],
+          },
+        ]}
+        onChange={onChange}
+        context={CONTEXT}
+        outer={[]}
+        legend="For every"
+      />
+    );
+
+    // Clearing every condition → toIrWhere returns [].
+    fireEvent.click(screen.getByRole("button", { name: /remove condition/i }));
+
+    const lastCall = onChange.mock.calls.at(-1) as [Binding[]];
+    expect(lastCall[0][0]).toEqual({ index: "d", set: "day" });
+    expect(lastCall[0][0]).not.toHaveProperty("where");
+    expect(lastCall[0][0]).not.toHaveProperty("problems");
   });
 
   it("keeps each binding's controls separate", () => {
@@ -291,7 +465,7 @@ describe("BindingsEditor", () => {
         legend="For every"
       />
     );
-    expect(screen.queryByRole("button", { name: /^remove$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove .+ in /i })).not.toBeInTheDocument();
 
     rerender(
       <BindingsEditor
@@ -305,7 +479,7 @@ describe("BindingsEditor", () => {
         legend="For every"
       />
     );
-    expect(screen.getAllByRole("button", { name: /^remove$/i })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /remove .+ in /i })).toHaveLength(2);
   });
 
   it("converts an edited filter into the IR's flat and-list", () => {
@@ -357,6 +531,54 @@ describe("BindingsEditor, the relationship picker", () => {
     expect(offered).toContain("works_in:to");
     // `reports_to` joins units, and this binding is over employees.
     expect(offered).not.toContain("reports_to:from");
+    // One end, so the name is enough — "against" was a direction the
+    // document does not store.
+    expect(Array.from(picker.options).map((option) => option.textContent)).toContain("works_in");
+  });
+
+  it("names a hierarchy walk down or up, not along or against", () => {
+    renderWalk([{ index: "sub", set: "unit" }], [{ index: "u", set: "unit" }]);
+
+    const picker = screen.getByLabelText("Reached through") as HTMLSelectElement;
+    const byValue = Object.fromEntries(
+      Array.from(picker.options).map((option) => [option.value, option.textContent])
+    );
+    expect(byValue["reports_to:from"]).toBe("reports_to down the tree");
+    expect(byValue["reports_to:to"]).toBe("reports_to up the tree");
+  });
+
+  it("hides Starting at when only one index can be the anchor", () => {
+    renderWalk(
+      [{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u" } }],
+      [{ index: "u", set: "unit" }]
+    );
+
+    expect(screen.queryByLabelText("Starting at")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("How far")).toBeInTheDocument();
+  });
+
+  it("offers Starting at when two indexes of that set are already bound", () => {
+    const onChange = renderWalk(
+      [{ index: "e", set: "employee", via: { rel: "works_in", to: "sub" } }],
+      [
+        { index: "r", set: "unit" },
+        { index: "sub", set: "unit" },
+      ]
+    );
+
+    const start = screen.getByLabelText("Starting at") as HTMLSelectElement;
+    expect(Array.from(start.options).map((option) => option.value)).toEqual(["r", "sub"]);
+    expect(Array.from(start.options).map((option) => option.textContent)).toEqual([
+      "r in unit",
+      "sub in unit",
+    ]);
+    expect(screen.queryByLabelText("How far")).not.toBeInTheDocument();
+
+    fireEvent.change(start, { target: { value: "r" } });
+    expect((onChange.mock.calls.at(-1) as [Binding[]])[0][0].via).toEqual({
+      rel: "works_in",
+      to: "r",
+    });
   });
 
   it("will not anchor a walk on an index bound after it", () => {
@@ -386,6 +608,45 @@ describe("BindingsEditor, the relationship picker", () => {
     expect(next[0].via).toEqual({ rel: "works_in", to: "u" });
   });
 
+  it("writes down the tree as the from end and up the tree as the to end", () => {
+    const onChange = renderWalk([{ index: "sub", set: "unit" }], [{ index: "u", set: "unit" }]);
+    const picker = screen.getByLabelText("Reached through");
+
+    fireEvent.change(picker, { target: { value: "reports_to:from" } });
+    expect((onChange.mock.calls.at(-1) as [Binding[]])[0][0].via).toEqual({
+      rel: "reports_to",
+      from: "u",
+    });
+
+    fireEvent.change(picker, { target: { value: "reports_to:to" } });
+    expect((onChange.mock.calls.at(-1) as [Binding[]])[0][0].via).toEqual({
+      rel: "reports_to",
+      to: "u",
+    });
+  });
+
+  it("writes each How far choice as the matching depth", () => {
+    const onChange = renderWalk(
+      [{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u" } }],
+      [{ index: "u", set: "unit" }]
+    );
+    const howFar = screen.getByLabelText("How far");
+
+    fireEvent.change(howFar, { target: { value: "any" } });
+    expect((onChange.mock.calls.at(-1) as [Binding[]])[0][0].via).toEqual({
+      rel: "reports_to",
+      from: "u",
+      depth: "any",
+    });
+
+    fireEvent.change(howFar, { target: { value: "any_or_self" } });
+    expect((onChange.mock.calls.at(-1) as [Binding[]])[0][0].via).toEqual({
+      rel: "reports_to",
+      from: "u",
+      depth: "any_or_self",
+    });
+  });
+
   it("offers a depth only on a relationship that joins a type to itself", () => {
     const { rerender } = render(
       <BindingsEditor
@@ -410,6 +671,20 @@ describe("BindingsEditor, the relationship picker", () => {
       />
     );
     expect(screen.getByLabelText("How far")).toBeInTheDocument();
+  });
+
+  it("names the three depths the way a planner would say them", () => {
+    renderWalk(
+      [{ index: "sub", set: "unit", via: { rel: "reports_to", from: "u" } }],
+      [{ index: "u", set: "unit" }]
+    );
+
+    const howFar = screen.getByLabelText("How far") as HTMLSelectElement;
+    expect(Array.from(howFar.options).map((option) => option.textContent)).toEqual([
+      "the next hop only",
+      "everything under it",
+      "itself and everything under it",
+    ]);
   });
 
   it("leaves depth out of the document when the walk is a single step", () => {

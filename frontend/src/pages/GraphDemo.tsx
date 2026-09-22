@@ -14,7 +14,8 @@ import { useDomain } from "../hooks/useDomain";
 import { parseGraphMode, useGraphMode } from "../hooks/useGraphMode";
 import { parseRouteId } from "../lib/routeId";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import type { GraphMode } from "../lib/typesGraph";
+import { erKind, isErDecoration, type GraphMode } from "../lib/typesGraph";
+import { useModelTarget } from "../hooks/useModelTarget";
 
 /**
  * One domain's entities and relationships, drawn.
@@ -108,7 +109,7 @@ export default function GraphDemo() {
   // which keeps every existing link (and Ruling 31's `?focus=` one) intact.
   useEffect(() => {
     const current = searchParams.get("mode");
-    const wanted = mode === "types" ? "types" : null;
+    const wanted = mode === "objects" ? null : mode;
     if (current === wanted) {
       return;
     }
@@ -135,8 +136,44 @@ export default function GraphDemo() {
   const [searchFocus, setSearchFocus] = useState<{ nodeId: string; token: number } | null>(null);
   const searchFocusTokenRef = useRef(0);
 
-  const { data: graph } = useGraphView(domainId, hierarchyTypeId, mode);
-  const selectedNodeId = selection?.kind === "node" ? selection.id : null;
+  // The optimization view's problem and version. Asked for through the URL
+  // (`?problem=` and `?version=`) so a view of one model is a link to it;
+  // resolved by `useModelTarget` to the first problem and its latest version
+  // when nothing -- or something stale -- is asked for.
+  const requestedModel = {
+    problemId: parseRouteId(searchParams.get("problem")),
+    versionId: parseRouteId(searchParams.get("version")),
+  };
+  const modelTarget = useModelTarget(domainId, requestedModel, mode === "model");
+  function changeModelTarget(request: { problemId: Id | null; versionId: Id | null }) {
+    setSelection(null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (request.problemId === null) next.delete("problem");
+        else next.set("problem", String(request.problemId));
+        if (request.versionId === null) next.delete("version");
+        else next.set("version", String(request.versionId));
+        return next;
+      },
+      { replace: true }
+    );
+  }
+
+  const { data: graph } = useGraphView(domainId, hierarchyTypeId, mode, modelTarget.versionId);
+  // A relationship type selects as an edge (see `lib/typesGraph`), but in the
+  // ER drawing it IS a node -- its diamond -- so "highlight connections"
+  // works from it too: the diamond, its lines, and the two types it relates.
+  const selectedNodeId =
+    selection?.kind === "node"
+      ? selection.id
+      : selection?.kind === "edge" && graph?.nodes.some((node) => node.id === selection.id)
+        ? selection.id
+        : null;
+  const passThrough = useMemo(
+    () => new Set((graph?.nodes ?? []).filter((node) => erKind(node) === "relationship").map((node) => node.id)),
+    [graph?.nodes]
+  );
 
   // Task 14c. The expression's FIELDS come from the entity types, because
   // the graph payload's `attribute_definitions` carry no `enum_values` and
@@ -220,11 +257,11 @@ export default function GraphDemo() {
   const filter = useMemo(
     () =>
       graph
-        ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges, expressionMatchIds)
+        ? deriveFilterCriteria(filterState, selectedNodeId, graph.edges, expressionMatchIds, passThrough)
         : undefined,
     // edges, not the graph object — a new wrapper with the same edges must not restyle
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filterState, selectedNodeId, graph?.edges, expressionMatchIds]
+    [filterState, selectedNodeId, graph?.edges, expressionMatchIds, passThrough]
   );
 
   // H-1 fix round 1: typing a node's label and pressing Enter selects it.
@@ -236,11 +273,16 @@ export default function GraphDemo() {
     if (!q || !graph) {
       return;
     }
-    const match = graph.nodes.find((node) => node.label.toLowerCase().includes(q));
+    // Not an attribute ellipse: it is not a place the canvas can stop on, and
+    // selecting it selects its owner anyway. The owner is what was wanted.
+    const match = graph.nodes.find(
+      (node) => !isErDecoration(node) && node.label.toLowerCase().includes(q)
+    );
     if (!match) {
       return;
     }
-    setSelection({ kind: "node", id: match.id });
+    // A diamond opens its relationship type, as a tap on it does.
+    setSelection(erKind(match) === "relationship" ? { kind: "edge", id: match.id } : { kind: "node", id: match.id });
     searchFocusTokenRef.current += 1;
     setSearchFocus({ nodeId: match.id, token: searchFocusTokenRef.current });
   }
@@ -285,9 +327,15 @@ export default function GraphDemo() {
           // groups by changes: a types node's `type` is its entity type's
           // ROLE, so the checkbox list offers the roles present. Filtering
           // types by their own names would only duplicate the search box.
-          typeNoun={mode === "types" ? "Roles" : "Types"}
+          // The model view groups by what a part IS: sets, variables,
+          // parameters, rules, the objective.
+          typeNoun={mode === "types" ? "Roles" : mode === "model" ? "Parts" : "Types"}
           searchLabel={
-            mode === "types" ? "Search types by name" : "Search nodes by label"
+            mode === "types"
+              ? "Search types by name"
+              : mode === "model"
+                ? "Search the model by name"
+                : "Search nodes by label"
           }
           // Only in the objects view: the fields are an entity's
           // attributes, and a types node IS an entity type, not an entity.
@@ -316,6 +364,8 @@ export default function GraphDemo() {
             filter={filter}
             onSelectionChange={setSelection}
             focusRequest={searchFocus}
+            modelTarget={modelTarget}
+            onModelTargetChange={changeModelTarget}
           />
         </div>
         {/* F-5: `self-start` keeps this box only as tall as its own content

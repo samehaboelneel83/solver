@@ -22,15 +22,18 @@ import {
   type Id,
 } from "../api/v1";
 import { checkIrShape } from "../ir";
-import { RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
+import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
-import { parameterOptions } from "../model/declarations";
+import { parameterOptions, cleanVariable, type VariableSpec } from "../model/declarations";
 import {
+  cleanBinding,
+  cleanTerm,
   declaredRelationships,
   describeTerm,
-  freeIndexName,
+  freeNumberedId,
+  nextBinding,
   type Binding,
   type Constraint,
   type ModelContext,
@@ -78,7 +81,7 @@ const EMPTY_MODEL = {
 type Draft = {
   sets: string[];
   parameters: Record<string, { index: string[] }>;
-  variables: Record<string, { index: string[]; domain: string }>;
+  variables: Record<string, VariableSpec>;
   constraints: Constraint[];
   objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
 };
@@ -270,14 +273,54 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       // way this screen could build a `binding_via_rel_not_declared`.
       ...(walked.length > 0 ? { relationships: walked } : {}),
       parameters: draft.parameters,
-      variables: draft.variables,
-      constraints: draft.constraints,
+      variables: Object.fromEntries(
+        Object.entries(draft.variables).map(([name, spec]) => [name, cleanVariable(spec)])
+      ),
+      constraints: draft.constraints.map((constraint) => {
+        // A hard rule must not carry a weight (contract §3.4); a soft one
+        // must. The Strength control keeps the draft honest, and this
+        // strips a leftover weight so Publish is not blocked by a key
+        // the person can no longer see.
+        let next: Constraint =
+          constraint.severity === "soft"
+            ? {
+                ...constraint,
+                weight: constraint.weight && constraint.weight >= 1 ? constraint.weight : 1,
+              }
+            : (() => {
+                const { weight: _dropped, ...rest } = constraint;
+                return rest;
+              })();
+        // A blank "What it means" is not prose — omit the key rather than
+        // publish an empty string.
+        if (!next.note?.trim()) {
+          const { note: _blank, ...rest } = next;
+          next = rest;
+        }
+        // An empty forall is refused; omit it the same way the editor does
+        // when the last index is removed.
+        if (Array.isArray(next.forall) && next.forall.length === 0) {
+          const { forall: _empty, ...rest } = next;
+          next = rest;
+        }
+        // Drop empty where arrays and any UI-only `problems` left on a
+        // binding after a filter was refused then fixed.
+        if (next.forall) {
+          next = { ...next, forall: next.forall.map(cleanBinding) };
+        }
+        if (next.left) next = { ...next, left: cleanTerm(next.left) };
+        if (next.right) next = { ...next, right: cleanTerm(next.right) };
+        return next;
+      }),
       ...(draft.objective.terms.length > 0
         ? {
             objective: {
               sense: draft.objective.sense,
               ...(draft.objective.mode === "lex" ? { mode: "lex" } : {}),
-              terms: draft.objective.terms,
+              terms: draft.objective.terms.map((term) => ({
+                ...term,
+                expression: term.expression ? cleanTerm(term.expression) : term.expression,
+              })),
             },
           }
         : {}),
@@ -410,6 +453,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             <ConstraintCard
               key={position}
               constraint={constraint}
+              otherIds={draft.constraints
+                .filter((_, i) => i !== position)
+                .map((c) => c.id)}
               context={context}
               onChange={(next) =>
                 setDraft({
@@ -435,8 +481,15 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               constraints: [
                 ...draft.constraints,
                 {
-                  id: `c_${draft.constraints.length + 1}`,
-                  forall: [{ index: freeIndexName([]), set: context.sets[0] ?? "" }],
+                  id: freeNumberedId(
+                    "c_",
+                    draft.constraints.map((constraint) => constraint.id)
+                  ),
+                  // No set yet → a global rule (omit forall). Naming an
+                  // empty set would publish a binding the contract refuses.
+                  ...(context.sets.length > 0
+                    ? { forall: [nextBinding([], context)] }
+                    : {}),
                   left: { const: 0 },
                   relation: "<=",
                   right: { const: 0 },
@@ -538,11 +591,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
 function ConstraintCard({
   constraint,
+  otherIds,
   context,
   onChange,
   onRemove,
 }: {
   constraint: Constraint;
+  otherIds: string[];
   context: ModelContext;
   onChange: (next: Constraint) => void;
   onRemove: () => void;
@@ -550,6 +605,13 @@ function ConstraintCard({
   const idField = useId();
   const noteField = useId();
   const bound: Binding[] = constraint.forall ?? [];
+  const idProblem = !constraint.id
+    ? "A rule needs a name."
+    : !isName(constraint.id)
+      ? "A name starts with a letter and uses lower-case letters, digits and underscores."
+      : otherIds.includes(constraint.id)
+        ? `Another rule is already called ${constraint.id}.`
+        : null;
 
   return (
     <article className="rounded-md border border-slate-200 bg-white p-2">
@@ -565,8 +627,15 @@ function ConstraintCard({
               id={idField}
               className={`${INPUT_CLASS} w-48 text-sm`}
               value={constraint.id}
+              aria-invalid={idProblem ? "true" : undefined}
+              aria-describedby={idProblem ? `${idField}-problem` : undefined}
               onChange={(event) => onChange({ ...constraint, id: event.target.value })}
             />
+            {idProblem && (
+              <p id={`${idField}-problem`} role="alert" className="mt-1 text-xs text-red-600">
+                {idProblem}
+              </p>
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <label htmlFor={noteField} className="block text-xs text-slate-600">
@@ -618,10 +687,20 @@ function ConstraintCard({
 
           <BindingsEditor
             bindings={bound}
-            onChange={(forall) => onChange({ ...constraint, forall })}
+            onChange={(forall) => {
+              // Omit the key when there is nothing to range over — an empty
+              // array is refused (contract §3.4).
+              if (forall.length === 0) {
+                const { forall: _dropped, ...rest } = constraint;
+                onChange(rest);
+                return;
+              }
+              onChange({ ...constraint, forall });
+            }}
             context={context}
             outer={[]}
             legend="For every"
+            minBindings={0}
           />
 
           <TermBuilder
@@ -648,9 +727,19 @@ function ConstraintCard({
                 value: s,
                 label: s === "hard" ? "must hold" : "can bend, at a cost",
               }))}
-              onChange={(severity) =>
-                onChange({ ...constraint, severity: severity as Constraint["severity"] })
-              }
+              onChange={(severity) => {
+                const next = severity as Constraint["severity"];
+                if (next === "soft") {
+                  onChange({
+                    ...constraint,
+                    severity: next,
+                    weight: constraint.weight && constraint.weight >= 1 ? constraint.weight : 1,
+                  });
+                  return;
+                }
+                const { weight: _dropped, ...rest } = constraint;
+                onChange({ ...rest, severity: next });
+              }}
             />
             {constraint.severity === "soft" && (
               <div>
@@ -663,8 +752,17 @@ function ConstraintCard({
                   className={`${INPUT_CLASS} w-28 text-sm`}
                   value={String(constraint.weight ?? 1)}
                   onChange={(event) => {
-                    const next = Number(event.target.value);
-                    if (/^\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
+                    // A soft cost must be a positive integer (contract §3.4).
+                    // Rejecting 0 here keeps the field honest — Publish used
+                    // to coerce it silently while the box still showed 0.
+                    const raw = event.target.value;
+                    if (!/^\d*$/.test(raw)) return;
+                    if (raw === "") {
+                      onChange({ ...constraint, weight: 1 });
+                      return;
+                    }
+                    const next = Number(raw);
+                    if (Number.isSafeInteger(next) && next >= 1) {
                       onChange({ ...constraint, weight: next });
                     }
                   }}
@@ -696,6 +794,16 @@ function ObjectiveEditor({
   context: ModelContext;
   onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
 }) {
+  const lex = objective.mode === "lex";
+
+  function moveTerm(from: number, to: number) {
+    if (to < 0 || to >= objective.terms.length) return;
+    const terms = [...objective.terms];
+    const [moved] = terms.splice(from, 1);
+    terms.splice(to, 0, moved);
+    onChange({ ...objective, terms });
+  }
+
   return (
     <div className="rounded-md border border-slate-200 bg-white p-4">
       <Choice
@@ -715,7 +823,18 @@ function ObjectiveEditor({
       />
 
       <div className="mt-3 space-y-1">
-        {objective.terms.map((term, position) => (
+        {objective.terms.map((term, position) => {
+          const otherIds = objective.terms
+            .filter((_, i) => i !== position)
+            .map((t) => t.id);
+          const idProblem = !term.id
+            ? "A goal needs a name."
+            : !isName(term.id)
+              ? "A name starts with a letter and uses lower-case letters, digits and underscores."
+              : otherIds.includes(term.id)
+                ? `Another goal is already called ${term.id}.`
+                : null;
+          return (
           <TreeItem
             key={position}
             name={term.id || "objective term"}
@@ -729,6 +848,8 @@ function ObjectiveEditor({
                     id={`obj-${position}-id`}
                     className={`${INPUT_CLASS} w-48 text-sm`}
                     value={term.id}
+                    aria-invalid={idProblem ? "true" : undefined}
+                    aria-describedby={idProblem ? `obj-${position}-id-problem` : undefined}
                     onChange={(event) =>
                       onChange({
                         ...objective,
@@ -738,41 +859,81 @@ function ObjectiveEditor({
                       })
                     }
                   />
+                  {idProblem && (
+                    <p
+                      id={`obj-${position}-id-problem`}
+                      role="alert"
+                      className="mt-1 text-xs text-red-600"
+                    >
+                      {idProblem}
+                    </p>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
-                    {objective.mode === "lex" ? "Weight (unused in this order)" : "Weight"}
-                  </label>
-                  <input
-                    id={`obj-${position}-weight`}
-                    inputMode="numeric"
-                    className={`${INPUT_CLASS} w-24 text-sm`}
-                    value={String(term.weight)}
-                    onChange={(event) => {
-                      const next = Number(event.target.value);
-                      if (/^[+-]?\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
-                        onChange({
-                          ...objective,
-                          terms: objective.terms.map((t, i) =>
-                            i === position ? { ...t, weight: next } : t
-                          ),
-                        });
-                      }
-                    }}
-                  />
-                </div>
+                {lex ? (
+                  <div>
+                    <span className="block text-xs text-slate-600">Goal order</span>
+                    <p className="mt-1 font-mono text-sm text-slate-900" data-testid={`goal-order-${position}`}>
+                      {ordinal(position + 1)}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
+                      Weight
+                    </label>
+                    <input
+                      id={`obj-${position}-weight`}
+                      inputMode="numeric"
+                      className={`${INPUT_CLASS} w-24 text-sm`}
+                      value={String(term.weight)}
+                      onChange={(event) => {
+                        const next = Number(event.target.value);
+                        if (/^[+-]?\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
+                          onChange({
+                            ...objective,
+                            terms: objective.terms.map((t, i) =>
+                              i === position ? { ...t, weight: next } : t
+                            ),
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             }
             actions={
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-sm text-red-700 underline"
-                onClick={() =>
-                  onChange({ ...objective, terms: objective.terms.filter((_, i) => i !== position) })
-                }
-              >
-                Remove
-              </button>
+              <span className="flex flex-wrap items-center gap-1">
+                {lex && position > 0 && (
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-sm text-slate-700 underline"
+                    onClick={() => moveTerm(position, position - 1)}
+                    aria-label={`Make ${term.id || "goal"} earlier`}
+                  >
+                    Earlier
+                  </button>
+                )}
+                {lex && position < objective.terms.length - 1 && (
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 text-sm text-slate-700 underline"
+                    onClick={() => moveTerm(position, position + 1)}
+                    aria-label={`Make ${term.id || "goal"} later`}
+                  >
+                    Later
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-sm text-red-700 underline"
+                  onClick={() =>
+                    onChange({ ...objective, terms: objective.terms.filter((_, i) => i !== position) })
+                  }
+                >
+                  Remove
+                </button>
+              </span>
             }
           >
             {term.expression == null ? (
@@ -810,7 +971,8 @@ function ObjectiveEditor({
               />
             )}
           </TreeItem>
-        ))}
+          );
+        })}
       </div>
 
       <button
@@ -821,7 +983,14 @@ function ObjectiveEditor({
             ...objective,
             terms: [
               ...objective.terms,
-              { id: `o_${objective.terms.length + 1}`, weight: 1, expression: { const: 0 } as Term },
+              {
+                id: freeNumberedId(
+                  "o_",
+                  objective.terms.map((term) => term.id)
+                ),
+                weight: 1,
+                expression: { const: 0 } as Term,
+              },
             ],
           })
         }
@@ -830,6 +999,22 @@ function ObjectiveEditor({
       </button>
     </div>
   );
+}
+
+/** 1 → 1st, 2 → 2nd, 11 → 11th — the place a lex goal takes in the order. */
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
 }
 
 function relationLabel(relation: string): string {

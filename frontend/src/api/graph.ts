@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 import { formatApiError } from "./errors";
-import { useEntityTypes, useRelationshipTypes, validationErrors, type Id } from "./v1";
+import { useEntityTypes, useRelationshipTypes, useVersion, validationErrors, type Id } from "./v1";
+import { buildModelView } from "../lib/modelGraph";
+
+// What the optimization view shows before there is a model to draw.
+const EMPTY_MODEL = buildModelView({}, []);
 import {
   EMPTY_PALETTE,
   buildTypesView,
@@ -84,12 +88,18 @@ export type GraphView = {
 export function useGraphView(
   domainId: Id | null,
   hierarchyTypeId: Id | null,
-  mode: GraphMode
+  mode: GraphMode,
+  // The model version the optimization view draws; ignored by the others.
+  modelVersionId: Id | null = null
 ): GraphView {
   const isTypes = mode === "types";
-  const objects = useGraph(domainId, hierarchyTypeId, { enabled: !isTypes });
-  const entityTypes = useEntityTypes(domainId, { limit: 500 }, { enabled: isTypes });
+  const isModel = mode === "model";
+  const objects = useGraph(domainId, hierarchyTypeId, { enabled: mode === "objects" });
+  // The model's sets are entity types, drawn in their colours, so the
+  // optimization view reads the same list the ERD does.
+  const entityTypes = useEntityTypes(domainId, { limit: 500 }, { enabled: isTypes || isModel });
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500 }, { enabled: isTypes });
+  const version = useVersion(isModel ? modelVersionId : null);
 
   const objectsData = objects.data;
   const typeItems = entityTypes.data?.items;
@@ -103,8 +113,34 @@ export function useGraphView(
     () => (objectsData ? objectsPalette(objectsData) : null),
     [objectsData]
   );
+  const ir = version.data?.ir;
+  const model = useMemo(
+    () => (isModel && ir && typeItems ? buildModelView(ir, typeItems) : null),
+    [isModel, ir, typeItems]
+  );
 
-  if (!isTypes) {
+  if (isModel) {
+    return {
+      // No version to draw (a domain with no problems, or a problem with no
+      // versions) is an empty drawing, not a load that never finishes.
+      data: model?.graph ?? (modelVersionId === null && !entityTypes.isLoading ? EMPTY_MODEL.graph : undefined),
+      palette: model?.palette ?? EMPTY_PALETTE,
+      isLoading: entityTypes.isLoading || (modelVersionId !== null && version.isLoading),
+      error: entityTypes.error ?? version.error ?? null,
+      fetchStatus:
+        entityTypes.fetchStatus === "paused" || version.fetchStatus === "paused"
+          ? "paused"
+          : entityTypes.fetchStatus === "fetching" || version.fetchStatus === "fetching"
+            ? "fetching"
+            : "idle",
+      refetch: () => {
+        void entityTypes.refetch();
+        void version.refetch();
+      },
+    };
+  }
+
+  if (mode === "objects") {
     return {
       data: objectsData,
       palette: objectsColours ?? EMPTY_PALETTE,

@@ -29,10 +29,10 @@ const listeners = new Set<Listener>();
 let memoryValue: GraphMode = DEFAULT_MODE;
 let storageBroken = false;
 
-/** Anything that is not one of the two known modes reads as the default --
+/** Anything that is not one of the known modes reads as the default --
  * a stored value can outlive the code that wrote it. */
 export function parseGraphMode(raw: string | null): GraphMode {
-  return raw === "types" || raw === "objects" ? raw : DEFAULT_MODE;
+  return raw === "types" || raw === "objects" || raw === "model" ? raw : DEFAULT_MODE;
 }
 
 function read(): GraphMode {

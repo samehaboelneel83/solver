@@ -90,7 +90,6 @@ export function termKind(term: Term): TermKind {
 /** A new term of the chosen kind, filled in as far as the context allows so
  * the editor never shows a control with nothing in it. */
 export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[]): Term {
-  const firstSet = context.sets[0] ?? "";
   switch (kind) {
     case "const":
       return { const: 0 };
@@ -110,9 +109,14 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       return { attr: { of: binding?.index ?? "", name: attrs[0]?.name ?? "" } };
     }
     case "sum":
+      // Defence: the kind picker hides sum when there is no set, but a
+      // caller that forces one still must not invent an empty-set binding.
+      if (context.sets.length === 0) {
+        return { const: 0 };
+      }
       return {
         sum: { const: 1 },
-        over: [{ index: freeIndexName(bound), set: firstSet }],
+        over: [nextBinding(bound, context)],
       };
     case "add":
       return { add: [{ const: 0 }, { const: 0 }] };
@@ -147,7 +151,7 @@ export function walksAvailable(context: ModelContext, set: string, bound: Bindin
       const boundEnd = anchorEnd === "from" ? rel.to : rel.from;
       const anchorSet = anchorEnd === "from" ? rel.from : rel.to;
       if (boundEnd !== set) continue;
-      const anchors = bound.filter((b) => b.set === anchorSet).map((b) => b.index);
+      const anchors = uniqueByIndex(bound.filter((b) => b.set === anchorSet)).map((b) => b.index);
       if (anchors.length === 0) continue;
       offers.push({ rel: rel.name, anchorEnd, anchors, loops: rel.from === rel.to });
     }
@@ -175,6 +179,18 @@ export function boundIndices(outer: Binding[], added: Binding[] = []): Binding[]
   return [...outer, ...added];
 }
 
+/** Keep the first binding of each index name. A sum that rebinds a set
+ * already bound outside would otherwise list `d` twice in the index
+ * picker, which is the same choice twice and a duplicate React key. */
+export function uniqueByIndex(bound: Binding[]): Binding[] {
+  const seen = new Set<string>();
+  return bound.filter((binding) => {
+    if (seen.has(binding.index)) return false;
+    seen.add(binding.index);
+    return true;
+  });
+}
+
 function fillIndices(arity: number, wantedSets: string[], bound: Binding[]): string[] {
   return Array.from({ length: arity }, (_, position) => {
     const set = wantedSets[position];
@@ -190,6 +206,59 @@ export function freeIndexName(bound: Binding[], seed = "i"): string {
     if (!taken.has(`${seed}${n}`)) return `${seed}${n}`;
   }
   return `${seed}_`;
+}
+
+/** Drop UI-only fields and empty optionals so a binding matches the contract. */
+export function cleanBinding(binding: Binding & { problems?: string[] }): Binding {
+  const next: Binding = { index: binding.index, set: binding.set };
+  if (binding.where && binding.where.length > 0) next.where = binding.where;
+  if (binding.via) next.via = binding.via;
+  return next;
+}
+
+/** Walk a term and clean every binding it ranges over. */
+export function cleanTerm(term: Term): Term {
+  if ("sum" in term) {
+    return { sum: cleanTerm(term.sum), over: term.over.map(cleanBinding) };
+  }
+  if ("add" in term) {
+    return { add: term.add.map(cleanTerm) };
+  }
+  if ("mul" in term) {
+    return { mul: [cleanTerm(term.mul[0]), cleanTerm(term.mul[1])] };
+  }
+  return term;
+}
+
+export function seedForSet(set: string): string {
+  return /^[a-z]/.test(set) ? set[0] : "i";
+}
+
+/** True when the index is still the name `nextBinding` would have chosen
+ * for this set (`e`, `e2`, …), so changing the set may rename it. A name
+ * the person typed (`person`) is left alone. */
+export function isGeneratedIndex(index: string, set: string): boolean {
+  const seed = seedForSet(set);
+  return index === seed || new RegExp(`^${seed}\\d+$`).test(index);
+}
+
+/** The next binding to add: a set not already ranged over, named after
+ * that set (`e` for employee). When every set is already bound, reuse the
+ * first one with a free name (`e2`) rather than a generic `i`. */
+export function nextBinding(bound: Binding[], context: ModelContext): Binding {
+  const used = new Set(bound.map((b) => b.set));
+  const set = context.sets.find((name) => !used.has(name)) ?? context.sets[0] ?? "";
+  return { index: freeIndexName(bound, seedForSet(set)), set };
+}
+
+/** The next free `c_1` / `o_2` style id among those already taken. */
+export function freeNumberedId(prefix: string, taken: string[]): string {
+  const used = new Set(taken);
+  for (let n = 1; n < 1000; n += 1) {
+    const id = `${prefix}${n}`;
+    if (!used.has(id)) return id;
+  }
+  return `${prefix}${taken.length + 1}`;
 }
 
 /**

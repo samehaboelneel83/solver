@@ -297,22 +297,45 @@ The page has three parts, in the order a model is actually written:
    `sets`; which of its parameters it reads (the index comes from
    `parameter_def`, in order — typing `demand[shift, day]` would type-check by
    arity and silently mean a different model); and the **variables** a solver
-   decides (`binary`, `integer` or `continuous`). Removing a declaration that
+   decides (`binary`, `integer` or `continuous` — shown as **yes or no**,
+   **a whole number**, or **any number**, and changeable on an existing
+   variable). An integer or continuous variable may also say **no less
+   than** / **no more than**. Removing a declaration that
    a rule still uses is refused here, naming the rule, rather than after
    publish.
 2. **Rules.** Each constraint has an id (the same one a scenario patch and
-   `constraint_result` will use), an optional `forall` of index bindings, a
+   `constraint_result` will use) — a bad or duplicated name is refused on
+   the field, not only when Publish is clicked — an optional `forall` of index bindings, a
    left-hand term, a relation (`<=`, `=`, `>=`), a right-hand term, and
    `hard` or `soft`. A soft one carries a positive integer **weight** — the
-   cost of one unit of violation. A binding is an index over a set, optionally
+   cost of one unit of violation. Making a soft rule mandatory drops that
+   cost from the document — a hard rule must not carry one. Making a
+   mandatory rule soft gives it a cost of 1. A blank **What it means** is
+   dropped on publish rather than stored as an empty string. Removing the
+   last **For every** index omits `forall` entirely — a rule may hold once,
+   globally; an empty array is refused. Clearing a binding filter drops
+   `where` rather than leaving an empty list (and any UI-only filter
+   refusal stays off the published document). A binding is an index over a set, optionally
    filtered (`where`: only the weekend days) and optionally walked (`via`:
    everything under North Region). The filter is react-querybuilder, because
    a filter is a boolean condition tree; the arithmetic around it is not, so
    `TermBuilder` edits that. A walk names the relationship and **which end of
    the edge the anchor sits at**, not a direction — `from: "r"` on
-   `reports_to` walks down because `r` is at the parent end.
-3. **Objective.** Minimize or maximize a weighted sum of terms. Omit it
-   entirely for a pure feasibility problem; an empty objective and a missing
+   `reports_to` walks down because `r` is at the parent end. The picker
+   says **down the tree** or **up the tree** for a hierarchy, and just
+   the relationship name otherwise. **Starting at** appears only when two
+   indexes could be the origin. How far is the next hop only,
+   everything under it, or itself and everything under it. A relationship
+   whose two ends differ (`works_in`) has no depth — only one hop.
+   **Add an index** / **Add a rule** names the next set that is not already
+   bound (`e` for employee), not a generic `i`. A new rule or goal reuses
+   the smallest free `c_N` / `o_N` id, so removing a middle one does not
+   leave a gap forever. With no set declared yet, **Add a rule** starts a
+   global rule (no `forall`) rather than a binding over an empty name.
+3. **Objective.** Minimize or maximize a weighted sum of terms, or take
+   them in order (`lex`): the page then shows **1st** / **2nd** and
+   Earlier / Later instead of a weight that would do nothing. Omit the
+   objective entirely for a pure feasibility problem; an empty objective and a missing
    one would otherwise be two spellings of "optimise nothing", so the page
    drops the key when there are no terms.
 
@@ -617,7 +640,8 @@ python scripts/graph_smoke_check.py
   as JSON, which is why existing free-form payloads stay legal. Once a def
   exists, the graph panel uses the same typed controls as an entity, and the
   database refuses an unknown key or a wrong type with the same `kind`s as
-  `entity_validate`. Generic JSONB columns on other tables remain a JSON box.
+  `entity_validate`. Generic JSONB columns on other tables remain a JSON box;
+  `template.domain_seed` and `template.default_ir` must be objects, not arrays.
 - **Optimistic locking covers the purpose-built forms and generic CRUD.**
   `entity`, `entity_type`, `relationship_type`, `relationship` and
   `parameter_value` plus the factory tables (`domain`, `template`,

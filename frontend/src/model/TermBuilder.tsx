@@ -6,9 +6,14 @@ import { TERM_KINDS } from "../ir/contract";
 import type { TermKind, TraversalDepth } from "../ir";
 import {
   boundIndices,
+  cleanBinding,
   describeTerm,
   emptyTerm,
   freeIndexName,
+  uniqueByIndex,
+  nextBinding,
+  isGeneratedIndex,
+  seedForSet,
   arithmeticAttributes,
   mentionsVariable,
   TERM_LABELS,
@@ -63,6 +68,12 @@ export default function TermBuilder({
   const kind = termKind(value);
   const nested = kind === "sum" || kind === "add" || kind === "mul";
   const namedBlock = Boolean(label);
+  // A sum needs a set to range over. Offering one with none declared would
+  // mint a binding whose set is empty — refused on publish.
+  const offeredKinds =
+    context.sets.length > 0 || kind === "sum"
+      ? TERM_KINDS
+      : TERM_KINDS.filter((option) => option !== "sum");
   const name = label ?? TERM_LABELS[kind];
   const kindSelect = (
     <>
@@ -77,7 +88,7 @@ export default function TermBuilder({
           onChange(emptyTerm(event.target.value as TermKind, context, bound))
         }
       >
-        {TERM_KINDS.map((option) => (
+        {offeredKinds.map((option) => (
           <option key={option} value={option}>
             {TERM_LABELS[option]}
           </option>
@@ -158,9 +169,10 @@ function Body({
             key={`${name}-${position}`}
             label={`${set} index`}
             value={term.index[position] ?? ""}
-            options={bound
-              .filter((b) => b.set === set)
-              .map((b) => ({ value: b.index, label: `${b.index} in ${b.set}` }))}
+            options={uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => ({
+              value: b.index,
+              label: `${b.index} in ${b.set}`,
+            }))}
             emptyLabel={`no index over ${set}`}
             onChange={(next) => {
               const indices = [...term.index];
@@ -182,7 +194,10 @@ function Body({
         <Select
           label="Of"
           value={term.attr.of}
-          options={bound.map((b) => ({ value: b.index, label: `${b.index} in ${b.set}` }))}
+          options={uniqueByIndex(bound).map((b) => ({
+            value: b.index,
+            label: `${b.index} in ${b.set}`,
+          }))}
           emptyLabel="nothing is bound here"
           onChange={(next) => onChange({ attr: { of: next, name: "" } })}
         />
@@ -303,6 +318,8 @@ export type BindingsEditorProps = {
   /** Indices bound further out, so a new one does not shadow them. */
   outer: Binding[];
   legend: string;
+  /** A `forall` may be omitted entirely; a sum's `over` may not. */
+  minBindings?: number;
 };
 
 /**
@@ -314,7 +331,14 @@ export type BindingsEditorProps = {
  * reason rather than flattening them, because flattening would change which
  * entities the constraint ranges over.
  */
-export function BindingsEditor({ bindings, onChange, context, outer, legend }: BindingsEditorProps) {
+export function BindingsEditor({
+  bindings,
+  onChange,
+  context,
+  outer,
+  legend,
+  minBindings = 1,
+}: BindingsEditorProps) {
   return (
     <TreeItem
       name={legend}
@@ -339,10 +363,11 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                 </>
               }
               actions={
-                bindings.length > 1 ? (
+                bindings.length > minBindings ? (
                   <button
                     type="button"
                     className="rounded px-2 py-1 text-xs text-red-700 underline"
+                    aria-label={`Remove ${binding.index} in ${binding.set}`}
                     onClick={() => onChange(bindings.filter((_, i) => i !== position))}
                   >
                     Remove
@@ -357,10 +382,25 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                   onChange={(next) => replace(position, { ...binding, index: next })}
                 />
                 <Select
-                  label="Over"
+                  label="Set"
                   value={binding.set}
                   options={context.sets.map((s) => ({ value: s, label: s }))}
-                  onChange={(next) => replace(position, { ...binding, set: next, where: [] })}
+                  onChange={(next) => {
+                    const others = [...outer, ...bindings.filter((_, i) => i !== position)];
+                    const { via: _dropped, where: _cleared, problems: _ui, ...rest } = binding as Binding & {
+                      problems?: string[];
+                    };
+                    replace(
+                      position,
+                      cleanBinding({
+                        ...rest,
+                        set: next,
+                        index: isGeneratedIndex(binding.index, binding.set)
+                          ? freeIndexName(others, seedForSet(next))
+                          : binding.index,
+                      })
+                    );
+                  }}
                 />
                 <WalkPicker
                   binding={binding}
@@ -403,11 +443,22 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
                     value={fromIrWhere(binding.where, setId)}
                     onChange={(document) => {
                       const converted = toIrWhere(document);
-                      replace(position, {
-                        ...binding,
-                        where: converted.ok ? converted.where : binding.where,
-                        ...(converted.ok ? {} : { problems: converted.problems }),
-                      } as Binding);
+                      if (!converted.ok) {
+                        // Keep the last good where; surface the reason inline.
+                        // `problems` is UI-only — cleanBinding strips it on publish.
+                        replace(position, {
+                          ...binding,
+                          problems: converted.problems,
+                        } as Binding & { problems?: string[] });
+                        return;
+                      }
+                      replace(
+                        position,
+                        cleanBinding({
+                          ...binding,
+                          where: converted.where,
+                        })
+                      );
                     }}
                   />
                   {(binding as Binding & { problems?: string[] }).problems?.map((problem) => (
@@ -427,12 +478,7 @@ export function BindingsEditor({ bindings, onChange, context, outer, legend }: B
         <button
           type="button"
           className="rounded px-2 py-1 text-xs text-blue-700 underline"
-          onClick={() =>
-            onChange([
-              ...bindings,
-              { index: freeIndexName([...outer, ...bindings]), set: context.sets[0] ?? "" },
-            ])
-          }
+          onClick={() => onChange([...bindings, nextBinding([...outer, ...bindings], context)])}
         >
           Add an index
         </button>
@@ -511,18 +557,29 @@ function WalkPicker({
           { value: NO_WALK, label: "all of them" },
           ...offers.map((o) => ({
             value: walkKey(o.rel, o.anchorEnd),
-            // "along" is the stored direction, from the `from` end to the
-            // `to` end; "against" reads the same edge backwards.
-            label: `${o.rel} ${o.anchorEnd === "from" ? "along" : "against"}`,
+            // A hierarchy is one_to_many from parent to child, so the
+            // from-end is down the tree and the to-end is up. A walk
+            // whose ends differ has only one offer, so the name is
+            // enough — "along"/"against" was a direction the document
+            // does not store.
+            label: o.loops
+              ? `${o.rel} ${o.anchorEnd === "from" ? "down the tree" : "up the tree"}`
+              : o.rel,
           })),
         ]}
         onChange={choose}
       />
-      {current && offer && (
+      {current && offer && offer.anchors.length > 1 && (
         <Select
           label="Starting at"
           value={current.anchor}
-          options={offer.anchors.map((a) => ({ value: a, label: a }))}
+          options={offer.anchors.map((a) => ({
+            value: a,
+            label: (() => {
+              const set = earlier.find((b) => b.index === a)?.set;
+              return set ? `${a} in ${set}` : a;
+            })(),
+          }))}
           onChange={anchor}
         />
       )}
@@ -531,9 +588,9 @@ function WalkPicker({
           label="How far"
           value={binding.via?.depth ?? "one"}
           options={[
-            { value: "one", label: "one step" },
-            { value: "any", label: "any number of steps" },
-            { value: "any_or_self", label: "any number, or itself" },
+            { value: "one", label: "the next hop only" },
+            { value: "any", label: "everything under it" },
+            { value: "any_or_self", label: "itself and everything under it" },
           ]}
           onChange={(depth) =>
             onChange({

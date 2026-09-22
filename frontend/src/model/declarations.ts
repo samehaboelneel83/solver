@@ -21,7 +21,7 @@
  * than leaving the server to refuse the publish.
  */
 
-import { NAME_PATTERN } from "../ir/contract";
+import { NAME_PATTERN, type VariableDomain } from "../ir/contract";
 import type { Constraint, ObjectiveTerm, Term } from "./terms";
 import { termKind } from "./terms";
 
@@ -29,7 +29,29 @@ export type EntityTypeRef = { id: number | string; name: string };
 export type ParameterDefRef = { id: number | string; name: string; index_type_ids: (number | string)[] };
 
 export type ParameterDeclaration = { name: string; index: string[] };
-export type VariableDeclaration = { name: string; index: string[]; domain: "binary" | "integer" };
+export type VariableSpec = {
+  index: string[];
+  domain: VariableDomain;
+  lower?: number;
+  upper?: number;
+};
+export type VariableDeclaration = { name: string } & VariableSpec;
+
+/** A binary variable's bounds are fixed at 0 and 1 — drop any that were typed. */
+export function withDomain(spec: VariableSpec, domain: VariableDomain): VariableSpec {
+  if (domain === "binary") {
+    return { index: spec.index, domain };
+  }
+  const next: VariableSpec = { index: spec.index, domain };
+  if (spec.lower !== undefined) next.lower = spec.lower;
+  if (spec.upper !== undefined) next.upper = spec.upper;
+  return next;
+}
+
+/** Drop empty optionals and binary bounds so the published declaration matches the contract. */
+export function cleanVariable(spec: VariableSpec): VariableSpec {
+  return withDomain(spec, spec.domain);
+}
 
 const NAME_RE = new RegExp(NAME_PATTERN);
 

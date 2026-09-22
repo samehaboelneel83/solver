@@ -153,4 +153,127 @@ describe("DeclarationsEditor", () => {
     expect(screen.getByRole("button", { name: /add variable/i })).toBeDisabled();
     expect(screen.getByText(/a variable with no index is a single number/i)).toBeInTheDocument();
   });
+
+  it("names continuous separately from a whole number, not as the same choice twice", () => {
+    renderEditor();
+
+    const decides = screen.getByLabelText(/^decides$/i) as HTMLSelectElement;
+    expect(Array.from(decides.options).map((o) => o.textContent)).toEqual([
+      "yes or no",
+      "a whole number",
+      "any number",
+    ]);
+  });
+
+  it("says a continuous variable decides any number, not a whole number", () => {
+    renderEditor({
+      variables: { flow: { index: ["day"], domain: "continuous" } },
+    });
+
+    expect(screen.getByLabelText(/flow decides/i)).toHaveValue("continuous");
+    const decides = screen.getByLabelText(/flow decides/i) as HTMLSelectElement;
+    expect(decides.options[decides.selectedIndex]?.textContent).toBe("any number");
+  });
+
+  it("adds a continuous variable when that is what was chosen", () => {
+    const onChange = renderEditor();
+
+    fireEvent.change(screen.getByLabelText(/new variable/i), { target: { value: "flow" } });
+    fireEvent.change(screen.getByLabelText(/^decides$/i), { target: { value: "continuous" } });
+    fireEvent.click(within(screen.getByRole("group", { name: /one for every/i })).getByRole("checkbox", { name: /^day/ }));
+    fireEvent.click(screen.getByRole("button", { name: /add variable/i }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: expect.objectContaining({ flow: { index: ["day"], domain: "continuous" } }),
+      })
+    );
+  });
+
+  it("can change what an existing variable decides", () => {
+    const onChange = renderEditor({
+      variables: { assign: { index: ["employee", "day"], domain: "binary" } },
+    });
+
+    fireEvent.change(screen.getByLabelText(/assign decides/i), { target: { value: "continuous" } });
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: { assign: { index: ["employee", "day"], domain: "continuous" } },
+      })
+    );
+  });
+
+  it("offers bounds only when the variable is not yes-or-no", () => {
+    const { rerender } = render(
+      <DeclarationsEditor
+        sets={["day"]}
+        parameters={{}}
+        variables={{ hours: { index: ["day"], domain: "binary" } }}
+        entityTypeNames={["day"]}
+        parameterOptions={[]}
+        constraints={[]}
+        objectiveTerms={[]}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.queryByLabelText(/hours no less than/i)).not.toBeInTheDocument();
+
+    rerender(
+      <DeclarationsEditor
+        sets={["day"]}
+        parameters={{}}
+        variables={{ hours: { index: ["day"], domain: "integer" } }}
+        entityTypeNames={["day"]}
+        parameterOptions={[]}
+        constraints={[]}
+        objectiveTerms={[]}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.getByLabelText(/hours no less than/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/hours no more than/i)).toBeInTheDocument();
+  });
+
+  it("writes a lower bound and drops it again when the variable becomes yes-or-no", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <DeclarationsEditor
+        sets={["day"]}
+        parameters={{}}
+        variables={{ hours: { index: ["day"], domain: "integer" } }}
+        entityTypeNames={["day"]}
+        parameterOptions={[]}
+        constraints={[]}
+        objectiveTerms={[]}
+        onChange={onChange}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/hours no less than/i), { target: { value: "0" } });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: { hours: { index: ["day"], domain: "integer", lower: 0 } },
+      })
+    );
+
+    rerender(
+      <DeclarationsEditor
+        sets={["day"]}
+        parameters={{}}
+        variables={{ hours: { index: ["day"], domain: "integer", lower: 0 } }}
+        entityTypeNames={["day"]}
+        parameterOptions={[]}
+        constraints={[]}
+        objectiveTerms={[]}
+        onChange={onChange}
+      />
+    );
+    fireEvent.change(screen.getByLabelText(/hours decides/i), { target: { value: "binary" } });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        variables: { hours: { index: ["day"], domain: "binary" } },
+      })
+    );
+  });
 });

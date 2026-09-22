@@ -10,34 +10,16 @@ from app.api.deps import get_current_user
 from app.core.db import get_db
 from app.crud.labels import DEFAULT_LABEL_COLUMNS
 from app.crud.registry import TABLE_REGISTRY
+from app.ir.contract import IR_VERSION
 from app.models.iam import UserAccount
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
-# Curated free-text "type" choices, keyed by (table, field) with a
-# (None, field) fallback shared across tables that use the same field
-# name (e.g. every `status` column). Hints only -- the CRUD routes still
-# accept any value.
+# Hints only -- the CRUD routes still accept any value. The v0 shared
+# lists (`status`, `data_type`, …) never attached to a factory field and
+# are gone; the one leftover that does is the IR version a template stores.
 CHOICES: dict[tuple[str | None, str], list[str]] = {
-    (None, "status"): ["DRAFT", "ACTIVE", "ARCHIVED"],
-    (None, "severity"): ["error", "warning", "info"],
-    (None, "objective_type"): ["minimize", "maximize"],
-    (None, "variable_type"): ["binary", "integer", "continuous"],
-    (None, "dimension_type"): ["entity", "time", "set"],
-    # one_to_one | one_to_many | many_to_one | many_to_many -- matches the
-    # CHECK constraint on v1's relationship_type.cardinality.
-    (None, "cardinality"): ["one_to_one", "one_to_many", "many_to_one", "many_to_many"],
-    (None, "problem_type"): ["scheduling", "assignment", "routing", "other"],
-    (None, "data_type"): ["string", "number", "boolean", "date", "datetime", "json"],
-    # v1's table is `attribute_def` (v0 was `attribute_definition`).
-    ("attribute_def", "data_type"): [
-        "string",
-        "number",
-        "boolean",
-        "date",
-        "datetime",
-        "json",
-    ],
+    ("template", "ir_version"): [str(IR_VERSION)],
 }
 
 

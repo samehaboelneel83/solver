@@ -1,12 +1,14 @@
 import { useId, useState } from "react";
 import { INPUT_CLASS } from "../components/attrTypes";
-import { VARIABLE_DOMAINS } from "../ir/contract";
+import { VARIABLE_DOMAINS, type VariableDomain } from "../ir/contract";
 import {
   parameterIsUsable,
   strandedBy,
   variableNameProblem,
+  withDomain,
   type ParameterDeclaration,
   type VariableDeclaration,
+  type VariableSpec,
 } from "./declarations";
 import type { Constraint, ObjectiveTerm } from "./terms";
 
@@ -28,7 +30,7 @@ import type { Constraint, ObjectiveTerm } from "./terms";
 export type DeclarationsEditorProps = {
   sets: string[];
   parameters: Record<string, { index: string[] }>;
-  variables: Record<string, { index: string[]; domain: string }>;
+  variables: Record<string, VariableSpec>;
   /** Every entity type of the domain, whether declared as a set or not. */
   entityTypeNames: string[];
   /** The domain's parameters, indexes already read back as set names. */
@@ -38,7 +40,7 @@ export type DeclarationsEditorProps = {
   onChange: (next: {
     sets: string[];
     parameters: Record<string, { index: string[] }>;
-    variables: Record<string, { index: string[]; domain: string }>;
+    variables: Record<string, VariableSpec>;
   }) => void;
 };
 
@@ -173,9 +175,65 @@ export default function DeclarationsEditor({
                   Remove
                 </button>
               </div>
-              <p className="text-xs text-slate-500">
-                {spec.domain === "binary" ? "yes or no for each" : "a whole number for each"}
-              </p>
+              <div className="mt-1">
+                <label className="block text-xs text-slate-600" htmlFor={`var-domain-${name}`}>
+                  {name} decides
+                </label>
+                <select
+                  id={`var-domain-${name}`}
+                  className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
+                  value={spec.domain}
+                  onChange={(event) =>
+                    apply({
+                      variables: {
+                        ...variables,
+                        [name]: withDomain(
+                          spec,
+                          event.target.value as VariableDomain
+                        ),
+                      },
+                    })
+                  }
+                >
+                  {VARIABLE_DOMAINS.map((option) => (
+                    <option key={option} value={option}>
+                      {domainPhrase(option)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {spec.domain !== "binary" && (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <BoundField
+                    id={`var-lower-${name}`}
+                    label={`${name} no less than`}
+                    value={spec.lower}
+                    integer={spec.domain === "integer"}
+                    onChange={(lower) =>
+                      apply({
+                        variables: {
+                          ...variables,
+                          [name]: boundPatch(spec, "lower", lower),
+                        },
+                      })
+                    }
+                  />
+                  <BoundField
+                    id={`var-upper-${name}`}
+                    label={`${name} no more than`}
+                    value={spec.upper}
+                    integer={spec.domain === "integer"}
+                    onChange={(upper) =>
+                      apply({
+                        variables: {
+                          ...variables,
+                          [name]: boundPatch(spec, "upper", upper),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              )}
             </div>
           ))}
           <AddVariable
@@ -196,6 +254,72 @@ export default function DeclarationsEditor({
   );
 }
 
+/** Planner language for a variable domain — not the contract token. */
+function domainPhrase(domain: string): string {
+  if (domain === "binary") return "yes or no";
+  if (domain === "continuous") return "any number";
+  return "a whole number";
+}
+
+function boundPatch(
+  spec: VariableSpec,
+  key: "lower" | "upper",
+  value: number | undefined
+): VariableSpec {
+  const next = { ...spec };
+  if (value === undefined) {
+    delete next[key];
+  } else {
+    next[key] = value;
+  }
+  return next;
+}
+
+function BoundField({
+  id,
+  label,
+  value,
+  integer,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number | undefined;
+  integer: boolean;
+  onChange: (next: number | undefined) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="block text-xs text-slate-600">
+        {label}
+      </label>
+      <input
+        id={id}
+        inputMode={integer ? "numeric" : "decimal"}
+        className={`${INPUT_CLASS} mt-0.5 w-24 text-xs`}
+        value={value === undefined ? "" : String(value)}
+        placeholder="optional"
+        onChange={(event) => {
+          const raw = event.target.value.trim();
+          if (raw === "") {
+            onChange(undefined);
+            return;
+          }
+          if (integer) {
+            if (!/^[+-]?\d+$/.test(raw)) return;
+            const next = Number(raw);
+            if (Number.isSafeInteger(next)) onChange(next);
+            return;
+          }
+          if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(raw)) return;
+          const next = Number(raw);
+          if (Number.isFinite(next)) onChange(next);
+        }}
+      />
+    </div>
+  );
+}
+
 function AddVariable({
   sets,
   taken,
@@ -208,7 +332,7 @@ function AddVariable({
   const nameId = useId();
   const domainId = useId();
   const [name, setName] = useState("");
-  const [domain, setDomain] = useState<"binary" | "integer">("binary");
+  const [domain, setDomain] = useState<VariableDomain>("binary");
   const [index, setIndex] = useState<string[]>([]);
   const problem = name === "" ? null : variableNameProblem(name, taken);
 
@@ -235,11 +359,11 @@ function AddVariable({
             id={domainId}
             className={`${INPUT_CLASS} w-auto text-xs`}
             value={domain}
-            onChange={(event) => setDomain(event.target.value as "binary" | "integer")}
+            onChange={(event) => setDomain(event.target.value as VariableDomain)}
           >
             {VARIABLE_DOMAINS.map((option) => (
               <option key={option} value={option}>
-                {option === "binary" ? "yes or no" : "a whole number"}
+                {domainPhrase(option)}
               </option>
             ))}
           </select>

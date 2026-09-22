@@ -110,7 +110,7 @@ function stub(overrides: Record<string, unknown> = {}) {
     if (path.startsWith("/api/v1/versions/22")) {
       return Promise.resolve({ ...VERSIONS.items[0], ir: overrides.ir ?? IR_V2 });
     }
-    if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(ENTITY_TYPES);
+    if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(overrides.entityTypes ?? ENTITY_TYPES);
     if (path.startsWith("/api/v1/parameters")) return Promise.resolve(PARAMETERS);
     if (path.startsWith("/api/v1/relationship-types")) {
       return Promise.resolve(overrides.relationshipTypes ?? { items: [], total: 0 });
@@ -238,7 +238,7 @@ describe("ModelEditor", () => {
     // The new rule's binding offers `day` -- if the term editor read the
     // stored version instead of the draft, the two halves of this page would
     // disagree about what the model is.
-    const over = await screen.findByLabelText("Over");
+    const over = await screen.findByLabelText("Set");
     expect(Array.from((over as HTMLSelectElement).options).map((o) => o.value)).toContain("day");
   });
 
@@ -295,6 +295,72 @@ describe("ModelEditor", () => {
     expect(await screen.findByLabelText(/cost per unit broken/i)).toHaveValue("4");
   });
 
+  it("drops the cost when a soft rule is made mandatory", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      ir: {
+        ...IR_V2,
+        constraints: [{ ...IR_V2.constraints[0], severity: "soft", weight: 4 }],
+      },
+    });
+    renderPage();
+    await screen.findByLabelText(/cost per unit broken/i);
+
+    fireEvent.change(screen.getByLabelText("Strength"), {
+      target: { value: "hard" },
+    });
+    expect(screen.queryByLabelText(/cost per unit broken/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints[0].severity).toBe("hard");
+    expect(sent.constraints[0]).not.toHaveProperty("weight");
+  });
+
+  it("gives a soft rule a cost of 1 when it was mandatory", async () => {
+    renderPage();
+    await screen.findByDisplayValue("c_cover");
+
+    fireEvent.change(screen.getByLabelText("Strength"), {
+      target: { value: "soft" },
+    });
+    expect(await screen.findByLabelText(/cost per unit broken/i)).toHaveValue("1");
+  });
+
+  it("does not let a soft cost fall below 1 in the field", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [{ ...IR_V2.constraints[0], severity: "soft", weight: 4 }],
+      },
+    });
+    renderPage();
+    const cost = await screen.findByLabelText(/cost per unit broken/i);
+    fireEvent.change(cost, { target: { value: "0" } });
+    expect(cost).toHaveValue("4");
+    fireEvent.change(cost, { target: { value: "2" } });
+    expect(cost).toHaveValue("2");
+  });
+
+  it("names a duplicate rule id on the field, not only at Publish", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [
+          { ...IR_V2.constraints[0], id: "c_a" },
+          { ...IR_V2.constraints[0], id: "c_b", note: "other" },
+        ],
+      },
+    });
+    renderPage();
+    const name = await screen.findByDisplayValue("c_b");
+    fireEvent.change(name, { target: { value: "c_a" } });
+    expect(screen.getAllByText(/another rule is already called c_a/i).length).toBeGreaterThan(0);
+    expect(name).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("gives For every, Of and That each a tree chevron", async () => {
     renderPage();
     await screen.findByDisplayValue("c_cover");
@@ -336,5 +402,274 @@ describe("ModelEditor", () => {
     const panel = await screen.findByRole("complementary", { name: /rules that ranged over nobody/i });
     expect(within(panel).getByText("c_north")).toBeInTheDocument();
     expect(within(panel).getByText(/never applied to anyone/i)).toBeInTheDocument();
+  });
+
+  it("in lex order shows goal place instead of a weight that does nothing", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        objective: {
+          sense: "minimize",
+          mode: "lex",
+          terms: [
+            { id: "o_cost", weight: 1, expression: { const: 0 } },
+            { id: "o_soft", weight: 4, expression: { const: 1 } },
+          ],
+        },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByDisplayValue("o_cost")).toBeInTheDocument();
+    expect(screen.getByText("1st")).toBeInTheDocument();
+    expect(screen.getByText("2nd")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^weight$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/unused/i)).not.toBeInTheDocument();
+  });
+
+  it("lets a person reorder lex goals with earlier and later", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        objective: {
+          sense: "minimize",
+          mode: "lex",
+          terms: [
+            { id: "o_cost", weight: 1, expression: { const: 0 } },
+            { id: "o_soft", weight: 4, expression: { const: 1 } },
+          ],
+        },
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("o_cost");
+
+    fireEvent.click(screen.getByRole("button", { name: /make o_cost later/i }));
+
+    const names = screen.getAllByLabelText(/^name$/i) as HTMLInputElement[];
+    // Objective names are among the Name fields; the two goals stay named.
+    expect(names.map((n) => n.value)).toEqual(expect.arrayContaining(["o_soft", "o_cost"]));
+    // After later, o_soft is first in the objective section: its "Make earlier"
+    // is gone and o_cost has "Make earlier".
+    expect(screen.queryByRole("button", { name: /make o_soft earlier/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /make o_cost earlier/i })).toBeInTheDocument();
+  });
+
+  it("keeps weight when goals are mixed by weight", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        objective: {
+          sense: "minimize",
+          mode: "weighted",
+          terms: [{ id: "o_cost", weight: 3, expression: { const: 0 } }],
+        },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByLabelText(/^weight$/i)).toHaveValue("3");
+    expect(screen.queryByText("1st")).not.toBeInTheDocument();
+  });
+
+  it("names a new rule after the next unused set, not a generic i", async () => {
+    stub({ versions: { items: [], total: 0 } });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /start a model/i }));
+
+    const sets = screen.getByRole("group", { name: "Sets" });
+    fireEvent.click(within(sets).getByRole("checkbox", { name: "employee" }));
+    fireEvent.click(within(sets).getByRole("checkbox", { name: "day" }));
+    fireEvent.click(screen.getByRole("button", { name: /add a rule/i }));
+
+    expect(await screen.findByDisplayValue("c_1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Index")).toHaveValue("e");
+    expect(screen.getByLabelText("Set")).toHaveValue("employee");
+  });
+
+  it("picks a free rule id when a middle one was removed", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        constraints: [
+          { ...IR_V2.constraints[0], id: "c_1" },
+          { ...IR_V2.constraints[0], id: "c_3", note: "third" },
+        ],
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("c_1");
+
+    fireEvent.click(screen.getByRole("button", { name: /add a rule/i }));
+    expect(await screen.findByDisplayValue("c_2")).toBeInTheDocument();
+  });
+
+  it("picks a free goal id when a middle one was removed", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        objective: {
+          sense: "minimize",
+          mode: "weighted",
+          terms: [
+            { id: "o_1", weight: 1, expression: { const: 0 } },
+            { id: "o_3", weight: 1, expression: { const: 1 } },
+          ],
+        },
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("o_1");
+
+    fireEvent.click(screen.getByRole("button", { name: /add something to count/i }));
+    expect(await screen.findByDisplayValue("o_2")).toBeInTheDocument();
+  });
+
+  it("lets a rule range over nothing by removing its last index", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      ir: {
+        ...IR_V2,
+        constraints: [
+          {
+            id: "c_global",
+            note: "always true",
+            forall: [{ index: "d", set: "day" }],
+            left: { const: 0 },
+            relation: "<=",
+            right: { const: 1 },
+            severity: "hard",
+          },
+        ],
+        objective: {
+          sense: "minimize",
+          terms: [{ id: "o_1", weight: 1, expression: { const: 0 } }],
+        },
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("c_global");
+
+    fireEvent.click(screen.getByRole("button", { name: /remove d in day/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints[0]).not.toHaveProperty("forall");
+  });
+
+  it("drops a blank What it means rather than publishing an empty note", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    await screen.findByDisplayValue("c_cover");
+
+    fireEvent.change(screen.getByLabelText(/what it means/i), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints[0]).not.toHaveProperty("note");
+  });
+
+  it("adds a global rule when no set is declared yet", async () => {
+    stub({ versions: { items: [], total: 0 } });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /start a model/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add a rule/i }));
+
+    expect(await screen.findByDisplayValue("c_1")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Index")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add an index/i })).toBeInTheDocument();
+  });
+
+  it("publishes a cleared filter without an empty where key", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      entityTypes: {
+        items: [
+          ENTITY_TYPES.items[0],
+          {
+            id: 6,
+            domain_id: 1,
+            name: "day",
+            role: "time",
+            colour: null,
+            attributes: [
+              {
+                id: 2,
+                entity_type_id: 6,
+                name: "is_weekend",
+                data_type: "boolean",
+                required: false,
+                unit: null,
+                enum_values: null,
+                default_value: null,
+              },
+            ],
+          },
+        ],
+        total: 2,
+      },
+      ir: {
+        ...IR_V2,
+        constraints: [
+          {
+            ...IR_V2.constraints[0],
+            forall: [
+              {
+                index: "d",
+                set: "day",
+                where: [{ attr: "is_weekend", op: "=", value: true }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    renderPage();
+    await screen.findByDisplayValue("c_cover");
+
+    fireEvent.click(screen.getByRole("button", { name: /remove condition/i }));
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints[0].forall[0]).toEqual({ index: "d", set: "day" });
+    expect(sent.constraints[0].forall[0]).not.toHaveProperty("where");
+  });
+
+  it("publishes integer bounds and drops them when the variable is yes-or-no", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      ir: {
+        ...IR_V2,
+        variables: {
+          assign: { index: ["employee", "day"], domain: "binary" },
+          hours: { index: ["employee"], domain: "integer", lower: 0, upper: 40 },
+        },
+      },
+    });
+    renderPage();
+    await screen.findByLabelText(/hours decides/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.variables.hours).toEqual({
+      index: ["employee"],
+      domain: "integer",
+      lower: 0,
+      upper: 40,
+    });
+    expect(sent.variables.assign).toEqual({
+      index: ["employee", "day"],
+      domain: "binary",
+    });
   });
 });

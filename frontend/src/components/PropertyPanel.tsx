@@ -34,6 +34,7 @@ import {
   type GraphMode,
 } from "../lib/typesGraph";
 import type { GraphResponse } from "../types/graph";
+import { modelDetails, type Detail } from "../lib/modelGraph";
 
 /**
  * The selected node's or edge's editor, beside the canvas.
@@ -81,6 +82,16 @@ export default function PropertyPanel({
   if (!selection) {
     return <p className="text-sm text-slate-500">Select a node or edge to see its properties.</p>;
   }
+  if (mode === "model") {
+    // A set that is an entity type opens that type, exactly as in the ERD;
+    // every other part of the model is shown as the model states it.
+    const details = modelDetails(graph.nodes.find((node) => node.id === selection.id));
+    if (details) {
+      const node = graph.nodes.find((candidate) => candidate.id === selection.id);
+      return <ModelPartPanel title={node?.label.split("\n")[0] ?? selection.id} details={details} onClose={onClose} />;
+    }
+    return <EntityTypePanel nodeId={selection.id} onClose={onClose} />;
+  }
   if (mode === "types") {
     return selection.kind === "node" ? (
       <EntityTypePanel nodeId={selection.id} onClose={onClose} />
@@ -92,6 +103,37 @@ export default function PropertyPanel({
     return <NodePanel domainId={domainId} graph={graph} nodeId={selection.id} onClose={onClose} />;
   }
   return <EdgePanel graph={graph} edgeId={selection.id} onClose={onClose} />;
+}
+
+/**
+ * One part of an optimization model, as the model states it: its kind, what
+ * indexes it, and for a rule the rule itself, in words. Read-only -- a model
+ * version is immutable, and changing a model is the model editor's job.
+ */
+function ModelPartPanel({ title, details, onClose }: { title: string; details: Detail[]; onClose: () => void }) {
+  return (
+    <section aria-labelledby="model-part-heading" className="space-y-2 text-sm">
+      <h2 id="model-part-heading" className="font-mono text-base font-semibold text-slate-900">
+        {title}
+      </h2>
+      <dl className="space-y-1">
+        {details.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
+            <dd className="break-words text-slate-800">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Link to="/model" className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-800">
+          Open in the model editor
+        </Link>
+        <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-500">
+          Close
+        </button>
+      </div>
+    </section>
+  );
 }
 
 const BUTTON_ROW = "flex flex-wrap gap-2 pt-1";

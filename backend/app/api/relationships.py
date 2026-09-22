@@ -71,6 +71,9 @@ from app.api.deps import get_current_user, requires
 from app.api.entity_types import (
     AttributeDefCreate,
     AttributeDefRead,
+    AttributeOrder,
+    next_attribute_position,
+    reorder_attributes,
     _check_default_value,
     _check_enum_pairing,
 )
@@ -78,7 +81,12 @@ from app.api.validation import NAME_PATTERN, field_error, validate_colour, valid
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
-from app.models.v1_domain import AttributeDef, Relationship, RelationshipType
+from app.models.v1_domain import (
+    ATTRIBUTE_ORDER,
+    AttributeDef,
+    Relationship,
+    RelationshipType,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["relationships"])
 
@@ -287,7 +295,7 @@ def _attributes_for_relationship_types(
     rows = (
         db.query(AttributeDef)
         .filter(AttributeDef.relationship_type_id.in_(type_ids))
-        .order_by(AttributeDef.name.asc())
+        .order_by(*ATTRIBUTE_ORDER)
         .all()
     )
     grouped: dict[int, list[AttributeDef]] = {type_id: [] for type_id in type_ids}
@@ -441,11 +449,31 @@ def create_relationship_attribute(
     _get_relationship_type(db, relationship_type_id)
     _check_enum_pairing(payload.data_type, payload.enum_values)
     _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
-    attribute = AttributeDef(relationship_type_id=relationship_type_id, **payload.model_dump())
+    fields = payload.model_dump()
+    if fields["sort_order"] is None:
+        fields["sort_order"] = next_attribute_position(
+            db, AttributeDef.relationship_type_id, relationship_type_id
+        )
+    attribute = AttributeDef(relationship_type_id=relationship_type_id, **fields)
     db.add(attribute)
     _commit(db, "attribute_def")
     db.refresh(attribute)
     return AttributeDefRead.model_validate(attribute)
+
+
+@router.put("/relationship-types/{relationship_type_id}/attribute-order")
+def order_relationship_attributes(
+    relationship_type_id: int,
+    payload: AttributeOrder,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("domain.edit")),
+) -> list[AttributeDefRead]:
+    """Put a relationship type's attributes in the order given."""
+    _get_relationship_type(db, relationship_type_id)
+    rows = reorder_attributes(
+        db, AttributeDef.relationship_type_id, relationship_type_id, payload.attribute_ids
+    )
+    return [AttributeDefRead.model_validate(row) for row in rows]
 
 
 # --- relationships ---------------------------------------------------------

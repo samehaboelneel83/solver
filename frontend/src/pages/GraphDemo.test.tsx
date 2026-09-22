@@ -131,6 +131,9 @@ vi.mock("cytoscape", () => ({ default: mockCytoscape }));
 // Named rather than two indistinguishable `{}`s -- see GraphEditor.test.tsx.
 vi.mock("cytoscape-elk", () => ({ default: { extension: "elk" } }));
 vi.mock("cytoscape-edgehandles", () => ({ default: { extension: "edgehandles" } }));
+// The ER layout drives real cytoscape (sizes, collections, a force layout)
+// that this fake does not model; it has its own tests in lib/erLayout.
+vi.mock("../lib/erLayout", () => ({ runErLayout: vi.fn(() => Promise.resolve()) }));
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -469,6 +472,22 @@ describe("GraphDemo view mode", () => {
     await waitFor(() => expect(screen.getByTestId("location").textContent).not.toContain("mode="));
   });
 
+  it("puts the optimization view in the URL too, and asks for the domain's problems", async () => {
+    renderAt();
+    await waitFor(() => expect(screen.getByTestId("graph-mode-model")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("graph-mode-model"));
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/graph?mode=model"));
+    expect(screen.getByTestId("graph-mode-model")).toHaveAttribute("aria-pressed", "true");
+    // Which problem's model to draw comes from the domain's problems -- and
+    // only once this view is showing.
+    await waitFor(() =>
+      expect(
+        (apiFetch as any).mock.calls.some((call: any[]) => String(call[0]).startsWith("/api/problem/"))
+      ).toBe(true)
+    );
+  });
+
   it("honours ?mode=types on arrival and stops asking for the objects graph", async () => {
     renderAt(["/graph?mode=types"]);
     await waitFor(() => expect(screen.getByTestId("graph-mode-types")).toHaveAttribute("aria-pressed", "true"));
@@ -704,10 +723,10 @@ describe("GraphDemo expression filter", () => {
     setRule(">", "3");
     await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("2 of 3"));
 
-    fireEvent.click(screen.getByRole("button", { name: /^Types$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^ERD View$/ }));
 
     await waitFor(() => expect(screen.queryByTestId("filter-expression-toggle")).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /^Objects$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Graph View$/ }));
     await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
     expect(screen.getByTestId("filter-expression-toggle")).toHaveTextContent(/no conditions/i);
   });

@@ -1,6 +1,7 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
+import AttributeOrderCell, { refocusMoved, swapped } from "../components/AttributeOrderCell";
 import RelationshipTypeFields, {
   RELATIONSHIP_TYPE_FIELDS,
   draftFromType,
@@ -24,6 +25,7 @@ import { formatApiError, isStaleRecordError } from "../api/errors";
 import {
   useCreateRelationshipAttribute,
   useDeleteAttribute,
+  useOrderRelationshipAttributes,
   useDeleteRelationshipType,
   useEntityTypes,
   useRelationshipType,
@@ -271,10 +273,24 @@ function Attributes({ type }: { type: RelationshipType }) {
   const createAttribute = useCreateRelationshipAttribute();
   const updateAttribute = useUpdateAttribute();
   const deleteAttribute = useDeleteAttribute();
+  const orderAttributes = useOrderRelationshipAttributes();
   const toast = useToast();
   const attributes = type.attributes ?? [];
 
   const editingAttribute = typeof editing === "number" ? attributes.find((a) => a.id === editing) : undefined;
+
+  async function move(index: number, by: -1 | 1) {
+    const ids = swapped(attributes, index, by);
+    if (!ids) return;
+    const moved = attributes[index];
+    try {
+      await orderAttributes.mutateAsync({ relationshipTypeId: type.id, attributeIds: ids });
+      toast.success(`"${moved.name}" moved ${by < 0 ? "up" : "down"}`);
+      refocusMoved(moved.id, by);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }
 
   function open(next: Editing) {
     setServerErrors(null);
@@ -346,6 +362,7 @@ function Attributes({ type }: { type: RelationshipType }) {
           <table className="w-full text-left text-sm" aria-label="Attributes">
             <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-600">
               <tr>
+                <th scope="col" className="px-2 py-2 font-semibold">Sort order</th>
                 <th scope="col" className="px-2 py-2 font-semibold">Name</th>
                 <th scope="col" className="px-2 py-2 font-semibold">Data type</th>
                 <th scope="col" className="px-2 py-2 font-semibold">Required</th>
@@ -358,8 +375,16 @@ function Attributes({ type }: { type: RelationshipType }) {
               </tr>
             </thead>
             <tbody>
-              {attributes.map((attribute) => (
+              {attributes.map((attribute, index) => (
                 <tr key={attribute.id} className="border-b border-slate-100 last:border-0 align-top">
+                  <AttributeOrderCell
+                    attribute={attribute}
+                    index={index}
+                    count={attributes.length}
+                    canEdit={canEdit}
+                    busy={orderAttributes.isPending}
+                    onMove={move}
+                  />
                   <th scope="row" className="px-2 py-2 font-mono font-normal text-slate-900">
                     {attribute.name}
                   </th>

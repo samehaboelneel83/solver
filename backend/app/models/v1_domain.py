@@ -160,6 +160,15 @@ class AttributeDef(Base):
     # contract via snapshot_dataset()'s `jsonb_build_object('id', e.key) ||
     # e.attrs`. "No default" has to be expressible through the API.
     default_value: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    # Migration 0027: the order the type's designer chose, lower first, with
+    # `name` breaking ties. Numbered per owner; every list of attributes in
+    # the platform reads it through `ATTRIBUTE_ORDER`.
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+# The one ordering every attribute list uses. Kept here, beside the column,
+# so the form, the type's table and the graph panel cannot drift apart.
+ATTRIBUTE_ORDER = (AttributeDef.sort_order.asc(), AttributeDef.name.asc())
 
 
 class Entity(Base):

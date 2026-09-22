@@ -33,6 +33,7 @@ function attr(
     unit: null,
     enum_values: null,
     default_value: null,
+    sort_order: nextId,
     ...extra,
   };
 }

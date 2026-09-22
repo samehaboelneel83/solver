@@ -20,10 +20,15 @@ import {
   parentIds,
 } from "../lib/hierarchyCollapse";
 import {
+  isErDecoration,
   objectsPalette,
+  withErDependents,
   type GraphMode,
   type GraphPalette,
 } from "../lib/typesGraph";
+import { runErLayout } from "../lib/erLayout";
+import ModelPicker from "./ModelPicker";
+import type { ModelTarget, ModelTargetRequest } from "../hooks/useModelTarget";
 import AttrsForm, { buildAttrs, type AttrDrafts } from "./AttrsForm";
 import { FieldError, FieldLabel, INPUT_CLASS, type FieldErrors } from "./attrTypes";
 import { entityServerErrors } from "../pages/EntityRecord";
@@ -49,6 +54,10 @@ type GraphEditorProps = {
    * nodes' compound parents. Null draws the graph flat. */
   hierarchyTypeId: Id | null;
   onHierarchyTypeChange: (id: Id | null) => void;
+  /** The optimization view's problem and model version, resolved by the page
+   * (`useModelTarget`), and how to ask for another. Unused by the others. */
+  modelTarget?: ModelTarget;
+  onModelTargetChange?: (request: ModelTargetRequest) => void;
   filter?: FilterCriteria;
   onSelectionChange?: (selection: Selection) => void;
   // H-1 fix round 1: an external request to move the canvas's own roving keyboard focus to a
@@ -135,6 +144,141 @@ export function graphStylesheet() {
         "curve-style": "bezier",
       },
     },
+    // -- the types view, as an ER diagram (lib/typesGraph.ts, lib/erLayout.ts) --
+    // Chen's notation: rectangles, diamonds, ellipses. Sizes come from the
+    // label, estimated where the drawing is built, so text stays inside its
+    // shape.
+    {
+      selector: 'node[er = "entity"]',
+      style: {
+        shape: "rectangle",
+        width: "data(w)",
+        height: 46,
+        "font-size": "16px",
+        "font-weight": "bold",
+        "text-valign": "center",
+        "text-halign": "center",
+        "border-width": 1.5,
+        "border-color": "#1e293b",
+      },
+    },
+    {
+      selector: 'node[er = "relationship"]',
+      style: {
+        shape: "diamond",
+        width: "data(w)",
+        height: 62,
+        "font-size": "13px",
+        "text-valign": "center",
+        "text-halign": "center",
+        "border-width": 1.5,
+        "border-color": "#1e293b",
+      },
+    },
+    {
+      // A hierarchy is a relationship a type has with itself that also nests
+      // it; the double border tells it apart from an ordinary recursive one.
+      selector: 'node[er = "relationship"][hierarchy = "yes"]',
+      style: { "border-width": 4, "border-style": "double" },
+    },
+    {
+      // White with dark text whatever the owner's colour: an attribute
+      // describes its owner, and forty coloured ellipses would drown the
+      // rectangles they describe. No halo -- the text sits on white.
+      selector: 'node[er = "attribute"]',
+      style: {
+        shape: "ellipse",
+        width: "data(w)",
+        height: 28,
+        "font-size": "13px",
+        "text-valign": "center",
+        "text-halign": "center",
+        "text-outline-width": 0,
+        "border-width": 1.2,
+        "border-color": "#475569",
+      },
+    },
+    {
+      selector: 'edge[er = "attribute-link"]',
+      style: {
+        width: 1.2,
+        "curve-style": "straight",
+        "target-arrow-shape": "none",
+        label: "",
+      },
+    },
+    {
+      // Plain lines in the notation -- the direction is in the cardinality
+      // at each end, not in an arrowhead. Bezier rather than straight so
+      // the two lines of a hierarchy, which join the same pair of nodes,
+      // bow apart instead of lying on top of each other.
+      selector: 'edge[er = "connector"]',
+      style: {
+        width: 2,
+        "curve-style": "bezier",
+        "target-arrow-shape": "none",
+        label: "",
+        "source-label": "data(end)",
+        "source-text-offset": 26,
+        "font-size": "13px",
+        "font-weight": "bold",
+      },
+    },
+    {
+      // The `to` line runs diamond -> type, so its cardinality belongs at
+      // the target end, beside the rectangle.
+      selector: 'edge[er = "connector"][endAt = "target"]',
+      style: {
+        "source-label": "",
+        "target-label": "data(end)",
+        "target-text-offset": 26,
+      },
+    },
+    // -- the optimization view (lib/modelGraph.ts) --
+    // Two-line labels: a name, then what the part is (domain and index, or
+    // whether the rule may bend). Sizes come from the label, estimated where
+    // the drawing is built.
+    {
+      selector: 'node[er = "set"], node[er = "variable"], node[er = "parameter"], node[er = "constraint"], node[er = "objective"]',
+      style: {
+        width: "data(w)",
+        height: 50,
+        "font-size": "13px",
+        "text-wrap": "wrap",
+        "text-valign": "center",
+        "text-halign": "center",
+        "border-width": 1.5,
+        "border-color": "#1e293b",
+      },
+    },
+    { selector: 'node[er = "set"]', style: { shape: "rectangle", height: 44, "font-size": "15px", "font-weight": "bold" } },
+    { selector: 'node[er = "variable"]', style: { shape: "ellipse", "border-color": "#1d4ed8", "text-outline-width": 0 } },
+    { selector: 'node[er = "parameter"]', style: { shape: "round-rectangle", "border-color": "#64748b", "text-outline-width": 0 } },
+    { selector: 'node[er = "constraint"]', style: { shape: "hexagon", height: 56 } },
+    {
+      // A rule that may bend: amber, dashed -- it holds unless holding costs
+      // more than the price of breaking it.
+      selector: 'node[er = "constraint"][soft = "yes"]',
+      style: { "border-style": "dashed", "border-width": 2, "border-color": "#b45309", "text-outline-width": 0 },
+    },
+    { selector: 'node[er = "objective"]', style: { shape: "octagon", height: 60, "font-weight": "bold" } },
+    {
+      selector: 'edge[er = "uses"], edge[er = "ranges"]',
+      style: {
+        width: 1.6,
+        "curve-style": "bezier",
+        "target-arrow-shape": "triangle",
+        "arrow-scale": 0.9,
+        "font-size": "11px",
+      },
+    },
+    {
+      // "Ranges over" -- a set indexing something, or a rule holding for
+      // every member -- is structure rather than arithmetic, so it is drawn
+      // lighter than a variable or parameter feeding a rule.
+      selector: 'edge[er = "ranges"]',
+      style: { "line-style": "dashed", width: 1.2 },
+    },
     { selector: ".graph-highlighted", style: { "border-width": 3, "border-color": "#2563eb" } },
     { selector: ".graph-dimmed", style: { opacity: 0.25 } },
     // H-1: the visible ring for the node currently holding keyboard (roving) focus.
@@ -166,11 +310,18 @@ export function applyGraphToCy(
   // data rather than as per-element `.style()` calls: a style set on an
   // element wins over the stylesheet forever and would have to be cleared
   // by hand when a type's colour changes.
+  // `nodeData` / `edgeData` carry what the ER drawing adds (shape kind,
+  // estimated width, cardinality end labels, what a tap selects) -- merged in
+  // here so the stylesheet can select on it. The objects view has none.
   const nodeStyle = (id: string) => ({
+    ...(palette.nodeData?.[id] ?? {}),
     colour: palette.nodeFill[id] ?? FALLBACK_FILL,
     labelColour: palette.nodeLabel[id] ?? FALLBACK_LABEL,
   });
-  const edgeStyle = (id: string) => ({ colour: palette.edgeColour[id] ?? FALLBACK_EDGE });
+  const edgeStyle = (id: string) => ({
+    ...(palette.edgeData?.[id] ?? {}),
+    colour: palette.edgeColour[id] ?? FALLBACK_EDGE,
+  });
 
   const desiredNodes = new Map(graph.nodes.map((n) => [n.id, n]));
   // Keyed by CANVAS id -- see `cyEdgeId`. `edge.id` (the wire id) is still
@@ -287,6 +438,72 @@ export function applyGraphToCy(
 
 const GRID_LAYOUT = { name: "grid" } as const;
 
+const MODEL_LAYOUT = {
+  name: "elk",
+  fit: false,
+  // Columns by what a part IS, not only by where its edges happen to lead:
+  // a set that only feeds rules directly (unit, in the workforce model)
+  // would otherwise be layered beside the variables, and the objective could
+  // land mid-page. Sets first, objective last; the rest falls in between.
+  nodeLayoutOptions: (node: { data: (key: string) => unknown }) => {
+    const kind = node.data("er");
+    if (kind === "set") return { "elk.layered.layering.layerConstraint": "FIRST" };
+    if (kind === "objective") return { "elk.layered.layering.layerConstraint": "LAST" };
+    return {};
+  },
+  elk: {
+    algorithm: "layered",
+    "elk.direction": "RIGHT",
+    "elk.spacing.nodeNode": 24,
+    "elk.layered.spacing.nodeNodeBetweenLayers": 70,
+    "elk.spacing.componentComponent": 40,
+  },
+} as const;
+
+/** The toggle's words, and the canvas's name for each view. The mode values
+ * (`types`, `objects`, `model`) predate them and stay, because they are in
+ * stored preferences and in links. */
+export const VIEW_NAME: Record<GraphMode, string> = {
+  types: "ERD View",
+  objects: "Graph View",
+  model: "Optimization View",
+};
+
+const VIEW_TITLE: Record<GraphMode, string> = {
+  types: "Show this domain's schema as an entity-relationship diagram",
+  objects: "Show this domain's entities and the relationships between them",
+  model: "Show a problem's optimization model: its sets, variables, parameters, rules and objective",
+};
+
+/** In the order the toggle offers them: the schema, the data, the model. */
+const VIEW_ORDER: readonly GraphMode[] = ["types", "objects", "model"];
+
+/**
+ * What tapping (or pressing Enter on) an element selects.
+ *
+ * Usually the element itself -- a node by its id, an edge by its wire id
+ * (see `cyEdgeId`). The ER drawing overrides that through `selectKind` /
+ * `selectId`: a diamond and its two lines select the relationship type, as
+ * the single edge they replaced did, and an attribute selects its owner. So
+ * the side panel resolves exactly the selections it always has.
+ */
+export function selectionOf(
+  element: { id: () => string; data?: (key: string) => unknown },
+  // Which handler fired: the fallback when the element says nothing about
+  // itself, which is every element outside the ER drawing.
+  as: "node" | "edge"
+): { kind: "node" | "edge"; id: string } {
+  const read = (key: string) => (typeof element.data === "function" ? element.data(key) : undefined);
+  const kind = read("selectKind");
+  const id = read("selectId");
+  if ((kind === "node" || kind === "edge") && typeof id === "string") {
+    return { kind, id };
+  }
+  if (as === "node") return { kind: "node", id: element.id() };
+  // The wire id, not the canvas id -- see `cyEdgeId`.
+  return { kind: "edge", id: String(read("graphId") ?? element.id()) };
+}
+
 /**
  * The canvas id for a wire edge.
  *
@@ -316,6 +533,13 @@ export function cyEdgeId(wireId: string): string {
  * the same spot (see the `center`-object-sharing bug applyGraphToCy guards against above; kept
  * as a runtime safety net for any other cause, e.g. a genuine ELK failure).
  */
+/** How many nodes a person would count: every node, except the ER
+ * drawing's attribute ellipses, which describe a node rather than being one.
+ * Six entity types with forty attributes is "6 nodes", not 46. */
+export function countable(nodes: readonly GraphNode[]): number {
+  return nodes.filter((node) => !isErDecoration(node)).length;
+}
+
 export function positionsAreDegenerate(positions: { x: number; y: number }[]): boolean {
   if (positions.length < 2) {
     return false;
@@ -342,10 +566,16 @@ export default function GraphEditor({
   filter,
   onSelectionChange,
   focusRequest,
+  modelTarget,
+  onModelTargetChange,
 }: GraphEditorProps) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
   const isTypes = mode === "types";
+  const isModel = mode === "model";
+  // The entity graph -- the only view that writes rows (Connect, create,
+  // nesting by hierarchy). Both others are read-only drawings of a schema.
+  const isObjects = mode === "objects";
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
    
@@ -432,11 +662,11 @@ export default function GraphEditor({
     error: loadError,
     refetch: refetchGraph,
     fetchStatus: graphFetchStatus,
-  } = useGraphView(domainId, hierarchyTypeId, mode);
+  } = useGraphView(domainId, hierarchyTypeId, mode, modelTarget?.versionId ?? null);
   // Collapse only when a hierarchy is actually nesting the canvas. A
   // flat objects view, and the types view, have no compound parents to
   // sit on -- Minus must not remove nodes there.
-  const nesting = !isTypes && hierarchyTypeId !== null;
+  const nesting = isObjects && hierarchyTypeId !== null;
 
   useEffect(() => {
     setCollapsedIds(new Set());
@@ -481,15 +711,11 @@ export default function GraphEditor({
 
      
     cy.on("tap", "node", (evt: any) => {
-      onSelectionChangeRef.current?.({ kind: "node", id: evt.target.id() });
+      onSelectionChangeRef.current?.(selectionOf(evt.target, "node"));
     });
-     
+
     cy.on("tap", "edge", (evt: any) => {
-      // The wire id, not the canvas id -- see `cyEdgeId`.
-      onSelectionChangeRef.current?.({
-        kind: "edge",
-        id: evt.target.data("graphId") ?? evt.target.id(),
-      });
+      onSelectionChangeRef.current?.(selectionOf(evt.target, "edge"));
     });
      
     cy.on("tap", (evt: any) => {
@@ -613,11 +839,10 @@ export default function GraphEditor({
     // invalid expression filters nothing rather than blanking the canvas.
     const expressionMatchIds = filter?.expressionMatchIds ?? null;
 
-    cy.nodes().forEach((node) => {
-      const graphNode = nodeById.get(node.id());
-      if (!graphNode) {
-        return;
-      }
+    // In the ER drawing an attribute shows exactly when its owner does and a
+    // diamond when both of its types do -- `withErDependents`. Every other
+    // node is judged by the three filters below.
+    const showing = withErDependents(data.nodes, (graphNode) => {
       const typeOk = selectedTypesSet === null || selectedTypesSet.has(graphNode.type);
       // Label only. v0 also matched `attributes.code`, which was the entity's
       // own `code` COLUMN; v1 has no such column -- `code` there would be an
@@ -628,7 +853,13 @@ export default function GraphEditor({
       // expression hid is indistinguishable downstream (edges, hit-testing,
       // the empty-state overlay) from one a checkbox hid.
       const expressionOk = expressionMatchIds === null || expressionMatchIds.has(graphNode.id);
-      node.style("display", typeOk && searchOk && expressionOk ? "element" : "none");
+      return typeOk && searchOk && expressionOk;
+    });
+    cy.nodes().forEach((node) => {
+      if (!nodeById.has(node.id())) {
+        return;
+      }
+      node.style("display", showing.has(node.id()) ? "element" : "none");
     });
 
     cy.edges().forEach((edge) => {
@@ -660,16 +891,13 @@ export default function GraphEditor({
     const searchLower = (filter?.search ?? "").toLowerCase();
     const matchIds = filter?.expressionMatchIds ?? null;
     const collapsedAway = nesting ? hiddenByCollapse(data.nodes, collapsedIds) : null;
-    return new Set(
-      data.nodes
-        .filter(
-          (node) =>
-            (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
-            (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
-            (matchIds === null || matchIds.has(node.id)) &&
-            (collapsedAway === null || !collapsedAway.has(node.id))
-        )
-        .map((node) => node.id)
+    return withErDependents(
+      data.nodes,
+      (node) =>
+        (selectedTypesSet === null || selectedTypesSet.has(node.type)) &&
+        (!searchLower || node.label.toLowerCase().includes(searchLower)) &&
+        (matchIds === null || matchIds.has(node.id)) &&
+        (collapsedAway === null || !collapsedAway.has(node.id))
     );
   }, [data, filter, nesting, collapsedIds]);
 
@@ -694,11 +922,11 @@ export default function GraphEditor({
    * do, and that was a plain untruth on a filtered one.
    */
   const canvasLabel = useMemo(() => {
-    const total = data?.nodes.length ?? 0;
-    const shown = shownNodeIds ? shownNodeIds.size : total;
+    const total = countable(data?.nodes ?? []);
+    const shown = shownNodeIds ? countable((data?.nodes ?? []).filter((n) => shownNodeIds.has(n.id))) : total;
     const count = shown === total ? `${total} nodes` : `${shown} of ${total} nodes shown`;
-    return `Graph canvas, ${isTypes ? "types view" : "objects view"}, ${count} — use the arrow keys to move between nodes`;
-  }, [data, shownNodeIds, isTypes]);
+    return `Graph canvas, ${VIEW_NAME[mode].toLowerCase()}, ${count} — use the arrow keys to move between nodes`;
+  }, [data, shownNodeIds, mode]);
 
   /**
    * What the two text filters left showing, announced in the live region
@@ -752,7 +980,9 @@ export default function GraphEditor({
         : active === "conditions"
           ? "Filter conditions"
           : `Search "${search}" and filter conditions`;
-    setLiveMessage(`${what}: ${shownNodeIds.size} of ${data.nodes.length} nodes shown`);
+    setLiveMessage(
+      `${what}: ${countable(data.nodes.filter((n) => shownNodeIds.has(n.id)))} of ${countable(data.nodes)} nodes shown`
+    );
   }, [filter, data, shownNodeIds]);
 
   /*
@@ -766,7 +996,7 @@ export default function GraphEditor({
   }, [connectNote]);
 
   useEffect(() => {
-    if (!pendingEdge || !data || isTypes) {
+    if (!pendingEdge || !data || !isObjects) {
       return;
     }
     if (validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId).length > 0) {
@@ -778,7 +1008,7 @@ export default function GraphEditor({
         `cannot be connected to "${nodeLabelOf(pendingEdge.targetId)}".`
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingEdge, data, isTypes]);
+  }, [pendingEdge, data, isObjects]);
 
   // H-1 fix round 1: an external request (currently: GraphDemo's search-select, Enter in
   // FilterBar's search box) to move the canvas's own roving keyboard focus to a node, so the
@@ -807,6 +1037,41 @@ export default function GraphEditor({
       setLayoutStatus(null);
       setError("Layout failed");
     };
+    // The types view is an ER diagram and has its own layout: the skeleton
+    // first, then each owner's attributes round it in their chosen order.
+    // A layered layout would put the attributes in a column to one side.
+    // The optimization view is a flow -- sets, then the variables and
+    // parameters they index, then the rules that read those, then the
+    // objective -- and its edges point that way, so a layered layout run left
+    // to right sets the columns out in the order the model is read.
+    if (isModel) {
+      try {
+        const lay: any = cy.layout(MODEL_LAYOUT as any);
+        lay.on?.("layoutstart", () => setLayoutStatus("Laying out…"));
+        lay.on?.("layoutstop", () => {
+          setLayoutStatus(null);
+          cy.fit(undefined, 30);
+          if (cy.zoom() > 1.1) {
+            cy.zoom(1.1);
+            cy.center();
+          }
+        });
+        Promise.resolve(lay.run()).catch(fail);
+      } catch {
+        fail();
+      }
+      return;
+    }
+    if (isTypes) {
+      setLayoutStatus("Laying out…");
+      // Through a promise, so a synchronous throw inside the layout lands in
+      // `fail` like an asynchronous one rather than escaping the effect.
+      Promise.resolve()
+        .then(() => runErLayout(cy))
+        .then(() => setLayoutStatus(null))
+        .catch(fail);
+      return;
+    }
     const runGridFallback = () => {
       setLayoutStatus("ELK layout produced no positions — showing a grid");
       try {
@@ -897,7 +1162,11 @@ export default function GraphEditor({
             .map((n: any) => {
               const pos = typeof n.position === "function" ? n.position() : undefined;
               const display = typeof n.style === "function" ? n.style("display") : undefined;
-              return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0, hidden: display === "none" };
+              // An attribute ellipse is not a stop: it describes its owner,
+              // whose panel lists it, and stopping on each of forty would
+              // bury the rectangles and diamonds between them.
+              const decoration = typeof n.data === "function" && n.data("er") === "attribute";
+              return { id: n.id(), x: pos?.x ?? 0, y: pos?.y ?? 0, hidden: display === "none" || decoration };
             })
             .filter((item: { hidden: boolean }) => !item.hidden)
         : [];
@@ -990,7 +1259,7 @@ export default function GraphEditor({
   }
 
   function startKeyboardConnect() {
-    if (!canEdit || isTypes) {
+    if (!canEdit || !isObjects) {
       return;
     }
     const cy = cyRef.current;
@@ -1100,7 +1369,12 @@ export default function GraphEditor({
           break;
         }
         if (focusedNodeId && cy && orderedNodeIds(cy).includes(focusedNodeId)) {
-          onSelectionChangeRef.current?.({ kind: "node", id: focusedNodeId });
+          // What a tap on it would select: a diamond opens its relationship
+          // type, as the edge it replaced did.
+          const element = (cy as any).getElementById?.(focusedNodeId);
+          onSelectionChangeRef.current?.(
+            element && element.length !== 0 ? selectionOf(element, "node") : { kind: "node", id: focusedNodeId }
+          );
         }
         break;
       }
@@ -1260,8 +1534,8 @@ export default function GraphEditor({
     // container's comment for why this replaced a `100vh - 320px` guess.
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        {!isTypes && (
-          <select
+        {isObjects && (
+<select
             ref={firstControlRef as React.RefObject<HTMLSelectElement>}
             className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             value={hierarchyTypeId ?? ""}
@@ -1290,31 +1564,32 @@ export default function GraphEditor({
           className="flex overflow-hidden rounded-md border border-slate-300"
           data-testid="graph-mode-toggle"
         >
-          {(["objects", "types"] as const).map((candidate) => (
+          {VIEW_ORDER.map((candidate, index) => (
             <button
               key={candidate}
+              // Outside the entity graph the hierarchy select is not rendered,
+              // so the toggle's first button is the toolbar's first control.
               ref={
-                isTypes && candidate === "objects"
+                !isObjects && index === 0
                   ? (firstControlRef as React.RefObject<HTMLButtonElement>)
                   : undefined
               }
               type="button"
               onClick={() => onModeChange(candidate)}
               aria-pressed={mode === candidate}
-              title={
-                candidate === "objects"
-                  ? "Show this domain's entities and the relationships between them"
-                  : "Show this domain's schema: one node per entity type, one edge per relationship type"
-              }
+              title={VIEW_TITLE[candidate]}
               className={`px-2 py-1 text-sm ${
                 mode === candidate ? "bg-slate-900 text-white" : "bg-white text-slate-700"
               }`}
               data-testid={`graph-mode-${candidate}`}
             >
-              {candidate === "objects" ? "Objects" : "Types"}
+              {VIEW_NAME[candidate]}
             </button>
           ))}
         </div>
+        {isModel && modelTarget && (
+          <ModelPicker target={modelTarget} onChange={(request) => onModelTargetChange?.(request)} />
+        )}
         <button
           onClick={runLayout}
           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -1359,7 +1634,7 @@ export default function GraphEditor({
         {/* Both of these write `entity` / `relationship` ROWS, which the
             schema view has none of: creating an entity type or a
             relationship type is a different form on a different page. */}
-        {!isTypes && canEdit && (
+        {isObjects && canEdit && (
         <>
         <button
           type="button"
@@ -1406,8 +1681,10 @@ export default function GraphEditor({
           Connect mode is switched on. The text swaps to a focused instruction the moment Connect
           mode is actually on, so the mode is self-explanatory rather than a mystery toggle. */}
       <p data-testid="graph-help" className="mb-2 text-xs text-slate-500">
-        {isTypes
-          ? "This is the domain's schema: one node per entity type, one edge per relationship type, labelled with its cardinality. A loop is a type that relates to itself, such as a hierarchy. Click a node or edge to see and colour it."
+        {isModel
+          ? "This is the problem's optimization model, read left to right: the sets it ranges over, the variables it decides and the parameters it reads, the rules that constrain them, and the objective. A dark hexagon must hold; an amber, dashed one may bend at the price shown. Click any part to see it written out."
+          : isTypes
+          ? "This is the domain's schema as an entity-relationship diagram: a rectangle per entity type, a diamond per relationship type with its cardinality at each end (1, n, m), and an ellipse per attribute in its chosen order. The underlined key is what a model addresses an entity by; a double-bordered diamond is a hierarchy. Click a rectangle or diamond to see and colour it."
           : connecting
             ? "Drag from one node to another to connect them, or with a node focused press C then Enter on the other node."
             : canEdit
@@ -1429,7 +1706,7 @@ export default function GraphEditor({
         </div>
       )}
 
-      {showCreateNode && data && !isTypes && canEdit && (
+      {showCreateNode && data && isObjects && canEdit && (
         <form
           id="create-node-form"
           onSubmit={handleCreateNode}
@@ -1546,7 +1823,7 @@ export default function GraphEditor({
 
       {pendingEdge &&
         data &&
-        !isTypes &&
+        isObjects &&
         (() => {
           const validTypes = validRelationshipTypesFor(pendingEdge.sourceId, pendingEdge.targetId);
           // A node's `type` IS the entity type's name in v1, so there is
@@ -1688,8 +1965,23 @@ export default function GraphEditor({
             data-testid="graph-empty-state"
             className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-slate-500"
           >
-            <p>{isTypes ? "No entity types in this domain yet." : "No nodes yet."}</p>
-            {isTypes ? (
+            <p>
+              {isModel
+                ? modelTarget && modelTarget.problems.length === 0
+                  ? "No problems in this domain yet, so there is no model to draw."
+                  : "This problem has no model version yet."
+                : isTypes
+                  ? "No entity types in this domain yet."
+                  : "No nodes yet."}
+            </p>
+            {isModel ? (
+              <Link
+                to="/model"
+                className="pointer-events-auto rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
+              >
+                Open the model editor
+              </Link>
+            ) : isTypes ? (
               // The schema view has nothing to create from here: a type is
               // defined with its attributes, on its own page.
               <Link

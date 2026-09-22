@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.crud.registry import TABLE_REGISTRY
+from app.ir.contract import IR_VERSION
 from app.main import app
 from app.seed import seed_admin
 
@@ -249,6 +250,12 @@ def test_meta_reports_scalar_defaults_and_no_spurious_choices(auth_headers):
     assert capability_fields["capability_code"]["fk_table"] == "iam.capability"
     assert not capability_fields["capability_code"].get("choices")
     assert capability_fields["capability_code"]["label"] == "Capability"
+
+    template_fields = {f["name"]: f for f in tables[("public", "template")]["fields"]}
+    assert template_fields["ir_version"]["choices"] == [str(IR_VERSION)]
+    assert template_fields["ir_version"]["default"] == str(IR_VERSION)
+    assert template_fields["ir_version"]["required"] is False
+    assert not template_fields["name"].get("choices")
 
 
 def test_capability_options_use_the_code_as_the_id(auth_headers):

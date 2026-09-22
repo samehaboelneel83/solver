@@ -21,6 +21,7 @@ function def(name: string, data_type: AttrType, extra: Partial<AttributeDef> = {
     unit: null,
     enum_values: data_type === "enum" ? ["day", "night"] : null,
     default_value: null,
+    sort_order: 0,
     ...extra,
   };
 }

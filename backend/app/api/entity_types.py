@@ -70,10 +70,11 @@ as the CHECKs they shadow (see `app.api.validation.validate_name`).
 """
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from sqlalchemy import func
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -83,7 +84,7 @@ from app.api.validation import field_error, validate_colour, validate_name
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
-from app.models.v1_domain import AttributeDef, EntityType
+from app.models.v1_domain import ATTRIBUTE_ORDER, AttributeDef, EntityType
 
 router = APIRouter(prefix="/api/v1", tags=["entity types"])
 
@@ -229,6 +230,15 @@ class AttributeDefRead(BaseModel):
     unit: str | None
     enum_values: list[str] | None
     default_value: Any | None
+    # Migration 0027: lower first, `name` breaking ties. The list routes
+    # already return attributes in this order; it is here so a client that
+    # re-sorts, or a form that edits it, has the number.
+    sort_order: int
+
+
+# `integer` in the database. A client that sends more reaches the driver as
+# SQLSTATE 22003 -- a 500 -- so the range is refused here instead.
+SortOrder = Annotated[StrictInt, Field(ge=-(2**31), le=2**31 - 1)]
 
 
 class AttributeDefCreate(BaseModel):
@@ -238,8 +248,31 @@ class AttributeDefCreate(BaseModel):
     unit: str | None = None
     enum_values: list[str] | None = None
     default_value: Any | None = None
+    # Omitted means "after the others": a new attribute goes to the bottom of
+    # the form, where the person adding it is looking, rather than wherever
+    # its name happens to sort.
+    sort_order: SortOrder | None = None
 
     _check_name = field_validator("name")(_validate_attribute_name)
+
+
+class AttributeOrder(BaseModel):
+    """Every attribute of one owner, in the order wanted.
+
+    The whole list rather than "move this one up": two people each moving one
+    row would otherwise interleave into an order neither asked for, and a
+    whole list is either exactly the owner's attributes or refused.
+    """
+
+    attribute_ids: list[int] = Field(min_length=1)
+
+
+def _not_null_sort_order(value):
+    """PATCH: omitting `sort_order` leaves it alone; an explicit `null` for a
+    NOT NULL column would otherwise reach the database as a 409."""
+    if value is None:
+        raise ValueError("sort_order cannot be null")
+    return value
 
 
 class AttributeDefUpdate(BaseModel):
@@ -253,8 +286,10 @@ class AttributeDefUpdate(BaseModel):
     unit: str | None = None
     enum_values: list[str] | None = None
     default_value: Any | None = None
+    sort_order: SortOrder | None = None
 
     _check_name = field_validator("name")(_validate_attribute_name)
+    _check_sort_order = field_validator("sort_order")(_not_null_sort_order)
 
 
 class EntityTypeRead(BaseModel):
@@ -314,20 +349,70 @@ class EntityTypeList(BaseModel):
 
 def _attributes_for(db: Session, entity_type_ids: list[int]) -> dict[int, list[AttributeDef]]:
     """All attribute defs for the given types, in one query, grouped by type
-    and ordered by name -- so the list route stays two queries regardless of
-    how many types it returns."""
+    and in their chosen order (migration 0027) -- so the list route stays two
+    queries regardless of how many types it returns."""
     if not entity_type_ids:
         return {}
     rows = (
         db.query(AttributeDef)
         .filter(AttributeDef.entity_type_id.in_(entity_type_ids))
-        .order_by(AttributeDef.name.asc())
+        .order_by(*ATTRIBUTE_ORDER)
         .all()
     )
     grouped: dict[int, list[AttributeDef]] = {type_id: [] for type_id in entity_type_ids}
     for row in rows:
         grouped[row.entity_type_id].append(row)
     return grouped
+
+
+def next_attribute_position(db: Session, owner_column, owner_id: int) -> int:
+    """One past the owner's last attribute, so a new one lands at the end."""
+    last = db.query(func.max(AttributeDef.sort_order)).filter(owner_column == owner_id).scalar()
+    return 1 if last is None else last + 1
+
+
+def reorder_attributes(db: Session, owner_column, owner_id: int, ids: list[int]) -> list[AttributeDef]:
+    """Renumber an owner's attributes 1..n in the order given, atomically.
+
+    Refused unless `ids` is exactly the owner's attributes, each once: a
+    partial list would leave the missing ones wherever their old numbers
+    happen to fall among the new ones, and an id from another type would move
+    an attribute on a screen nobody is looking at.
+    """
+    rows = (
+        db.query(AttributeDef)
+        .filter(owner_column == owner_id)
+        # Held for the renumbering, so a concurrent create cannot slip an
+        # attribute in between the check and the write.
+        .with_for_update()
+        .all()
+    )
+    have = {row.id for row in rows}
+    if len(ids) != len(set(ids)):
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "value_error", "loc": ["body", "attribute_ids"],
+                     "msg": "an attribute appears more than once"}],
+        )
+    if set(ids) != have:
+        missing = sorted(have - set(ids))
+        foreign = sorted(set(ids) - have)
+        parts = []
+        if missing:
+            parts.append(f"missing {missing}")
+        if foreign:
+            parts.append(f"not attributes of this type {foreign}")
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "value_error", "loc": ["body", "attribute_ids"],
+                     "msg": "the order must list every attribute of this type exactly once; "
+                            + "; ".join(parts)}],
+        )
+    by_id = {row.id: row for row in rows}
+    for position, attribute_id in enumerate(ids, start=1):
+        by_id[attribute_id].sort_order = position
+    _commit(db, "attribute_def")
+    return [by_id[attribute_id] for attribute_id in ids]
 
 
 def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityTypeRead:
@@ -491,11 +576,29 @@ def create_attribute(
     _get_entity_type(db, entity_type_id)
     _check_enum_pairing(payload.data_type, payload.enum_values)
     _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
-    attribute = AttributeDef(entity_type_id=entity_type_id, **payload.model_dump())
+    fields = payload.model_dump()
+    if fields["sort_order"] is None:
+        fields["sort_order"] = next_attribute_position(
+            db, AttributeDef.entity_type_id, entity_type_id
+        )
+    attribute = AttributeDef(entity_type_id=entity_type_id, **fields)
     db.add(attribute)
     _commit(db, "attribute_def")
     db.refresh(attribute)
     return AttributeDefRead.model_validate(attribute)
+
+
+@router.put("/entity-types/{entity_type_id}/attribute-order")
+def order_attributes(
+    entity_type_id: int,
+    payload: AttributeOrder,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("domain.edit")),
+) -> list[AttributeDefRead]:
+    """Put a type's attributes in the order given; returns them in it."""
+    _get_entity_type(db, entity_type_id)
+    rows = reorder_attributes(db, AttributeDef.entity_type_id, entity_type_id, payload.attribute_ids)
+    return [AttributeDefRead.model_validate(row) for row in rows]
 
 
 @router.patch("/attributes/{attribute_id}")

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CARDINALITY_ENDS,
   CARDINALITY_LABEL,
   buildTypesView,
+  erKind,
+  underlined,
+  withErDependents,
   entityTypeIdFromNodeId,
   objectsPalette,
   relationshipTypeIdFromEdgeId,
@@ -37,6 +41,7 @@ const EMPLOYEE: EntityType = {
       id: 1,
       entity_type_id: 11,
       name: "grade",
+      sort_order: 1,
       data_type: "integer",
       required: false,
       unit: null,
@@ -121,16 +126,18 @@ describe("relationshipTypeLabel", () => {
 
 describe("buildTypesView", () => {
   const { graph, palette } = buildTypesView([EMPLOYEE, UNIT], [REPORTS_TO, WORKS_FOR]);
+  const ofKind = (kind: string) => graph.nodes.filter((node) => erKind(node) === kind);
 
-  it("draws one node per entity type, labelled with the type's name", () => {
-    expect(graph.nodes.map((node) => [node.id, node.label])).toEqual([
+  it("draws one rectangle per entity type, labelled with the type's name", () => {
+    expect(ofKind("entity").map((node) => [node.id, node.label])).toEqual([
       ["type-11", "employee"],
       ["type-22", "unit"],
     ]);
+    expect(palette.nodeData?.["type-11"]?.er).toBe("entity");
   });
 
-  it("gives a node its type's ROLE as `type`, which is what the filter groups by", () => {
-    expect(graph.nodes.map((node) => node.type)).toEqual(["agent", "org"]);
+  it("gives a rectangle its type's ROLE as `type`, which is what the filter groups by", () => {
+    expect(ofKind("entity").map((node) => node.type)).toEqual(["agent", "org"]);
     // ... and offers exactly the roles present, not the whole role list.
     expect(graph.entity_types.map((option) => option.name)).toEqual(["agent", "org"]);
   });
@@ -143,20 +150,12 @@ describe("buildTypesView", () => {
     // two of them toggling the same thing, and the list jumping around as
     // types are added.
     const TASK: EntityType = { ...UNIT, id: 33, name: "job", role: "task" };
-    const CONTRACTOR: EntityType = { ...EMPLOYEE, id: 44, name: "contractor" };
+    const CONTRACTOR: EntityType = { ...EMPLOYEE, id: 44, name: "contractor", attributes: [] };
     const { graph: mixed } = buildTypesView([TASK, EMPLOYEE, CONTRACTOR, UNIT], []);
-    expect(mixed.entity_types.map((option) => option.name)).toEqual([
-      "agent",
-      "org",
-      "task",
-    ]);
-    expect(mixed.entity_types.map((option) => option.id)).toEqual([
-      "role-agent",
-      "role-org",
-      "role-task",
-    ]);
-    // Both agents still get their own node, coloured independently.
-    expect(mixed.nodes.filter((node) => node.type === "agent")).toHaveLength(2);
+    expect(mixed.entity_types.map((option) => option.name)).toEqual(["agent", "org", "task"]);
+    expect(mixed.entity_types.map((option) => option.id)).toEqual(["role-agent", "role-org", "role-task"]);
+    // Both agents still get their own rectangle, coloured independently.
+    expect(mixed.nodes.filter((node) => erKind(node) === "entity" && node.type === "agent")).toHaveLength(2);
   });
 
   it("nests nothing: the schema has no relationship rows to nest by", () => {
@@ -164,43 +163,122 @@ describe("buildTypesView", () => {
     expect(graph.hierarchies).toEqual([]);
   });
 
-  it("draws a self-referencing hierarchy as a loop and an ordinary type as a directed edge", () => {
-    const bySource = graph.edges.map((edge) => [edge.type, edge.source, edge.target]);
-    expect(bySource).toEqual([
-      // The loop: both ends are the same node.
-      ["reports_to", "type-22", "type-22"],
-      // The ordinary edge, from_type -> to_type. A builder that swapped
-      // the two would give ["works_for", "type-22", "type-11"] here, which
-      // the loop above could never reveal.
-      ["works_for", "type-11", "type-22"],
+  it("draws a relationship type as a diamond that keeps the relationship type's id", () => {
+    // `reltype-<id>` is what the side panel resolves as a relationship type,
+    // so the diamond can stand in for the edge it replaced.
+    expect(ofKind("relationship").map((node) => [node.id, node.label])).toEqual([
+      ["reltype-5", "reports_to"],
+      ["reltype-6", "works_for"],
+    ]);
+    expect(palette.nodeData?.["reltype-5"]).toMatchObject({ selectKind: "edge", selectId: "reltype-5" });
+  });
+
+  it("runs each relationship from_type -> diamond -> to_type", () => {
+    // That direction is what lets a layered layout set the diamond BETWEEN
+    // the two types rather than below both.
+    const lines = graph.edges
+      .filter((edge) => palette.edgeData?.[edge.id]?.er === "connector")
+      .map((edge) => [edge.id, edge.source, edge.target, palette.edgeData?.[edge.id]?.endAt]);
+    expect(lines).toEqual([
+      // The hierarchy: both lines on the one rectangle.
+      ["rellink-5-from", "type-22", "reltype-5", "source"],
+      ["rellink-5-to", "reltype-5", "type-22", "target"],
+      // from_type -> to_type. A builder that swapped the two would put
+      // employee on the `to` line, which the hierarchy could never reveal.
+      ["rellink-6-from", "type-11", "reltype-6", "source"],
+      ["rellink-6-to", "reltype-6", "type-22", "target"],
     ]);
   });
 
-  it("labels an edge with its name, cardinality and whether it is a hierarchy", () => {
-    expect(graph.edges.map((edge) => edge.label)).toEqual([
-      "reports_to\n1 → n · hierarchy",
-      "works_for\nn → 1",
-    ]);
-    expect(graph.edges.map((edge) => edge.attributes)).toEqual([
-      { cardinality: "one_to_many", is_hierarchy: true },
-      { cardinality: "many_to_one", is_hierarchy: false },
-    ]);
+  it("writes each side's cardinality beside the type at that end", () => {
+    // works_for is many-to-one: many employees work for one unit.
+    expect(palette.edgeData?.["rellink-6-from"]?.end).toBe("n");
+    expect(palette.edgeData?.["rellink-6-to"]?.end).toBe("1");
+    expect(palette.edgeData?.["rellink-5-from"]?.end).toBe("1");
+    expect(palette.edgeData?.["rellink-5-to"]?.end).toBe("n");
   });
 
-  it("colours a node from its type's colour, or a deterministic fallback", () => {
+  it("marks a hierarchy's diamond, and only that one", () => {
+    expect(palette.nodeData?.["reltype-5"]?.hierarchy).toBe("yes");
+    expect(palette.nodeData?.["reltype-6"]?.hierarchy).toBe("no");
+  });
+
+  it("draws each attribute as an ellipse joined to its owner, after the underlined key", () => {
+    const ofEmployee = graph.nodes
+      .filter((node) => erKind(node) === "attribute" && node.attributes?.owner === "type-11")
+      .map((node) => [node.id, node.label, palette.nodeData?.[node.id]?.seq]);
+    expect(ofEmployee).toEqual([
+      ["typekey-11", underlined("key"), 0],
+      ["attr-1", "grade", 1],
+    ]);
+    // A type with no attributes of its own still has its key.
+    expect(graph.nodes.filter((node) => node.attributes?.owner === "type-22").map((node) => node.id)).toEqual([
+      "typekey-22",
+    ]);
+    const link = graph.edges.find((edge) => edge.id === "attrlink-attr-1");
+    expect([link?.source, link?.target]).toEqual(["type-11", "attr-1"]);
+  });
+
+  it("lays attributes out in their chosen order, not alphabetically (migration 0027)", () => {
+    const attribute = (id: number, name: string, sort_order: number) => ({
+      ...EMPLOYEE.attributes[0],
+      id,
+      name,
+      sort_order,
+    });
+    const ordered: EntityType = {
+      ...EMPLOYEE,
+      // Given in neither order, to show the builder sorts by sort_order.
+      attributes: [attribute(3, "alpha", 3), attribute(1, "zeta", 1), attribute(2, "mid", 2)],
+    };
+    const { graph: built, palette: drawn } = buildTypesView([ordered], []);
+    const names = built.nodes
+      .filter((node) => erKind(node) === "attribute")
+      .sort((a, b) => (drawn.nodeData?.[a.id]?.seq ?? 0) - (drawn.nodeData?.[b.id]?.seq ?? 0))
+      .map((node) => node.label);
+    expect(names).toEqual([underlined("key"), "zeta", "mid", "alpha"]);
+  });
+
+  it("selects the owner when an ellipse or its line is tapped", () => {
+    expect(palette.nodeData?.["attr-1"]).toMatchObject({ selectKind: "node", selectId: "type-11" });
+    expect(palette.edgeData?.["attrlink-attr-1"]).toMatchObject({ selectKind: "node", selectId: "type-11" });
+  });
+
+  it("gives an ellipse the owner's role, so the role filter takes it along", () => {
+    expect(graph.nodes.find((node) => node.id === "attr-1")?.type).toBe("agent");
+  });
+
+  it("draws relationship attributes round the diamond, selecting the relationship", () => {
+    const withShare: RelationshipType = {
+      ...WORKS_FOR,
+      attributes: [{ ...EMPLOYEE.attributes[0], id: 9, entity_type_id: null, relationship_type_id: 6, name: "share" }],
+    };
+    const { graph: built, palette: drawn } = buildTypesView([EMPLOYEE, UNIT], [withShare]);
+    expect(built.nodes.find((node) => node.id === "attr-9")?.attributes?.owner).toBe("reltype-6");
+    expect(drawn.nodeData?.["attr-9"]).toMatchObject({ selectKind: "edge", selectId: "reltype-6" });
+  });
+
+  it("colours a rectangle from its type's colour, or a deterministic fallback", () => {
     expect(palette.nodeFill["type-11"]).toBe("#1f77b4");
     // `unit` has none, and the fallback is keyed on the entity type's own
     // id (22) -- not on the namespaced node id, and not on a list position.
     expect(palette.nodeFill["type-22"]).toBe(fallbackColour("22"));
   });
 
-  it("colours an edge from its relationship type, with the same fallback rule", () => {
-    expect(palette.edgeColour["reltype-5"]).toBe("#2ca02c");
-    expect(palette.edgeColour["reltype-6"]).toBe(fallbackColour("6"));
+  it("colours a diamond from its relationship type, with the same fallback rule", () => {
+    expect(palette.nodeFill["reltype-5"]).toBe("#2ca02c");
+    expect(palette.nodeFill["reltype-6"]).toBe(fallbackColour("6"));
   });
 
-  it("gives every node a label colour that is readable on its own fill", () => {
-    for (const node of graph.nodes) {
+  it("draws every ellipse white with dark text, whatever its owner's colour", () => {
+    for (const node of graph.nodes.filter((candidate) => erKind(candidate) === "attribute")) {
+      expect(palette.nodeFill[node.id]).toBe("#ffffff");
+      expect(palette.nodeLabel[node.id]).toBe("#0f172a");
+    }
+  });
+
+  it("gives every rectangle and diamond a label colour readable on its own fill", () => {
+    for (const node of graph.nodes.filter((candidate) => erKind(candidate) !== "attribute")) {
       expect(palette.nodeLabel[node.id]).toBe(labelForeground(palette.nodeFill[node.id]));
       expect([LABEL_DARK, LABEL_LIGHT]).toContain(palette.nodeLabel[node.id]);
     }
@@ -211,20 +289,19 @@ describe("buildTypesView", () => {
     // change colour because another one was added or removed.
     const reordered = buildTypesView([UNIT, EMPLOYEE], [WORKS_FOR, REPORTS_TO]);
     expect(reordered.palette.nodeFill).toEqual(palette.nodeFill);
-    expect(reordered.palette.edgeColour).toEqual(palette.edgeColour);
 
     const filtered = buildTypesView([UNIT], [REPORTS_TO]);
     expect(filtered.palette.nodeFill["type-22"]).toBe(palette.nodeFill["type-22"]);
-    expect(filtered.palette.edgeColour["reltype-5"]).toBe(palette.edgeColour["reltype-5"]);
+    expect(filtered.palette.nodeFill["reltype-5"]).toBe(palette.nodeFill["reltype-5"]);
   });
 
   it("drops a relationship type whose endpoints are not among the given entity types", () => {
     // Cytoscape throws synchronously on an edge to a node it was not
     // given, which would abort the whole update.
     const partial = buildTypesView([EMPLOYEE], [WORKS_FOR, REPORTS_TO]);
-    expect(partial.graph.edges).toEqual([]);
+    expect(partial.graph.nodes.filter((node) => erKind(node) === "relationship")).toEqual([]);
+    expect(partial.graph.edges.filter((edge) => edge.id.startsWith("rellink-"))).toEqual([]);
     expect(partial.graph.relationship_types).toEqual([]);
-    expect(partial.palette.edgeColour).toEqual({});
   });
 
   it("is empty, not broken, for a domain with no types", () => {
@@ -232,6 +309,61 @@ describe("buildTypesView", () => {
     expect(empty.graph.nodes).toEqual([]);
     expect(empty.graph.edges).toEqual([]);
     expect(empty.graph.entity_types).toEqual([]);
+  });
+});
+
+describe("CARDINALITY_ENDS", () => {
+  it("puts each side's number beside the type at that end", () => {
+    expect(CARDINALITY_ENDS).toEqual({
+      one_to_one: { from: "1", to: "1" },
+      one_to_many: { from: "1", to: "n" },
+      many_to_one: { from: "n", to: "1" },
+      // Two independent "many"s, as the notation writes them.
+      many_to_many: { from: "m", to: "n" },
+    });
+  });
+});
+
+describe("underlined", () => {
+  it("puts a combining low line after every character", () => {
+    expect(underlined("key")).toBe("k̲e̲y̲");
+    expect(underlined("")).toBe("");
+  });
+});
+
+describe("withErDependents", () => {
+  const { graph } = buildTypesView([EMPLOYEE, UNIT], [REPORTS_TO, WORKS_FOR]);
+
+  it("shows an ellipse exactly when its owner shows", () => {
+    const shown = withErDependents(graph.nodes, (node) => node.id === "type-11");
+    expect(shown.has("attr-1")).toBe(true);
+    expect(shown.has("typekey-11")).toBe(true);
+    expect(shown.has("typekey-22")).toBe(false);
+  });
+
+  it("shows a diamond only when both of its types show", () => {
+    // Searching "employee" must not leave works_for pointing at a hidden unit.
+    const employeeOnly = withErDependents(graph.nodes, (node) => node.id === "type-11");
+    expect(employeeOnly.has("reltype-6")).toBe(false);
+    const both = withErDependents(graph.nodes, (node) => node.id === "type-11" || node.id === "type-22");
+    expect(both.has("reltype-6")).toBe(true);
+    // The hierarchy needs only unit, which is both of its ends.
+    const unitOnly = withErDependents(graph.nodes, (node) => node.id === "type-22");
+    expect(unitOnly.has("reltype-5")).toBe(true);
+  });
+
+  it("never asks the filters about an ellipse or a diamond", () => {
+    const asked: string[] = [];
+    withErDependents(graph.nodes, (node) => {
+      asked.push(node.id);
+      return true;
+    });
+    expect(asked.sort()).toEqual(["type-11", "type-22"]);
+  });
+
+  it("passes an objects-view node straight through the filters", () => {
+    const plain = [{ id: "1", attributes: {} }, { id: "2", attributes: {} }];
+    expect([...withErDependents(plain, (node) => node.id === "2")]).toEqual(["2"]);
   });
 });
 

@@ -28,7 +28,29 @@ router.include_router(
     )
 )
 
-def hash_user_password(data: dict) -> dict:
+def require_json_objects(data: dict, _user=None) -> dict:
+    """`template.domain_seed` and `template.default_ir` are JSONB objects.
+    The factory types JSONB as `Any`, so an array or string used to store
+    and then fail later on apply."""
+    for field in ("domain_seed", "default_ir"):
+        if field in data and data[field] is not None and not isinstance(data[field], dict):
+            raise field_error(field, "must be a JSON object", data[field])
+    return data
+
+
+def default_problem_owner(data: dict, user=None) -> dict:
+    """A problem create that omits `owner` used to store null. Name the
+    caller; an explicit owner still wins. Update dumps omit the key, so
+    a rename does not rewrite ownership."""
+    if user is None or "owner" not in data:
+        return data
+    owner = data["owner"]
+    if owner is None or (isinstance(owner, str) and owner.strip() == ""):
+        data["owner"] = user.username
+    return data
+
+
+def hash_user_password(data: dict, _user=None) -> dict:
     """Turn a write-only `password` into `hashed_password`. A raw hash in
     the payload is still dropped by `hidden=`, so it never reaches here."""
     if "password" not in data:
@@ -167,7 +189,10 @@ router.include_router(
 )
 
 TemplateCreate, TemplateUpdate, TemplateRead = make_crud_schemas(
-    Template, name="Template", readonly={"id"}, server_default={"updated_at"}
+    Template,
+    name="Template",
+    readonly={"id"},
+    server_default={"updated_at", "domain_seed"},
 )
 router.include_router(
     build_crud_router(
@@ -178,6 +203,7 @@ router.include_router(
         schema_name="public",
         table_name="template",
         write_capability="model.publish",
+        prepare=require_json_objects,
     )
 )
 
@@ -193,5 +219,6 @@ router.include_router(
         schema_name="public",
         table_name="problem",
         write_capability="model.publish",
+        prepare=default_problem_owner,
     )
 )

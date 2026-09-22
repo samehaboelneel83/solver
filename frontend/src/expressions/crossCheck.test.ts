@@ -87,6 +87,7 @@ const entityTypes: EntityType[] = fixture.entityTypes.map((spec) => ({
   updated_at: "2026-09-20T09:00:00+00:00",
   attributes: spec.attributes.map((attribute, index) => ({
     id: (index + 1) as Id,
+    sort_order: index + 1,
     entity_type_id: entityTypeIds.get(spec.name) as Id,
     name: attribute.name,
     data_type: attribute.data_type,

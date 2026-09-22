@@ -479,6 +479,41 @@ describe("EntityDetail human-readable titles (B-1)", () => {
   });
 });
 
+describe("EntityDetail (create a problem)", () => {
+  it("prefills owner from the signed-in account", async () => {
+    (apiFetch as any).mockImplementation((path: string) => {
+      if (path === "/api/meta/schema") {
+        return Promise.resolve([
+          {
+            schema: "public",
+            table: "problem",
+            write_capability: "model.publish",
+            fields: [
+              { name: "id", type: "integer", required: true, writable: false, is_fk: false, fk_table: null },
+              { name: "name", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+              { name: "owner", type: "string", required: false, writable: true, is_fk: false, fk_table: null },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    });
+
+    const queryClient = editorQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/public/problem/new"]}>
+          <Routes>
+            <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByTestId("field-owner")).toHaveValue("admin");
+  });
+});
+
 describe("EntityDetail (create mode with query-string prefill)", () => {
   it("prefills a foreign-key field from the query string and resolves its label", async () => {
     (apiFetch as any).mockImplementation((path: string) => {

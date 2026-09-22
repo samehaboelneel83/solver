@@ -9,12 +9,15 @@ domain.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.ir.contract import IR_VERSION
 from app.main import app
 from app.seed import ensure_weekly_rota_template, seed_admin, seed_workforce_demo
 from tests.test_v1_problem_run import db  # noqa: F401
@@ -277,3 +280,64 @@ def test_a_domain_without_the_types_is_named_not_half_built(auth_headers, db):
         db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
         db.execute(text("DELETE FROM template WHERE id = :t"), {"t": template_id})
         db.commit()
+
+
+def test_template_ir_version_defaults_to_the_contract(auth_headers):
+    """The platform expresses one IR version. Omitting `ir_version` used
+    to 422 as a missing field; the column default is that version."""
+    client = TestClient(app)
+    name = f"default-ir-version-{uuid.uuid4().hex[:8]}"
+    response = client.post(
+        "/api/template/",
+        json={"name": name, "default_ir": {}},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    try:
+        assert response.json()["ir_version"] == str(IR_VERSION)
+    finally:
+        client.delete(f"/api/template/{response.json()['id']}", headers=auth_headers)
+
+
+def test_template_json_columns_must_be_objects(auth_headers):
+    """`domain_seed` and `default_ir` are JSONB objects. An array used to
+    store and then fail later on apply; name the field at write time."""
+    client = TestClient(app)
+    name = f"not-an-object-{uuid.uuid4().hex[:8]}"
+    cases = (
+        ("default_ir", {"name": name, "ir_version": "1", "default_ir": []}),
+        (
+            "domain_seed",
+            {
+                "name": f"{name}-seed",
+                "ir_version": "1",
+                "default_ir": {},
+                "domain_seed": ["employee"],
+            },
+        ),
+    )
+    for field, payload in cases:
+        response = client.post("/api/template/", json=payload, headers=auth_headers)
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert any(list(entry.get("loc", [])) == ["body", field] for entry in detail), detail
+        assert any("object" in str(entry.get("msg", "")).lower() for entry in detail)
+
+    created = client.post(
+        "/api/template/",
+        json={"name": name, "ir_version": "1", "default_ir": {}},
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    row_id = created.json()["id"]
+    try:
+        rewritten = client.put(
+            f"/api/template/{row_id}",
+            json={"default_ir": "not-an-object"},
+            headers=auth_headers,
+        )
+        assert rewritten.status_code == 422, rewritten.text
+        detail = rewritten.json()["detail"]
+        assert any(list(entry.get("loc", [])) == ["body", "default_ir"] for entry in detail), detail
+    finally:
+        client.delete(f"/api/template/{row_id}", headers=auth_headers)

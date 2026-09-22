@@ -32,7 +32,7 @@ function parseEnumValues(text: string): string[] {
     .filter((line) => line !== "");
 }
 
-const FIELD_ORDER = ["name", "data_type", "required", "unit", "enum_values", "default_value"];
+const FIELD_ORDER = ["name", "data_type", "required", "unit", "sort_order", "enum_values", "default_value"];
 export const ATTRIBUTE_FIELDS = FIELD_ORDER;
 
 const MATERIALISED_NOTE =
@@ -68,6 +68,9 @@ export default function AttributeDefEditor({
   const [dataType, setDataType] = useState<AttrType>(initial?.data_type ?? "text");
   const [required, setRequired] = useState(initial?.required ?? false);
   const [unit, setUnit] = useState(initial?.unit ?? "");
+  // Text, not a number, so an empty box can mean "after the others" on a new
+  // attribute and "unchanged" on an existing one (migration 0027).
+  const [sortOrder, setSortOrder] = useState(initial ? String(initial.sort_order) : "");
   const [enumText, setEnumText] = useState((initial?.enum_values ?? []).join("\n"));
   const [defaultDraft, setDefaultDraft] = useState(draftFromValue(initial?.default_value));
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
@@ -124,6 +127,12 @@ export default function AttributeDefEditor({
     const parsed = parseDefaultValue(dataType, defaultDraft, enumValues);
     if (!parsed.ok) next.default_value = parsed.message;
 
+    const trimmedOrder = sortOrder.trim();
+    const order = trimmedOrder === "" ? null : Number(trimmedOrder);
+    if (order !== null && !(Number.isInteger(order) && Math.abs(order) <= 2 ** 31 - 1)) {
+      next.sort_order = "Sort order: a whole number, or leave it empty.";
+    }
+
     replace(next);
     if (Object.keys(next).length > 0 || !parsed.ok) return;
 
@@ -135,6 +144,10 @@ export default function AttributeDefEditor({
       unit: trimmedUnit === "" ? null : trimmedUnit,
       enum_values: dataType === "enum" ? enumValues : null,
       default_value: parsed.value,
+      // Omitted rather than null: the server reads an absent position as
+      // "after the others" on create and "unchanged" on edit, and refuses a
+      // null for a column that is never empty.
+      ...(order === null ? {} : { sort_order: order }),
     });
   }
 
@@ -287,6 +300,29 @@ export default function AttributeDefEditor({
             }}
           />
           <FieldError id={errorId("unit")} message={errors.unit} />
+        </div>
+
+        <div>
+          <FieldLabel htmlFor={id("sort_order")}>Sort order</FieldLabel>
+          <input
+            id={id("sort_order")}
+            type="number"
+            inputMode="numeric"
+            step={1}
+            className={INPUT_CLASS}
+            placeholder={initial ? "" : "after the others"}
+            value={sortOrder}
+            aria-invalid={errors.sort_order ? "true" : undefined}
+            aria-describedby={describedBy(id("sort_order-hint"), errors.sort_order && errorId("sort_order"))}
+            onChange={(e) => {
+              setSortOrder(e.target.value);
+              clearError("sort_order");
+            }}
+          />
+          <p id={id("sort_order-hint")} className="mt-1 text-xs text-slate-500">
+            Lower comes first in forms and lists. Ties go by name.
+          </p>
+          <FieldError id={errorId("sort_order")} message={errors.sort_order} />
         </div>
 
         <div className="flex items-center gap-2 sm:mt-7">

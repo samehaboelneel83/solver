@@ -121,7 +121,7 @@ def build_crud_router(
 
     `prepare` rewrites the dumped payload before it becomes a row — used
     to hash `password` into `hashed_password` on user_account so the
-    plaintext never reaches the model.
+    plaintext never reaches the model. It is called as `prepare(data, user)`.
 
     `write_capability` is the capability `requires()` checks on create,
     update and delete. Domain tables stay on `domain.edit`; a problem
@@ -244,11 +244,11 @@ def build_crud_router(
         def create_item(
             payload: create_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires(write_capability)),
+            user: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
             data = payload.model_dump()
             if prepare is not None:
-                data = prepare(data)
+                data = prepare(data, user)
             item = model(**data)
             db.add(item)
             try:
@@ -266,12 +266,12 @@ def build_crud_router(
             item_id: item_id_type,
             payload: update_schema,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires(write_capability)),
+            user: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
             changes = payload.model_dump(exclude_unset=True)
             expected = changes.pop("updated_at", None)
             if prepare is not None:
-                changes = prepare(changes)
+                changes = prepare(changes, user)
             item = db.get(model, item_id, with_for_update=expected is not None)
             if item is None:
                 raise HTTPException(status_code=404, detail="not found")

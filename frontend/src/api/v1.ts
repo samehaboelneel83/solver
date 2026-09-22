@@ -122,6 +122,9 @@ export type AttributeDef = {
   unit: string | null;
   enum_values: string[] | null;
   default_value: unknown;
+  /** Lower first, name breaking ties (migration 0027). The API already
+   * returns attributes in this order, so screens render them as given. */
+  sort_order: number;
 };
 
 export type AttributeDefCreate = {
@@ -131,6 +134,8 @@ export type AttributeDefCreate = {
   unit?: string | null;
   enum_values?: string[] | null;
   default_value?: unknown;
+  /** Omitted means "after the others". */
+  sort_order?: number;
 };
 
 /** An explicit `null` is meaningful (it clears `enum_values`, `unit`,
@@ -190,6 +195,17 @@ export const createRelationshipAttribute = (relationshipTypeId: Id, body: Attrib
 export const updateAttribute = (id: Id, body: AttributeDefUpdate) =>
   send<AttributeDef>("PATCH", `/api/v1/attributes/${id}`, body);
 export const deleteAttribute = (id: Id) => remove(`/api/v1/attributes/${id}`);
+/** The whole list, in the order wanted. The server refuses anything that is
+ * not exactly the owner's attributes once each, so two people reordering at
+ * once cannot interleave into an order neither chose. */
+export const orderAttributes = (entityTypeId: Id, attributeIds: Id[]) =>
+  send<AttributeDef[]>("PUT", `/api/v1/entity-types/${entityTypeId}/attribute-order`, {
+    attribute_ids: attributeIds,
+  });
+export const orderRelationshipAttributes = (relationshipTypeId: Id, attributeIds: Id[]) =>
+  send<AttributeDef[]>("PUT", `/api/v1/relationship-types/${relationshipTypeId}/attribute-order`, {
+    attribute_ids: attributeIds,
+  });
 
 // --- entities (Task 6) ------------------------------------------------------
 
@@ -774,6 +790,14 @@ export const useCreateRelationshipAttribute = () =>
 export const useUpdateAttribute = () =>
   useV1Mutation(({ id, body }: { id: Id; body: AttributeDefUpdate }) => updateAttribute(id, body));
 export const useDeleteAttribute = () => useV1Mutation(deleteAttribute);
+export const useOrderAttributes = () =>
+  useV1Mutation(({ entityTypeId, attributeIds }: { entityTypeId: Id; attributeIds: Id[] }) =>
+    orderAttributes(entityTypeId, attributeIds)
+  );
+export const useOrderRelationshipAttributes = () =>
+  useV1Mutation(({ relationshipTypeId, attributeIds }: { relationshipTypeId: Id; attributeIds: Id[] }) =>
+    orderRelationshipAttributes(relationshipTypeId, attributeIds)
+  );
 
 // entities
 export function useEntities(

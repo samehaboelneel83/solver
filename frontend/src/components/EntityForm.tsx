@@ -48,7 +48,27 @@ function defaultValueFor(field: FieldMeta): unknown {
     // (e.g. is_active).
     return field.required ? false : "";
   }
+  // `template.default_ir` / `domain_seed` are required JSON objects; a
+  // blank box used to omit them and the server then demanded the field.
+  if (field.type === "json" && field.required) return "{}";
   return "";
+}
+
+const JSON_OBJECT_FIELDS = new Set(["domain_seed", "default_ir"]);
+
+function jsonFieldError(field: FieldMeta, raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      JSON_OBJECT_FIELDS.has(field.name) &&
+      (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    ) {
+      return `${field.name}: must be a JSON object`;
+    }
+    return null;
+  } catch {
+    return `${field.name}: invalid JSON`;
+  }
 }
 
 /** Formats a stored value for a date/datetime `<input>`. Date-only values
@@ -162,12 +182,12 @@ export default function EntityForm({
       clearFieldError(field.name);
       return;
     }
-    try {
-      JSON.parse(raw);
-      clearFieldError(field.name);
-    } catch {
-      setFieldErrors((prev) => ({ ...prev, [field.name]: `${field.name}: invalid JSON` }));
+    const problem = jsonFieldError(field, raw);
+    if (problem) {
+      setFieldErrors((prev) => ({ ...prev, [field.name]: problem }));
+      return;
     }
+    clearFieldError(field.name);
   }
 
   function clearFieldError(name: string) {
@@ -216,13 +236,11 @@ export default function EntityForm({
         // yields a real boolean and falls through to the else branch.
         payload[field.name] = raw === "true";
       } else if (field.type === "json" && typeof raw === "string") {
-        try {
+        const problem = jsonFieldError(field, raw);
+        if (problem) {
+          nextFieldErrors[field.name] = problem;
+        } else {
           payload[field.name] = JSON.parse(raw);
-        } catch {
-          // Storing invalid JSON as a plain string used to silently corrupt
-          // the column; block the submit and point at the offending field
-          // instead.
-          nextFieldErrors[field.name] = `${field.name}: invalid JSON`;
         }
       } else if (field.type === "integer" || field.type === "number") {
         const num = Number(raw);

@@ -298,6 +298,7 @@ describe("AttributeDefEditor: the materialised-default note (spec §3)", () => {
       entity_type_id: 5,
       name: "headcount",
       data_type: "integer",
+      sort_order: 1,
       required: false,
       unit: null,
       enum_values: null,
@@ -330,6 +331,7 @@ describe("AttributeDefEditor: editing an existing attribute", () => {
     entity_type_id: 5,
     name: "shift_kind",
     data_type: "enum",
+    sort_order: 2,
     required: true,
     unit: "slot",
     enum_values: ["day", "night"],
@@ -360,6 +362,66 @@ describe("AttributeDefEditor: editing an existing attribute", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save attribute" }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(defaultInput()).toHaveAttribute("aria-invalid", "true");
+  });
+});
+
+describe("AttributeDefEditor: sort order (migration 0027)", () => {
+  function submit() {
+    fireEvent.click(screen.getByRole("button", { name: "Add attribute" }));
+  }
+
+  it("leaves the position out of a new attribute when the box is empty", () => {
+    // Omitted, not null: the server reads an absent position as "after the
+    // others", and a null for a column that is never empty would be refused.
+    const { onSubmit } = renderEditor();
+    setName("headcount");
+
+    submit();
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("sort_order");
+  });
+
+  it("sends a typed position as a number", () => {
+    const { onSubmit } = renderEditor();
+    setName("headcount");
+    fireEvent.change(screen.getByLabelText(/^Sort order/), { target: { value: "3" } });
+
+    submit();
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ sort_order: 3 });
+  });
+
+  it("refuses a position that is not a whole number, and sends nothing", () => {
+    const { onSubmit } = renderEditor();
+    setName("headcount");
+    fireEvent.change(screen.getByLabelText(/^Sort order/), { target: { value: "1.5" } });
+
+    submit();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    const box = screen.getByLabelText(/^Sort order/);
+    expect(box).toHaveAttribute("aria-invalid", "true");
+    // The message is in the form's summary and beside the field; what matters
+    // for a screen reader is that the field itself is described by it.
+    expect(box).toHaveAccessibleDescription(/Sort order: a whole number, or leave it empty\./);
+  });
+
+  it("starts from the attribute's own position when editing", () => {
+    const existing: AttributeDef = {
+      id: 7,
+      entity_type_id: 5,
+      name: "grade",
+      data_type: "integer",
+      sort_order: 4,
+      required: false,
+      unit: null,
+      enum_values: null,
+      default_value: null,
+    };
+    renderEditor({ initial: existing, submitLabel: "Save attribute" });
+
+    expect(screen.getByLabelText(/^Sort order/)).toHaveValue(4);
   });
 });
 

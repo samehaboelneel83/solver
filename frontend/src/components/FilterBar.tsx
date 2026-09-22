@@ -79,16 +79,31 @@ export function deriveFilterCriteria(
   state: FilterState,
   selectedNodeId: string | null,
   edges: GraphEdge[],
-  expressionMatchIds: Set<string> | null = null
+  expressionMatchIds: Set<string> | null = null,
+  // Nodes a connection passes THROUGH rather than ends at: the ER drawing's
+  // diamonds. Employee's connection is to Unit, by way of `works_in`; stopping
+  // at the diamond would highlight the relationship and dim the thing it
+  // relates employee to, which is the half anyone was asking about.
+  passThrough: ReadonlySet<string> = new Set()
 ): FilterCriteria {
   let highlightIds: string[] | null = null;
   if (state.highlighting && selectedNodeId) {
-    const neighbors = new Set<string>([selectedNodeId]);
-    for (const edge of edges) {
-      if (edge.source === selectedNodeId) neighbors.add(edge.target);
-      if (edge.target === selectedNodeId) neighbors.add(edge.source);
+    const neighbours = (id: string) => {
+      const found: string[] = [];
+      for (const edge of edges) {
+        if (edge.source === id) found.push(edge.target);
+        if (edge.target === id) found.push(edge.source);
+      }
+      return found;
+    };
+    const highlighted = new Set<string>([selectedNodeId]);
+    for (const next of neighbours(selectedNodeId)) {
+      highlighted.add(next);
+      if (next !== selectedNodeId && passThrough.has(next)) {
+        for (const across of neighbours(next)) highlighted.add(across);
+      }
     }
-    highlightIds = Array.from(neighbors);
+    highlightIds = Array.from(highlighted);
   }
   return { selectedTypes: state.selectedTypes, search: state.search, highlightIds, expressionMatchIds };
 }

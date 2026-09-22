@@ -213,6 +213,9 @@ vi.mock("cytoscape", () => ({ default: mockCytoscape }));
 // `edgehandles` is a Connect button that does nothing.
 vi.mock("cytoscape-elk", () => ({ default: { extension: "elk" } }));
 vi.mock("cytoscape-edgehandles", () => ({ default: { extension: "edgehandles" } }));
+// The ER layout drives real cytoscape (sizes, collections, a force layout)
+// that this fake does not model; it has its own tests in lib/erLayout.
+vi.mock("../lib/erLayout", () => ({ runErLayout: vi.fn(() => Promise.resolve()) }));
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -350,6 +353,60 @@ const ALL_RELATIONSHIP_TYPES = {
   total: 2,
 };
 
+// A small model over the fixture's two entity types: one variable, one
+// parameter, one rule that must hold and one that may bend, and an objective.
+const MODEL_VERSION = {
+  id: 70,
+  problem_id: 3,
+  version: 2,
+  ir_hash: "h",
+  note: null,
+  created_at: "2026-09-22T00:00:00+00:00",
+  ir: {
+    version: 1,
+    sets: ["employee", "unit"],
+    parameters: { capacity: { index: ["unit"] } },
+    variables: { place: { index: ["employee", "unit"], domain: "binary" } },
+    constraints: [
+      {
+        id: "c_one_unit",
+        forall: [{ index: "e", set: "employee" }],
+        left: { sum: { var: "place", index: ["e", "u"] }, over: [{ index: "u", set: "unit" }] },
+        relation: "=",
+        right: { const: 1 },
+        severity: "hard",
+      },
+      {
+        id: "c_capacity",
+        forall: [{ index: "u", set: "unit" }],
+        left: { sum: { var: "place", index: ["e", "u"] }, over: [{ index: "e", set: "employee" }] },
+        relation: "<=",
+        right: { par: "capacity", index: ["u"] },
+        severity: "soft",
+        weight: 5,
+      },
+    ],
+    objective: {
+      sense: "minimize",
+      terms: [{ id: "o_places", weight: 1, expression: { sum: { var: "place", index: ["e", "u"] }, over: [{ index: "e", set: "employee" }, { index: "u", set: "unit" }] } }],
+    },
+  },
+};
+
+const MODEL_TARGET = {
+  problemId: 3,
+  versionId: 70,
+  problems: [
+    { id: 3, name: "placement" },
+    { id: 4, name: "rota" },
+  ],
+  versions: [
+    { id: 70, problem_id: 3, version: 2, ir_hash: "h", note: null, created_at: "2026-09-22T00:00:00+00:00" },
+    { id: 60, problem_id: 3, version: 1, ir_hash: "g", note: "first cut", created_at: "2026-09-21T00:00:00+00:00" },
+  ],
+  isLoading: false,
+};
+
 type Stub = {
   graph?: unknown;
   graphError?: unknown;
@@ -406,6 +463,10 @@ function stubApi(stub: Stub = {}) {
     }
     if (path.startsWith("/api/v1/entity-types")) {
       return Promise.resolve(stub.entityTypes ?? ENTITY_TYPES);
+    }
+    // The optimization view reads one model version.
+    if (path.startsWith("/api/v1/versions/")) {
+      return Promise.resolve({ ...MODEL_VERSION, id: Number(path.split("/").pop()) });
     }
     return Promise.reject(new Error(`unexpected GET ${path}`));
   });
@@ -1670,46 +1731,168 @@ describe("GraphEditor", () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
 
-      const nodes = [...elementStore.values()].filter((entry) => entry.isNode);
-      expect(nodes.map((entry) => entry.data.label).sort()).toEqual(["employee", "unit"]);
-      expect(nodes.map((entry) => entry.data.id).sort()).toEqual(["type-1", "type-2"]);
+      const entities = [...elementStore.values()].filter((entry) => entry.data.er === "entity");
+      expect(entities.map((entry) => entry.data.label).sort()).toEqual(["employee", "unit"]);
+      expect(entities.map((entry) => entry.data.id).sort()).toEqual(["type-1", "type-2"]);
       // ... and none of the objects view's nodes survived.
       expect([...elementStore.keys()]).not.toContain("1");
     });
 
-    it("draws relationship types as edges, including a self-referencing loop", async () => {
+    it("draws a relationship type as a diamond joined by a line to each type it relates", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
-      const edges = [...elementStore.values()]
-        .filter((entry) => !entry.isNode)
+
+      const diamonds = [...elementStore.values()].filter((entry) => entry.data.er === "relationship");
+      expect(diamonds.map((entry) => [entry.data.id, entry.data.label]).sort()).toEqual([
+        ["reltype-5", "reports_to"],
+        ["reltype-6", "works_for"],
+      ]);
+      const lines = [...elementStore.values()]
+        .filter((entry) => entry.data.er === "connector")
         .map((entry) => [entry.data.id, entry.data.source, entry.data.target]);
-      expect(edges).toEqual(
+      expect(lines).toEqual(
         expect.arrayContaining([
-          // reports_to: unit -> unit, a loop on one node.
-          [cyEdgeId("reltype-5"), "type-2", "type-2"],
-          // works_for: employee -> unit. A swapped from/to would read
-          // [cyEdgeId("reltype-6"), "type-2", "type-1"] here, which the loop alone
-          // could never reveal.
-          [cyEdgeId("reltype-6"), "type-1", "type-2"],
+          // reports_to: unit -- both lines on one rectangle, the notation's
+          // recursive relationship.
+          [cyEdgeId("rellink-5-from"), "type-2", "reltype-5"],
+          [cyEdgeId("rellink-5-to"), "reltype-5", "type-2"],
+          // works_for: employee -> diamond -> unit. A swapped from/to would
+          // put employee on the `to` line, which the loop alone could never
+          // reveal.
+          [cyEdgeId("rellink-6-from"), "type-1", "reltype-6"],
+          [cyEdgeId("rellink-6-to"), "reltype-6", "type-2"],
         ])
       );
-      expect(edges).toHaveLength(2);
+      expect(lines).toHaveLength(4);
     });
 
-    it("labels a types edge with its cardinality and hierarchy flag", async () => {
+    it("writes each side's cardinality beside the type at that end", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
-      expect(elementStore.get(cyEdgeId("reltype-5"))?.data.label).toBe("reports_to\n1 → n · hierarchy");
-      expect(elementStore.get(cyEdgeId("reltype-6"))?.data.label).toBe("works_for\nn → 1");
+      // works_for is many-to-one: many employees, one unit.
+      expect(elementStore.get(cyEdgeId("rellink-6-from"))?.data.end).toBe("n");
+      expect(elementStore.get(cyEdgeId("rellink-6-to"))?.data.end).toBe("1");
+      // reports_to is one-to-many, and a hierarchy.
+      expect(elementStore.get(cyEdgeId("rellink-5-from"))?.data.end).toBe("1");
+      expect(elementStore.get(cyEdgeId("rellink-5-to"))?.data.end).toBe("n");
+      expect(elementStore.get("reltype-5")?.data.hierarchy).toBe("yes");
+      expect(elementStore.get("reltype-6")?.data.hierarchy).toBe("no");
     });
 
-    it("colours types nodes and edges from the types' own colours", async () => {
+    it("draws each type's attributes as ellipses, the key first and underlined", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+
+      const ofEmployee = [...elementStore.values()]
+        .filter((entry) => entry.data.er === "attribute" && entry.data.selectId === "type-1")
+        .sort((a, b) => a.data.seq - b.data.seq)
+        .map((entry) => entry.data.label);
+      // The key is a column every entity has; the notation underlines it.
+      // The fixture's attributes carry no sort order, so the name decides.
+      expect(ofEmployee).toEqual(["k\u0332e\u0332y\u0332", "code", "grade", "status"]);
+      expect(elementStore.get(cyEdgeId("attrlink-attr-11"))?.data.source).toBe("type-1");
+    });
+
+    it("colours types and diamonds from the types' own colours, and ellipses white", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
       expect(elementStore.get("type-1")?.data.colour).toBe("#1f77b4");
       expect(elementStore.get("type-2")?.data.colour).toBe(fallbackColour("2"));
       expect(elementStore.get("type-1")?.data.labelColour).toBe(labelForeground("#1f77b4"));
-      expect(elementStore.get(cyEdgeId("reltype-5"))?.data.colour).toBe("#2ca02c");
+      expect(elementStore.get("reltype-5")?.data.colour).toBe("#2ca02c");
+      expect(elementStore.get("attr-11")?.data.colour).toBe("#ffffff");
+    });
+
+    it("selects the relationship type from its diamond or either line, and the owner from an ellipse", async () => {
+      // The side panel resolves `reltype-<id>` as a relationship type and
+      // `type-<id>` as an entity type, as it did before the drawing changed.
+      const onSelectionChange = vi.fn();
+      renderWithProviders({ mode: "types", onSelectionChange });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      const tap = (kind: "node" | "edge", id: string) =>
+        act(() =>
+          registeredHandlersRef.current[`tap:${kind}`]({ target: mockCytoscapeInstance.getElementById(id) })
+        );
+
+      tap("node", "reltype-6");
+      expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "edge", id: "reltype-6" });
+      tap("edge", cyEdgeId("rellink-6-to"));
+      expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "edge", id: "reltype-6" });
+      tap("node", "attr-12");
+      expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "node", id: "type-1" });
+      tap("node", "type-2");
+      expect(onSelectionChange).toHaveBeenLastCalledWith({ kind: "node", id: "type-2" });
+    });
+
+    it("counts types and relationships, not attribute ellipses, in the canvas's name", async () => {
+      renderWithProviders({ mode: "types" });
+      await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
+      // Two types and two diamonds; the six ellipses describe them.
+      await waitFor(() =>
+        expect(screen.getByTestId("cytoscape-container")).toHaveAccessibleName(/erd view, 4 nodes/i)
+      );
+    });
+
+    it("offers three views, in order: the schema, the data, the model", async () => {
+      renderWithProviders({ mode: "objects" });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      const toggle = screen.getByRole("group", { name: "Graph view" });
+      expect(within(toggle).getAllByRole("button").map((button) => button.textContent)).toEqual([
+        "ERD View",
+        "Graph View",
+        "Optimization View",
+      ]);
+      expect(screen.getByRole("button", { name: "Graph View" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("asks for the optimization view by its mode value", async () => {
+      const onModeChange = vi.fn();
+      renderWithProviders({ mode: "objects", onModeChange });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Optimization View" }));
+      expect(onModeChange).toHaveBeenCalledWith("model");
+    });
+
+    it("draws the chosen model version in the optimization view", async () => {
+      renderWithProviders({ mode: "model", modelTarget: MODEL_TARGET });
+      await waitFor(() => expect(elementStore.has("model-var-place")).toBe(true));
+      const kinds = [...elementStore.values()].filter((entry) => entry.isNode).map((entry) => entry.data.er);
+      expect(kinds.sort()).toEqual(["constraint", "constraint", "objective", "parameter", "set", "set", "variable"]);
+      expect(elementStore.get("model-con-c_capacity")?.data.soft).toBe("yes");
+      // It read the version it was given, and nothing from the entity graph.
+      const reads = (apiFetch as any).mock.calls.map((call: any[]) => String(call[0]));
+      expect(reads).toContain("/api/v1/versions/70");
+      expect(reads.some((path: string) => path.startsWith("/api/v1/graph"))).toBe(false);
+      expect(screen.getByTestId("cytoscape-container")).toHaveAccessibleName(/optimization view, 7 nodes/i);
+    });
+
+    it("offers the problem and version to draw, the latest marked, and asks for a change", async () => {
+      const onModelTargetChange = vi.fn();
+      renderWithProviders({ mode: "model", modelTarget: MODEL_TARGET, onModelTargetChange });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      const picker = screen.getByTestId("model-picker");
+      expect(within(picker).getByLabelText("Version")).toHaveDisplayValue("v2 (latest)");
+
+      fireEvent.change(within(picker).getByLabelText("Version"), { target: { value: "60" } });
+      expect(onModelTargetChange).toHaveBeenLastCalledWith({ problemId: 3, versionId: 60 });
+      // A new problem starts from its own latest version, not this one's number.
+      fireEvent.change(within(picker).getByLabelText("Problem"), { target: { value: "4" } });
+      expect(onModelTargetChange).toHaveBeenLastCalledWith({ problemId: 4, versionId: null });
+    });
+
+    it("keeps the entity graph's writing controls out of the optimization view", async () => {
+      renderWithProviders({ mode: "model", modelTarget: MODEL_TARGET });
+      await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
+      expect(screen.queryByTestId("hierarchy-select")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("toggle-connect")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("toggle-create-node")).not.toBeInTheDocument();
+    });
+
+    it("points at the model editor when the problem has no version to draw", async () => {
+      renderWithProviders({ mode: "model", modelTarget: { ...MODEL_TARGET, versionId: null, versions: [] } });
+      const empty = await screen.findByTestId("graph-empty-state");
+      expect(empty).toHaveTextContent(/no model version yet/i);
+      expect(within(empty).getByRole("link", { name: /Open the model editor/i })).toHaveAttribute("href", "/model");
     });
 
     it("does not request the objects graph while the types view is showing", async () => {
@@ -1772,31 +1955,38 @@ describe("GraphEditor", () => {
     it("names the view in the canvas's accessible name", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
-      expect(screen.getByTestId("cytoscape-container")).toHaveAccessibleName(/types view/i);
+      expect(screen.getByTestId("cytoscape-container")).toHaveAccessibleName(/erd view/i);
       expect(screen.getByTestId("cytoscape-container")).toHaveAttribute("role", "application");
     });
 
-    it("still moves the roving keyboard selection with the arrow keys", async () => {
+    it("moves the roving selection between types and diamonds, never onto an ellipse", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
       elementStore.get("type-1")!.position = { x: 0, y: 0 };
       elementStore.get("type-2")!.position = { x: 100, y: 0 };
+      elementStore.get("reltype-6")!.position = { x: 200, y: 0 };
+      elementStore.get("reltype-5")!.position = { x: 300, y: 0 };
+      // An ellipse sitting between them must still be skipped.
+      elementStore.get("attr-11")!.position = { x: 50, y: 0 };
 
       const canvas = screen.getByTestId("cytoscape-container");
-      fireEvent.keyDown(canvas, { key: "ArrowRight" });
-      expect(elementStore.get("type-1")?.classes.has("kb-focus")).toBe(true);
-      await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("employee"));
-      fireEvent.keyDown(canvas, { key: "ArrowRight" });
-      expect(elementStore.get("type-2")?.classes.has("kb-focus")).toBe(true);
+      const stops: string[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        fireEvent.keyDown(canvas, { key: "ArrowRight" });
+        stops.push([...elementStore.entries()].find(([, entry]) => entry.classes.has("kb-focus"))?.[0] ?? "");
+      }
+      expect(stops).toEqual(["type-1", "type-2", "reltype-6", "reltype-5"]);
+      await waitFor(() => expect(screen.getByTestId("graph-live")).toHaveTextContent("reports_to"));
     });
 
     it("returns focus to the first toolbar control on Escape, which is now the toggle", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(mockCytoscape).toHaveBeenCalled());
       fireEvent.keyDown(screen.getByTestId("cytoscape-container"), { key: "Escape" });
-      // The hierarchy select is not rendered here, so the toggle is the
-      // first control and Escape must not drop focus onto the body.
-      expect(document.activeElement).toBe(screen.getByTestId("graph-mode-objects"));
+      // The hierarchy select is not rendered here, so the toggle's first
+      // button -- ERD View -- is the first control, and Escape must not drop
+      // focus onto the body.
+      expect(document.activeElement).toBe(screen.getByTestId("graph-mode-types"));
     });
 
     it("points an empty schema at the entity types page rather than at a create form", async () => {

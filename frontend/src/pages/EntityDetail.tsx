@@ -42,7 +42,7 @@ export function mapConstraintError(detail: string, fields: FieldMeta[]): { field
 
 export default function EntityDetail() {
   const { schemaName = "", tableName = "", id } = useParams();
-  const { can } = useCapabilities();
+  const { can, username } = useCapabilities();
   const isNew = id === undefined;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -120,8 +120,11 @@ export default function EntityDetail() {
         values[key] = value;
       }
     }
+    if (table.table === "problem" && writableNames.has("owner") && values.owner == null && username) {
+      values.owner = username;
+    }
     return Object.keys(values).length > 0 ? values : undefined;
-  }, [isNew, table, searchParams]);
+  }, [isNew, table, searchParams, username]);
 
   if (isOffline) {
     return <OfflineNotice subject="This page" />;

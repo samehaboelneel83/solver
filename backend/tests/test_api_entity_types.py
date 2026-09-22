@@ -517,7 +517,10 @@ def test_list_attributes_of_a_type(auth_headers, domain_id):
         f"/api/v1/entity-types/{entity_type['id']}/attributes", headers=auth_headers
     )
     assert response.status_code == 200, response.text
-    assert [a["name"] for a in response.json()] == ["hired_on", "rank"]
+    # Added order, not alphabetical (migration 0027): a new attribute goes
+    # to the bottom, where the person adding it is looking.
+    assert [a["name"] for a in response.json()] == ["rank", "hired_on"]
+    assert [a["sort_order"] for a in response.json()] == [1, 2]
 
 
 def test_attribute_default_value_round_trips(auth_headers, domain_id):

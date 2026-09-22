@@ -5,6 +5,8 @@ import {
   referencesOf,
   strandedBy,
   variableNameProblem,
+  withDomain,
+  cleanVariable,
 } from "./declarations";
 import type { Constraint, ObjectiveTerm, Term } from "./terms";
 
@@ -72,6 +74,20 @@ describe("variableNameProblem", () => {
 
   it("refuses a name already in use", () => {
     expect(variableNameProblem("assign", ["assign"])).toMatch(/already something called/);
+  });
+});
+
+describe("withDomain / cleanVariable", () => {
+  it("drops bounds when the variable becomes yes-or-no", () => {
+    expect(
+      withDomain({ index: ["day"], domain: "integer", lower: 0, upper: 40 }, "binary")
+    ).toEqual({ index: ["day"], domain: "binary" });
+  });
+
+  it("keeps bounds on an integer or continuous variable", () => {
+    expect(
+      cleanVariable({ index: ["day"], domain: "continuous", lower: 0.5, upper: 2 })
+    ).toEqual({ index: ["day"], domain: "continuous", lower: 0.5, upper: 2 });
   });
 });
 

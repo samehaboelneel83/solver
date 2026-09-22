@@ -46,6 +46,7 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+from app.ir.contract import IR_VERSION
 
 # Rows in these four tables are frozen by the `forbid_update()` trigger:
 # any UPDATE raises. The API layer reads this to withhold PUT/PATCH rather
@@ -76,7 +77,7 @@ class Template(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    ir_version: Mapped[str] = mapped_column(Text, nullable=False)
+    ir_version: Mapped[str] = mapped_column(Text, nullable=False, default=str(IR_VERSION))
     domain_seed: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default="{}"
     )

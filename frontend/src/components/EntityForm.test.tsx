@@ -185,6 +185,39 @@ describe("EntityForm JSON validation", () => {
     });
     expect(screen.queryByText("expression: invalid JSON")).not.toBeInTheDocument();
   });
+
+  it("starts a required JSON field as an empty object, and refuses an array on template IR", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EntityForm
+          fields={[
+            { name: "name", type: "string", required: true, writable: true, is_fk: false, fk_table: null },
+            { name: "default_ir", type: "json", required: true, writable: true, is_fk: false, fk_table: null },
+          ]}
+          onSubmit={onSubmit}
+          submitLabel="Save"
+        />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByTestId("field-default_ir")).toHaveValue("{}");
+
+    fireEvent.change(screen.getByTestId("field-name"), { target: { value: "weekly" } });
+    fireEvent.change(screen.getByTestId("field-default_ir"), { target: { value: "[]" } });
+    fireEvent.blur(screen.getByTestId("field-default_ir"));
+    expect(screen.getByText("default_ir: must be a JSON object", { selector: "p" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Save"));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId("field-default_ir"), { target: { value: "{}" } });
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({ name: "weekly", default_ir: {} });
+    });
+  });
 });
 
 describe("EntityForm date/datetime formatting", () => {

@@ -87,6 +87,7 @@ from app.graph.schemas import (
     RelationshipTypeOption,
 )
 from app.models.v1_domain import (
+    ATTRIBUTE_ORDER,
     AttributeDef,
     Entity,
     EntityType,
@@ -225,7 +226,7 @@ def get_domain_graph(
         attribute_defs = (
             db.query(AttributeDef)
             .filter(AttributeDef.entity_type_id.in_(entity_type_by_id.keys()))
-            .order_by(AttributeDef.entity_type_id.asc(), AttributeDef.name.asc())
+            .order_by(AttributeDef.entity_type_id.asc(), *ATTRIBUTE_ORDER)
             .all()
         )
 

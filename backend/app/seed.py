@@ -35,7 +35,7 @@ have to compare `ir_hash` by hand. Skipping is the honest shape.
 import logging
 from typing import Any
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -528,7 +528,18 @@ def _attribute(
     unit: str | None = None,
     enum_values: list[str] | None = None,
     default_value: Any = None,
+    sort_order: int | None = None,
 ) -> AttributeDef:
+    if sort_order is None:
+        # After the type's existing attributes, so a seed or a template lists
+        # its attributes in the order it declares them (migration 0027)
+        # rather than alphabetically.
+        last = db.execute(
+            select(func.max(AttributeDef.sort_order)).where(
+                AttributeDef.entity_type_id == entity_type.id
+            )
+        ).scalar()
+        sort_order = 1 if last is None else last + 1
     row = AttributeDef(
         entity_type_id=entity_type.id,
         name=name,
@@ -537,6 +548,7 @@ def _attribute(
         unit=unit,
         enum_values=enum_values,
         default_value=default_value,
+        sort_order=sort_order,
     )
     db.add(row)
     db.flush()
@@ -581,6 +593,7 @@ def _ensure_attribute(db: Session, entity_type: EntityType, spec: dict[str, Any]
         unit=spec.get("unit"),
         enum_values=spec.get("enum_values"),
         default_value=spec.get("default_value"),
+        sort_order=spec.get("sort_order") if isinstance(spec.get("sort_order"), int) else None,
     )
 
 

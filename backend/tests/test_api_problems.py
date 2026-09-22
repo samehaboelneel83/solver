@@ -196,6 +196,32 @@ def _problem(client, auth_headers, domain_id, name) -> int:
     return response.json()["id"]
 
 
+def test_creating_a_problem_names_the_caller_as_owner(client, auth_headers, domain_id):
+    """Omitting `owner` used to store null. The caller is who started it."""
+    settings = get_settings()
+    response = client.post(
+        "/api/problem/",
+        json={"domain_id": domain_id, "name": f"owned-{uuid.uuid4().hex[:8]}"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["owner"] == settings.admin_username
+
+
+def test_creating_a_problem_keeps_an_explicit_owner(client, auth_headers, domain_id):
+    response = client.post(
+        "/api/problem/",
+        json={
+            "domain_id": domain_id,
+            "name": f"ops-owned-{uuid.uuid4().hex[:8]}",
+            "owner": "ops",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["owner"] == "ops"
+
+
 def _version(client, auth_headers, problem_id, ir, note=None) -> dict:
     response = client.post(
         f"/api/v1/problems/{problem_id}/versions",
