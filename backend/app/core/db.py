@@ -10,7 +10,8 @@ engine = create_engine(settings.database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # The role API requests act as (migration 0032): row-level security applies
-# to it, where the connecting role -- a superuser -- bypasses it.
+# to it, where the connecting role bypasses it -- `solver_runtime` (0037,
+# BYPASSRLS but not a superuser), or the owner when `.env.runtime` is absent.
 REQUEST_ROLE = "solver_app"
 
 

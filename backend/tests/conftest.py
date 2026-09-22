@@ -148,6 +148,10 @@ _ensure_database_exists(_maintenance_url, _TEST_DATABASE_NAME)
 # Must happen before the alembic upgrade below, since running migrations
 # imports app.core.config/app.core.db/app.models (see module docstring).
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+# alembic/env.py prefers MIGRATION_DATABASE_URL, which compose sets to the
+# live owner's URL; left in place, the upgrade below would migrate the live
+# database and leave the test one empty.
+os.environ.pop("MIGRATION_DATABASE_URL", None)
 
 _backend_dir = Path(__file__).resolve().parent.parent
 _alembic_ini = _backend_dir / "alembic.ini"

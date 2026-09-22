@@ -53,9 +53,16 @@ services:
     build: ./backend
     image: solver-backend:latest
     restart: unless-stopped
-    env_file: .env
+    # The app logs in as `solver_runtime`, not the owner (migration 0037):
+    # `.env.runtime`, written by scripts/runtime_role.sh, overrides .env's
+    # DATABASE_URL. Without it the owner's URL from .env is used, as before.
+    # Migrations -- `compose run backend alembic ...` -- run as the owner.
+    env_file:
+      - .env
+      - path: .env.runtime
+        required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      MIGRATION_DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
     ports:
       - "8010:8000"
@@ -79,9 +86,12 @@ services:
     build: ./backend
     image: solver-backend:latest
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - .env
+      - path: .env.runtime
+        required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      MIGRATION_DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
     command: ["python", "-m", "app.worker"]
     depends_on:

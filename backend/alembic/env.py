@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,7 +12,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Migrations run as the owner. The app itself logs in as `solver_runtime`
+# (migration 0037), which may not change the schema; compose hands the
+# owner's URL to this process as MIGRATION_DATABASE_URL. Without it -- the
+# test suite, a bare checkout -- DATABASE_URL is the owner's anyway.
+_url = os.environ.get("MIGRATION_DATABASE_URL") or get_settings().database_url
+# configparser would read a `%` in a password as interpolation.
+config.set_main_option("sqlalchemy.url", _url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 

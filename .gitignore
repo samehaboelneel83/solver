@@ -1,5 +1,7 @@
 .worktrees/
 .env
+# The runtime role's URL and password (scripts/runtime_role.sh).
+.env.runtime
 __pycache__/
 *.pyc
 .venv/
