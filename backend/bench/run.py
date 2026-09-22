@@ -6,7 +6,7 @@
 One JSON row per (instance, backend, technique value, seed):
 
     {family, size, instance, backend, technique, value, seed, status,
-     objective, bound, gap, compile_s, solve_s, wrong}
+     objective, bound, gap, compile_s, solve_s, sense, wrong, primal_integral}
 
 **Techniques are solve settings.** `--technique name=v1,v2` runs every value
 of one `solve_compiled` knob (`gap_rel`, `workers`) so the report can compare
@@ -19,8 +19,10 @@ relative, and on infeasibility. Any row that disagrees with the majority of
 proven answers on its instance is marked wrong. The roadmap's rule -- zero
 wrong answers before anything is enabled by default -- reads this column.
 
-Not measured: the primal integral, which needs incumbents streamed from the
-solver as it runs; no backend here reports them yet.
+**`primal_integral`** is how long the run spent without a good answer
+(`bench.primal`): the area under the primal gap of its best answer so far,
+from the incumbents the backend streams as it solves plus the one it ended
+with. A backend that streams nothing is charged until it finishes.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from bench.families import FAMILIES, SIZES, Instance, generate
+from bench.primal import mark_primal_integral
 
 # Imported lazily in `run`: `app.solve` loads the solvers, and a bad import
 # should fail the run with a message rather than the argument parser.
@@ -125,10 +128,20 @@ def run(
                 if technique.name:
                     knobs[technique.name] = value
                 for seed in range(1, seeds + 1):
+                    incumbents: list[tuple[float, float]] = []
+
+                    def heard(kind: str, payload: dict, found=incumbents) -> None:
+                        if kind == "incumbent" and payload.get("objective") is not None:
+                            found.append((payload["t"], payload["objective"]))
+
                     started = time.monotonic()
                     result, _ = solve_compiled(
-                        backend, compiled, time_limit=time_limit, seed=seed, **knobs
+                        backend, compiled, time_limit=time_limit, seed=seed, on_progress=heard, **knobs
                     )
+                    solve_s = round(time.monotonic() - started, 4)
+                    if result.objective is not None and result.status in ("optimal", "feasible"):
+                        # The answer it ended with, at the moment it ended.
+                        incumbents.append((solve_s, float(result.objective)))
                     rows.append(
                         {
                             "family": family,
@@ -144,11 +157,14 @@ def run(
                             "bound": result.best_bound,
                             "gap": gap_of(result.objective, result.best_bound),
                             "compile_s": round(compile_s, 4),
-                            "solve_s": round(time.monotonic() - started, 4),
+                            "solve_s": solve_s,
                             "time_limit": time_limit,
+                            "sense": getattr(compiled, "sense", "minimize"),
+                            "incumbents": incumbents,
                         }
                     )
     mark_wrong(rows)
+    mark_primal_integral(rows)
     return rows
 
 
@@ -238,11 +254,19 @@ def store(rows: list[dict[str, Any]]) -> None:
             text(
                 "INSERT INTO bench_result (family, size, instance, model_class, backend, technique,"
                 "  technique_value, seed, status, objective, bound, gap, compile_s, solve_s,"
-                "  time_limit_s, wrong)"
+                "  time_limit_s, wrong, primal_integral)"
                 " VALUES (:family, :size, :instance, :class, :backend, :technique, :value, :seed,"
-                "  :status, :objective, :bound, :gap, :compile_s, :solve_s, :time_limit, :wrong)"
+                "  :status, :objective, :bound, :gap, :compile_s, :solve_s, :time_limit, :wrong,"
+                "  :primal_integral)"
             ),
-            [{**row, "value": None if row["value"] is None else str(row["value"])} for row in rows],
+            [
+                {
+                    **row,
+                    "value": None if row["value"] is None else str(row["value"]),
+                    "primal_integral": row.get("primal_integral"),
+                }
+                for row in rows
+            ],
         )
         db.commit()
     finally:

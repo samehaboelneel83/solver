@@ -58,6 +58,8 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         groups[(row["family"], row["size"], row["backend"], row["value"])].append(row)
     for (family, size, backend, value), group in sorted(groups.items(), key=lambda kv: tuple(map(str, kv[0]))):
         gaps = [row["gap"] for row in group if row["gap"] is not None]
+        # Rows written before the primal integral existed carry none.
+        integrals = [row["primal_integral"] for row in group if row.get("primal_integral") is not None]
         table.append(
             {
                 "family": family,
@@ -68,6 +70,7 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "proven": sum(row["status"] in ("optimal", "infeasible", "unbounded") for row in group),
                 "sgm_s": sgm([_time(row) for row in group]),
                 "mean_gap": sum(gaps) / len(gaps) if gaps else None,
+                "mean_primal_integral": sum(integrals) / len(integrals) if integrals else None,
                 "wrong": sum(bool(row.get("wrong")) for row in group),
             }
         )
@@ -130,14 +133,17 @@ def markdown(rows: list[dict[str, Any]], label: str) -> str:
         f"{len(rows)} runs; technique `{technique or 'none'}`, baseline `{summary['baseline']}`. "
         f"Time is the shifted geometric mean (shift {SHIFT:g} s), charging an unproven answer the full time limit.",
         "",
-        "| family | size | backend | value | runs | proven | SGM time (s) | mean gap | wrong |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "The primal integral is the seconds spent without a good answer (`bench.primal`); smaller is better.",
+        "",
+        "| family | size | backend | value | runs | proven | SGM time (s) | mean gap | primal integral (s) | wrong |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in summary["table"]:
         gap = "—" if row["mean_gap"] is None else f"{row['mean_gap']:.2%}"
+        integral = "—" if row["mean_primal_integral"] is None else f"{row['mean_primal_integral']:.3f}"
         lines.append(
             f"| {row['family']} | {row['size']} | {row['backend']} | {row['value']} | {row['runs']} "
-            f"| {row['proven']} | {row['sgm_s']:.3f} | {gap} | {row['wrong']} |"
+            f"| {row['proven']} | {row['sgm_s']:.3f} | {gap} | {integral} | {row['wrong']} |"
         )
     for comparison in summary["comparisons"]:
         lines += [

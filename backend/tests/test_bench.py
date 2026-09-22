@@ -254,3 +254,81 @@ def test_nightly_runs_end_to_end_and_compares_with_the_night_before(tmp_path):
     (tmp_path / "2026-01-02.json").unlink()
     assert main([*common, "--night", "2026-01-02"]) == 1
     assert "optimum moved" in (tmp_path / "2026-01-02.md").read_text()
+
+
+# -- the primal integral ------------------------------------------------------
+
+
+def test_primal_gap_is_berthold_s():
+    from bench.primal import primal_gap
+
+    assert primal_gap(None, 10) == 1.0          # no answer yet
+    assert primal_gap(0, 0) == 0.0
+    assert primal_gap(-1, 1) == 1.0             # different signs
+    assert primal_gap(20, 10) == 0.5            # |20-10| / 20
+    assert primal_gap(8, 10) == 0.2             # |8-10| / 10, the same for maximising
+
+
+def test_primal_integral_of_a_hand_worked_curve():
+    """Minimising, optimum 10, run ends at 8 s. Answers 20 at 1 s, 12 at 3 s,
+    10 at 6 s. Area = 1x1 (nothing) + 0.5x2 (20) + (2/12)x3 (12) + 0x2 (10)
+    = 1 + 1 + 0.5 = 2.5."""
+    from bench.primal import primal_integral
+
+    assert primal_integral([(3, 12), (1, 20), (6, 10)], 10, 8) == pytest.approx(2.5)
+
+
+def test_primal_integral_maximising_and_ignoring_worse_answers():
+    """Maximising, optimum 10, ends at 5 s: 5 at 2 s, 8 at 4 s, then a worse 6
+    at 4.5 s. Area = 1x2 + 0.5x2 + 0.2x1 = 3.2."""
+    from bench.primal import primal_integral
+
+    points = [(2, 5), (4, 8), (4.5, 6)]
+    assert primal_integral(points, 10, 5, minimise=False) == pytest.approx(3.2)
+
+
+def test_primal_integral_charges_the_whole_run_when_nothing_was_found():
+    from bench.primal import primal_integral
+
+    assert primal_integral([], 10, 7.5) == pytest.approx(7.5)
+    # An answer after the end is not counted early.
+    assert primal_integral([(9, 10)], 10, 7.5) == pytest.approx(7.5)
+
+
+def test_rows_get_a_primal_integral_against_the_instance_s_proven_optimum():
+    from bench.primal import mark_primal_integral
+
+    rows = [
+        {"instance": "a", "status": "optimal", "objective": 10.0, "solve_s": 2.0,
+         "incumbents": [(1.0, 10.0)], "wrong": False},
+        {"instance": "a", "status": "feasible", "objective": 20.0, "solve_s": 4.0,
+         "incumbents": [(2.0, 20.0)], "wrong": False},
+        {"instance": "b", "status": "infeasible", "objective": None, "solve_s": 0.5,
+         "incumbents": [], "wrong": False},
+    ]
+    mark_primal_integral(rows)
+    assert rows[0]["primal_integral"] == pytest.approx(1.0)        # 1x1 then 0
+    assert rows[1]["primal_integral"] == pytest.approx(2.0 + 1.0)  # 1x2 then 0.5x2
+    assert rows[2]["primal_integral"] is None
+    assert all("incumbents" not in row for row in rows)
+
+
+def test_a_real_run_streams_incumbents_into_its_primal_integral():
+    """CP-SAT streams its answers; the integral lies between 0 and the run time."""
+    from bench.run import run
+
+    rows = run(["rota"], ["S"], backends=["cp-sat"], time_limit=10.0)
+    assert rows and rows[0]["status"] == "optimal"
+    integral = rows[0]["primal_integral"]
+    assert integral is not None and 0 <= integral <= rows[0]["solve_s"]
+
+
+def test_the_report_shows_the_primal_integral():
+    from bench.report import markdown
+
+    rows = [
+        {"family": "f", "size": "S", "instance": "i", "backend": "cp-sat", "technique": None,
+         "value": None, "seed": 1, "status": "optimal", "objective": 1.0, "gap": 0.0,
+         "solve_s": 2.0, "time_limit": 10.0, "wrong": False, "primal_integral": 0.75},
+    ]
+    assert "| 0.750 |" in markdown(rows, "x")
