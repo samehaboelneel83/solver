@@ -250,3 +250,57 @@ def test_an_integral_lex_stage_is_still_held_exactly():
     (freeze,) = recorder.stages[1].constraints
     assert freeze.relation == "="
     assert freeze.right.const == 3
+
+
+# -- gap and threads as settings (migration 0030) ---------------------------------
+
+
+def test_the_run_passes_its_threads_and_gap_to_the_solver(db, monkeypatch):
+    seen: list = []
+    real = cpsat.solve
+
+    def spy(compiled, **kwargs):
+        seen.append((kwargs.get("workers"), kwargs.get("gap_rel")))
+        return real(compiled, **kwargs)
+
+    monkeypatch.setattr(cpsat, "solve", spy)
+    db.execute(
+        text("INSERT INTO setting (scope, scope_id, key, value) VALUES ('platform', NULL, 'solve.workers', '2')")
+    )
+    db.commit()
+    try:
+        _run(db, _scalar("binary", "maximize", X, []), "honesty-knobs")
+    finally:
+        db.execute(text("DELETE FROM setting WHERE scope = 'platform' AND key = 'solve.workers'"))
+        db.commit()
+
+    assert seen == [(2, 0.0)]
+
+
+class _Loose:
+    """A backend that says `optimal` with a bound 10% away, as a solver
+    stopped at its own default tolerance would."""
+
+    name = "loose"
+
+    def solve(self, compiled, **_):
+        return Solution("optimal", True, 100, {("x", ()): 1}, 0.0, "loose", best_bound=110.0)
+
+
+def test_optimal_with_an_open_gap_is_recorded_as_feasible():
+    from app.solve.service import solve_compiled
+
+    key = ("x", ())
+    compiled = Compiled(
+        variables={key: Variable(key, "integer", Decimal(0), Decimal(5))},
+        constraints=[],
+        objective=Linear({key: Decimal(100)}),
+        sense="maximize",
+        var_index_sets={"x": []},
+    )
+
+    result, _ = solve_compiled(_Loose(), compiled, time_limit=5)
+
+    assert result.status == "feasible"
+    assert result.optimal is False
+    assert gap_of(result.objective, result.best_bound) == pytest.approx(0.1)

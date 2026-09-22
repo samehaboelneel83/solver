@@ -363,3 +363,51 @@ def test_changing_a_setting_needs_the_capability(db):
 
     assert response.status_code == 403
     assert "settings.edit" in response.json()["detail"]
+
+
+def test_a_run_records_its_threads_and_gap_and_where_they_came_from(db):
+    version, _ = _feasible(db, demand_value=1)
+    problem = db.execute(
+        text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}
+    ).scalar_one()
+    scenario = db.execute(
+        text(
+            "INSERT INTO scenario (problem_id, model_version_id, name)"
+            " VALUES (:p, :v, 's') RETURNING id"
+        ),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.commit()
+    _set(db, "problem", problem, "solve.gap_rel", "0.05")
+
+    run_id = enqueue_run(db, scenario)
+
+    params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    assert params["gap_rel"] == 0.05
+    assert params["from_settings"]["gap_rel"] == "problem"
+    # Nothing set: the built-in default, and the run says so.
+    assert params["workers"] == 8
+    assert params["from_settings"]["workers"] == "default"
+
+    db.execute(text("DELETE FROM run WHERE id = :r"), {"r": run_id})
+    db.commit()
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("solve.gap_rel", -0.1),
+        ("solve.gap_rel", 0.9),
+        ("solve.workers", 0),
+        ("solve.workers", 2.5),
+        ("solve.time_limit_s", 0),
+    ],
+)
+def test_a_solve_setting_out_of_range_is_refused(db, auth_headers, key, value):
+    response = TestClient(app).put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={"scope": "platform", "scope_id": None, "key": key, "value": value},
+    )
+    assert response.status_code == 422, response.text
+    assert key in response.json()["detail"]

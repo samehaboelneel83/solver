@@ -66,6 +66,7 @@ def solve(
     workers: int = 8,
     should_stop=None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     engine = available()
     if engine is None:  # pragma: no cover -- both ship with ortools
@@ -91,8 +92,12 @@ def solve(
         )
         solver.Minimize(expression) if compiled.sense == "minimize" else solver.Maximize(expression)
 
+    # pywraplp's own default gap is 1e-4, which would let a run be called
+    # optimal 0.01% short of the best. The setting decides, 0 by default.
+    parameters = pywraplp.MPSolverParameters()
+    parameters.SetDoubleParam(pywraplp.MPSolverParameters.RELATIVE_MIP_GAP, float(gap_rel))
     with interrupt_when(should_stop, solver.InterruptSolve):
-        status = solver.Solve()
+        status = solver.Solve(parameters)
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
 
     return Solution(

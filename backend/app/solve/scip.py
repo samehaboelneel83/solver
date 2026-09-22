@@ -65,6 +65,7 @@ def solve(
     workers: int = 1,
     should_stop=None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     import pyscipopt
 
@@ -73,6 +74,7 @@ def solve(
     model.setParam("limits/time", float(time_limit))
     if seed is not None:
         model.setParam("randomization/randomseedshift", int(seed))
+    model.setParam("limits/gap", float(gap_rel))
 
     variables = {key: _declare(model, key, spec) for key, spec in compiled.variables.items()}
     for constraint in compiled.constraints:

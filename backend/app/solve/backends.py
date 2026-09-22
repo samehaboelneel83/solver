@@ -39,6 +39,7 @@ class SolveFn(Protocol):
         workers: int,
         should_stop: ShouldStop | None = None,
         seed: int | None = None,
+        gap_rel: float = 0.0,
     ) -> Solution: ...
 
 
@@ -73,11 +74,13 @@ def _cpsat_solve(
     workers: int,
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     from app.solve import cpsat
 
     return cpsat.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel,
     )
 
 
@@ -88,11 +91,13 @@ def _milp_solve(
     workers: int,
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     from app.solve import milp
 
     return milp.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel,
     )
 
 
@@ -109,11 +114,13 @@ def _lp_solve(
     workers: int,
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     from app.solve import lp
 
     return lp.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel,
     )
 
 
@@ -130,11 +137,13 @@ def _highs_solve(
     workers: int,
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     from app.solve import highs
 
     return highs.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel,
     )
 
 
@@ -151,11 +160,13 @@ def _scip_solve(
     workers: int,
     should_stop: ShouldStop | None = None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     from app.solve import scip
 
     return scip.solve(
-        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel,
     )
 
 

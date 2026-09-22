@@ -82,6 +82,7 @@ def solve(
     workers: int = 8,
     should_stop=None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return _blank("unknown")
@@ -98,6 +99,7 @@ def solve(
                     "time_limit": time_limit,
                     "workers": workers,
                     "seed": seed,
+                    "gap_rel": gap_rel,
                 },
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -133,6 +135,7 @@ def solve_in_process(
     time_limit: float = 10.0,
     workers: int = 8,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -144,6 +147,9 @@ def solve_in_process(
         solver.setOptionValue("threads", int(workers))
     if seed is not None:
         solver.setOptionValue("random_seed", int(seed))
+    # HiGHS's own default is 1e-4: "optimal" up to 0.01% short of the best.
+    # The setting decides, 0 by default.
+    solver.setOptionValue("mip_rel_gap", float(gap_rel))
 
     variables = {key: _declare(solver, highspy, spec) for key, spec in compiled.variables.items()}
 

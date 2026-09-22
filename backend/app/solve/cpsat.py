@@ -74,6 +74,7 @@ def solve(
     workers: int = 8,
     should_stop=None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return Solution(
@@ -136,6 +137,10 @@ def solve(
     solver.parameters.num_search_workers = workers
     if seed is not None:
         solver.parameters.random_seed = int(seed)
+    # Stop once the answer is proven within this fraction of the best. 0, the
+    # default, is "prove the optimum"; the run then checks the recorded gap
+    # before it lets the answer be called optimal.
+    solver.parameters.relative_gap_limit = float(gap_rel)
     with interrupt_when(should_stop, solver.StopSearch):
         status = solver.Solve(model)
 

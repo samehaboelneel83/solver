@@ -102,6 +102,7 @@ def write_setting(
         return {"unset": payload.key, "scope": payload.scope, "scope_id": payload.scope_id}
 
     _refuse_wrong_type(known, payload.value, payload.key)
+    _refuse_out_of_range(payload.key, payload.value)
 
     try:
         db.execute(
@@ -139,6 +140,27 @@ def _refuse_wrong_type(value_type: str, value: Any, key: str) -> None:
             status_code=422,
             detail=f"{key} is a {value_type}, and {value!r} is not",
         )
+
+
+# The numbers a solve setting may take. A negative gap, zero threads or a
+# zero time limit would be stored happily and fail at solve time, far from the
+# screen that set them. Inclusive bounds; None means no limit that side.
+_RANGES: dict[str, tuple[float | None, float | None]] = {
+    "solve.time_limit_s": (0.1, None),
+    "solve.workers": (1, 64),
+    "solve.gap_rel": (0, 0.5),
+    "solve.seed": (0, 2_147_483_647),
+    "run.retention_days": (1, None),
+}
+
+
+def _refuse_out_of_range(key: str, value: Any) -> None:
+    low, high = _RANGES.get(key, (None, None))
+    if (low is not None and value < low) or (high is not None and value > high):
+        span = f"from {low}" + (f" to {high}" if high is not None else " up")
+        raise HTTPException(status_code=422, detail=f"{key} takes values {span}, and {value!r} is not one")
+    if key in ("solve.workers", "solve.seed", "run.retention_days") and value != int(value):
+        raise HTTPException(status_code=422, detail=f"{key} is a whole number, and {value!r} is not")
 
 
 def _json(value: Any) -> str:

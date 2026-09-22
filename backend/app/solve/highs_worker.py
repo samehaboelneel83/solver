@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         time_limit=payload["time_limit"],
         workers=payload["workers"],
         seed=payload.get("seed"),
+        gap_rel=payload.get("gap_rel", 0.0),
     )
     with open(out_path, "wb") as handle:
         pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)

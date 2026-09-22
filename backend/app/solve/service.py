@@ -106,6 +106,10 @@ def enqueue_run(
     if seed is None:
         seed = int(settings["solve.seed"].value)
         from_settings["seed"] = settings["solve.seed"].source
+    workers = int(settings["solve.workers"].value)
+    from_settings["workers"] = settings["solve.workers"].source
+    gap_rel = float(settings["solve.gap_rel"].value)
+    from_settings["gap_rel"] = settings["solve.gap_rel"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -135,6 +139,8 @@ def enqueue_run(
             "params": _json(
                 {
                     "time_limit_s": time_limit,
+                    "workers": workers,
+                    "gap_rel": gap_rel,
                     "classified_as": found.model_class,
                     "why": found.reasons,
                     "needs": sorted(found.needs),
@@ -298,6 +304,10 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     params = row["params"] or {}
     time_limit = float(params.get("time_limit_s", 10.0))
     seed = row["seed"]
+    # Runs queued before migration 0030 carry neither; they keep what they
+    # were solved with then.
+    workers = int(params.get("workers", 8))
+    gap_rel = float(params.get("gap_rel", 0.0))
     dataset_id = row["dataset_id"]
 
     stop = threading.Event()
@@ -337,7 +347,13 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
             result, reason = solve_compiled(
-                backend, compiled, time_limit=time_limit, seed=seed, should_stop=stop.is_set
+                backend,
+                compiled,
+                time_limit=time_limit,
+                seed=seed,
+                should_stop=stop.is_set,
+                workers=workers,
+                gap_rel=gap_rel,
             )
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
@@ -548,6 +564,7 @@ def _solve_lex(
     workers: int,
     should_stop=None,
     seed: int | None = None,
+    gap_rel: float = 0.0,
 ) -> Solution:
     """Optimise terms in order, freezing each before the next.
 
@@ -561,7 +578,12 @@ def _solve_lex(
         stages.append(compiled.penalty_objective.copy())
     if not stages:
         return backend.solve(
-            compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed
+            compiled,
+            time_limit=time_limit,
+            workers=workers,
+            should_stop=should_stop,
+            seed=seed,
+            gap_rel=gap_rel,
         )
 
     deadline = time.monotonic() + time_limit
@@ -576,9 +598,17 @@ def _solve_lex(
             constraints=[*compiled.constraints, *freezes],
         )
         result = backend.solve(
-            stage, time_limit=remaining, workers=workers, should_stop=should_stop, seed=seed
+            stage,
+            time_limit=remaining,
+            workers=workers,
+            should_stop=should_stop,
+            seed=seed,
+            gap_rel=gap_rel,
         )
         wall += result.wall_seconds
+        stage_gap = gap_of(result.objective, result.best_bound)
+        if stage_gap is not None and stage_gap > OPTIMAL_GAP:
+            result = replace(result, status="feasible", optimal=False)
         if result.status != "optimal" or not result.assignments:
             return replace(result, wall_seconds=round(wall, 3))
         value = term.evaluated_at(result.assignments)
@@ -614,7 +644,14 @@ def _solve_lex(
 
 
 def solve_compiled(
-    backend, compiled: Compiled, *, time_limit: float, seed: int | None = None, should_stop=None
+    backend,
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    seed: int | None = None,
+    should_stop=None,
+    workers: int = 8,
+    gap_rel: float = 0.0,
 ) -> tuple[Solution, str | None]:
     """Solve a compiled model as a run does, and say why if it is unbounded.
 
@@ -622,39 +659,51 @@ def solve_compiled(
     the model never set (`_unbounded_ceilings`). The reason is None unless the
     status is `unbounded`. The golden suite calls this, so what it pins is
     what a run records.
+
+    **"Optimal" means the gap is closed.** A backend asked to stop within
+    `gap_rel` of the best -- or one whose own default tolerance crept in --
+    can report `optimal` with a bound that is not the answer. Whatever it
+    says, an answer whose recorded gap exceeds `OPTIMAL_GAP` is `feasible`.
     """
+    knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     started = time.monotonic()
-    result = _solve(backend, compiled, time_limit, seed, should_stop)
+    result = _solve(backend, compiled, time_limit, knobs, should_stop)
     unbounded = _unbounded_ceilings(
         backend,
         compiled,
         result,
         max(0.5, time_limit - (time.monotonic() - started)),
-        seed,
+        knobs,
         should_stop,
     )
-    if unbounded is None:
-        return result, None
-    return unbounded
+    if unbounded is not None:
+        return unbounded
+    gap = gap_of(result.objective, result.best_bound)
+    if result.status == "optimal" and gap is not None and gap > OPTIMAL_GAP:
+        result = replace(result, status="feasible", optimal=False)
+    return result, None
 
 
-def _solve(backend, compiled: Compiled, time_limit: float, seed, should_stop) -> Solution:
+# The widest gap an answer may have and still be called optimal. Not zero:
+# solvers prove optimality to their own feasibility tolerances, and a bound
+# that differs from the answer in the eighth figure is that, not a gap.
+OPTIMAL_GAP = 1e-6
+
+
+def _solve(backend, compiled: Compiled, time_limit: float, knobs: dict, should_stop) -> Solution:
     if compiled.objective_mode == "lex":
         return _solve_lex(
             backend,
             compiled,
             time_limit=time_limit,
-            workers=8,
             should_stop=should_stop,
-            seed=seed,
+            **knobs,
         )
-    return backend.solve(
-        compiled, time_limit=time_limit, workers=8, should_stop=should_stop, seed=seed
-    )
+    return backend.solve(compiled, time_limit=time_limit, should_stop=should_stop, **knobs)
 
 
 def _unbounded_ceilings(
-    backend, compiled: Compiled, result: Solution, time_limit: float, seed, should_stop
+    backend, compiled: Compiled, result: Solution, time_limit: float, knobs: dict, should_stop
 ) -> tuple[Solution, str] | None:
     """An answer resting on a ceiling the model never set, shown to be unbounded.
 
@@ -683,7 +732,7 @@ def _unbounded_ceilings(
             for key, spec in compiled.variables.items()
         },
     )
-    again = _solve(backend, lifted, time_limit, seed, should_stop)
+    again = _solve(backend, lifted, time_limit, knobs, should_stop)
     if again.status not in ("optimal", "feasible") or again.objective is None:
         return None
     first, second = Decimal(str(result.objective)), Decimal(str(again.objective))
