@@ -487,11 +487,18 @@ export type ConstraintOutcome = {
   dual: number | null;
 };
 
+/** What an answer may claim (migration 0028). `global`: proven the best of
+ * all answers. `local`: the best among its neighbours -- a better one may
+ * exist. `none`: an answer, with no claim to be the best. */
+export type Optimality = "global" | "local" | "none";
+
 export type RunSummary = {
   id: Id;
   scenario_id: Id;
   dataset_id: Id;
   status: RunStatus;
+  /** Null when there is no answer to make a claim about. */
+  optimality?: Optimality | null;
   solver: string;
   solver_version: string | null;
   compiler_version: string | null;

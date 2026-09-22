@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Literal, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,6 +97,10 @@ class RunSummary(BaseModel):
     scenario_id: int
     dataset_id: int
     status: str
+    # Migration 0028. `global`: proven the best of all answers. `local`: the
+    # best among its neighbours -- a better one may exist elsewhere. `none`:
+    # an answer, with no claim to be the best. Null when there is no answer.
+    optimality: Literal["global", "local", "none"] | None = None
     solver: str
     solver_version: str | None
     compiler_version: str | None

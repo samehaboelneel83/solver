@@ -74,6 +74,26 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   cancelled: "Stopped before an answer.",
 };
 
+/**
+ * What the status means, qualified by what the answer may claim.
+ *
+ * "Optimal" is only a complete sentence when the solver that said it proves
+ * the best of ALL answers. A local solver's optimum is the best among its
+ * neighbours, and on a model that is not convex a better one can exist
+ * somewhere else; worded like a global optimum, it would be believed. So the
+ * claim decides the words, and a missing claim (an older run) falls back to
+ * the plain status note.
+ */
+export function statusNote(run: { status: RunStatus; optimality?: string | null }): string {
+  if (run.status === "optimal" && run.optimality === "local") {
+    return "The best answer near where the search looked -- not proven the best overall. A better one may exist; solving from another start, or with a global solver, is how to find out.";
+  }
+  if (run.status === "optimal" && run.optimality === "global") {
+    return "Best possible answer, proven: no other answer does better.";
+  }
+  return STATUS_NOTE[run.status];
+}
+
 export default function Runs() {
   useDocumentTitle("Runs");
   const { domainId } = useDomain();
@@ -539,7 +559,7 @@ function RunDetail({ id }: { id: Id }) {
       <h2 id={`run-${id}-heading`} className="mb-1 text-base font-semibold text-slate-900">
         Run {String(id)}
       </h2>
-      <p className="mb-4 text-sm text-slate-600">{STATUS_NOTE[data.status]}</p>
+      <p className="mb-4 text-sm text-slate-600">{statusNote(data)}</p>
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
 
       {can("run.submit") && unfinished && (

@@ -219,6 +219,8 @@ class Run(Base):
     # numeric(15, 6) since migration 0015: a linear program's optimum is
     # fractional almost always, and a bigint would round the answer.
     objective: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    # Migration 0028: what an answer may claim -- global, local or none.
+    optimality: Mapped[str | None] = mapped_column(Text, nullable=True)
     wall_time_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     # infeasible: [{"constraint_id": "...", "instance": [...]}]
     conflict: Mapped[Any | None] = mapped_column(JSONB, nullable=True)

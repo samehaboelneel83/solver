@@ -24,7 +24,7 @@ from typing import Any, Iterator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.solve.backends import NoBackend, choose
+from app.solve.backends import NoBackend, choose, optimality_of
 from app.solve.classify import classify
 from app.solve.compile import (
     _VIOLATION,
@@ -371,6 +371,13 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         {"s": backend.name, "extra": _json(extra), "r": run_id},
     )
     _record(db, run_id, compiled, result)
+    # What the answer may claim, as the backend that found it declares
+    # (migration 0028): "optimal" from a local solver is not the same claim
+    # as "optimal" from a global one, and the run must not blur the two.
+    db.execute(
+        text("UPDATE run SET optimality = :o WHERE id = :r"),
+        {"o": optimality_of(backend, result.status), "r": run_id},
+    )
     if result.status == "infeasible":
         # "No answer exists" is true and useless on its own. Which rules
         # cannot hold together is the thing a planner can act on, and it is

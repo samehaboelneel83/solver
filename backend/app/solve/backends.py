@@ -19,7 +19,7 @@ questioned:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Literal, Callable, Protocol
 
 from app.solve.classify import Classification
 from app.solve.compile import Compiled
@@ -51,6 +51,12 @@ class Backend:
     #: Lower runs first when both could take a model.
     rank: int
     solve: SolveFn
+    #: What this backend's `optimal` proves (migration 0028): `global` -- the
+    #: best of all possible answers -- or `local` -- the best among its
+    #: neighbours, with a better one possibly elsewhere. Required, with no
+    #: default, so a local solver cannot be registered without saying so: a
+    #: local optimum shown as "optimal" looks exactly like the best answer.
+    proves: Literal["global", "local"]
     #: Whether this build actually has it.
     is_available: Callable[[], bool] = field(default=lambda: True)
     note: str = ""
@@ -145,6 +151,8 @@ CP_SAT = Backend(
     provides=frozenset({"linear", "integral", "soft-constraints"}),
     rank=0,
     solve=_cpsat_solve,
+    # A linear model is convex: every optimum it proves is the global one.
+    proves="global",
     note="constraint programming; strongest on tightly constrained combinatorial models",
     planner_choice="A combinatorial solver will take this by default.",
 )
@@ -155,6 +163,8 @@ GLOP = Backend(
     provides=frozenset({"linear", "continuous", "fractional-data", "soft-constraints"}),
     rank=0,
     solve=_lp_solve,
+    # A linear model is convex: every optimum it proves is the global one.
+    proves="global",
     is_available=_lp_available,
     note="the simplex method; the right technique for a model with no discrete decisions",
     planner_choice="A linear solver will take this by default.",
@@ -168,6 +178,8 @@ HIGHS = Backend(
     ),
     rank=1,
     solve=_highs_solve,
+    # A linear model is convex: every optimum it proves is the global one.
+    proves="global",
     is_available=_highs_available,
     note="HiGHS; LP and MILP under an MIT licence, the mixed-model default when installed",
     planner_choice="A mixed solver will take this by default.",
@@ -181,6 +193,8 @@ MILP = Backend(
     ),
     rank=1,
     solve=_milp_solve,
+    # A linear model is convex: every optimum it proves is the global one.
+    proves="global",
     is_available=_milp_available,
     note="branch and cut over a linear relaxation; the ortools fallback for a mixed model",
     planner_choice="A mixed solver will take this by default.",
@@ -252,3 +266,17 @@ def planner_choice_for(found: Classification) -> str | None:
     except NoBackend:
         return None
     return backend.planner_choice
+
+
+def optimality_of(backend: Backend, status: str) -> str | None:
+    """What a run's answer may claim, from the backend's declaration.
+
+    `optimal` claims whatever the backend proves; `feasible` -- an answer found
+    before the clock ran out -- claims nothing about being best; a run with no
+    answer makes no claim at all.
+    """
+    if status == "optimal":
+        return backend.proves
+    if status == "feasible":
+        return "none"
+    return None
