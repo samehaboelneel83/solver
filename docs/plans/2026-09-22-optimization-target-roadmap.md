@@ -242,9 +242,11 @@ is no remote for a hosted one. The primal integral is `bench.primal`
 (2026-09-23, migration `0038`): Berthold's area under the primal gap, from
 the incumbents a backend streams plus its final answer, in every row, the
 report and `bench_result`; backends that stream nothing (GLOP, the MILP
-wrapper) are charged until they finish. Still open in this phase: D7 for the pywraplp backends (GLOP and
-the MILP wrapper spend ~0.7 s on a 200,000-entry model; not yet measured
-against a proto load), and CP-SAT fractional scaling.
+wrapper) are charged until they finish. D7 is done for the pywraplp backends too (2026-09-23): GLOP and
+the MILP wrapper load one `MPModelProto` -- 0.435 s to 0.043 s on 200,000
+entries, measured against the expression build and per-entry coefficients
+first (`bench/results/2026-09-23-pywraplp-build.md`). Still open in this
+phase: CP-SAT fractional scaling.
 
 **Exit:** golden suite green on every backend; timeout-without-incumbent can't return values; two runs
 with the same seed reproduce; gap visible in the Runs UI.
