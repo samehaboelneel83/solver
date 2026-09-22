@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GRAPH_MODE_STORAGE_KEY, parseGraphMode, useGraphMode } from "./useGraphMode";
+import { GRAPH_MODE_STORAGE_KEY, parseGraphMode } from "./useGraphMode";
 
 /**
  * Persistence, tested as persistence.
@@ -13,9 +13,17 @@ import { GRAPH_MODE_STORAGE_KEY, parseGraphMode, useGraphMode } from "./useGraph
  * one, or reads `localStorage` directly.
  */
 
-beforeEach(() => {
+// Each test gets a module of its own. The module keeps state -- the
+// in-memory fallback and whether storage has been found broken -- so a
+// static import shared by every test let "keeps working when localStorage
+// throws" leave its broken storage and its "types" behind for whichever
+// test ran next.
+let useGraphMode: typeof import("./useGraphMode").useGraphMode;
+
+beforeEach(async () => {
   localStorage.clear();
   vi.resetModules();
+  ({ useGraphMode } = await import("./useGraphMode"));
 });
 
 afterEach(() => {

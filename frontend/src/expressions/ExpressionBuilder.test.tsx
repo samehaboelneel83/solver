@@ -160,6 +160,26 @@ describe("defaultValueFor", () => {
   });
 });
 
+describe("ExpressionBuilder — reports only edits", () => {
+  // react-querybuilder reports its query once on mount unless told not to.
+  // That report is nobody's edit, and it arrives a moment after the render
+  // it came from: in the model editor it climbed a chain of handlers, each
+  // rebuilding its value from the props of that earlier render, and wrote a
+  // stale copy of the whole rule over whatever the person had just changed
+  // -- a rule made "preferred" snapped back to "required".
+  it("does not call onChange just for being shown", async () => {
+    const onChange = renderBuilder(docWith({ field: CAPACITY, operator: ">", value: 3 }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does not call onChange for being shown empty", async () => {
+    const onChange = renderBuilder(null);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("ExpressionBuilder — editing", () => {
   it("emits a versioned document whenever anything changes", () => {
     const onChange = renderBuilder(docWith({ field: CODE, operator: "contains", value: "a" }));

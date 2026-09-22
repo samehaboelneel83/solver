@@ -460,6 +460,13 @@ export default function ExpressionBuilder({
         <QueryBuilder
           query={query}
           onQueryChange={(next: RuleGroupType) => onChange(toDocument(next))}
+          // Report edits only. By default the library also reports the query
+          // once on mount, a tick after the render it came from; a parent
+          // that rebuilds its value from that render's props then writes a
+          // stale copy over whatever was changed in between (in the model
+          // editor, a rule's strength snapped back). Nothing here needs the
+          // mount report: the document shown is the one we passed in.
+          enableMountQueryChange={false}
           fields={fields}
           // `defaults.ts`, not `catalogue.fields[0]`: that was the
           // alphabetically first field including the generated calls, i.e.

@@ -1022,6 +1022,13 @@ describe("EntityDetail: a concurrent edit (Ruling 42)", () => {
     },
   ];
 
+  // `puts()` counts every PUT the mock has seen, so it must start from none:
+  // without this, a test elsewhere in the file that saved a domain and ran
+  // first (as a shuffled order can have it) left its PUTs to be counted here.
+  beforeEach(() => {
+    (apiFetch as unknown as ReturnType<typeof vi.fn>).mockReset();
+  });
+
   function puts(): Record<string, unknown>[] {
     return (apiFetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       .filter((call) => (call[1] as RequestInit | undefined)?.method === "PUT")
