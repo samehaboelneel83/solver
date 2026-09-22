@@ -357,8 +357,13 @@ done (2026-09-23): `app.core.logs` renders every line as JSON through
 structlog -- stdlib and uvicorn lines too -- with the worker binding
 `run_id`, `org_id` and then `solver`, and the API writing one line per
 request with the organization (carried on `request.state`, since a
-dependency's context is a copy). Still open in this phase: Prometheus
-metrics, OpenTelemetry tracing, the ClickHouse `run_fact` writer, and
+dependency's context is a copy). Metrics are done too
+(`app.core.metrics`): the worker serves `solve_seconds`, `run_gap` (a
+histogram), `runs_total`, `queue_wait_seconds` and `worker_busy` on 9100,
+the API `queue_depth{org}` (counted at scrape) on 9101 -- internal ports,
+not published, since queue depth names organizations; no Prometheus server
+is deployed yet, and `diagnose_probes_total` is not counted. Still open in
+this phase: OpenTelemetry tracing, the ClickHouse `run_fact` writer, and
 `run_event` retention.
 
 ---

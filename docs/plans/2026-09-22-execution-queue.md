@@ -32,7 +32,7 @@ lane; no LLM / NL→IR work.
 ## Phase 8 — observability
 
 - [x] (8) Structured logs — done when API and worker emit JSON logs via `structlog` with `run_id`, `org_id`, `solver` bound. *(`7d64ba5`: `app.core.logs`; checked live on both containers.)*
-- [ ] (8) Metrics and `/metrics` — done when `solve_seconds`, `run_gap`, `queue_depth`, `queue_wait_seconds`, `worker_busy` are exported on the API and a worker port and scraped live.
+- [x] (8) Metrics and `/metrics` — done when `solve_seconds`, `run_gap`, `queue_depth`, `queue_wait_seconds`, `worker_busy` are exported on the API and a worker port and scraped live. *(`6470b48`: internal ports 9101 (API) and 9100 (worker), unpublished; scraped from the compose network. No Prometheus server is deployed.)*
 - [ ] (8) OpenTelemetry tracing — done when a run's API span and its worker spans (`compile`, `choose`, `solve`, `diagnose`, `persist`) share one trace through `run.params.trace`, exporter configurable.
 - [ ] (8) ClickHouse `run_fact` writer — done when every settled run inserts one `run_fact` row, verified live.
 - [ ] (8) `run_event` retention — done when events older than the setting (default 30 days after settle) are pruned by the worker, pinned by a test.
