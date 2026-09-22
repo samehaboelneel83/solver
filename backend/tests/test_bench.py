@@ -175,3 +175,82 @@ def test_results_are_stored_for_the_history(db):
     finally:
         db.execute(text("DELETE FROM bench_result WHERE instance = 'i'"))
         db.commit()
+
+
+# -- the nightly job --------------------------------------------------------
+
+
+def _row(instance="rota-L-0", backend="cp-sat", seed=1, status="optimal", objective=10.0,
+         solve_s=1.0, wrong=False):
+    return {"instance": instance, "backend": backend, "seed": seed, "status": status,
+            "objective": objective, "solve_s": solve_s, "wrong": wrong}
+
+
+def test_nightly_finds_nothing_when_nothing_changed():
+    from bench.nightly import compare
+
+    night = [_row(), _row(backend="highs", solve_s=1.4)]
+    assert compare(night, [dict(r) for r in night]) == []
+
+
+def test_nightly_reports_each_kind_of_worse():
+    from bench.nightly import compare
+
+    before = [
+        _row(instance="a", objective=10.0),
+        _row(instance="b", status="optimal", objective=5.0),
+        _row(instance="c", solve_s=1.0),
+    ]
+    tonight = [
+        _row(instance="a", objective=11.0),                      # the optimum moved
+        _row(instance="b", status="feasible", objective=6.0),    # proof lost
+        _row(instance="c", solve_s=4.5),                         # (4.5+1)/(1+1) = 2.75x
+        _row(instance="d", status="error", objective=None),
+        _row(instance="e", wrong=True),
+    ]
+    problems = compare(before, tonight)
+    assert any(p.startswith("optimum moved: a was 10.0, now 11.0") for p in problems)
+    assert any(p.startswith("proof lost: b on cp-sat") for p in problems)
+    assert any(p.startswith("2x slower: c on cp-sat") for p in problems)
+    assert any(p.startswith("error: d on cp-sat") for p in problems)
+    assert any(p.startswith("wrong: e on cp-sat") for p in problems)
+    assert len(problems) == 5
+
+
+def test_nightly_does_not_call_noise_on_a_fast_solve_a_regression():
+    """20 ms to 90 ms is 4.5x raw, but (0.09+1)/(0.02+1) = 1.07 shifted."""
+    from bench.nightly import compare
+
+    assert compare([_row(solve_s=0.02)], [_row(solve_s=0.09)]) == []
+
+
+def test_nightly_first_night_only_checks_tonight():
+    from bench.nightly import compare
+
+    assert compare(None, [_row()]) == []
+    assert compare(None, [_row(wrong=True)]) != []
+
+
+def test_nightly_runs_end_to_end_and_compares_with_the_night_before(tmp_path):
+    """Two nights on the small instances: the second compares with the first
+    and finds nothing; a doctored first night makes it fail."""
+    import json
+
+    from bench.nightly import main
+
+    common = ["--out-dir", str(tmp_path), "--sizes", "S", "--instances", "1", "--seeds", "1",
+              "--time-limit", "10", "--no-store"]
+    assert main([*common, "--night", "2026-01-01"]) == 0
+    assert main([*common, "--night", "2026-01-02"]) == 0
+    summary = (tmp_path / "2026-01-02.md").read_text()
+    assert "compared with 2026-01-01" in summary
+    assert "Nothing got worse" in summary
+
+    first = json.loads((tmp_path / "2026-01-01.json").read_text())
+    for row in first:
+        if row["status"] == "optimal":
+            row["objective"] = row["objective"] + 1
+    (tmp_path / "2026-01-01.json").write_text(json.dumps(first))
+    (tmp_path / "2026-01-02.json").unlink()
+    assert main([*common, "--night", "2026-01-02"]) == 1
+    assert "optimum moved" in (tmp_path / "2026-01-02.md").read_text()

@@ -24,3 +24,6 @@ backend/_probe_*.py
 
 # MIPLIB instances are downloaded by `python -m bench.download_miplib`, not committed.
 backend/bench/mps/
+
+# Nightly job output (scripts/nightly.sh).
+backend/bench/nightly_results/
