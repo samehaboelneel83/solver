@@ -239,6 +239,12 @@ def _honour_cancel(db: Session, run_id: int) -> bool:
     return True
 
 
+def _cancel_requested(db: Session, run_id: int) -> bool:
+    return bool(
+        db.execute(text("SELECT cancel_requested FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    )
+
+
 def _cancelled_outcome(db: Session, run_id: int) -> RunOutcome:
     dataset_id = db.execute(
         text("SELECT dataset_id FROM run WHERE id = :r"), {"r": run_id}
@@ -370,13 +376,21 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
 
-        if _honour_cancel(db, run_id):
-            return _cancelled_outcome(db, run_id)
+        # Stopped while solving. An answer found before the stop is still an
+        # answer -- throwing it away made "Stop" cost everything the solver
+        # had done -- so it is kept, as `feasible` with its gap, and marked.
+        # Only a stop with nothing in hand is `cancelled`.
+        stopped = _cancel_requested(db, run_id)
+        if stopped and not (result.status in ("optimal", "feasible") and result.assignments):
+            if _honour_cancel(db, run_id):
+                return _cancelled_outcome(db, run_id)
 
     # Which solver ran, and why it was the one -- a result nobody can
     # attribute to a choice is not reproducible. Empty ranges ride along:
     # they are a fact about this compile, not a second table.
     extra = {"chosen_solver": backend.name, "why_solver": why}
+    if stopped:
+        extra["stopped_by_request"] = True
     if compiled.empty_ranges:
         extra["empty_ranges"] = compiled.empty_ranges
     if compiled.objective_mode == "lex":

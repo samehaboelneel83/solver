@@ -87,7 +87,18 @@ const STATUS_NOTE: Record<RunStatus, string> = {
  * claim decides the words, and a missing claim (an older run) falls back to
  * the plain status note.
  */
-export function statusNote(run: { status: RunStatus; optimality?: string | null; gap?: number | null }): string {
+export function statusNote(run: {
+  status: RunStatus;
+  optimality?: string | null;
+  gap?: number | null;
+  /** The run was stopped on request and kept the answer it had. */
+  stopped?: boolean;
+}): string {
+  if (run.status === "feasible" && run.stopped) {
+    return typeof run.gap === "number"
+      ? `Stopped on request. The best answer found by then -- at most ${formatGap(run.gap)} worse than the best possible.`
+      : "Stopped on request. The best answer found by then -- not proven best.";
+  }
   if (run.status === "feasible" && typeof run.gap === "number") {
     return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
   }
@@ -599,6 +610,7 @@ function RunDetail({ id }: { id: Id }) {
   const emptyRanges = (data.params as { empty_ranges?: EmptyRange[] }).empty_ranges ?? [];
   const lead = outcomeLead(data);
   const params = data.params as {
+    stopped_by_request?: boolean;
     why_solver?: string;
     classified_as?: string;
     objective_mode?: string;
@@ -620,7 +632,7 @@ function RunDetail({ id }: { id: Id }) {
       <h2 id={`run-${id}-heading`} className="mb-1 text-base font-semibold text-slate-900">
         Run {String(id)}
       </h2>
-      <p className="mb-4 text-sm text-slate-600">{statusNote(data)}</p>
+      <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
 
       {can("run.submit") && unfinished && (

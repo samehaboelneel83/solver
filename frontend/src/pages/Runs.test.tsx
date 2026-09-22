@@ -183,6 +183,13 @@ describe("gap and unbounded (migration 0029)", () => {
     expect(statusNote({ status: "feasible", optimality: "none", gap: 0.0231 })).toMatch(/at most 2.3% worse/);
   });
 
+  it("says a run stopped on request kept the answer it had", () => {
+    expect(statusNote({ status: "feasible", gap: 0.1, stopped: true })).toMatch(
+      /Stopped on request\. The best answer found by then -- at most 10% worse/
+    );
+    expect(statusNote({ status: "feasible", gap: null, stopped: true })).toMatch(/not proven best/);
+  });
+
   it("falls back to the plain note when there is no bound", () => {
     expect(statusNote({ status: "feasible", optimality: "none", gap: null })).toMatch(/not proven best/);
   });

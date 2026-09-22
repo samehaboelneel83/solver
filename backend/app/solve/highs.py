@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import os
 import pickle
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from decimal import Decimal
 from importlib.metadata import version as _pkg_version
 from importlib.util import find_spec
@@ -42,6 +44,9 @@ except Exception:
     pass
 
 _available: bool | None = None
+
+# How long a child asked to stop may take to write out its answer.
+_STOP_GRACE = 3.0
 
 
 def available() -> bool:
@@ -111,8 +116,17 @@ def solve(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        def stop_child() -> None:
+            # SIGTERM first: the child turns it into HiGHS's own cancel and
+            # writes out the best answer it has. Killed only if it has not
+            # gone within `_STOP_GRACE` seconds.
+            proc.terminate()
+            timer = threading.Timer(_STOP_GRACE, lambda: proc.poll() is None and proc.kill())
+            timer.daemon = True
+            timer.start()
+
         try:
-            with interrupt_when(should_stop, proc.terminate):
+            with interrupt_when(should_stop, stop_child):
                 _, stderr = proc.communicate(timeout=max(time_limit + 15.0, 20.0))
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -186,7 +200,16 @@ def solve_in_process(
         if compiled.objective_quadratic:
             solver.passHessian(_hessian(highspy, solver, variables, compiled.objective_quadratic, sign))
 
-    solver.run()
+    # `solve()` with keyboard-interrupt handling, not `run()`: HiGHS then
+    # solves on a thread, and an interrupt -- the SIGTERM the parent sends
+    # to stop a run, turned into one below -- calls `cancelSolve()`, which
+    # ends the search keeping the incumbent. `run()` could only be killed.
+    solver.HandleKeyboardInterrupt = True
+    previous = signal.signal(signal.SIGTERM, signal.default_int_handler)
+    try:
+        solver.solve()
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
     status = _status(solver.getModelStatus())
     if status == "feasible" and not _has_solution(solver):
@@ -303,8 +326,10 @@ def _status(model_status) -> str:
         ("kInfeasible", "infeasible"),
         ("kUnbounded", "unbounded"),
         ("kUnboundedOrInfeasible", "unknown"),
-        ("kInterrupt", "unknown"),
-        ("kHighsInterrupt", "unknown"),
+        # Stopped on request: an answer if it has one (`_has_solution`
+        # decides), otherwise nothing.
+        ("kInterrupt", "feasible"),
+        ("kHighsInterrupt", "feasible"),
     ):
         code = getattr(highspy.HighsModelStatus, name, None)
         if code is not None:

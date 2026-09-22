@@ -304,3 +304,78 @@ def test_optimal_with_an_open_gap_is_recorded_as_feasible():
     assert result.status == "feasible"
     assert result.optimal is False
     assert gap_of(result.objective, result.best_bound) == pytest.approx(0.1)
+
+
+# -- D4: a stopped run keeps the answer it had --------------------------------------
+
+
+def _hard_knapsack(n: int = 200, m: int = 10) -> Compiled:
+    """Ten capacity rows over 200 yes/no items: HiGHS finds good answers in
+    well under a second and cannot prove the best one for many seconds."""
+    rnd = random.Random(4)
+    keys = [("x", (str(i),)) for i in range(n)]
+    rows = []
+    for j in range(m):
+        weights = {k: Decimal(rnd.randint(1, 1000)) for k in keys}
+        rows.append(Constraint(f"c{j}", {}, Linear(weights), "<=", Linear(const=sum(weights.values()) // 4)))
+    return Compiled(
+        variables={k: Variable(k, "binary", Decimal(0), Decimal(1)) for k in keys},
+        constraints=rows,
+        objective=Linear({k: Decimal(rnd.randint(1, 1000)) for k in keys}),
+        sense="maximize",
+        var_index_sets={"x": []},
+    )
+
+
+@pytest.mark.skipif(not highs.available(), reason="highs is not installed")
+def test_stopping_highs_keeps_the_best_answer_it_had():
+    import time
+
+    started = time.monotonic()
+    result = highs.solve(
+        _hard_knapsack(), time_limit=60, workers=1, should_stop=lambda: time.monotonic() - started > 1.5
+    )
+
+    assert time.monotonic() - started < 10
+    assert result.status == "feasible"
+    assert len(result.assignments) == 200
+    assert result.objective is not None and result.best_bound is not None
+    assert result.best_bound >= result.objective
+
+
+def _stop_during_solve(monkeypatch, answer: Solution | None):
+    """Make CP-SAT's solve mark the run as asked to stop, then return
+    `answer` -- or the real result when None."""
+    from app.core.db import SessionLocal
+
+    real = cpsat.solve
+
+    def stopped(compiled, **kwargs):
+        session = SessionLocal()
+        session.execute(text("UPDATE run SET cancel_requested = true WHERE status = 'running'"))
+        session.commit()
+        session.close()
+        return answer if answer is not None else real(compiled, **kwargs)
+
+    monkeypatch.setattr(cpsat, "solve", stopped)
+
+
+def test_a_run_stopped_with_an_answer_keeps_it_and_says_it_was_stopped(db, monkeypatch):
+    _stop_during_solve(monkeypatch, None)
+
+    row = _run(db, _scalar("binary", "maximize", X, []), "honesty-stop-kept")
+    params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": row["id"]}).scalar_one()
+
+    assert row["status"] == "optimal"
+    assert row["objective"] == 1
+    assert row["solutions"] == 1
+    assert params["stopped_by_request"] is True
+
+
+def test_a_run_stopped_with_nothing_in_hand_is_cancelled(db, monkeypatch):
+    _stop_during_solve(monkeypatch, Solution("unknown", False, None, {}, 0.0, "cp-sat"))
+
+    row = _run(db, _scalar("binary", "maximize", X, []), "honesty-stop-empty")
+
+    assert row["status"] == "cancelled"
+    assert row["solutions"] == 0
