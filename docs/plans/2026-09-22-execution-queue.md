@@ -18,7 +18,8 @@ lane; no LLM / NL→IR work.
 
 - [x] (P0) Intermittent frontend test failure — done when the race in the editor is found and fixed, and `vitest` passes 10 runs in a row. *(`fb8843c`: react-querybuilder's mount report wrote a stale rule over fresh edits; 10 plain + 6 shuffled runs green.)*
 - [x] (P0) `weekly_rota` on an empty domain is infeasible — done when applying the template to a new domain and solving gives an optimal answer, pinned by a test. *(`e4cd513`, `ca6580e`: the template's coverage is a target (soft, 100); start-up now refreshes the template; live run optimal at 3669, the hand-worked value.)*
-- [ ] (P0) Non-superuser Postgres login role for the app — done when API and worker connect as a role without superuser/BYPASSRLS, migrations still run as the owner, and tenant isolation holds live.
+- [x] (P0) Non-superuser Postgres login role for the app — done when API and worker connect as a role that is not a superuser and owns nothing, migrations still run as the owner, and tenant isolation holds live. *(`9c2f2be`, migration 0037: `solver_runtime`. Amended: the line first said "without BYPASSRLS", which 0032's design rules out -- system code sees every tenant -- so the role keeps it.)*
+- [ ] (P0) API requests log in without BYPASSRLS — done when the API connects as a role without BYPASSRLS (closing `RESET ROLE` out of a tenant), sign-in and API-key lookups work before the tenant is known, the start-up seed runs as another role, and the worker keeps `solver_runtime`.
 
 ## Phase 6 leftovers
 

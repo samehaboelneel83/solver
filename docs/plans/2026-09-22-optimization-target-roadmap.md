@@ -271,7 +271,8 @@ the decision's stated assumption: a tenant is an `iam.organization`, a
 domain belongs to one). Every tenant table carries `organization_id`, filled
 from the parent by trigger, and a row whose parents are in different
 organizations is refused. RLS is enforced for the role API requests switch
-to (`solver_app`) -- the app connects as a superuser, which bypasses RLS --
+to (`solver_app`) -- the app connects as `solver_runtime` (migration
+`0037`: not a superuser, but BYPASSRLS for system code), which bypasses RLS --
 and fails closed without `app.org_id`; each request is pinned to one
 connection so the tenant cannot be lost at a commit. Roles, capabilities,
 setting keys, templates and platform settings are shared and writable only
