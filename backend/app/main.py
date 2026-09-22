@@ -20,6 +20,7 @@ from app.clickhouse_schema import create_analytics_schema
 from app.core.db import SessionLocal, get_clickhouse_client
 from app.core.nul_guard import NulByteGuard
 from app.seed import seed_admin
+from app.showcase import ensure_showcase_templates
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,17 @@ async def lifespan(_app: FastAPI):
             "Run: docker compose run --rm --no-deps -T backend alembic upgrade head",
             exc_info=True,
         )
+    finally:
+        db.close()
+    # The feed-blend and load-balance templates, which show the linear and
+    # quadratic solving the rota cannot. Separate from the admin seed so a
+    # problem with one does not stop the other.
+    db = SessionLocal()
+    try:
+        ensure_showcase_templates(db)
+    except Exception:
+        db.rollback()
+        logger.warning("Skipped the showcase templates", exc_info=True)
     finally:
         db.close()
     yield
