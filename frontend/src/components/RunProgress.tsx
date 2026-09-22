@@ -48,6 +48,7 @@ export default function RunProgress({
   onSettled?: () => void;
 }) {
   const [points, setPoints] = useState<Point[]>([]);
+  const [recorded, setRecorded] = useState(0);
   const [stage, setStage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const onSettledRef = useRef(onSettled);
@@ -55,10 +56,12 @@ export default function RunProgress({
 
   useEffect(() => {
     setPoints([]);
+    setRecorded(0);
     setStage(null);
     setFailed(false);
     const stop = watchRun(runId, {
       onEvent: (event: RunEvent) => {
+        setRecorded((count) => count + 1);
         if (event.kind === "stage") setStage(String(event.stage ?? ""));
         if (event.kind === "incumbent" || event.kind === "bound") {
           setPoints((current) => [
@@ -135,7 +138,11 @@ export default function RunProgress({
         </svg>
       ) : (
         <p className="text-sm text-slate-500">
-          {live ? "Waiting for the solver's first answer…" : "This run reported no progress: it finished too quickly to say anything."}
+          {live
+            ? "Waiting for the solver's first answer…"
+            : recorded === 0
+              ? "Nothing was recorded while this run was solved: it ran before runs were watched."
+              : "This run reported no progress: it was settled before the search began."}
         </p>
       )}
       <p className="mt-1 text-xs text-slate-500">

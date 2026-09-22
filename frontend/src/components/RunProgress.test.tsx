@@ -59,11 +59,16 @@ describe("watching a run", () => {
     expect(screen.getByText("compiled")).toBeInTheDocument();
   });
 
-  it("says a finished run that reported nothing was simply quick", async () => {
+  it("tells a run settled before the search apart from one nobody watched", async () => {
     serve([{ seq: 1, kind: "stage", at: "", stage: "settled" }]);
-    render(<RunProgress runId={5} live={false} />);
+    const settled = render(<RunProgress runId={5} live={false} />);
+    expect(await screen.findByText(/settled before the search began/)).toBeInTheDocument();
+    settled.unmount();
 
-    expect(await screen.findByText(/finished too quickly/)).toBeInTheDocument();
+    // A run from before this was kept has nothing at all to replay.
+    serve([]);
+    render(<RunProgress runId={6} live={false} />);
+    expect(await screen.findByText(/before runs were watched/)).toBeInTheDocument();
   });
 
   it("tells the page when the run settles, so it can show the answer", async () => {
