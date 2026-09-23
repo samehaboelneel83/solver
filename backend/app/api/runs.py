@@ -72,6 +72,10 @@ class RunRequest(BaseModel):
     #: Ask for the trade-off front between the goal's two terms instead of
     #: one answer: the ends and this many steps between (`app.solve.pareto`).
     pareto_steps: Annotated[int, Field(ge=2, le=50)] | None = None
+    #: Solve the robust counterpart: every rule that reads a parameter
+    #: declared uncertain within a range must hold for any `gamma` of its
+    #: values moving (`app.solve.robust`), and report the price.
+    robust: bool = False
 
 
 class ConstraintOutcome(BaseModel):
@@ -243,6 +247,7 @@ def create_run(
             solver=request.solver,
             reuse=request.reuse,
             pareto_steps=request.pareto_steps,
+            robust=request.robust,
         )
     except QuotaExceeded as exc:
         # 422, not 429: the request is well-formed and the caller is not

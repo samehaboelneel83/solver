@@ -292,6 +292,11 @@ function ScenarioRuns({
   const { can } = useCapabilities();
   const version = useVersion(modelVersionId);
   const unexpressed = unexpressedRules(version.data?.ir);
+  // A robust solve needs a parameter declared uncertain within a range.
+  const uncertain = Object.values(
+    ((version.data?.ir as { parameters?: Record<string, { uncertainty?: { kind?: string } }> } | undefined)
+      ?.parameters ?? {})
+  ).some((spec) => spec.uncertainty?.kind === "interval");
   // A trade-off front needs a goal of exactly two terms (app.solve.pareto).
   const twoGoals =
     ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length === 2;
@@ -319,12 +324,17 @@ function ScenarioRuns({
   const comparable = items.filter((row) => row.id !== selected);
   const against = comparable.some((row) => row.id === againstId) ? againstId : null;
 
-  function solve(front = false) {
+  function solve(how: "plain" | "front" | "robust" = "plain") {
     setFailure(null);
     createRun.mutate(
       {
         scenarioId,
-        body: { time_limit_s: 30, ...(solver ? { solver } : {}), ...(front ? { pareto_steps: 10 } : {}) },
+        body: {
+          time_limit_s: 30,
+          ...(solver ? { solver } : {}),
+          ...(how === "front" ? { pareto_steps: 10 } : {}),
+          ...(how === "robust" ? { robust: true } : {}),
+        },
       },
       {
         onSuccess: (run: Run) => {
@@ -367,11 +377,21 @@ function ScenarioRuns({
           {twoGoals && (
             <button
               type="button"
-              onClick={() => solve(true)}
+              onClick={() => solve("front")}
               disabled={createRun.isPending}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Show the trade-off between its two goals
+            </button>
+          )}
+          {uncertain && (
+            <button
+              type="button"
+              onClick={() => solve("robust")}
+              disabled={createRun.isPending}
+              className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+            >
+              Solve robustly
             </button>
           )}
           </>
@@ -697,6 +717,9 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         </p>
       )}
 
+      {(data.params as { robust?: RobustReport }).robust && (
+        <Robustness report={(data.params as { robust: RobustReport }).robust} objective={data.objective} />
+      )}
       {data.pareto && data.pareto.length > 0 && (
         <TradeOff points={data.pareto} terms={data.pareto_terms ?? ["first goal", "second goal"]} onOpen={onOpen} />
       )}
@@ -1009,6 +1032,41 @@ function Conflict({
             Creates a scenario that softens the fighting rules. Solve it from the Scenarios page.
           </span>
         </div>
+      )}
+    </section>
+  );
+}
+
+type RobustReport = {
+  rows: { rule: string; index: string[]; moving: number; gamma: number }[];
+  nominal?: number | null;
+  nominal_status?: string;
+  price?: number;
+  price_share?: number;
+  note?: string;
+};
+
+/** What a robust answer protects against, and what the protection costs. */
+export function Robustness({ report, objective }: { report: RobustReport; objective: unknown }) {
+  const shown = (value: number) => String(Number(value.toPrecision(6)));
+  if (report.rows.length === 0) {
+    return <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">{report.note}</p>;
+  }
+  const rules = [...new Set(report.rows.map((row) => row.rule))];
+  return (
+    <section className="mb-4 rounded-md border border-slate-200 p-3 text-sm text-slate-700">
+      <h3 className="mb-1 text-sm font-semibold text-slate-900">A robust answer</h3>
+      <p>
+        {rules.join(", ")} {rules.length === 1 ? "holds" : "hold"} however the uncertain values turn out, within
+        their declared range and budget ({report.rows.length} {report.rows.length === 1 ? "instance" : "instances"}
+        protected).
+      </p>
+      {report.price !== undefined && report.nominal != null && (
+        <p className="mt-1">
+          The price of robustness: {shown(report.price)} on the goal
+          {report.price_share !== undefined ? ` (${shown(report.price_share * 100)}%)` : ""} — {String(objective)} against{" "}
+          {shown(report.nominal)} if the data were exact{report.nominal_status === "optimal" ? "" : " (not proven)"}.
+        </p>
       )}
     </section>
   );

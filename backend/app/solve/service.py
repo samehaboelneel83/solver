@@ -44,6 +44,7 @@ from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import pareto
+from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
 from app.solve import warm
@@ -85,6 +86,7 @@ def enqueue_run(
     solver: str | None = None,
     reuse: bool = True,
     pareto_steps: int | None = None,
+    robust: bool = False,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -187,6 +189,7 @@ def enqueue_run(
         "warm_start": warm_start,
         "symmetry": symmetry,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
+        **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
         "trace": trace_carrier,
@@ -199,9 +202,10 @@ def enqueue_run(
         # is a run nobody can make faster.
         **({"from_settings": from_settings} if from_settings else {}),
     }
-    if pareto_steps:
+    if pareto_steps or robust:
         # A front is a different question from the goal's optimum, and its
-        # own answer is one end of it: neither reused nor reusable.
+        # own answer is one end of it; a robust answer is to a different
+        # question too. Neither reused nor reusable.
         reuse, cache_key = False, None
     if reuse:
         reused = cache_reuse(
@@ -536,6 +540,28 @@ def _execute(
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
         found = refine(found, compiled)
+        # What the solver is given: the model itself, or its robust
+        # counterpart (app.solve.robust) when the run asks for one.
+        solving_model, robust_record, nominal = compiled, None, None
+        if params.get("robust"):
+            try:
+                moving = robust_rows.deviations(ir, data, compiled)
+            except (robust_rows.NotRobust, Unsupported) as exc:
+                db.execute(
+                    text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                    {"e": str(exc), "r": run_id},
+                )
+                db.commit()
+                return RunOutcome(run_id, dataset_id, "error", None, {})
+            robust_record = []
+            if moving:
+                solving_model, robust_record = robust_rows.rewrite(compiled, moving)
+                # The protection is continuous: a whole-number model becomes mixed.
+                found = replace(
+                    found,
+                    needs=found.needs | {"continuous"},
+                    model_class="MILP" if found.model_class == "IP" else found.model_class,
+                )
         if params.get("cpsat_scaling"):
             # Fractional data made whole exactly, so CP-SAT may take it
             # (migration 0039); a model that cannot be scaled says why.
@@ -586,7 +612,9 @@ def _execute(
                     "app.solve.sandbox:pareto_in_child",
                     {
                         "backend": backend.name,
-                        "compiled": compiled,
+                        # The robust counterpart when one was asked for: a
+                        # robust front.
+                        "compiled": solving_model,
                         "steps": int(params["pareto_steps"]),
                         "time_limit": time_limit,
                         "seed": seed,
@@ -612,6 +640,17 @@ def _execute(
                 result, reason = _point_solution(compiled, points[0]), None
                 raise _Answered
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
+            if robust_record:
+                # The nominal answer, for the price of robustness: the same
+                # backend, the same clock, the model as written.
+                nominal, _ = sandbox.run(
+                    "app.solve.sandbox:solve_in_child",
+                    {"backend": backend.name, "compiled": compiled, "time_limit": time_limit, "seed": seed,
+                     "workers": workers, "gap_rel": gap_rel},
+                    time_limit=time_limit,
+                    workers=workers,
+                    should_stop=stop.is_set,
+                )
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
                 # In a child process with a memory ceiling, a CPU allowance
                 # and a deadline (app.solve.sandbox, Phase 9): a model that
@@ -620,7 +659,7 @@ def _execute(
                     "app.solve.sandbox:solve_in_child",
                     {
                         "backend": backend.name,
-                        "compiled": compiled,
+                        "compiled": solving_model,
                         "time_limit": time_limit,
                         "seed": seed,
                         "workers": workers,
@@ -678,6 +717,15 @@ def _execute(
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
     if stopped:
         extra["stopped_by_request"] = True
+    if robust_record is not None:
+        extra["robust"] = {"rows": robust_record}
+        if robust_record and nominal is not None:
+            extra["robust"].update(_price(nominal, result, compiled.sense))
+        elif not robust_record:
+            extra["robust"]["note"] = (
+                "no rule reads a parameter declared uncertain within a range, so the robust answer "
+                "is the nominal one"
+            )
     if points:
         extra["pareto"] = {
             "terms": list(compiled.objective_term_ids),
@@ -723,7 +771,7 @@ def _execute(
         # cannot hold together is the thing a planner can act on, and it is
         # only findable here, where the compiled model still exists.
         with tracing.span("diagnose", solver=backend.name):
-            _record_conflict(db, run_id, compiled, backend, time_limit)
+            _record_conflict(db, run_id, solving_model, backend, time_limit)
     db.commit()
     return RunOutcome(
         run_id,
@@ -1233,6 +1281,18 @@ class RunEvents:
         except Exception:  # pragma: no cover -- watching must not break solving
             self.session.rollback()
             logger.warning("could not record a run event", exc_info=True)
+
+
+def _price(nominal: Solution, robust: Solution, sense: str) -> dict[str, Any]:
+    """What protection costs: the robust goal against the nominal one, both
+    as found (proven or not), and the difference in the goal's own terms."""
+    out: dict[str, Any] = {"nominal_status": nominal.status, "nominal": nominal.objective}
+    if nominal.objective is not None and robust.objective is not None:
+        worse = (robust.objective - nominal.objective) * (1 if sense == "minimize" else -1)
+        out["price"] = worse
+        if nominal.objective:
+            out["price_share"] = round(worse / abs(nominal.objective), 6)
+    return out
 
 
 class _Answered(Exception):

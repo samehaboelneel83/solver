@@ -480,6 +480,39 @@ describe("Runs", () => {
     expect(await screen.findByText(/one point of run \d+.s trade-off front/i)).toBeInTheDocument();
   });
 
+  it("reports what a robust answer protects and what it costs", async () => {
+    stub({
+      run: {
+        ...RUN_DETAIL,
+        objective: 15,
+        params: {
+          ...RUN_DETAIL.params,
+          robust: { rows: [{ rule: "c_capacity", index: [], moving: 4, gamma: 1 }], nominal: 17, nominal_status: "optimal", price: 2, price_share: 0.117647 },
+        },
+      },
+    });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "A robust answer" })).toBeInTheDocument();
+    expect(screen.getByText(/c_capacity holds however the uncertain values turn out/)).toBeInTheDocument();
+    expect(screen.getByText(/the price of robustness: 2 on the goal \(11.7647%\) — 15 against 17 if the data were exact\./i)).toBeInTheDocument();
+  });
+
+  it("offers a robust solve only when a parameter is uncertain within a range", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 31, status: "queued" });
+    const uncertainVersion = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: {
+        parameters: { demand: { index: ["day"], uncertainty: { kind: "interval", deviation: 0.1 } } },
+        constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }],
+      },
+    };
+    stub({ write, version: uncertainVersion });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /solve robustly/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ robust: true }));
+  });
+
   it("offers to turn the fighting rules into preferences", async () => {
     const write = vi.fn().mockResolvedValue({
       id: 9,

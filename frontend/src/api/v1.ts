@@ -575,6 +575,8 @@ export type RunRequest = {
   solver?: string | null;
   /** Ask for the trade-off front between the goal's two terms (migration 0045). */
   pareto_steps?: number;
+  /** Solve the robust counterpart and report the price (app.solve.robust). */
+  robust?: boolean;
 };
 
 /** One point of a run's trade-off front, and the run that holds its answer. */
