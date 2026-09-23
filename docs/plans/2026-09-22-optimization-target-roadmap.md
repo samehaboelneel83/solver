@@ -585,7 +585,11 @@ short says it is not minimal. A faster shrink was considered and not
 built: facility L's conflict is 263 of its core's 340 instances, and
 proving each member needed costs a probe per member whatever the order,
 so QuickXplain-style splitting cannot help where the conflict is most of
-the core. Still open: the explanations UI.
+the core. The explanations UI is done (`4cd7b4b`): the run page leads each
+conflicting rule with its author's note, and says how the list was found
+and what making sure of it cost. The queue's Phase 11 items are complete;
+this section's minimum-cost relaxation, diverse IISs and sensitivity in
+business language were never queued and remain open.
 
 ## Phase 12 — Caching and warm starts (~2 weeks)
 
