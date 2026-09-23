@@ -701,6 +701,13 @@ per-domain tuned settings remain open.
 - **GPU lane:** `requires_gpu` capability; separate claim filter (`worker.lane='gpu'`); cuOpt for VRP / huge LP,
   cuPDLP. **Only build when a tenant has instances that need it**; costs infra and an NVIDIA runtime.
 
+
+**Progress (2026-09-23):** separable blocks are found (`d4abc92`,
+`app.solve.blocks`): the compiled model's incidence graph split into its
+components, a split refused by name where the goal or a rewrite ties blocks
+together, and the pieces shown to be exactly the model (their optima add up
+to the monolithic one on 40 random models). Solving them in parallel, behind
+a setting the bench decides, is the next item (14b).
 ---
 
 ## Phase 15 — Multiple objectives and uncertainty (~5 weeks)
