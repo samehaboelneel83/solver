@@ -103,6 +103,13 @@ def refine(found: Classification, compiled: Compiled) -> Classification:
     from app.solve.reformulate import admit, admit_pwl
 
     found = admit_pwl(admit(found, compiled), compiled)
+    # Every product of a yes-or-no decision: linear once written exactly
+    # (McCormick), so its curvature is no longer the question.
+    from app.solve.mccormick import BILINEAR_BINARY, admit as admit_products
+
+    found = admit_products(found, compiled)
+    if BILINEAR_BINARY in found.needs:
+        return found
     if not compiled.objective_quadratic or all(v.is_integral for v in compiled.variables.values()):
         return found
     convexity = objective_convexity(compiled)

@@ -43,7 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
-from app.solve import pareto
+from app.solve import mccormick, pareto
 from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
@@ -1057,6 +1057,15 @@ def solve_compiled(
         # Curves as linear rows: an epigraph where the goal allows, else the
         # incremental formulation (app.solve.reformulate).
         compiled, _ = pwl_rewrite(compiled)
+    if (
+        backend.name in mccormick.FOR
+        and (compiled.objective_quadratic or any(c.quadratic for c in compiled.constraints))
+        and mccormick.blocked(compiled) is None
+    ):
+        # Products of a yes-or-no decision as linear rows, exactly
+        # (`mccormick.admit` routed such a model here). Any other product
+        # reaching HiGHS is a convex continuous QP, which it solves itself.
+        compiled, _ = mccormick.linearise(compiled)
     if symmetry and compiled.symmetry and backend.name in symmetry_rows.FOR:
         # Interchangeable entities ordered, for a backend that does not
         # detect symmetry itself (setting `solve.symmetry`).

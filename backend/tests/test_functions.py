@@ -22,7 +22,7 @@ from sqlalchemy import text
 
 from app.ir.contract import CONTRACT, FUNCTIONS
 from app.solve import compile_model
-from app.solve.backends import by_name, choose
+from app.solve.backends import NoBackend, by_name, choose
 from app.solve.classify import classify
 from app.solve.compile import Unsupported
 from app.solve.robust import NotRobust, deviations
@@ -225,8 +225,8 @@ def test_a_function_of_a_decision_is_nonlinear_and_only_scip_takes_it():
     whole = classify(_ir(fn("abs", X), domain="integer"))
     assert whole.model_class == "MINLP"
     assert choose(whole)[0].name == "scip"
-    for name in ("highs", "cpsat", "glop", "milp"):
-        with pytest.raises(Exception):
+    for name in ("highs", "cp-sat", "glop", "milp"):
+        with pytest.raises(NoBackend, match=f"{name} cannot take a NLP model needing .*functions"):
             choose(found, name)
 
 

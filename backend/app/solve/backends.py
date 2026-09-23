@@ -244,6 +244,8 @@ CP_SAT = Backend(
             "pwl-native",
             # Intervals, NoOverlap and Cumulative.
             "scheduling",
+            # A product of a yes-or-no decision, held as a product.
+            "bilinear-binary",
         }
     ),
     rank=0,
@@ -299,6 +301,8 @@ HIGHS = Backend(
             # Piecewise curves, rewritten: epigraph or incremental.
             "pwl",
             "pwl-convex",
+            # A product of a yes-or-no decision, written exactly (McCormick).
+            "bilinear-binary",
         }
     ),
     rank=1,
@@ -324,6 +328,7 @@ MILP = Backend(
             "indicator-bounded",
             "pwl",
             "pwl-convex",
+            "bilinear-binary",
         }
     ),
     rank=1,
@@ -369,6 +374,7 @@ SCIP = Backend(
             "pwl-native",
             # exp, log, sqrt, abs, sin and cos of a linear argument.
             "functions",
+            "bilinear-binary",
         }
     ),
     rank=2,
