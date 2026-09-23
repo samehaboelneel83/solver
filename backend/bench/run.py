@@ -10,7 +10,9 @@ One JSON row per (instance, backend, technique value, seed):
 
 **Techniques are solve settings.** `--technique name=v1,v2` runs every value
 of one `solve_compiled` knob (`gap_rel`, `workers`) so the report can compare
-them; the first value is the baseline. `cpsat_scaling=0,1` is a routing
+them; the first value is the baseline. `backend.option=v1,v2` measures a
+whitelisted solver option (`app.solve.params`) on that backend alone, its
+default first. `cpsat_scaling=0,1` is a routing
 setting instead: for each value it runs only the backend `choose` picks with
 the setting so (migration 0039), as a run would, and labels the rows
 `routed` with the backend in `solver` -- the comparison is of the two
@@ -60,8 +62,22 @@ def parse_technique(text: str | None) -> Technique:
     if not text:
         return Technique(None, [None])
     name, _, values = text.partition("=")
+    if "." in name:
+        # A whitelisted solver option, `backend.option` (app.solve.params):
+        # the first value is the solver's default, the baseline.
+        from app.solve.params import WHITELIST, parse
+
+        backend, option = name.split(".", 1)
+        if option not in WHITELIST.get(backend, {}):
+            raise SystemExit(f"{name!r} is not a whitelisted solver option; see app.solve.params")
+        try:
+            return Technique(name, [parse(backend, option, v) for v in values.split(",") if v])
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
     if name not in ("gap_rel", "workers", "cpsat_scaling"):
-        raise SystemExit(f"--technique takes gap_rel, workers or cpsat_scaling, not {name!r}")
+        raise SystemExit(
+            f"--technique takes gap_rel, workers, cpsat_scaling or backend.option, not {name!r}"
+        )
     cast = float if name == "gap_rel" else int
     return Technique(name, [cast(v) for v in values.split(",") if v])
 
@@ -121,8 +137,12 @@ def run(
                 family, size, name, compiled, found, compile_s, technique, seeds, time_limit, workers
             )
             continue
+        option_of = technique.name.split(".", 1) if technique.name and "." in technique.name else None
         for backend in REGISTRY:
             if backends and backend.name not in backends:
+                continue
+            if option_of is not None and backend.name != option_of[0]:
+                # A solver option is measured on its own solver only.
                 continue
             if only is not None and backend.name not in only:
                 continue
@@ -134,7 +154,9 @@ def run(
                 continue
             for value in technique.values:
                 knobs: dict[str, Any] = {"workers": workers}
-                if technique.name:
+                if option_of is not None:
+                    knobs["solver_params"] = {option_of[1]: value}
+                elif technique.name:
                     knobs[technique.name] = value
                 for seed in range(1, seeds + 1):
                     incumbents: list[tuple[float, float]] = []

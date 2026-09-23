@@ -84,6 +84,7 @@ def _cpsat_solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     from app.solve import cpsat
 
@@ -92,6 +93,7 @@ def _cpsat_solve(
         gap_rel=gap_rel,
         on_progress=on_progress,
         hint=hint,
+        solver_params=solver_params,
     )
 
 
@@ -105,6 +107,7 @@ def _milp_solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     from app.solve import milp
 
@@ -131,6 +134,7 @@ def _lp_solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     from app.solve import lp
 
@@ -157,6 +161,7 @@ def _highs_solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     from app.solve import highs
 
@@ -165,6 +170,7 @@ def _highs_solve(
         gap_rel=gap_rel,
         on_progress=on_progress,
         hint=hint,
+        solver_params=solver_params,
     )
 
 
@@ -184,6 +190,7 @@ def _scip_solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     from app.solve import scip
 
@@ -192,6 +199,7 @@ def _scip_solve(
         gap_rel=gap_rel,
         on_progress=on_progress,
         hint=hint,
+        solver_params=solver_params,
     )
 
 

@@ -39,6 +39,7 @@ from ortools.sat.python import cp_model
 _ORTOOLS_VERSION = _pkg_version("ortools")
 
 from app.api.quantity import report_quantity
+from app.solve.params import check as check_params
 from app.solve.compile import Compiled, Constraint
 from app.solve.result import Solution
 from app.solve.scaling import NotScalable, ScaledRow, reach_of, scale
@@ -88,6 +89,7 @@ def solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return Solution(
@@ -138,6 +140,9 @@ def solve(
     # default, is "prove the optimum"; the run then checks the recorded gap
     # before it lets the answer be called optimal.
     solver.parameters.relative_gap_limit = float(gap_rel)
+    # Whitelisted options only, and the benchmark's winners (app.solve.params).
+    for name, value in check_params("cp-sat", solver_params).items():
+        setattr(solver.parameters, name, value)
     callback = None
     if on_progress is not None and has_objective:
         callback = _Progress(on_progress, unscale)

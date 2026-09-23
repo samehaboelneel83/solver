@@ -43,6 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve.cache import key_of
@@ -628,6 +629,9 @@ def _execute(
         extra["reformulations"] = [*extra.get("reformulations", []), *pwl_rewrite(compiled)[1]]
     if params.get("symmetry") and compiled.symmetry and backend.name in symmetry_rows.FOR:
         extra["symmetry_rows"] = symmetry_rows.order_rows(compiled)[1]
+    if solver_param_table.ENABLED.get(backend.name):
+        # The benchmark's winners, applied to every solve of this backend.
+        extra["solver_params"] = solver_param_table.ENABLED[backend.name]
     if stopped:
         extra["stopped_by_request"] = True
     if compiled.empty_ranges:
@@ -931,6 +935,7 @@ def solve_compiled(
     on_progress=None,
     hint: dict | None = None,
     symmetry: bool = False,
+    solver_params: dict | None = None,
 ) -> tuple[Solution, str | None]:
     """Solve a compiled model as a run does, and say why if it is unbounded.
 
@@ -966,6 +971,8 @@ def solve_compiled(
     if hint:
         # Only when there is one: a backend that takes none need not know.
         knobs["hint"] = hint
+    if solver_params:
+        knobs["solver_params"] = solver_params
     started = time.monotonic()
     # Only the first solve is watched: the re-solve that tests a ceiling
     # (`_unbounded_ceilings`) answers a different question, and a

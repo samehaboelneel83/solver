@@ -91,9 +91,15 @@ def solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return _blank("unknown")
+    from app.solve.params import check as check_params
+
+    # Checked here, in the parent, so a refusal names the option rather than
+    # a child that died.
+    options = check_params("highs", solver_params)
     if not available():
         raise RuntimeError("highs is not available in this build")
 
@@ -106,6 +112,7 @@ def solve(
             "gap_rel": gap_rel,
             "progress": on_progress is not None,
             "hint": hint,
+            "options": options,
         },
         time_limit=time_limit,
         should_stop=should_stop,
@@ -203,6 +210,7 @@ def solve_in_process(
     gap_rel: float = 0.0,
     progress: bool = False,
     hint: dict | None = None,
+    options: dict | None = None,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -217,6 +225,8 @@ def solve_in_process(
     # HiGHS's own default is 1e-4: "optimal" up to 0.01% short of the best.
     # The setting decides, 0 by default.
     solver.setOptionValue("mip_rel_gap", float(gap_rel))
+    for name, value in (options or {}).items():
+        solver.setOptionValue(name, value)
 
     # The whole model goes in as arrays, a handful of calls however large it
     # is (target roadmap D7). One `addVariable`/`addConstr` per column and row

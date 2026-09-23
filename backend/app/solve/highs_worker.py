@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         gap_rel=payload.get("gap_rel", 0.0),
         progress=payload.get("progress", False),
         hint=payload.get("hint"),
+        options=payload.get("options"),
     )
     with open(out_path, "wb") as handle:
         pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)

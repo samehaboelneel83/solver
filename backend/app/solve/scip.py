@@ -69,8 +69,11 @@ def solve(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    solver_params: dict | None = None,
 ) -> Solution:
     import pyscipopt
+
+    from app.solve.params import check as check_params
 
     model = pyscipopt.Model()
     model.hideOutput()
@@ -103,6 +106,10 @@ def solve(
     if has_objective:
         model.setObjective(objective, compiled.sense)
 
+    # Whitelisted emphasis settings only, and the benchmark's winners.
+    for name, value in check_params("scip", solver_params).items():
+        setting = getattr(pyscipopt.SCIP_PARAMSETTING, value.upper())
+        (model.setPresolve if name == "presolving" else model.setHeuristics)(setting)
     if hint:
         # A partial solution (`app.solve.warm`): SCIP completes it and keeps
         # it as a start if it holds.
