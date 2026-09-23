@@ -614,7 +614,19 @@ its answer and rule results copied, `wall_time_s` 0, nothing queued;
 infeasible, time-limited and local results are never reused;
 `RunRequest.reuse: false` solves again. On the way: the run page's event
 stream reconnected for ever for a settled run with no events (every reused
-run), fixed in `be8b230`.
+run), fixed in `be8b230`. Warm starts are done (`21bff11`, migration 0043),
+**off by default on the bench's evidence**: `app.solve.warm` hints the
+nearest earlier answer of the problem (same version first) to CP-SAT
+(`add_hint`), HiGHS (sparse `setSolution`) and SCIP (a partial solution);
+the run records `warm_start_from` and `_hinted`. What a stored roster can
+hint is exact only for yes-or-no decisions -- it keeps which amounts were
+used, not how much -- so a MILP gets its switches hinted and its
+quantities left. On 28 perturb-and-resolve solves (rota, facility,
+knapsack M/L) every solve was proven and warm agreed with cold; HiGHS was
+4% and SCIP 3% faster by SGM, within the noise, and CP-SAT slower
+(`bench/results/2026-09-23-warm-start.md`). A problem whose runs end at the
+time limit can turn it on at its own level; storing values (queue item 17)
+would make the MILP hint whole. The queue's Phase 12 items are complete.
 ---
 
 ## Phase 13 — Search power (~5 weeks)
