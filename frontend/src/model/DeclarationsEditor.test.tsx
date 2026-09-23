@@ -69,6 +69,19 @@ describe("DeclarationsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/demand is used by c_cover/i);
   });
 
+  it("shows an interval read-only, and offers no interval to pick", () => {
+    renderEditor({
+      variables: {
+        assign: { index: ["employee", "day"], domain: "binary" },
+        task: { index: ["day"], domain: "interval", start: "b", end: "e", size: "demand", presence: "on" },
+      },
+    });
+    expect(screen.getByText(/task is a span of time: from b to e, lasting demand, and only if on/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("task decides")).not.toBeInTheDocument();
+    const picker = screen.getByLabelText("assign decides") as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.value)).toEqual(["binary", "integer", "continuous"]);
+  });
+
   it("removes a variable no rule mentions", () => {
     const onChange = renderEditor({
       variables: {

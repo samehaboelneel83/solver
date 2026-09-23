@@ -58,7 +58,8 @@
   "variableDomains": [
     "binary",
     "integer",
-    "continuous"
+    "continuous",
+    "interval"
   ],
   "relations": [
     "<=",
@@ -255,7 +256,7 @@
     {
       "code": "constraint_expression_missing",
       "where": "shape",
-      "text": "a constraint states `left`, `relation` and `right`; a declared but unexpressed constraint is not a model"
+      "text": "a constraint that is not a scheduling rule states `left`, `relation` and `right`; a declared but unexpressed constraint is not a model"
     },
     {
       "code": "constraint_relation_unsupported",
@@ -536,6 +537,56 @@
       "code": "pwl_breakpoints_not_increasing",
       "where": "shape",
       "text": "a `pwl`'s points are in strictly increasing `x`"
+    },
+    {
+      "code": "interval_needs_version_2",
+      "where": "shape",
+      "text": "the `interval` domain appears only in a version 2 document"
+    },
+    {
+      "code": "interval_malformed",
+      "where": "shape",
+      "text": "an interval names its `start`, `end` and `size` (and optionally `presence`) and carries no bounds; no other variable carries those keys"
+    },
+    {
+      "code": "interval_part_invalid",
+      "where": "shape",
+      "text": "an interval's `start` and `end` are integer variables, and its `presence` a binary one, each declared with the interval's own index"
+    },
+    {
+      "code": "interval_size_invalid",
+      "where": "shape",
+      "text": "an interval's `size` is a non-negative whole number or a parameter declared with the interval's own index"
+    },
+    {
+      "code": "interval_read_as_number",
+      "where": "shape",
+      "text": "a `var` term never names an interval; its `start` and `end` variables are the numbers"
+    },
+    {
+      "code": "scheduling_needs_version_2",
+      "where": "shape",
+      "text": "a `no_overlap` or `cumulative` rule appears only in a version 2 document"
+    },
+    {
+      "code": "scheduling_rule_malformed",
+      "where": "shape",
+      "text": "a constraint is either an expression (`left`, `relation`, `right`) or exactly one scheduling rule; `no_overlap` carries an `interval` and an `over`, `cumulative` also a `demand` and a `capacity`"
+    },
+    {
+      "code": "scheduling_not_interval",
+      "where": "shape",
+      "text": "a scheduling rule's `interval` names an interval variable"
+    },
+    {
+      "code": "scheduling_rule_hard",
+      "where": "shape",
+      "text": "a scheduling rule is hard: no weight, no `when`"
+    },
+    {
+      "code": "scheduling_amount_not_constant",
+      "where": "shape",
+      "text": "a `cumulative`'s `demand` and `capacity` read no variable"
     }
   ]
 }

@@ -49,7 +49,38 @@ export type Constraint = {
   right?: Term;
   severity?: Severity;
   weight?: number;
+  /** A scheduling rule (version 2) in place of left/relation/right. Kept
+   * and shown by the editor, not yet built in it. */
+  no_overlap?: SchedulingBody;
+  cumulative?: SchedulingBody & { demand: Term; capacity: Term };
 };
+
+export type SchedulingBody = { interval: { var: string; index: string[] }; over: Binding[] };
+
+/** Which scheduling rule a constraint is, if it is one. */
+export function schedulingKind(rule: {
+  no_overlap?: unknown;
+  cumulative?: unknown;
+}): "no_overlap" | "cumulative" | null {
+  if (rule.no_overlap !== undefined) return "no_overlap";
+  if (rule.cumulative !== undefined) return "cumulative";
+  return null;
+}
+
+/** A one-line reading of a scheduling rule, or null for any other:
+ * `no two of task[j] (j in job) overlap`. */
+export function describeSchedule(rule: { no_overlap?: unknown; cumulative?: unknown }): string | null {
+  const kind = schedulingKind(rule);
+  if (kind === null) return null;
+  const body = rule[kind] as SchedulingBody & { demand?: Term; capacity?: Term };
+  const of = `${body.interval?.var ?? "?"}[${(body.interval?.index ?? []).join(", ")}]`;
+  const over = (body.over ?? []).map(describeBinding).join(", ");
+  if (kind === "no_overlap") return `no two of ${of} (${over}) overlap`;
+  return (
+    `${of} (${over}), each taking ${describeTerm(body.demand)}, ` +
+    `stay within ${describeTerm(body.capacity)} at every moment`
+  );
+}
 
 export type ObjectiveTerm = { id: string; weight: number; expression?: Term };
 

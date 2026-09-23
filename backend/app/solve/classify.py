@@ -44,11 +44,14 @@ class Classification:
 
 
 def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classification:
-    domains = {spec.get("domain", "binary") for spec in ir.get("variables", {}).values()}
+    # An interval is not a number: its start and end variables are, and they
+    # decide the class like any other.
+    domains = {spec.get("domain", "binary") for spec in ir.get("variables", {}).values()} - {"interval"}
     reasons: list[str] = []
     needs = {"linear"}
 
     planner: list[str] = []
+    refusals: dict[str, str] = {}
 
     if not domains:
         reasons.append("no variables, so nothing is decided")
@@ -124,6 +127,18 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some rules apply only when a decision says so")
 
+    if _scheduling(ir):
+        needs.add("scheduling")
+        reasons.append(
+            "the model has intervals or a scheduling rule (no_overlap, cumulative), which a "
+            "constraint solver holds natively and nothing else here holds at all"
+        )
+        planner.append("some things are placed in time and must not clash")
+        refusals["scheduling"] = (
+            "a scheduling rule or an interval is solved by CP-SAT, the one solver here that "
+            "holds them"
+        )
+
     if _has_pwl(ir):
         needs.add("pwl")
         reasons.append(
@@ -143,7 +158,15 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"{fractional} is not a whole number, so a yes-or-no solver cannot take this model"
         )
 
-    return Classification(model_class, reasons, needs, planner)
+    return Classification(model_class, reasons, needs, planner, refusals=refusals)
+
+
+def _scheduling(ir: dict[str, Any]) -> bool:
+    return any(
+        isinstance(spec, dict) and spec.get("domain") == "interval" for spec in ir.get("variables", {}).values()
+    ) or any(
+        isinstance(c, dict) and ("no_overlap" in c or "cumulative" in c) for c in ir.get("constraints", [])
+    )
 
 
 def _quadratic_objective(ir: dict[str, Any]) -> bool:

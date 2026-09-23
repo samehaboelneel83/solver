@@ -225,6 +225,19 @@ describe("statusNote (migration 0028)", () => {
   });
 });
 
+describe("unexpressedRules and scheduling", () => {
+  it("does not call a scheduling rule unexpressed", () => {
+    expect(
+      unexpressedRules({
+        constraints: [
+          { id: "c_room", no_overlap: { interval: { var: "task", index: ["d"] }, over: [] }, severity: "hard" },
+          { id: "c_old", note: "named only" },
+        ],
+      })
+    ).toEqual(["c_old"]);
+  });
+});
+
 describe("unexpressedRules", () => {
   it("names rules that carry no arithmetic, and nothing for an expressed model", () => {
     expect(

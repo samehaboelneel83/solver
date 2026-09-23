@@ -34,11 +34,24 @@ export type VariableSpec = {
   domain: VariableDomain;
   lower?: number;
   upper?: number;
+  /** An interval's parts (version 2): kept as published, not built here yet. */
+  start?: string;
+  end?: string;
+  size?: number | string;
+  presence?: string;
 };
 export type VariableDeclaration = { name: string } & VariableSpec;
 
 /** A binary variable's bounds are fixed at 0 and 1 — drop any that were typed. */
 export function withDomain(spec: VariableSpec, domain: VariableDomain): VariableSpec {
+  if (domain === "interval") {
+    // Its start, end, size and presence are what it is; it has no bounds.
+    const next: VariableSpec = { index: spec.index, domain };
+    for (const key of ["start", "end", "size", "presence"] as const) {
+      if (spec[key] !== undefined) (next as Record<string, unknown>)[key] = spec[key];
+    }
+    return next;
+  }
   if (domain === "binary") {
     return { index: spec.index, domain };
   }

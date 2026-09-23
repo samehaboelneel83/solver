@@ -39,7 +39,7 @@ Number = Union[StrictInt, StrictFloat]
 #: leaving the key out -- and at most `MAX_INDICES`.
 Bindings = Annotated[list["Binding"], Field(min_length=1, max_length=MAX_INDICES)]
 
-VariableDomain = Literal["binary", "integer", "continuous"]
+VariableDomain = Literal["binary", "integer", "continuous", "interval"]
 Relation = Literal["<=", "=", ">="]
 TraversalDepth = Literal["one", "any", "any_or_self"]
 Severity = Literal["hard", "soft"]
@@ -152,6 +152,25 @@ class Variable(_Model):
     domain: VariableDomain
     lower: Optional[Number] = None
     upper: Optional[Number] = None
+    # An interval (version 2): its start and end variables, its size (a
+    # whole number or a parameter), and optionally the binary that says
+    # whether it happens at all. Which variables those are is checked by
+    # `validate.py`, as it needs the declarations.
+    start: Optional[Name] = None
+    end: Optional[Name] = None
+    size: Optional[Union[Annotated[StrictInt, Field(ge=0)], Name]] = None
+    presence: Optional[Name] = None
+
+    @model_validator(mode="after")
+    def _interval_keys(self) -> "Variable":
+        parts = {"start": self.start, "end": self.end, "size": self.size}
+        if self.domain == "interval":
+            missing = [k for k, v in parts.items() if v is None]
+            if missing or self.lower is not None or self.upper is not None:
+                raise ValueError("an interval names its start, end and size and carries no bounds")
+        elif any(v is not None for v in (*parts.values(), self.presence)):
+            raise ValueError("only an interval names a start, end, size or presence")
+        return self
 
 
 def _zero_or_one(value: int) -> int:
@@ -170,16 +189,49 @@ class When(_Model):
     is_: Annotated[StrictInt, AfterValidator(_zero_or_one)] = Field(default=1, alias="is")
 
 
+class NoOverlap(_Model):
+    """The intervals `over` ranges across never run at once (version 2)."""
+
+    interval: VarRef
+    over: Bindings
+
+
+class Cumulative(_Model):
+    """At every moment, the demands of the intervals running stay within the
+    capacity (version 2). Both are numbers the data gives."""
+
+    interval: VarRef
+    over: Bindings
+    demand: Term
+    capacity: Term
+
+
 class Constraint(_Model):
+    """An expression -- `left relation right` -- or, in version 2, one
+    scheduling rule in its place."""
+
     id: Name
     note: Optional[str] = None
     forall: Optional[Bindings] = None
-    left: Term
-    relation: Relation
-    right: Term
+    left: Optional[Term] = None
+    relation: Optional[Relation] = None
+    right: Optional[Term] = None
+    no_overlap: Optional[NoOverlap] = None
+    cumulative: Optional[Cumulative] = None
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "Constraint":
+        expression = [self.left, self.relation, self.right]
+        scheduling = [k for k in (self.no_overlap, self.cumulative) if k is not None]
+        if scheduling:
+            if len(scheduling) > 1 or any(part is not None for part in expression):
+                raise ValueError("a constraint is one expression or one scheduling rule")
+        elif any(part is None for part in expression):
+            raise ValueError("a constraint states left, relation and right")
+        return self
 
 
 class ObjectiveTerm(_Model):
@@ -205,7 +257,7 @@ class ProblemIR(_Model):
     relationships: Optional[list[Name]] = None
 
 
-for _model in (Sum, Add, Mul, Constraint, ObjectiveTerm):
+for _model in (Sum, Add, Mul, NoOverlap, Cumulative, Constraint, ObjectiveTerm):
     _model.model_rebuild()
 
 

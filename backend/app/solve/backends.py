@@ -226,6 +226,8 @@ CP_SAT = Backend(
             "pwl",
             "pwl-convex",
             "pwl-native",
+            # Intervals, NoOverlap and Cumulative.
+            "scheduling",
         }
     ),
     rank=0,

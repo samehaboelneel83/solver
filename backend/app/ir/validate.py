@@ -42,6 +42,8 @@ from app.ir.contract import (
     ALL_KEYS,
     ARITHMETIC_ATTR_TYPES,
     CONSTRAINT_KEYS,
+    INTERVAL_KEYS,
+    SCHEDULING_KEYS,
     FILTER_OPERATORS,
     ACCEPTED_VERSIONS,
     IR_VERSION,
@@ -87,7 +89,7 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 #: the new index's own name.
 _VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
-_VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"})
+_VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"}) | INTERVAL_KEYS
 _PARAMETER_KEYS = frozenset({"index"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
@@ -330,13 +332,96 @@ class _ShapeChecker:
                     f"{json.dumps(domain)} is not a variable domain version {IR_VERSION} solves; "
                     f"it has {', '.join(sorted(VARIABLE_DOMAINS))}",
                 )
+            problem = self._check_interval_keys(name, declaration, at)
+            if problem:
+                return problem
             problem = self._check_bounds(name, declaration, at)
             if problem:
                 return problem
             self.variables[name] = list(index)
+        for name, declaration in variables.items():
+            if declaration["domain"] == "interval":
+                problem = self._check_interval_parts(name, declaration, ["variables", name])
+                if problem:
+                    return problem
+        return None
+
+    def _check_interval_keys(self, name: str, declaration: dict[str, Any], at: Loc):
+        """An interval (version 2) is not a number: it ties a start and an
+        end variable together, `end = start + size`, and may be absent when
+        its `presence` is 0. Only it carries those keys, and it carries no
+        bounds -- its start's and end's own are the window."""
+        if declaration["domain"] != "interval":
+            stray = sorted(INTERVAL_KEYS & set(declaration))
+            if stray:
+                return Refusal(
+                    "interval_malformed",
+                    [*at, stray[0]],
+                    f"{name!r} is {declaration['domain']}, and only an interval names a "
+                    f"{stray[0]}",
+                )
+            return None
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "interval_needs_version_2",
+                [*at, "domain"],
+                f"{name!r} is an interval, which version 1 does not have; publish it as version 2",
+            )
+        for key in ("start", "end", "size"):
+            if key not in declaration:
+                return Refusal(
+                    "interval_malformed",
+                    [*at, key],
+                    f"the interval {name!r} names no {key}; an interval is a start, an end and "
+                    "the size between them",
+                )
+        for key in ("lower", "upper"):
+            if key in declaration:
+                return Refusal(
+                    "interval_malformed",
+                    [*at, key],
+                    f"the interval {name!r} carries a {key} bound; its start and end variables "
+                    "carry the window it may be placed in",
+                )
+        return None
+
+    def _check_interval_parts(self, name: str, declaration: dict[str, Any], at: Loc):
+        index = self.variables[name]
+        declared = self.ir["variables"]
+        for key, domain in (("start", "integer"), ("end", "integer"), ("presence", "binary")):
+            if key not in declaration:
+                continue
+            part = declaration[key]
+            spec = declared.get(part) if isinstance(part, str) else None
+            if not isinstance(spec, dict) or spec.get("domain") != domain or self.variables.get(part) != index:
+                return Refusal(
+                    "interval_part_invalid",
+                    [*at, key],
+                    f"the {key} of the interval {name!r} must be {'an' if domain == 'integer' else 'a'} "
+                    f"{domain} variable declared over [{', '.join(index)}], as the interval is; "
+                    f"{json.dumps(part)} is not",
+                )
+        size = declaration["size"]
+        if isinstance(size, str):
+            if self.parameters.get(size) != index:
+                return Refusal(
+                    "interval_size_invalid",
+                    [*at, "size"],
+                    f"the size of the interval {name!r} names {json.dumps(size)}, which is not a "
+                    f"parameter declared over [{', '.join(index)}], as the interval is",
+                )
+        elif not _is_int(size) or size < 0:
+            return Refusal(
+                "interval_size_invalid",
+                [*at, "size"],
+                f"the size of the interval {name!r} is {json.dumps(size)}; a size is a "
+                "non-negative whole number, or a parameter",
+            )
         return None
 
     def _check_bounds(self, name: str, declaration: dict[str, Any], at: Loc):
+        if declaration["domain"] == "interval":
+            return None
         for key in ("lower", "upper"):
             if key not in declaration:
                 continue
@@ -413,6 +498,12 @@ class _ShapeChecker:
                     return result
                 scope = result
 
+            if any(kind in constraint for kind in SCHEDULING_KEYS):
+                problem = self._check_scheduling(constraint, at, scope, identifier)
+                if problem:
+                    return problem
+                continue
+
             for key in ("left", "relation", "right"):
                 if key not in constraint:
                     return Refusal(
@@ -447,6 +538,86 @@ class _ShapeChecker:
             problem = self._check_when(constraint, at, scope, identifier)
             if problem:
                 return problem
+        return None
+
+    def _check_scheduling(self, constraint: dict[str, Any], at: Loc, scope: dict[str, str], identifier: str):
+        """`no_overlap` (the intervals never run at once) and `cumulative`
+        (at every moment the running intervals' demands stay within the
+        capacity), each over the intervals an `over` ranges across, once per
+        instance of the `forall` -- version 2, solved by CP-SAT."""
+        kinds = [kind for kind in SCHEDULING_KEYS if kind in constraint]
+        kind = kinds[0]
+        if self.ir.get("version") == 1:
+            # The rule as a whole: without it the document is version 1 again.
+            return Refusal(
+                "scheduling_needs_version_2",
+                at,
+                f"the constraint {identifier!r} is a {kind} rule, which version 1 does not have; "
+                "publish it as version 2",
+            )
+        extra = kinds[1:] + [key for key in ("left", "relation", "right") if key in constraint]
+        if extra:
+            return Refusal(
+                "scheduling_rule_malformed",
+                [*at, extra[0]],
+                f"the constraint {identifier!r} is a {kind} rule and also carries {extra[0]}; a "
+                "constraint is one expression or one scheduling rule",
+            )
+        body = constraint[kind]
+        loc: Loc = [*at, kind]
+        if not isinstance(body, dict) or set(body) != SCHEDULING_KEYS[kind]:
+            return Refusal(
+                "scheduling_rule_malformed",
+                loc,
+                f"a {kind} carries exactly {', '.join(sorted(SCHEDULING_KEYS[kind]))}",
+            )
+        if constraint.get("severity") not in SEVERITIES:
+            return Refusal(
+                "constraint_severity_unsupported",
+                [*at, "severity"],
+                f"{json.dumps(constraint.get('severity'))} is not a severity; a constraint "
+                f"is {' or '.join(sorted(SEVERITIES))}, and nothing defaults it",
+            )
+        for key in ("severity", "weight", "when"):
+            if key in constraint and (key != "severity" or constraint[key] != "hard"):
+                return Refusal(
+                    "scheduling_rule_hard",
+                    [*at, key],
+                    f"the {kind} rule {identifier!r} is hard and unconditional; a scheduling "
+                    "rule has no price for being broken and no switch",
+                )
+        inner = self.check_bindings(body["over"], [*loc, "over"], scope)
+        if isinstance(inner, Refusal):
+            return inner
+        interval = body["interval"]
+        if not isinstance(interval, dict) or set(interval) != {"var", "index"}:
+            return Refusal(
+                "scheduling_rule_malformed",
+                [*loc, "interval"],
+                'a scheduling rule names its intervals as {"var": "task", "index": [...]}',
+            )
+        problem = self._reference(interval, [*loc, "interval"], inner, "var", self.variables)
+        if problem:
+            return problem
+        if self.ir["variables"][interval["var"]].get("domain") != "interval":
+            return Refusal(
+                "scheduling_not_interval",
+                [*loc, "interval", "var"],
+                f"{interval['var']!r} is {self.ir['variables'][interval['var']].get('domain')}; "
+                f"a {kind} rule is over interval variables",
+            )
+        if kind == "cumulative":
+            for key, where in (("demand", inner), ("capacity", scope)):
+                problem = self.check_term(body[key], [*loc, key], where, 1)
+                if problem:
+                    return problem
+                if _degree(body[key]) > 0:
+                    return Refusal(
+                        "scheduling_amount_not_constant",
+                        [*loc, key],
+                        f"the {key} of {identifier!r} reads a decision; it is a number the "
+                        "data gives",
+                    )
         return None
 
     def _check_when(self, constraint: dict[str, Any], at: Loc, scope: dict[str, str], identifier: str):
@@ -749,7 +920,17 @@ class _ShapeChecker:
         return self._reference(term, loc, scope, "par", self.parameters)
 
     def _term_var(self, term, loc, scope, depth):
-        return self._reference(term, loc, scope, "var", self.variables)
+        problem = self._reference(term, loc, scope, "var", self.variables)
+        if problem:
+            return problem
+        if self.ir["variables"][term["var"]].get("domain") == "interval":
+            return Refusal(
+                "interval_read_as_number",
+                [*loc, "var"],
+                f"{term['var']!r} is an interval, which is not a number; read its start or end "
+                "variable instead",
+            )
+        return None
 
     def _reference(self, term, loc, scope, kind, declared):
         name = term[kind]
@@ -1207,6 +1388,19 @@ class _DomainChecker:
                 problem = self._bindings(constraint["forall"], [*at, "forall"], scope)
                 if problem:
                     return problem
+            kind = next((k for k in SCHEDULING_KEYS if k in constraint), None)
+            if kind is not None:
+                body = constraint[kind]
+                inner = dict(scope)
+                problem = self._bindings(body["over"], [*at, kind, "over"], inner)
+                if problem:
+                    return problem
+                for key, where in (("demand", inner), ("capacity", scope)):
+                    if key in body:
+                        problem = self._term(body[key], [*at, kind, key], where)
+                        if problem:
+                            return problem
+                continue
             for key in ("left", "right"):
                 problem = self._term(constraint[key], [*at, key], scope)
                 if problem:

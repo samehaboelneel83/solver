@@ -29,7 +29,7 @@
 
 import type { EntityType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
-import { describeBinding, describeTerm } from "../model/terms";
+import { describeBinding, describeSchedule, describeTerm } from "../model/terms";
 import type { Term, Binding } from "../model/terms";
 import { labelForeground, typeColour } from "./colour";
 import { typeNodeId, type ErData, type GraphPalette } from "./typesGraph";
@@ -44,7 +44,10 @@ export type ModelPart = (typeof MODEL_PARTS)[number];
 type Ir = {
   sets?: string[];
   parameters?: Record<string, { index?: string[] }>;
-  variables?: Record<string, { index?: string[]; domain?: string; lower?: number; upper?: number }>;
+  variables?: Record<
+    string,
+    { index?: string[]; domain?: string; lower?: number; upper?: number; start?: string; end?: string; size?: number | string; presence?: string }
+  >;
   constraints?: IrConstraint[];
   objective?: { sense?: string; terms?: { id?: string; weight?: number; expression?: Term }[] };
 };
@@ -59,6 +62,8 @@ type IrConstraint = {
   severity?: string;
   weight?: number;
   penalty?: number;
+  no_overlap?: { interval?: { var?: string }; over?: Binding[] };
+  cumulative?: { interval?: { var?: string }; over?: Binding[]; demand?: Term; capacity?: Term };
 };
 
 /** One row of the side panel: a label and what it says. */
@@ -200,7 +205,11 @@ export function buildModelView(
     const domain = spec.domain ?? "binary";
     const lines = [name, `${domain}${index.length ? ` [${index.join(", ")}]` : ""}`];
     const bounds =
-      domain === "binary" ? "0 or 1" : `${spec.lower ?? 0} to ${spec.upper ?? "no stated limit"}`;
+      domain === "binary"
+        ? "0 or 1"
+        : domain === "interval"
+          ? `from ${spec.start} to ${spec.end}, lasting ${spec.size}${spec.presence ? `, only if ${spec.presence}` : ""}`
+          : `${spec.lower ?? 0} to ${spec.upper ?? "no stated limit"}`;
     addNode(id, "variables", "variable", lines, "#dbeafe",
       [["Kind", "Variable (decision)"], ["Domain", domain], ["Indexed by", index.join(", ") || "nothing: one value"], ["Values", bounds]],
       estimateWidth(lines, 7.8, 100, 34));
@@ -222,12 +231,19 @@ export function buildModelView(
       (soft ? `may bend · ${price ?? 1} per unit` : "must hold") + (quadratic ? " · quadratic" : ""),
     ];
     const expressed = rule.left !== undefined && rule.right !== undefined;
+    const schedule = describeSchedule(rule);
     const details: Detail[] = [
       [
         "Kind",
         (soft ? "Rule that may bend (soft)" : "Rule that must hold (hard)") + (quadratic ? ", quadratic" : ""),
       ],
-      ["Rule", expressed ? `${describeTerm(rule.left)} ${relation} ${describeTerm(rule.right)}` : "(no expression: published before the IR contract)"],
+      [
+        "Rule",
+        schedule ??
+          (expressed
+            ? `${describeTerm(rule.left)} ${relation} ${describeTerm(rule.right)}`
+            : "(no expression: published before the IR contract)"),
+      ],
     ];
     if (rule.forall?.length) details.push(["For every", rule.forall.map(describeBinding).join(", ")]);
     if (soft) details.push(["Price per unit broken", String(price ?? 1)]);
@@ -240,6 +256,18 @@ export function buildModelView(
     const found = { vars: new Set<string>(), pars: new Set<string>(), attrs: new Map<string, Set<string>>() };
     collect(rule.left, found, bound);
     collect(rule.right, found, bound);
+    const body = rule.no_overlap ?? rule.cumulative;
+    if (body) {
+      // A scheduling rule reads its intervals, and any data in its demand
+      // (bound by its `over`) and capacity.
+      const inner = new Map(bound);
+      for (const binding of body.over ?? []) inner.set(binding.index, binding.set);
+      if (body.interval?.var) found.vars.add(body.interval.var);
+      if (rule.cumulative) {
+        collect(rule.cumulative.demand, found, inner);
+        collect(rule.cumulative.capacity, found, bound);
+      }
+    }
     found.vars.forEach((name) => addEdge(`${MODEL_NODE_PREFIX}var-${name}`, id));
     found.pars.forEach((name) => addEdge(`${MODEL_NODE_PREFIX}par-${name}`, id));
     // The sets it holds for every one of, labelled with any attribute of

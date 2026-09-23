@@ -31,6 +31,8 @@ import {
   cleanBinding,
   cleanTerm,
   declaredRelationships,
+  describeBinding,
+  describeSchedule,
   describeTerm,
   freeNumberedId,
   nextBinding,
@@ -680,7 +682,17 @@ function ConstraintCard({
         </button>
       }
     >
-      {constraint.left == null || constraint.right == null ? (
+      {describeSchedule(constraint) !== null ? (
+        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          <p className="font-mono text-xs">
+            {constraint.forall?.length ? `for every ${constraint.forall.map(describeBinding).join(", ")}: ` : ""}
+            {describeSchedule(constraint)}
+          </p>
+          <p className="mt-1">
+            A scheduling rule, always required. Kept as published; it cannot be edited here yet.
+          </p>
+        </div>
+      ) : constraint.left == null || constraint.right == null ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>
             This rule is named but not expressed — a leftover of versions that

@@ -44,6 +44,7 @@ STRUCTURAL = frozenset({
     "where_not_array", "where_filter_malformed", "where_operator_unknown",
     "relationships_not_array", "relationship_not_a_name",
     "when_malformed", "pwl_malformed",
+    "interval_malformed", "scheduling_rule_malformed",
 })
 
 #: Rules that need the whole document, the limits or the domain: validate.py's.
@@ -63,6 +64,11 @@ SEMANTIC = frozenset({
     # rest of the document.
     "when_needs_version_2", "when_not_binary", "when_on_soft", "when_on_product",
     "pwl_needs_version_2", "pwl_breakpoints_not_increasing",
+    # Which variables an interval's parts are, and what a scheduling rule's
+    # interval and amounts read, need the declarations.
+    "interval_needs_version_2", "interval_part_invalid", "interval_size_invalid",
+    "interval_read_as_number", "scheduling_needs_version_2", "scheduling_not_interval",
+    "scheduling_rule_hard", "scheduling_amount_not_constant",
 })
 
 

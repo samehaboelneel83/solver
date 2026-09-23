@@ -268,7 +268,14 @@ function ForDomain({ domainId }: { domainId: Id }) {
 export function unexpressedRules(ir: Record<string, unknown> | undefined): string[] {
   const constraints = Array.isArray(ir?.constraints) ? (ir.constraints as Record<string, unknown>[]) : [];
   return constraints
-    .filter((rule) => rule && (rule.left === undefined || rule.right === undefined))
+    .filter(
+      (rule) =>
+        rule &&
+        (rule.left === undefined || rule.right === undefined) &&
+        // A scheduling rule has no left or right: it is expressed differently.
+        rule.no_overlap === undefined &&
+        rule.cumulative === undefined
+    )
     .map((rule) => String(rule.id ?? "?"));
 }
 

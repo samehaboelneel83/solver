@@ -18,7 +18,7 @@
  */
 
 import type { Binding, Term } from "../model/terms";
-import { describeBinding } from "../model/terms";
+import { describeBinding, schedulingKind } from "../model/terms";
 import type { GraphResponse } from "../types/graph";
 import { MODEL_NODE_PREFIX, OBJECTIVE_NODE_ID } from "./modelGraph";
 
@@ -172,6 +172,8 @@ type Ir = {
     severity?: string;
     weight?: number;
     penalty?: number;
+    no_overlap?: { interval: { var: string; index: string[] }; over?: Binding[] };
+    cumulative?: { interval: { var: string; index: string[] }; over?: Binding[]; demand?: Term; capacity?: Term };
   }[];
   objective?: { sense?: string; terms?: { weight?: number; expression?: Term }[] };
 };
@@ -258,6 +260,25 @@ export function modelToBlocks(irInput: Record<string, unknown> | null | undefine
   const rules: SerialBlock[] = (ir.constraints ?? []).map((rule) => {
     const soft = rule.severity === "soft";
     const expressed = rule.left !== undefined && rule.right !== undefined;
+    const kind = schedulingKind(rule);
+    if (kind !== null) {
+      // No scheduling block yet (the editor slice): the rule's intervals on
+      // the left, and for a cumulative its capacity on the right.
+      const body = rule[kind]!;
+      return fixed({
+        type: "ir_rule_hard",
+        id: `${MODEL_NODE_PREFIX}con-${rule.id}`,
+        fields: {
+          ID: rule.id,
+          FORALL: rule.forall?.length ? rule.forall.map(describeBinding).join(", ") : "nothing: it holds once",
+          RELATION: kind === "no_overlap" ? "never overlap" : "stay within",
+        },
+        inputs: {
+          LEFT: { block: termBlock({ sum: { var: body.interval.var, index: body.interval.index }, over: body.over ?? [] } as Term) },
+          ...(rule.cumulative ? { RIGHT: { block: termBlock(rule.cumulative.capacity) } } : {}),
+        },
+      });
+    }
     return fixed({
       type: soft ? "ir_rule_soft" : "ir_rule_hard",
       id: `${MODEL_NODE_PREFIX}con-${rule.id}`,

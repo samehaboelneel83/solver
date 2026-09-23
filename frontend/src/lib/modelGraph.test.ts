@@ -214,6 +214,43 @@ describe("buildModelView on models that are not tidy", () => {
     expect(modelDetails(objective)).toContainEqual(["o", "1 × curve(x[], 3 points)"]);
   });
 
+  it("draws a scheduling rule and an interval in words, joined to what they read", () => {
+    const { graph: built } = buildModelView(
+      {
+        sets: ["job"],
+        parameters: { duration: { index: ["job"] }, crew: { index: ["job"] } },
+        variables: {
+          begin: { index: ["job"], domain: "integer", lower: 0, upper: 9 },
+          finish: { index: ["job"], domain: "integer", lower: 0, upper: 9 },
+          task: { index: ["job"], domain: "interval", start: "begin", end: "finish", size: "duration" },
+        },
+        constraints: [
+          {
+            id: "c_crew",
+            cumulative: {
+              interval: { var: "task", index: ["j"] },
+              over: [{ index: "j", set: "job" }],
+              demand: { par: "crew", index: ["j"] },
+              capacity: { const: 2 },
+            },
+            severity: "hard",
+          },
+        ],
+      },
+      []
+    );
+    const rule = built.nodes.find((node) => node.id === "model-con-c_crew");
+    expect(modelDetails(rule)).toContainEqual([
+      "Rule",
+      "task[j] (j in job), each taking crew[j], stay within 2 at every moment",
+    ]);
+    const joined = (source: string) => built.edges.some((e) => e.source === source && e.target === "model-con-c_crew");
+    expect(joined("model-var-task")).toBe(true);
+    expect(joined("model-par-crew")).toBe(true);
+    const task = built.nodes.find((node) => node.id === "model-var-task");
+    expect(modelDetails(task)).toContainEqual(["Values", "from begin to finish, lasting duration"]);
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);

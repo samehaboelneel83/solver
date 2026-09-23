@@ -175,6 +175,15 @@ export default function DeclarationsEditor({
                   Remove
                 </button>
               </div>
+              {spec.domain === "interval" ? (
+                <p className="mt-1 text-xs text-slate-600">
+                  {name} is a span of time: from {spec.start} to {spec.end}, lasting{" "}
+                  {spec.size}
+                  {spec.presence ? `, and only if ${spec.presence}` : ""}. Kept as published; an
+                  interval cannot be edited here yet.
+                </p>
+              ) : (
+              <>
               <div className="mt-1">
                 <label className="block text-xs text-slate-600" htmlFor={`var-domain-${name}`}>
                   {name} decides
@@ -195,7 +204,7 @@ export default function DeclarationsEditor({
                     })
                   }
                 >
-                  {VARIABLE_DOMAINS.map((option) => (
+                  {SETTABLE_DOMAINS.map((option) => (
                     <option key={option} value={option}>
                       {domainPhrase(option)}
                     </option>
@@ -244,6 +253,8 @@ export default function DeclarationsEditor({
                     )}
                 </div>
               )}
+              </>
+              )}
             </div>
           ))}
           <AddVariable
@@ -264,10 +275,15 @@ export default function DeclarationsEditor({
   );
 }
 
+/** The domains a variable can be given here. An interval is kept and shown,
+ * not built: it names other variables, which the editor slice will offer. */
+const SETTABLE_DOMAINS = VARIABLE_DOMAINS.filter((domain) => domain !== "interval");
+
 /** Planner language for a variable domain — not the contract token. */
 function domainPhrase(domain: string): string {
   if (domain === "binary") return "yes or no";
   if (domain === "continuous") return "any number";
+  if (domain === "interval") return "a span of time";
   return "a whole number";
 }
 
@@ -371,7 +387,7 @@ function AddVariable({
             value={domain}
             onChange={(event) => setDomain(event.target.value as VariableDomain)}
           >
-            {VARIABLE_DOMAINS.map((option) => (
+            {SETTABLE_DOMAINS.map((option) => (
               <option key={option} value={option}>
                 {domainPhrase(option)}
               </option>

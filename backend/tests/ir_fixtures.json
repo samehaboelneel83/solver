@@ -1473,6 +1473,172 @@
           ]
         }
       }
+    },
+    {
+      "name": "shift_blocks_scheduled",
+      "why": "Scheduling (version 2): an interval ties a start and an end variable, `end = start + size`, and may be absent when its presence is 0. `no_overlap` keeps one day's blocks apart; `cumulative` lets at most two run at once.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -5572,6 +5738,1511 @@
                     2,
                     10
                   ]
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "interval_needs_version_2",
+      "loc": [
+        "variables",
+        "block",
+        "domain"
+      ],
+      "why": "an interval is version 2",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": []
+      }
+    },
+    {
+      "code": "interval_malformed",
+      "loc": [
+        "variables",
+        "block",
+        "lower"
+      ],
+      "why": "an interval's window is its start's and end's bounds, not its own",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held",
+            "lower": 0
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "interval_part_invalid",
+      "loc": [
+        "variables",
+        "block",
+        "start"
+      ],
+      "why": "a start is an integer variable, not a yes-or-no",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "held",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "interval_size_invalid",
+      "loc": [
+        "variables",
+        "block",
+        "size"
+      ],
+      "why": "a size is never negative",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": -1,
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "interval_read_as_number",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "sum",
+        "var"
+      ],
+      "why": "an interval is not a number; its end variable is",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "block",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "scheduling_needs_version_2",
+      "loc": [
+        "constraints",
+        0
+      ],
+      "why": "a scheduling rule is version 2",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "held",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "scheduling_rule_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "left"
+      ],
+      "why": "a constraint is one expression or one scheduling rule, not both",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard",
+            "left": {
+              "const": 0
+            }
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "scheduling_not_interval",
+      "loc": [
+        "constraints",
+        0,
+        "no_overlap",
+        "interval",
+        "var"
+      ],
+      "why": "no_overlap is over intervals, not start times",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "begin",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "begin",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "scheduling_rule_hard",
+      "loc": [
+        "constraints",
+        0,
+        "severity"
+      ],
+      "why": "a scheduling rule has no price for being broken",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "soft",
+            "weight": 5
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "const": 1
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "scheduling_amount_not_constant",
+      "loc": [
+        "constraints",
+        1,
+        "cumulative",
+        "demand"
+      ],
+      "why": "a demand is data, not a decision",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "begin": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "finish": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 100
+          },
+          "held": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          },
+          "block": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "domain": "interval",
+            "start": "begin",
+            "end": "finish",
+            "size": "demand",
+            "presence": "held"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_room",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "no_overlap": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_crew",
+            "cumulative": {
+              "interval": {
+                "var": "block",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "d",
+                  "set": "day"
+                },
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ],
+              "demand": {
+                "var": "begin",
+                "index": [
+                  "d",
+                  "s"
+                ]
+              },
+              "capacity": {
+                "const": 2
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_hold_all",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "var": "held",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_finish",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "finish",
+                  "index": [
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
                 ]
               }
             }

@@ -115,6 +115,13 @@ describe("referencesOf", () => {
   });
 });
 
+describe("an interval in the editor", () => {
+  it("keeps its start, end, size and presence, and never carries bounds", () => {
+    const task = { index: ["day"], domain: "interval" as const, start: "b", end: "e", size: 3, presence: "on" };
+    expect(cleanVariable({ ...task, lower: 0, upper: 9 })).toEqual(task);
+  });
+});
+
 describe("referencesOf a piecewise curve", () => {
   it("finds the variable the curve is of", () => {
     const term = { pwl: { var: "units", index: [] }, points: [[0, 0], [1, 5]] } as Term;

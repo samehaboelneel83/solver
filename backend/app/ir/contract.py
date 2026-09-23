@@ -76,8 +76,19 @@ DOMAIN_RULES: frozenset[str] = frozenset(c for c, r in RULES.items() if r["where
 #: they are the contract's prose, and a typo'd key is caught by
 #: `constraint_key_unknown` against this tuple.
 CONSTRAINT_KEYS: frozenset[str] = frozenset(
-    {"id", "note", "forall", "left", "relation", "right", "severity", "weight", "when"}
+    {
+        "id", "note", "forall", "left", "relation", "right", "severity", "weight", "when",
+        # Scheduling rules (version 2), in place of left/relation/right.
+        "no_overlap", "cumulative",
+    }
 )
+#: The two scheduling rules, and the keys each carries.
+SCHEDULING_KEYS: dict[str, frozenset[str]] = {
+    "no_overlap": frozenset({"interval", "over"}),
+    "cumulative": frozenset({"interval", "over", "demand", "capacity"}),
+}
+#: What an interval declaration names beyond `index` and `domain`.
+INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 
 _missing_operators = sorted(FILTER_OPERATORS - set(OPERATORS))
 if _missing_operators:  # pragma: no cover -- an import-time contradiction

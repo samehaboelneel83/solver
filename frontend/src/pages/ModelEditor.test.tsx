@@ -283,6 +283,46 @@ describe("ModelEditor", () => {
     expect(screen.queryByLabelText("Kind of term")).not.toBeInTheDocument();
   });
 
+  it("shows a scheduling model read-only and publishes it unchanged", async () => {
+    // Version 2 intervals and a no_overlap rule: the editor cannot build
+    // them yet, so it must neither crash, call the rule unexpressed, offer
+    // its Strength, nor drop an interval's start, end and size on publish.
+    const task = { index: ["day"], domain: "interval", start: "begin", end: "finish", size: "demand" };
+    const room = {
+      id: "c_room",
+      no_overlap: { interval: { var: "task", index: ["d"] }, over: [{ index: "d", set: "day" }] },
+      severity: "hard",
+    };
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      ir: {
+        version: 2,
+        sets: ["day"],
+        parameters: { demand: { index: ["day"] } },
+        variables: {
+          begin: { index: ["day"], domain: "integer", lower: 0, upper: 20 },
+          finish: { index: ["day"], domain: "integer", lower: 0, upper: 20 },
+          task,
+        },
+        constraints: [room],
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("no two of task[d] (d in day) overlap")).toBeInTheDocument();
+    expect(screen.getByText(/a scheduling rule, always required/i)).toBeInTheDocument();
+    expect(screen.getByText(/task is a span of time: from begin to finish, lasting demand/i)).toBeInTheDocument();
+    expect(screen.queryByText(/named but not expressed/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Strength")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.variables.task).toEqual(task);
+    expect(sent.constraints).toEqual([room]);
+  });
+
   it("reads a soft constraint's weight from the document, not an invented key", async () => {
     stub({
       ir: {

@@ -127,7 +127,13 @@ def solve(
         return products[(a, b)]
 
     reach = reach_of(compiled)
+    intervals = {
+        key: _interval(model, cp_vars, spec) for key, spec in compiled.intervals.items()
+    }
     for c in compiled.constraints:
+        if c.schedule is not None:
+            _add_schedule(model, intervals, c)
+            continue
         _add(model, cp_vars, c, product_of, reach)
     for curve in compiled.pwl:
         _add_curve(model, cp_vars, curve)
@@ -207,6 +213,25 @@ class _Progress(cp_model.CpSolverSolutionCallback):
             self.on_progress, "incumbent", self.WallTime(), self.best,
             self.unscale(self.BestObjectiveBound()),
         )
+
+
+def _interval(model: cp_model.CpModel, cp_vars: dict, spec):
+    """`end = start + size`, held by the interval itself; an optional one
+    holds it only while its presence is 1."""
+    start, end = cp_vars[spec.start], cp_vars[spec.end]
+    name = f"{spec.key[0]}[{','.join(spec.key[1])}]"
+    if spec.presence is None:
+        return model.NewIntervalVar(start, spec.size, end, name)
+    return model.NewOptionalIntervalVar(start, spec.size, end, cp_vars[spec.presence], name)
+
+
+def _add_schedule(model: cp_model.CpModel, intervals: dict, c: Constraint) -> None:
+    schedule = c.schedule
+    members = [intervals[key] for key, _ in schedule.members]
+    if schedule.kind == "no_overlap":
+        model.AddNoOverlap(members)
+    else:
+        model.AddCumulative(members, [demand for _, demand in schedule.members], schedule.capacity)
 
 
 def _add_curve(model: cp_model.CpModel, cp_vars: dict, curve) -> None:

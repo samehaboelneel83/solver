@@ -881,6 +881,12 @@ def solve_compiled(
         # Curves as linear rows: an epigraph where the goal allows, else the
         # incremental formulation (app.solve.reformulate).
         compiled, _ = pwl_rewrite(compiled)
+    if (compiled.intervals or any(c.schedule for c in compiled.constraints)) and "scheduling" not in getattr(
+        backend, "provides", ()
+    ):
+        # `choose` never routes one here; an empty row would be an answer
+        # that ignores the rule.
+        raise Unsupported(f"{backend.name} holds no scheduling rule or interval")
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     started = time.monotonic()
     # Only the first solve is watched: the re-solve that tests a ceiling

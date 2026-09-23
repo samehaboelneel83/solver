@@ -44,7 +44,7 @@ export const REQUIRED_KEYS = ["version", "sets", "parameters", "variables", "con
 export const OPTIONAL_KEYS = ["objective", "relationships"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
-export const VARIABLE_DOMAINS = ["binary", "integer", "continuous"] as const;
+export const VARIABLE_DOMAINS = ["binary", "integer", "continuous", "interval"] as const;
 export const RELATIONS = ["<=", "=", ">="] as const;
 /** How far a `via` binding walks. `one` is a single edge; `any` is the
  * transitive closure; `any_or_self` is that plus the anchor itself, which
@@ -175,7 +175,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "constraint_expression_missing",
     where: "shape",
-    text: "a constraint states `left`, `relation` and `right`; a declared but unexpressed constraint is not a model",
+    text: "a constraint that is not a scheduling rule states `left`, `relation` and `right`; a declared but unexpressed constraint is not a model",
   },
   {
     code: "constraint_relation_unsupported",
@@ -404,6 +404,56 @@ export const IR_RULES: readonly IrRule[] = [
     where: "shape",
     text: "a `pwl`'s points are in strictly increasing `x`",
   },
+  {
+    code: "interval_needs_version_2",
+    where: "shape",
+    text: "the `interval` domain appears only in a version 2 document",
+  },
+  {
+    code: "interval_malformed",
+    where: "shape",
+    text: "an interval names its `start`, `end` and `size` (and optionally `presence`) and carries no bounds; no other variable carries those keys",
+  },
+  {
+    code: "interval_part_invalid",
+    where: "shape",
+    text: "an interval's `start` and `end` are integer variables, and its `presence` a binary one, each declared with the interval's own index",
+  },
+  {
+    code: "interval_size_invalid",
+    where: "shape",
+    text: "an interval's `size` is a non-negative whole number or a parameter declared with the interval's own index",
+  },
+  {
+    code: "interval_read_as_number",
+    where: "shape",
+    text: "a `var` term never names an interval; its `start` and `end` variables are the numbers",
+  },
+  {
+    code: "scheduling_needs_version_2",
+    where: "shape",
+    text: "a `no_overlap` or `cumulative` rule appears only in a version 2 document",
+  },
+  {
+    code: "scheduling_rule_malformed",
+    where: "shape",
+    text: "a constraint is either an expression (`left`, `relation`, `right`) or exactly one scheduling rule; `no_overlap` carries an `interval` and an `over`, `cumulative` also a `demand` and a `capacity`",
+  },
+  {
+    code: "scheduling_not_interval",
+    where: "shape",
+    text: "a scheduling rule's `interval` names an interval variable",
+  },
+  {
+    code: "scheduling_rule_hard",
+    where: "shape",
+    text: "a scheduling rule is hard: no weight, no `when`",
+  },
+  {
+    code: "scheduling_amount_not_constant",
+    where: "shape",
+    text: "a `cumulative`'s `demand` and `capacity` read no variable",
+  },
 ];
 
 export const SHAPE_RULES: ReadonlySet<string> = new Set(
@@ -427,4 +477,17 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "severity",
   "weight",
   "when",
+  // Scheduling rules (version 2), in place of left/relation/right.
+  "no_overlap",
+  "cumulative",
 ]);
+
+/** The two scheduling rules, and the keys each carries (`SCHEDULING_KEYS`
+ * in `app/ir/contract.py`). */
+export const SCHEDULING_KEYS: Readonly<Record<"no_overlap" | "cumulative", readonly string[]>> = {
+  no_overlap: ["interval", "over"],
+  cumulative: ["interval", "over", "demand", "capacity"],
+};
+
+/** What an interval declaration names beyond `index` and `domain`. */
+export const INTERVAL_KEYS = ["start", "end", "size", "presence"] as const;

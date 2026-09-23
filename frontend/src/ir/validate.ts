@@ -21,6 +21,8 @@
 import {
   ALL_KEYS,
   CONSTRAINT_KEYS,
+  INTERVAL_KEYS,
+  SCHEDULING_KEYS,
   FILTER_OPERATORS,
   ACCEPTED_VERSIONS,
   IR_VERSION,
@@ -58,7 +60,7 @@ const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via
  */
 const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
-const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper"]);
+const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", ...INTERVAL_KEYS]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
@@ -332,14 +334,108 @@ class ShapeChecker {
             `${[...VARIABLE_DOMAINS].sort().join(", ")}`
         );
       }
+      const intervalKeys = this.checkIntervalKeys(name, declaration, at);
+      if (intervalKeys) return intervalKeys;
       const bounds = this.checkBounds(name, declaration, at);
       if (bounds) return bounds;
       this.variables.set(name, index as string[]);
+    }
+    for (const [name, declaration] of Object.entries(variables)) {
+      if ((declaration as Json).domain === "interval") {
+        const problem = this.checkIntervalParts(name, declaration as Json, ["variables", name]);
+        if (problem) return problem;
+      }
+    }
+    return null;
+  }
+
+  /** The same checks, in the same order, as `_check_interval_keys` in
+   * `app/ir/validate.py`. */
+  private checkIntervalKeys(name: string, declaration: Json, at: IrLoc): IrRefusal | null {
+    if (declaration.domain !== "interval") {
+      const stray = INTERVAL_KEYS.filter((key) => key in declaration).sort();
+      if (stray.length > 0) {
+        return refusal(
+          "interval_malformed",
+          [...at, stray[0]],
+          `'${name}' is ${String(declaration.domain)}, and only an interval names a ${stray[0]}`
+        );
+      }
+      return null;
+    }
+    if (this.ir.version === 1) {
+      return refusal(
+        "interval_needs_version_2",
+        [...at, "domain"],
+        `'${name}' is an interval, which version 1 does not have; publish it as version 2`
+      );
+    }
+    for (const key of ["start", "end", "size"]) {
+      if (!(key in declaration)) {
+        return refusal(
+          "interval_malformed",
+          [...at, key],
+          `the interval '${name}' names no ${key}; an interval is a start, an end and the size between them`
+        );
+      }
+    }
+    for (const key of ["lower", "upper"]) {
+      if (key in declaration) {
+        return refusal(
+          "interval_malformed",
+          [...at, key],
+          `the interval '${name}' carries a ${key} bound; its start and end variables carry the window it may be placed in`
+        );
+      }
+    }
+    return null;
+  }
+
+  /** `_check_interval_parts` in `app/ir/validate.py`. */
+  private checkIntervalParts(name: string, declaration: Json, at: IrLoc): IrRefusal | null {
+    const index = this.variables.get(name) as string[];
+    const declared = this.ir.variables as Record<string, Json>;
+    const sameIndex = (other: string[] | undefined) =>
+      other !== undefined && other.length === index.length && other.every((s, i) => s === index[i]);
+    for (const [key, domain] of [
+      ["start", "integer"],
+      ["end", "integer"],
+      ["presence", "binary"],
+    ] as const) {
+      if (!(key in declaration)) continue;
+      const part = declaration[key];
+      const spec = typeof part === "string" ? declared[part] : undefined;
+      if (!isObject(spec) || spec.domain !== domain || !sameIndex(this.variables.get(part as string))) {
+        return refusal(
+          "interval_part_invalid",
+          [...at, key],
+          `the ${key} of the interval '${name}' must be ${domain === "integer" ? "an" : "a"} ${domain} ` +
+            `variable declared over [${index.join(", ")}], as the interval is; ${show(part)} is not`
+        );
+      }
+    }
+    const size = declaration.size;
+    if (typeof size === "string") {
+      if (!sameIndex(this.parameters.get(size))) {
+        return refusal(
+          "interval_size_invalid",
+          [...at, "size"],
+          `the size of the interval '${name}' names ${show(size)}, which is not a parameter ` +
+            `declared over [${index.join(", ")}], as the interval is`
+        );
+      }
+    } else if (!isInt(size) || size < 0) {
+      return refusal(
+        "interval_size_invalid",
+        [...at, "size"],
+        `the size of the interval '${name}' is ${show(size)}; a size is a non-negative whole number, or a parameter`
+      );
     }
     return null;
   }
 
   private checkBounds(name: string, declaration: Json, at: IrLoc): IrRefusal | null {
+    if (declaration.domain === "interval") return null;
     for (const key of ["lower", "upper"] as const) {
       if (!(key in declaration)) continue;
       if (declaration.domain === "binary") {
@@ -423,6 +519,12 @@ class ShapeChecker {
         scope = bound as Map<string, string>;
       }
 
+      if ("no_overlap" in constraint || "cumulative" in constraint) {
+        const problem = this.checkScheduling(constraint, at, scope, identifier);
+        if (problem) return problem;
+        continue;
+      }
+
       for (const key of ["left", "relation", "right"] as const) {
         if (!(key in constraint)) {
           return refusal(
@@ -459,6 +561,109 @@ class ShapeChecker {
       }
       const when = this.checkWhen(constraint, at, scope, identifier);
       if (when) return when;
+    }
+    return null;
+  }
+
+  /** `no_overlap` / `cumulative` (version 2): the same checks, in the same
+   * order, as `_check_scheduling` in `app/ir/validate.py`. */
+  private checkScheduling(
+    constraint: Json,
+    at: IrLoc,
+    scope: Map<string, string>,
+    identifier: string
+  ): IrRefusal | null {
+    const kinds = (["no_overlap", "cumulative"] as const).filter((kind) => kind in constraint);
+    const kind = kinds[0];
+    if (this.ir.version === 1) {
+      return refusal(
+        "scheduling_needs_version_2",
+        at,
+        `the constraint '${identifier}' is a ${kind} rule, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const extra = [...kinds.slice(1), ...["left", "relation", "right"].filter((key) => key in constraint)];
+    if (extra.length > 0) {
+      return refusal(
+        "scheduling_rule_malformed",
+        [...at, extra[0]],
+        `the constraint '${identifier}' is a ${kind} rule and also carries ${extra[0]}; a constraint is ` +
+          "one expression or one scheduling rule"
+      );
+    }
+    const body = constraint[kind];
+    const loc: IrLoc = [...at, kind];
+    const expected = SCHEDULING_KEYS[kind];
+    if (
+      !isObject(body) ||
+      Object.keys(body).length !== expected.length ||
+      !expected.every((key) => key in body)
+    ) {
+      return refusal(
+        "scheduling_rule_malformed",
+        loc,
+        `a ${kind} carries exactly ${[...expected].sort().join(", ")}`
+      );
+    }
+    if (!(SEVERITIES as readonly unknown[]).includes(constraint.severity)) {
+      return refusal(
+        "constraint_severity_unsupported",
+        [...at, "severity"],
+        `${show(constraint.severity)} is not a severity; a constraint is ` +
+          `${[...SEVERITIES].sort().join(" or ")}, and nothing defaults it`
+      );
+    }
+    for (const key of ["severity", "weight", "when"]) {
+      if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
+        return refusal(
+          "scheduling_rule_hard",
+          [...at, key],
+          `the ${kind} rule '${identifier}' is hard and unconditional; a scheduling rule has no ` +
+            "price for being broken and no switch"
+        );
+      }
+    }
+    const inner = this.checkBindings(body.over, [...loc, "over"], scope);
+    if ("code" in inner) return inner as IrRefusal;
+    const innerScope = inner as Map<string, string>;
+    const interval = body.interval;
+    if (
+      !isObject(interval) ||
+      Object.keys(interval).length !== 2 ||
+      !("var" in interval) ||
+      !("index" in interval)
+    ) {
+      return refusal(
+        "scheduling_rule_malformed",
+        [...loc, "interval"],
+        'a scheduling rule names its intervals as {"var": "task", "index": [...]}'
+      );
+    }
+    const reference = this.reference(interval, [...loc, "interval"], innerScope, "var", this.variables);
+    if (reference) return reference;
+    const declared = (this.ir.variables as Record<string, Json>)[interval.var as string];
+    if (declared.domain !== "interval") {
+      return refusal(
+        "scheduling_not_interval",
+        [...loc, "interval", "var"],
+        `'${String(interval.var)}' is ${String(declared.domain)}; a ${kind} rule is over interval variables`
+      );
+    }
+    if (kind === "cumulative") {
+      for (const [key, where] of [
+        ["demand", innerScope],
+        ["capacity", scope],
+      ] as const) {
+        const problem = this.checkTerm(body[key], [...loc, key], where, 1);
+        if (problem) return problem;
+        if (degree(body[key]) > 0) {
+          return refusal(
+            "scheduling_amount_not_constant",
+            [...loc, key],
+            `the ${key} of '${identifier}' reads a decision; it is a number the data gives`
+          );
+        }
+      }
     }
     return null;
   }
@@ -787,8 +992,19 @@ class ShapeChecker {
         return this.termConst(term, loc);
       case "par":
         return this.reference(term, loc, scope, "par", this.parameters);
-      case "var":
-        return this.reference(term, loc, scope, "var", this.variables);
+      case "var": {
+        const problem = this.reference(term, loc, scope, "var", this.variables);
+        if (problem) return problem;
+        const declared = (this.ir.variables as Record<string, Json>)[term.var as string];
+        if (declared.domain === "interval") {
+          return refusal(
+            "interval_read_as_number",
+            [...loc, "var"],
+            `'${String(term.var)}' is an interval, which is not a number; read its start or end variable instead`
+          );
+        }
+        return null;
+      }
       case "attr":
         return this.termAttr(term, loc, scope);
       case "sum":

@@ -127,6 +127,32 @@ class Linear:
         return total
 
 
+@dataclass(frozen=True)
+class IntervalDef:
+    """One instance of an interval variable (IR version 2): `end = start +
+    size`, both integer decisions, unless `presence` (a binary) is 0 -- then
+    the interval does not happen and neither holds. Not a decision itself: a
+    backend that holds intervals (CP-SAT) builds one from these."""
+
+    key: VarKey
+    start: VarKey
+    end: VarKey
+    size: int
+    presence: VarKey | None = None
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """A scheduling rule instance: `no_overlap` (the members never run at
+    once) or `cumulative` (the running members' demands stay within
+    `capacity` at every moment). `members` pairs each interval with its
+    demand (1 for `no_overlap`)."""
+
+    kind: str
+    members: tuple[tuple[VarKey, int], ...]
+    capacity: int | None = None
+
+
 @dataclass
 class Constraint:
     """One instance of a constraint: the `forall` has already been expanded,
@@ -149,6 +175,10 @@ class Constraint:
     # while this binary variable has this value, and says nothing otherwise.
     # None for an unconditional rule -- every rule before version 2.
     when: tuple[VarKey, int] | None = None
+    # A scheduling rule instance (version 2) in place of an expression: the
+    # left and right are empty and say nothing. Only a backend that provides
+    # `scheduling` is offered one.
+    schedule: Schedule | None = None
 
     def is_active(self, assignments: dict[VarKey, Any]) -> bool:
         """Whether the rule binds at an assignment: always, unless its switch
@@ -237,6 +267,8 @@ class Compiled:
     # The piecewise-linear curves the model's `pwl` terms stand for, each an
     # auxiliary `y` defined by its `x` (IR version 2).
     pwl: list[PwlDef] = field(default_factory=list)
+    # Every instance of every interval variable, by its key (version 2).
+    intervals: dict[VarKey, IntervalDef] = field(default_factory=dict)
 
     @property
     def is_integral(self) -> bool:
@@ -290,7 +322,8 @@ def slack_by_constraint(
     for constraint in compiled.constraints:
         # A conditional rule switched off has no room to measure: it does not
         # bind, however far its sides are apart.
-        if not constraint.is_active(assignments):
+        if not constraint.is_active(assignments) or constraint.schedule is not None:
+            # A scheduling rule has no one number of room left.
             continue
         value = slack_of(constraint, assignments)
         current = tightest.get(constraint.id)
@@ -333,6 +366,7 @@ class _Compiler:
         self._check_edges_were_frozen()
         self._index_parameters()
         self._declare_variables()
+        intervals = self._declare_intervals()
         for spec in self.ir.get("constraints", []):
             self._expand_constraint(spec)
         objective, sense, mode, term_ids, terms, penalties, quadratic = self._objective()
@@ -346,11 +380,15 @@ class _Compiler:
             objective_terms=terms,
             penalty_objective=penalties,
             objective_quadratic=quadratic,
-            var_index_sets={n: v["index"] for n, v in self.ir.get("variables", {}).items()},
+            # An interval is not a decision with a value; its start and end are.
+            var_index_sets={
+                n: v["index"] for n, v in self.ir.get("variables", {}).items() if v.get("domain") != "interval"
+            },
             violations=self.violations,
             penalty_of=self.penalty_of,
             empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
             pwl=list(self._pwls),
+            intervals=intervals,
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -387,6 +425,8 @@ class _Compiler:
     def _declare_variables(self) -> None:
         for name, spec in self.ir.get("variables", {}).items():
             domain = spec.get("domain", "binary")
+            if domain == "interval":
+                continue  # `_declare_intervals`, once its start and end exist
             if domain == "binary":
                 lower, upper = Decimal(0), Decimal(1)
             elif domain in ("integer", "continuous"):
@@ -402,6 +442,34 @@ class _Compiler:
             for combo in self._members(spec["index"]):
                 key: VarKey = (name, combo)
                 self.variables[key] = Variable(key, domain, lower, upper, defaulted)
+
+    def _declare_intervals(self) -> dict[VarKey, IntervalDef]:
+        out: dict[VarKey, IntervalDef] = {}
+        for name, spec in self.ir.get("variables", {}).items():
+            if spec.get("domain") != "interval":
+                continue
+            size_spec = spec["size"]
+            for combo in self._members(spec["index"]):
+                if isinstance(size_spec, str):
+                    size = self._params[size_spec].get(combo, self.defaults.get(size_spec, 0))
+                else:
+                    size = size_spec
+                size = number(size)
+                label = f"{name}[{', '.join(combo)}]" if combo else name
+                if size < 0 or size != size.to_integral_value():
+                    raise Unsupported(
+                        f"the size of the interval {label} is {size}; an interval's size is a "
+                        "non-negative whole number of time units"
+                    )
+                presence = spec.get("presence")
+                out[(name, combo)] = IntervalDef(
+                    (name, combo),
+                    (spec["start"], combo),
+                    (spec["end"], combo),
+                    int(size),
+                    (presence, combo) if presence else None,
+                )
+        return out
 
     def _all_integral_so_far(self) -> bool:
         """Whether every variable *declared by the model* is integral.
@@ -428,6 +496,10 @@ class _Compiler:
         that looks optimal and quietly breaks the rule; ignoring the penalty
         would make every soft constraint free.
         """
+        kind = next((k for k in ("no_overlap", "cumulative") if k in spec), None)
+        if kind is not None:
+            self._expand_scheduling(spec, kind)
+            return
         if "left" not in spec or "right" not in spec:
             # A model version published before the IR contract existed: its
             # constraints carry an id and a prose note and nothing to solve.
@@ -510,6 +582,46 @@ class _Compiler:
                 Constraint(spec["id"], index, left, spec["relation"], right, square, when)
             )
         self._current_id = None
+
+    def _expand_scheduling(self, spec: dict[str, Any], kind: str) -> None:
+        """One `Constraint` carrying a `Schedule` per instance of the
+        `forall`, over the intervals its `over` ranges across."""
+        if spec.get("severity") == "soft":
+            # Only a scenario can get here: the validator refuses a soft one.
+            raise Unsupported(
+                f"the {kind} rule {spec['id']!r} was softened by the scenario; a scheduling rule "
+                "has no amount by which it is broken, so it can only be kept or disabled"
+            )
+        body = spec[kind]
+        forall = spec.get("forall") or []
+        envs = self._bindings(forall)
+        if forall and not envs:
+            self._note_empty(spec["id"], "forall", {})
+            return
+        interval = body["interval"]
+        for env in envs:
+            index = dict(env_keys(env))
+            members = []
+            inner = self._bindings(body["over"], env)
+            if not inner:
+                self._note_empty(spec["id"], "over", index)
+            for env2 in inner:
+                key: VarKey = (interval["var"], tuple(env2[i][1]["id"] for i in interval["index"]))
+                demand = self._amount(body["demand"], env2, spec["id"], "demand") if kind == "cumulative" else 1
+                members.append((key, demand))
+            capacity = self._amount(body["capacity"], env, spec["id"], "capacity") if kind == "cumulative" else None
+            self.constraints.append(
+                Constraint(spec["id"], index, Linear(), "<=", Linear(), schedule=Schedule(kind, tuple(members), capacity))
+            )
+
+    def _amount(self, term: dict[str, Any], env, rule: str, what: str) -> int:
+        value = self._term(term, env).const
+        if value < 0 or value != value.to_integral_value():
+            raise Unsupported(
+                f"the {what} of {rule!r} comes to {value} here; a scheduling rule counts in "
+                "non-negative whole numbers"
+            )
+        return int(value)
 
     def _when(self, spec: dict[str, Any] | None, env) -> tuple[VarKey, int] | None:
         """This instance's switch: the binary variable at these indices, and
