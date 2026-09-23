@@ -717,7 +717,8 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         </p>
       )}
 
-      {(data.params as { robust?: RobustReport }).robust && (
+      {/* `robust` is the request's `true` until the run settles, then its report. */}
+      {typeof (data.params as { robust?: unknown }).robust === "object" && (
         <Robustness report={(data.params as { robust: RobustReport }).robust} objective={data.objective} />
       )}
       {data.pareto && data.pareto.length > 0 && (

@@ -497,6 +497,13 @@ describe("Runs", () => {
     expect(screen.getByText(/the price of robustness: 2 on the goal \(11.7647%\) — 15 against 17 if the data were exact\./i)).toBeInTheDocument();
   });
 
+  it("shows a robust run still solving without a report -- its params carry the request's true", async () => {
+    stub({ run: { ...RUN_DETAIL, params: { ...RUN_DETAIL.params, robust: true } } });
+    renderPage();
+    expect(await screen.findByText("c_cover_demand")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "A robust answer" })).not.toBeInTheDocument();
+  });
+
   it("offers a robust solve only when a parameter is uncertain within a range", async () => {
     const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 31, status: "queued" });
     const uncertainVersion = {
