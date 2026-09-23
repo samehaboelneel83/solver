@@ -476,7 +476,23 @@ variable named and CP-SAT or SCIP take the rule natively. The run records
 goes to HiGHS (rank 1) rather than SCIP. Not built: the IR-level bound
 propagation (FBBT) the plan mentions for tightening M further -- declared
 bounds already give the exact M for the box, and nothing yet shows a need.
-Next slices: PWL, scheduling, then the editor and graph styles.
+Slice 4, piecewise-linear, is done (2026-09-23, `6ebc2a1`): a term
+`{"pwl": {var, index}, "points": [[x, y], ...]}` (version 2, points in
+strictly increasing x) is f(x) by interpolation, x kept within the first
+and last point. The compiler gives each (x, curve) one auxiliary y -- whole
+when x is whole and f is whole at every whole x. CP-SAT holds it as an
+AddElement table, SCIP as SOS2 (`pwl-native`); for HiGHS and the MILP
+wrapper `reformulate.pwl_rewrite` writes an epigraph when y appears only in
+a weighted goal that pushes a convex curve down (or a concave one up), else
+the incremental formulation. `admit_pwl` (from `refine`) turns the need into
+`pwl-convex` in the first case -- GLOP provides that -- and otherwise makes
+an LP a MILP. The run records `params.reformulations` (kind, x, segments);
+auxiliaries (`__` names) never reach the roster, reduced costs or a
+conflict, since a non-native diagnosis rewrites per probe. The editor keeps
+and shows a curve but cannot draw one yet (the editor slice). The plan's
+`pwl-nonconvex` need became `pwl` / `pwl-convex`, named by what a backend
+provides rather than what the curve is. Next slices: scheduling, then the
+editor and graph styles.
 
 ---
 
