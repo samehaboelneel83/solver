@@ -124,6 +124,14 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some rules apply only when a decision says so")
 
+    if _has_pwl(ir):
+        needs.add("pwl")
+        reasons.append(
+            "a cost or amount follows a piecewise-linear curve, which a solver holds by choosing "
+            "the segment x falls on"
+        )
+        planner.append("some amounts follow a curve with corners")
+
     fractional = _fractional(ir, data)
     if fractional:
         needs.add("fractional-data")
@@ -185,6 +193,14 @@ def with_convexity(found: Classification, convex: bool | None, reason: str) -> C
         found.needs | {"nonconvex"},
         [*found.planner, "the goal may have more than one low point, so the best one has to be searched for"],
     )
+
+
+def _has_pwl(node: Any) -> bool:
+    if isinstance(node, dict):
+        return "pwl" in node and "points" in node or any(_has_pwl(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_has_pwl(v) for v in node)
+    return False
 
 
 def _fractional(ir: dict[str, Any], data: dict[str, Any] | None) -> str | None:

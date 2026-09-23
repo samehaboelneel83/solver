@@ -30,7 +30,6 @@ from app.solve.backends import NoBackend, choose, optimality_of
 from app.solve.classify import classify
 from app.solve.convexity import refine
 from app.solve.compile import (
-    _VIOLATION,
     DEFAULT_UPPER,
     Compiled,
     Constraint,
@@ -44,7 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
-from app.solve.reformulate import bigm
+from app.solve.reformulate import bigm, pwl_rewrite
 from app.core.logs import bind as bind_log
 from app.core import tracing
 from app.settings_resolve import resolve
@@ -577,6 +576,8 @@ def _execute(
         # What the solver was actually given: the conditional rules as big-M
         # rows, and the largest M each needed (principle 7: say so).
         extra["reformulations"] = bigm(compiled)[1]
+    if compiled.pwl and "pwl-native" not in backend.provides:
+        extra["reformulations"] = [*extra.get("reformulations", []), *pwl_rewrite(compiled)[1]]
     if stopped:
         extra["stopped_by_request"] = True
     if compiled.empty_ranges:
@@ -876,6 +877,10 @@ def solve_compiled(
         # No native indicator: conditional rules as a big-M from declared
         # bounds (`reformulate.admit` routed only such a model here).
         compiled, _ = bigm(compiled)
+    if compiled.pwl and "pwl-native" not in backend.provides:
+        # Curves as linear rows: an epigraph where the goal allows, else the
+        # incremental formulation (app.solve.reformulate).
+        compiled, _ = pwl_rewrite(compiled)
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     started = time.monotonic()
     # Only the first solve is watched: the re-solve that tests a ceiling
@@ -1133,7 +1138,9 @@ def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[st
     through `constraint_result` instead."""
     out: dict[str, list[list[str]]] = {name: [] for name in compiled.var_index_sets}
     for (name, index), value in sorted(result.assignments.items()):
-        if name != _VIOLATION and value:
+        # Violations and the auxiliaries a curve stands for are not decisions
+        # anyone made; `__` names are the compiler's own.
+        if not name.startswith("__") and value:
             out.setdefault(name, []).append(list(index))
     return out
 
@@ -1149,7 +1156,7 @@ def _reduced_costs(result: Solution) -> dict[str, list[dict[str, Any]]] | None:
         return None
     out: dict[str, list[dict[str, Any]]] = {}
     for (name, index), value in sorted(result.reduced_costs.items()):
-        if name == _VIOLATION or abs(value) < _REDUCED_COST_FLOOR:
+        if name.startswith("__") or abs(value) < _REDUCED_COST_FLOOR:
             continue
         out.setdefault(name, []).append(
             {"index": list(index), "value": _json_number(value)}

@@ -70,10 +70,13 @@ export default function TermBuilder({
   const namedBlock = Boolean(label);
   // A sum needs a set to range over. Offering one with none declared would
   // mint a binding whose set is empty — refused on publish.
-  const offeredKinds =
+  // A piecewise curve is kept and shown, not yet built here (IR version 2;
+  // the editor learns to draw its points in a later slice).
+  const offeredKinds = (
     context.sets.length > 0 || kind === "sum"
       ? TERM_KINDS
-      : TERM_KINDS.filter((option) => option !== "sum");
+      : TERM_KINDS.filter((option) => option !== "sum")
+  ).filter((option) => option !== "pwl" || kind === "pwl");
   const name = label ?? TERM_LABELS[kind];
   const kindSelect = (
     <>
@@ -130,6 +133,18 @@ function Body({
   depth,
 }: Required<Omit<TermBuilderProps, "label" | "actions">>) {
   const kind = termKind(value);
+
+  if (kind === "pwl") {
+    const term = value as { pwl: { var: string; index: string[] }; points: [number, number][] };
+    const of = term.pwl.index.length > 0 ? `${term.pwl.var}[${term.pwl.index.join(", ")}]` : term.pwl.var;
+    return (
+      <p className="px-2 py-1 text-sm text-slate-600">
+        A piecewise curve of {of} through {term.points.length} points (
+        {term.points.map(([x, y]) => `${x} → ${y}`).join(", ")}). Kept as published; its points
+        cannot be edited here yet.
+      </p>
+    );
+  }
 
   if (kind === "const") {
     const term = value as { const: number };

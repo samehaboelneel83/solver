@@ -100,9 +100,9 @@ def refine(found: Classification, compiled: Compiled) -> Classification:
     """
     # Conditional rules: whether a big-M backend may take them is a fact
     # about the compiled bounds too (app.solve.reformulate).
-    from app.solve.reformulate import admit
+    from app.solve.reformulate import admit, admit_pwl
 
-    found = admit(found, compiled)
+    found = admit_pwl(admit(found, compiled), compiled)
     if not compiled.objective_quadratic or all(v.is_integral for v in compiled.variables.values()):
         return found
     convexity = objective_convexity(compiled)

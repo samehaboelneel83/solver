@@ -1409,6 +1409,70 @@
           ]
         }
       }
+    },
+    {
+      "name": "volume_discount_pwl",
+      "why": "A piecewise-linear cost (version 2): 5 a unit for the first two, 3 for the next two, 2 after -- a price-break curve, which is concave and needs the curve itself, not its tangents.",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "units": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 6
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_enough",
+            "left": {
+              "var": "units",
+              "index": []
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "pwl": {
+                  "var": "units",
+                  "index": []
+                },
+                "points": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    2,
+                    10
+                  ],
+                  [
+                    4,
+                    16
+                  ],
+                  [
+                    6,
+                    20
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -5311,6 +5375,203 @@
                       }
                     ]
                   }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "pwl_needs_version_2",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "pwl"
+      ],
+      "why": "a piecewise-linear term is a version 2 construct",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "units": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 6
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_enough",
+            "left": {
+              "var": "units",
+              "index": []
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "pwl": {
+                  "var": "units",
+                  "index": []
+                },
+                "points": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    2,
+                    10
+                  ],
+                  [
+                    4,
+                    16
+                  ],
+                  [
+                    6,
+                    20
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "pwl_malformed",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "points"
+      ],
+      "why": "one point is a value, not a curve: a pwl needs at least two",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "units": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 6
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_enough",
+            "left": {
+              "var": "units",
+              "index": []
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "pwl": {
+                  "var": "units",
+                  "index": []
+                },
+                "points": [
+                  [
+                    0,
+                    0
+                  ]
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "pwl_breakpoints_not_increasing",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "points"
+      ],
+      "why": "x must increase, or one x would have two values",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "units": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 6
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_enough",
+            "left": {
+              "var": "units",
+              "index": []
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "pwl": {
+                  "var": "units",
+                  "index": []
+                },
+                "points": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    4,
+                    16
+                  ],
+                  [
+                    2,
+                    10
+                  ]
                 ]
               }
             }

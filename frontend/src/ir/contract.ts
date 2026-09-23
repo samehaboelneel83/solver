@@ -55,7 +55,7 @@ export const TRAVERSAL_DEPTHS = ["one", "any", "any_or_self"] as const;
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const OBJECTIVE_MODES = ["weighted", "lex"] as const;
-export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul"] as const;
+export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul", "pwl"] as const;
 export const FILTER_OPERATORS = ["=", "!=", "<", "<=", ">", ">=", "in", "notIn"] as const;
 export const ARITHMETIC_ATTR_TYPES = ["integer", "number"] as const;
 
@@ -389,6 +389,21 @@ export const IR_RULES: readonly IrRule[] = [
   },
   { code: "when_on_soft", where: "shape", text: "a `when` is on a hard constraint" },
   { code: "when_on_product", where: "shape", text: "a constraint with a `when` is linear" },
+  {
+    code: "pwl_needs_version_2",
+    where: "shape",
+    text: "a `pwl` term appears only in a version 2 document",
+  },
+  {
+    code: "pwl_malformed",
+    where: "shape",
+    text: "a `pwl` names one variable and at least two `[x, y]` points of numbers",
+  },
+  {
+    code: "pwl_breakpoints_not_increasing",
+    where: "shape",
+    text: "a `pwl`'s points are in strictly increasing `x`",
+  },
 ];
 
 export const SHAPE_RULES: ReadonlySet<string> = new Set(

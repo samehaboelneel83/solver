@@ -89,7 +89,8 @@
     "attr",
     "sum",
     "add",
-    "mul"
+    "mul",
+    "pwl"
   ],
   "filterOperators": [
     "=",
@@ -520,6 +521,21 @@
       "code": "when_on_product",
       "where": "shape",
       "text": "a constraint with a `when` is linear"
+    },
+    {
+      "code": "pwl_needs_version_2",
+      "where": "shape",
+      "text": "a `pwl` term appears only in a version 2 document"
+    },
+    {
+      "code": "pwl_malformed",
+      "where": "shape",
+      "text": "a `pwl` names one variable and at least two `[x, y]` points of numbers"
+    },
+    {
+      "code": "pwl_breakpoints_not_increasing",
+      "where": "shape",
+      "text": "a `pwl`'s points are in strictly increasing `x`"
     }
   ]
 }

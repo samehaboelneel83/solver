@@ -33,7 +33,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.solve.classify import Classification
-from app.solve.compile import Compiled, Constraint, Linear
+from app.solve.compile import Compiled, Constraint, Linear, PwlDef, Variable
 
 INDICATOR = "indicator"
 #: What a model with conditional rules needs once every variable those
@@ -165,3 +165,141 @@ def _row(c: Constraint, left: Linear, relation: str, bound: Decimal, m: Decimal)
     row = Constraint(c.id, dict(c.index), left, relation, Linear(const=bound))
     row._big_m = m  # type: ignore[attr-defined]
     return row
+
+
+# -- piecewise-linear curves (IR version 2, `pwl`) -------------------------------------
+
+PWL = "pwl"
+#: Every curve is convex where the objective only pushes it down (or concave
+#: where it only pushes it up): an epigraph holds it with no binaries, so an
+#: LP backend may take it too.
+PWL_CONVEX = "pwl-convex"
+#: Held by the backend itself: CP-SAT as a table, SCIP as SOS2.
+PWL_NATIVE = "pwl-native"
+
+
+def _pushed_down(compiled: Compiled, curve: PwlDef) -> bool:
+    """Can an epigraph stand for this curve? Only if its y appears in no rule
+    and nowhere but a weighted objective's linear part, and that objective
+    presses y towards the curve from the side the curve bends away from."""
+    y = curve.y
+    if any(y in c.left.coeffs or y in c.right.coeffs for c in compiled.constraints):
+        return False
+    if any(y in pair for pair in compiled.objective_quadratic):
+        return False
+    if compiled.objective_mode == "lex" and any(y in t.coeffs for t in compiled.objective_terms):
+        return False
+    coeff = compiled.objective.coeffs.get(y, Decimal(0))
+    pressure = coeff if compiled.sense == "minimize" else -coeff
+    slopes = curve.slopes
+    convex = all(b >= a for a, b in zip(slopes, slopes[1:]))
+    concave = all(b <= a for a, b in zip(slopes, slopes[1:]))
+    return pressure == 0 or (pressure > 0 and convex) or (pressure < 0 and concave)
+
+
+def admit_pwl(found: Classification, compiled: Compiled) -> Classification:
+    """What a model with curves needs once compiled: `pwl-convex` when every
+    curve can be an epigraph (any backend, an LP one too), else `pwl`, which
+    brings binaries with it on the backends that are not native -- so an LP
+    becomes a MILP. A curve whose y is fractional makes the model mixed."""
+    if PWL not in found.needs or not compiled.pwl:
+        return found
+    needs = set(found.needs)
+    reasons = list(found.reasons)
+    model_class = found.model_class
+    if any(not compiled.variables[c.y].is_integral for c in compiled.pwl):
+        needs.add("continuous")
+        if model_class == "IP":
+            model_class = "MILP"
+    if all(_pushed_down(compiled, c) for c in compiled.pwl):
+        needs = (needs - {PWL}) | {PWL_CONVEX}
+        reasons.append(
+            "every piecewise curve bends the way the goal pushes it, so it can be held by its "
+            "tangent lines alone, with no yes-or-no decisions added"
+        )
+    else:
+        needs.add("integral")
+        if model_class == "LP":
+            model_class = "MILP"
+        reasons.append(
+            "a piecewise curve is not convex in the direction the goal pushes it, so choosing "
+            "its segment is a yes-or-no decision"
+        )
+    return replace(found, needs=needs, reasons=reasons, model_class=model_class)
+
+
+def pwl_rewrite(compiled: Compiled) -> tuple[Compiled, list[dict[str, Any]]]:
+    """Every curve as linear rows, for a backend that does not hold it
+    natively: an epigraph where `_pushed_down` allows, else the incremental
+    formulation (exact, and a stronger relaxation than convex combination)."""
+    if not compiled.pwl:
+        return compiled, []
+    variables = dict(compiled.variables)
+    rows = list(compiled.constraints)
+    record = []
+    for n, curve in enumerate(compiled.pwl):
+        if _pushed_down(compiled, curve):
+            rows += _epigraph(compiled, curve)
+            record.append({"kind": "pwl-epigraph", "x": _name(curve.x), "segments": len(curve.points) - 1})
+        else:
+            new_vars, new_rows = _incremental(curve, n)
+            variables.update(new_vars)
+            rows += new_rows
+            record.append({"kind": "pwl-incremental", "x": _name(curve.x), "segments": len(curve.points) - 1})
+    return replace(compiled, variables=variables, constraints=rows, pwl=[]), record
+
+
+_ID = "__pwl"
+
+
+def _name(key) -> str:
+    return key[0] + (f"[{','.join(key[1])}]" if key[1] else "")
+
+
+def _within(curve: PwlDef) -> list[Constraint]:
+    """x is kept between the first and last point."""
+    (x0, _), (xn, _) = curve.points[0], curve.points[-1]
+    x = Linear(coeffs={curve.x: Decimal(1)})
+    return [
+        Constraint(_ID, {}, x, ">=", Linear(const=x0)),
+        Constraint(_ID, {}, Linear(coeffs={curve.x: Decimal(1)}), "<=", Linear(const=xn)),
+    ]
+
+
+def _epigraph(compiled: Compiled, curve: PwlDef) -> list[Constraint]:
+    """y >= each segment's line (y <= for a concave curve pushed up): at the
+    optimum y sits on the highest line, which for a convex curve is f(x)."""
+    coeff = compiled.objective.coeffs.get(curve.y, Decimal(0))
+    pressure = coeff if compiled.sense == "minimize" else -coeff
+    relation = ">=" if pressure >= 0 else "<="
+    rows = _within(curve)
+    for (x0, y0), slope in zip(curve.points, curve.slopes):
+        # y - slope * x  rel  y0 - slope * x0
+        left = Linear(coeffs={curve.y: Decimal(1), curve.x: -slope})
+        rows.append(Constraint(_ID, {}, left, relation, Linear(const=y0 - slope * x0)))
+    return rows
+
+
+def _incremental(curve: PwlDef, n: int) -> tuple[dict, list[Constraint]]:
+    """x = x0 + sum d_k dx_k, y = y0 + sum d_k dy_k, 0 <= d_k <= 1, and
+    d_{k+1} <= z_k <= d_k with z_k binary: segment k+1 is entered only once
+    segment k is full."""
+    pts = curve.points
+    segments = len(pts) - 1
+    d = [("__pwl_d", (str(n), str(k))) for k in range(segments)]
+    z = [("__pwl_z", (str(n), str(k))) for k in range(segments - 1)]
+    variables = {key: Variable(key, "continuous", Decimal(0), Decimal(1)) for key in d}
+    variables.update({key: Variable(key, "binary", Decimal(0), Decimal(1)) for key in z})
+    x_row = {curve.x: Decimal(1)}
+    y_row = {curve.y: Decimal(1)}
+    for k in range(segments):
+        x_row[d[k]] = -(pts[k + 1][0] - pts[k][0])
+        y_row[d[k]] = -(pts[k + 1][1] - pts[k][1])
+    rows = [
+        Constraint(_ID, {}, Linear(coeffs=x_row), "=", Linear(const=pts[0][0])),
+        Constraint(_ID, {}, Linear(coeffs=y_row), "=", Linear(const=pts[0][1])),
+    ]
+    for k in range(segments - 1):
+        rows.append(Constraint(_ID, {}, Linear(coeffs={d[k + 1]: Decimal(1), z[k]: Decimal(-1)}), "<=", Linear()))
+        rows.append(Constraint(_ID, {}, Linear(coeffs={z[k]: Decimal(1), d[k]: Decimal(-1)}), "<=", Linear()))
+    return variables, rows

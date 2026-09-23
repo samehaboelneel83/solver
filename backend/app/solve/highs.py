@@ -186,6 +186,8 @@ def solve_in_process(
     # is (target roadmap D7). One `addVariable`/`addConstr` per column and row
     # cost two seconds of Python on a 200,000-entry model HiGHS then solved
     # in three milliseconds.
+    if compiled.pwl:  # pragma: no cover -- solve_compiled rewrites curves first
+        raise ValueError("a piecewise curve reached a backend that holds none")
     keys = list(compiled.variables)
     position = {key: i for i, key in enumerate(keys)}
     _add_columns(highspy, solver, compiled, keys)

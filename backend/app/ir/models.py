@@ -49,7 +49,7 @@ FilterOperator = Literal["=", "!=", "<", "<=", ">", ">=", "in", "notIn"]
 
 #: The term kinds, by the key that names each (the IR has no `kind` field:
 #: a term is `{"var": ...}`, `{"sum": ..., "over": ...}` and so on).
-TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul")
+TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul", "pwl")
 
 
 def _accepted(version: int) -> int:
@@ -127,7 +127,20 @@ class Mul(_Model):
     mul: list["Term"] = Field(min_length=2, max_length=2)
 
 
-Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul]
+class PwlArgument(_Model):
+    var: Name
+    index: list[Name]
+
+
+class Pwl(_Model):
+    """f(x) through `points` by linear interpolation (version 2). That the
+    x's increase and the document is version 2 is `validate.py`'s to say."""
+
+    pwl: PwlArgument
+    points: list[Annotated[list[Number], Field(min_length=2, max_length=2)]] = Field(min_length=2)
+
+
+Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl]
 
 
 class Parameter(_Model):

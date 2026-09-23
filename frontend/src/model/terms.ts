@@ -35,7 +35,8 @@ export type Term =
   | { attr: { of: string; name: string } }
   | { sum: Term; over: Binding[] }
   | { add: Term[] }
-  | { mul: [Term, Term] };
+  | { mul: [Term, Term] }
+  | { pwl: { var: string; index: string[] }; points: [number, number][] };
 
 export type Constraint = {
   id: string;
@@ -75,6 +76,7 @@ export const TERM_LABELS: Record<TermKind, string> = {
   sum: "a sum over a set",
   add: "several terms added",
   mul: "one term times another",
+  pwl: "a piecewise curve of a variable",
 };
 
 export function termKind(term: Term): TermKind {
@@ -84,6 +86,7 @@ export function termKind(term: Term): TermKind {
   if ("attr" in term) return "attr";
   if ("sum" in term) return "sum";
   if ("add" in term) return "add";
+  if ("pwl" in term) return "pwl";
   return "mul";
 }
 
@@ -120,6 +123,18 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       };
     case "add":
       return { add: [{ const: 0 }, { const: 0 }] };
+    case "pwl": {
+      // A straight line through two points: a curve with nothing bent yet.
+      const name = Object.keys(context.variables)[0] ?? "";
+      const arity = context.variables[name]?.index.length ?? 0;
+      return {
+        pwl: { var: name, index: fillIndices(arity, context.variables[name]?.index ?? [], bound) },
+        points: [
+          [0, 0],
+          [1, 1],
+        ],
+      };
+    }
     default:
       return { mul: [{ const: 1 }, { const: 0 }] };
   }

@@ -129,6 +129,8 @@ def solve(
     reach = reach_of(compiled)
     for c in compiled.constraints:
         _add(model, cp_vars, c, product_of, reach)
+    for curve in compiled.pwl:
+        _add_curve(model, cp_vars, curve)
 
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
     # The objective as one scaled row: whole coefficients, and the factor its
@@ -205,6 +207,18 @@ class _Progress(cp_model.CpSolverSolutionCallback):
             self.on_progress, "incumbent", self.WallTime(), self.best,
             self.unscale(self.BestObjectiveBound()),
         )
+
+
+def _add_curve(model: cp_model.CpModel, cp_vars: dict, curve) -> None:
+    """y = f(x) as a table over every whole x the curve covers: exact, with x
+    kept within it. Compile made y whole only when f is whole at each of them."""
+    import math
+
+    lo, hi = math.ceil(curve.points[0][0]), math.floor(curve.points[-1][0])
+    table = [_whole(curve.value_at(Decimal(k)), f"the curve at {k}") for k in range(lo, hi + 1)]
+    position = model.NewIntVar(0, hi - lo, "")
+    model.Add(position == cp_vars[curve.x] - lo)
+    model.AddElement(position, table, cp_vars[curve.y])
 
 
 def _scaled(coeffs, rhs, quadratic, reach, what) -> ScaledRow:

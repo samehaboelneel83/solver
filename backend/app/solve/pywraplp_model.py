@@ -61,6 +61,8 @@ def row_bounds(c: Constraint) -> tuple[dict, float, float]:
 def load(solver: pywraplp.Solver, compiled: Compiled) -> tuple[dict, list]:
     """Load the model; return {variable key: MPVariable} and the rows'
     MPConstraints, in `compiled.constraints` order."""
+    if compiled.pwl:  # pragma: no cover -- solve_compiled rewrites curves first
+        raise ValueError("a piecewise curve reached a backend that holds none")
     model = linear_solver_pb2.MPModelProto()
     model.maximize = compiled.sense != "minimize"
     keys = list(compiled.variables)

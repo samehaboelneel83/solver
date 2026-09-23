@@ -70,6 +70,7 @@ const TERM_KEYS: Record<string, readonly string[]> = {
   sum: ["over"],
   add: [],
   mul: [],
+  pwl: ["points"],
 };
 
 function isObject(value: unknown): value is Json {
@@ -794,6 +795,8 @@ class ShapeChecker {
         return this.termSum(term, loc, scope, depth);
       case "add":
         return this.termAdd(term, loc, scope, depth);
+      case "pwl":
+        return this.termPwl(term, loc, scope, depth);
       default:
         return this.termMul(term, loc, scope, depth);
     }
@@ -921,6 +924,51 @@ class ShapeChecker {
     for (let i = 0; i < summands.length; i += 1) {
       const problem = this.checkTerm(summands[i], [...loc, "add", i], scope, depth + 1);
       if (problem) return problem;
+    }
+    return null;
+  }
+
+  /** The same checks, in the same order, as `_term_pwl` in `app/ir/validate.py`. */
+  private termPwl(
+    term: Json,
+    loc: IrLoc,
+    scope: Map<string, string>,
+    depth: number
+  ): IrRefusal | null {
+    if (this.ir.version === 1) {
+      return refusal(
+        "pwl_needs_version_2",
+        [...loc, "pwl"],
+        "a piecewise-linear term is version 2; publish the model as version 2"
+      );
+    }
+    const argument = term.pwl;
+    if (
+      !isObject(argument) ||
+      Object.keys(argument).length !== 2 ||
+      !("var" in argument) ||
+      !("index" in argument)
+    ) {
+      return refusal("pwl_malformed", [...loc, "pwl"], 'a pwl is a curve of one variable: {"var": "x", "index": [...]}');
+    }
+    const problem = this.checkTerm(argument, [...loc, "pwl"], scope, depth + 1);
+    if (problem) return problem;
+    const points = term.points;
+    const isNumber = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+    if (
+      !Array.isArray(points) ||
+      points.length < 2 ||
+      !points.every((p) => Array.isArray(p) && p.length === 2 && p.every(isNumber))
+    ) {
+      return refusal("pwl_malformed", [...loc, "points"], "a pwl's points are at least two [x, y] pairs of numbers");
+    }
+    const xs = (points as number[][]).map((p) => p[0]);
+    if (xs.some((x, i) => i > 0 && x <= xs[i - 1])) {
+      return refusal(
+        "pwl_breakpoints_not_increasing",
+        [...loc, "points"],
+        "a pwl's points are in strictly increasing x, so each x has one value"
+      );
     }
     return null;
   }
@@ -1075,7 +1123,7 @@ class ShapeChecker {
  * data, 1 for linear, 2 for quadratic. Mirrors `_degree` in validate.py. */
 function degree(term: unknown): number {
   if (!isObject(term)) return 0;
-  if ("var" in term) return 1;
+  if ("var" in term || "pwl" in term) return 1;
   if ("sum" in term) return degree(term.sum);
   if (Array.isArray(term.add)) return Math.max(0, ...term.add.map(degree));
   if (Array.isArray(term.mul)) return term.mul.reduce((total: number, child: unknown) => total + degree(child), 0);

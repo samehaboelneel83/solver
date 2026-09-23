@@ -81,6 +81,8 @@ def solve(
     variables = {key: _declare(model, key, spec) for key, spec in compiled.variables.items()}
     for constraint in compiled.constraints:
         _add(model, variables, constraint)
+    for n, curve in enumerate(compiled.pwl):
+        _add_curve(model, variables, curve, n)
 
     objective = pyscipopt.quicksum(
         float(coeff) * variables[key] for key, coeff in compiled.objective.coeffs.items()
@@ -247,6 +249,22 @@ def _add(model, variables: dict, c: Constraint) -> None:
         model.addCons(expression >= rhs + 1)
     else:  # pragma: no cover -- the contract's relation vocabulary
         raise ValueError(f"unknown relation {c.relation!r}")
+
+
+def _add_curve(model, variables: dict, curve, n: int) -> None:
+    """y = f(x) as SOS2: one weight per point, summing to one, at most two
+    of them non-zero and those adjacent -- SCIP branches on the segment."""
+    import pyscipopt
+
+    weights = [model.addVar(name=f"pwl{n}_w{i}", lb=0, ub=1) for i in range(len(curve.points))]
+    model.addCons(pyscipopt.quicksum(weights) == 1)
+    model.addCons(
+        variables[curve.x] == pyscipopt.quicksum(float(px) * w for (px, _), w in zip(curve.points, weights))
+    )
+    model.addCons(
+        variables[curve.y] == pyscipopt.quicksum(float(py) * w for (_, py), w in zip(curve.points, weights))
+    )
+    model.addConsSOS2(weights)
 
 
 def _add_indicator(model, variables: dict, c: Constraint, coeffs: dict, rhs: float) -> None:

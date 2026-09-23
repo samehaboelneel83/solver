@@ -30,6 +30,9 @@ VarKey = tuple[str, tuple[str, ...]]
 # The name violation variables are minted under. Not a legal IR variable name
 # (the contract requires `^[a-z][a-z0-9_]*$`), so it cannot collide with one.
 _VIOLATION = "__violation"
+#: The auxiliary variables `pwl` terms stand for. Like violations, a name
+#: no IR variable can have (`^[a-z]...`).
+_PWL = "__pwl"
 _VIOLATION_CEILING = 1_000_000
 # The upper bound of an integer or continuous variable the model left
 # unbounded. Every solver here needs a finite one (CP-SAT always, the rest to
@@ -156,6 +159,32 @@ class Constraint:
         return int(round(float(assignments.get(key, 0)))) == value
 
 
+@dataclass(frozen=True)
+class PwlDef:
+    """`y = f(x)`, f the piecewise-linear curve through `points` (IR version 2,
+    a `pwl` term). `y` is an auxiliary variable the term stands for; how a
+    backend holds the equation is its own business -- CP-SAT a table, SCIP
+    SOS2, HiGHS and the MILP wrapper the incremental formulation or, for a
+    convex curve the objective only pushes down, an epigraph
+    (`app.solve.reformulate`). x is kept within the first and last point."""
+
+    x: VarKey
+    y: VarKey
+    points: tuple[tuple[Decimal, Decimal], ...]
+
+    def value_at(self, x: Decimal) -> Decimal:
+        pts = self.points
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if x0 <= x <= x1:
+                return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        raise ValueError(f"{x} is outside the curve's {pts[0][0]}..{pts[-1][0]}")
+
+    @property
+    def slopes(self) -> list[Decimal]:
+        pts = self.points
+        return [(y1 - y0) / (x1 - x0) for (x0, y0), (x1, y1) in zip(pts, pts[1:])]
+
+
 @dataclass
 class Variable:
     key: VarKey
@@ -205,6 +234,9 @@ class Compiled:
     # vacuously true (a forall over the empty set) or a sum that counted as
     # zero -- both look like a solved model and are usually a data mistake.
     empty_ranges: list[dict[str, Any]] = field(default_factory=list)
+    # The piecewise-linear curves the model's `pwl` terms stand for, each an
+    # auxiliary `y` defined by its `x` (IR version 2).
+    pwl: list[PwlDef] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -273,6 +305,7 @@ def compile_model(ir: dict[str, Any], data: dict[str, Any]) -> Compiled:
 
 class _Compiler:
     def __init__(self, ir: dict[str, Any], data: dict[str, Any]) -> None:
+        self._pwls: list[PwlDef] = []
         self.ir = ir
         self.sets: dict[str, list[dict[str, Any]]] = data.get("sets", {})
         self.params_raw: dict[str, list[dict[str, Any]]] = data.get("parameters", {})
@@ -317,6 +350,7 @@ class _Compiler:
             violations=self.violations,
             penalty_of=self.penalty_of,
             empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
+            pwl=list(self._pwls),
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -489,6 +523,27 @@ class _Compiler:
             raise Unsupported(f"no variable {key}")
         return key, int(spec.get("is", 1))
 
+    def _pwl(self, term: dict[str, Any], env) -> VarKey:
+        """The auxiliary variable a `pwl` term stands for -- one per (x, curve),
+        so the same curve of the same x written twice is one variable."""
+        argument = term["pwl"]
+        x: VarKey = (argument["var"], tuple(env[i][1]["id"] for i in argument["index"]))
+        if x not in self.variables:  # pragma: no cover -- validator pins arity
+            raise Unsupported(f"no variable {x}")
+        points = tuple((number(px), number(py)) for px, py in term["points"])
+        for existing in self._pwls:
+            if existing.x == x and existing.points == points:
+                return existing.y
+        y: VarKey = (_PWL, (str(len(self._pwls)),))
+        spec = self.variables[x]
+        ys = [py for _, py in points]
+        # Whole-number y exactly when x is whole and the curve is whole at
+        # every whole x it covers -- what lets CP-SAT hold it as a table.
+        whole = spec.is_integral and _whole_on_integers(points)
+        self.variables[y] = Variable(y, "integer" if whole else "continuous", min(ys), max(ys))
+        self._pwls.append(PwlDef(x, y, points))
+        return y
+
     def _note_empty(self, constraint_id: str, kind: str, index: dict[str, str]) -> None:
         key = (constraint_id, kind, tuple(sorted(index.items())))
         if key in self._empty_seen:
@@ -610,6 +665,9 @@ class _Compiler:
                 raise Unsupported(f"no variable {key}")
             return Linear(coeffs={key: Decimal(1)})
 
+        if "pwl" in term:
+            return Linear(coeffs={self._pwl(term, env): Decimal(1)})
+
         if "sum" in term:
             over = term.get("over") or []
             inner = self._bindings(over, env)
@@ -725,6 +783,16 @@ class _Compiler:
 
 
 Quadratic = dict[tuple[VarKey, VarKey], Decimal]
+
+
+def _whole_on_integers(points, limit: int = 100_000) -> bool:
+    import math
+
+    lo, hi = math.ceil(points[0][0]), math.floor(points[-1][0])
+    if hi - lo > limit:
+        return False
+    curve = PwlDef(("", ()), ("", ()), points)
+    return all(curve.value_at(Decimal(k)) == curve.value_at(Decimal(k)).to_integral_value() for k in range(lo, hi + 1))
 
 
 def _pair(a: VarKey, b: VarKey) -> tuple[VarKey, VarKey]:

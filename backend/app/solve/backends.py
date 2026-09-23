@@ -222,6 +222,10 @@ CP_SAT = Backend(
             # is switched, not approximated with a big number.
             "indicator",
             "indicator-bounded",
+            # A piecewise curve of a whole number, as a table (AddElement).
+            "pwl",
+            "pwl-convex",
+            "pwl-native",
         }
     ),
     rank=0,
@@ -236,7 +240,15 @@ GLOP = Backend(
     name="glop",
     classes=frozenset({"LP", "trivial"}),
     provides=frozenset(
-        {"linear", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints"}
+        {
+            "linear",
+            "continuous",
+            "fractional-data",
+            "scaled-fractional-data",
+            "soft-constraints",
+            # Only a curve an epigraph can hold: the rest need binaries.
+            "pwl-convex",
+        }
     ),
     rank=0,
     solve=_lp_solve,
@@ -266,6 +278,9 @@ HIGHS = Backend(
             # A conditional rule over declared bounds, rewritten with a tight
             # big-M (app.solve.reformulate) -- never over a guard ceiling.
             "indicator-bounded",
+            # Piecewise curves, rewritten: epigraph or incremental.
+            "pwl",
+            "pwl-convex",
         }
     ),
     rank=1,
@@ -289,6 +304,8 @@ MILP = Backend(
             "scaled-fractional-data",
             "soft-constraints",
             "indicator-bounded",
+            "pwl",
+            "pwl-convex",
         }
     ),
     rank=1,
@@ -326,6 +343,10 @@ SCIP = Backend(
             # `when`, as SCIP's own indicator constraints.
             "indicator",
             "indicator-bounded",
+            # A piecewise curve as SOS2.
+            "pwl",
+            "pwl-convex",
+            "pwl-native",
         }
     ),
     rank=2,

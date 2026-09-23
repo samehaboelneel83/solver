@@ -227,9 +227,15 @@ def solve_in_child(*, backend: str, compiled, time_limit: float, seed, workers: 
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain
-    from app.solve.reformulate import bigm
+    from app.solve.reformulate import bigm, pwl_rewrite
 
     chosen = by_name(backend)
     if "indicator" not in chosen.provides and any(c.when for c in compiled.constraints):
         compiled, _ = bigm(compiled)
-    return explain(compiled, chosen.solve, probe_seconds=probe_seconds)
+    solve = chosen.solve
+    if compiled.pwl and "pwl-native" not in chosen.provides:
+        # Rewritten per probe, so the curve's own rows are never offered as
+        # rules that might be in conflict.
+        def solve(probe, **kwargs):  # noqa: F811
+            return chosen.solve(pwl_rewrite(probe)[0], **kwargs)
+    return explain(compiled, solve, probe_seconds=probe_seconds)

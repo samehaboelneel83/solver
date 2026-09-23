@@ -77,6 +77,7 @@ _TERM_KEYS: dict[str, frozenset[str]] = {
     "sum": frozenset({"over"}),
     "add": frozenset(),
     "mul": frozenset(),
+    "pwl": frozenset({"points"}),
 }
 _LIST_OPERATORS = frozenset({"in", "notIn"})
 _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
@@ -823,6 +824,46 @@ class _ShapeChecker:
             return result
         return self.check_term(term["sum"], [*loc, "sum"], result, depth + 1)
 
+    def _term_pwl(self, term, loc, scope, depth):
+        """`{"pwl": {"var": "x", "index": [...]}, "points": [[x0, y0], ...]}`:
+        f(x) by linear interpolation between the points, x kept within the
+        first and last. A variable in its own right, so degree 1."""
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "pwl_needs_version_2",
+                [*loc, "pwl"],
+                "a piecewise-linear term is version 2; publish the model as version 2",
+            )
+        argument = term["pwl"]
+        if not isinstance(argument, dict) or set(argument) != {"var", "index"}:
+            return Refusal(
+                "pwl_malformed",
+                [*loc, "pwl"],
+                'a pwl is a curve of one variable: {"var": "x", "index": [...]}',
+            )
+        problem = self.check_term(argument, [*loc, "pwl"], scope, depth + 1)
+        if problem:
+            return problem
+        points = term.get("points")
+        if (
+            not isinstance(points, list)
+            or len(points) < 2
+            or not all(isinstance(p, list) and len(p) == 2 and all(_is_number(n) for n in p) for p in points)
+        ):
+            return Refusal(
+                "pwl_malformed",
+                [*loc, "points"],
+                "a pwl's points are at least two [x, y] pairs of numbers",
+            )
+        xs = [p[0] for p in points]
+        if any(b <= a for a, b in zip(xs, xs[1:])):
+            return Refusal(
+                "pwl_breakpoints_not_increasing",
+                [*loc, "points"],
+                "a pwl's points are in strictly increasing x, so each x has one value",
+            )
+        return None
+
     def _term_add(self, term, loc, scope, depth):
         summands = term["add"]
         if not isinstance(summands, list) or not summands:
@@ -977,7 +1018,7 @@ def _degree(term: Any) -> int:
     factors `check_term` has already accepted, so the shapes are known."""
     if not isinstance(term, dict):
         return 0
-    if "var" in term:
+    if "var" in term or "pwl" in term:
         return 1
     if "sum" in term:
         return _degree(term["sum"])
