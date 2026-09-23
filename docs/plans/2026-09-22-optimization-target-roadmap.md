@@ -736,7 +736,20 @@ parameter's optional `uncertainty` is `{kind: interval, deviation, gamma?}`
 `gamma` of a rule's cells at once, all when absent -- or
 `{kind: scenarios}`. It is an optional key on version 2, not a version 3:
 every stored document stays valid, as with each Phase 10 construct. The
-editor declares it; solves read the nominal values until robust solving.
+editor declares it; solves read the nominal values unless a run asks to
+be robust. Robust solving is done (`5827038`, `1a07a18`): a run with
+`robust` solves the Bertsimas–Sim counterpart of every rule that reads a
+parameter declared uncertain within a range (`app.solve.robust`). The
+deviations come from compiling again with each such parameter raised by
+its share -- the compiler is linear in values, so the difference is
+exactly how far each coefficient may move -- and each moving row is
+rewritten exactly, with `y_j >= |x_j|` only where a decision can go
+negative. Pinned by a hand-worked knapsack (17, 15 at Γ1, 13 at Γ2) and
+by brute force over every assignment of 40 random models. The run also
+solves the nominal model on the same backend and clock and records the
+price of robustness; an equality or a quadratic rule that reads an
+uncertain value is refused by name. Not done from the plan: stochastic
+SAA and chance constraints, which the execution queue does not carry.
 ---
 
 ## Phase 16 — Nonlinear stage 3b (~4 weeks) — coordinates with the in-flight SCIP work
