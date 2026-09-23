@@ -1042,8 +1042,10 @@ export function TradeOff({
   const x = (v: number) => FRONT.pad + ((v - sx.low) / sx.width) * inner.w;
   const y = (v: number) => FRONT.pad + (1 - (v - sy.low) / sy.width) * inner.h;
   const [first, second] = terms;
+  // Six significant figures: a solver's 4.99998562 is the 5 it was held to.
+  const shown = (value: number) => String(Number(value.toPrecision(6)));
   const say = (p: ParetoPoint) =>
-    `Point ${p.seq}: ${first} ${p.first}, ${second} ${p.second}${p.status === "optimal" ? "" : " (not proven)"}`;
+    `Point ${p.seq}: ${first} ${shown(p.first)}, ${second} ${shown(p.second)}${p.status === "optimal" ? "" : " (not proven)"}`;
 
   return (
     <section className="mb-4 rounded-md border border-slate-200 p-3">

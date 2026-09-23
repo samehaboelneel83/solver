@@ -460,7 +460,7 @@ describe("Runs", () => {
       ...RUN_DETAIL,
       pareto_terms: ["o_cost", "o_time"],
       pareto: [
-        { seq: 1, first: 1, second: 9, epsilon: null, status: "optimal", run_id: 21 },
+        { seq: 1, first: 1.0000002, second: 8.99999562, epsilon: null, status: "optimal", run_id: 21 },
         { seq: 2, first: 6, second: 6, epsilon: 7.5, status: "optimal", run_id: 22 },
         { seq: 3, first: 9, second: 1, epsilon: null, status: "feasible", run_id: 23 },
       ],
@@ -472,6 +472,8 @@ describe("Runs", () => {
     const chart = await screen.findByRole("img", { name: "Trade-off front, 3 points" });
     expect(chart).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "The trade-off between o_cost and o_time" })).toBeInTheDocument();
+    // Shown to six figures: 8.99999562 is the 9 the solver was held to.
+    expect(screen.getByRole("button", { name: "Point 1: o_cost 1, o_time 9" })).toBeInTheDocument();
     // An unproven point says so.
     expect(screen.getByRole("button", { name: "Point 3: o_cost 9, o_time 1 (not proven)" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Point 2: o_cost 6, o_time 6" }));
