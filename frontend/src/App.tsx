@@ -15,6 +15,7 @@ import EntityRecord from "./pages/EntityRecord";
 import Parameters from "./pages/Parameters";
 import ModelVersions from "./pages/ModelVersions";
 import Runs from "./pages/Runs";
+import Workspace from "./pages/Workspace";
 import ApiKeys from "./pages/ApiKeys";
 import Settings from "./pages/Settings";
 import ModelEditor from "./pages/ModelEditor";
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="parameters" element={<Parameters />} />
         <Route path="versions" element={<ModelVersions />} />
         <Route path="runs" element={<Runs />} />
+        <Route path="workspace" element={<Workspace />} />
         <Route path="settings" element={<Settings />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="model" element={<ModelEditor />} />

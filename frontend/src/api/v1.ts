@@ -577,6 +577,8 @@ export type RunRequest = {
   pareto_steps?: number;
   /** Solve the robust counterpart and report the price (app.solve.robust). */
   robust?: boolean;
+  /** False to solve even when an identical run's answer could be reused. */
+  reuse?: boolean;
 };
 
 /** One point of a run's trade-off front, and the run that holds its answer. */

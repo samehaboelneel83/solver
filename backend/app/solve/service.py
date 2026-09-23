@@ -45,6 +45,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve.fingerprint import fingerprint as fingerprint_of
 from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
@@ -522,6 +523,9 @@ def _execute(
     stop: threading.Event,
 ) -> RunOutcome:
     with _heartbeat(run_id, stop):
+        # Each step as it starts, for whoever watches (the GenUI stream,
+        # app.genui.translate): the pipeline is the agent.
+        events.stage("started")
         found = classify(ir, data)
         if _honour_cancel(db, run_id):
             return _cancelled_outcome(db, run_id)
@@ -529,6 +533,7 @@ def _execute(
             # Compiled before the solver is chosen: whether a quadratic
             # objective is convex is a fact about its numbers, and it decides
             # which backends may take the model at all.
+            events.stage("compiling", model_class=found.model_class)
             with tracing.span("compile") as compiling:
                 compiled = compile_model(ir, data)
                 compiling.set_attribute("variables", len(compiled.variables))
@@ -543,6 +548,9 @@ def _execute(
             )
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
+        # The model's numbers, stored as soon as there is a model: a run that
+        # fails later still says what it was (app.solve.fingerprint, Phase 17).
+        numbers = _record_fingerprint(db, run_id, compiled)
         found = refine(found, compiled)
         # What the solver is given: the model itself, or its robust
         # counterpart (app.solve.robust) when the run asks for one.
@@ -575,12 +583,14 @@ def _execute(
             model_class=found.model_class,
             variables=len(compiled.variables),
             rules=len(compiled.constraints),
+            **({"fingerprint": numbers} if numbers else {}),
         )
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
                 choosing.set_attribute("solver", backend.name)
             bind_log(solver=backend.name)
+            events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
         except NoBackend as exc:
             db.execute(
                 text(
@@ -602,6 +612,7 @@ def _execute(
                     text("UPDATE run SET params = params || CAST(:w AS jsonb) WHERE id = :r"),
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
+                db.commit()  # not held through the solve: see `_record_fingerprint`
 
         points: list = []
         parts, blocks_record = None, None
@@ -785,6 +796,7 @@ def _execute(
                     compiled.objective_term_ids, compiled.objective_terms, strict=True
                 )
             ]
+    events.stage("post_processing")
     with tracing.span("persist"):
         db.execute(
             text(
@@ -1329,6 +1341,23 @@ class RunEvents:
         except Exception:  # pragma: no cover -- watching must not break solving
             self.session.rollback()
             logger.warning("could not record a run event", exc_info=True)
+
+
+def _record_fingerprint(db: Session, run_id: int, compiled: Compiled) -> dict | None:
+    try:
+        numbers = fingerprint_of(compiled)
+    except Exception:  # noqa: BLE001 -- a fact for later must never fail the run
+        logger.warning("could not fingerprint run %s", run_id, exc_info=True)
+        return None
+    db.execute(
+        text("UPDATE run SET params = params || CAST(:f AS jsonb) WHERE id = :r"),
+        {"f": _json({"fingerprint": numbers}), "r": run_id},
+    )
+    # Committed now, not with the answer: an uncommitted write holds the
+    # run's row for the whole solve, and a request to stop it (another
+    # session's UPDATE) would wait until the solve had ended.
+    db.commit()
+    return numbers
 
 
 def _price(nominal: Solution, robust: Solution, sense: str) -> dict[str, Any]:

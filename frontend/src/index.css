@@ -40,4 +40,38 @@ html {
       animation: none;
     }
   }
+
+  /* GenUI skeletons: a light band sweeping across, by transform only
+     (translate3d), so it never triggers layout. Off for reduced motion,
+     where the skeleton is a still placeholder and its label says why. */
+  @keyframes genui-sweep {
+    from {
+      transform: translate3d(-100%, 0, 0);
+    }
+    to {
+      transform: translate3d(100%, 0, 0);
+    }
+  }
+
+  .genui-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: rgb(226 232 240);
+  }
+
+  .genui-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+    animation: genui-sweep 1.4s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .genui-shimmer::after {
+      animation: none;
+      display: none;
+    }
+  }
 }

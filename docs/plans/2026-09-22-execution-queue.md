@@ -90,3 +90,13 @@ lane; no LLM / NL→IR work.
 ## Phase 17 — learning (only this part)
 
 - [ ] (17) Run fingerprint + stored facts — done when every run computes and stores its fingerprint and it reaches `run_fact`.
+
+## Phase 17 — solver choice without a learned model (decided 2026-09-23)
+
+In place of the learned selector, which needs months of `run_fact`: two
+choices that use only what the platform already records. The fingerprint
+stays as a description of the model (Workspace, analytics).
+
+- [ ] (17a) Per-problem memory — done when a run of a problem that has settled runs before takes the solver (among those `choose` admits) that proved its recent runs fastest, `why_solver` says so with the evidence, a named solver or setting overrides it, it is off for a problem with no proven run, and it is checked against the rule choice on the bench.
+- [ ] (17b) Probe race — done when a run with no memory to go on gives each admissible solver a short probe at once in the sandbox, continues with the best (proven first, then the smaller gap, then the better bound), records the probes on the run, and never runs for a model the rules already settle in under the probe time; behind a setting whose default the bench decides.
+- [ ] (GenUI 1) GenUI workspace, phase 1 — done when the pipeline's steps stream as typed GenUI events (`protocol.json`, parity-tested), a `/workspace` page renders them through a registry with skeletons, hydration and shared-layout expansion, reduced motion is honoured, and it is checked live in a browser.

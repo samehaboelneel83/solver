@@ -88,11 +88,15 @@ def test_a_run_records_its_stages(db):
 
     stages = [(kind, payload) for kind, payload in _events(db, run_id) if kind == "stage"]
     names = [payload["stage"] for _, payload in stages]
-    assert names == ["compiled", "solving", "settled"]
-    compiled = stages[0][1]
+    assert names == ["started", "compiling", "compiled", "chosen", "solving", "post_processing", "settled"]
+    by_name = {payload["stage"]: payload for _, payload in stages}
+    compiled = by_name["compiled"]
     assert compiled["model_class"] == "IP" and compiled["variables"] == 1
-    assert stages[1][1]["solver"] == "cp-sat"
-    assert stages[2][1]["status"] == "optimal"
+    # The model's numbers ride along, as stored on the run.
+    assert compiled["fingerprint"]["variables"] == 1 and compiled["fingerprint"]["version"] == 1
+    assert by_name["chosen"]["solver"] == "cp-sat" and "cp-sat" in by_name["chosen"]["why"]
+    assert by_name["solving"]["solver"] == "cp-sat"
+    assert by_name["settled"]["status"] == "optimal"
 
 
 def test_a_solver_reports_the_answer_and_the_bound_as_it_works(db):
@@ -113,8 +117,8 @@ def test_events_are_throttled_rather_than_written_by_the_thousand(db):
     run_id = _run(db, _knapsack(60), "events-throttle")
     rows = len(_events(db, run_id))
     seconds = db.execute(text("SELECT wall_time_s FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
-    # Two a second for progress, plus the three stages, and a little slack.
-    assert rows <= 3 + 2 * (float(seconds) + 2)
+    # Two a second for progress, plus the seven stages, and a little slack.
+    assert rows <= 7 + 2 * (float(seconds) + 2)
 
 
 def test_the_recorder_keeps_the_latest_of_what_it_held_back(db):
@@ -166,7 +170,7 @@ def test_the_stream_replays_a_finished_run_and_closes(tenants, db):
     assert [event["seq"] for event in events] == sorted(event["seq"] for event in events)
     # The whole run, in order: what it compiled to, the solving, the answers
     # and bounds along the way, and the status it ended with.
-    assert (events[0]["kind"], events[0]["stage"]) == ("stage", "compiled")
+    assert (events[0]["kind"], events[0]["stage"]) == ("stage", "started")
     assert (events[-1]["kind"], events[-1]["stage"]) == ("stage", "settled")
     assert any(event["kind"] in ("incumbent", "bound") for event in events)
 

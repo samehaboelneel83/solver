@@ -65,7 +65,22 @@ def _wait(connection, seconds: float) -> None:
     connection.notifies.clear()
 
 
-async def _stream(run_id: int, after: int) -> AsyncIterator[str]:
+_FINAL = (
+    "SELECT status::text, objective::float8, best_bound, gap, optimality, wall_time_s, solver, error"
+    " FROM run WHERE id = %s"
+)
+
+
+async def records(run_id: int, after: int) -> AsyncIterator[tuple]:
+    """The run's recorded events, then what it ended with:
+
+    - `("event", seq, kind, payload, at)` for each `run_event`,
+    - `("alive",)` each time the wait for more times out,
+    - `("settled", final, replayed)` once, last -- `final` the run's record,
+      `replayed` True when it had settled before its last event was read here.
+
+    Shared by the events stream and the GenUI stream (`app.api.genui`).
+    """
     raw = engine.raw_connection()
     connection = raw.driver_connection
     try:
@@ -85,22 +100,23 @@ async def _stream(run_id: int, after: int) -> AsyncIterator[str]:
         cursor.execute("SELECT set_config('app.org_id', '', false)")
         cursor.execute(f'LISTEN "run_{run_id}"')
         last = after
-        done = False
-        while not done:
+        while True:
+            ended = False
             for seq, kind, payload, at in _rows(cursor, run_id, last):
                 last = seq
-                yield _frame(seq, kind, {"seq": seq, "kind": kind, "at": at, **payload})
+                yield ("event", seq, kind, payload, at)
                 if kind == "stage" and payload.get("stage") == "settled":
-                    done = True
-            if done:
+                    ended = True
+            if ended:
+                yield ("settled", _final(cursor, run_id), False)
                 break
             # A run that settled before this stream opened has no further
             # events to wait for; one still going is waited on.
             if _status(cursor, run_id) in SETTLED and not _rows(cursor, run_id, last):
-                yield ": settled\n\n"
+                yield ("settled", _final(cursor, run_id), True)
                 break
             await asyncio.to_thread(_wait, connection, HEARTBEAT_SECONDS)
-            yield ": keep-alive\n\n"
+            yield ("alive",)
     finally:
         try:
             cursor.execute(f'UNLISTEN "run_{run_id}"')
@@ -108,6 +124,25 @@ async def _stream(run_id: int, after: int) -> AsyncIterator[str]:
             pass
         connection.autocommit = False
         raw.close()
+
+
+def _final(cursor, run_id: int) -> dict[str, Any]:
+    cursor.execute(_FINAL, (run_id,))
+    row = cursor.fetchone()
+    keys = ("status", "objective", "best_bound", "gap", "optimality", "wall_time_s", "solver", "error")
+    return dict(zip(keys, row)) if row else {}
+
+
+async def _stream(run_id: int, after: int) -> AsyncIterator[str]:
+    async for item in records(run_id, after):
+        if item[0] == "event":
+            _, seq, kind, payload, at = item
+            yield _frame(seq, kind, {"seq": seq, "kind": kind, "at": at, **payload})
+        elif item[0] == "alive":
+            yield ": keep-alive\n\n"
+        elif item[2]:
+            # Settled before the stream saw its last event: say so, as before.
+            yield ": settled\n\n"
 
 
 @router.get("/runs/{run_id}/events")

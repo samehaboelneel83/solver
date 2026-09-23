@@ -98,7 +98,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     key: "runs",
     label: "Runs",
-    items: [{ to: "/runs", label: "Runs" }],
+    items: [
+      { to: "/runs", label: "Runs" },
+      { to: "/workspace", label: "Workspace" },
+    ],
   },
   {
     key: "platform",
