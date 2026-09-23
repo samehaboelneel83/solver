@@ -21,8 +21,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.expressions.catalogue import OPERATORS
-
 CONTRACT_PATH = Path(__file__).with_name("contract.json")
 
 _RAW: dict[str, Any] = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -96,6 +94,12 @@ SCHEDULING_KEYS: dict[str, frozenset[str]] = {
 }
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
+
+# Imported last, not first: `app.expressions` loads its compiler, which loads
+# `app.models`, which reads `IR_VERSION` from this module -- so every name
+# above must exist before it runs, or a process whose first import is this
+# module fails on a half-loaded module (`tests/test_imports.py`).
+from app.expressions.catalogue import OPERATORS  # noqa: E402
 
 _missing_operators = sorted(FILTER_OPERATORS - set(OPERATORS))
 if _missing_operators:  # pragma: no cover -- an import-time contradiction
