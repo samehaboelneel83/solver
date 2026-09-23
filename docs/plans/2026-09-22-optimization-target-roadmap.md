@@ -571,9 +571,16 @@ run records `conflict_method` / `_probes` / `_seconds`. Measured
 45 where the conflict is small in a big model, little saved where it is
 most of the model, ~0.5 s fixed for the HiGHS child. HiGHS's
 `Irreducible` flag took 49 s against 1 s on a 12,340-row relaxation and
-ignores `time_limit`, so it is off. Still open in this phase: CP-SAT
-assumption cores, a faster shrink of a large core (facility L exhausts
-the 200-probe budget either way), and the explanations UI.
+ignores `time_limit`, so it is off. CP-SAT assumption cores are done
+(`3ec5a42`): `cpsat.core` enforces each rule instance by a literal of its
+own (beside a `when` switch) and reads
+`SufficientAssumptionsForInfeasibility` back; `explain` takes an ordered
+list of named cores and a CP-SAT run tries its own first. On rota it is
+the fastest of the three (2 probes, 0.01-0.12 s) and it is exact where
+only whole numbers conflict, where HiGHS's relaxation has no core. No
+CP-SAT core for scheduling rules (no enforcement literal on NoOverlap or
+Cumulative). Still open: a faster shrink of a large core (facility L
+exhausts the 200-probe budget either way) and the explanations UI.
 
 ## Phase 12 — Caching and warm starts (~2 weeks)
 
