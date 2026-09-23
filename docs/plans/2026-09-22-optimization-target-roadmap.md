@@ -579,8 +579,13 @@ list of named cores and a CP-SAT run tries its own first. On rota it is
 the fastest of the three (2 probes, 0.01-0.12 s) and it is exact where
 only whole numbers conflict, where HiGHS's relaxation has no core. No
 CP-SAT core for scheduling rules (no enforcement literal on NoOverlap or
-Cumulative). Still open: a faster shrink of a large core (facility L
-exhausts the 200-probe budget either way) and the explanations UI.
+Cumulative). Minimal conflicts are done with them: a confirmed core is
+shrunk on itself alone (1 + its size in probes, pinned) and a shrink cut
+short says it is not minimal. A faster shrink was considered and not
+built: facility L's conflict is 263 of its core's 340 instances, and
+proving each member needed costs a probe per member whatever the order,
+so QuickXplain-style splitting cannot help where the conflict is most of
+the core. Still open: the explanations UI.
 
 ## Phase 12 — Caching and warm starts (~2 weeks)
 

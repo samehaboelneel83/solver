@@ -377,3 +377,34 @@ def test_no_cp_sat_core_for_what_it_cannot_assume_or_take():
     assert cpsat.core(replace(compiled, variables=fractional)) is None
     # Feasible: nothing to name.
     assert cpsat.core(replace(compiled, constraints=compiled.constraints[:1])) is None
+
+
+# -- minimal conflicts: shrunk on the core only, and honest about it ------------
+
+
+def test_a_core_is_shrunk_on_itself_alone(db):
+    """One probe to confirm the core, then one per member -- and not one
+    probe spent on a rule outside it. Offered the whole model as a core,
+    that is 1 + every instance, with no rule pass before it."""
+    _, compiled = _impossible(db)
+    everything = list(range(len(compiled.constraints)))
+
+    conflict = explain(compiled, cpsat.solve, cores=[("all", lambda model: everything)])
+
+    assert conflict.method == "all" and conflict.minimal
+    assert conflict.probes == 1 + len(everything)
+    assert set(conflict.rules) == {"c_cover", "c_max_hours"}
+
+
+def test_a_core_shrink_cut_short_says_it_is_not_minimal(db):
+    """The core is a true conflict, but a shrink that ran out of probes has
+    not shown every member is needed: `minimal` is False, and says why."""
+    _, compiled = _impossible(db)
+    everything = list(range(len(compiled.constraints)))
+
+    conflict = explain(compiled, cpsat.solve, budget=3, cores=[("all", lambda model: everything)])
+
+    assert conflict.method == "all" and conflict.minimal is False
+    assert "may be larger than it needs to be" in conflict.note
+    reported = [c for c in compiled.constraints if _matches(c, conflict.items)]
+    assert not _solves(compiled, reported)
