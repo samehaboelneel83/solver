@@ -37,6 +37,10 @@ class Classification:
     #: rather than "IP" / "fractional-data"; `reasons` stays the record on
     #: the run, because that is what a modeller traces a backend choice to.
     planner: list[str] = field(default_factory=list)
+    #: need -> why a backend that would otherwise fit may not take this
+    #: model, when the need itself cannot say (`reformulate.admit`: which
+    #: variable left a conditional rule without a big-M). `choose` quotes it.
+    refusals: dict[str, str] = field(default_factory=dict)
 
 
 def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classification:

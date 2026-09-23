@@ -93,7 +93,9 @@ def _brute_force(ir: dict) -> int | None:
     return best
 
 
-CASES = [(seed, backend) for seed in range(40) for backend in ("cp-sat", "scip")]
+#: CP-SAT and SCIP hold a `when` natively; HiGHS and the MILP wrapper take it
+#: as a big-M from the declared bounds (0..3 here), so all four must agree.
+CASES = [(seed, backend) for seed in range(40) for backend in ("cp-sat", "scip", "highs", "milp")]
 
 
 @pytest.mark.parametrize("seed, backend_name", CASES)
@@ -102,7 +104,8 @@ def test_the_solver_agrees_with_every_assignment_tried(seed, backend_name):
     expected = _brute_force(ir)
     compiled = compile_model(ir, NO_DATA)
     found = refine(classify(ir, NO_DATA), compiled)
-    assert "indicator" in found.needs or not any("when" in r for r in ir["constraints"])
+    # Declared bounds (0..3), so once compiled the need is the bounded one.
+    assert found.needs & {"indicator", "indicator-bounded"} or not any("when" in r for r in ir["constraints"])
     backend = by_name(backend_name)
     if not backend.is_available():
         pytest.skip(f"{backend_name} is not in this build")
@@ -128,13 +131,29 @@ def test_the_models_are_not_all_the_same_case():
     assert kinds == {0, 1}
 
 
-def test_the_linear_backends_are_never_offered_a_conditional_rule():
+def test_a_big_m_backend_is_refused_a_rule_over_a_guard_ceiling_and_told_which_variable():
+    """x1 has no declared upper bound: an M from the compiler's guard ceiling
+    would be a million nobody chose, so HiGHS and the MILP wrapper are
+    refused, the refusal names x1, and a native backend still takes it."""
+    ir = _random_model(0)
+    del ir["variables"]["x1"]["upper"]
+    for rule in ir["constraints"]:
+        rule["when"] = {"var": "b1", "index": []}
+    found = refine(classify(ir, NO_DATA), compile_model(ir, NO_DATA))
+    assert "indicator" in found.needs
+    for name in ("highs", "milp"):
+        with pytest.raises(NoBackend, match="x1, which has no declared upper bound"):
+            choose(found, name)
+    with pytest.raises(NoBackend):
+        choose(found, "glop")
+    assert choose(found)[0].name == "cp-sat"
+
+
+def test_glop_is_never_offered_a_conditional_rule():
     ir = _random_model(0)
     found = refine(classify(ir, NO_DATA), compile_model(ir, NO_DATA))
-    for name in ("highs", "milp", "glop"):
-        with pytest.raises(NoBackend):
-            choose(found, name)
-    assert choose(found)[0].name == "cp-sat"
+    with pytest.raises(NoBackend):
+        choose(found, "glop")
 
 
 def test_a_rule_switched_off_has_no_slack_to_report():

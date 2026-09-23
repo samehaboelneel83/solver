@@ -221,6 +221,7 @@ CP_SAT = Backend(
             # A conditional rule (`when`) as an enforcement literal: the rule
             # is switched, not approximated with a big number.
             "indicator",
+            "indicator-bounded",
         }
     ),
     rank=0,
@@ -262,6 +263,9 @@ HIGHS = Backend(
             "scaled-fractional-data",
             "soft-constraints",
             "quadratic",
+            # A conditional rule over declared bounds, rewritten with a tight
+            # big-M (app.solve.reformulate) -- never over a guard ceiling.
+            "indicator-bounded",
         }
     ),
     rank=1,
@@ -284,6 +288,7 @@ MILP = Backend(
             "fractional-data",
             "scaled-fractional-data",
             "soft-constraints",
+            "indicator-bounded",
         }
     ),
     rank=1,
@@ -320,6 +325,7 @@ SCIP = Backend(
             "nonconvex",
             # `when`, as SCIP's own indicator constraints.
             "indicator",
+            "indicator-bounded",
         }
     ),
     rank=2,
@@ -365,6 +371,7 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
             raise NoBackend(
                 f"{requested} cannot take a {found.model_class} model"
                 + (f" needing {', '.join(sorted(missing))}" if missing else "")
+                + "".join(f": {found.refusals[need]}" for need in sorted(missing) if need in found.refusals)
             )
         return backend, f"asked for {backend.name}"
 

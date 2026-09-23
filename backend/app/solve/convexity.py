@@ -98,6 +98,11 @@ def refine(found: Classification, compiled: Compiled) -> Classification:
     continuous quadratic model depends on convexity: an all-integer one is
     searched exactly whatever its curvature, so it is not checked.
     """
+    # Conditional rules: whether a big-M backend may take them is a fact
+    # about the compiled bounds too (app.solve.reformulate).
+    from app.solve.reformulate import admit
+
+    found = admit(found, compiled)
     if not compiled.objective_quadratic or all(v.is_integral for v in compiled.variables.values()):
         return found
     convexity = objective_convexity(compiled)

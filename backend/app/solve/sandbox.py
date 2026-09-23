@@ -227,5 +227,9 @@ def solve_in_child(*, backend: str, compiled, time_limit: float, seed, workers: 
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain
+    from app.solve.reformulate import bigm
 
-    return explain(compiled, by_name(backend).solve, probe_seconds=probe_seconds)
+    chosen = by_name(backend)
+    if "indicator" not in chosen.provides and any(c.when for c in compiled.constraints):
+        compiled, _ = bigm(compiled)
+    return explain(compiled, chosen.solve, probe_seconds=probe_seconds)

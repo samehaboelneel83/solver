@@ -44,6 +44,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve.reformulate import bigm
 from app.core.logs import bind as bind_log
 from app.core import tracing
 from app.settings_resolve import resolve
@@ -572,6 +573,10 @@ def _execute(
     # attribute to a choice is not reproducible. Empty ranges ride along:
     # they are a fact about this compile, not a second table.
     extra = {"chosen_solver": backend.name, "why_solver": why}
+    if any(c.when for c in compiled.constraints) and "indicator" not in backend.provides:
+        # What the solver was actually given: the conditional rules as big-M
+        # rows, and the largest M each needed (principle 7: say so).
+        extra["reformulations"] = bigm(compiled)[1]
     if stopped:
         extra["stopped_by_request"] = True
     if compiled.empty_ranges:
@@ -867,6 +872,10 @@ def solve_compiled(
     can report `optimal` with a bound that is not the answer. Whatever it
     says, an answer whose recorded gap exceeds `OPTIMAL_GAP` is `feasible`.
     """
+    if any(c.when for c in compiled.constraints) and "indicator" not in backend.provides:
+        # No native indicator: conditional rules as a big-M from declared
+        # bounds (`reformulate.admit` routed only such a model here).
+        compiled, _ = bigm(compiled)
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     started = time.monotonic()
     # Only the first solve is watched: the re-solve that tests a ceiling
