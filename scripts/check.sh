@@ -47,6 +47,8 @@
 #                         (default: <repo>/.env, else the main checkout's)
 #   SOLVER_DOCKER_NET     default solver_solver_net
 #   SOLVER_BACKEND_IMAGE  default solver-backend
+#   SOLVER_TEST_SUFFIX    default _test -- the test databases' suffix; must
+#                         end in _test (the nightly job uses _nightly_test)
 #
 # Exit status is 0 only if every step that ran passed.
 
@@ -274,7 +276,10 @@ backend_checks() {
     record "backend tests (pytest)" FAIL 0 "no DATABASE_URL in $ENV_FILE"
     return 0
   fi
-  test_url="${app_url}_test"
+  # SOLVER_TEST_SUFFIX names this run's own test databases (default _test).
+  # The nightly job uses _nightly_test, so a check run by hand at 03:00 and
+  # the nightly's never drop each other's database mid-run.
+  test_url="${app_url}${SOLVER_TEST_SUFFIX:-_test}"
   test_db="${test_url##*/}"
 
   # Belt and braces over conftest.py's own guard: conftest DROPs and recreates
@@ -297,6 +302,7 @@ backend_checks() {
       -w /app \
       --env-file "$(to_host_path "$ENV_FILE")" \
       -e TEST_DATABASE_URL="$test_url" \
+      -e TEST_CLICKHOUSE_DB="analytics${SOLVER_TEST_SUFFIX:-_test}" \
       -e CLICKHOUSE_HOST=clickhouse \
       "$BACKEND_IMAGE" pytest -q
 }

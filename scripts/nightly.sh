@@ -67,7 +67,9 @@ git -C "$REPO" worktree add --detach --force "$WORKTREE" master >/dev/null
 COMMIT="$(git -C "$WORKTREE" rev-parse --short HEAD)"
 trap 'git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1' EXIT
 
-bash "$WORKTREE/scripts/check.sh" > "$OUT/$NIGHT-check.log" 2>&1
+# Its own test databases: a check someone runs by hand at 03:00 must not
+# drop the nightly's mid-run, nor the nightly theirs.
+SOLVER_TEST_SUFFIX=_nightly_test bash "$WORKTREE/scripts/check.sh" > "$OUT/$NIGHT-check.log" 2>&1
 check=$?
 
 docker run --rm \
