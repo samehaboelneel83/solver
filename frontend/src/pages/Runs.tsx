@@ -1059,7 +1059,7 @@ export function Robustness({ report, objective }: { report: RobustReport; object
       <h3 className="mb-1 text-sm font-semibold text-slate-900">A robust answer</h3>
       <p>
         {rules.join(", ")} {rules.length === 1 ? "holds" : "hold"} however the uncertain values turn out, within
-        their declared range and budget ({report.rows.length} {report.rows.length === 1 ? "instance" : "instances"}
+        their declared range and budget ({report.rows.length} {report.rows.length === 1 ? "instance" : "instances"}{" "}
         protected).
       </p>
       {report.price !== undefined && report.nominal != null && (

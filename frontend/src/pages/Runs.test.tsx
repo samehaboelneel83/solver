@@ -493,7 +493,7 @@ describe("Runs", () => {
     });
     renderPage();
     expect(await screen.findByRole("heading", { name: "A robust answer" })).toBeInTheDocument();
-    expect(screen.getByText(/c_capacity holds however the uncertain values turn out/)).toBeInTheDocument();
+    expect(screen.getByText(/c_capacity holds however the uncertain values turn out, within their declared range and budget \(1 instance protected\)\./)).toBeInTheDocument();
     expect(screen.getByText(/the price of robustness: 2 on the goal \(11.7647%\) — 15 against 17 if the data were exact\./i)).toBeInTheDocument();
   });
 
