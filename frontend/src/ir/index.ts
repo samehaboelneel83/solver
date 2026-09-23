@@ -15,6 +15,7 @@ export {
   CONSTRAINT_KEYS,
   DOMAIN_RULES,
   FILTER_OPERATORS,
+  FUNCTIONS,
   IR_RULES,
   IR_VERSION,
   MAX_DEPTH,
@@ -34,6 +35,7 @@ export {
   isName,
 } from "./contract";
 export type {
+  FunctionSpec,
   IrRule,
   Relation,
   RuleWhere,

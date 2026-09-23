@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
-import { TERM_KINDS, isName } from "../ir/contract";
+import { FUNCTIONS, TERM_KINDS, isName } from "../ir/contract";
 import type { TermKind, TraversalDepth } from "../ir";
 import {
   boundIndices,
@@ -66,7 +66,7 @@ export default function TermBuilder({
 }: TermBuilderProps) {
   const kindId = useId();
   const kind = termKind(value);
-  const nested = kind === "sum" || kind === "add" || kind === "mul";
+  const nested = kind === "sum" || kind === "add" || kind === "mul" || kind === "fn";
   const namedBlock = Boolean(label);
   // A sum needs a set to range over. Offering one with none declared would
   // mint a binding whose set is empty — refused on publish.
@@ -148,6 +148,43 @@ function Body({
           allow={(domain) => domain === "integer" || domain === "continuous"}
         />
         <CurvePoints points={term.points} onChange={(points) => onChange({ ...term, points } as Term)} />
+      </div>
+    );
+  }
+
+  if (kind === "fn") {
+    const term = value as { fn: string; of: Term };
+    const spec = FUNCTIONS[term.fn];
+    const within = spec ? DOMAIN_NOTE[spec.domain] : null;
+    return (
+      <div className="space-y-2">
+        <Select
+          label="Function"
+          value={term.fn}
+          options={Object.entries(FUNCTIONS).map(([name, f]) => ({
+            value: name,
+            label: `${name} — ${f.text} (${f.convexity === "neither" ? "neither convex nor concave" : f.convexity})`,
+          }))}
+          onChange={(next) => onChange({ fn: next, of: term.of })}
+        />
+        <p role="note" className="text-xs text-slate-600">
+          Applied to a decision, a function makes the model nonlinear: it goes to the global solver, which searches
+          for the best answer rather than assuming the curve bends one way.
+          {within && ` ${term.fn} is defined only ${within}, so the decisions it reads need bounds that keep it there.`}
+        </p>
+        {degree(term.of) > 1 && (
+          <p role="alert" className="text-xs text-red-600">
+            This multiplies decisions together inside {term.fn}. A function is applied to a linear argument.
+          </p>
+        )}
+        <TermBuilder
+          value={term.of}
+          onChange={(next) => onChange({ fn: term.fn, of: next })}
+          context={context}
+          bound={bound}
+          depth={depth + 1}
+          label="Of"
+        />
       </div>
     );
   }
@@ -311,6 +348,13 @@ function Body({
     </div>
   );
 }
+
+/** Where a catalogue function is defined, in words (`FunctionSpec.domain`). */
+const DOMAIN_NOTE: Record<string, string | null> = {
+  any: null,
+  nonnegative: "at zero and above",
+  positive: "above zero",
+};
 
 export type BindingsEditorProps = {
   bindings: Binding[];

@@ -113,6 +113,11 @@ describe("referencesOf", () => {
     expect([...found.names].sort()).toEqual(["assign", "demand"]);
     expect([...found.sets]).toEqual(["day"]);
   });
+
+  it("finds what a function's argument reads", () => {
+    const term = { fn: "sqrt", of: { mul: [{ par: "scale", index: [] }, { var: "spend", index: [] }] } } as Term;
+    expect([...referencesOf(term).names].sort()).toEqual(["scale", "spend"]);
+  });
 });
 
 describe("describeUncertainty", () => {

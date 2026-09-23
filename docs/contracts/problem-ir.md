@@ -7,7 +7,7 @@ reason §10 now records.
 
 **Version 2** (2026-09-23, target roadmap Phase 10) is version 1 plus the
 constructs Phase 10 adds as they land -- indicators, piecewise-linear terms,
-scheduling. It removes and changes nothing, so every version 1 document is
+scheduling -- and, since Phase 16, catalogue functions (§4.3). It removes and changes nothing, so every version 1 document is
 a valid version 2 document as written: the platform reads `version` 1 or 2
 (`acceptedVersions` in `contract.json`) and writes 2, and `upgrade_v1`
 (`backend/app/ir/models.py`) only restamps. The same contract is also
@@ -500,6 +500,40 @@ was asked, and an org chart that changed after the snapshot must not change
 what that snapshot solves.
 
 ---
+
+### 4.3 `fn` — a function from the catalogue (version 2)
+
+`{"fn": "log", "of": <term>}` is a function of one argument, named from a
+closed catalogue (`functions` in `contract.json`):
+
+| name | is | curvature | defined |
+|---|---|---|---|
+| `exp` | e raised to the argument | convex | everywhere |
+| `log` | the natural logarithm | concave | above zero |
+| `sqrt` | the square root | concave | at zero and above |
+| `abs` | the absolute value | convex | everywhere |
+| `sin` | the sine, in radians | neither | everywhere |
+| `cos` | the cosine, in radians | neither | everywhere |
+
+Each entry also says whether the function only rises (`monotone`). The
+labels are over the function's whole domain and are what curvature
+detection composes; `backend/tests/test_functions.py` checks each on a
+grid.
+
+- **The argument is linear** (`fn_argument_nonlinear` otherwise), and may
+  itself hold a function: `exp(abs(x - 2))` is written and solved.
+- **A function of data is a number.** `sqrt(16)` compiles to 4 and the model
+  stays whatever it was. Of a decision, it makes the model NLP (or MINLP
+  with whole-number decisions), which only SCIP takes: each function becomes
+  a variable of its own, equal to the function of its argument, held by SCIP
+  as its own nonlinear expression and searched by spatial branch-and-bound,
+  so an answer SCIP proves is a global optimum whatever the curvature.
+- **The argument stays in the domain.** From the bounds of the decisions it
+  reads, the compiler works out how low an argument can go; `log` of one
+  that can reach zero, or `sqrt` of one that can go below it, is refused by
+  name before any solve, with the rule it is in.
+- A degree of 1 when the argument reads a decision (it stands for one), 0
+  when it is data -- so `x * log(y)` is quadratic, as the product rule says.
 
 ## 5. What is deliberately not supported yet
 

@@ -133,7 +133,7 @@ def iis(compiled: Compiled, *, time_limit: float = 10.0) -> list[int] | None:
     """
     if not available():
         return None
-    if compiled.pwl or compiled.intervals or any(
+    if compiled.pwl or compiled.functions or compiled.intervals or any(
         c.quadratic or c.when is not None or c.schedule is not None for c in compiled.constraints
     ):
         return None
@@ -234,6 +234,8 @@ def solve_in_process(
     # in three milliseconds.
     if compiled.pwl:  # pragma: no cover -- solve_compiled rewrites curves first
         raise ValueError("a piecewise curve reached a backend that holds none")
+    if compiled.functions:  # pragma: no cover -- the registry offers these to SCIP only
+        raise ValueError("a function reached a backend that holds none")
     keys = list(compiled.variables)
     position = {key: i for i, key in enumerate(keys)}
     _add_columns(highspy, solver, compiled, keys)

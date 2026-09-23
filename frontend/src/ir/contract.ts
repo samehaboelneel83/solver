@@ -57,9 +57,32 @@ export const TRAVERSAL_DEPTHS = ["one", "any", "any_or_self"] as const;
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const OBJECTIVE_MODES = ["weighted", "lex"] as const;
-export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul", "pwl"] as const;
+export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn"] as const;
 export const FILTER_OPERATORS = ["=", "!=", "<", "<=", ">", ">=", "in", "notIn"] as const;
 export const ARITHMETIC_ATTR_TYPES = ["integer", "number"] as const;
+
+export const FUNCTION_CONVEXITIES = ["convex", "concave", "neither"] as const;
+export const FUNCTION_MONOTONICITY = ["increasing", "decreasing", "none"] as const;
+export const FUNCTION_DOMAINS = ["any", "nonnegative", "positive"] as const;
+
+export type FunctionSpec = {
+  text: string;
+  convexity: (typeof FUNCTION_CONVEXITIES)[number];
+  monotone: (typeof FUNCTION_MONOTONICITY)[number];
+  domain: (typeof FUNCTION_DOMAINS)[number];
+};
+
+/** The closed catalogue a `fn` term names (version 2): each a function of
+ * one argument, labelled with its curvature over its whole domain, whether
+ * it only rises, and where it is defined. */
+export const FUNCTIONS: Readonly<Record<string, FunctionSpec>> = {
+  exp: { text: "e raised to the argument", convexity: "convex", monotone: "increasing", domain: "any" },
+  log: { text: "the natural logarithm", convexity: "concave", monotone: "increasing", domain: "positive" },
+  sqrt: { text: "the square root", convexity: "concave", monotone: "increasing", domain: "nonnegative" },
+  abs: { text: "the absolute value", convexity: "convex", monotone: "none", domain: "any" },
+  sin: { text: "the sine, in radians", convexity: "neither", monotone: "none", domain: "any" },
+  cos: { text: "the cosine, in radians", convexity: "neither", monotone: "none", domain: "any" },
+};
 
 export type VariableDomain = (typeof VARIABLE_DOMAINS)[number];
 export type Relation = (typeof RELATIONS)[number];
@@ -405,6 +428,22 @@ export const IR_RULES: readonly IrRule[] = [
     code: "pwl_breakpoints_not_increasing",
     where: "shape",
     text: "a `pwl`'s points are in strictly increasing `x`",
+  },
+  {
+    code: "fn_needs_version_2",
+    where: "shape",
+    text: "a `fn` term appears only in a version 2 document",
+  },
+  {
+    code: "fn_unknown",
+    where: "shape",
+    text: "a `fn` names a function in the contract's `functions` catalogue",
+  },
+  { code: "fn_malformed", where: "shape", text: "a `fn` carries its argument, a term, in `of`" },
+  {
+    code: "fn_argument_nonlinear",
+    where: "shape",
+    text: "a function's argument is linear: no part of it multiplies two decisions",
   },
   {
     code: "interval_needs_version_2",

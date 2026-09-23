@@ -128,6 +128,15 @@ export const BLOCK_DEFINITIONS = [
     colour: COLOUR.sum,
   },
   {
+    type: "ir_fn",
+    message0: "%1 of %2",
+    args0: [label("NAME"), value("ARG")],
+    inputsInline: true,
+    output: "Number",
+    colour: COLOUR.operator,
+    tooltip: "A function from the catalogue, applied to a term",
+  },
+  {
     type: "ir_add",
     message0: "%1 + %2",
     args0: [value("A"), value("B")],
@@ -196,6 +205,9 @@ export function termBlock(term: Term | undefined): SerialBlock {
     return fixed({ type: "ir_var", fields: { NAME: `curve(${term.pwl.var})`, INDEX: bracket(term.pwl.index) } });
   }
   if ("attr" in term) return fixed({ type: "ir_attr", fields: { NAME: term.attr.name, OF: term.attr.of } });
+  if ("fn" in term) {
+    return fixed({ type: "ir_fn", fields: { NAME: term.fn }, inputs: { ARG: { block: termBlock(term.of) } } });
+  }
   if ("sum" in term) {
     return fixed({
       type: "ir_sum",

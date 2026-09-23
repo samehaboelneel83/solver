@@ -43,7 +43,7 @@ STRUCTURAL = frozenset({
     "binding_via_not_object", "binding_via_depth_unsupported", "binding_via_anchor_invalid",
     "where_not_array", "where_filter_malformed", "where_operator_unknown",
     "relationships_not_array", "relationship_not_a_name",
-    "when_malformed", "pwl_malformed",
+    "when_malformed", "pwl_malformed", "fn_unknown", "fn_malformed",
     "interval_malformed", "scheduling_rule_malformed",
     "uncertainty_malformed",
 })
@@ -65,6 +65,8 @@ SEMANTIC = frozenset({
     # rest of the document.
     "when_needs_version_2", "when_not_binary", "when_on_soft", "when_on_product",
     "pwl_needs_version_2", "pwl_breakpoints_not_increasing",
+    # A function's argument is linear by its degree, a fact of its terms.
+    "fn_needs_version_2", "fn_argument_nonlinear",
     # Which variables an interval's parts are, and what a scheduling rule's
     # interval and amounts read, need the declarations.
     "interval_needs_version_2", "interval_part_invalid", "interval_size_invalid",
@@ -93,6 +95,10 @@ def test_every_rule_in_the_contract_is_placed_on_one_side():
 )
 def test_each_closed_vocabulary_equals_the_contract(alias, key):
     assert sorted(get_args(alias)) == sorted(CONTRACT[key])
+
+
+def test_the_function_names_are_the_contract_s_catalogue():
+    assert sorted(get_args(models.FunctionName)) == sorted(CONTRACT["functions"])
 
 
 def test_versions_term_kinds_keys_and_names_equal_the_contract():

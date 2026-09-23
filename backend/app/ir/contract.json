@@ -28,7 +28,15 @@
     "`version` is the version this platform writes; `acceptedVersions` the",
     "ones it reads. Version 2 is version 1 plus what Phase 10 adds, so a",
     "version 1 document is valid as it stands (app/ir/models.py upgrade_v1",
-    "only restamps it)."
+    "only restamps it).",
+    "",
+    "`functions` is the closed catalogue a `fn` term names (version 2):",
+    "each a function of one argument, labelled with its curvature over its",
+    "whole domain (`convex`, `concave` or `neither`), whether it only rises",
+    "or falls, and where it is defined. The labels are what curvature",
+    "detection composes; the domain is what the compiler holds an argument's",
+    "bounds to. Only a global nonlinear solver (SCIP) takes a model that",
+    "applies one to a decision."
   ],
   "version": 2,
   "acceptedVersions": [
@@ -91,7 +99,8 @@
     "sum",
     "add",
     "mul",
-    "pwl"
+    "pwl",
+    "fn"
   ],
   "filterOperators": [
     "=",
@@ -539,6 +548,26 @@
       "text": "a `pwl`'s points are in strictly increasing `x`"
     },
     {
+      "code": "fn_needs_version_2",
+      "where": "shape",
+      "text": "a `fn` term appears only in a version 2 document"
+    },
+    {
+      "code": "fn_unknown",
+      "where": "shape",
+      "text": "a `fn` names a function in the contract's `functions` catalogue"
+    },
+    {
+      "code": "fn_malformed",
+      "where": "shape",
+      "text": "a `fn` carries its argument, a term, in `of`"
+    },
+    {
+      "code": "fn_argument_nonlinear",
+      "where": "shape",
+      "text": "a function's argument is linear: no part of it multiplies two decisions"
+    },
+    {
       "code": "interval_needs_version_2",
       "where": "shape",
       "text": "the `interval` domain appears only in a version 2 document"
@@ -602,5 +631,58 @@
   "uncertaintyKinds": [
     "interval",
     "scenarios"
+  ],
+  "functions": {
+    "exp": {
+      "text": "e raised to the argument",
+      "convexity": "convex",
+      "monotone": "increasing",
+      "domain": "any"
+    },
+    "log": {
+      "text": "the natural logarithm",
+      "convexity": "concave",
+      "monotone": "increasing",
+      "domain": "positive"
+    },
+    "sqrt": {
+      "text": "the square root",
+      "convexity": "concave",
+      "monotone": "increasing",
+      "domain": "nonnegative"
+    },
+    "abs": {
+      "text": "the absolute value",
+      "convexity": "convex",
+      "monotone": "none",
+      "domain": "any"
+    },
+    "sin": {
+      "text": "the sine, in radians",
+      "convexity": "neither",
+      "monotone": "none",
+      "domain": "any"
+    },
+    "cos": {
+      "text": "the cosine, in radians",
+      "convexity": "neither",
+      "monotone": "none",
+      "domain": "any"
+    }
+  },
+  "functionConvexities": [
+    "convex",
+    "concave",
+    "neither"
+  ],
+  "functionMonotonicity": [
+    "increasing",
+    "decreasing",
+    "none"
+  ],
+  "functionDomains": [
+    "any",
+    "nonnegative",
+    "positive"
   ]
 }

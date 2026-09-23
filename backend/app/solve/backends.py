@@ -343,7 +343,9 @@ SCIP = Backend(
     # with continuous decisions, which CP-SAT cannot hold and the linear
     # backends have no indicator for. Rank 2 keeps every other linear model
     # with the backends above.
-    classes=frozenset({"QP", "MIQP", "QCQP", "MIQCQP", "IP", "MILP", "LP"}),
+    # NLP and MINLP: a catalogue function of a decision, which SCIP holds as
+    # its own nonlinear expression and nothing else here holds at all.
+    classes=frozenset({"QP", "MIQP", "QCQP", "MIQCQP", "IP", "MILP", "LP", "NLP", "MINLP"}),
     # `nonconvex` and a mix of `integral` and `continuous` together: the two
     # cases stage 2 refused. Spatial branch-and-bound bounds each product on
     # every branch, so nonconvexity costs time, never correctness.
@@ -365,6 +367,8 @@ SCIP = Backend(
             "pwl",
             "pwl-convex",
             "pwl-native",
+            # exp, log, sqrt, abs, sin and cos of a linear argument.
+            "functions",
         }
     ),
     rank=2,

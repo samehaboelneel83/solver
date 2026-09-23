@@ -46,6 +46,7 @@ from app.ir.contract import (
     UNCERTAINTY_KINDS,
     SCHEDULING_KEYS,
     FILTER_OPERATORS,
+    FUNCTIONS,
     ACCEPTED_VERSIONS,
     IR_VERSION,
     MAX_DEPTH,
@@ -81,6 +82,7 @@ _TERM_KEYS: dict[str, frozenset[str]] = {
     "add": frozenset(),
     "mul": frozenset(),
     "pwl": frozenset({"points"}),
+    "fn": frozenset({"of"}),
 }
 _LIST_OPERATORS = frozenset({"in", "notIn"})
 _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
@@ -1099,6 +1101,42 @@ class _ShapeChecker:
             )
         return None
 
+    def _term_fn(self, term, loc, scope, depth):
+        """`{"fn": "log", "of": <term>}`: a function from the contract's
+        catalogue, applied to a linear argument. Of degree 1 when the
+        argument reads a decision (it stands for one), 0 when it is data."""
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "fn_needs_version_2",
+                [*loc, "fn"],
+                "a function term is version 2; publish the model as version 2",
+            )
+        name = term["fn"]
+        if not isinstance(name, str) or name not in FUNCTIONS:
+            return Refusal(
+                "fn_unknown",
+                [*loc, "fn"],
+                f"{json.dumps(name)} is not a function this platform knows; it knows "
+                f"{', '.join(sorted(FUNCTIONS))}",
+            )
+        if "of" not in term:
+            return Refusal(
+                "fn_malformed",
+                [*loc, "of"],
+                f"a function is applied to something: {name} needs its argument in `of`",
+            )
+        problem = self.check_term(term["of"], [*loc, "of"], scope, depth + 1)
+        if problem:
+            return problem
+        if _degree(term["of"]) > 1:
+            return Refusal(
+                "fn_argument_nonlinear",
+                [*loc, "of"],
+                f"the argument of {name} multiplies decisions together; a function is applied "
+                "to a linear argument",
+            )
+        return None
+
     def _term_add(self, term, loc, scope, depth):
         summands = term["add"]
         if not isinstance(summands, list) or not summands:
@@ -1255,6 +1293,9 @@ def _degree(term: Any) -> int:
         return 0
     if "var" in term or "pwl" in term:
         return 1
+    if "fn" in term:
+        # It stands for a decision of its own when its argument reads one.
+        return 1 if _degree(term["of"]) else 0
     if "sum" in term:
         return _degree(term["sum"])
     if "add" in term:

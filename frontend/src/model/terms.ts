@@ -36,7 +36,8 @@ export type Term =
   | { sum: Term; over: Binding[] }
   | { add: Term[] }
   | { mul: [Term, Term] }
-  | { pwl: { var: string; index: string[] }; points: [number, number][] };
+  | { pwl: { var: string; index: string[] }; points: [number, number][] }
+  | { fn: string; of: Term };
 
 export type Constraint = {
   id: string;
@@ -118,6 +119,7 @@ export const TERM_LABELS: Record<TermKind, string> = {
   add: "several terms added",
   mul: "one term times another",
   pwl: "a piecewise curve of a variable",
+  fn: "a function (log, exp, …) of a term",
 };
 
 export function termKind(term: Term): TermKind {
@@ -128,6 +130,7 @@ export function termKind(term: Term): TermKind {
   if ("sum" in term) return "sum";
   if ("add" in term) return "add";
   if ("pwl" in term) return "pwl";
+  if ("fn" in term) return "fn";
   return "mul";
 }
 
@@ -177,6 +180,11 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
           [1, 1],
         ],
       };
+    }
+    case "fn": {
+      // Of a decision when there is one: a function of data is only a number.
+      const numeric = Object.keys(context.variables).some((n) => context.variables[n].domain !== "interval");
+      return { fn: "exp", of: numeric ? emptyTerm("var", context, bound) : { const: 0 } };
     }
     default:
       return { mul: [{ const: 1 }, { const: 0 }] };
@@ -407,6 +415,10 @@ export function describeTerm(term: Term | undefined | null): string {
       const t = term as { pwl: { var: string; index: string[] }; points: [number, number][] };
       return `curve(${t.pwl.var}[${t.pwl.index.join(", ")}], ${t.points.length} points)`;
     }
+    case "fn": {
+      const t = term as { fn: string; of: Term };
+      return `${t.fn}(${describeTerm(t.of)})`;
+    }
     default: {
       const t = term as { mul: [Term, Term] };
       return `${describeTerm(t.mul[0])} × ${describeTerm(t.mul[1])}`;
@@ -422,6 +434,9 @@ export function degree(term: Term): number {
     case "var":
     case "pwl":
       return 1;
+    case "fn":
+      // It stands for a decision of its own when its argument reads one.
+      return degree((term as { of: Term }).of) ? 1 : 0;
     case "sum":
       return degree((term as { sum: Term }).sum);
     case "add":

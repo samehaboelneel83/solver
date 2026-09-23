@@ -63,6 +63,8 @@ def load(solver: pywraplp.Solver, compiled: Compiled) -> tuple[dict, list]:
     MPConstraints, in `compiled.constraints` order."""
     if compiled.pwl:  # pragma: no cover -- solve_compiled rewrites curves first
         raise ValueError("a piecewise curve reached a backend that holds none")
+    if compiled.functions:  # pragma: no cover -- the registry offers these to SCIP only
+        raise ValueError("a function reached a backend that holds none")
     model = linear_solver_pb2.MPModelProto()
     model.maximize = compiled.sense != "minimize"
     keys = list(compiled.variables)

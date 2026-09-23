@@ -1475,6 +1475,85 @@
       }
     },
     {
+      "name": "diminishing_returns_fn",
+      "why": "Functions from the catalogue (version 2): ten to spend between two uses, one returning log(1 + x) and the other sqrt(y) -- both concave, so each extra unit returns less.",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_budget",
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "y",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_return",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "fn": "log",
+                    "of": {
+                      "add": [
+                        {
+                          "const": 1
+                        },
+                        {
+                          "var": "x",
+                          "index": []
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fn": "sqrt",
+                    "of": {
+                      "var": "y",
+                      "index": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "shift_blocks_scheduled",
       "why": "Scheduling (version 2): an interval ties a start and an end variable, `end = start + size`, and may be absent when its presence is 0. `no_overlap` keeps one day's blocks apart; `cumulative` lets at most two run at once.",
       "ir": {
@@ -6259,6 +6338,289 @@
                     10
                   ]
                 ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "fn_needs_version_2",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "fn"
+      ],
+      "why": "a function term is a version 2 construct",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_budget",
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "y",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_return",
+              "weight": 1,
+              "expression": {
+                "fn": "log",
+                "of": {
+                  "add": [
+                    {
+                      "const": 1
+                    },
+                    {
+                      "var": "x",
+                      "index": []
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "fn_unknown",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "fn"
+      ],
+      "why": "tan is not in the catalogue",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_budget",
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "y",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_return",
+              "weight": 1,
+              "expression": {
+                "fn": "tan",
+                "of": {
+                  "var": "x",
+                  "index": []
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "fn_malformed",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "of"
+      ],
+      "why": "a function with nothing to apply it to",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_budget",
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "y",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_return",
+              "weight": 1,
+              "expression": {
+                "fn": "sqrt"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "fn_argument_nonlinear",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "of"
+      ],
+      "why": "exp(x * y): the argument multiplies two decisions",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          },
+          "y": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_budget",
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": []
+                },
+                {
+                  "var": "y",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_return",
+              "weight": 1,
+              "expression": {
+                "fn": "exp",
+                "of": {
+                  "mul": [
+                    {
+                      "var": "x",
+                      "index": []
+                    },
+                    {
+                      "var": "y",
+                      "index": []
+                    }
+                  ]
+                }
               }
             }
           ]

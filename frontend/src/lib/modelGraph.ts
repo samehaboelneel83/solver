@@ -84,6 +84,7 @@ function degree(term: unknown): number {
   if (!term || typeof term !== "object") return 0;
   const t = term as Record<string, unknown>;
   if (typeof t.var === "string" || t.pwl !== undefined) return 1;
+  if (typeof t.fn === "string") return degree(t.of) ? 1 : 0;
   if (t.sum !== undefined) return degree(t.sum);
   if (Array.isArray(t.add)) return Math.max(0, ...t.add.map(degree));
   if (Array.isArray(t.mul)) return t.mul.reduce((total: number, child) => total + degree(child), 0);
@@ -120,6 +121,8 @@ function collect(
   }
   // A piecewise curve reads the variable it is a curve of.
   if (t.pwl && typeof t.pwl === "object") collect(t.pwl, found, bound);
+  // A function reads what its argument reads.
+  if (typeof t.fn === "string") collect(t.of, found, bound);
 }
 
 /**

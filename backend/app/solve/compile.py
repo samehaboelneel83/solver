@@ -18,6 +18,7 @@ wrong answer.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import product
@@ -33,6 +34,8 @@ _VIOLATION = "__violation"
 #: The auxiliary variables `pwl` terms stand for. Like violations, a name
 #: no IR variable can have (`^[a-z]...`).
 _PWL = "__pwl"
+#: The auxiliary variables `fn` terms stand for, one per function and argument.
+_FN = "__fn"
 _VIOLATION_CEILING = 1_000_000
 # The upper bound of an integer or continuous variable the model left
 # unbounded. Every solver here needs a finite one (CP-SAT always, the rest to
@@ -215,6 +218,59 @@ class PwlDef:
         return [(y1 - y0) / (x1 - x0) for (x0, y0), (x1, y1) in zip(pts, pts[1:])]
 
 
+#: The catalogue's functions (`contract.json` `functions`), as numbers.
+_FUNCTIONS = {
+    "exp": math.exp,
+    "log": math.log,
+    "sqrt": math.sqrt,
+    "abs": abs,
+    "sin": math.sin,
+    "cos": math.cos,
+}
+_INFINITY = Decimal("Infinity")
+
+
+def function_value(name: str, x: float) -> float:
+    """f(x) for a catalogue function; inf where exp overflows a float."""
+    try:
+        return float(_FUNCTIONS[name](x))
+    except OverflowError:
+        return math.inf
+
+
+def function_range(name: str, low: float, high: float) -> tuple[float, float]:
+    """The least and greatest f takes over [low, high], which the argument's
+    bounds imply -- given to the stand-in as its own bounds. `low` is inside
+    the function's domain (the compiler has checked)."""
+    if name in ("exp", "log", "sqrt"):  # increasing
+        return function_value(name, low), (math.inf if high == math.inf else function_value(name, high))
+    if name == "abs":
+        if low >= 0:
+            return low, high
+        if high <= 0:
+            return -high, -low
+        return 0.0, max(-low, high)
+    return -1.0, 1.0  # sin, cos
+
+
+@dataclass(frozen=True)
+class FnDef:
+    """`y = f(argument)`, f from the contract's catalogue (IR version 2, a
+    `fn` term). `y` is an auxiliary variable the term stands for, bounded by
+    what f takes over the argument's range; only a backend that holds the
+    equation itself (SCIP) is offered one."""
+
+    name: str
+    argument: "Linear"
+    y: VarKey
+
+    def value_at(self, assignments: dict[VarKey, Any]) -> float:
+        x = float(self.argument.const) + sum(
+            float(coeff) * float(assignments.get(key, 0)) for key, coeff in self.argument.coeffs.items()
+        )
+        return function_value(self.name, x)
+
+
 @dataclass
 class Variable:
     key: VarKey
@@ -267,6 +323,9 @@ class Compiled:
     # The piecewise-linear curves the model's `pwl` terms stand for, each an
     # auxiliary `y` defined by its `x` (IR version 2).
     pwl: list[PwlDef] = field(default_factory=list)
+    # The catalogue functions the model's `fn` terms stand for, each an
+    # auxiliary `y` equal to f of its linear argument (IR version 2).
+    functions: list[FnDef] = field(default_factory=list)
     # Every instance of every interval variable, by its key (version 2).
     intervals: dict[VarKey, IntervalDef] = field(default_factory=dict)
     # Classes of interchangeable entities, per set (`app.solve.symmetry`):
@@ -342,6 +401,7 @@ def compile_model(ir: dict[str, Any], data: dict[str, Any]) -> Compiled:
 class _Compiler:
     def __init__(self, ir: dict[str, Any], data: dict[str, Any]) -> None:
         self._pwls: list[PwlDef] = []
+        self._fns: list[FnDef] = []
         self.ir = ir
         self.sets: dict[str, list[dict[str, Any]]] = data.get("sets", {})
         self.params_raw: dict[str, list[dict[str, Any]]] = data.get("parameters", {})
@@ -391,6 +451,7 @@ class _Compiler:
             penalty_of=self.penalty_of,
             empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
             pwl=list(self._pwls),
+            functions=list(self._fns),
             intervals=intervals,
             symmetry=self._symmetry(),
         )
@@ -665,6 +726,52 @@ class _Compiler:
         self._pwls.append(PwlDef(x, y, points))
         return y
 
+    def _fn(self, name: str, argument: Linear) -> Linear:
+        """What a `fn` term compiles to: f's value when its argument is data,
+        else the auxiliary variable standing for it -- one per (f, argument),
+        so the same function of the same thing written twice is one."""
+        where = f" in {self._current_id}" if self._current_id else " in the goal"
+        domain = {"log": "above zero", "sqrt": "at least zero"}.get(name)
+        if argument.is_constant:
+            x = float(argument.const)
+            if (name == "log" and x <= 0) or (name == "sqrt" and x < 0):
+                raise Unsupported(f"{name}{where} is applied to {argument.const}; {name} needs its argument {domain}")
+            value = function_value(name, x)
+            if math.isinf(value):
+                raise Unsupported(f"{name}({argument.const}){where} is too large to hold as a number")
+            return Linear(const=Decimal(repr(value)))
+        low, high = self._range(argument)
+        if (name == "log" and low <= 0) or (name == "sqrt" and low < 0):
+            raise Unsupported(
+                f"{name}{where} needs its argument {domain}, but the decisions it reads let it go as low "
+                f"as {_shown(low)} -- give them bounds that keep it {domain}"
+            )
+        for existing in self._fns:
+            if existing.name == name and existing.argument == argument:
+                return Linear(coeffs={existing.y: Decimal(1)})
+        y: VarKey = (_FN, (str(len(self._fns)),))
+        least, most = function_range(name, low, high)
+        # Widened by a hair: the float bounds must never cut off the true value.
+        slack = lambda v: 1e-9 * (1 + abs(v))  # noqa: E731
+        self.variables[y] = Variable(
+            y,
+            "continuous",
+            -_INFINITY if math.isinf(least) else Decimal(repr(least - slack(least))),
+            _INFINITY if math.isinf(most) else Decimal(repr(most + slack(most))),
+        )
+        self._fns.append(FnDef(name, argument.copy(), y))
+        return Linear(coeffs={y: Decimal(1)})
+
+    def _range(self, argument: Linear) -> tuple[float, float]:
+        """The least and greatest a linear argument can be, from its
+        decisions' bounds (a stand-in's may be infinite)."""
+        low = high = float(argument.const)
+        for key, coeff in argument.coeffs.items():
+            spec = self.variables[key]
+            a, b = float(coeff) * float(spec.lower), float(coeff) * float(spec.upper)
+            low, high = low + min(a, b), high + max(a, b)
+        return low, high
+
     def _note_empty(self, constraint_id: str, kind: str, index: dict[str, str]) -> None:
         key = (constraint_id, kind, tuple(sorted(index.items())))
         if key in self._empty_seen:
@@ -788,6 +895,9 @@ class _Compiler:
 
         if "pwl" in term:
             return Linear(coeffs={self._pwl(term, env): Decimal(1)})
+
+        if "fn" in term:
+            return self._fn(term["fn"], self._term(term["of"], env))
 
         if "sum" in term:
             over = term.get("over") or []
@@ -914,6 +1024,10 @@ def _whole_on_integers(points, limit: int = 100_000) -> bool:
         return False
     curve = PwlDef(("", ()), ("", ()), points)
     return all(curve.value_at(Decimal(k)) == curve.value_at(Decimal(k)).to_integral_value() for k in range(lo, hi + 1))
+
+
+def _shown(value: float) -> str:
+    return "minus infinity" if value == -math.inf else f"{value:g}"
 
 
 def _pair(a: VarKey, b: VarKey) -> tuple[VarKey, VarKey]:

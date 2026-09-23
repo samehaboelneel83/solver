@@ -67,6 +67,10 @@ SENSES: frozenset[str] = frozenset(CONTRACT["senses"])
 OBJECTIVE_MODES: frozenset[str] = frozenset(CONTRACT["objectiveModes"])
 TERM_KINDS: frozenset[str] = frozenset(CONTRACT["termKinds"])
 FILTER_OPERATORS: frozenset[str] = frozenset(CONTRACT["filterOperators"])
+#: The closed catalogue a `fn` term names (version 2): name -> its curvature
+#: (`convex` / `concave` / `neither`), whether it only rises (`monotone`),
+#: and where it is defined (`any` / `nonnegative` / `positive`).
+FUNCTIONS: dict[str, dict[str, str]] = CONTRACT["functions"]
 ARITHMETIC_ATTR_TYPES: frozenset[str] = frozenset(CONTRACT["arithmeticAttrTypes"])
 
 #: Every reason an IR can be refused, keyed by code. `where` is `shape`

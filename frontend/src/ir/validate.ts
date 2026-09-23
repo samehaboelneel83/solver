@@ -25,6 +25,7 @@ import {
   UNCERTAINTY_KINDS,
   SCHEDULING_KEYS,
   FILTER_OPERATORS,
+  FUNCTIONS,
   ACCEPTED_VERSIONS,
   IR_VERSION,
   MAX_DEPTH,
@@ -74,6 +75,7 @@ const TERM_KEYS: Record<string, readonly string[]> = {
   add: [],
   mul: [],
   pwl: ["points"],
+  fn: ["of"],
 };
 
 function isObject(value: unknown): value is Json {
@@ -1063,6 +1065,8 @@ class ShapeChecker {
         return this.termAdd(term, loc, scope, depth);
       case "pwl":
         return this.termPwl(term, loc, scope, depth);
+      case "fn":
+        return this.termFn(term, loc, scope, depth);
       default:
         return this.termMul(term, loc, scope, depth);
     }
@@ -1239,6 +1243,34 @@ class ShapeChecker {
     return null;
   }
 
+  /** The same checks, in the same order, as `_term_fn` in `app/ir/validate.py`. */
+  private termFn(term: Json, loc: IrLoc, scope: Map<string, string>, depth: number): IrRefusal | null {
+    if (this.ir.version === 1) {
+      return refusal("fn_needs_version_2", [...loc, "fn"], "a function term is version 2; publish the model as version 2");
+    }
+    const name = term.fn;
+    if (typeof name !== "string" || !Object.prototype.hasOwnProperty.call(FUNCTIONS, name)) {
+      return refusal(
+        "fn_unknown",
+        [...loc, "fn"],
+        `${show(name)} is not a function this platform knows; it knows ${Object.keys(FUNCTIONS).sort().join(", ")}`
+      );
+    }
+    if (!("of" in term)) {
+      return refusal("fn_malformed", [...loc, "of"], `a function is applied to something: ${name} needs its argument in \`of\``);
+    }
+    const problem = this.checkTerm(term.of, [...loc, "of"], scope, depth + 1);
+    if (problem) return problem;
+    if (degree(term.of) > 1) {
+      return refusal(
+        "fn_argument_nonlinear",
+        [...loc, "of"],
+        `the argument of ${name} multiplies decisions together; a function is applied to a linear argument`
+      );
+    }
+    return null;
+  }
+
   private termMul(
     term: Json,
     loc: IrLoc,
@@ -1390,6 +1422,8 @@ class ShapeChecker {
 function degree(term: unknown): number {
   if (!isObject(term)) return 0;
   if ("var" in term || "pwl" in term) return 1;
+  // A function stands for a decision of its own when its argument reads one.
+  if ("fn" in term) return degree(term.of) ? 1 : 0;
   if ("sum" in term) return degree(term.sum);
   if (Array.isArray(term.add)) return Math.max(0, ...term.add.map(degree));
   if (Array.isArray(term.mul)) return term.mul.reduce((total: number, child: unknown) => total + degree(child), 0);

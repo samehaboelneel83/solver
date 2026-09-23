@@ -49,7 +49,9 @@ FilterOperator = Literal["=", "!=", "<", "<=", ">", ">=", "in", "notIn"]
 
 #: The term kinds, by the key that names each (the IR has no `kind` field:
 #: a term is `{"var": ...}`, `{"sum": ..., "over": ...}` and so on).
-TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul", "pwl")
+TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn")
+#: The function catalogue's names (`contract.json` `functions`).
+FunctionName = Literal["exp", "log", "sqrt", "abs", "sin", "cos"]
 
 
 def _accepted(version: int) -> int:
@@ -140,7 +142,15 @@ class Pwl(_Model):
     points: list[Annotated[list[Number], Field(min_length=2, max_length=2)]] = Field(min_length=2)
 
 
-Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl]
+class Fn(_Model):
+    """A catalogue function of a linear argument (version 2). That the
+    argument is linear and the document version 2 is `validate.py`'s to say."""
+
+    fn: FunctionName
+    of: "Term"
+
+
+Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl, Fn]
 
 
 class IntervalUncertainty(_Model):
@@ -272,7 +282,7 @@ class ProblemIR(_Model):
     relationships: Optional[list[Name]] = None
 
 
-for _model in (Sum, Add, Mul, NoOverlap, Cumulative, Constraint, ObjectiveTerm):
+for _model in (Sum, Add, Mul, Fn, NoOverlap, Cumulative, Constraint, ObjectiveTerm):
     _model.model_rebuild()
 
 

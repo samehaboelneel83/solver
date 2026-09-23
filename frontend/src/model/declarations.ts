@@ -142,6 +142,9 @@ export function referencesOf(
     case "pwl":
       found.names.add((term as { pwl: { var: string } }).pwl.var);
       break;
+    case "fn":
+      referencesOf((term as { of: Term }).of, found);
+      break;
     case "sum": {
       const t = term as { sum: Term; over: { set: string }[] };
       t.over.forEach((binding) => found.sets.add(binding.set));

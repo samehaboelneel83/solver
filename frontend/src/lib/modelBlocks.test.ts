@@ -7,6 +7,15 @@ describe("termBlock", () => {
     const term = { pwl: { var: "units", index: ["p"] }, points: [[0, 0], [2, 10]] } as Term;
     expect(termBlock(term)).toMatchObject({ type: "ir_var", fields: { NAME: "curve(units)", INDEX: "[p]" } });
   });
+
+  it("shows a function as its name of its argument's block", () => {
+    const term = { fn: "log", of: { add: [{ const: 1 }, { var: "spend", index: [] }] } } as Term;
+    expect(termBlock(term)).toMatchObject({
+      type: "ir_fn",
+      fields: { NAME: "log" },
+      inputs: { ARG: { block: { type: "ir_add" } } },
+    });
+  });
 });
 
 describe("modelToBlocks and a scheduling rule", () => {

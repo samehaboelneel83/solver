@@ -114,6 +114,18 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         reasons.append("every rule is linear")
         planner.append("every rule is linear")
 
+    functions = sorted(_functions(ir))
+    if functions:
+        # A catalogue function of a decision: nonlinear, whatever else the
+        # model is, and held only by a solver that takes the function itself.
+        model_class = "MINLP" if mixed_or_whole else "NLP"
+        needs.add("functions")
+        names = ", ".join(functions)
+        reasons.append(
+            f"the model applies {names} to decisions, so it is nonlinear beyond products"
+        )
+        planner.append(f"a rule or the goal applies {names} to decisions")
+
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
         needs.add("soft-constraints")
         reasons.append("at least one constraint is soft, so the backend must carry penalties")
@@ -189,8 +201,10 @@ def _quadratic_rules(ir: dict[str, Any]) -> list[str]:
 def _degree(term: Any) -> int:
     if not isinstance(term, dict):
         return 0
-    if "var" in term:
+    if "var" in term or "pwl" in term:
         return 1
+    if "fn" in term:
+        return 1 if _degree(term.get("of")) else 0
     if "sum" in term:
         return _degree(term["sum"])
     if isinstance(term.get("add"), list):
@@ -216,6 +230,19 @@ def with_convexity(found: Classification, convex: bool | None, reason: str) -> C
         found.needs | {"nonconvex"},
         [*found.planner, "the goal may have more than one low point, so the best one has to be searched for"],
     )
+
+
+def _functions(node: Any) -> set[str]:
+    """The catalogue functions the model applies to a decision -- one of data
+    is only a number."""
+    if isinstance(node, dict):
+        found = set().union(*(_functions(v) for v in node.values())) if node else set()
+        if isinstance(node.get("fn"), str) and _degree(node.get("of")):
+            found.add(node["fn"])
+        return found
+    if isinstance(node, list):
+        return set().union(*(_functions(v) for v in node)) if node else set()
+    return set()
 
 
 def _has_pwl(node: Any) -> bool:

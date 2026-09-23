@@ -26,8 +26,8 @@ may move (the compiler is linear in a parameter's values). Rows line up
 because compiling is deterministic in everything but the values.
 
 **What it refuses.** An equality rule whose coefficients may move -- it
-cannot hold for every deviation -- and a quadratic rule that reads an
-uncertain parameter. The goal is left nominal: uncertainty is in the rules.
+cannot hold for every deviation -- a quadratic rule that reads an
+uncertain parameter, and a rule that reads a function of one. The goal is left nominal: uncertainty is in the rules.
 
 Target roadmap Phase 15; the run reports the price of robustness -- the
 robust goal against the nominal one.
@@ -82,6 +82,16 @@ def deviations(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled) -> 
         other = compile_model(ir, raised)
         if len(other.constraints) != len(compiled.constraints):  # pragma: no cover -- deterministic compile
             raise NotRobust(f"raising {name!r} changed the rules themselves, not only their numbers")
+        # A function's argument that moves moves the rules through its
+        # stand-in, which no coefficient shows: refused, unless only the goal
+        # (which stays nominal) reads it.
+        in_rules = {key for c in compiled.constraints for key in (*c.left.coeffs, *c.right.coeffs)}
+        for a, b in zip(compiled.functions, other.functions, strict=True):
+            if a.argument != b.argument and a.y in in_rules:
+                raise NotRobust(
+                    f"a rule reads {a.name} of the uncertain {name!r}; a robust counterpart is exact "
+                    "for rules linear in the uncertain values"
+                )
         for i, (a, b) in enumerate(zip(compiled.constraints, other.constraints, strict=True)):
             moved = _moved(a, b)
             if not moved[0] and not moved[1]:

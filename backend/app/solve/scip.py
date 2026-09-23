@@ -35,6 +35,7 @@ in one interpreter.
 
 from __future__ import annotations
 
+import math
 from importlib.metadata import version as _pkg_version
 from importlib.util import find_spec
 
@@ -87,6 +88,8 @@ def solve(
         _add(model, variables, constraint)
     for n, curve in enumerate(compiled.pwl):
         _add_curve(model, variables, curve, n)
+    for function in compiled.functions:
+        _add_function(model, variables, function)
 
     objective = pyscipopt.quicksum(
         float(coeff) * variables[key] for key, coeff in compiled.objective.coeffs.items()
@@ -218,7 +221,11 @@ def _declare(model, key, spec: Variable):
     if spec.domain == "binary":
         return model.addVar(name=name, vtype="B")
     vtype = "I" if spec.domain == "integer" else "C"
-    return model.addVar(name=name, vtype=vtype, lb=float(spec.lower), ub=float(spec.upper))
+    # A function's stand-in may be unbounded (`exp` of an unbounded argument).
+    lower, upper = float(spec.lower), float(spec.upper)
+    return model.addVar(
+        name=name, vtype=vtype, lb=None if math.isinf(lower) else lower, ub=None if math.isinf(upper) else upper
+    )
 
 
 def _read(spec: Variable, value: float) -> float | int:
@@ -281,6 +288,25 @@ def _add_curve(model, variables: dict, curve, n: int) -> None:
         variables[curve.y] == pyscipopt.quicksum(float(py) * w for (_, py), w in zip(curve.points, weights))
     )
     model.addConsSOS2(weights)
+
+
+def _add_function(model, variables: dict, function) -> None:
+    """y = f(argument), as SCIP's own nonlinear expression: spatial
+    branch-and-bound bounds f on every branch, so a function that is neither
+    convex nor concave is searched, not approximated."""
+    import pyscipopt
+
+    argument = function.argument
+    expression = pyscipopt.quicksum(float(c) * variables[k] for k, c in argument.coeffs.items()) + float(argument.const)
+    apply = {
+        "exp": pyscipopt.exp,
+        "log": pyscipopt.log,
+        "sqrt": pyscipopt.sqrt,
+        "abs": abs,
+        "sin": pyscipopt.sin,
+        "cos": pyscipopt.cos,
+    }[function.name]
+    model.addCons(variables[function.y] == apply(expression))
 
 
 def _add_indicator(model, variables: dict, c: Constraint, coeffs: dict, rhs: float) -> None:

@@ -831,3 +831,51 @@ describe("TermBuilder and a piecewise curve", () => {
     expect(term().var).toBe("assign");
   });
 });
+
+describe("TermBuilder and a function", () => {
+  const NUMBERS: ModelContext = {
+    ...CONTEXT,
+    variables: { units: { index: [], domain: "continuous" }, task: { index: [], domain: "interval" } },
+  };
+
+  function Harness({ initial }: { initial: Term }) {
+    const [value, setValue] = useState<Term>(initial);
+    return (
+      <>
+        <TermBuilder value={value} onChange={setValue} context={NUMBERS} bound={[]} />
+        <output data-testid="term">{JSON.stringify(value)}</output>
+      </>
+    );
+  }
+  const term = () => JSON.parse(screen.getByTestId("term").textContent ?? "null");
+
+  it("applies a catalogue function, labelled with its curvature, to a decision", () => {
+    render(<Harness initial={{ const: 0 }} />);
+    fireEvent.change(screen.getByLabelText("Kind of term"), { target: { value: "fn" } });
+    expect(term()).toEqual({ fn: "exp", of: { var: "units", index: [] } });
+
+    const picker = screen.getByLabelText("Function") as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.textContent)).toEqual([
+      "exp — e raised to the argument (convex)",
+      "log — the natural logarithm (concave)",
+      "sqrt — the square root (concave)",
+      "abs — the absolute value (convex)",
+      "sin — the sine, in radians (neither convex nor concave)",
+      "cos — the cosine, in radians (neither convex nor concave)",
+    ]);
+    fireEvent.change(picker, { target: { value: "log" } });
+    expect(term()).toEqual({ fn: "log", of: { var: "units", index: [] } });
+    expect(screen.getByText(/log is defined only above zero, so the decisions it reads need bounds/)).toBeInTheDocument();
+    expect(screen.getByText("log(units[])")).toBeInTheDocument();
+
+    // Its argument is a term like any other.
+    fireEvent.change(screen.getByLabelText("Of: kind of term"), { target: { value: "add" } });
+    expect(term()).toEqual({ fn: "log", of: { add: [{ const: 0 }, { const: 0 }] } });
+  });
+
+  it("says when the argument multiplies decisions, before the server does", () => {
+    const units = { var: "units", index: [] };
+    render(<Harness initial={{ fn: "exp", of: { mul: [units, units] } } as Term} />);
+    expect(screen.getAllByRole("alert")[0]).toHaveTextContent(/multiplies decisions together inside exp/i);
+  });
+});
