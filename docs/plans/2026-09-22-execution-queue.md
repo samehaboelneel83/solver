@@ -61,7 +61,7 @@ lane; no LLM / NL→IR work.
 
 ## Phase 12 — reuse
 
-- [ ] (12) Result cache — done when a submit matching a proven-optimal run returns a new run with `reused_from` and no solve.
+- [x] (12) Result cache — done when a submit matching a proven-optimal run returns a new run with `reused_from` and no solve. *(`0a5dd98`, migration 0042 (rehearsed up/down/up on a live copy): `run.cache_key` over ir_hash, data_hash, patch, solver, seed, gap_rel, cpsat_scaling, compiler; `run.reused_from`; `RunRequest.reuse`. Live: workshop run 116 optimal 9; the same submit came back from the POST already optimal, reused_from 116, 0 s, nothing queued; `reuse: false` was queued and solved. Found on the way and fixed (`be8b230`): the run page reconnected to the event stream for ever for a settled run with no events -- every reused run; a browser now reaches network idle on one and shows "Answered by run N".)*
 - [ ] (12) Warm starts — done when the nearest prior run hints CP-SAT, HiGHS and SCIP behind `solve.warm_start` (default off), with a bench report on the default.
 
 ## Phase 13 — search power

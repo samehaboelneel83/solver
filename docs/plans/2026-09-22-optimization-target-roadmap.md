@@ -602,6 +602,19 @@ business language were never queued and remain open.
   `addSol`/`createPartialSol`. Recorded as `run.params.warm_start_from`. Setting `solve.warm_start`
   default **off** until bench (scenario families: perturb 5% of data, re-solve) shows the win.
 
+
+**Progress (2026-09-23):** the result cache is done (`0a5dd98`, migration
+0042). The key is a sha256 of the version's `ir_hash`, the frozen
+`data_hash`, the scenario patch, the solver asked for, the seed, `gap_rel`,
+`cpsat_scaling` and the compiler version -- not the time limit or the
+thread count, which a *proven* optimum does not depend on (the plan's
+"SolveParams" read that way). A match on a run with status `optimal` and
+optimality `global` records a new run already finished, `reused_from` it,
+its answer and rule results copied, `wall_time_s` 0, nothing queued;
+infeasible, time-limited and local results are never reused;
+`RunRequest.reuse: false` solves again. On the way: the run page's event
+stream reconnected for ever for a settled run with no events (every reused
+run), fixed in `be8b230`.
 ---
 
 ## Phase 13 — Search power (~5 weeks)
