@@ -50,6 +50,20 @@ describe("reading an event stream", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/runs/7/events");
   });
 
+  it("ends on the server's settled comment when the run settled with no events", async () => {
+    // A run answered from the result cache has no events at all: the server
+    // says ": settled" and closes. That is the end, not a dropped stream.
+    const fetchMock = vi.fn().mockResolvedValue(streamOf([": settled\n\n"]));
+    vi.stubGlobal("fetch", fetchMock);
+    const ended: string[] = [];
+
+    watchRun(11, { onEvent: () => {}, onEnd: (why) => ended.push(why) });
+    await vi.waitFor(() => expect(ended).toEqual(["settled"]));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("resumes from the last event it saw when the stream drops", async () => {
     const fetchMock = vi
       .fn()

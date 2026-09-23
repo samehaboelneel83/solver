@@ -82,6 +82,12 @@ export function watchRun(runId: number | string, handlers: WatchHandlers): () =>
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
+          // The server's own word that the run is over when it has no event
+          // to say it with: a run that settled with none -- one answered from
+          // the result cache, or recorded before events existed. Without it
+          // the close reads as a dropped stream, and the page reconnects at
+          // once, for ever.
+          if (/(^|\n): settled\n/.test(buffer)) settled = true;
           const { events, rest } = parseFrames(buffer);
           buffer = rest;
           for (const event of events) {
