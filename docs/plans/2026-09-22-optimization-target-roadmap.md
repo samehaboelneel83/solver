@@ -707,7 +707,10 @@ per-domain tuned settings remain open.
 components, a split refused by name where the goal or a rewrite ties blocks
 together, and the pieces shown to be exactly the model (their optima add up
 to the monolithic one on 40 random models). Solving them in parallel, behind
-a setting the bench decides, is the next item (14b).
+a setting the bench decides, is done too (`28a59d0`, migration 0046):
+up to four blocks at once in their own sandboxed children, the answers put
+together, and on by default -- 3.3-17x faster on the bench, never slower,
+no optimum changed.
 ---
 
 ## Phase 15 — Multiple objectives and uncertainty (~5 weeks)
