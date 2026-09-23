@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Runs, { formatGap, statusNote, unexpressedRules } from "./Runs";
+import Runs, { formatGap, howFound, statusNote, unexpressedRules } from "./Runs";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 
@@ -387,6 +387,42 @@ describe("Runs", () => {
     expect(within(panel).getByText(/relax or remove any single one/i)).toBeInTheDocument();
   });
 
+  it("reads a conflict in the rules' own words, and says how it was found", async () => {
+    const infeasible = {
+      ...RUN_DETAIL,
+      status: "infeasible",
+      solver: "cp-sat",
+      objective: null,
+      assignments: null,
+      constraints: [],
+      rule_notes: { c_cover: "each day/shift is staffed to demand", c_budget: "the batch is exactly 100 kg" },
+      conflict: [
+        { constraint_id: "c_cover", instance: ["mon", "morning"] },
+        { constraint_id: "c_max_hours", instance: ["sara"] },
+        { constraint_id: "c_budget", instance: [] },
+      ],
+      conflict_minimal: true,
+      params: { ...RUN_DETAIL.params, conflict_method: "cp-sat", conflict_probes: 3, conflict_seconds: 0.004 },
+    };
+    stub({ run: infeasible, runs: { items: [{ ...RUN_SUMMARY, status: "infeasible", objective: null }], total: 1 } });
+    renderPage();
+
+    const why = await screen.findByRole("heading", { name: /why there is no answer/i });
+    const panel = why.closest("section") as HTMLElement;
+    // The author's words lead; the id follows, to find it in the model.
+    expect(within(panel).getByText("each day/shift is staffed to demand")).toBeInTheDocument();
+    expect(within(panel).getByText("(c_cover)")).toBeInTheDocument();
+    // A rule with no note is still named, by its id.
+    expect(within(panel).getByText("c_max_hours")).toBeInTheDocument();
+    // A rule over nothing names no day: it is the rule as a whole.
+    expect(within(panel).getByText("the rule as a whole")).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "Found from CP-SAT's own reasoning about why no answer exists, then each rule checked by solving again with CP-SAT (3 checks, under 0.01 s)."
+      )
+    ).toBeInTheDocument();
+  });
+
   it("offers to turn the fighting rules into preferences", async () => {
     const write = vi.fn().mockResolvedValue({
       id: 9,
@@ -713,5 +749,19 @@ describe("Runs", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run 11/i })).toBeInTheDocument();
+  });
+});
+
+
+describe("howFound", () => {
+  it("says which reasoning found a conflict, and what making sure of it cost", () => {
+    expect(howFound({ conflict_method: "iis", conflict_probes: 1, conflict_seconds: 0.48 }, "glop")).toBe(
+      "Found from HiGHS's analysis of the model, then each rule checked by solving again with GLOP (1 check, 0.48 s)."
+    );
+    expect(howFound({ conflict_method: "deletion", conflict_probes: 24, conflict_seconds: 1.2 }, "highs")).toBe(
+      "Found by solving the model again with HiGHS, leaving rules out one at a time (24 checks, 1.2 s)."
+    );
+    // Runs from before the method was recorded say nothing rather than guess.
+    expect(howFound({}, "cp-sat")).toBeNull();
   });
 });

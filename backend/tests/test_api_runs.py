@@ -232,6 +232,10 @@ def test_an_infeasible_run_says_which_rules_cannot_hold_together(db, auth_header
         # And it is proven irreducible, which is what makes "remove any one of
         # these" a safe thing for the UI to say.
         assert run["conflict_minimal"] is True
+        # What each rule means, as its author wrote it: the words the page
+        # reads the conflict in.
+        assert run["rule_notes"]["c_cover"] == "each day/shift is staffed to demand"
+        assert run["rule_notes"]["c_max_hours"] == "eight hours a shift, within the weekly limit"
     finally:
         db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
         db.commit()

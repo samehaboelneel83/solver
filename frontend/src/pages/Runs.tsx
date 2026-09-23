@@ -680,6 +680,9 @@ function RunDetail({ id }: { id: Id }) {
           minimal={data.conflict_minimal}
           labels={data.labels}
           sets={data.index_sets.constraints}
+          notes={data.rule_notes ?? {}}
+          found={data.params as ConflictFinding}
+          solver={data.solver}
         />
       )}
 
@@ -833,6 +836,33 @@ function outcomeLead(data: Run): string | null {
  * saying the stronger thing would send someone to relax a rule that changes
  * nothing.
  */
+/** How a conflict was found, as the run recorded it (`diagnose.explain`). */
+type ConflictFinding = { conflict_method?: string; conflict_probes?: number; conflict_seconds?: number };
+
+/** One sentence on how the list was found and what it cost, for a planner:
+ * which reasoning proposed it, and how many times the model was solved again
+ * to make sure of it. Null for runs from before it was recorded. */
+export function howFound(found: ConflictFinding, solver: string | null): string | null {
+  const checks = found.conflict_probes;
+  if (checks === undefined) return null;
+  const cost = `${checks} ${checks === 1 ? "check" : "checks"}${
+    found.conflict_seconds !== undefined ? `, ${found.conflict_seconds < 0.01 ? "under 0.01" : found.conflict_seconds} s` : ""
+  }`;
+  const by = solver ? ` with ${solverName(solver)}` : "";
+  switch (found.conflict_method) {
+    case "cp-sat":
+      return `Found from CP-SAT's own reasoning about why no answer exists, then each rule checked by solving again${by} (${cost}).`;
+    case "iis":
+      return `Found from HiGHS's analysis of the model, then each rule checked by solving again${by} (${cost}).`;
+    default:
+      return `Found by solving the model again${by}, leaving rules out one at a time (${cost}).`;
+  }
+}
+
+function solverName(solver: string): string {
+  return solver.split(" ")[0].replace(/^cp-sat$/, "CP-SAT").replace(/^glop$/, "GLOP").replace(/^highs$/, "HiGHS").replace(/^scip$/, "SCIP");
+}
+
 function Conflict({
   runId,
   scenarioId,
@@ -840,6 +870,9 @@ function Conflict({
   minimal,
   labels,
   sets,
+  notes,
+  found,
+  solver,
 }: {
   runId: Id;
   scenarioId: Id;
@@ -847,6 +880,9 @@ function Conflict({
   minimal: boolean | null;
   labels: Run["labels"];
   sets: Record<string, string[]>;
+  notes: Record<string, string>;
+  found: ConflictFinding;
+  solver: string | null;
 }) {
   const { can } = useCapabilities();
   const scenario = useScenario(scenarioId);
@@ -885,10 +921,19 @@ function Conflict({
           ? "These rules cannot all hold at once. Every one of them is needed for the clash: relax or remove any single one and the model can be solved."
           : "These rules cannot all hold at once. The search stopped before it could narrow the list, so some of them may not be needed."}
       </p>
+      {howFound(found, solver) && <p className="mb-3 text-xs text-amber-800">{howFound(found, solver)}</p>}
       <ul className="space-y-2">
         {[...byRule.entries()].map(([rule, instances]) => (
           <li key={rule} className="text-sm">
-            <span className="font-mono text-amber-900">{rule}</span>
+            {/* The author's words first; the id is how to find it in the model. */}
+            {notes[rule] ? (
+              <>
+                <span className="font-medium text-amber-950">{notes[rule]}</span>{" "}
+                <span className="font-mono text-xs text-amber-800">({rule})</span>
+              </>
+            ) : (
+              <span className="font-mono text-amber-900">{rule}</span>
+            )}
             <ul className="mt-1 flex flex-wrap gap-2">
               {instances.map((instance) => (
                 <li
@@ -897,7 +942,7 @@ function Conflict({
                 >
                   {instance.length > 0
                     ? naming(labels, sets[rule])(instance).join(" · ")
-                    : "everywhere"}
+                    : "the rule as a whole"}
                 </li>
               ))}
             </ul>

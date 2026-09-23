@@ -544,6 +544,10 @@ export type Run = RunSummary & {
   /** Which set each position of an index tuple names, so a key can be looked
    * up in the right type: keys are unique within a type, not across them. */
   index_sets: { variables: Record<string, string[]>; constraints: Record<string, string[]> };
+  /** What each rule means, in its author's words (`note` in the model
+   * version the run solved). Only rules that carry one; absent from servers
+   * before it was added. */
+  rule_notes?: Record<string, string>;
   /** Rules that cannot hold together. Null unless the run was infeasible. */
   conflict: ConflictItem[] | null;
   /** True when every listed rule was shown to be needed, so removing any one

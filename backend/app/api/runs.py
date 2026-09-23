@@ -139,6 +139,10 @@ class RunRead(RunSummary):
     # turn ["ahmed", "mon"] into names without guessing which type a key
     # belongs to. Keys are unique within a type, not across them.
     index_sets: dict[str, dict[str, list[str]]]
+    # What each rule means, in the words its author gave it (`note` in the
+    # model version the run solved): what a conflict is read in, rather than
+    # rule ids. Only rules that carry one.
+    rule_notes: dict[str, str] = {}
     # Why there is no answer: rules that cannot hold together. Null unless
     # the run was infeasible.
     conflict: list[ConflictItem] | None
@@ -448,7 +452,7 @@ def get_run(
     return _read(db, run_id)
 
 
-def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
     """The frozen display names, and which set each index position names.
 
     Both come from what the run points at -- the dataset it froze and the
@@ -477,13 +481,18 @@ def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any
         for spec in (ir.get("constraints") or [])
         if isinstance(spec, dict) and "id" in spec
     }
-    return row["labels"] or {}, {"variables": variables, "constraints": constraints}
+    notes = {
+        spec["id"]: spec["note"].strip()
+        for spec in (ir.get("constraints") or [])
+        if isinstance(spec, dict) and "id" in spec and isinstance(spec.get("note"), str) and spec["note"].strip()
+    }
+    return row["labels"] or {}, {"variables": variables, "constraints": constraints}, notes
 
 
 def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
-    labels, index_sets = _vocabulary(db, run_id)
+    labels, index_sets, rule_notes = _vocabulary(db, run_id)
     constraints = db.scalars(
         select(ConstraintResult)
         .where(ConstraintResult.run_id == run_id)
@@ -495,6 +504,7 @@ def _read(db: Session, run_id: int) -> RunRead:
         params=run.params or {},
         labels=labels,
         index_sets=index_sets,
+        rule_notes=rule_notes,
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,
