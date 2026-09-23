@@ -280,6 +280,20 @@ describe("buildModelView on models that are not tidy", () => {
     expect(line?.label).toBe("switch");
   });
 
+  it("says how a parameter's values may be wrong", () => {
+    const { graph: built } = buildModelView(
+      {
+        sets: [],
+        parameters: { demand: { index: [], uncertainty: { kind: "interval", deviation: 0.1, gamma: 2 } } },
+        variables: {},
+        constraints: [],
+      },
+      []
+    );
+    const demand = built.nodes.find((node) => node.id === "model-par-demand");
+    expect(modelDetails(demand)).toContainEqual(["Uncertain", "within 10% of each value, at most 2 at once"]);
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);

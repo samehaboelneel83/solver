@@ -23,6 +23,7 @@ import {
   SHAPE_RULES,
   TERM_KINDS,
   TRAVERSAL_DEPTHS,
+  UNCERTAINTY_KINDS,
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
@@ -87,6 +88,7 @@ function fromTypeScript(): Record<string, unknown> {
     namePattern: NAME_PATTERN,
     topLevel: { required: [...REQUIRED_KEYS], optional: [...OPTIONAL_KEYS] },
     variableDomains: [...VARIABLE_DOMAINS],
+    uncertaintyKinds: [...UNCERTAINTY_KINDS],
     relations: [...RELATIONS],
     severities: [...SEVERITIES],
     senses: [...SENSES],

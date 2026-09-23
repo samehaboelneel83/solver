@@ -9,6 +9,8 @@ import {
   type ParameterDeclaration,
   type VariableDeclaration,
   type VariableSpec,
+  type ParameterSpec,
+  type Uncertainty,
 } from "./declarations";
 import type { Constraint, ObjectiveTerm } from "./terms";
 
@@ -29,7 +31,7 @@ import type { Constraint, ObjectiveTerm } from "./terms";
 
 export type DeclarationsEditorProps = {
   sets: string[];
-  parameters: Record<string, { index: string[] }>;
+  parameters: Record<string, ParameterSpec>;
   variables: Record<string, VariableSpec>;
   /** Every entity type of the domain, whether declared as a set or not. */
   entityTypeNames: string[];
@@ -39,7 +41,7 @@ export type DeclarationsEditorProps = {
   objectiveTerms: ObjectiveTerm[];
   onChange: (next: {
     sets: string[];
-    parameters: Record<string, { index: string[] }>;
+    parameters: Record<string, ParameterSpec>;
     variables: Record<string, VariableSpec>;
   }) => void;
 };
@@ -149,6 +151,21 @@ export default function DeclarationsEditor({
                   </span>
                 </label>
                 {!declared && !usable && <Muted>{reason}</Muted>}
+                {declared && (
+                  <UncertaintyFields
+                    name={option.name}
+                    value={parameters[option.name].uncertainty}
+                    onChange={(uncertainty) => {
+                      const { uncertainty: _was, ...rest } = parameters[option.name];
+                      apply({
+                        parameters: {
+                          ...parameters,
+                          [option.name]: uncertainty ? { ...rest, uncertainty } : rest,
+                        },
+                      });
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -320,7 +337,7 @@ function IntervalFields({
   name: string;
   spec: VariableSpec;
   variables: Record<string, VariableSpec>;
-  parameters: Record<string, { index: string[] }>;
+  parameters: Record<string, ParameterSpec>;
   onChange: (next: VariableSpec) => void;
 }) {
   const ids = { start: useId(), end: useId(), size: useId(), presence: useId(), number: useId() };
@@ -403,6 +420,95 @@ function IntervalFields({
           onChange({ ...spec, presence });
         },
         "always"
+      )}
+    </div>
+  );
+}
+
+/**
+ * How a declared parameter's values may be wrong (IR version 2). Exact is
+ * the default and writes nothing; a range is typed as a percentage and
+ * kept as a fraction, with an optional cap on how many of a rule's values
+ * may be off at once.
+ */
+function UncertaintyFields({
+  name,
+  value,
+  onChange,
+}: {
+  name: string;
+  value: Uncertainty | undefined;
+  onChange: (next: Uncertainty | undefined) => void;
+}) {
+  const ids = { kind: useId(), share: useId(), gamma: useId() };
+  const kind = value?.kind ?? "exact";
+  const range = value?.kind === "interval" ? value : null;
+  const [shareDraft, setShareDraft] = useState(range ? String(Number((range.deviation * 100).toPrecision(6))) : "10");
+  const [gammaDraft, setGammaDraft] = useState(range?.gamma !== undefined ? String(range.gamma) : "");
+  return (
+    <div className="ml-6 mt-1 space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={ids.kind} className="text-xs text-slate-600">
+          {name}&rsquo;s values are
+        </label>
+        <select
+          id={ids.kind}
+          className={`${INPUT_CLASS} w-auto text-xs`}
+          value={kind}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (next === "exact") onChange(undefined);
+            else if (next === "scenarios") onChange({ kind: "scenarios" });
+            else onChange({ kind: "interval", deviation: Number(shareDraft) / 100 || 0.1 });
+          }}
+        >
+          <option value="exact">exact</option>
+          <option value="interval">within a range of each value</option>
+          <option value="scenarios">one per scenario</option>
+        </select>
+      </div>
+      {range && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label htmlFor={ids.share} className="block text-xs text-slate-600">
+              {name} may be off by up to (%)
+            </label>
+            <input
+              id={ids.share}
+              inputMode="decimal"
+              className={`${INPUT_CLASS} w-20 text-xs`}
+              value={shareDraft}
+              onChange={(event) => {
+                const raw = event.target.value;
+                if (!/^\d*\.?\d*$/.test(raw)) return;
+                setShareDraft(raw);
+                if (raw !== "" && Number.isFinite(Number(raw))) onChange({ ...range, deviation: Number(raw) / 100 });
+              }}
+            />
+          </div>
+          <div>
+            <label htmlFor={ids.gamma} className="block text-xs text-slate-600">
+              at most this many of a rule&rsquo;s {name} values at once (blank: all)
+            </label>
+            <input
+              id={ids.gamma}
+              inputMode="decimal"
+              className={`${INPUT_CLASS} w-20 text-xs`}
+              value={gammaDraft}
+              onChange={(event) => {
+                const raw = event.target.value;
+                if (!/^\d*\.?\d*$/.test(raw)) return;
+                setGammaDraft(raw);
+                if (raw === "") {
+                  const { gamma: _all, ...rest } = range;
+                  onChange(rest);
+                } else if (Number.isFinite(Number(raw))) {
+                  onChange({ ...range, gamma: Number(raw) });
+                }
+              }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

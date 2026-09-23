@@ -351,3 +351,41 @@ describe("DeclarationsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/no less than 10 is above no more than 5/i);
   });
 });
+
+describe("DeclarationsEditor and an uncertain parameter", () => {
+  it("declares a range as a fraction, with an optional cap, and exact removes it", () => {
+    const onChange = renderEditor();
+    fireEvent.change(screen.getByLabelText(/demand.s values are/i), { target: { value: "interval" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({
+      index: ["day"],
+      uncertainty: { kind: "interval", deviation: 0.1 },
+    });
+  });
+
+  it("reads a range back as a percentage, and edits its share and its cap", () => {
+    const onChange = renderEditor({
+      parameters: { demand: { index: ["day"], uncertainty: { kind: "interval", deviation: 0.25 } } },
+    });
+    const share = screen.getByLabelText(/demand may be off by up to/i) as HTMLInputElement;
+    expect(share.value).toBe("25");
+    fireEvent.change(share, { target: { value: "12.5" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand.uncertainty).toEqual({ kind: "interval", deviation: 0.125 });
+    fireEvent.change(screen.getByLabelText(/at most this many/i), { target: { value: "2" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand.uncertainty).toEqual({
+      kind: "interval",
+      deviation: 0.25,
+      gamma: 2,
+    });
+  });
+
+  it("takes one value per scenario, and exact writes nothing", () => {
+    const onChange = renderEditor({
+      parameters: { demand: { index: ["day"], uncertainty: { kind: "interval", deviation: 0.1 } } },
+    });
+    const kind = screen.getByLabelText(/demand.s values are/i);
+    fireEvent.change(kind, { target: { value: "scenarios" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({ index: ["day"], uncertainty: { kind: "scenarios" } });
+    fireEvent.change(kind, { target: { value: "exact" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({ index: ["day"] });
+  });
+});

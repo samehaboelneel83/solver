@@ -28,7 +28,12 @@ import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
-import { parameterOptions, cleanVariable, type VariableSpec } from "../model/declarations";
+import {
+  parameterOptions,
+  cleanVariable,
+  type VariableSpec,
+  type ParameterSpec,
+} from "../model/declarations";
 import {
   cleanBinding,
   cleanTerm,
@@ -84,7 +89,7 @@ const EMPTY_MODEL = {
 
 type Draft = {
   sets: string[];
-  parameters: Record<string, { index: string[] }>;
+  parameters: Record<string, ParameterSpec>;
   variables: Record<string, VariableSpec>;
   constraints: Constraint[];
   objective: { sense: string; mode: string; terms: ObjectiveTerm[] };

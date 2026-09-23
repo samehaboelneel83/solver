@@ -409,6 +409,18 @@ describe("ModelEditor", () => {
     expect(screen.getByText(/a preferred rule can already be broken at a cost/i)).toBeInTheDocument();
   });
 
+  it("publishes a parameter's uncertainty as declared", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    const uncertain = { index: ["day"], uncertainty: { kind: "interval", deviation: 0.1, gamma: 2 } };
+    stub({ write, ir: { ...IR_V2, parameters: { demand: uncertain } } });
+    renderPage();
+
+    expect((await screen.findByLabelText(/demand may be off by up to/i)) as HTMLInputElement).toHaveValue("10");
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body).ir.parameters.demand).toEqual(uncertain);
+  });
+
   it("reads a soft constraint's weight from the document, not an invented key", async () => {
     stub({
       ir: {

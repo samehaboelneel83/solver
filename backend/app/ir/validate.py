@@ -43,6 +43,7 @@ from app.ir.contract import (
     ARITHMETIC_ATTR_TYPES,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
+    UNCERTAINTY_KINDS,
     SCHEDULING_KEYS,
     FILTER_OPERATORS,
     ACCEPTED_VERSIONS,
@@ -90,7 +91,7 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 _VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"}) | INTERVAL_KEYS
-_PARAMETER_KEYS = frozenset({"index"})
+_PARAMETER_KEYS = frozenset({"index", "uncertainty"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
 
@@ -264,7 +265,60 @@ class _ShapeChecker:
                         f"{name!r} is indexed by {set_name!r}, which this model does not "
                         "declare in sets, so no dataset would carry it",
                     )
+            problem = self._check_uncertainty(name, declaration, at)
+            if problem:
+                return problem
             self.parameters[name] = list(index)
+        return None
+
+    def _check_uncertainty(self, name: str, declaration: dict[str, Any], at: Loc):
+        """How a parameter's values may be wrong (version 2): within a range of
+        each -- `deviation` a fraction of the value, `gamma` how many of a
+        rule's cells may be off at once (Bertsimas-Sim's budget; all of them
+        when absent) -- or by scenario. What the robust solve reads."""
+        if "uncertainty" not in declaration:
+            return None
+        loc: Loc = [*at, "uncertainty"]
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "uncertainty_needs_version_2",
+                loc,
+                f"{name!r} declares an uncertainty, which version 1 does not have; publish it as "
+                "version 2",
+            )
+        spec = declaration["uncertainty"]
+        kind = spec.get("kind") if isinstance(spec, dict) else None
+        if kind not in UNCERTAINTY_KINDS:
+            return Refusal(
+                "uncertainty_malformed",
+                loc,
+                f"an uncertainty names its kind: {' or '.join(sorted(UNCERTAINTY_KINDS))}",
+            )
+        allowed = {"kind", "deviation", "gamma"} if kind == "interval" else {"kind"}
+        extra = sorted(set(spec) - allowed)
+        if extra:
+            return Refusal(
+                "uncertainty_malformed",
+                [*loc, extra[0]],
+                f"a {kind} uncertainty carries no {extra[0]}",
+            )
+        if kind == "interval":
+            for key in ("deviation", "gamma"):
+                if key not in spec:
+                    if key == "deviation":
+                        return Refusal(
+                            "uncertainty_malformed",
+                            [*loc, key],
+                            f"{name!r} is uncertain within a range, so it says how far: a "
+                            "deviation, as a fraction of each value (0.1 for ten per cent)",
+                        )
+                    continue
+                if not _is_number(spec[key]) or spec[key] < 0:
+                    return Refusal(
+                        "uncertainty_malformed",
+                        [*loc, key],
+                        f"{name!r}'s {key} is a non-negative number",
+                    )
         return None
 
     def check_variables(self):

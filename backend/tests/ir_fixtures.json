@@ -1639,6 +1639,526 @@
           ]
         }
       }
+    },
+    {
+      "name": "demand_uncertain_within_a_range",
+      "why": "A parameter may say how its values may be wrong (version 2): each within 10% of itself, at most two of a rule's cells at once -- what a robust solve reads.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "interval",
+              "deviation": 0.1,
+              "gamma": 2
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "demand_uncertain_by_scenario",
+      "why": "Or by scenario: the values are the scenarios' own.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "scenarios"
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -7235,6 +7755,1333 @@
                   ]
                 },
                 "over": [
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "uncertainty_needs_version_2",
+      "loc": [
+        "parameters",
+        "demand",
+        "uncertainty"
+      ],
+      "why": "an uncertainty is version 2",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "interval",
+              "deviation": 0.1
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "uncertainty_malformed",
+      "loc": [
+        "parameters",
+        "demand",
+        "uncertainty"
+      ],
+      "why": "an uncertainty names its kind",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "fuzzy"
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "uncertainty_malformed",
+      "loc": [
+        "parameters",
+        "demand",
+        "uncertainty",
+        "deviation"
+      ],
+      "why": "a range says how far",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "interval"
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "uncertainty_malformed",
+      "loc": [
+        "parameters",
+        "demand",
+        "uncertainty",
+        "gamma"
+      ],
+      "why": "a budget is never negative",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "interval",
+              "deviation": 0.1,
+              "gamma": -1
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "uncertainty_malformed",
+      "loc": [
+        "parameters",
+        "demand",
+        "uncertainty",
+        "deviation"
+      ],
+      "why": "a scenario uncertainty has no range",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit",
+          "day",
+          "shift"
+        ],
+        "relationships": [
+          "reports_to",
+          "works_in"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "uncertainty": {
+              "kind": "scenarios",
+              "deviation": 0.1
+            }
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_cover_demand",
+            "note": "each day/shift is staffed to at least demand[day, shift]",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "s",
+                "set": "shift"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee"
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "par": "demand",
+              "index": [
+                "d",
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_one_shift_per_day",
+            "note": "nobody works two shifts in a day",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_max_hours",
+            "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "const": 8
+                },
+                {
+                  "sum": {
+                    "var": "assign",
+                    "index": [
+                      "e",
+                      "d",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "d",
+                      "set": "day"
+                    },
+                    {
+                      "index": "s",
+                      "set": "shift"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "e",
+                "name": "hours_per_week"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_north_region_lates",
+            "note": "North Region puts three people on the late shift every day, counting the depots under it",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "r",
+                "set": "unit",
+                "where": [
+                  {
+                    "attr": "cost_centre",
+                    "op": "=",
+                    "value": "OPS-100"
+                  }
+                ]
+              },
+              {
+                "index": "late",
+                "set": "shift",
+                "where": [
+                  {
+                    "attr": "starts_at",
+                    "op": "=",
+                    "value": "14:00"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "late"
+                ]
+              },
+              "over": [
+                {
+                  "index": "sub",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "r",
+                    "depth": "any_or_self"
+                  }
+                },
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "sub"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 3
+            },
+            "severity": "soft",
+            "weight": 4
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_shifts_worked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
                   {
                     "index": "d",
                     "set": "day"

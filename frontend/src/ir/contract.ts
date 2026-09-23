@@ -45,6 +45,8 @@ export const OPTIONAL_KEYS = ["objective", "relationships"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
 export const VARIABLE_DOMAINS = ["binary", "integer", "continuous", "interval"] as const;
+/** How a parameter's values may be uncertain (version 2). */
+export const UNCERTAINTY_KINDS = ["interval", "scenarios"] as const;
 export const RELATIONS = ["<=", "=", ">="] as const;
 /** How far a `via` binding walks. `one` is a single edge; `any` is the
  * transitive closure; `any_or_self` is that plus the anchor itself, which
@@ -453,6 +455,16 @@ export const IR_RULES: readonly IrRule[] = [
     code: "scheduling_amount_not_constant",
     where: "shape",
     text: "a `cumulative`'s `demand` and `capacity` read no variable",
+  },
+  {
+    code: "uncertainty_needs_version_2",
+    where: "shape",
+    text: "a parameter's `uncertainty` appears only in a version 2 document",
+  },
+  {
+    code: "uncertainty_malformed",
+    where: "shape",
+    text: "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`",
   },
 ];
 

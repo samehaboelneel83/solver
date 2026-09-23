@@ -45,6 +45,7 @@ STRUCTURAL = frozenset({
     "relationships_not_array", "relationship_not_a_name",
     "when_malformed", "pwl_malformed",
     "interval_malformed", "scheduling_rule_malformed",
+    "uncertainty_malformed",
 })
 
 #: Rules that need the whole document, the limits or the domain: validate.py's.
@@ -69,6 +70,7 @@ SEMANTIC = frozenset({
     "interval_needs_version_2", "interval_part_invalid", "interval_size_invalid",
     "interval_read_as_number", "scheduling_needs_version_2", "scheduling_not_interval",
     "scheduling_rule_hard", "scheduling_amount_not_constant",
+    "uncertainty_needs_version_2",
 })
 
 

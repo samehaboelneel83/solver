@@ -31,6 +31,7 @@ import type { EntityType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
 import { describeBinding, describeSchedule, describeTerm, describeWhen } from "../model/terms";
 import type { Term, Binding } from "../model/terms";
+import { describeUncertainty, type Uncertainty } from "../model/declarations";
 import { labelForeground, typeColour } from "./colour";
 import { typeNodeId, type ErData, type GraphPalette } from "./typesGraph";
 
@@ -43,7 +44,7 @@ export type ModelPart = (typeof MODEL_PARTS)[number];
 
 type Ir = {
   sets?: string[];
-  parameters?: Record<string, { index?: string[] }>;
+  parameters?: Record<string, { index?: string[]; uncertainty?: Uncertainty }>;
   variables?: Record<
     string,
     { index?: string[]; domain?: string; lower?: number; upper?: number; start?: string; end?: string; size?: number | string; presence?: string }
@@ -192,8 +193,13 @@ export function buildModelView(
     const id = `${MODEL_NODE_PREFIX}par-${name}`;
     const index = spec.index ?? [];
     const lines = [name, index.length ? `[${index.join(", ")}]` : "scalar"];
+    const uncertain = describeUncertainty(spec.uncertainty);
     addNode(id, "parameters", "parameter", lines, "#e2e8f0",
-      [["Kind", "Parameter (data)"], ["Indexed by", index.join(", ") || "nothing: one number"]],
+      [
+        ["Kind", "Parameter (data)"],
+        ["Indexed by", index.join(", ") || "nothing: one number"],
+        ...(uncertain ? ([["Uncertain", uncertain]] as Detail[]) : []),
+      ],
       estimateWidth(lines, 7.8, 90, 28));
     for (const set of index) {
       const from = setOf(set);

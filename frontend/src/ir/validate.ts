@@ -22,6 +22,7 @@ import {
   ALL_KEYS,
   CONSTRAINT_KEYS,
   INTERVAL_KEYS,
+  UNCERTAINTY_KINDS,
   SCHEDULING_KEYS,
   FILTER_OPERATORS,
   ACCEPTED_VERSIONS,
@@ -61,7 +62,7 @@ const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via
 const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", ...INTERVAL_KEYS]);
-const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index"]);
+const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
 const TERM_KEYS: Record<string, readonly string[]> = {
@@ -255,7 +256,56 @@ class ShapeChecker {
           );
         }
       }
+      const uncertainty = this.checkUncertainty(name, declaration, at);
+      if (uncertainty) return uncertainty;
       this.parameters.set(name, index as string[]);
+    }
+    return null;
+  }
+
+  /** `_check_uncertainty` in `app/ir/validate.py`, in the same order. */
+  private checkUncertainty(name: string, declaration: Json, at: IrLoc): IrRefusal | null {
+    if (!("uncertainty" in declaration)) return null;
+    const loc: IrLoc = [...at, "uncertainty"];
+    if (this.ir.version === 1) {
+      return refusal(
+        "uncertainty_needs_version_2",
+        loc,
+        `'${name}' declares an uncertainty, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const spec = declaration.uncertainty;
+    const kind = isObject(spec) ? spec.kind : undefined;
+    if (!(UNCERTAINTY_KINDS as readonly unknown[]).includes(kind)) {
+      return refusal(
+        "uncertainty_malformed",
+        loc,
+        `an uncertainty names its kind: ${[...UNCERTAINTY_KINDS].sort().join(" or ")}`
+      );
+    }
+    const body = spec as Json;
+    const allowed = kind === "interval" ? ["kind", "deviation", "gamma"] : ["kind"];
+    const extra = Object.keys(body).filter((key) => !allowed.includes(key)).sort();
+    if (extra.length > 0) {
+      return refusal("uncertainty_malformed", [...loc, extra[0]], `a ${String(kind)} uncertainty carries no ${extra[0]}`);
+    }
+    if (kind === "interval") {
+      for (const key of ["deviation", "gamma"]) {
+        if (!(key in body)) {
+          if (key === "deviation") {
+            return refusal(
+              "uncertainty_malformed",
+              [...loc, key],
+              `'${name}' is uncertain within a range, so it says how far: a deviation, as a fraction of each value (0.1 for ten per cent)`
+            );
+          }
+          continue;
+        }
+        const value = body[key];
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+          return refusal("uncertainty_malformed", [...loc, key], `'${name}''s ${key} is a non-negative number`);
+        }
+      }
     }
     return null;
   }

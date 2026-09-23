@@ -143,8 +143,23 @@ class Pwl(_Model):
 Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl]
 
 
+class IntervalUncertainty(_Model):
+    """Each value may be off by up to `deviation` of itself; at most `gamma`
+    of a rule's cells at once (all of them when absent)."""
+
+    kind: Literal["interval"]
+    deviation: Annotated[Number, Field(ge=0)]
+    gamma: Optional[Annotated[Number, Field(ge=0)]] = None
+
+
+class ScenarioUncertainty(_Model):
+    kind: Literal["scenarios"]
+
+
 class Parameter(_Model):
     index: list[Name]
+    # How the values may be wrong (version 2): what a robust solve reads.
+    uncertainty: Optional[Annotated[Union[IntervalUncertainty, ScenarioUncertainty], Field(discriminator="kind")]] = None
 
 
 class Variable(_Model):

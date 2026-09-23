@@ -587,6 +587,20 @@
       "code": "scheduling_amount_not_constant",
       "where": "shape",
       "text": "a `cumulative`'s `demand` and `capacity` read no variable"
+    },
+    {
+      "code": "uncertainty_needs_version_2",
+      "where": "shape",
+      "text": "a parameter's `uncertainty` appears only in a version 2 document"
+    },
+    {
+      "code": "uncertainty_malformed",
+      "where": "shape",
+      "text": "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`"
     }
+  ],
+  "uncertaintyKinds": [
+    "interval",
+    "scenarios"
   ]
 }

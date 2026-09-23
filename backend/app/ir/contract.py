@@ -53,6 +53,9 @@ OPTIONAL_KEYS: tuple[str, ...] = tuple(CONTRACT["topLevel"]["optional"])
 ALL_KEYS: frozenset[str] = frozenset(REQUIRED_KEYS + OPTIONAL_KEYS)
 
 VARIABLE_DOMAINS: frozenset[str] = frozenset(CONTRACT["variableDomains"])
+#: How a parameter's values may be uncertain (version 2): within a range of
+#: each value, or by scenario.
+UNCERTAINTY_KINDS: frozenset[str] = frozenset(CONTRACT["uncertaintyKinds"])
 RELATIONS: frozenset[str] = frozenset(CONTRACT["relations"])
 #: How far a `via` binding walks. `one` is a single edge; `any` is the
 #: transitive closure; `any_or_self` is that plus the anchor itself, which is

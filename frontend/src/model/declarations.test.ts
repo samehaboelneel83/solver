@@ -115,6 +115,18 @@ describe("referencesOf", () => {
   });
 });
 
+describe("describeUncertainty", () => {
+  it("reads an uncertainty back in words", async () => {
+    const { describeUncertainty } = await import("./declarations");
+    expect(describeUncertainty(undefined)).toBeNull();
+    expect(describeUncertainty({ kind: "interval", deviation: 0.1 })).toBe("within 10% of each value");
+    expect(describeUncertainty({ kind: "interval", deviation: 0.125, gamma: 2 })).toBe(
+      "within 12.5% of each value, at most 2 at once"
+    );
+    expect(describeUncertainty({ kind: "scenarios" })).toBe("one value per scenario");
+  });
+});
+
 describe("an interval in the editor", () => {
   it("keeps its start, end, size and presence, and never carries bounds", () => {
     const task = { index: ["day"], domain: "interval" as const, start: "b", end: "e", size: 3, presence: "on" };
