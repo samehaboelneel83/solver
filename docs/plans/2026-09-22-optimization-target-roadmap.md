@@ -654,6 +654,20 @@ would make the MILP hint whole. The queue's Phase 12 items are complete.
   `presolve`, …); objective = SGM primal integral on held-out instances; results stored as a setting
   at domain/problem level (the existing three-level settings), with `tuned_at` and the bench report link.
 
+
+**Progress (2026-09-23):** symmetry breaking is done (`bae4704`, migration
+0044), **off by default on the bench's evidence**. Detection is on the
+frozen data, not an attribute hash alone: two members are interchangeable
+when their attributes, every parameter cell they index and their
+neighbours along every declared relationship agree and no edge joins them
+(a parameter indexed by the set twice is not attempted). The rows order a
+class on one variable indexed once by the set, for HiGHS and the MILP
+wrapper only, inside the solve; orderings on several sets at once stay
+valid because each total sums over the other sets. On a new
+comparison-only family, `rota_teams` (people on three contracts), every
+pair proved the same optimum and the rows only slowed the solvers (MILP
+wrapper 2.6x, HiGHS 8%): their presolve already handles this symmetry
+(`bench/results/2026-09-23-symmetry.md`).
 ---
 
 ## Phase 14 — Scale: decomposition, first-order, GPU (~6+ weeks, demand-driven)

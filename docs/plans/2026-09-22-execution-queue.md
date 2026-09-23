@@ -66,7 +66,7 @@ lane; no LLM / NL→IR work.
 
 ## Phase 13 — search power
 
-- [ ] (13) Symmetry breaking — done when identical entities get ordering rules on HiGHS/MILP only, equivalence-tested, default decided by the bench.
+- [x] (13) Symmetry breaking — done when identical entities get ordering rules on HiGHS/MILP only, equivalence-tested, default decided by the bench. *(`bae4704`, migration 0044 (rehearsed up/down/up): `app.solve.symmetry` -- interchangeable entities (same attributes, parameter cells, neighbours, no edge between) ordered on one variable, for HiGHS and the MILP wrapper only, behind `solve.symmetry`. 30 random rosters against CP-SAT: never cuts the optimum. Bench (`bench/results/2026-09-23-symmetry.md`, new comparison-only family rota_teams): all 36 pairs agree; the rows only slowed the solvers (MILP 2.6x, HiGHS 8% on rota_teams) -- default off. Live: load_balance on HiGHS with the setting on recorded one row for {Ana, Ben}, same 3937.5.)*
 - [ ] (13) Solver-parameter techniques behind the benchmark gate — done when the whitelisted parameter settings are measured by the harness and only winners are enabled, with reports committed.
 
 ## Phase 15 — multiple objectives and uncertainty
