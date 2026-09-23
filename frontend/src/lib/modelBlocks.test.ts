@@ -26,3 +26,20 @@ describe("modelToBlocks and a scheduling rule", () => {
     expect(json).toContain('"NAME":"task"');
   });
 });
+
+describe("modelToBlocks and a conditional rule", () => {
+  it("reads the condition with what the rule holds for", async () => {
+    const { modelToBlocks } = await import("./modelBlocks");
+    const ir = {
+      sets: [],
+      parameters: {},
+      variables: { open: { index: [], domain: "binary" }, ship: { index: [], domain: "integer" } },
+      constraints: [
+        { id: "c_closed", left: { var: "ship", index: [] }, relation: "<=", right: { const: 0 }, severity: "hard",
+          when: { var: "open", index: [], is: 0 } },
+      ],
+    };
+    const json = JSON.stringify(modelToBlocks(ir, { nodes: [], edges: [], entity_types: [] } as never));
+    expect(json).toContain("nothing: it holds once, only while open[] is no");
+  });
+});

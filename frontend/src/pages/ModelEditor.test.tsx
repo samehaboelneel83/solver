@@ -278,7 +278,10 @@ describe("ModelEditor", () => {
     fireEvent.change(await screen.findByLabelText(/starting from/i), { target: { value: "21" } });
 
     expect(await screen.findByDisplayValue("c_cover_demand")).toBeInTheDocument();
-    expect(screen.getByText(/named but not expressed/i)).toBeInTheDocument();
+    expect(screen.getByText(/this rule is named but not expressed/i)).toBeInTheDocument();
+    // Published at the current version, the refusal is the rule itself, not
+    // the sketch's missing version.
+    expect(screen.getAllByRole("alert").some((alert) => /c_cover_demand. has no left/.test(alert.textContent ?? ""))).toBe(true);
     expect(screen.getByText(/named but has nothing to count/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Kind of term")).not.toBeInTheDocument();
   });
@@ -321,6 +324,48 @@ describe("ModelEditor", () => {
     const sent = JSON.parse(write.mock.calls[0][1].body).ir;
     expect(sent.variables.task).toEqual(task);
     expect(sent.constraints).toEqual([room]);
+  });
+
+  it("makes a rule conditional on a yes-or-no decision, and publishes the switch", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({
+      write,
+      ir: {
+        ...IR_V2,
+        variables: { ...IR_V2.variables, staffed: { index: ["day"], domain: "binary" } },
+      },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByLabelText(/only while a yes-or-no decision is set/i));
+    fireEvent.change(screen.getByLabelText("Switch"), { target: { value: "staffed" } });
+    fireEvent.change(screen.getByLabelText("is"), { target: { value: "0" } });
+    expect(screen.getByText(/only while staffed\[d\] is no/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints[0].when).toEqual({ var: "staffed", index: ["d"], is: 0 });
+    // Started from a version 1 model: published as 2, which a when needs.
+    expect(sent.version).toBe(2);
+  });
+
+  it("drops the condition when a rule is made preferred, and offers none then", async () => {
+    stub({
+      ir: {
+        ...IR_V2,
+        variables: { ...IR_V2.variables, staffed: { index: ["day"], domain: "binary" } },
+        constraints: [{ ...IR_V2.constraints[0], when: { var: "staffed", index: ["d"], is: 1 } }],
+      },
+    });
+    renderPage();
+
+    const toggle = await screen.findByLabelText(/only while a yes-or-no decision is set/i);
+    expect(toggle).toBeChecked();
+    fireEvent.change(screen.getByLabelText("Strength"), { target: { value: "soft" } });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/a preferred rule can already be broken at a cost/i)).toBeInTheDocument();
   });
 
   it("reads a soft constraint's weight from the document, not an invented key", async () => {
@@ -727,6 +772,11 @@ describe("ModelEditor", () => {
     await screen.findByDisplayValue("c_cover");
 
     fireEvent.click(screen.getByRole("button", { name: /remove condition/i }));
+    // The query builder reports a removal a tick after rendering it; a
+    // person cannot click Publish inside that tick, but a loaded test run
+    // could, and would publish the filter it had just removed.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /remove condition/i })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/is_weekend/)).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
     const sent = JSON.parse(write.mock.calls[0][1].body).ir;

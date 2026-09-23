@@ -49,11 +49,21 @@ export type Constraint = {
   right?: Term;
   severity?: Severity;
   weight?: number;
+  /** The rule holds only while this yes-or-no decision is `is` (version 2). */
+  when?: When;
   /** A scheduling rule (version 2) in place of left/relation/right. Kept
    * and shown by the editor, not yet built in it. */
   no_overlap?: SchedulingBody;
   cumulative?: SchedulingBody & { demand: Term; capacity: Term };
 };
+
+export type When = { var: string; index: string[]; is?: 0 | 1 };
+
+/** `only while open[f] is yes`, or null for an unconditional rule. */
+export function describeWhen(when: { var?: string; index?: string[]; is?: number } | undefined): string | null {
+  if (!when?.var) return null;
+  return `only while ${when.var}[${(when.index ?? []).join(", ")}] is ${when.is === 0 ? "no" : "yes"}`;
+}
 
 export type SchedulingBody = { interval: { var: string; index: string[] }; over: Binding[] };
 
@@ -133,7 +143,8 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       return { par: name, index: fillIndices(arity, context.parameters[name]?.index ?? [], bound) };
     }
     case "var": {
-      const name = Object.keys(context.variables)[0] ?? "";
+      // An interval is not a number to read (its start and end are).
+      const name = Object.keys(context.variables).find((n) => context.variables[n].domain !== "interval") ?? "";
       const arity = context.variables[name]?.index.length ?? 0;
       return { var: name, index: fillIndices(arity, context.variables[name]?.index ?? [], bound) };
     }
@@ -156,7 +167,8 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       return { add: [{ const: 0 }, { const: 0 }] };
     case "pwl": {
       // A straight line through two points: a curve with nothing bent yet.
-      const name = Object.keys(context.variables)[0] ?? "";
+      const name =
+        Object.keys(context.variables).find((n) => ["integer", "continuous"].includes(context.variables[n].domain)) ?? "";
       const arity = context.variables[name]?.index.length ?? 0;
       return {
         pwl: { var: name, index: fillIndices(arity, context.variables[name]?.index ?? [], bound) },

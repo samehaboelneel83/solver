@@ -251,6 +251,35 @@ describe("buildModelView on models that are not tidy", () => {
     expect(modelDetails(task)).toContainEqual(["Values", "from begin to finish, lasting duration"]);
   });
 
+  it("says when a rule is switched, and joins the switch to it", () => {
+    const { graph: built } = buildModelView(
+      {
+        sets: [],
+        parameters: {},
+        variables: {
+          open: { index: [], domain: "binary" },
+          ship: { index: [], domain: "integer", lower: 0, upper: 9 },
+        },
+        constraints: [
+          {
+            id: "c_closed",
+            left: { var: "ship", index: [] },
+            relation: "<=",
+            right: { const: 0 },
+            severity: "hard",
+            when: { var: "open", index: [], is: 0 },
+          },
+        ],
+      },
+      []
+    );
+    const rule = built.nodes.find((node) => node.id === "model-con-c_closed");
+    expect(rule?.label).toBe("c_closed\nmust hold · while open");
+    expect(modelDetails(rule)).toContainEqual(["Applies", "only while open[] is no"]);
+    const line = built.edges.find((e) => e.source === "model-var-open" && e.target === "model-con-c_closed");
+    expect(line?.label).toBe("switch");
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);

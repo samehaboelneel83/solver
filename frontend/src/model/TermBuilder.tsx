@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
@@ -70,13 +70,13 @@ export default function TermBuilder({
   const namedBlock = Boolean(label);
   // A sum needs a set to range over. Offering one with none declared would
   // mint a binding whose set is empty — refused on publish.
-  // A piecewise curve is kept and shown, not yet built here (IR version 2;
-  // the editor learns to draw its points in a later slice).
+  // A piecewise curve (IR version 2) is a curve of a variable, so it is
+  // offered once there is a number to draw one of.
   const offeredKinds = (
     context.sets.length > 0 || kind === "sum"
       ? TERM_KINDS
       : TERM_KINDS.filter((option) => option !== "sum")
-  ).filter((option) => option !== "pwl" || kind === "pwl");
+  ).filter((option) => option !== "pwl" || kind === "pwl" || numericVariables(context).length > 0);
   const name = label ?? TERM_LABELS[kind];
   const kindSelect = (
     <>
@@ -136,13 +136,19 @@ function Body({
 
   if (kind === "pwl") {
     const term = value as { pwl: { var: string; index: string[] }; points: [number, number][] };
-    const of = term.pwl.index.length > 0 ? `${term.pwl.var}[${term.pwl.index.join(", ")}]` : term.pwl.var;
     return (
-      <p className="px-2 py-1 text-sm text-slate-600">
-        A piecewise curve of {of} through {term.points.length} points (
-        {term.points.map(([x, y]) => `${x} → ${y}`).join(", ")}). Kept as published; its points
-        cannot be edited here yet.
-      </p>
+      <div className="space-y-2">
+        <ReferencePicker
+          kind="var"
+          label="Curve of"
+          value={term.pwl}
+          onChange={(pwl) => onChange({ ...term, pwl } as Term)}
+          context={context}
+          bound={bound}
+          allow={(domain) => domain === "integer" || domain === "continuous"}
+        />
+        <CurvePoints points={term.points} onChange={(points) => onChange({ ...term, points } as Term)} />
+      </div>
     );
   }
 
@@ -160,43 +166,18 @@ function Body({
   if (kind === "par" || kind === "var") {
     const isVar = kind === "var";
     const term = value as { par?: string; var?: string; index: string[] };
-    const name = (isVar ? term.var : term.par) ?? "";
-    const declarations = isVar ? context.variables : context.parameters;
-    const wantedSets = declarations[name]?.index ?? [];
-
     return (
-      <div className="flex flex-wrap items-end gap-2">
-        <Select
-          label={isVar ? "Variable" : "Parameter"}
-          value={name}
-          options={Object.keys(declarations).map((n) => ({ value: n, label: n }))}
-          onChange={(next) => {
-            const arity = declarations[next]?.index.length ?? 0;
-            const indices = Array.from({ length: arity }, (_, position) => {
-              const set = declarations[next]?.index[position];
-              return bound.find((b) => b.set === set)?.index ?? "";
-            });
-            onChange(isVar ? { var: next, index: indices } : { par: next, index: indices });
-          }}
-        />
-        {wantedSets.map((set, position) => (
-          <Select
-            key={`${name}-${position}`}
-            label={`${set} index`}
-            value={term.index[position] ?? ""}
-            options={uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => ({
-              value: b.index,
-              label: `${b.index} in ${b.set}`,
-            }))}
-            emptyLabel={`no index over ${set}`}
-            onChange={(next) => {
-              const indices = [...term.index];
-              indices[position] = next;
-              onChange(isVar ? { var: name, index: indices } : { par: name, index: indices });
-            }}
-          />
-        ))}
-      </div>
+      <ReferencePicker
+        kind={kind}
+        value={{ name: (isVar ? term.var : term.par) ?? "", index: term.index }}
+        onChange={(next) =>
+          onChange(isVar ? { var: next.name, index: next.index } : { par: next.name, index: next.index })
+        }
+        context={context}
+        bound={bound}
+        // An interval is not a number: its start and end variables are.
+        allow={isVar ? (domain) => domain !== "interval" : undefined}
+      />
     );
   }
 
@@ -643,6 +624,191 @@ function WalkPicker({
         />
       )}
     </>
+  );
+}
+
+/** The variables a number can be read from: not yes-or-no, not an interval. */
+function numericVariables(context: ModelContext): string[] {
+  return Object.entries(context.variables)
+    .filter(([, spec]) => spec.domain === "integer" || spec.domain === "continuous")
+    .map(([name]) => name);
+}
+
+type Reference = { name: string; index: string[] } | { var: string; index: string[] };
+
+/**
+ * A declared variable (or parameter) and the indices it is read at, each
+ * chosen from what is bound here. Shared by plain references, a curve's
+ * variable and a rule's switch; `allow` narrows the variables by domain.
+ */
+export function ReferencePicker<T extends Reference>({
+  kind,
+  label,
+  value,
+  onChange,
+  context,
+  bound,
+  allow,
+}: {
+  kind: "var" | "par";
+  label?: string;
+  value: T;
+  onChange: (next: T) => void;
+  context: ModelContext;
+  bound: Binding[];
+  allow?: (domain: string) => boolean;
+}) {
+  const isVar = kind === "var";
+  const keyed = "var" in value;
+  const name = keyed ? (value as { var: string }).var : (value as { name: string }).name;
+  const declarations: Record<string, { index: string[]; domain?: string }> = isVar
+    ? context.variables
+    : context.parameters;
+  const names = Object.keys(declarations).filter(
+    (n) => !isVar || !allow || allow(declarations[n].domain ?? "")
+  );
+  const wantedSets = declarations[name]?.index ?? [];
+  const emit = (nextName: string, index: string[]) =>
+    onChange((keyed ? { var: nextName, index } : { name: nextName, index }) as T);
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <Select
+        label={label ?? (isVar ? "Variable" : "Parameter")}
+        value={name}
+        options={names.map((n) => ({ value: n, label: n }))}
+        emptyLabel={isVar ? "no variable of that kind yet" : undefined}
+        onChange={(next) => {
+          const arity = declarations[next]?.index.length ?? 0;
+          emit(
+            next,
+            Array.from({ length: arity }, (_, position) => {
+              const set = declarations[next]?.index[position];
+              return bound.find((b) => b.set === set)?.index ?? "";
+            })
+          );
+        }}
+      />
+      {wantedSets.map((set, position) => (
+        <Select
+          key={`${name}-${position}`}
+          label={`${set} index`}
+          value={value.index[position] ?? ""}
+          options={uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => ({
+            value: b.index,
+            label: `${b.index} in ${b.set}`,
+          }))}
+          emptyLabel={`no index over ${set}`}
+          onChange={(next) => {
+            const indices = [...value.index];
+            indices[position] = next;
+            emit(name, indices);
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A curve's points, `x → y`, in increasing x (the contract refuses
+ * anything else, and says so here first). At least two: one point is a
+ * value, not a curve.
+ */
+function CurvePoints({
+  points,
+  onChange,
+}: {
+  points: [number, number][];
+  onChange: (points: [number, number][]) => void;
+}) {
+  const unordered = points.findIndex((point, i) => i > 0 && point[0] <= points[i - 1][0]);
+  return (
+    <fieldset className="px-2">
+      <legend className="text-xs text-slate-600">Through the points</legend>
+      <ol className="mt-1 space-y-1">
+        {points.map(([x, y], i) => (
+          <li key={i} className="flex flex-wrap items-end gap-2">
+            <DecimalField
+              label={`Point ${i + 1}: at`}
+              value={x}
+              onChange={(next) => onChange(points.map((p, j) => (j === i ? [next, p[1]] : p)))}
+            />
+            <span className="pb-1 text-xs text-slate-500">→</span>
+            <DecimalField
+              label={`Point ${i + 1}: value`}
+              value={y}
+              onChange={(next) => onChange(points.map((p, j) => (j === i ? [p[0], next] : p)))}
+            />
+            {points.length > 2 && (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xs text-red-700 underline"
+                onClick={() => onChange(points.filter((_, j) => j !== i))}
+              >
+                Remove point {i + 1}
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+      <button
+        type="button"
+        className="mt-1 rounded px-2 py-1 text-xs text-blue-700 underline"
+        onClick={() => {
+          const [lastX, lastY] = points[points.length - 1];
+          onChange([...points, [lastX + 1, lastY]]);
+        }}
+      >
+        Add a point
+      </button>
+      {unordered > 0 && (
+        <p role="alert" className="mt-1 text-xs text-red-600">
+          Point {unordered + 1} is not to the right of point {unordered}: the points go in
+          increasing order of where they are, so each place has one value.
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+/** A number that may have decimals. The draft is kept as typed, so "1." or
+ * "-" can be on the way to a number; only a finite number is sent on. */
+function DecimalField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const id = useId();
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    if (Number(draft) !== value) setDraft(String(value));
+    // Only an outside change of `value` resets the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <div>
+      <label htmlFor={id} className="block text-xs text-slate-600">
+        {label}
+      </label>
+      <input
+        id={id}
+        inputMode="decimal"
+        className={`${INPUT_CLASS} w-20 text-xs`}
+        value={draft}
+        onChange={(event) => {
+          const raw = event.target.value;
+          if (!/^[+-]?\d*\.?\d*$/.test(raw)) return;
+          setDraft(raw);
+          const next = Number(raw);
+          if (raw.trim() !== "" && Number.isFinite(next)) onChange(next);
+        }}
+      />
+    </div>
   );
 }
 

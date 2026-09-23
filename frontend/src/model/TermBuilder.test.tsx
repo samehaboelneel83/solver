@@ -765,3 +765,69 @@ describe("BindingsEditor, the relationship picker", () => {
     expect(next[0]).not.toHaveProperty("via");
   });
 });
+
+describe("TermBuilder and a piecewise curve", () => {
+  const CURVES: ModelContext = {
+    ...CONTEXT,
+    variables: {
+      assign: { index: ["employee", "day", "shift"], domain: "binary" },
+      units: { index: [], domain: "integer" },
+      begin: { index: [], domain: "integer" },
+      task: { index: [], domain: "interval" },
+    },
+  };
+
+  function Harness({ initial }: { initial: Term }) {
+    const [value, setValue] = useState<Term>(initial);
+    return (
+      <>
+        <TermBuilder value={value} onChange={setValue} context={CURVES} bound={[]} />
+        <output data-testid="term">{JSON.stringify(value)}</output>
+      </>
+    );
+  }
+  const term = () => JSON.parse(screen.getByTestId("term").textContent ?? "null");
+
+  it("builds a curve of a number variable through points typed with decimals", () => {
+    render(<Harness initial={{ const: 0 }} />);
+    fireEvent.change(screen.getByLabelText("Kind of term"), { target: { value: "pwl" } });
+
+    // Only whole or fractional numbers can be curved: not yes-or-no, not an interval.
+    const of = screen.getByLabelText("Curve of") as HTMLSelectElement;
+    expect(Array.from(of.options).map((o) => o.value)).toEqual(["units", "begin"]);
+    expect(term()).toEqual({ pwl: { var: "units", index: [] }, points: [[0, 0], [1, 1]] });
+
+    fireEvent.change(screen.getByLabelText("Point 2: at"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Point 2: value"), { target: { value: "10.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add a point" }));
+    fireEvent.change(screen.getByLabelText("Point 3: value"), { target: { value: "16" } });
+    expect(term()).toEqual({ pwl: { var: "units", index: [] }, points: [[0, 0], [2, 10.5], [3, 16]] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove point 1" }));
+    expect(term().points).toEqual([[2, 10.5], [3, 16]]);
+    // Two points is a curve; one would be a value.
+    expect(screen.queryByRole("button", { name: /remove point/i })).not.toBeInTheDocument();
+  });
+
+  it("says when the points are out of order, before the server does", () => {
+    render(<Harness initial={{ pwl: { var: "units", index: [] }, points: [[0, 0], [2, 1], [1, 3]] } as Term} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/point 3 is not to the right of point 2/i);
+  });
+
+  it("keeps a half-typed decimal on screen without sending it", () => {
+    render(<Harness initial={{ pwl: { var: "units", index: [] }, points: [[0, 0], [1, 1]] } as Term} />);
+    const field = screen.getByLabelText("Point 2: value") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "2." } });
+    expect(field.value).toBe("2.");
+    fireEvent.change(field, { target: { value: "2.5" } });
+    expect(term().points[1]).toEqual([1, 2.5]);
+  });
+
+  it("never offers an interval as a variable to read", () => {
+    render(<Harness initial={{ const: 0 }} />);
+    fireEvent.change(screen.getByLabelText("Kind of term"), { target: { value: "var" } });
+    const picker = screen.getByLabelText("Variable") as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.value)).not.toContain("task");
+    expect(term().var).toBe("assign");
+  });
+});

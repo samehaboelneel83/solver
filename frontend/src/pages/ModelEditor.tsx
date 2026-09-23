@@ -22,7 +22,8 @@ import {
   type Id,
 } from "../api/v1";
 import { checkIrShape } from "../ir";
-import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
+import { IR_VERSION, isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
+import WhenEditor from "../model/WhenEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
@@ -34,6 +35,7 @@ import {
   describeBinding,
   describeSchedule,
   describeTerm,
+  describeWhen,
   freeNumberedId,
   nextBinding,
   type Binding,
@@ -283,6 +285,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     const walked = declaredRelationships(draft.constraints, draft.objective.terms);
     return {
       ...withoutObjective,
+      // The editor always writes the current version: version 2 is version 1
+      // plus what it adds, so a model started as 1 is still valid as 2, and
+      // a condition or a curve added to it is refused in 1 with no control
+      // on this screen to change that.
+      version: IR_VERSION,
       sets: draft.sets,
       // Derived from the walks, not declared by hand. `sets` is declared
       // because a set may legitimately be carried and never used -- for
@@ -719,6 +726,7 @@ function ConstraintCard({
         <TreeView>
           <p className="mb-1 px-2 font-mono text-xs text-slate-500">
             {describeTerm(constraint.left)} {constraint.relation} {describeTerm(constraint.right)}
+            {describeWhen(constraint.when) ? `, ${describeWhen(constraint.when)}` : ""}
           </p>
 
           <BindingsEditor
@@ -766,8 +774,10 @@ function ConstraintCard({
               onChange={(severity) => {
                 const next = severity as Constraint["severity"];
                 if (next === "soft") {
+                  // A preferred rule takes no condition (contract: when_on_soft).
+                  const { when: _unswitched, ...rest } = constraint;
                   onChange({
-                    ...constraint,
+                    ...rest,
                     severity: next,
                     weight: constraint.weight && constraint.weight >= 1 ? constraint.weight : 1,
                   });
@@ -813,6 +823,21 @@ function ConstraintCard({
             context={context}
             bound={bound}
             label="That"
+          />
+
+          <WhenEditor
+            when={constraint.when}
+            soft={constraint.severity === "soft"}
+            bound={bound}
+            context={context}
+            onChange={(when) => {
+              if (when === undefined) {
+                const { when: _dropped, ...rest } = constraint;
+                onChange(rest);
+                return;
+              }
+              onChange({ ...constraint, when });
+            }}
           />
         </TreeView>
       )}

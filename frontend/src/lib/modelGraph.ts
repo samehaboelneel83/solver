@@ -29,7 +29,7 @@
 
 import type { EntityType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
-import { describeBinding, describeSchedule, describeTerm } from "../model/terms";
+import { describeBinding, describeSchedule, describeTerm, describeWhen } from "../model/terms";
 import type { Term, Binding } from "../model/terms";
 import { labelForeground, typeColour } from "./colour";
 import { typeNodeId, type ErData, type GraphPalette } from "./typesGraph";
@@ -62,6 +62,7 @@ type IrConstraint = {
   severity?: string;
   weight?: number;
   penalty?: number;
+  when?: { var?: string; index?: string[]; is?: number };
   no_overlap?: { interval?: { var?: string }; over?: Binding[] };
   cumulative?: { interval?: { var?: string }; over?: Binding[]; demand?: Term; capacity?: Term };
 };
@@ -228,7 +229,9 @@ export function buildModelView(
     const quadratic = Math.max(degree(rule.left), degree(rule.right)) >= 2;
     const lines = [
       rule.id,
-      (soft ? `may bend · ${price ?? 1} per unit` : "must hold") + (quadratic ? " · quadratic" : ""),
+      (soft ? `may bend · ${price ?? 1} per unit` : "must hold") +
+        (quadratic ? " · quadratic" : "") +
+        (rule.when?.var ? ` · while ${rule.when.var}` : ""),
     ];
     const expressed = rule.left !== undefined && rule.right !== undefined;
     const schedule = describeSchedule(rule);
@@ -246,6 +249,8 @@ export function buildModelView(
       ],
     ];
     if (rule.forall?.length) details.push(["For every", rule.forall.map(describeBinding).join(", ")]);
+    const condition = describeWhen(rule.when);
+    if (condition) details.push(["Applies", condition]);
     if (soft) details.push(["Price per unit broken", String(price ?? 1)]);
     if (rule.note) details.push(["Note", rule.note]);
     addNode(id, "rules", "constraint", lines, soft ? "#fef3c7" : "#1e293b", details,
@@ -256,6 +261,7 @@ export function buildModelView(
     const found = { vars: new Set<string>(), pars: new Set<string>(), attrs: new Map<string, Set<string>>() };
     collect(rule.left, found, bound);
     collect(rule.right, found, bound);
+    const switched = rule.when?.var;
     const body = rule.no_overlap ?? rule.cumulative;
     if (body) {
       // A scheduling rule reads its intervals, and any data in its demand
@@ -269,6 +275,8 @@ export function buildModelView(
       }
     }
     found.vars.forEach((name) => addEdge(`${MODEL_NODE_PREFIX}var-${name}`, id));
+    // The switch that turns the rule on, labelled so it reads as one.
+    if (switched && !found.vars.has(switched)) addEdge(`${MODEL_NODE_PREFIX}var-${switched}`, id, "switch");
     found.pars.forEach((name) => addEdge(`${MODEL_NODE_PREFIX}par-${name}`, id));
     // The sets it holds for every one of, labelled with any attribute of
     // theirs it reads as a number -- hours_per_week flowing into the hours

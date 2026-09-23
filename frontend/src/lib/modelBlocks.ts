@@ -18,7 +18,7 @@
  */
 
 import type { Binding, Term } from "../model/terms";
-import { describeBinding, schedulingKind } from "../model/terms";
+import { describeBinding, describeWhen, schedulingKind } from "../model/terms";
 import type { GraphResponse } from "../types/graph";
 import { MODEL_NODE_PREFIX, OBJECTIVE_NODE_ID } from "./modelGraph";
 
@@ -172,6 +172,7 @@ type Ir = {
     severity?: string;
     weight?: number;
     penalty?: number;
+    when?: { var?: string; index?: string[]; is?: number };
     no_overlap?: { interval: { var: string; index: string[] }; over?: Binding[] };
     cumulative?: { interval: { var: string; index: string[] }; over?: Binding[]; demand?: Term; capacity?: Term };
   }[];
@@ -285,7 +286,11 @@ export function modelToBlocks(irInput: Record<string, unknown> | null | undefine
       fields: {
         ID: rule.id,
         ...(soft ? { PRICE: String(rule.weight ?? rule.penalty ?? 1) } : {}),
-        FORALL: rule.forall?.length ? rule.forall.map(describeBinding).join(", ") : "nothing: it holds once",
+        // No switch socket on the rule block yet: the condition reads with
+        // what the rule holds for.
+        FORALL:
+          (rule.forall?.length ? rule.forall.map(describeBinding).join(", ") : "nothing: it holds once") +
+          (describeWhen(rule.when) ? `, ${describeWhen(rule.when)}` : ""),
         RELATION: expressed ? RELATION[rule.relation ?? ""] ?? rule.relation ?? "?" : "(no expression)",
       },
       inputs: expressed ? { LEFT: { block: termBlock(rule.left) }, RIGHT: { block: termBlock(rule.right) } } : {},
