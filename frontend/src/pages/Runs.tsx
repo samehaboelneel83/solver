@@ -16,6 +16,7 @@ useScenario,
   useScenarios,
   useSolvers,
   type ConflictItem,
+  type ParetoPoint,
   type ConstraintOutcome,
   type Id,
   type Run,
@@ -291,6 +292,9 @@ function ScenarioRuns({
   const { can } = useCapabilities();
   const version = useVersion(modelVersionId);
   const unexpressed = unexpressedRules(version.data?.ir);
+  // A trade-off front needs a goal of exactly two terms (app.solve.pareto).
+  const twoGoals =
+    ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length === 2;
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
@@ -315,10 +319,13 @@ function ScenarioRuns({
   const comparable = items.filter((row) => row.id !== selected);
   const against = comparable.some((row) => row.id === againstId) ? againstId : null;
 
-  function solve() {
+  function solve(front = false) {
     setFailure(null);
     createRun.mutate(
-      { scenarioId, body: { time_limit_s: 30, ...(solver ? { solver } : {}) } },
+      {
+        scenarioId,
+        body: { time_limit_s: 30, ...(solver ? { solver } : {}), ...(front ? { pareto_steps: 10 } : {}) },
+      },
       {
         onSuccess: (run: Run) => {
           setOpenId(run.id);
@@ -348,14 +355,26 @@ function ScenarioRuns({
             and publish. Past runs of it are below.
           </p>
         ) : can("run.submit") ? (
+          <>
           <button
             type="button"
-            onClick={solve}
+            onClick={() => solve()}
             disabled={createRun.isPending}
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
           </button>
+          {twoGoals && (
+            <button
+              type="button"
+              onClick={() => solve(true)}
+              disabled={createRun.isPending}
+              className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+            >
+              Show the trade-off between its two goals
+            </button>
+          )}
+          </>
         ) : (
           <p className="text-sm text-slate-600">
             This account may read runs but not start them. Past answers are below.
@@ -468,7 +487,7 @@ function ScenarioRuns({
 
           {selected !== null && against !== null && <Comparison left={selected} right={against} />}
 
-          {selected !== null && <RunDetail id={selected} />}
+          {selected !== null && <RunDetail id={selected} onOpen={setOpenId} />}
         </>
       )}
     </>
@@ -601,7 +620,7 @@ function naming(labels: Run["labels"], sets: string[] | undefined) {
     tuple.map((key, position) => labels[sets?.[position] ?? ""]?.[key] ?? key);
 }
 
-function RunDetail({ id }: { id: Id }) {
+function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
   const run = useRun(id);
   const { can } = useCapabilities();
   const cancelRun = useCancelRun();
@@ -675,6 +694,27 @@ function RunDetail({ id }: { id: Id }) {
       {data.error && (
         <p role="alert" className="mb-4 whitespace-pre-line rounded bg-red-50 p-3 text-sm text-red-800">
           {data.error}
+        </p>
+      )}
+
+      {data.pareto && data.pareto.length > 0 && (
+        <TradeOff points={data.pareto} terms={data.pareto_terms ?? ["first goal", "second goal"]} onOpen={onOpen} />
+      )}
+      {(data.params as { pareto_of?: number }).pareto_of != null && (
+        <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">
+          One point of run {String((data.params as { pareto_of: number }).pareto_of)}&rsquo;s trade-off front.
+          {onOpen && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => onOpen((data.params as { pareto_of: number }).pareto_of)}
+              >
+                Back to the front
+              </button>
+            </>
+          )}
         </p>
       )}
 
@@ -970,6 +1010,94 @@ function Conflict({
           </span>
         </div>
       )}
+    </section>
+  );
+}
+
+const FRONT = { width: 420, height: 240, pad: 44 };
+
+/**
+ * The trade-off front: one goal across, the other up, each point an answer
+ * neither goal can improve on without the other giving way. Each point is
+ * its own run -- the chart and the list under it open it.
+ */
+export function TradeOff({
+  points,
+  terms,
+  onOpen,
+}: {
+  points: ParetoPoint[];
+  terms: string[];
+  onOpen?: (id: Id) => void;
+}) {
+  const xs = points.map((p) => p.first);
+  const ys = points.map((p) => p.second);
+  const span = (values: number[]) => {
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    return { low, high, width: high - low || 1 };
+  };
+  const [sx, sy] = [span(xs), span(ys)];
+  const inner = { w: FRONT.width - 2 * FRONT.pad, h: FRONT.height - 2 * FRONT.pad };
+  const x = (v: number) => FRONT.pad + ((v - sx.low) / sx.width) * inner.w;
+  const y = (v: number) => FRONT.pad + (1 - (v - sy.low) / sy.width) * inner.h;
+  const [first, second] = terms;
+  const say = (p: ParetoPoint) =>
+    `Point ${p.seq}: ${first} ${p.first}, ${second} ${p.second}${p.status === "optimal" ? "" : " (not proven)"}`;
+
+  return (
+    <section className="mb-4 rounded-md border border-slate-200 p-3">
+      <h3 className="mb-1 text-sm font-semibold text-slate-900">The trade-off between {first} and {second}</h3>
+      <p className="mb-2 text-sm text-slate-700">
+        Each point is an answer where neither goal can get better without the other getting worse. Choose one
+        to open its answer.
+      </p>
+      <svg
+        role="img"
+        aria-label={`Trade-off front, ${points.length} points`}
+        viewBox={`0 0 ${FRONT.width} ${FRONT.height}`}
+        className="w-full max-w-md"
+      >
+        <line x1={FRONT.pad} y1={FRONT.height - FRONT.pad} x2={FRONT.width - FRONT.pad} y2={FRONT.height - FRONT.pad} stroke="#94a3b8" />
+        <line x1={FRONT.pad} y1={FRONT.pad} x2={FRONT.pad} y2={FRONT.height - FRONT.pad} stroke="#94a3b8" />
+        <text x={FRONT.width / 2} y={FRONT.height - 8} textAnchor="middle" fontSize="11" fill="#475569">
+          {first}
+        </text>
+        <text x={12} y={FRONT.height / 2} textAnchor="middle" fontSize="11" fill="#475569" transform={`rotate(-90 12 ${FRONT.height / 2})`}>
+          {second}
+        </text>
+        <polyline
+          fill="none"
+          stroke="#93c5fd"
+          points={points.map((p) => `${x(p.first)},${y(p.second)}`).join(" ")}
+        />
+        {points.map((p) => (
+          <circle
+            key={p.seq}
+            cx={x(p.first)}
+            cy={y(p.second)}
+            r={6}
+            fill={p.status === "optimal" ? "#2563eb" : "#f59e0b"}
+            className={onOpen && p.run_id != null ? "cursor-pointer" : undefined}
+            onClick={() => p.run_id != null && onOpen?.(p.run_id)}
+          >
+            <title>{say(p)}</title>
+          </circle>
+        ))}
+      </svg>
+      <ol className="mt-2 space-y-1 text-sm">
+        {points.map((p) => (
+          <li key={p.seq}>
+            {onOpen && p.run_id != null ? (
+              <button type="button" className="text-blue-700 underline" onClick={() => onOpen(p.run_id as number)}>
+                {say(p)}
+              </button>
+            ) : (
+              say(p)
+            )}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

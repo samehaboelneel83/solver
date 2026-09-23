@@ -119,7 +119,7 @@ function stub(overrides: Record<string, unknown> = {}) {
     // A function lets a test change what the server says between polls,
     // which is the whole point of a queued run.
     const resolve = (value: unknown, fallback: unknown) =>
-      Promise.resolve(typeof value === "function" ? (value as () => unknown)() : (value ?? fallback));
+      Promise.resolve(typeof value === "function" ? (value as (p: string) => unknown)(path) : (value ?? fallback));
     if (path.startsWith("/api/v1/me")) {
       return Promise.resolve(
         overrides.me ?? {
@@ -429,6 +429,53 @@ describe("Runs", () => {
     expect(
       await screen.findByText(/answered by run 7: the same model, data and settings were already solved/i)
     ).toBeInTheDocument();
+  });
+
+  it("offers a trade-off front only for a goal of two terms, and asks for one", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 30, status: "queued" });
+    const twoGoals = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: {
+        constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }],
+        objective: { sense: "minimize", terms: [{ id: "o_cost", weight: 1 }, { id: "o_time", weight: 1 }] },
+      },
+    };
+    stub({ write, version: twoGoals });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /show the trade-off between its two goals/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ pareto_steps: 10 }));
+  });
+
+  it("offers no trade-off for a goal of one term", async () => {
+    stub();
+    renderPage();
+    await screen.findByRole("button", { name: /^solve/i });
+    expect(screen.queryByRole("button", { name: /show the trade-off/i })).not.toBeInTheDocument();
+  });
+
+  it("draws the front, and each point opens its own run", async () => {
+    const front = {
+      ...RUN_DETAIL,
+      pareto_terms: ["o_cost", "o_time"],
+      pareto: [
+        { seq: 1, first: 1, second: 9, epsilon: null, status: "optimal", run_id: 21 },
+        { seq: 2, first: 6, second: 6, epsilon: 7.5, status: "optimal", run_id: 22 },
+        { seq: 3, first: 9, second: 1, epsilon: null, status: "feasible", run_id: 23 },
+      ],
+    };
+    const point = { ...RUN_DETAIL, id: 22, params: { ...RUN_DETAIL.params, pareto_of: RUN_DETAIL.id } };
+    stub({ run: (path?: string) => (String(path ?? "").endsWith("/22") ? point : front) });
+    renderPage();
+
+    const chart = await screen.findByRole("img", { name: "Trade-off front, 3 points" });
+    expect(chart).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The trade-off between o_cost and o_time" })).toBeInTheDocument();
+    // An unproven point says so.
+    expect(screen.getByRole("button", { name: "Point 3: o_cost 9, o_time 1 (not proven)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Point 2: o_cost 6, o_time 6" }));
+    expect(await screen.findByText(/one point of run \d+.s trade-off front/i)).toBeInTheDocument();
   });
 
   it("offers to turn the fighting rules into preferences", async () => {

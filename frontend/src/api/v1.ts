@@ -551,6 +551,10 @@ export type Run = RunSummary & {
    * version the run solved). Only rules that carry one; absent from servers
    * before it was added. */
   rule_notes?: Record<string, string>;
+  /** The trade-off front, when one was asked for: points in order of the
+   * first term, each linked to its run; and the two terms' ids. */
+  pareto?: ParetoPoint[] | null;
+  pareto_terms?: string[] | null;
   /** Rules that cannot hold together. Null unless the run was infeasible. */
   conflict: ConflictItem[] | null;
   /** True when every listed rule was shown to be needed, so removing any one
@@ -565,7 +569,23 @@ export type Run = RunSummary & {
   constraints: ConstraintOutcome[];
 };
 
-export type RunRequest = { time_limit_s?: number; seed?: number; solver?: string | null };
+export type RunRequest = {
+  time_limit_s?: number;
+  seed?: number;
+  solver?: string | null;
+  /** Ask for the trade-off front between the goal's two terms (migration 0045). */
+  pareto_steps?: number;
+};
+
+/** One point of a run's trade-off front, and the run that holds its answer. */
+export type ParetoPoint = {
+  seq: number;
+  first: number;
+  second: number;
+  epsilon: number | null;
+  status: "optimal" | "feasible";
+  run_id: number | null;
+};
 
 export type SolverInfo = {
   name: string;

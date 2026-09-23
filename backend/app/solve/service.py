@@ -43,6 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve import pareto
 from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
 from app.solve import warm
@@ -83,6 +84,7 @@ def enqueue_run(
     seed: int | None = None,
     solver: str | None = None,
     reuse: bool = True,
+    pareto_steps: int | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -184,6 +186,7 @@ def enqueue_run(
         "cpsat_scaling": cpsat_scaling,
         "warm_start": warm_start,
         "symmetry": symmetry,
+        **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
         "trace": trace_carrier,
@@ -196,6 +199,10 @@ def enqueue_run(
         # is a run nobody can make faster.
         **({"from_settings": from_settings} if from_settings else {}),
     }
+    if pareto_steps:
+        # A front is a different question from the goal's optimum, and its
+        # own answer is one end of it: neither reused nor reusable.
+        reuse, cache_key = False, None
     if reuse:
         reused = cache_reuse(
             db, key=cache_key, scenario_id=scenario_id, dataset_id=dataset_id, params=request_params
@@ -566,9 +573,44 @@ def _execute(
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
 
+        points: list = []
+        if params.get("pareto_steps"):
+            # A trade-off front between the goal's two terms (app.solve.pareto):
+            # each point solved in full, the first end standing as this run's
+            # own answer. A model with no answer at all falls through to the
+            # ordinary solve, so its verdict and explanation are the usual ones.
+            try:
+                pareto.admissible(compiled)
+                events.stage("solving", solver=backend.name, time_limit_s=time_limit)
+                points = sandbox.run(
+                    "app.solve.sandbox:pareto_in_child",
+                    {
+                        "backend": backend.name,
+                        "compiled": compiled,
+                        "steps": int(params["pareto_steps"]),
+                        "time_limit": time_limit,
+                        "seed": seed,
+                        "workers": workers,
+                        "gap_rel": gap_rel,
+                    },
+                    time_limit=time_limit,
+                    workers=workers,
+                    should_stop=stop.is_set,
+                )
+            except (pareto.NotTwoGoals, Unsupported, sandbox.SandboxFailed) as exc:
+                db.execute(
+                    text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                    {"e": str(exc), "r": run_id},
+                )
+                db.commit()
+                return RunOutcome(run_id, dataset_id, "error", None, {})
+
         try:
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
+            if points:
+                result, reason = _point_solution(compiled, points[0]), None
+                raise _Answered
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
                 # In a child process with a memory ceiling, a CPU allowance
@@ -594,6 +636,8 @@ def _execute(
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
+        except _Answered:
+            pass
         except (Unsupported, sandbox.SandboxFailed) as exc:
             # The model is valid and this compiler cannot express it, or its
             # solve outgrew the sandbox. Either is a failed run with a reason,
@@ -634,6 +678,12 @@ def _execute(
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
     if stopped:
         extra["stopped_by_request"] = True
+    if points:
+        extra["pareto"] = {
+            "terms": list(compiled.objective_term_ids),
+            "steps": int(params["pareto_steps"]),
+            "points": len(points),
+        }
     if compiled.empty_ranges:
         extra["empty_ranges"] = compiled.empty_ranges
     if compiled.objective_mode == "lex":
@@ -666,6 +716,8 @@ def _execute(
             text("UPDATE run SET optimality = :o WHERE id = :r"),
             {"o": optimality_of(backend, result.status), "r": run_id},
         )
+        if points:
+            _record_front(db, run_id, compiled, backend, points)
     if result.status == "infeasible":
         # "No answer exists" is true and useless on its own. Which rules
         # cannot hold together is the thing a planner can act on, and it is
@@ -1181,6 +1233,58 @@ class RunEvents:
         except Exception:  # pragma: no cover -- watching must not break solving
             self.session.rollback()
             logger.warning("could not record a run event", exc_info=True)
+
+
+class _Answered(Exception):
+    """The answer is already in hand (a Pareto front's first end): skip the solve."""
+
+
+def _point_solution(compiled: Compiled, point) -> Solution:
+    """A front point as a run's answer: the model's whole goal as its value,
+    its status as proven or not, and no bound (the bound of its last solve
+    was on one term, not on the goal)."""
+    value = compiled.objective.evaluated_at(point.solution.assignments)
+    objective = int(value) if compiled.is_integral and value == value.to_integral_value() else float(value)
+    return replace(point.solution, status=point.status, optimal=point.status == "optimal",
+                   objective=objective, best_bound=None)
+
+
+def _record_front(db: Session, run_id: int, compiled: Compiled, backend, points) -> None:
+    """Each point as a run of its own, already finished, and the front."""
+    parent = db.execute(
+        text("SELECT scenario_id, dataset_id, seed, compiler_version FROM run WHERE id = :r"), {"r": run_id}
+    ).mappings().one()
+    for seq, point in enumerate(points, start=1):
+        child = db.execute(
+            text(
+                "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version, params, seed, started_at)"
+                " VALUES (:s, :d, 'running', :solver, :cv, CAST(:params AS jsonb), :seed, now())"
+                " RETURNING id"
+            ),
+            {
+                "s": parent["scenario_id"],
+                "d": parent["dataset_id"],
+                "solver": backend.name,
+                "cv": parent["compiler_version"],
+                "seed": parent["seed"],
+                "params": _json({"pareto_of": run_id, "pareto_point": seq, "epsilon": point.epsilon,
+                                 "chosen_solver": backend.name}),
+            },
+        ).scalar_one()
+        solution = _point_solution(compiled, point)
+        _record(db, child, compiled, solution)
+        db.execute(
+            text("UPDATE run SET optimality = :o WHERE id = :r"),
+            {"o": optimality_of(backend, solution.status), "r": child},
+        )
+        db.execute(
+            text(
+                "INSERT INTO pareto_point (run_id, seq, first_value, second_value, epsilon, status, point_run_id)"
+                " VALUES (:r, :seq, :a, :b, :e, :st, :child)"
+            ),
+            {"r": run_id, "seq": seq, "a": point.first, "b": point.second, "e": point.epsilon,
+             "st": point.status, "child": child},
+        )
 
 
 def _record_conflict(

@@ -224,6 +224,22 @@ def solve_in_child(*, backend: str, compiled, time_limit: float, seed, workers: 
     )
 
 
+def pareto_in_child(*, backend: str, compiled, steps: int, time_limit: float, seed, workers: int,
+                    gap_rel: float, should_stop, on_progress):
+    """`pareto.front`, by backend name: every solve of it is `solve_compiled`."""
+    from app.solve.backends import by_name
+    from app.solve.pareto import front
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+
+    def solve(model, limit):
+        return solve_compiled(chosen, model, time_limit=limit, seed=seed, should_stop=should_stop,
+                              workers=workers, gap_rel=gap_rel)[0]
+
+    return front(chosen, compiled, steps=steps, time_limit=time_limit, solve=solve)
+
+
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain

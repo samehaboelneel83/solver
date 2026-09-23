@@ -69,6 +69,9 @@ class RunRequest(BaseModel):
     #: data, patch and deciding settings, proven optimal -- is answered from
     #: that run without a solve (migration 0042). False solves it again.
     reuse: bool = True
+    #: Ask for the trade-off front between the goal's two terms instead of
+    #: one answer: the ends and this many steps between (`app.solve.pareto`).
+    pareto_steps: Annotated[int, Field(ge=2, le=50)] | None = None
 
 
 class ConstraintOutcome(BaseModel):
@@ -124,6 +127,17 @@ class RunSummary(BaseModel):
     reused_from: int | None = None
 
 
+class ParetoPoint(BaseModel):
+    """One point of a run's trade-off front, and the run that holds it."""
+
+    seq: int
+    first: float
+    second: float
+    epsilon: float | None
+    status: str
+    run_id: int | None
+
+
 class ConflictItem(BaseModel):
     """One instance of a rule that is part of why there is no answer."""
 
@@ -150,6 +164,11 @@ class RunRead(RunSummary):
     # model version the run solved): what a conflict is read in, rather than
     # rule ids. Only rules that carry one.
     rule_notes: dict[str, str] = {}
+    # The trade-off front, when one was asked for (migration 0045): its
+    # points in order of the first term, each linked to its own run, and
+    # the two terms' ids. Null otherwise.
+    pareto: list[ParetoPoint] | None = None
+    pareto_terms: list[str] | None = None
     # Why there is no answer: rules that cannot hold together. Null unless
     # the run was infeasible.
     conflict: list[ConflictItem] | None
@@ -223,6 +242,7 @@ def create_run(
             seed=request.seed,
             solver=request.solver,
             reuse=request.reuse,
+            pareto_steps=request.pareto_steps,
         )
     except QuotaExceeded as exc:
         # 422, not 429: the request is well-formed and the caller is not
@@ -437,8 +457,11 @@ def list_runs(
     _: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Newest first: the last run of a scenario is the one being looked for."""
-    stmt = select(Run)
-    count_stmt = select(func.count()).select_from(Run)
+    # A trade-off front's points are runs of their own, opened from their
+    # front's chart; the list shows the run that was asked for.
+    not_a_point = Run.params["pareto_of"].is_(None)
+    stmt = select(Run).where(not_a_point)
+    count_stmt = select(func.count()).select_from(Run).where(not_a_point)
     if scenario_id is not None:
         stmt = stmt.where(Run.scenario_id == scenario_id)
         count_stmt = count_stmt.where(Run.scenario_id == scenario_id)
@@ -497,6 +520,24 @@ def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any
     return row["labels"] or {}, {"variables": variables, "constraints": constraints}, notes
 
 
+def _front(db: Session, run: Run) -> dict[str, Any]:
+    rows = db.execute(
+        text(
+            "SELECT seq, first_value, second_value, epsilon, status, point_run_id"
+            "  FROM pareto_point WHERE run_id = :r ORDER BY seq"
+        ),
+        {"r": run.id},
+    ).all()
+    if not rows:
+        return {}
+    return {
+        "pareto": [
+            ParetoPoint(seq=r[0], first=r[1], second=r[2], epsilon=r[3], status=r[4], run_id=r[5]) for r in rows
+        ],
+        "pareto_terms": (run.params or {}).get("pareto", {}).get("terms"),
+    }
+
+
 def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
@@ -513,6 +554,7 @@ def _read(db: Session, run_id: int) -> RunRead:
         labels=labels,
         index_sets=index_sets,
         rule_notes=rule_notes,
+        **_front(db, run),
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,
