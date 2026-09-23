@@ -491,7 +491,21 @@ auxiliaries (`__` names) never reach the roster, reduced costs or a
 conflict, since a non-native diagnosis rewrites per probe. The editor keeps
 and shows a curve but cannot draw one yet (the editor slice). The plan's
 `pwl-nonconvex` need became `pwl` / `pwl-convex`, named by what a backend
-provides rather than what the curve is. Next slices: scheduling, then the
+provides rather than what the curve is. Slice 5, scheduling constructs, is
+done (2026-09-23, `3b629fa`); the item was split, and the template + bench
+family comparing the interval formulation with a time-indexed one is its
+own slice (10b). An interval is a variable of domain `interval` naming its
+integer `start` and `end` variables, a `size` (whole number or parameter)
+and optionally a binary `presence` -- not a new term kind: rules and goals
+read the start and end as ordinary variables (makespan is `finish <=
+makespan` rows). `no_overlap` / `cumulative` are constraints in place of an
+expression, over the intervals an `over` ranges across, per `forall`
+instance; each instance compiles to a `Constraint` carrying a `Schedule`,
+so ids, conflicts (a probe subsets them like any rule), result rows and
+scenario `disable` work unchanged; a softened one, or a fractional size or
+demand, is refused by name. The classifier's `scheduling` need is CP-SAT's
+alone (the plan's `supports_interval`), and `solve_compiled` refuses to
+hand one to anything else. Next slices: 10b (template + bench), then the
 editor and graph styles.
 
 ---
