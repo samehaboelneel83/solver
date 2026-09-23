@@ -487,3 +487,17 @@ def test_the_iis_bench_measures_both_ways_on_a_planted_conflict():
     # The batch and the nutrient floor it cannot meet.
     assert row["iis"]["rules"] == ["c_batch", "c_need"]
     assert row["iis"]["probes"] < row["deletion"]["probes"]
+
+
+def test_the_warm_bench_perturbs_a_small_share_of_the_data_the_same_way_each_time():
+    from bench.warm import perturb
+
+    case = generate("rota", "M", 0)
+    one, two = perturb(case.data, "seed"), perturb(case.data, "seed")
+    assert one == two and one != case.data
+    before = [row["value"] for row in case.data["parameters"]["demand"]]
+    after = [row["value"] for row in one["parameters"]["demand"]]
+    changed = sum(a != b for a, b in zip(before, after))
+    assert 0 <= changed <= max(1, round(0.05 * len(before)) + 1)
+    # Whole numbers stay whole: a demand of 2.3 people is not a perturbation.
+    assert all(isinstance(value, int) for value in after)

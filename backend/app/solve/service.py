@@ -43,6 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve import warm
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
@@ -128,6 +129,8 @@ def enqueue_run(
     from_settings["gap_rel"] = settings["solve.gap_rel"].source
     cpsat_scaling = bool(settings["solve.cpsat_scaling"].value)
     from_settings["cpsat_scaling"] = settings["solve.cpsat_scaling"].source
+    warm_start = bool(settings["solve.warm_start"].value)
+    from_settings["warm_start"] = settings["solve.warm_start"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -175,6 +178,7 @@ def enqueue_run(
         "workers": workers,
         "gap_rel": gap_rel,
         "cpsat_scaling": cpsat_scaling,
+        "warm_start": warm_start,
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
         "trace": trace_carrier,
@@ -545,6 +549,18 @@ def _execute(
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
 
+        hint = None
+        if params.get("warm_start") and backend.name in warm.HINTED:
+            # The nearest earlier answer as a starting point (setting
+            # `solve.warm_start`, app.solve.warm).
+            prior = warm.prior_run(db, run_id)
+            if prior is not None:
+                hint = warm.hint_from(compiled, prior[1]) or None
+                db.execute(
+                    text("UPDATE run SET params = params || CAST(:w AS jsonb) WHERE id = :r"),
+                    {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
+                )
+
         try:
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
@@ -562,6 +578,7 @@ def _execute(
                         "seed": seed,
                         "workers": workers,
                         "gap_rel": gap_rel,
+                        "hint": hint,
                     },
                     time_limit=time_limit,
                     workers=workers,
@@ -905,6 +922,7 @@ def solve_compiled(
     workers: int = 8,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> tuple[Solution, str | None]:
     """Solve a compiled model as a run does, and say why if it is unbounded.
 
@@ -933,6 +951,9 @@ def solve_compiled(
         # that ignores the rule.
         raise Unsupported(f"{backend.name} holds no scheduling rule or interval")
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
+    if hint:
+        # Only when there is one: a backend that takes none need not know.
+        knobs["hint"] = hint
     started = time.monotonic()
     # Only the first solve is watched: the re-solve that tests a ceiling
     # (`_unbounded_ceilings`) answers a different question, and a

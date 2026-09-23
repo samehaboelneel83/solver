@@ -68,6 +68,7 @@ def solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     import pyscipopt
 
@@ -102,6 +103,14 @@ def solve(
     if has_objective:
         model.setObjective(objective, compiled.sense)
 
+    if hint:
+        # A partial solution (`app.solve.warm`): SCIP completes it and keeps
+        # it as a start if it holds.
+        start = model.createPartialSol()
+        for key, value in hint.items():
+            if key in variables:
+                model.setSolVal(start, variables[key], float(value))
+        model.addSol(start)
     # SCIP clears an interrupt when `optimize()` starts, so one asked for
     # before that would be lost and the model solved anyway. Honour it here.
     if should_stop is not None and should_stop():

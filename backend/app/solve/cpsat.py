@@ -87,6 +87,7 @@ def solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return Solution(
@@ -99,6 +100,11 @@ def solve(
         )
 
     model, cp_vars, product_of, reach, _ = _build(compiled)
+    for key, value in (hint or {}).items():
+        # A starting point, not a rule: CP-SAT tries it first and moves on
+        # if it does not hold (`app.solve.warm`).
+        if key in cp_vars:
+            model.add_hint(cp_vars[key], int(round(value)))
 
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
     # The objective as one scaled row: whole coefficients, and the factor its

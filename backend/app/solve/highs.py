@@ -90,6 +90,7 @@ def solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     if should_stop is not None and should_stop():
         return _blank("unknown")
@@ -104,6 +105,7 @@ def solve(
             "seed": seed,
             "gap_rel": gap_rel,
             "progress": on_progress is not None,
+            "hint": hint,
         },
         time_limit=time_limit,
         should_stop=should_stop,
@@ -200,6 +202,7 @@ def solve_in_process(
     seed: int | None = None,
     gap_rel: float = 0.0,
     progress: bool = False,
+    hint: dict | None = None,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -225,6 +228,18 @@ def solve_in_process(
     position = {key: i for i, key in enumerate(keys)}
     _add_columns(highspy, solver, compiled, keys)
     added_ids = _add_rows(highspy, solver, compiled.constraints, position)
+    if hint:
+        # A partial starting point (`app.solve.warm`): HiGHS completes and
+        # checks it, and uses it as an incumbent if it holds.
+        import numpy as np
+
+        known = [(position[key], float(value)) for key, value in hint.items() if key in position]
+        if known:
+            solver.setSolution(
+                len(known),
+                np.array([i for i, _ in known], dtype=np.int32),
+                np.array([v for _, v in known], dtype=np.float64),
+            )
 
     has_objective = bool(
         compiled.objective.coeffs or compiled.objective.const or compiled.objective_quadratic

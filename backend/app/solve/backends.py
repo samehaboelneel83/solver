@@ -83,6 +83,7 @@ def _cpsat_solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     from app.solve import cpsat
 
@@ -90,6 +91,7 @@ def _cpsat_solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
         on_progress=on_progress,
+        hint=hint,
     )
 
 
@@ -102,6 +104,7 @@ def _milp_solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     from app.solve import milp
 
@@ -127,6 +130,7 @@ def _lp_solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     from app.solve import lp
 
@@ -152,6 +156,7 @@ def _highs_solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     from app.solve import highs
 
@@ -159,6 +164,7 @@ def _highs_solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
         on_progress=on_progress,
+        hint=hint,
     )
 
 
@@ -177,6 +183,7 @@ def _scip_solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    hint: dict | None = None,
 ) -> Solution:
     from app.solve import scip
 
@@ -184,6 +191,7 @@ def _scip_solve(
         compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
         gap_rel=gap_rel,
         on_progress=on_progress,
+        hint=hint,
     )
 
 
