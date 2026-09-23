@@ -730,7 +730,13 @@ points. Exactly two linear terms and required rules only -- anything else
 is refused by name. Not done from the plan: warm-starting each step (warm
 starts are off platform-wide on their own bench) and weighted-sum mode,
 which is left documented as the thing that misses unsupported points
-(`tests/test_pareto.py` pins one).
+(`tests/test_pareto.py` pins one). IR uncertainty is done (`df34fc4`): a
+parameter's optional `uncertainty` is `{kind: interval, deviation, gamma?}`
+-- each value off by up to `deviation` of itself (a fraction), at most
+`gamma` of a rule's cells at once, all when absent -- or
+`{kind: scenarios}`. It is an optional key on version 2, not a version 3:
+every stored document stays valid, as with each Phase 10 construct. The
+editor declares it; solves read the nominal values until robust solving.
 ---
 
 ## Phase 16 — Nonlinear stage 3b (~4 weeks) — coordinates with the in-flight SCIP work
