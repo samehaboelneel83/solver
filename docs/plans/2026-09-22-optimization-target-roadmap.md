@@ -515,8 +515,20 @@ horizon ~125) CP-SAT proves the interval model in 0.03 s and the
 time-indexed one in 31 s, and HiGHS, the MILP wrapper and SCIP find no
 answer to it in 60 s (`bench/results/2026-09-23-flow-shop-formulations.md`).
 The time-indexed family is comparison-only: at the nightly's 30 s limit it
-would flip between proven and not. Next slice: the editor and graph
-styles.
+would flip between proven and not. Slice 10c, the editor for conditions
+and curves, is done (2026-09-23, `2ff854d`): a rule's "Only while a
+yes-or-no decision is set" (binary switches only, indexed from the rule's
+bindings; dropped when the rule is made preferred), and a curve term (a
+whole or fractional variable, decimal points, out-of-order points named
+before Publish). One `ReferencePicker` serves plain references, a curve's
+variable and a switch, and keeps intervals out of "a variable". Every
+style shows a switched rule: "while open" on the node, an "Applies" row,
+a line labelled "switch" (Rete and Flow draw from the same graph), the
+condition in the block view. Found on the way: the editor published a
+version 1 base as version 1, so neither could be added to an older model;
+it now always writes version 2. Validator parity needed nothing new -- the
+shared fixtures already bind both. Next: 10d, intervals and scheduling
+rules in the editor.
 
 ---
 
