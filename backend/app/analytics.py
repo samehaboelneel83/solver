@@ -3,7 +3,9 @@
 The facts Phase 17's learned selector will train on, and what an analyst
 queries without touching the transactional database: which solver took
 which class of model, how it ended, the gap, how long it waited and ran,
-how big the model was, and the trace to follow when a number looks wrong.
+how big the model was, its fingerprint (`app.solve.fingerprint`, JSON --
+empty for a run that never compiled, e.g. cancelled before a worker took
+it), and the trace to follow when a number looks wrong.
 
 Written by the worker from an outbox (`run.fact_written_at`, migration
 0040), not at the moment a run settles: runs settle in more than one place,
@@ -31,7 +33,7 @@ COLUMNS = [
     "run_id", "organization_id", "domain_id", "problem_id", "scenario_id", "model_version_id",
     "solver", "model_class", "status", "optimality",
     "objective", "best_bound", "gap", "wall_time_s", "time_limit_s", "workers", "seed",
-    "variables", "rules", "trace_id",
+    "variables", "rules", "fingerprint", "trace_id",
     "queued_at", "started_at", "finished_at", "queue_wait_s", "written_at",
 ]
 
@@ -44,6 +46,7 @@ _PENDING = text(
            coalesce((r.params->>'time_limit_s')::float8, 0) AS time_limit_s,
            coalesce((r.params->>'workers')::int, 0) AS workers, r.seed,
            compiled.variables, compiled.rules,
+           coalesce((r.params->'fingerprint')::text, '') AS fingerprint,
            coalesce(split_part(r.params->'trace'->>'traceparent', '-', 2), '') AS trace_id,
            r.queued_at, r.started_at, r.finished_at,
            extract(epoch FROM r.started_at - r.queued_at)::float8 AS queue_wait_s,

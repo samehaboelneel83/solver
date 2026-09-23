@@ -77,6 +77,7 @@ _STATEMENTS = [
         seed Int64,
         variables Nullable(UInt32),
         rules Nullable(UInt32),
+        fingerprint String DEFAULT '',
         trace_id String,
         queued_at DateTime64(3, 'UTC'),
         started_at Nullable(DateTime64(3, 'UTC')),
@@ -87,6 +88,9 @@ _STATEMENTS = [
     ENGINE = ReplacingMergeTree(written_at)
     ORDER BY (organization_id, run_id)
     """,
+    # Added to a table created before Phase 17: the fingerprint as JSON
+    # (`JSONExtractInt(fingerprint, 'rows_cover')` reads one number).
+    "ALTER TABLE {db}.run_fact ADD COLUMN IF NOT EXISTS fingerprint String DEFAULT '' AFTER rules",
 ]
 
 

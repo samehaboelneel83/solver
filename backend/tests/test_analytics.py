@@ -22,6 +22,7 @@ def clickhouse():
     client = get_clickhouse_client()
     assert client.database.endswith("_test"), client.database
     create_analytics_schema(client)
+    create_analytics_schema(client)  # twice: the added column's ALTER is idempotent
     client.command("TRUNCATE TABLE run_fact")
     return client
 
@@ -55,6 +56,17 @@ def test_a_settled_run_becomes_one_fact(db, empty_queue, clickhouse):  # noqa: F
     assert fact["queue_wait_s"] is not None and fact["queue_wait_s"] >= 0
     if run["objective"] is not None:
         assert fact["objective"] == pytest.approx(float(run["objective"]))
+
+    # The fingerprint the run stored, as JSON, readable in ClickHouse.
+    import json
+
+    stored = db.execute(text("SELECT params->'fingerprint' FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    assert json.loads(fact["fingerprint"]) == stored and stored["version"] == 1
+    assert stored["variables"] == fact["variables"] and stored["rows"] == fact["rules"]
+    (rows,) = clickhouse.query(
+        f"SELECT JSONExtractInt(fingerprint, 'rows') FROM run_fact FINAL WHERE run_id = {int(run_id)}"
+    ).result_rows[0]
+    assert rows == stored["rows"]
 
     # Written once: the next sweep has nothing of it to do.
     publish_facts(db, clickhouse)
