@@ -106,10 +106,9 @@ class Translator:
 
     def opening(self) -> list[dict]:
         """What is shown before any event: the job is in, the plan is on screen."""
-        out = self._create("timeline", "timeline", state="interactive", props={"title": "What the solver is doing"})
-        out += self._create("model", "model-summary", props={"title": "The model"})
+        out = [self._say(f"Run {self.run_id} is queued; a worker will take it.")]
+        out += self._create("timeline", "timeline", state="interactive", props={"title": "What the solver is doing"})
         out += self._enter("submitting_job")
-        out.append(self._say(f"Run {self.run_id} is queued; a worker will take it."))
         return out
 
     def feed(self, kind: str, payload: dict[str, Any]) -> list[dict]:
@@ -128,9 +127,12 @@ class Translator:
         if stage == "started":
             out += self._enter("understanding")
             out.append(self._say("A worker took the run and is reading the model against its frozen data."))
+            # The model's card, as a skeleton while it is read and built.
+            out += self._create("model", "model-summary", props={"title": "The model"})
         elif stage == "compiling":
             out += self._enter("building_model")
         elif stage == "compiled":
+            out += self._create("model", "model-summary", props={"title": "The model"})
             out += self._enter("building_model")
             fingerprint = facts.get("fingerprint") or {}
             out += self._data("model", {
@@ -151,7 +153,6 @@ class Translator:
             out += self._create("solver", "solver-status", props={"title": "Solver"})
             out += self._data("solver", {"solver": facts.get("solver"), "why": facts.get("why"),
                                          "modelClass": facts.get("model_class")}, state="hydrated")
-            out.append(self._say(f"{facts.get('why') or facts.get('solver')}."))
         elif stage == "solving":
             out += self._create("solver", "solver-status", props={"title": "Solver"})
             if "solver" not in self.completed:
