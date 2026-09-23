@@ -84,7 +84,8 @@ lane; no LLM / NL→IR work.
 
 ## Phase 14 — scale (only this part)
 
-- [ ] (14) Separable blocks — done when a model whose incidence graph has >1 component is solved block by block in parallel, objective summed, status the worst, checked against the monolithic answer.
+- [ ] (14a) Separable blocks, found — done when a compiled model's incidence graph is split into its components (rows, products, conditions, intervals), a split is admitted or refused by name (lex goal, soft rules, symmetry rows, pareto, robust), and the blocks together are exactly the model, pinned by tests. *(Split from (14), 2026-09-23: finding, admitting and solving-in-parallel with a bench-gated setting is more than one tick.)*
+- [ ] (14b) Separable blocks, solved — done when an admitted model is solved block by block in parallel, objective summed, status the worst (infeasible, then unbounded, then unanswered), bound summed only when every block has one, recorded on the run, checked against the monolithic answer; behind a setting whose default the bench decides.
 
 ## Phase 17 — learning (only this part)
 
