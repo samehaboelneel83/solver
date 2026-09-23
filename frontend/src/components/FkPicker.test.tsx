@@ -44,7 +44,7 @@ describe("FkPicker", () => {
       () => {
         expect(apiFetch).toHaveBeenCalledWith(expect.stringContaining("/options?q=nur"));
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
 
     expect(await screen.findByRole("option", { name: "Nur Hospital" })).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe("FkPicker", () => {
       () => {
         expect(screen.getByText("No matches")).toBeInTheDocument();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
   });
 });
@@ -191,7 +191,7 @@ describe("FkPicker keeps typed text instead of silently discarding it (C-1)", ()
       () => {
         expect(screen.getByText("No matches")).toBeInTheDocument();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
 
     fireEvent.blur(input);
@@ -251,7 +251,7 @@ describe("FkPicker reverts to the prior selection instead of showing unmatched t
       () => {
         expect(screen.getByText("No matches")).toBeInTheDocument();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
     fireEvent.blur(input);
     return { input, onChange };
@@ -298,7 +298,7 @@ describe("FkPicker reverts to the prior selection instead of showing unmatched t
       () => {
         expect(screen.getByText("No matches")).toBeInTheDocument();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
     fireEvent.blur(input);
 

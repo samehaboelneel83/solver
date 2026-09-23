@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import FilterBar, { DEFAULT_FILTER_STATE, deriveFilterCriteria } from "./FilterBar";
 import type { FilterState } from "./FilterBar";
 import { buildFieldCatalogue, encodeFieldId } from "../expressions/fields";
@@ -8,6 +8,13 @@ import {
   ENTITY_TYPES as EXPR_ENTITY_TYPES,
   RELATIONSHIP_TYPES as EXPR_RELATIONSHIP_TYPES,
 } from "../expressions/testFixtures";
+
+// The page loads the expression builder lazily. Under the full suite, on
+// every core, fetching that chunk inside a test could take longer than
+// any wait in it; loaded once here, `lazy()` finds it already there.
+beforeAll(async () => {
+  await import("../expressions/ExpressionBuilder");
+}, 30000);
 
 // v1 shape: `code` and `name` are both `entity_type.name`, so they are always
 // the SAME string (Task 7's mapping). A fixture where they differ would let

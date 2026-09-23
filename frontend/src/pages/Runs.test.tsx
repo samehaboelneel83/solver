@@ -560,7 +560,7 @@ describe("Runs", () => {
     expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
     status = "optimal";
 
-    expect(await screen.findByText(/best possible answer/i, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByText(/best possible answer/i)).toBeInTheDocument();
   });
 
   it("offers to stop a queued run, and does not offer it on a finished one", async () => {

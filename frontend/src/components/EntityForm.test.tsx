@@ -700,7 +700,7 @@ describe("EntityForm FK display can never disagree with what it submits (fix rou
       () => {
         expect(screen.getByText("No matches")).toBeInTheDocument();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
     fireEvent.blur(input);
 

@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Entities from "./Entities";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
@@ -13,6 +13,13 @@ vi.mock("../api/client", async () => {
 });
 
 import { ApiError, apiFetch } from "../api/client";
+
+// The page loads the expression builder lazily. Under the full suite, on
+// every core, fetching that chunk inside a test could take longer than
+// any wait in it; loaded once here, `lazy()` finds it already there.
+beforeAll(async () => {
+  await import("../expressions/ExpressionBuilder");
+}, 30000);
 
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -196,7 +203,7 @@ describe("Entities: what reaches the server", () => {
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
     fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "4" } });
 
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
     expect(sentExpressions()[0]).toEqual({
       version: 1,
       query: { combinator: "and", rules: [{ field: GRADE, operator: "=", value: 4 }] },
@@ -256,7 +263,7 @@ describe("Entities: what reaches the server", () => {
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-operator")[0], { target: { value: "contains" } });
 
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
     expect(sentExpressions()[0]).toEqual({
       version: 1,
       query: { combinator: "and", rules: [{ field: "col:key", operator: "contains", value: "" }] },
@@ -269,7 +276,7 @@ describe("Entities: what reaches the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "zo" } });
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
 
     fireEvent.change(screen.getAllByTestId("expression-value")[0], { target: { value: "" } });
     const before = sentExpressions().length;
@@ -294,7 +301,7 @@ describe("Entities: what reaches the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
 
     fireEvent.change(await screen.findByLabelText(/^Search/), { target: { value: "zo" } });
     fireEvent.click(screen.getByRole("button", { name: /^Search$/ }));
@@ -309,7 +316,7 @@ describe("Entities: what reaches the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
 
     fireEvent.click(screen.getByTestId("entities-conditions-clear"));
     await waitFor(() =>
@@ -336,7 +343,7 @@ describe("Entities: a refusal from the server", () => {
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
 
-    const problems = await screen.findByTestId("expression-problems", undefined, { timeout: 3000 });
+    const problems = await screen.findByTestId("expression-problems");
     // Condition 1 is `rules[0]`; the message is the server's, verbatim.
     expect(problems).toHaveTextContent('Condition 1: "z" is not one of a, b, c.');
   });
@@ -352,7 +359,7 @@ describe("Entities: a refusal from the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    const problems = await screen.findByTestId("expression-problems", undefined, { timeout: 3000 });
+    const problems = await screen.findByTestId("expression-problems");
     // 2.1 -- read from `loc`, not from a `kind` (Ruling 30).
     expect(problems).toHaveTextContent("Condition 2.1: nope");
   });
@@ -363,7 +370,7 @@ describe("Entities: a refusal from the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    await waitFor(() => expect(sentExpressions()).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sentExpressions()).toHaveLength(1));
 
     // Close it, then make the next request fail.
     fireEvent.click(screen.getByTestId("entities-conditions-toggle"));
@@ -372,7 +379,7 @@ describe("Entities: a refusal from the server", () => {
     fireEvent.change(screen.getByLabelText(/^Search/), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: /^Search$/ }));
 
-    expect(await screen.findByTestId("expression-builder", undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByTestId("expression-builder")).toBeInTheDocument();
     expect(screen.getByTestId("expression-problems")).toHaveTextContent("is not one of");
   });
 
@@ -382,7 +389,9 @@ describe("Entities: a refusal from the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    expect(await screen.findByTestId("entities-expression-refused", undefined, { timeout: 3000 })).toBeInTheDocument();
+    // The suite's own wait (src/test/setup.ts): the expression builder is
+    // lazily loaded, and a shorter one timed out under the full suite.
+    expect(await screen.findByTestId("entities-expression-refused")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
   });
 

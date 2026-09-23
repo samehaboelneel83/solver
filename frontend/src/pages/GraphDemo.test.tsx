@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import GraphDemo from "./GraphDemo";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 import { GRAPH_MODE_STORAGE_KEY } from "../hooks/useGraphMode";
@@ -146,6 +146,13 @@ import { ApiError, apiFetch } from "../api/client";
 import elkExtension from "cytoscape-elk";
 // @ts-expect-error -- cytoscape-edgehandles ships no bundled type declarations
 import edgehandlesExtension from "cytoscape-edgehandles";
+
+// The page loads the expression builder lazily. Under the full suite, on
+// every core, fetching that chunk inside a test could take longer than
+// any wait in it; loaded once here, `lazy()` finds it already there.
+beforeAll(async () => {
+  await import("../expressions/ExpressionBuilder");
+}, 30000);
 
 const GRAPH = {
   nodes: [
@@ -622,9 +629,9 @@ describe("GraphDemo expression filter", () => {
     // default, which is what made this helper flake (once in eleven full
     // runs). `EntitiesExpression.test.tsx` already waits 3000 ms in four
     // places for the same boundary; match it rather than invent a number.
-    fireEvent.click(await screen.findByTestId("expression-add-rule", undefined, { timeout: 3000 }));
+    fireEvent.click(await screen.findByTestId("expression-add-rule"));
     await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1), {
-      timeout: 3000,
+      timeout: 5000,
     });
   }
 
@@ -778,9 +785,9 @@ describe("GraphDemo search announcement", () => {
   async function openBuilder() {
     await waitFor(() => expect(screen.getByTestId("filter-expression-toggle")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("filter-expression-toggle"));
-    fireEvent.click(await screen.findByTestId("expression-add-rule", undefined, { timeout: 3000 }));
+    fireEvent.click(await screen.findByTestId("expression-add-rule"));
     await waitFor(() => expect(screen.getAllByTestId("expression-field")).toHaveLength(1), {
-      timeout: 3000,
+      timeout: 5000,
     });
   }
 

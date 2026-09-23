@@ -139,7 +139,7 @@ describe("EntityList", () => {
         );
         expect(call).toBeTruthy();
       },
-      { timeout: 2000 }
+      { timeout: 5000 }
     );
   });
 
