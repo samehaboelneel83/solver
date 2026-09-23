@@ -69,8 +69,8 @@ class Conflict:
     minimal: bool = True
     #: Why the search stopped, when it stopped early.
     note: str = ""
-    #: How it was found: "iis" (a HiGHS core, shrunk) or "deletion" (the
-    #: whole model filtered), and what it cost.
+    #: How it was found: the name of the core it was shrunk from ("cp-sat",
+    #: "iis") or "deletion" (the whole model filtered), and what it cost.
     method: str = "deletion"
     probes: int = 0
     seconds: float = 0.0
@@ -100,7 +100,7 @@ def explain(
     *,
     probe_seconds: float = DEFAULT_PROBE_SECONDS,
     budget: int = DEFAULT_BUDGET,
-    core: Callable[[Compiled], list[int] | None] | None = None,
+    cores: list[tuple[str, Callable[[Compiled], list[int] | None]]] = (),
 ) -> Conflict:
     """An irreducible set of constraint instances that cannot all hold.
 
@@ -135,12 +135,16 @@ def explain(
         )
 
     # -- a core, confirmed and shrunk with the run's own backend -----------
-    found = core(compiled) if core is not None else None
-    if found:
+    # The first one offered that the backend confirms; one it does not is a
+    # candidate that failed, and the next is tried.
+    for name, core in cores:
+        found = core(compiled)
+        if not found:
+            continue
         candidates = [compiled.constraints[i] for i in found]
         if infeasible(candidates):
             needed, stopped = _filter(candidates, lambda keep: infeasible(keep))
-            return done(needed, stopped, "iis")
+            return done(needed, stopped, name)
 
     # -- pass 1: which rules are involved ---------------------------------
     rules = list(dict.fromkeys(c.id for c in compiled.constraints))

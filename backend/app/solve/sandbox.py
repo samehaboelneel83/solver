@@ -238,10 +238,13 @@ def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_sto
         # rules that might be in conflict.
         def solve(probe, **kwargs):  # noqa: F811
             return chosen.solve(pwl_rewrite(probe)[0], **kwargs)
-    from app.solve import highs
+    from app.solve import cpsat, highs
 
-    # HiGHS's IIS of the linear relaxation as a core, for any backend: the
-    # core is confirmed and shrunk with `chosen`, so the verdicts stay its.
-    return explain(
-        compiled, solve, probe_seconds=probe_seconds, core=lambda model: highs.iis(model, time_limit=probe_seconds * 4)
-    )
+    # Cores to start from, confirmed and shrunk with `chosen` so the verdicts
+    # stay its. CP-SAT's own assumptions first when it ran -- exact for the
+    # whole-number model -- then HiGHS's IIS of the linear relaxation, for
+    # any backend.
+    cores = [("iis", lambda model: highs.iis(model, time_limit=probe_seconds * 4))]
+    if chosen.name == "cp-sat":
+        cores.insert(0, ("cp-sat", lambda model: cpsat.core(model, time_limit=probe_seconds * 4)))
+    return explain(compiled, solve, probe_seconds=probe_seconds, cores=cores)

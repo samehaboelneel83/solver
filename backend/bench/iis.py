@@ -6,7 +6,7 @@ Each family is made infeasible in a way a planner would recognise, then
 diagnosed twice with the backend a run would choose: by deletion filtering
 over the whole model (`diagnose.explain`), and with HiGHS's IIS of the
 linear relaxation as a core that the same backend confirms and shrinks
-(`core=highs.iis`). Reported per instance: probes (solves), seconds, the
+(`cores=[("iis", highs.iis)]`). Reported per instance: probes (solves), seconds, the
 size of the conflict, whether it is proven minimal, and whether both name
 the same rules.
 
@@ -44,7 +44,7 @@ def _plant(family: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def measure(family: str, size: str, probe_seconds: float) -> dict[str, Any]:
-    from app.solve import compile_model, highs
+    from app.solve import compile_model, cpsat, highs
     from app.solve.backends import choose
     from app.solve.classify import classify
     from app.solve.convexity import refine
@@ -66,9 +66,14 @@ def measure(family: str, size: str, probe_seconds: float) -> dict[str, Any]:
     def solve(model, **kwargs):
         return backend.solve(model, **kwargs)
 
-    for label, core in (("deletion", None), ("iis", lambda model: highs.iis(model, time_limit=probe_seconds * 4))):
+    iis = ("iis", lambda model: highs.iis(model, time_limit=probe_seconds * 4))
+    modes = [("deletion", []), ("iis", [iis])]
+    if backend.name == "cp-sat":
+        # CP-SAT's own assumption core, as a CP-SAT run diagnoses.
+        modes.append(("cp-sat", [("cp-sat", lambda model: cpsat.core(model, time_limit=probe_seconds * 4))]))
+    for label, cores in modes:
         started = time.monotonic()
-        conflict = explain(compiled, solve, probe_seconds=probe_seconds, core=core)
+        conflict = explain(compiled, solve, probe_seconds=probe_seconds, cores=cores)
         row[label] = {
             "method": conflict.method,
             "probes": conflict.probes,
@@ -77,24 +82,25 @@ def measure(family: str, size: str, probe_seconds: float) -> dict[str, Any]:
             "minimal": conflict.minimal,
             "rules": sorted(conflict.rules),
         }
-    row["same_rules"] = row["deletion"]["rules"] == row["iis"]["rules"]
+    row["same_rules"] = all(row[mode]["rules"] == row["deletion"]["rules"] for mode, _ in modes)
     return row
 
 
 def report(rows: list[dict[str, Any]]) -> str:
     lines = [
-        "| family | size | backend | instances | deletion: probes / s / size / minimal | IIS core: probes / s / size / minimal | same rules |",
-        "|---|---|---|---|---|---|---|",
+        "| family | size | backend | instances | deletion: probes / s / size / minimal | IIS core: probes / s / size / minimal | CP-SAT core: probes / s / size / minimal | same rules |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         if "iis" not in r:
-            lines.append(f"| {r['family']} | {r['size']} | {r['backend']} | {r['instances']} | not infeasible ({r['status']}) | | |")
+            lines.append(f"| {r['family']} | {r['size']} | {r['backend']} | {r['instances']} | not infeasible ({r['status']}) | | | |")
             continue
-        d, i = r["deletion"], r["iis"]
+        d, i, c = r["deletion"], r["iis"], r.get("cp-sat")
+        cp = f"{c['probes']} / {c['seconds']} / {c['size']} / {c['minimal']} ({c['method']})" if c else "(not a CP-SAT run)"
         lines.append(
             f"| {r['family']} | {r['size']} | {r['backend']} | {r['instances']} | "
             f"{d['probes']} / {d['seconds']} / {d['size']} / {d['minimal']} | "
-            f"{i['probes']} / {i['seconds']} / {i['size']} / {i['minimal']} ({i['method']}) | {r['same_rules']} |"
+            f"{i['probes']} / {i['seconds']} / {i['size']} / {i['minimal']} ({i['method']}) | {cp} | {r['same_rules']} |"
         )
     return "\n".join(lines) + "\n"
 

@@ -98,45 +98,7 @@ def solve(
             solver=f"cp-sat (ortools {_ORTOOLS_VERSION})",
         )
 
-    model = cp_model.CpModel()
-
-    for key, v in compiled.variables.items():
-        if not v.is_integral:
-            raise NotIntegral(
-                f"cp-sat has no continuous variables, and {v.key[0]!r} is {v.domain}"
-            )
-
-    cp_vars = {
-        key: model.NewIntVar(
-            _whole(v.lower, f"{key[0]}'s lower bound"),
-            _whole(v.upper, f"{key[0]}'s upper bound"),
-            f"{key[0]}[{','.join(key[1])}]",
-        )
-        for key, v in compiled.variables.items()
-    }
-
-    # One product variable per pair, however many rules and objective terms
-    # mention it: the pair means the same number everywhere.
-    products: dict = {}
-
-    def product_of(a, b):
-        if (a, b) not in products:
-            products[(a, b)] = _product(
-                model, cp_vars[a], cp_vars[b], compiled.variables[a], compiled.variables[b]
-            )
-        return products[(a, b)]
-
-    reach = reach_of(compiled)
-    intervals = {
-        key: _interval(model, cp_vars, spec) for key, spec in compiled.intervals.items()
-    }
-    for c in compiled.constraints:
-        if c.schedule is not None:
-            _add_schedule(model, intervals, c)
-            continue
-        _add(model, cp_vars, c, product_of, reach)
-    for curve in compiled.pwl:
-        _add_curve(model, cp_vars, curve)
+    model, cp_vars, product_of, reach, _ = _build(compiled)
 
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
     # The objective as one scaled row: whole coefficients, and the factor its
@@ -285,7 +247,93 @@ def _product(model: cp_model.CpModel, x, y, spec_x, spec_y):
     return product
 
 
-def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of, reach) -> None:
+def _build(compiled: Compiled, *, assumable: bool = False):
+    """The model's variables, rules, intervals and curves. With `assumable`,
+    each rule instance is also enforced by a literal of its own, returned
+    by position in `compiled.constraints` -- what `core` assumes."""
+    model = cp_model.CpModel()
+
+    for key, v in compiled.variables.items():
+        if not v.is_integral:
+            raise NotIntegral(
+                f"cp-sat has no continuous variables, and {v.key[0]!r} is {v.domain}"
+            )
+
+    cp_vars = {
+        key: model.NewIntVar(
+            _whole(v.lower, f"{key[0]}'s lower bound"),
+            _whole(v.upper, f"{key[0]}'s upper bound"),
+            f"{key[0]}[{','.join(key[1])}]",
+        )
+        for key, v in compiled.variables.items()
+    }
+
+    # One product variable per pair, however many rules and objective terms
+    # mention it: the pair means the same number everywhere.
+    products: dict = {}
+
+    def product_of(a, b):
+        if (a, b) not in products:
+            products[(a, b)] = _product(
+                model, cp_vars[a], cp_vars[b], compiled.variables[a], compiled.variables[b]
+            )
+        return products[(a, b)]
+
+    reach = reach_of(compiled)
+    intervals = {
+        key: _interval(model, cp_vars, spec) for key, spec in compiled.intervals.items()
+    }
+    literals: dict[int, Any] = {}
+    for i, c in enumerate(compiled.constraints):
+        if c.schedule is not None:
+            _add_schedule(model, intervals, c)
+            continue
+        literal = model.NewBoolVar(f"holds_{i}") if assumable else None
+        _add(model, cp_vars, c, product_of, reach, literal)
+        if literal is not None:
+            literals[i] = literal
+    for curve in compiled.pwl:
+        _add_curve(model, cp_vars, curve)
+    return model, cp_vars, product_of, reach, literals
+
+
+def core(compiled: Compiled, *, time_limit: float = 10.0) -> list[int] | None:
+    """Positions in `compiled.constraints` of a set of rule instances CP-SAT
+    shows cannot all hold -- or None.
+
+    Each instance is enforced by a literal of its own and every literal is
+    assumed true; an infeasible solve then names, in
+    `SufficientAssumptionsForInfeasibility`, assumptions that are enough to
+    make it so. Exact for the whole-number model, where HiGHS's IIS of the
+    relaxation can find nothing (`2x = 1` over whole x). Not necessarily
+    irreducible: the caller shrinks it (`diagnose.explain`).
+
+    None when CP-SAT cannot take the model, it is not shown infeasible in
+    time, or it holds a scheduling rule: `NoOverlap` and `Cumulative` take
+    no enforcement literal, so one could not be assumed away.
+    """
+    if any(c.schedule is not None for c in compiled.constraints):
+        return None
+    try:
+        model, _, _, _, literals = _build(compiled, assumable=True)
+    except (NotIntegral, ValueError):
+        return None
+    if not literals:
+        return None
+    model.AddAssumptions(list(literals.values()))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit
+    # The core is read from the sequential search's final conflict; a
+    # portfolio of workers may prove infeasibility without one.
+    solver.parameters.num_search_workers = 1
+    if solver.Solve(model) != cp_model.INFEASIBLE:
+        return None
+    position = {literal.Index(): i for i, literal in literals.items()}
+    found = sorted(position[index] for index in solver.SufficientAssumptionsForInfeasibility() if index in position)
+    return found or None
+
+
+def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of, reach, literal=None) -> None:
     """`left relation right`, rearranged to `terms relation rhs` because
     CP-SAT wants the variables on one side, and scaled to whole numbers
     (`scaling.scale`) -- a no-op but for a common factor when they already
@@ -313,9 +361,15 @@ def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of, reac
         added = model.Add(expr >= rhs + 1)
     else:  # pragma: no cover -- the contract's relation vocabulary
         raise ValueError(f"unknown relation {c.relation!r}")
+    enforce = []
     if c.when is not None:
         # The rule holds while its switch is set: an enforcement literal,
         # exact, with no big number standing in for "off".
         key, value = c.when
         switch = cp_vars[key]
-        added.OnlyEnforceIf(switch if value == 1 else switch.Not())
+        enforce.append(switch if value == 1 else switch.Not())
+    if literal is not None:
+        # Its own literal, to be assumed (`core`).
+        enforce.append(literal)
+    if enforce:
+        added.OnlyEnforceIf(enforce)

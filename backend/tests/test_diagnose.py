@@ -199,8 +199,8 @@ def test_an_infeasible_run_records_its_conflict(db):
     assert row["conflict_minimal"] is True
     assert {item["constraint_id"] for item in row["conflict"]} == {"c_cover", "c_max_hours"}
     assert "removing any one" in row["params"]["conflict_note"]
-    # The relaxation is infeasible too, so HiGHS named the core.
-    assert row["params"]["conflict_method"] == "iis"
+    # CP-SAT solved it, so its own assumptions named the core.
+    assert row["params"]["conflict_method"] == "cp-sat"
     assert row["params"]["conflict_probes"] >= 1
 
 
@@ -230,7 +230,7 @@ def test_a_highs_core_gives_the_same_conflict_in_fewer_probes(db):
     _, compiled = _impossible(db)
 
     whole = explain(compiled, cpsat.solve)
-    cored = explain(compiled, cpsat.solve, core=highs.iis)
+    cored = explain(compiled, cpsat.solve, cores=[("iis", highs.iis)])
 
     assert whole.method == "deletion" and cored.method == "iis"
     assert cored.minimal and set(cored.rules) == set(whole.rules) == {"c_cover", "c_max_hours"}
@@ -260,7 +260,7 @@ def test_no_core_when_only_the_whole_numbers_conflict():
     compiled = _whole_only()
     assert highs.iis(compiled) is None
 
-    conflict = explain(compiled, cpsat.solve, core=highs.iis)
+    conflict = explain(compiled, cpsat.solve, cores=[("iis", highs.iis)])
 
     assert conflict.method == "deletion" and conflict.minimal
     assert conflict.rules == ["c_half"]
@@ -271,7 +271,7 @@ def test_a_core_the_backend_does_not_confirm_is_not_trusted():
     alone), the search confirms, finds it solvable, and filters the model."""
     compiled = _whole_only()
 
-    conflict = explain(compiled, cpsat.solve, core=lambda model: [0])
+    conflict = explain(compiled, cpsat.solve, cores=[("iis", lambda model: [0])])
 
     assert conflict.method == "deletion"
     assert conflict.rules == ["c_half"] and conflict.minimal
@@ -311,5 +311,69 @@ def test_a_highs_core_that_cannot_finish_is_no_core(monkeypatch):
     monkeypatch.setattr(highs, "_in_child", killed)
     compiled = _whole_only()
     assert highs.iis(compiled) is None
-    conflict = explain(compiled, cpsat.solve, core=highs.iis)
+    conflict = explain(compiled, cpsat.solve, cores=[("iis", highs.iis)])
     assert conflict.method == "deletion" and conflict.rules == ["c_half"]
+
+
+# -- CP-SAT assumption cores (Phase 11) ----------------------------------------
+
+
+def test_cp_sat_names_the_core_the_relaxation_cannot():
+    """2x = 1 over whole x: HiGHS's relaxation is satisfied by x = 0.5 and
+    offers nothing; CP-SAT, assuming each rule, names c_half alone."""
+    compiled = _whole_only()
+    assert highs.iis(compiled) is None
+    assert cpsat.core(compiled) == [1]
+
+    conflict = explain(compiled, cpsat.solve, cores=[("cp-sat", cpsat.core), ("iis", highs.iis)])
+    whole = explain(compiled, cpsat.solve)
+
+    assert conflict.method == "cp-sat" and conflict.rules == ["c_half"] and conflict.minimal
+    assert conflict.probes < whole.probes
+
+
+def test_a_cp_sat_core_gives_the_same_conflict_in_fewer_probes(db):
+    _, compiled = _impossible(db)
+
+    whole = explain(compiled, cpsat.solve)
+    cored = explain(compiled, cpsat.solve, cores=[("cp-sat", cpsat.core)])
+
+    assert cored.method == "cp-sat" and cored.minimal
+    assert set(cored.rules) == set(whole.rules) == {"c_cover", "c_max_hours"}
+    assert cored.probes < whole.probes
+    reported = [c for c in compiled.constraints if _matches(c, cored.items)]
+    for dropped in reported:
+        assert _solves(compiled, [c for c in reported if c is not dropped])
+
+
+def test_a_cp_sat_core_keeps_a_rules_switch():
+    """x <= 2 only while s is on, s forced on, x >= 5: all three are needed
+    -- with s off the conditional rule asks nothing. The assumption literal
+    sits beside the switch, never in place of it."""
+    x, s = ("x", ()), ("s", ())
+    compiled = Compiled(
+        variables={x: Variable(x, "integer", Decimal(0), Decimal(10)), s: Variable(s, "binary", Decimal(0), Decimal(1))},
+        constraints=[
+            Constraint("c_low", {}, Linear(coeffs={x: Decimal(1)}), "<=", Linear(const=Decimal(2)), when=(s, 1)),
+            Constraint("c_on", {}, Linear(coeffs={s: Decimal(1)}), ">=", Linear(const=Decimal(1))),
+            Constraint("c_high", {}, Linear(coeffs={x: Decimal(1)}), ">=", Linear(const=Decimal(5))),
+        ],
+        objective=Linear(),
+        sense="minimize",
+        var_index_sets={},
+    )
+    assert cpsat.core(compiled) == [0, 1, 2]
+    conflict = explain(compiled, cpsat.solve, cores=[("cp-sat", cpsat.core)])
+    assert conflict.method == "cp-sat" and sorted(conflict.rules) == ["c_high", "c_low", "c_on"]
+
+
+def test_no_cp_sat_core_for_what_it_cannot_assume_or_take():
+    from app.solve.compile import Schedule
+
+    compiled = _whole_only()
+    scheduled = Constraint("c_room", {}, Linear(), "<=", Linear(), schedule=Schedule("no_overlap", ()))
+    assert cpsat.core(replace(compiled, constraints=[*compiled.constraints, scheduled])) is None
+    fractional = {("x", ()): Variable(("x", ()), "continuous", Decimal(0), Decimal(10))}
+    assert cpsat.core(replace(compiled, variables=fractional)) is None
+    # Feasible: nothing to name.
+    assert cpsat.core(replace(compiled, constraints=compiled.constraints[:1])) is None

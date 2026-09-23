@@ -51,3 +51,24 @@ every instance, and every conflict proven minimal by one is by the other.
   relaxation is feasible (only whole numbers conflict), or that holds a
   switch, a curve or a scheduling rule, has no core and is searched as
   before.
+
+## CP-SAT assumption cores (added the same day)
+
+`python -m bench.iis --families rota --sizes S,M,L` -- a third mode for
+the instances CP-SAT solves: every rule instance enforced by a literal of
+its own, all assumed, and `SufficientAssumptionsForInfeasibility` read
+back as the core (`cpsat.core`), then confirmed and shrunk as the others.
+
+| family | size | backend | instances | deletion | IIS core | CP-SAT core | same rules |
+|---|---|---|---|---|---|---|---|
+| rota | S | cp-sat | 101 | 24 / 0.041 s / 1 / True | 2 / 0.478 s / 1 / True | 2 / 0.012 s / 1 / True | True |
+| rota | M | cp-sat | 261 | 24 / 0.105 s / 1 / True | 2 / 0.434 s / 1 / True | 2 / 0.027 s / 1 / True | True |
+| rota | L | cp-sat | 1242 | 45 / 0.708 s / 1 / True | 2 / 0.471 s / 1 / True | 2 / 0.122 s / 1 / True | True |
+
+(probes / seconds / conflict size / minimal.) The CP-SAT core is as short
+as HiGHS's and has no child process to start, so it is the fastest of the
+three on every size -- and it is exact for the whole-number model: where
+only whole numbers conflict (`2x = 1`), HiGHS's relaxation offers nothing
+and CP-SAT names the rule (`tests/test_diagnose.py`). A CP-SAT run tries
+its own core first, then HiGHS's. A model with a scheduling rule has no
+CP-SAT core: `NoOverlap` and `Cumulative` take no enforcement literal.
