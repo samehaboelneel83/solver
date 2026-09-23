@@ -6,6 +6,8 @@ from __future__ import annotations
 import socket
 import urllib.request
 
+import pytest
+
 from prometheus_client import REGISTRY
 from sqlalchemy import text
 
@@ -66,11 +68,18 @@ def test_queue_depth_counts_queued_runs_per_organization(db, empty_queue):  # no
 
 
 def test_metrics_are_served_on_their_own_port(monkeypatch):
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    monkeypatch.setenv("TEST_METRICS_PORT", str(port))
-    assert metrics.serve("TEST_METRICS_PORT", 0) == port
+    # A free port is only free until someone else takes it: between closing
+    # the probe and binding, the busy full suite can hand it to another
+    # socket, and `serve` then rightly says it is taken. A few fresh tries.
+    for _ in range(5):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        monkeypatch.setenv("TEST_METRICS_PORT", str(port))
+        if metrics.serve("TEST_METRICS_PORT", 0) == port:
+            break
+    else:
+        pytest.fail("no free port could be served in five tries")
     body = urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics").read().decode()
     assert "# TYPE worker_busy gauge" in body
     assert "# TYPE solve_seconds histogram" in body
