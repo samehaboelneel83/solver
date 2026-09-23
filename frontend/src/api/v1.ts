@@ -515,6 +515,9 @@ export type RunSummary = {
   /** Null when there is no answer to make a claim about. */
   optimality?: Optimality | null;
   solver: string;
+  /** The run whose proven optimum answered this one without a solve
+   * (migration 0042); absent or null for a run that was solved. */
+  reused_from?: number | null;
   solver_version: string | null;
   compiler_version: string | null;
   objective: number | null;

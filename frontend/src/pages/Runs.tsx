@@ -642,6 +642,12 @@ function RunDetail({ id }: { id: Id }) {
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
+      {data.reused_from != null && (
+        <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">
+          Answered by run {String(data.reused_from)}: the same model, data and settings were already
+          solved to a proven optimum, so this was not solved again.
+        </p>
+      )}
 
       {/* The solve itself: live while it runs, replayed afterwards. When it
           settles, refresh the run so the answer below it appears at once

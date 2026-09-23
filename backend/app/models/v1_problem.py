@@ -242,6 +242,12 @@ class Run(Base):
     # Set by POST /runs/{id}/cancel. A queued run is cancelled immediately;
     # a running one is asked to stop, and the worker records `cancelled`.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # The result cache (migration 0042): the key of what decides this run's
+    # answer, and the run whose proven optimum answered it without a solve.
+    cache_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reused_from: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("run.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class Solution(Base):

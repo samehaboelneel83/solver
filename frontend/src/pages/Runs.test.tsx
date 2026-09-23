@@ -423,6 +423,14 @@ describe("Runs", () => {
     ).toBeInTheDocument();
   });
 
+  it("says when an answer was reused rather than solved", async () => {
+    stub({ run: { ...RUN_DETAIL, reused_from: 7 } });
+    renderPage();
+    expect(
+      await screen.findByText(/answered by run 7: the same model, data and settings were already solved/i)
+    ).toBeInTheDocument();
+  });
+
   it("offers to turn the fighting rules into preferences", async () => {
     const write = vi.fn().mockResolvedValue({
       id: 9,

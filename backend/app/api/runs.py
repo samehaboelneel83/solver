@@ -65,6 +65,10 @@ class RunRequest(BaseModel):
     #: quietly using another -- "I used something else" would make the
     #: record a lie.
     solver: str | None = None
+    #: Leave it true and a question already answered -- the same model,
+    #: data, patch and deciding settings, proven optimal -- is answered from
+    #: that run without a solve (migration 0042). False solves it again.
+    reuse: bool = True
 
 
 class ConstraintOutcome(BaseModel):
@@ -115,6 +119,9 @@ class RunSummary(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     cancel_requested: bool = False
+    # The run whose proven optimum answered this one without a solve
+    # (migration 0042); null for a run that was solved.
+    reused_from: int | None = None
 
 
 class ConflictItem(BaseModel):
@@ -215,6 +222,7 @@ def create_run(
             time_limit=request.time_limit_s,
             seed=request.seed,
             solver=request.solver,
+            reuse=request.reuse,
         )
     except QuotaExceeded as exc:
         # 422, not 429: the request is well-formed and the caller is not

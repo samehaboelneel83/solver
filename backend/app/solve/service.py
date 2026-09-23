@@ -43,6 +43,8 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve.cache import key_of
+from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
 from app.core.logs import bind as bind_log
 from app.core import tracing
@@ -77,8 +79,14 @@ def enqueue_run(
     time_limit: float | None = None,
     seed: int | None = None,
     solver: str | None = None,
+    reuse: bool = True,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
+
+    **A question already answered is not solved again** (`reuse`, on by
+    default): when a run with the same model, data, patch and deciding
+    settings was proven globally optimal, the new run is recorded already
+    finished, pointing at it, and nothing is queued (`app.solve.cache`).
 
     **What is not given is resolved, not hardcoded.** The time limit, the seed
     and the solver come from settings when the caller does not name them --
@@ -96,7 +104,8 @@ def enqueue_run(
     """
     scenario = db.execute(
         text(
-            "SELECT s.id, s.model_version_id, s.patch, s.problem_id, s.organization_id, mv.ir"
+            "SELECT s.id, s.model_version_id, s.patch, s.problem_id, s.organization_id, mv.ir,"
+            "       mv.ir_hash"
             "  FROM scenario s JOIN model_version mv ON mv.id = s.model_version_id"
             " WHERE s.id = :s"
         ),
@@ -133,9 +142,9 @@ def enqueue_run(
     # Classified against the frozen data, not the model alone: since
     # migration 0015 a fractional parameter can put an otherwise integral
     # model out of CP-SAT's reach, and the IR cannot see that.
-    frozen = db.execute(
-        text("SELECT data FROM dataset WHERE id = :d"), {"d": dataset_id}
-    ).scalar_one()
+    frozen, data_hash = db.execute(
+        text("SELECT data, data_hash FROM dataset WHERE id = :d"), {"d": dataset_id}
+    ).one()
     found = classify(patched(scenario["ir"], scenario["patch"] or {}), frozen)
     if quota.get("max_vars") is not None:
         count = variable_count(scenario["ir"], frozen)
@@ -151,37 +160,54 @@ def enqueue_run(
     # request that submitted the run when there is one.
     with tracing.span("enqueue_run", scenario_id=scenario_id):
         trace_carrier = tracing.carrier()
+    cache_key = key_of(
+        ir_hash=scenario["ir_hash"],
+        data_hash=data_hash,
+        patch=scenario["patch"],
+        solver=solver,
+        seed=seed,
+        gap_rel=gap_rel,
+        cpsat_scaling=cpsat_scaling,
+        compiler_version=COMPILER_VERSION,
+    )
+    request_params = {
+        "time_limit_s": time_limit,
+        "workers": workers,
+        "gap_rel": gap_rel,
+        "cpsat_scaling": cpsat_scaling,
+        # The trace this run belongs to: the worker continues it
+        # (app.core.tracing).
+        "trace": trace_carrier,
+        "classified_as": found.model_class,
+        "why": found.reasons,
+        "needs": sorted(found.needs),
+        **({"requested_solver": solver} if solver else {}),
+        # Which of the three levels supplied each value the caller
+        # did not. A run whose time limit nobody can account for
+        # is a run nobody can make faster.
+        **({"from_settings": from_settings} if from_settings else {}),
+    }
+    if reuse:
+        reused = cache_reuse(
+            db, key=cache_key, scenario_id=scenario_id, dataset_id=dataset_id, params=request_params
+        )
+        if reused is not None:
+            db.commit()
+            return reused
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
-            "                 params, seed)"
-            " VALUES (:s, :d, 'queued', 'cp-sat', :cv, :params, :seed)"
+            "                 params, seed, cache_key)"
+            " VALUES (:s, :d, 'queued', 'cp-sat', :cv, :params, :seed, :k)"
             " RETURNING id"
         ),
         {
             "s": scenario_id,
             "d": dataset_id,
             "cv": COMPILER_VERSION,
-            "params": _json(
-                {
-                    "time_limit_s": time_limit,
-                    "workers": workers,
-                    "gap_rel": gap_rel,
-                    "cpsat_scaling": cpsat_scaling,
-                    # The trace this run belongs to: the worker continues it
-                    # (app.core.tracing).
-                    "trace": trace_carrier,
-                    "classified_as": found.model_class,
-                    "why": found.reasons,
-                    "needs": sorted(found.needs),
-                    **({"requested_solver": solver} if solver else {}),
-                    # Which of the three levels supplied each value the caller
-                    # did not. A run whose time limit nobody can account for
-                    # is a run nobody can make faster.
-                    **({"from_settings": from_settings} if from_settings else {}),
-                }
-            ),
+            "params": _json(request_params),
             "seed": seed,
+            "k": cache_key,
         },
     ).scalar_one()
     db.commit()
@@ -638,6 +664,10 @@ def run_scenario(
     same path the worker takes rather than a second one that could drift.
     """
     run_id = enqueue_run(db, scenario_id, time_limit=time_limit, seed=seed)
+    status = db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    if status != "queued":
+        # Answered from the result cache: already settled, nothing to solve.
+        return _stored_outcome(db, run_id)
     db.execute(
         text(
             "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now()"
@@ -646,6 +676,21 @@ def run_scenario(
         {"r": run_id},
     )
     return execute_run(db, run_id)
+
+
+def _stored_outcome(db: Session, run_id: int) -> RunOutcome:
+    row = db.execute(
+        text(
+            "SELECT r.dataset_id, r.status, r.objective, s.assignments"
+            "  FROM run r LEFT JOIN solution s ON s.run_id = r.id"
+            " WHERE r.id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+    objective = row["objective"]
+    if objective is not None:
+        objective = int(objective) if objective == objective.to_integral_value() else float(objective)
+    return RunOutcome(run_id, row["dataset_id"], row["status"], objective, row["assignments"] or {})
 
 
 def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
