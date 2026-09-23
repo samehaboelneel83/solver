@@ -667,7 +667,17 @@ valid because each total sums over the other sets. On a new
 comparison-only family, `rota_teams` (people on three contracts), every
 pair proved the same optimum and the rows only slowed the solvers (MILP
 wrapper 2.6x, HiGHS 8%): their presolve already handles this symmetry
-(`bench/results/2026-09-23-symmetry.md`).
+(`bench/results/2026-09-23-symmetry.md`). Solver options behind the
+benchmark gate are done (`e69e824`), the queue's narrower form of the
+Tuning bullet: a whitelist per backend (`app.solve.params`, anything else
+refused), measured option by option with `bench.run --technique
+backend.option=...` and judged by `bench.report`'s enable rule rather than
+Optuna. Of eleven values, one won -- SCIP `presolving=fast` -- and held on a
+96-run confirmation with a held-out instance; it is enabled for every
+SCIP solve. CP-SAT options could not be judged: among these families it
+takes only rota, and the rule wants two
+(`bench/results/2026-09-23-solver-params.md`). Optuna search and
+per-domain tuned settings remain open.
 ---
 
 ## Phase 14 — Scale: decomposition, first-order, GPU (~6+ weeks, demand-driven)
