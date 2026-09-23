@@ -110,6 +110,10 @@ def refine(found: Classification, compiled: Compiled) -> Classification:
     found = admit_products(found, compiled)
     if BILINEAR_BINARY in found.needs:
         return found
+    # Quadratic rules: which are convex, which are cones (app.solve.socp).
+    from app.solve.socp import admit as admit_cones
+
+    found = admit_cones(found, compiled)
     if not compiled.objective_quadratic or all(v.is_integral for v in compiled.variables.values()):
         return found
     convexity = objective_convexity(compiled)

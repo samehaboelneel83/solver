@@ -22,7 +22,7 @@ changes the class, which stays a property of the model itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -245,11 +245,13 @@ def with_convexity(found: Classification, convex: bool | None, reason: str) -> C
     """
     if "quadratic" not in found.needs or convex is True:
         return found
-    return Classification(
-        found.model_class,
-        [*found.reasons, reason],
-        found.needs | {"nonconvex"},
-        [*found.planner, "the goal may have more than one low point, so the best one has to be searched for"],
+    # `replace`, not a new Classification: what the earlier steps set
+    # (refusals, a convexity verdict) survives this one.
+    return replace(
+        found,
+        reasons=[*found.reasons, reason],
+        needs=found.needs | {"nonconvex"},
+        planner=[*found.planner, "the goal may have more than one low point, so the best one has to be searched for"],
     )
 
 

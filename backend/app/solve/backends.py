@@ -246,6 +246,8 @@ CP_SAT = Backend(
             "scheduling",
             # A product of a yes-or-no decision, held as a product.
             "bilinear-binary",
+            # Cone rules, as the products they are, searched exactly.
+            "socp",
         }
     ),
     rank=0,
@@ -375,6 +377,8 @@ SCIP = Backend(
             # exp, log, sqrt, abs, sin and cos of a linear argument.
             "functions",
             "bilinear-binary",
+            # Second-order cones: SCIP detects and holds them as cones.
+            "socp",
         }
     ),
     rank=2,
