@@ -760,6 +760,21 @@ SAA and chance constraints, which the execution queue does not carry.
   SCIP does this internally for exact solves). SOCP detection → SCIP (or a conic solver later).
 - IPOPT as `proves="local"`; **Decision 5** decides whether a local optimum may be shown.
 
+**Progress (2026-09-23):** the function catalogue is done (`0c89b46`). A
+`fn` term applies exp, log, sqrt, abs, sin or cos to a linear argument
+(version 2, an optional addition like every Phase 10 construct); each
+function carries its curvature over its whole domain (convex, concave or
+neither), whether it only rises, and where it is defined -- what DCP
+detection will compose. A function of a decision stands for a variable of
+its own, bounded by what the function takes over its argument's range and
+held by SCIP equal to the function itself, so the model is NLP or MINLP
+and its answer a global optimum; a function of data is only a number. An
+argument whose bounds would let it leave log's or sqrt's domain is refused
+by name before any solve. Worked by hand and checked live on SCIP
+(4.059076 against 4.0590761 for the log-plus-sqrt split). IPOPT is not
+added: the queue does not carry it, and the loop's default shows no local
+optimum as if it were one.
+
 ---
 
 ## Phase 17 — Learning and LLM assistance (~4 weeks, after ≥ 3 months of `run_fact` data)
