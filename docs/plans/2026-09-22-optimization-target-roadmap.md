@@ -780,7 +780,13 @@ data, a piecewise curve's slopes -- and a model with functions is
 classified convex or not proven convex, naming the first rule or goal that
 fails. It routes nothing yet (SCIP searches globally either way); it is
 what a convex-only or local solver would be admitted by, and it is sound:
-300 random trees are checked at every midpoint.
+300 random trees are checked at every midpoint. McCormick is done
+(`3f71f80`) where it is exact: a product with a binary factor and a
+declared-bound partner becomes four linear rows, so a model whose every
+product is of that kind is a MILP and HiGHS takes it (such runs that went to
+SCIP now go to HiGHS; exactness is tested, speed was not benchmarked). The
+continuous-by-continuous envelope is a relaxation, and is not used as an
+answer anywhere; SCIP builds it internally for exact solves.
 
 ---
 
