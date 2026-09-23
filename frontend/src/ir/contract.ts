@@ -372,6 +372,23 @@ export const IR_RULES: readonly IrRule[] = [
     where: "domain",
     text: "a filter's value is a value of the attribute's data type",
   },
+  {
+    code: "when_needs_version_2",
+    where: "shape",
+    text: "a constraint's `when` appears only in a version 2 document",
+  },
+  {
+    code: "when_malformed",
+    where: "shape",
+    text: "a `when` is an object naming a `var`, its `index`, and optionally `is` (0 or 1)",
+  },
+  {
+    code: "when_not_binary",
+    where: "shape",
+    text: "the variable a `when` names is declared binary",
+  },
+  { code: "when_on_soft", where: "shape", text: "a `when` is on a hard constraint" },
+  { code: "when_on_product", where: "shape", text: "a constraint with a `when` is linear" },
 ];
 
 export const SHAPE_RULES: ReadonlySet<string> = new Set(
@@ -394,4 +411,5 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "right",
   "severity",
   "weight",
+  "when",
 ]);

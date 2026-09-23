@@ -50,9 +50,9 @@ def rule(rid: str, left, relation: str, right, **extra) -> dict:
     return {"id": rid, "left": left, "relation": relation, "right": right, "severity": "hard", **extra}
 
 
-def model(variables: dict, rules: list, sense: str | None = None, terms: list | None = None, mode: str | None = None) -> dict:
+def model(variables: dict, rules: list, sense: str | None = None, terms: list | None = None, mode: str | None = None, version: int = 1) -> dict:
     ir: dict[str, Any] = {
-        "version": 1,
+        "version": version,
         "sets": [],
         "parameters": {},
         "variables": {name: {"index": [], **spec} for name, spec in variables.items()},
@@ -70,6 +70,21 @@ def model(variables: dict, rules: list, sense: str | None = None, terms: list | 
 CONT = {"domain": "continuous", "lower": 0, "upper": 10}
 INT = {"domain": "integer", "lower": 0, "upper": 10}
 BIN = {"domain": "binary"}
+
+def _facility(shipment: dict) -> dict:
+    return model(
+        {"open_a": BIN, "open_b": BIN, "ship_a": shipment, "ship_b": shipment},
+        [
+            rule("demand", add(v("ship_a"), v("ship_b")), ">=", c(7)),
+            rule("closed_a", v("ship_a"), "<=", c(0), when={"var": "open_a", "index": [], "is": 0}),
+            rule("closed_b", v("ship_b"), "<=", c(0), when={"var": "open_b", "index": [], "is": 0}),
+            rule("cap_a", v("ship_a"), "<=", c(5)),
+        ],
+        "minimize",
+        [mul(c(20), v("open_a")), mul(c(30), v("open_b")), v("ship_a"), mul(c(2), v("ship_b"))],
+        version=2,
+    )
+
 
 GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
     # max 5x + 4y, 6x + 4y <= 24, x + 2y <= 6: the vertex (3, 1.5), 21.
@@ -272,6 +287,44 @@ GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
         model({"x": BIN}, [rule("w", mul(c(0.12345), v("x")), "<=", c(1))], "maximize", [v("x")]),
         "optimal",
         Decimal("1"),
+    ),
+    # Conditional rules (IR version 2, `when`). Two sites; A costs 20 to open
+    # and ships at 1 a unit, B costs 30 and ships at 2; demand is 7 and A can
+    # ship at most 5; a closed site ships nothing. A alone cannot meet 7; B
+    # alone is 30 + 2 x 7 = 44; both is 20 + 30 + 5 + 2 x 2 = 59. So 44, with
+    # only B open. Whole shipments go to CP-SAT and SCIP; shipments that may
+    # be fractional only SCIP can take, and the answer is the same.
+    ("facility_when_whole", _facility(INT), "optimal", Decimal("44")),
+    ("facility_when_fractional", _facility(CONT), "optimal", Decimal("44")),
+    # `is` 1: the rule binds only while the switch is on. max x, x <= 3 when
+    # y, y costs 5 and x earns 2: y off leaves x free to 10, 20; y on caps x
+    # at 3 and costs 5, 1. So 20, with y off.
+    (
+        "switch_on_caps",
+        model(
+            {"x": INT, "y": BIN},
+            [rule("cap", v("x"), "<=", c(3), when={"var": "y", "index": []})],
+            "maximize",
+            [mul(c(2), v("x")), mul(c(-5), v("y"))],
+            version=2,
+        ),
+        "optimal",
+        Decimal("20"),
+    ),
+    # A conditional rule that can never hold forces its switch off: x >= 11
+    # when y, x at most 10, and y is required... y >= 1: infeasible.
+    (
+        "impossible_when_forces_off",
+        model(
+            {"x": INT, "y": BIN},
+            [
+                rule("never", v("x"), ">=", c(11), when={"var": "y", "index": []}),
+                rule("need_y", v("y"), ">=", c(1)),
+            ],
+            version=2,
+        ),
+        "infeasible",
+        None,
     ),
     # No objective: any answer that holds is optimal, and there is no value.
     ("feasibility", model({"x": BIN}, [rule("on", v("x"), ">=", c(1))]), "optimal", None),

@@ -76,7 +76,7 @@ DOMAIN_RULES: frozenset[str] = frozenset(c for c, r in RULES.items() if r["where
 #: they are the contract's prose, and a typo'd key is caught by
 #: `constraint_key_unknown` against this tuple.
 CONSTRAINT_KEYS: frozenset[str] = frozenset(
-    {"id", "note", "forall", "left", "relation", "right", "severity", "weight"}
+    {"id", "note", "forall", "left", "relation", "right", "severity", "weight", "when"}
 )
 
 _missing_operators = sorted(FILTER_OPERATORS - set(OPERATORS))

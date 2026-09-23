@@ -141,6 +141,22 @@ class Variable(_Model):
     upper: Optional[Number] = None
 
 
+def _zero_or_one(value: int) -> int:
+    if value not in (0, 1):
+        raise ValueError("a when's `is` is 0 or 1")
+    return value
+
+
+class When(_Model):
+    """The switch on a conditional rule (version 2): the rule holds while
+    `var[index]` is `is`. `var` must be binary -- `validate.py` checks that,
+    as it needs the declarations."""
+
+    var: Name
+    index: list[Name]
+    is_: Annotated[StrictInt, AfterValidator(_zero_or_one)] = Field(default=1, alias="is")
+
+
 class Constraint(_Model):
     id: Name
     note: Optional[str] = None
@@ -150,6 +166,7 @@ class Constraint(_Model):
     right: Term
     severity: Severity
     weight: Optional[StrictInt] = None
+    when: Optional[When] = None
 
 
 class ObjectiveTerm(_Model):

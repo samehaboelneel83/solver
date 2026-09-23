@@ -81,8 +81,22 @@ def test_scip_does_not_take_what_a_faster_solver_proves_as_well(db):
     assert choose(_found(integer, data))[0] is CP_SAT
 
 
-def test_scip_is_offered_no_linear_model():
-    assert not SCIP.classes & {"LP", "IP", "MILP", "trivial"}
+def test_scip_is_chosen_for_no_ordinary_linear_model():
+    """SCIP takes the linear classes since IR version 2, for one case only:
+    a conditional rule over continuous decisions (`when`), which no other
+    backend can hold. Rank 2 keeps every other linear model elsewhere."""
+    from app.solve.classify import Classification
+
+    assert "trivial" not in SCIP.classes
+    for model_class, needs in (
+        ("LP", {"linear", "continuous"}),
+        ("IP", {"linear", "integral"}),
+        ("MILP", {"linear", "integral", "continuous"}),
+    ):
+        chosen, _ = choose(Classification(model_class, [], set(needs)))
+        assert chosen.name != "scip", model_class
+    mixed_switch = Classification("MILP", [], {"linear", "integral", "continuous", "indicator"})
+    assert choose(mixed_switch)[0].name == "scip"
 
 
 def test_without_scip_the_refusals_come_back(db, monkeypatch):

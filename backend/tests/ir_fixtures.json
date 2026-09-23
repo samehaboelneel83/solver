@@ -1260,6 +1260,155 @@
           ]
         }
       }
+    },
+    {
+      "name": "facility_with_when",
+      "why": "An implication (version 2): a closed site ships nothing. `when` names a binary variable and the value it must have for the rule to hold.",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "open_a",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_b",
+            "when": {
+              "var": "open_b",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
@@ -4392,6 +4541,778 @@
                 ]
               },
               "weight": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "when_needs_version_2",
+      "loc": [
+        "constraints",
+        1,
+        "when"
+      ],
+      "why": "`when` is a version 2 construct; a version 1 document that uses it is not a version 1 document; its one when is the only thing wrong with it",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "open_a",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_b",
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "when_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "when"
+      ],
+      "why": "a when names its variable's index, even an empty one, as every variable reference does",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "open_a"
+            },
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_b",
+            "when": {
+              "var": "open_b",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "when_not_binary",
+      "loc": [
+        "constraints",
+        1,
+        "when",
+        "var"
+      ],
+      "why": "a rule is switched by a yes-or-no decision; `ship_b` is a quantity",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "ship_b",
+              "index": []
+            },
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_b",
+            "when": {
+              "var": "open_b",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "when_on_soft",
+      "loc": [
+        "constraints",
+        1,
+        "when"
+      ],
+      "why": "a rule that may be broken at a cost is not also switched off",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "open_a",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "soft",
+            "weight": 3
+          },
+          {
+            "id": "c_closed_b",
+            "when": {
+              "var": "open_b",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "when_on_product",
+      "loc": [
+        "constraints",
+        1,
+        "when"
+      ],
+      "why": "a conditional rule is linear: indicator constraints take a linear rule",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "variables": {
+          "open_a": {
+            "index": [],
+            "domain": "binary"
+          },
+          "open_b": {
+            "index": [],
+            "domain": "binary"
+          },
+          "ship_a": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          },
+          "ship_b": {
+            "index": [],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 10
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_demand",
+            "left": {
+              "add": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 7
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_a",
+            "when": {
+              "var": "open_a",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "mul": [
+                {
+                  "var": "ship_a",
+                  "index": []
+                },
+                {
+                  "var": "ship_b",
+                  "index": []
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_closed_b",
+            "when": {
+              "var": "open_b",
+              "index": [],
+              "is": 0
+            },
+            "left": {
+              "var": "ship_b",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 0
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_cap_a",
+            "left": {
+              "var": "ship_a",
+              "index": []
+            },
+            "relation": "<=",
+            "right": {
+              "const": 5
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_cost",
+              "weight": 1,
+              "expression": {
+                "add": [
+                  {
+                    "mul": [
+                      {
+                        "const": 20
+                      },
+                      {
+                        "var": "open_a",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 30
+                      },
+                      {
+                        "var": "open_b",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "ship_a",
+                    "index": []
+                  },
+                  {
+                    "mul": [
+                      {
+                        "const": 2
+                      },
+                      {
+                        "var": "ship_b",
+                        "index": []
+                      }
+                    ]
+                  }
+                ]
+              }
             }
           ]
         }

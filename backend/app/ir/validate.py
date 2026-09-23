@@ -443,6 +443,64 @@ class _ShapeChecker:
                 problem = self.check_term(constraint[key], [*at, key], scope, 1)
                 if problem:
                     return problem
+            problem = self._check_when(constraint, at, scope, identifier)
+            if problem:
+                return problem
+        return None
+
+    def _check_when(self, constraint: dict[str, Any], at: Loc, scope: dict[str, str], identifier: str):
+        """`when`: the rule holds only while a binary variable is `is` (1 by
+        default) -- an implication, solved natively where a backend can
+        (CP-SAT's enforcement literals, SCIP's indicator constraints)."""
+        if "when" not in constraint:
+            return None
+        when = constraint["when"]
+        loc: Loc = [*at, "when"]
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "when_needs_version_2",
+                loc,
+                f"the constraint {identifier!r} carries a when, which version 1 does not have; "
+                "publish it as version 2",
+            )
+        if (
+            not isinstance(when, dict)
+            or not set(when) <= {"var", "index", "is"}
+            or "var" not in when
+            or "index" not in when
+            or ("is" in when and (isinstance(when["is"], bool) or when["is"] not in (0, 1)))
+        ):
+            return Refusal(
+                "when_malformed",
+                loc,
+                "a when names a binary variable and its index, and optionally the value it "
+                'must have for the rule to hold: {"var": "open", "index": ["f"], "is": 1}',
+            )
+        problem = self.check_term({"var": when["var"], "index": when["index"]}, loc, scope, 1)
+        if problem:
+            return problem
+        declared = self.ir["variables"].get(when["var"], {})
+        if declared.get("domain") != "binary":
+            return Refusal(
+                "when_not_binary",
+                [*loc, "var"],
+                f"{when['var']!r} is {declared.get('domain')}; a when switches a rule on and off, "
+                "so it names a yes-or-no decision",
+            )
+        if constraint.get("severity") == "soft":
+            return Refusal(
+                "when_on_soft",
+                loc,
+                f"the constraint {identifier!r} is soft and conditional; a rule that may be "
+                "broken at a cost needs no switch -- make it hard, or drop the when",
+            )
+        if _degree(constraint["left"]) > 1 or _degree(constraint["right"]) > 1:
+            return Refusal(
+                "when_on_product",
+                loc,
+                f"the constraint {identifier!r} multiplies decisions and carries a when; a "
+                "conditional rule is linear",
+            )
         return None
 
     def _check_weight(self, constraint: dict[str, Any], at: Loc, identifier: str):

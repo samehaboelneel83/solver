@@ -43,6 +43,7 @@ STRUCTURAL = frozenset({
     "binding_via_not_object", "binding_via_depth_unsupported", "binding_via_anchor_invalid",
     "where_not_array", "where_filter_malformed", "where_operator_unknown",
     "relationships_not_array", "relationship_not_a_name",
+    "when_malformed",
 })
 
 #: Rules that need the whole document, the limits or the domain: validate.py's.
@@ -58,6 +59,9 @@ SEMANTIC = frozenset({
     "binding_via_endpoint_mismatch", "parameter_index_mismatch", "parameter_not_in_domain",
     "relationship_not_in_domain", "set_not_in_domain", "where_operator_not_offered",
     "where_value_not_of_type",
+    # A when's version, variable, severity and linearity are facts about the
+    # rest of the document.
+    "when_needs_version_2", "when_not_binary", "when_on_soft", "when_on_product",
 })
 
 

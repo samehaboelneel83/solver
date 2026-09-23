@@ -218,6 +218,9 @@ CP_SAT = Backend(
             # Fractional data made whole exactly (`scaling.py`), which is only
             # a need at all when `solve.cpsat_scaling` admits the model.
             "scaled-fractional-data",
+            # A conditional rule (`when`) as an enforcement literal: the rule
+            # is switched, not approximated with a big number.
+            "indicator",
         }
     ),
     rank=0,
@@ -296,7 +299,11 @@ SCIP = Backend(
     name="scip",
     # Only the quadratic classes: a linear model is better served by every
     # backend above, and rank 2 keeps it that way even if this list grows.
-    classes=frozenset({"QP", "MIQP", "QCQP", "MIQCQP"}),
+    # And the linear classes, for one reason: a conditional rule over a model
+    # with continuous decisions, which CP-SAT cannot hold and the linear
+    # backends have no indicator for. Rank 2 keeps every other linear model
+    # with the backends above.
+    classes=frozenset({"QP", "MIQP", "QCQP", "MIQCQP", "IP", "MILP", "LP"}),
     # `nonconvex` and a mix of `integral` and `continuous` together: the two
     # cases stage 2 refused. Spatial branch-and-bound bounds each product on
     # every branch, so nonconvexity costs time, never correctness.
@@ -311,6 +318,8 @@ SCIP = Backend(
             "quadratic",
             "quadratic-constraints",
             "nonconvex",
+            # `when`, as SCIP's own indicator constraints.
+            "indicator",
         }
     ),
     rank=2,

@@ -257,14 +257,20 @@ def _add(model: cp_model.CpModel, cp_vars: dict, c: Constraint, product_of, reac
         expr += product_of(a, b) * coeff
 
     if c.relation in (">=",):
-        model.Add(expr >= rhs)
+        added = model.Add(expr >= rhs)
     elif c.relation in ("<=",):
-        model.Add(expr <= rhs)
+        added = model.Add(expr <= rhs)
     elif c.relation in ("=", "=="):
-        model.Add(expr == rhs)
+        added = model.Add(expr == rhs)
     elif c.relation == "<":
-        model.Add(expr <= rhs - 1)
+        added = model.Add(expr <= rhs - 1)
     elif c.relation == ">":
-        model.Add(expr >= rhs + 1)
+        added = model.Add(expr >= rhs + 1)
     else:  # pragma: no cover -- the contract's relation vocabulary
         raise ValueError(f"unknown relation {c.relation!r}")
+    if c.when is not None:
+        # The rule holds while its switch is set: an enforcement literal,
+        # exact, with no big number standing in for "off".
+        key, value = c.when
+        switch = cp_vars[key]
+        added.OnlyEnforceIf(switch if value == 1 else switch.Not())

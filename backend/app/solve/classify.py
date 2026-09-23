@@ -112,6 +112,14 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         reasons.append("at least one constraint is soft, so the backend must carry penalties")
         planner.append("at least one rule can bend, at a cost")
 
+    if any(isinstance(c, dict) and "when" in c for c in ir.get("constraints", [])):
+        needs.add("indicator")
+        reasons.append(
+            "a rule holds only while a yes-or-no decision is set (`when`), which a solver "
+            "must switch on and off rather than approximate"
+        )
+        planner.append("some rules apply only when a decision says so")
+
     fractional = _fractional(ir, data)
     if fractional:
         needs.add("fractional-data")

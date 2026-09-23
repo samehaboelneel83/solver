@@ -217,6 +217,9 @@ def _add(model, variables: dict, c: Constraint) -> None:
         coeffs[key] = coeffs.get(key, 0) - coeff
     coeffs = {key: coeff for key, coeff in coeffs.items() if coeff}
     rhs = float(c.right.const - c.left.const)
+    if c.when is not None:
+        _add_indicator(model, variables, c, coeffs, rhs)
+        return
     if not coeffs and not c.quadratic:
         # Nothing left to decide: SCIP refuses a constraint on a constant, so
         # a true one is dropped and a false one stands as `0 >= 1`.
@@ -244,6 +247,31 @@ def _add(model, variables: dict, c: Constraint) -> None:
         model.addCons(expression >= rhs + 1)
     else:  # pragma: no cover -- the contract's relation vocabulary
         raise ValueError(f"unknown relation {c.relation!r}")
+
+
+def _add_indicator(model, variables: dict, c: Constraint, coeffs: dict, rhs: float) -> None:
+    """A conditional rule as SCIP's own indicator constraint: `switch = value`
+    implies the rule. SCIP's takes `expression <= rhs` only, so `>=` is
+    negated into it and `=` is the two halves."""
+    import pyscipopt
+
+    key, value = c.when
+    switch = variables[key]
+    if c.quadratic:  # pragma: no cover -- the validator refuses `when_on_product`
+        raise ValueError(f"{c.id!r} is conditional and quadratic; an indicator takes a linear rule")
+    if not coeffs:
+        # Nothing left to decide. A rule that holds needs no switch; one that
+        # cannot hold means its switch may never be set.
+        if not _holds(0.0, c.relation, rhs):
+            model.addCons(switch == (0 if value == 1 else 1))
+        return
+    expression = pyscipopt.quicksum(float(coeff) * variables[k] for k, coeff in coeffs.items())
+    active = value == 1
+    upper = {"<=": [(expression, rhs)], "<": [(expression, rhs - 1)],
+             ">=": [(-expression, -rhs)], ">": [(-expression, -(rhs + 1))],
+             "=": [(expression, rhs), (-expression, -rhs)], "==": [(expression, rhs), (-expression, -rhs)]}
+    for lhs, bound in upper[c.relation]:
+        model.addConsIndicator(lhs <= bound, binvar=switch, activeone=active)
 
 
 def _holds(value: float, relation: str, rhs: float) -> bool:

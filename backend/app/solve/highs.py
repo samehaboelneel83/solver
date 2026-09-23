@@ -470,6 +470,8 @@ def _add_rows(highspy, solver, constraints: list[Constraint], position: dict) ->
     for c in constraints:
         if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
             raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
+        if c.when is not None:  # pragma: no cover -- `indicator` keeps it away
+            raise ValueError(f"{c.id!r} is a conditional rule, which this backend cannot take")
         coeffs: dict = dict(c.left.coeffs)
         for key, coeff in c.right.coeffs.items():
             coeffs[key] = coeffs.get(key, Decimal(0)) - coeff

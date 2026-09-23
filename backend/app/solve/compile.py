@@ -142,6 +142,18 @@ class Constraint:
     # only a backend that provides `quadratic-constraints` is offered one
     # that is not.
     quadratic: dict[tuple[VarKey, VarKey], Decimal] = field(default_factory=dict)
+    # The switch on a conditional rule (IR version 2, `when`): the rule holds
+    # while this binary variable has this value, and says nothing otherwise.
+    # None for an unconditional rule -- every rule before version 2.
+    when: tuple[VarKey, int] | None = None
+
+    def is_active(self, assignments: dict[VarKey, Any]) -> bool:
+        """Whether the rule binds at an assignment: always, unless its switch
+        is set the other way."""
+        if self.when is None:
+            return True
+        key, value = self.when
+        return int(round(float(assignments.get(key, 0)))) == value
 
 
 @dataclass
@@ -244,6 +256,10 @@ def slack_by_constraint(
     """The tightest instance of each constraint -- the rule with no room left."""
     tightest: dict[str, Decimal] = {}
     for constraint in compiled.constraints:
+        # A conditional rule switched off has no room to measure: it does not
+        # bind, however far its sides are apart.
+        if not constraint.is_active(assignments):
+            continue
         value = slack_of(constraint, assignments)
         current = tightest.get(constraint.id)
         if current is None or value < current:
@@ -409,6 +425,7 @@ class _Compiler:
             return
         self._current_id = spec["id"]
         for env in envs:
+            when = self._when(spec.get("when"), env)
             left, square = self._poly(spec["left"], env)
             right, right_square = self._poly(spec["right"], env)
             # Both sides' products move to the left, as `Constraint.quadratic`.
@@ -456,9 +473,21 @@ class _Compiler:
                     continue
 
             self.constraints.append(
-                Constraint(spec["id"], index, left, spec["relation"], right, square)
+                Constraint(spec["id"], index, left, spec["relation"], right, square, when)
             )
         self._current_id = None
+
+    def _when(self, spec: dict[str, Any] | None, env) -> tuple[VarKey, int] | None:
+        """This instance's switch: the binary variable at these indices, and
+        the value that turns the rule on. The validator has made sure the
+        variable is binary and the rule is hard and linear."""
+        if spec is None:
+            return None
+        keys = tuple(env[i][1]["id"] for i in spec["index"])
+        key: VarKey = (spec["var"], keys)
+        if key not in self.variables:  # pragma: no cover -- validator pins arity
+            raise Unsupported(f"no variable {key}")
+        return key, int(spec.get("is", 1))
 
     def _note_empty(self, constraint_id: str, kind: str, index: dict[str, str]) -> None:
         key = (constraint_id, kind, tuple(sorted(index.items())))

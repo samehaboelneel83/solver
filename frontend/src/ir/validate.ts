@@ -456,6 +456,73 @@ class ShapeChecker {
         const problem = this.checkTerm(constraint[key], [...at, key], scope, 1);
         if (problem) return problem;
       }
+      const when = this.checkWhen(constraint, at, scope, identifier);
+      if (when) return when;
+    }
+    return null;
+  }
+
+  /** `when`: the rule holds only while a binary variable is `is` (1 by
+   * default). The same checks, in the same order, as `_check_when` in
+   * `app/ir/validate.py`. */
+  private checkWhen(
+    constraint: Json,
+    at: IrLoc,
+    scope: Map<string, string>,
+    identifier: string
+  ): IrRefusal | null {
+    if (!("when" in constraint)) return null;
+    const when = constraint.when;
+    const loc: IrLoc = [...at, "when"];
+    if (this.ir.version === 1) {
+      return refusal(
+        "when_needs_version_2",
+        loc,
+        `the constraint ${show(identifier)} carries a when, which version 1 does not have; ` +
+          "publish it as version 2"
+      );
+    }
+    if (
+      !isObject(when) ||
+      Object.keys(when).some((key) => !["var", "index", "is"].includes(key)) ||
+      !("var" in when) ||
+      !("index" in when) ||
+      ("is" in when && when.is !== 0 && when.is !== 1)
+    ) {
+      return refusal(
+        "when_malformed",
+        loc,
+        "a when names a binary variable and its index, and optionally the value it must have " +
+          'for the rule to hold: {"var": "open", "index": ["f"], "is": 1}'
+      );
+    }
+    const problem = this.checkTerm({ var: when.var, index: when.index }, loc, scope, 1);
+    if (problem) return problem;
+    const variables = isObject(this.ir.variables) ? this.ir.variables : {};
+    const declared = isObject(variables[when.var as string]) ? (variables[when.var as string] as Json) : {};
+    if (declared.domain !== "binary") {
+      return refusal(
+        "when_not_binary",
+        [...loc, "var"],
+        `${show(when.var)} is ${show(declared.domain)}; a when switches a rule on and off, ` +
+          "so it names a yes-or-no decision"
+      );
+    }
+    if (constraint.severity === "soft") {
+      return refusal(
+        "when_on_soft",
+        loc,
+        `the constraint ${show(identifier)} is soft and conditional; a rule that may be broken ` +
+          "at a cost needs no switch -- make it hard, or drop the when"
+      );
+    }
+    if (degree(constraint.left) > 1 || degree(constraint.right) > 1) {
+      return refusal(
+        "when_on_product",
+        loc,
+        `the constraint ${show(identifier)} multiplies decisions and carries a when; a ` +
+          "conditional rule is linear"
+      );
     }
     return null;
   }
