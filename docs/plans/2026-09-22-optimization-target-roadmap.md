@@ -773,7 +773,14 @@ argument whose bounds would let it leave log's or sqrt's domain is refused
 by name before any solve. Worked by hand and checked live on SCIP
 (4.059076 against 4.0590761 for the log-plus-sqrt split). IPOPT is not
 added: the queue does not carry it, and the loop's default shows no local
-optimum as if it were one.
+optimum as if it were one. DCP detection is done (`9a1195d`,
+`cde0b7a`): `app.solve.dcp` reads each term tree by the composition rules
+-- the catalogue's labels and monotonicity, a constant's sign from the
+data, a piecewise curve's slopes -- and a model with functions is
+classified convex or not proven convex, naming the first rule or goal that
+fails. It routes nothing yet (SCIP searches globally either way); it is
+what a convex-only or local solver would be admitted by, and it is sound:
+300 random trees are checked at every midpoint.
 
 ---
 
