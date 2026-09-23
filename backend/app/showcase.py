@@ -20,8 +20,16 @@ more than another. Even would be 30 each; Chloe can take only 15 and Dev only
 squares of 3937.5. The model is classified QP, proven convex, and its optimum
 is reported as the global one.
 
-Both are refreshed on every start, as `weekly_rota` is, so a live database
-cannot drift from this file.
+**workshop** -- scheduling (IR version 2). Three jobs are cut, then welded;
+each machine does one job at a time, and a job reaches the welder only once
+it is cut. Each operation is an interval, `no_overlap` holds each machine,
+and the route (cut feeds weld) is a relationship the rule walks. Shortest
+makespan: Johnson's rule orders the jobs B, then A and C (either way), for
+9 -- and 9 is also a lower bound, since welding takes 8 and cannot start
+before the shortest cut (B's 1) ends. Only CP-SAT holds intervals.
+
+All three are refreshed on every start, as `weekly_rota` is, so a live
+database cannot drift from this file.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ from app.models.v1_problem import Template
 
 FEED_BLEND = "feed_blend"
 LOAD_BALANCE = "load_balance"
+WORKSHOP = "workshop"
 
 
 def _sum(body: dict[str, Any], index: str, set_name: str) -> dict[str, Any]:
@@ -180,22 +189,104 @@ LOAD_BALANCE_SEED: dict[str, Any] = {
     ],
 }
 
+_JM = {"index": ["job", "machine"]}
+_OP = {"var": "op", "index": ["j", "m"]}
+
+WORKSHOP_IR: dict[str, Any] = {
+    "version": 2,
+    "sets": ["job", "machine"],
+    "relationships": ["feeds"],
+    "parameters": {"duration": {"index": ["job", "machine"]}},
+    "variables": {
+        "begin": {**_JM, "domain": "integer", "lower": 0, "upper": 40},
+        "finish": {**_JM, "domain": "integer", "lower": 0, "upper": 40},
+        "makespan": {"index": [], "domain": "integer", "lower": 0, "upper": 40},
+        # Each job's turn on each machine: from begin to finish, lasting its
+        # duration there.
+        "op": {**_JM, "domain": "interval", "start": "begin", "end": "finish", "size": "duration"},
+    },
+    "constraints": [
+        {
+            "id": "c_one_at_a_time",
+            "note": "each machine works on one job at a time",
+            "forall": [{"index": "m", "set": "machine"}],
+            "no_overlap": {"interval": _OP, "over": [{"index": "j", "set": "job"}]},
+            "severity": "hard",
+        },
+        {
+            "id": "c_route",
+            "note": "a job reaches the next machine only once this one is done with it",
+            "forall": [
+                {"index": "j", "set": "job"},
+                {"index": "m", "set": "machine"},
+                {"index": "n", "set": "machine", "via": {"rel": "feeds", "from": "m"}},
+            ],
+            "left": {"var": "finish", "index": ["j", "m"]},
+            "relation": "<=",
+            "right": {"var": "begin", "index": ["j", "n"]},
+            "severity": "hard",
+        },
+        {
+            "id": "c_makespan",
+            "note": "the makespan is when the last operation ends",
+            "forall": [{"index": "j", "set": "job"}, {"index": "m", "set": "machine"}],
+            "left": {"var": "finish", "index": ["j", "m"]},
+            "relation": "<=",
+            "right": {"var": "makespan", "index": []},
+            "severity": "hard",
+        },
+    ],
+    "objective": {
+        "sense": "minimize",
+        "terms": [{"id": "o_makespan", "weight": 1, "expression": {"var": "makespan", "index": []}}],
+    },
+}
+
+_DURATIONS = {"a": (3, 2), "b": (1, 4), "c": (2, 2)}  # hours to cut, hours to weld
+
+WORKSHOP_SEED: dict[str, Any] = {
+    "entity_types": [
+        {"name": "job", "role": "task", "colour": "#0f766e", "attributes": []},
+        {"name": "machine", "role": "resource", "colour": "#b45309", "attributes": []},
+    ],
+    "relationship_types": [
+        {"name": "feeds", "from": "machine", "to": "machine", "cardinality": "one_to_one", "is_hierarchy": False},
+    ],
+    "parameters": [{"name": "duration", "index": ["job", "machine"], "default_value": 0, "unit": "h"}],
+    "entities": [
+        *({"type": "job", "key": key, "label": f"Job {key.upper()}"} for key in _DURATIONS),
+        {"type": "machine", "key": "cut", "label": "Cutter"},
+        {"type": "machine", "key": "weld", "label": "Welder"},
+    ],
+    "relationships": [{"type": "feeds", "from": ["machine", "cut"], "to": ["machine", "weld"]}],
+    "parameter_values": [
+        {"parameter": "duration", "entities": [["job", job], ["machine", machine]], "value": hours}
+        for job, pair in _DURATIONS.items()
+        for machine, hours in zip(("cut", "weld"), pair)
+    ],
+}
+
 SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     FEED_BLEND: (FEED_BLEND_SEED, FEED_BLEND_IR),
     LOAD_BALANCE: (LOAD_BALANCE_SEED, LOAD_BALANCE_IR),
+    WORKSHOP: (WORKSHOP_SEED, WORKSHOP_IR),
 }
 
 
 def ensure_showcase_templates(db: Session) -> dict[str, int]:
-    """Create or refresh both templates. Idempotent on the name."""
+    """Create or refresh the showcase templates. Idempotent on the name."""
     ids: dict[str, int] = {}
     for name, (seed, ir) in SHOWCASE.items():
         found = db.execute(select(Template.id).where(Template.name == name)).scalar_one_or_none()
         if found is not None:
-            db.execute(update(Template).where(Template.id == found).values(domain_seed=seed, default_ir=ir))
+            db.execute(
+                update(Template)
+                .where(Template.id == found)
+                .values(domain_seed=seed, default_ir=ir, ir_version=str(ir["version"]))
+            )
             ids[name] = found
             continue
-        row = Template(name=name, ir_version="1", domain_seed=seed, default_ir=ir)
+        row = Template(name=name, ir_version=str(ir["version"]), domain_seed=seed, default_ir=ir)
         db.add(row)
         db.flush()
         ids[name] = row.id

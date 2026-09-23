@@ -27,6 +27,19 @@ Families, and the class each exercises:
 
 The last two are what `solve.cpsat_scaling` is about (migration 0039):
 whole-number models that only reach CP-SAT once their rules are scaled.
+
+- `flow_shop` / `flow_shop_timed` -- one scheduling problem, two
+  formulations, on identical data (the generator is seeded by
+  `flow_shop-{size}-{instance}` for both): jobs pass through a chain of
+  machines in order, each machine doing one at a time, and the makespan is
+  minimised. `flow_shop` is the interval formulation (IR version 2:
+  intervals, `no_overlap`, CP-SAT only); `flow_shop_timed` the classic
+  time-indexed one (version 1: a yes-or-no per job, machine and time slot
+  for "running" and for "starts here", any MIP backend). The horizon is the
+  makespan of the jobs in the order generated -- a schedule that exists, so
+  no optimum lies past it -- and grows with the size, which is what the
+  comparison is about: the time-indexed model grows with the horizon, the
+  interval model does not.
 """
 
 from __future__ import annotations
@@ -417,6 +430,132 @@ def knapsack(size: str, instance: int) -> tuple[dict, dict]:
     return ir, data
 
 
+# -- flow shop: intervals against time slots (Phase 10) ------------------------------
+
+#: jobs, machines, the longest duration
+_FLOW = {"S": (4, 2, 5), "M": (8, 3, 8), "L": (15, 4, 10), "XL": (30, 5, 12)}
+
+
+def _flow_shop_facts(size: str, instance: int):
+    jobs, machines, longest = _FLOW[size]
+    rnd = random.Random(f"flow_shop-{size}-{instance}")
+    job_ids = [f"j{j}" for j in range(jobs)]
+    machine_ids = [f"m{m}" for m in range(machines)]
+    duration = {(j, m): rnd.randint(1, longest) for j in job_ids for m in machine_ids}
+    # The makespan of the jobs in this order: finish[j][m] waits for the job
+    # before on this machine and for this job on the machine before.
+    done: dict[tuple[str, str], int] = {}
+    for i, j in enumerate(job_ids):
+        for k, m in enumerate(machine_ids):
+            ready = max(done.get((job_ids[i - 1], m), 0) if i else 0, done.get((j, machine_ids[k - 1]), 0) if k else 0)
+            done[(j, m)] = ready + duration[(j, m)]
+    horizon = done[(job_ids[-1], machine_ids[-1])]
+    return job_ids, machine_ids, duration, horizon
+
+
+def _flow_shop_rows(job_ids, machine_ids, duration):
+    sets = {"job": [{"id": j} for j in job_ids], "machine": [{"id": m} for m in machine_ids]}
+    parameters = {"duration": [{"job": j, "machine": m, "value": d} for (j, m), d in duration.items()]}
+    feeds = [{"from": a, "to": b} for a, b in zip(machine_ids, machine_ids[1:])]
+    return sets, parameters, feeds
+
+
+_JM = [("j", "job"), ("m", "machine")]
+_NEXT = {"index": "n", "set": "machine", "via": {"rel": "feeds", "from": "m"}}
+
+
+def _forall(*pairs: tuple[str, str], extra: list[dict] | None = None) -> list[dict]:
+    return [{"index": i, "set": s} for i, s in pairs] + (extra or [])
+
+
+def flow_shop(size: str, instance: int) -> tuple[dict, dict]:
+    job_ids, machine_ids, duration, horizon = _flow_shop_facts(size, instance)
+    jm = {"index": ["job", "machine"]}
+    ir = {
+        "version": 2,
+        "sets": ["job", "machine"],
+        "relationships": ["feeds"],
+        "parameters": {"duration": {"index": ["job", "machine"]}},
+        "variables": {
+            "begin": {**jm, "domain": "integer", "lower": 0, "upper": horizon},
+            "finish": {**jm, "domain": "integer", "lower": 0, "upper": horizon},
+            "makespan": {"index": [], "domain": "integer", "lower": 0, "upper": horizon},
+            "op": {**jm, "domain": "interval", "start": "begin", "end": "finish", "size": "duration"},
+        },
+        "constraints": [
+            {"id": "c_machine", "forall": _forall(("m", "machine")),
+             "no_overlap": {"interval": _var("op", "j", "m"), "over": _forall(("j", "job"))}, "severity": "hard"},
+            {"id": "c_route", "forall": _forall(*_JM, extra=[_NEXT]),
+             "left": _var("finish", "j", "m"), "relation": "<=", "right": _var("begin", "j", "n"), "severity": "hard"},
+            {"id": "c_makespan", "forall": _forall(*_JM),
+             "left": _var("finish", "j", "m"), "relation": "<=", "right": _var("makespan"), "severity": "hard"},
+        ],
+        "objective": {"sense": "minimize", "terms": [{"id": "o_makespan", "weight": 1, "expression": _var("makespan")}]},
+    }
+    sets, parameters, feeds = _flow_shop_rows(job_ids, machine_ids, duration)
+    data = _data(sets, parameters)
+    data["relationships"] = {"feeds": feeds}
+    return ir, data
+
+
+def flow_shop_timed(size: str, instance: int) -> tuple[dict, dict]:
+    """The same flow shop, time-indexed: `run[j, m, t]` (the operation is on
+    the machine in slot t) and `start[j, m, t]` (it starts there). Each runs
+    for its duration and starts once; a run may only switch on at its start
+    (`c_contiguous` along `follows`, slot to slot, and `c_first` in slot 0),
+    so it is one unbroken block. Start times are `sum at[t] * start`."""
+    job_ids, machine_ids, duration, horizon = _flow_shop_facts(size, instance)
+    jmt = ("j", "job"), ("m", "machine"), ("t", "time")
+    at = {"attr": {"of": "t", "name": "at"}}
+
+    def begin(machine: str) -> dict:
+        return _sum(_mul(at, _var("start", "j", machine, "t")), ("t", "time"))
+
+    ir = {
+        "version": 1,
+        "sets": ["job", "machine", "time"],
+        "relationships": ["feeds", "follows"],
+        "parameters": {"duration": {"index": ["job", "machine"]}},
+        "variables": {
+            "run": {"index": ["job", "machine", "time"], "domain": "binary"},
+            "start": {"index": ["job", "machine", "time"], "domain": "binary"},
+            "makespan": {"index": [], "domain": "integer", "lower": 0, "upper": horizon},
+        },
+        "constraints": [
+            {"id": "c_length", "forall": _forall(*_JM),
+             "left": _sum(_var("run", "j", "m", "t"), ("t", "time")), "relation": "=",
+             "right": _par("duration", "j", "m"), "severity": "hard"},
+            {"id": "c_one_start", "forall": _forall(*_JM),
+             "left": _sum(_var("start", "j", "m", "t"), ("t", "time")), "relation": "=",
+             "right": {"const": 1}, "severity": "hard"},
+            {"id": "c_first", "forall": _forall(*_JM, extra=[
+                {"index": "t", "set": "time", "where": [{"attr": "at", "op": "=", "value": 0}]}]),
+             "left": _var("run", "j", "m", "t"), "relation": "<=", "right": _var("start", "j", "m", "t"),
+             "severity": "hard"},
+            {"id": "c_contiguous", "forall": _forall(*jmt, extra=[
+                {"index": "u", "set": "time", "via": {"rel": "follows", "from": "t"}}]),
+             "left": {"add": [_var("run", "j", "m", "u"), _mul({"const": -1}, _var("run", "j", "m", "t"))]},
+             "relation": "<=", "right": _var("start", "j", "m", "u"), "severity": "hard"},
+            {"id": "c_machine", "forall": _forall(("m", "machine"), ("t", "time")),
+             "left": _sum(_var("run", "j", "m", "t"), ("j", "job")), "relation": "<=",
+             "right": {"const": 1}, "severity": "hard"},
+            {"id": "c_route", "forall": _forall(*_JM, extra=[_NEXT]),
+             "left": {"add": [begin("m"), _par("duration", "j", "m")]}, "relation": "<=",
+             "right": begin("n"), "severity": "hard"},
+            {"id": "c_makespan", "forall": _forall(*jmt),
+             "left": _mul({"add": [at, {"const": 1}]}, _var("run", "j", "m", "t")), "relation": "<=",
+             "right": _var("makespan"), "severity": "hard"},
+        ],
+        "objective": {"sense": "minimize", "terms": [{"id": "o_makespan", "weight": 1, "expression": _var("makespan")}]},
+    }
+    sets, parameters, feeds = _flow_shop_rows(job_ids, machine_ids, duration)
+    slots = [f"t{t}" for t in range(horizon)]
+    sets["time"] = [{"id": slot, "at": t} for t, slot in enumerate(slots)]
+    data = _data(sets, parameters)
+    data["relationships"] = {"feeds": feeds, "follows": [{"from": a, "to": b} for a, b in zip(slots, slots[1:])]}
+    return ir, data
+
+
 FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota": rota,
     "facility": facility,
@@ -424,7 +563,17 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "load_balance": load_balance,
     "rota_rates": rota_rates,
     "knapsack": knapsack,
+    "flow_shop": flow_shop,
+    "flow_shop_timed": flow_shop_timed,
 }
+
+
+#: Families run to compare formulations on demand, not every night. At L,
+#: CP-SAT proves the time-indexed flow shop in 26-36 s against the
+#: nightly's 30 s limit, so it would prove it some nights and not others --
+#: a "proof lost" that is only the clock. The MIP backends find nothing
+#: there in 60 s at all (bench/results/2026-09-23-flow-shop-formulations.md).
+COMPARISON_ONLY = frozenset({"flow_shop_timed"})
 
 
 def generate(family: str, size: str, instance: int = 0) -> Instance:

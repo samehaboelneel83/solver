@@ -141,7 +141,10 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows_path = out_dir / f"{args.night}.json"
+    from bench.families import COMPARISON_ONLY, FAMILIES
+
     run_args = [
+        "--family", ",".join(f for f in FAMILIES if f not in COMPARISON_ONLY),
         "--sizes", args.sizes,
         "--instances", str(args.instances),
         "--seeds", str(args.seeds),

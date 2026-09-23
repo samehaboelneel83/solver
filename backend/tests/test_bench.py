@@ -36,9 +36,20 @@ def test_the_small_sizes_solve_on_every_backend_that_takes_them_and_agree():
         (row["instance"], row["backend"], row["status"]) for row in rows if row["status"] != "optimal"
     ]
     assert not any(row["wrong"] for row in rows)
-    # Every family is solved by more than one backend, or "agree" means nothing.
+    # Every family is solved by more than one backend, or "agree" means
+    # nothing -- except one only CP-SAT holds (intervals), which must agree
+    # with its twin formulation on the same data instead.
+    twins = {"flow_shop": "flow_shop_timed"}
     for family in FAMILIES:
+        if family in twins:
+            continue
         assert len({row["backend"] for row in rows if row["family"] == family}) >= 2, family
+    for family, twin in twins.items():
+        optima = {
+            f: {row["instance"].rsplit("-", 1)[1]: row["objective"] for row in rows if row["family"] == f}
+            for f in (family, twin)
+        }
+        assert optima[family] and optima[family] == optima[twin], optima
 
 
 def _row(instance, backend, status, objective, value=None, solve_s=1.0, seed=1, family="f", gap=0.0):
@@ -380,3 +391,87 @@ def test_an_unproven_answer_better_than_the_published_optimum_is_wrong():
     ]
     mark_against_known(rows, {"pk1": 11.0, "m": 100.0})
     assert [r["wrong"] for r in rows] == [True, False, True, False]
+
+
+# -- flow shop: two formulations of one problem ---------------------------------------
+
+
+def _johnson(duration: dict, jobs: list[str], machines: list[str]) -> int:
+    """The optimal makespan of a two-machine flow shop, by Johnson's rule
+    (1954): jobs faster on the first machine go first, shortest first; the
+    rest go last, longest second-machine time first. Shares nothing with
+    either formulation."""
+    first, second = machines
+    early = sorted((j for j in jobs if duration[(j, first)] < duration[(j, second)]), key=lambda j: duration[(j, first)])
+    late = sorted((j for j in jobs if duration[(j, first)] >= duration[(j, second)]), key=lambda j: -duration[(j, second)])
+    a = b = 0
+    for j in early + late:
+        a += duration[(j, first)]
+        b = max(a, b) + duration[(j, second)]
+    return b
+
+
+def _optimum(family: str, size: str, instance: int, backend: str | None = None):
+    from app.solve import compile_model
+    from app.solve.backends import by_name, choose
+    from app.solve.classify import classify
+    from app.solve.convexity import refine
+    from app.solve.service import solve_compiled
+
+    case = generate(family, size, instance)
+    compiled = compile_model(case.ir, case.data)
+    chosen, _ = choose(refine(classify(case.ir, case.data), compiled), backend)
+    result, _ = solve_compiled(chosen, compiled, time_limit=60, seed=1)
+    return chosen.name, result.status, result.objective
+
+
+@pytest.mark.parametrize("instance", range(3))
+def test_both_flow_shop_formulations_find_johnsons_makespan(instance):
+    from bench.families import _flow_shop_facts
+
+    jobs, machines, duration, horizon = _flow_shop_facts("S", instance)
+    expected = _johnson(duration, jobs, machines)
+    assert expected <= horizon
+    assert _optimum("flow_shop", "S", instance) == ("cp-sat", "optimal", expected)
+    for backend in ("cp-sat", "highs"):
+        assert _optimum("flow_shop_timed", "S", instance, backend) == (backend, "optimal", expected)
+
+
+def test_the_formulations_agree_on_three_machines():
+    """No rule gives this one by hand; the two models share only the data."""
+    interval = _optimum("flow_shop", "M", 0)
+    timed = _optimum("flow_shop_timed", "M", 0)
+    assert interval[1] == timed[1] == "optimal"
+    assert interval[2] == timed[2]
+
+
+def test_only_the_time_indexed_model_grows_with_the_horizon():
+    from app.solve import compile_model
+
+    sizes = {}
+    for family in ("flow_shop", "flow_shop_timed"):
+        for size in ("S", "M"):
+            case = generate(family, size, 0)
+            sizes[family, size] = len(compile_model(case.ir, case.data).variables)
+    # Interval: begin and finish per operation, and the makespan.
+    assert sizes["flow_shop", "S"] == 2 * 4 * 2 + 1
+    # Timed: run and start per operation and slot -- the horizon times more.
+    assert sizes["flow_shop_timed", "M"] > 20 * sizes["flow_shop", "M"]
+
+
+def test_the_nightly_leaves_out_the_comparison_only_families(monkeypatch, tmp_path):
+    from bench import nightly
+    from bench import run as bench_run
+    from bench.families import COMPARISON_ONLY
+
+    seen = {}
+
+    def fake_main(argv):
+        seen["family"] = argv[argv.index("--family") + 1].split(",")
+        (tmp_path / "2026-01-01.json").write_text("[]")
+        return 0
+
+    monkeypatch.setattr(bench_run, "main", fake_main)
+    assert nightly.main(["--out-dir", str(tmp_path), "--night", "2026-01-01", "--no-store"]) == 0
+    assert "flow_shop" in seen["family"]
+    assert not COMPARISON_ONLY & set(seen["family"])
