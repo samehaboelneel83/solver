@@ -453,7 +453,17 @@ versions, keys, name pattern and index limit equal the JSON; the shared
 fixtures run through both; every rule code is placed as structural (the
 models refuse it) or semantic (`validate.py`, still the gate). Checked
 live: a version 2 model publishes and solves, version 3 is a 422, and the
-editor opens a version 2 model. Next slices: indicators, big-M, PWL,
+editor opens a version 2 model. Slice 2, indicators, is done
+(2026-09-23): a constraint may carry `when: {var, index, is}` (version 2
+only) -- it holds while that binary decision has that value. CP-SAT takes
+it as an enforcement literal, SCIP as its own indicator constraint; SCIP
+now also takes the linear classes at rank 2, for the one case only it can
+hold (a conditional rule over continuous decisions). The IR form is a
+switch on a rule rather than the sketch's `{when, then: rule}`: one rule,
+one id, so conflicts, slack and scenario patches keep working by id.
+Refused with a reason: `when` in version 1, on a non-binary, on a soft
+rule, on a product. Pinned by hand-worked golden models and 80
+brute-force equivalence cases. Next slices: big-M for HiGHS/MILP, PWL,
 scheduling, then the editor and graph styles.
 
 ---

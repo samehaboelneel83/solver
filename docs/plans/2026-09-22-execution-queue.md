@@ -44,7 +44,7 @@ lane; no LLM / NL→IR work.
 ## Phase 10 — IR v2, in slices
 
 - [x] (10) Contract v2 + Pydantic parity — done when `ir/contract.json` is version 2 (v1 documents valid), Pydantic models exist and a parity test binds them to the contract. *(`d8a4473`: `acceptedVersions` [1, 2]; `app/ir/models.py`; `tests/test_ir_models.py` places every rule as structural or semantic.)*
-- [ ] (10) Indicators and implications — done when `when/then` rules solve natively on CP-SAT and SCIP, with equivalence tests and golden cases.
+- [x] (10) Indicators and implications — done when `when/then` rules solve natively on CP-SAT and SCIP, with equivalence tests and golden cases. *(`51a0079`: a constraint's `when: {var, index, is}`; OnlyEnforceIf / addConsIndicator; 80 brute-force equivalence cases; live 44 on CP-SAT and SCIP.)*
 - [ ] (10) Big-M from declared bounds — done when HiGHS/MILP take indicators through a tight M from declared bounds and refuse, naming the variable, when a bound is a default.
 - [ ] (10) Piecewise-linear — done when `pwl` terms solve on every backend that accepts them (epigraph / incremental / element / SOS2), equivalence-tested.
 - [ ] (10) Scheduling constructs — done when interval variables, `no_overlap` and `cumulative` solve on CP-SAT, other backends refuse with a reason, and a scheduling template + bench family exist.
