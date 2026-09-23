@@ -475,3 +475,15 @@ def test_the_nightly_leaves_out_the_comparison_only_families(monkeypatch, tmp_pa
     assert nightly.main(["--out-dir", str(tmp_path), "--night", "2026-01-01", "--no-store"]) == 0
     assert "flow_shop" in seen["family"]
     assert not COMPARISON_ONLY & set(seen["family"])
+
+
+def test_the_iis_bench_measures_both_ways_on_a_planted_conflict():
+    from bench.iis import measure
+
+    row = measure("feed_blend", "S", probe_seconds=2.0)
+    assert row["status"] == "infeasible"
+    assert row["deletion"]["method"] == "deletion" and row["iis"]["method"] == "iis"
+    assert row["deletion"]["minimal"] and row["iis"]["minimal"] and row["same_rules"]
+    # The batch and the nutrient floor it cannot meet.
+    assert row["iis"]["rules"] == ["c_batch", "c_need"]
+    assert row["iis"]["probes"] < row["deletion"]["probes"]

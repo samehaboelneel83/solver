@@ -96,22 +96,55 @@ def solve(
     if not available():
         raise RuntimeError("highs is not available in this build")
 
+    return _in_child(
+        {
+            "compiled": compiled,
+            "time_limit": time_limit,
+            "workers": workers,
+            "seed": seed,
+            "gap_rel": gap_rel,
+            "progress": on_progress is not None,
+        },
+        time_limit=time_limit,
+        should_stop=should_stop,
+        on_progress=on_progress,
+    )
+
+
+def iis(compiled: Compiled, *, time_limit: float = 10.0) -> list[int] | None:
+    """The positions in `compiled.constraints` of an irreducible infeasible
+    subset HiGHS finds in the model's **linear relaxation** -- or None when
+    it finds none: the relaxation is feasible (only the whole-number model
+    is not), the model holds something HiGHS cannot take as a row, or HiGHS
+    is not in this build.
+
+    A core, not a verdict: the relaxation's IIS is infeasible for the model
+    too (its answers are a subset), but the caller confirms it with the
+    run's own backend and shrinks it there (`diagnose.explain`).
+    """
+    if not available():
+        return None
+    if compiled.pwl or compiled.intervals or any(
+        c.quadratic or c.when is not None or c.schedule is not None for c in compiled.constraints
+    ):
+        return None
+    try:
+        return _in_child({"mode": "iis", "compiled": compiled, "time_limit": time_limit}, time_limit=time_limit)
+    except RuntimeError:
+        # A core is an optimisation of the diagnosis, never a condition of
+        # it: HiGHS's IIS search does not stop at `time_limit` (seen on a
+        # large facility model), and the child is killed at its deadline.
+        # No core, and the full search runs.
+        return None
+
+
+def _in_child(payload: dict, *, time_limit: float, should_stop=None, on_progress=None):
+    """Run `highs_worker` on `payload` and return what it wrote."""
     with tempfile.TemporaryDirectory(prefix="solver-highs-") as tmp:
         req_path = os.path.join(tmp, "in.pkl")
         out_path = os.path.join(tmp, "out.pkl")
         with open(req_path, "wb") as handle:
-            pickle.dump(
-                {
-                    "compiled": compiled,
-                    "time_limit": time_limit,
-                    "workers": workers,
-                    "seed": seed,
-                    "gap_rel": gap_rel,
-                    "progress": on_progress is not None,
-                },
-                handle,
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         proc = subprocess.Popen(
             [sys.executable, "-m", "app.solve.highs_worker", req_path, out_path],
             cwd=_BACKEND_ROOT,
@@ -251,6 +284,36 @@ def solve_in_process(
         duals=_lp_duals(solver, compiled, added_ids) if solved else None,
         reduced_costs=_lp_reduced(solver, compiled, keys) if solved else None,
     )
+
+
+def iis_in_process(compiled: Compiled, *, time_limit: float = 10.0) -> list[int] | None:
+    """Called only from `highs_worker`. Rows are added one per constraint, in
+    order, so a row index is a position in `compiled.constraints`."""
+    import highspy
+
+    solver = highspy.Highs()
+    solver.setOptionValue("output_flag", False)
+    solver.setOptionValue("time_limit", float(time_limit))
+    keys = list(compiled.variables)
+    position = {key: i for i, key in enumerate(keys)}
+    # The relaxation: HiGHS computes an IIS of an LP. Whole numbers are
+    # dropped, and there is no objective -- only feasibility is asked.
+    _add_columns(highspy, solver, compiled, keys, relax=True)
+    _add_rows(highspy, solver, compiled.constraints, position)
+    solver.run()
+    if _status(solver.getModelStatus()) != "infeasible":
+        return None
+    # From the LP, *not* made irreducible by HiGHS: on a 12,340-row facility
+    # model that step took 49 s for a core 2% smaller (334 rows, not 340),
+    # against 1 s without it -- and HiGHS does not stop it at `time_limit`.
+    # The caller shrinks the core to irreducible anyway, with its own
+    # backend (bench/results/2026-09-23-native-iis.md).
+    solver.setOptionValue("iis_strategy", int(highspy.IisStrategy.kIisStrategyFromLp))
+    status, found = solver.getIis()
+    if status != highspy.HighsStatus.kOk or not found.valid_:
+        return None
+    rows = sorted(int(i) for i in found.row_index_)
+    return rows or None
 
 
 def _lp_duals(solver, compiled: Compiled, added_ids: list[str]) -> dict[str, float] | None:
@@ -442,14 +505,14 @@ def _hessian(highspy, dim: int, position: dict, quadratic: dict, sign: float):
     return hessian
 
 
-def _add_columns(highspy, solver, compiled: Compiled, keys: list) -> None:
+def _add_columns(highspy, solver, compiled: Compiled, keys: list, relax: bool = False) -> None:
     import numpy as np
 
     specs = [compiled.variables[key] for key in keys]
     lower = np.array([float(spec.lower) for spec in specs], dtype=np.float64)
     upper = np.array([float(spec.upper) for spec in specs], dtype=np.float64)
     solver.addVars(len(specs), lower, upper)
-    integral = [i for i, spec in enumerate(specs) if spec.is_integral]
+    integral = [] if relax else [i for i, spec in enumerate(specs) if spec.is_integral]
     if integral:
         solver.changeColsIntegrality(
             len(integral),

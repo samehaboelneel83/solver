@@ -1132,7 +1132,14 @@ def _record_conflict(
         {
             "c": _json(conflict.items),
             "m": conflict.minimal,
-            "note": _json({"conflict_note": conflict.note}),
+            "note": _json(
+                {
+                    "conflict_note": conflict.note,
+                    "conflict_method": conflict.method,
+                    "conflict_probes": conflict.probes,
+                    "conflict_seconds": conflict.seconds,
+                }
+            ),
             "r": run_id,
         },
     )

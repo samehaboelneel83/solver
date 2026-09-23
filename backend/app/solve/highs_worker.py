@@ -23,7 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     with open(req_path, "rb") as handle:
         payload = pickle.load(handle)
 
-    from app.solve.highs import solve_in_process
+    from app.solve.highs import iis_in_process, solve_in_process
+
+    if payload.get("mode") == "iis":
+        result = iis_in_process(payload["compiled"], time_limit=payload["time_limit"])
+        with open(out_path, "wb") as handle:
+            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        return 0
 
     result = solve_in_process(
         payload["compiled"],

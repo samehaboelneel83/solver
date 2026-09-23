@@ -18,6 +18,18 @@ narrows those to the **instances** -- Thursday morning, not "coverage" --
 which is what `run.conflict` is shaped for and what makes the sentence
 checkable.
 
+**A core first, when there is one** (target roadmap Phase 11, native IIS).
+Deletion filtering over the whole model costs a probe per rule and then one
+per instance of the rules kept -- hundreds of solves on a large model. For a
+linear model HiGHS can name an irreducible infeasible subset of the linear
+relaxation in one call (`highs.iis`). That set is only a *core* here: it is
+confirmed infeasible with the run's own backend (one probe), then shrunk by
+deletion filtering **on the core alone** with that backend, so the verdicts
+are still the run's and the result is still provably irreducible. When
+there is no core -- the relaxation is feasible and only the whole-number
+model is not, or HiGHS cannot take the model -- the full search runs, as it
+always did.
+
 **The honest part.** Each probe is a solve, so this is bounded by a budget,
 and a probe can time out without deciding. Either way the search stops early
 and reports what it has with `minimal = False`: a *superset* of a conflict,
@@ -29,6 +41,7 @@ from "somewhere in here".
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
@@ -56,6 +69,11 @@ class Conflict:
     minimal: bool = True
     #: Why the search stopped, when it stopped early.
     note: str = ""
+    #: How it was found: "iis" (a HiGHS core, shrunk) or "deletion" (the
+    #: whole model filtered), and what it cost.
+    method: str = "deletion"
+    probes: int = 0
+    seconds: float = 0.0
 
     @property
     def rules(self) -> list[str]:
@@ -82,6 +100,7 @@ def explain(
     *,
     probe_seconds: float = DEFAULT_PROBE_SECONDS,
     budget: int = DEFAULT_BUDGET,
+    core: Callable[[Compiled], list[int] | None] | None = None,
 ) -> Conflict:
     """An irreducible set of constraint instances that cannot all hold.
 
@@ -103,6 +122,26 @@ def explain(
             return True
         return None
 
+    started = time.monotonic()
+
+    def done(needed: list[Constraint], stopped: bool, method: str) -> Conflict:
+        return Conflict(
+            items=[{"constraint_id": c.id, "instance": _instance(c)} for c in needed],
+            minimal=not stopped,
+            note=_note(stopped, purse),
+            method=method,
+            probes=purse.spent,
+            seconds=round(time.monotonic() - started, 3),
+        )
+
+    # -- a core, confirmed and shrunk with the run's own backend -----------
+    found = core(compiled) if core is not None else None
+    if found:
+        candidates = [compiled.constraints[i] for i in found]
+        if infeasible(candidates):
+            needed, stopped = _filter(candidates, lambda keep: infeasible(keep))
+            return done(needed, stopped, "iis")
+
     # -- pass 1: which rules are involved ---------------------------------
     rules = list(dict.fromkeys(c.id for c in compiled.constraints))
     needed_rules, stopped = _filter(rules, lambda keep: infeasible(_by_rule(compiled, keep)))
@@ -114,11 +153,7 @@ def explain(
     else:
         needed = instances
 
-    return Conflict(
-        items=[{"constraint_id": c.id, "instance": _instance(c)} for c in needed],
-        minimal=not stopped,
-        note=_note(stopped, purse),
-    )
+    return done(needed, stopped, "deletion")
 
 
 def _filter(candidates: list, still_infeasible: Callable[[list], bool | None]) -> tuple[list, bool]:

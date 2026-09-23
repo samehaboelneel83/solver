@@ -21,7 +21,10 @@ from dataclasses import replace
 import pytest
 from sqlalchemy import text
 
-from app.solve import compile_model, cpsat
+from decimal import Decimal
+
+from app.solve import compile_model, cpsat, highs
+from app.solve.compile import Compiled, Constraint, Variable
 from app.solve.compile import Linear
 from app.solve.diagnose import explain
 from app.solve.result import Solution
@@ -196,6 +199,9 @@ def test_an_infeasible_run_records_its_conflict(db):
     assert row["conflict_minimal"] is True
     assert {item["constraint_id"] for item in row["conflict"]} == {"c_cover", "c_max_hours"}
     assert "removing any one" in row["params"]["conflict_note"]
+    # The relaxation is infeasible too, so HiGHS named the core.
+    assert row["params"]["conflict_method"] == "iis"
+    assert row["params"]["conflict_probes"] >= 1
 
 
 def test_a_solved_run_carries_no_conflict(db):
@@ -212,3 +218,98 @@ def test_a_solved_run_carries_no_conflict(db):
     assert row["status"] == "optimal"
     assert row["conflict"] is None
     assert row["conflict_minimal"] is None
+
+
+# -- a core from HiGHS's IIS (Phase 11) ---------------------------------------
+
+
+def test_a_highs_core_gives_the_same_conflict_in_fewer_probes(db):
+    """The fixture's relaxation is infeasible too (four slots, room for two
+    even fractionally), so HiGHS names a core; CP-SAT confirms and shrinks
+    it. Same rules, still irreducible, a fraction of the solves."""
+    _, compiled = _impossible(db)
+
+    whole = explain(compiled, cpsat.solve)
+    cored = explain(compiled, cpsat.solve, core=highs.iis)
+
+    assert whole.method == "deletion" and cored.method == "iis"
+    assert cored.minimal and set(cored.rules) == set(whole.rules) == {"c_cover", "c_max_hours"}
+    assert cored.probes < whole.probes, (cored.probes, whole.probes)
+    reported = [c for c in compiled.constraints if _matches(c, cored.items)]
+    assert not _solves(compiled, reported)
+    for dropped in reported:
+        assert _solves(compiled, [c for c in reported if c is not dropped])
+
+
+def _whole_only() -> Compiled:
+    """2x = 1 over whole x: infeasible, but x = 0.5 satisfies the relaxation."""
+    x = ("x", ())
+    return Compiled(
+        variables={x: Variable(x, "integer", Decimal(0), Decimal(10))},
+        constraints=[
+            Constraint("c_cap", {}, Linear(coeffs={x: Decimal(1)}), "<=", Linear(const=Decimal(10))),
+            Constraint("c_half", {}, Linear(coeffs={x: Decimal(2)}), "=", Linear(const=Decimal(1))),
+        ],
+        objective=Linear(),
+        sense="minimize",
+        var_index_sets={"x": []},
+    )
+
+
+def test_no_core_when_only_the_whole_numbers_conflict():
+    compiled = _whole_only()
+    assert highs.iis(compiled) is None
+
+    conflict = explain(compiled, cpsat.solve, core=highs.iis)
+
+    assert conflict.method == "deletion" and conflict.minimal
+    assert conflict.rules == ["c_half"]
+
+
+def test_a_core_the_backend_does_not_confirm_is_not_trusted():
+    """A core is a candidate, not a verdict: offered one that holds (the cap
+    alone), the search confirms, finds it solvable, and filters the model."""
+    compiled = _whole_only()
+
+    conflict = explain(compiled, cpsat.solve, core=lambda model: [0])
+
+    assert conflict.method == "deletion"
+    assert conflict.rules == ["c_half"] and conflict.minimal
+
+
+def test_highs_names_the_rows_of_an_irreducible_subset():
+    """x, y in 0..10: x + y >= 12, x <= 3, y <= 4, x - y <= 100. The first
+    three cannot hold together; the fourth has nothing to do with it."""
+    x, y = ("x", ()), ("y", ())
+    box = {k: Variable(k, "continuous", Decimal(0), Decimal(10)) for k in (x, y)}
+    rows = [
+        Constraint("c_enough", {}, Linear(coeffs={x: Decimal(1), y: Decimal(1)}), ">=", Linear(const=Decimal(12))),
+        Constraint("c_x", {}, Linear(coeffs={x: Decimal(1)}), "<=", Linear(const=Decimal(3))),
+        Constraint("c_y", {}, Linear(coeffs={y: Decimal(1)}), "<=", Linear(const=Decimal(4))),
+        Constraint("c_spread", {}, Linear(coeffs={x: Decimal(1), y: Decimal(-1)}), "<=", Linear(const=Decimal(100))),
+    ]
+    compiled = Compiled(variables=box, constraints=rows, objective=Linear(), sense="minimize", var_index_sets={})
+    assert highs.iis(compiled) == [0, 1, 2]
+    # Feasible once c_enough asks for 7: nothing to name.
+    rows[0] = Constraint("c_enough", {}, rows[0].left, ">=", Linear(const=Decimal(7)))
+    assert highs.iis(compiled) is None
+
+
+def test_highs_is_not_asked_about_what_it_cannot_hold():
+    compiled = _whole_only()
+    switched = Constraint("c_half", {}, compiled.constraints[1].left, "=", Linear(const=Decimal(1)),
+                          when=(("x", ()), 1))
+    assert highs.iis(replace(compiled, constraints=[switched])) is None
+
+
+def test_a_highs_core_that_cannot_finish_is_no_core(monkeypatch):
+    """HiGHS's IIS search does not stop at its time limit, so its child can
+    be killed at the deadline; the diagnosis must not die with it."""
+    def killed(*args, **kwargs):
+        raise RuntimeError("highs worker timed out")
+
+    monkeypatch.setattr(highs, "_in_child", killed)
+    compiled = _whole_only()
+    assert highs.iis(compiled) is None
+    conflict = explain(compiled, cpsat.solve, core=highs.iis)
+    assert conflict.method == "deletion" and conflict.rules == ["c_half"]
