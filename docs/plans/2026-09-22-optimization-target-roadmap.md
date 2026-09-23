@@ -505,8 +505,18 @@ so ids, conflicts (a probe subsets them like any rule), result rows and
 scenario `disable` work unchanged; a softened one, or a fractional size or
 demand, is refused by name. The classifier's `scheduling` need is CP-SAT's
 alone (the plan's `supports_interval`), and `solve_compiled` refuses to
-hand one to anything else. Next slices: 10b (template + bench), then the
-editor and graph styles.
+hand one to anything else. Slice 10b is done (2026-09-23, `cf75153`): the
+`workshop` template (three jobs cut then welded; the route is a
+machine-to-machine relationship a `via` walks; CP-SAT's 9 is Johnson's
+rule's makespan and a lower bound), and the bench families `flow_shop`
+(intervals) and `flow_shop_timed` (run/start binaries per slot) on
+identical data. The plan's expectation held: at L (4 machines, 15 jobs,
+horizon ~125) CP-SAT proves the interval model in 0.03 s and the
+time-indexed one in 31 s, and HiGHS, the MILP wrapper and SCIP find no
+answer to it in 60 s (`bench/results/2026-09-23-flow-shop-formulations.md`).
+The time-indexed family is comparison-only: at the nightly's 30 s limit it
+would flip between proven and not. Next slice: the editor and graph
+styles.
 
 ---
 
