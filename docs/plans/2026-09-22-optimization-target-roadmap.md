@@ -463,8 +463,20 @@ switch on a rule rather than the sketch's `{when, then: rule}`: one rule,
 one id, so conflicts, slack and scenario patches keep working by id.
 Refused with a reason: `when` in version 1, on a non-binary, on a soft
 rule, on a product. Pinned by hand-worked golden models and 80
-brute-force equivalence cases. Next slices: big-M for HiGHS/MILP, PWL,
-scheduling, then the editor and graph styles.
+brute-force equivalence cases. Slice 3, big-M, is done
+(2026-09-23, `app/solve/reformulate.py`): for a backend with no native
+indicator (HiGHS, the MILP wrapper) each conditional instance becomes
+`expr <= rhs + M(1 - L)` (mirrored for `>=`, both halves for `=`), M the
+most the expression can pass its bound over the **declared** box -- the
+tightest correct M; rows that can never break are dropped. `admit` (run
+from `refine`) allows it only when no variable in a conditional rule rests
+on the guard ceiling; otherwise those backends are refused with the
+variable named and CP-SAT or SCIP take the rule natively. The run records
+`params.reformulations` (rule, rows, largest M). A bounded mixed model now
+goes to HiGHS (rank 1) rather than SCIP. Not built: the IR-level bound
+propagation (FBBT) the plan mentions for tightening M further -- declared
+bounds already give the exact M for the box, and nothing yet shows a need.
+Next slices: PWL, scheduling, then the editor and graph styles.
 
 ---
 
