@@ -41,6 +41,10 @@ class Classification:
     #: model, when the need itself cannot say (`reformulate.admit`: which
     #: variable left a conditional rule without a big-M). `choose` quotes it.
     refusals: dict[str, str] = field(default_factory=dict)
+    #: For a model that applies a catalogue function to a decision: whether
+    #: the composition rules prove it convex (`app.solve.dcp`). None when
+    #: the question was not asked.
+    convex: bool | None = None
 
 
 def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classification:
@@ -125,6 +129,23 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"the model applies {names} to decisions, so it is nonlinear beyond products"
         )
         planner.append(f"a rule or the goal applies {names} to decisions")
+        # SCIP answers either way (it searches globally); this says whether
+        # the model is one where the best answer nearby is the best overall.
+        from app.solve.dcp import model_curvature
+
+        verdict = model_curvature(ir, data)
+        convex = verdict.convex
+        relaxed = " (its continuous relaxation, as some decisions are whole)" if mixed_or_whole else ""
+        if convex:
+            reasons.append(f"the model is convex{relaxed}: {verdict.reason}")
+            planner.append("the rules and the goal curve one way, so the best answer nearby is the best overall")
+        else:
+            reasons.append(f"the model is not proven convex{relaxed}: {verdict.reason}")
+            planner.append(
+                "the goal or a rule may have more than one peak or dip, so the solver searches the whole range"
+            )
+    else:
+        convex = None
 
     if any(c.get("severity") == "soft" for c in ir.get("constraints", [])):
         needs.add("soft-constraints")
@@ -170,7 +191,7 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"{fractional} is not a whole number, so a yes-or-no solver cannot take this model"
         )
 
-    return Classification(model_class, reasons, needs, planner, refusals=refusals)
+    return Classification(model_class, reasons, needs, planner, refusals=refusals, convex=convex)
 
 
 def _scheduling(ir: dict[str, Any]) -> bool:
