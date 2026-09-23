@@ -527,8 +527,13 @@ a line labelled "switch" (Rete and Flow draw from the same graph), the
 condition in the block view. Found on the way: the editor published a
 version 1 base as version 1, so neither could be added to an older model;
 it now always writes version 2. Validator parity needed nothing new -- the
-shared fixtures already bind both. Next: 10d, intervals and scheduling
-rules in the editor.
+shared fixtures already bind both. Slice 10d is done (2026-09-23,
+`5343dc6`): "a span of time" adds an interval together with its start and
+end, whose parts are then chosen from declarations over its own sets; a
+scheduling rule is added and edited in full (never overlap / share a
+capacity, For every, Over, interval, demand, capacity); the Remove guard
+counts switches, scheduling rules and interval parts. **Phase 10 is
+complete.**
 
 ---
 
