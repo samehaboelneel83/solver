@@ -269,6 +269,9 @@ class Compiled:
     pwl: list[PwlDef] = field(default_factory=list)
     # Every instance of every interval variable, by its key (version 2).
     intervals: dict[VarKey, IntervalDef] = field(default_factory=dict)
+    # Classes of interchangeable entities, per set (`app.solve.symmetry`):
+    # what a backend without symmetry detection may be told to order.
+    symmetry: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -389,6 +392,7 @@ class _Compiler:
             empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
             pwl=list(self._pwls),
             intervals=intervals,
+            symmetry=self._symmetry(),
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -442,6 +446,11 @@ class _Compiler:
             for combo in self._members(spec["index"]):
                 key: VarKey = (name, combo)
                 self.variables[key] = Variable(key, domain, lower, upper, defaulted)
+
+    def _symmetry(self) -> list[tuple[str, tuple[str, ...]]]:
+        from app.solve.symmetry import classes
+
+        return classes(self.ir, {"sets": self.sets, "parameters": self.params_raw, "relationships": self.edges})
 
     def _declare_intervals(self) -> dict[VarKey, IntervalDef]:
         out: dict[VarKey, IntervalDef] = {}

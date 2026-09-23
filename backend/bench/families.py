@@ -556,6 +556,20 @@ def flow_shop_timed(size: str, instance: int) -> tuple[dict, dict]:
     return ir, data
 
 
+def rota_teams(size: str, instance: int) -> tuple[dict, dict]:
+    """The rota with its people on three contracts, in turn -- every day at
+    18, three quarters of them at 20, half at 22 (max shifts, cost) -- as
+    staff usually are, so people on one contract are interchangeable: what
+    symmetry breaking is for (`app.solve.symmetry`,
+    bench/results/2026-09-23-symmetry.md)."""
+    ir, data = rota(size, instance)
+    days = len(data["sets"]["day"])
+    contracts = [(days, 18), (3 * days // 4, 20), (days // 2, 22)]
+    for i, row in enumerate(data["sets"]["person"]):
+        row["max_shifts"], row["cost"] = contracts[i % 3]
+    return ir, data
+
+
 FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota": rota,
     "facility": facility,
@@ -565,6 +579,7 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "knapsack": knapsack,
     "flow_shop": flow_shop,
     "flow_shop_timed": flow_shop_timed,
+    "rota_teams": rota_teams,
 }
 
 
@@ -573,7 +588,7 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
 #: nightly's 30 s limit, so it would prove it some nights and not others --
 #: a "proof lost" that is only the clock. The MIP backends find nothing
 #: there in 60 s at all (bench/results/2026-09-23-flow-shop-formulations.md).
-COMPARISON_ONLY = frozenset({"flow_shop_timed"})
+COMPARISON_ONLY = frozenset({"flow_shop_timed", "rota_teams"})
 
 
 def generate(family: str, size: str, instance: int = 0) -> Instance:

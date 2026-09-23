@@ -43,6 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
@@ -131,6 +132,8 @@ def enqueue_run(
     from_settings["cpsat_scaling"] = settings["solve.cpsat_scaling"].source
     warm_start = bool(settings["solve.warm_start"].value)
     from_settings["warm_start"] = settings["solve.warm_start"].source
+    symmetry = bool(settings["solve.symmetry"].value)
+    from_settings["symmetry"] = settings["solve.symmetry"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -179,6 +182,7 @@ def enqueue_run(
         "gap_rel": gap_rel,
         "cpsat_scaling": cpsat_scaling,
         "warm_start": warm_start,
+        "symmetry": symmetry,
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
         "trace": trace_carrier,
@@ -579,6 +583,7 @@ def _execute(
                         "workers": workers,
                         "gap_rel": gap_rel,
                         "hint": hint,
+                        "symmetry": bool(params.get("symmetry")),
                     },
                     time_limit=time_limit,
                     workers=workers,
@@ -621,6 +626,8 @@ def _execute(
         extra["reformulations"] = bigm(compiled)[1]
     if compiled.pwl and "pwl-native" not in backend.provides:
         extra["reformulations"] = [*extra.get("reformulations", []), *pwl_rewrite(compiled)[1]]
+    if params.get("symmetry") and compiled.symmetry and backend.name in symmetry_rows.FOR:
+        extra["symmetry_rows"] = symmetry_rows.order_rows(compiled)[1]
     if stopped:
         extra["stopped_by_request"] = True
     if compiled.empty_ranges:
@@ -923,6 +930,7 @@ def solve_compiled(
     gap_rel: float = 0.0,
     on_progress=None,
     hint: dict | None = None,
+    symmetry: bool = False,
 ) -> tuple[Solution, str | None]:
     """Solve a compiled model as a run does, and say why if it is unbounded.
 
@@ -944,6 +952,10 @@ def solve_compiled(
         # Curves as linear rows: an epigraph where the goal allows, else the
         # incremental formulation (app.solve.reformulate).
         compiled, _ = pwl_rewrite(compiled)
+    if symmetry and compiled.symmetry and backend.name in symmetry_rows.FOR:
+        # Interchangeable entities ordered, for a backend that does not
+        # detect symmetry itself (setting `solve.symmetry`).
+        compiled, _ = symmetry_rows.order_rows(compiled)
     if (compiled.intervals or any(c.schedule for c in compiled.constraints)) and "scheduling" not in getattr(
         backend, "provides", ()
     ):
