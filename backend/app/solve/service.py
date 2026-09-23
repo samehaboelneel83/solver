@@ -43,6 +43,7 @@ from app.solve.diagnose import DEFAULT_BUDGET, DEFAULT_PROBE_SECONDS
 from app.solve import sandbox
 from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
+from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
 from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
@@ -139,6 +140,8 @@ def enqueue_run(
     from_settings["warm_start"] = settings["solve.warm_start"].source
     symmetry = bool(settings["solve.symmetry"].value)
     from_settings["symmetry"] = settings["solve.symmetry"].source
+    separable = bool(settings["solve.separable"].value)
+    from_settings["separable"] = settings["solve.separable"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -188,6 +191,7 @@ def enqueue_run(
         "cpsat_scaling": cpsat_scaling,
         "warm_start": warm_start,
         "symmetry": symmetry,
+        "separable": separable,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -600,6 +604,7 @@ def _execute(
                 )
 
         points: list = []
+        parts, blocks_record = None, None
         if params.get("pareto_steps"):
             # A trade-off front between the goal's two terms (app.solve.pareto):
             # each point solved in full, the first end standing as this run's
@@ -651,27 +656,59 @@ def _execute(
                     workers=workers,
                     should_stop=stop.is_set,
                 )
-            with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
-                # In a child process with a memory ceiling, a CPU allowance
-                # and a deadline (app.solve.sandbox, Phase 9): a model that
-                # outgrows them fails with a reason, not the worker.
-                result, reason = sandbox.run(
-                    "app.solve.sandbox:solve_in_child",
-                    {
-                        "backend": backend.name,
-                        "compiled": solving_model,
-                        "time_limit": time_limit,
-                        "seed": seed,
-                        "workers": workers,
-                        "gap_rel": gap_rel,
-                        "hint": hint,
-                        "symmetry": bool(params.get("symmetry")),
-                    },
-                    time_limit=time_limit,
-                    workers=workers,
-                    on_progress=events.progress,
-                    should_stop=stop.is_set,
+            if params.get("separable"):
+                # Independent blocks solved at once (setting `solve.separable`,
+                # app.solve.blocks) -- unless something ties them together.
+                refused = block_rows.refusal(
+                    solving_model,
+                    symmetry=bool(params.get("symmetry")),
+                    pareto=bool(params.get("pareto_steps")),
+                    robust=bool(robust_record),
                 )
+                parts = block_rows.blocks(solving_model) if refused is None else None
+                if refused is not None or not block_rows.worth_splitting(parts):
+                    blocks_record = {"solved_whole": refused or "the model is one block"}
+                    parts = None
+            with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
+                if parts is not None:
+
+                    def run_one(piece, share, piece_hint):
+                        return sandbox.run(
+                            "app.solve.sandbox:solve_in_child",
+                            {"backend": backend.name, "compiled": piece, "time_limit": time_limit, "seed": seed,
+                             "workers": share, "gap_rel": gap_rel, "hint": piece_hint},
+                            time_limit=time_limit,
+                            workers=share,
+                            should_stop=stop.is_set,
+                        )
+
+                    # No progress curve while blocks solve: each has its own
+                    # incumbent, and one line through them would go backwards.
+                    result, reason, blocks_record = block_rows.solve(
+                        solving_model, parts, run_one, workers=workers, optimal_gap=OPTIMAL_GAP, hint=hint
+                    )
+                    solving.set_attribute("blocks", len(parts))
+                else:
+                    # In a child process with a memory ceiling, a CPU allowance
+                    # and a deadline (app.solve.sandbox, Phase 9): a model that
+                    # outgrows them fails with a reason, not the worker.
+                    result, reason = sandbox.run(
+                        "app.solve.sandbox:solve_in_child",
+                        {
+                            "backend": backend.name,
+                            "compiled": solving_model,
+                            "time_limit": time_limit,
+                            "seed": seed,
+                            "workers": workers,
+                            "gap_rel": gap_rel,
+                            "hint": hint,
+                            "symmetry": bool(params.get("symmetry")),
+                        },
+                        time_limit=time_limit,
+                        workers=workers,
+                        on_progress=events.progress,
+                        should_stop=stop.is_set,
+                    )
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
@@ -712,6 +749,8 @@ def _execute(
         extra["reformulations"] = [*extra.get("reformulations", []), *pwl_rewrite(compiled)[1]]
     if params.get("symmetry") and compiled.symmetry and backend.name in symmetry_rows.FOR:
         extra["symmetry_rows"] = symmetry_rows.order_rows(compiled)[1]
+    if blocks_record is not None:
+        extra["blocks"] = blocks_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]

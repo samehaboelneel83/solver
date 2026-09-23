@@ -17,7 +17,7 @@ import pytest
 
 from app.solve import compile_model
 from app.solve.backends import by_name
-from app.solve.blocks import blocks, refusal, split
+from app.solve.blocks import Block, blocks, refusal, split
 from app.solve.compile import Compiled, Constraint, Linear, Variable
 from app.solve.service import solve_compiled
 
@@ -235,3 +235,170 @@ def test_the_random_models_split_and_are_not_one_easy_case():
     assert all(len(blocks(_random(seed))) >= 2 for seed in range(40))
     statuses = {solve_compiled(by_name("cp-sat"), _random(seed), time_limit=10, seed=1)[0].status for seed in range(40)}
     assert statuses == {"optimal", "infeasible"}
+
+
+# -- solved: at once, and put together (14b) --------------------------------------------------------------
+
+from app.solve.blocks import MAX_PARALLEL, grouped, merge, worth_splitting  # noqa: E402
+from app.solve.blocks import solve as solve_blocks  # noqa: E402
+from app.solve.result import Solution  # noqa: E402
+
+
+def _answer(status, objective=None, bound=None, **extra):
+    return Solution(status=status, optimal=status == "optimal", objective=objective,
+                    assignments=extra.pop("assignments", {}), wall_seconds=extra.pop("wall", 1.0),
+                    solver="s", best_bound=bound, **extra)
+
+
+EMPTY = _model({}, [])
+
+
+@pytest.mark.parametrize(
+    "statuses, expected",
+    [
+        (["optimal", "infeasible", "unbounded"], "infeasible"),
+        (["unbounded", "feasible"], "unbounded"),
+        (["optimal", "unknown"], "unknown"),
+        (["optimal", "feasible"], "feasible"),
+        (["optimal", "optimal"], "optimal"),
+    ],
+)
+def test_the_status_is_the_worst(statuses, expected):
+    results = [_answer(s, 1 if s in ("optimal", "feasible") else None, 1) for s in statuses]
+    merged = merge([EMPTY] * len(results), results, optimal_gap=1e-6)
+    assert merged.status == expected
+    if expected not in ("optimal", "feasible"):
+        assert merged.objective is None and merged.assignments == {}
+
+
+def test_goal_and_bound_add_up_and_the_bound_only_when_every_piece_has_one():
+    a = _answer("optimal", 3, 3, assignments={("x", ()): 1}, wall=2.0)
+    b = _answer("feasible", 4, 6, assignments={("y", ()): 2}, wall=5.0)
+    merged = merge([EMPTY, EMPTY], [a, b], optimal_gap=1e-6)
+    assert (merged.status, merged.objective, merged.best_bound, merged.wall_seconds) == ("feasible", 7, 9, 5.0)
+    assert merged.assignments == {("x", ()): 1, ("y", ()): 2}
+    assert merge([EMPTY, EMPTY], [a, _answer("optimal", 4, None)], optimal_gap=1e-6).best_bound is None
+
+
+def test_a_piece_whose_goal_is_only_its_constant_counts_its_constant():
+    constant = replace(EMPTY, objective=Linear(const=Decimal(5)))
+    merged = merge([constant, EMPTY], [_answer("optimal", None, None), _answer("optimal", 2, 2)], optimal_gap=1e-6)
+    assert merged.objective == 7
+
+
+def test_optimal_pieces_whose_bounds_do_not_meet_are_not_called_optimal():
+    merged = merge([EMPTY], [_answer("optimal", 100, 99)], optimal_gap=1e-6)
+    assert merged.status == "feasible"
+
+
+def test_blocks_beyond_the_limit_are_packed_largest_first_into_the_lightest_group():
+    parts = [Block(frozenset({(f"b{i}", (str(j),)) for j in range(size)}), (i,)) for i, size in enumerate([5, 1, 4, 2, 3, 1])]
+    packed = grouped(parts, 3)
+    assert sorted(len(g.variables) for g in packed) == [5, 5, 6]
+    assert sorted(r for g in packed for r in g.rows) == list(range(6))
+    assert len(grouped(parts, 10)) == 6 and MAX_PARALLEL == 4
+
+
+def _run_one(backend):
+    def run(piece, workers, hint):
+        return solve_compiled(by_name(backend), piece, time_limit=10, seed=1, workers=workers, hint=hint)
+    return run
+
+
+@pytest.mark.parametrize("seed", range(40))
+@pytest.mark.parametrize("backend", ["cp-sat", "highs"])
+def test_solved_at_once_is_the_monolithic_answer(seed, backend):
+    compiled = _random(seed)
+    whole, _ = solve_compiled(by_name(backend), compiled, time_limit=10, seed=1)
+    merged, _, record = solve_blocks(compiled, blocks(compiled), _run_one(backend), workers=8, optimal_gap=1e-6)
+    assert merged.status == whole.status, seed
+    if whole.status == "optimal":
+        assert Fraction(str(merged.objective)) == Fraction(str(whole.objective)), seed
+        # The answer is an answer to the whole model.
+        from app.solve.compile import slack_by_constraint
+
+        assert all(v >= 0 for v in slack_by_constraint(compiled, merged.assignments).values()), seed
+    assert record["blocks"] == len(blocks(compiled)) and record["groups"] <= MAX_PARALLEL
+
+
+# -- through a run ---------------------------------------------------------------------------------------
+
+from sqlalchemy import text  # noqa: E402
+
+from app.solve.service import claim_next, enqueue_run, execute_run  # noqa: E402
+from tests.test_v1_problem_run import db, make_domain, make_model_version, make_problem  # noqa: E402, F401
+
+
+def _two_parts(mode=None):
+    """max x + y + z + w: x + 2y <= 4 (x = 4 best: 4) and z + w <= 3 (3): 7."""
+    var = {"domain": "integer", "lower": 0, "upper": 4}
+    v = lambda n: {"var": n, "index": []}  # noqa: E731
+    return {
+        "version": 2, "sets": [], "parameters": {},
+        "variables": {n: {"index": [], **var} for n in "xyzw"},
+        "constraints": [
+            {"id": "c_first", "left": {"add": [v("x"), {"mul": [{"const": 2}, v("y")]}]}, "relation": "<=",
+             "right": {"const": 4}, "severity": "hard"},
+            {"id": "c_second", "left": {"add": [v("z"), v("w")]}, "relation": "<=", "right": {"const": 3},
+             "severity": "hard"},
+        ],
+        "objective": {"sense": "maximize", **({"mode": mode} if mode else {}), "terms": [
+            {"id": "o_first", "weight": 1, "expression": {"add": [v("x"), v("y")]}},
+            {"id": "o_second", "weight": 1, "expression": {"add": [v("z"), v("w")]}}]},
+    }
+
+
+@pytest.fixture
+def empty_queue(db):
+    db.execute(text("DELETE FROM run"))
+    db.commit()
+    yield
+    db.execute(text("DELETE FROM run"))
+    db.commit()
+
+
+@pytest.mark.parametrize(
+    "on, mode, record",
+    [
+        (True, None, {"blocks": 2, "groups": 2, "sizes": [2, 2], "statuses": ["optimal", "optimal"]}),
+        (True, "lex", {"solved_whole": "a lexicographic goal is solved one term at a time across the whole model"}),
+        (False, None, None),
+    ],
+    ids=["on", "on-but-lex", "off"],
+)
+def test_a_run_solves_its_blocks_at_once_only_when_the_setting_says_so(db, empty_queue, on, mode, record):
+    domain = make_domain(db, "separable")
+    problem = make_problem(db, domain)
+    version = make_model_version(db, problem, _two_parts(mode))
+    scenario = db.execute(
+        text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.execute(text("INSERT INTO setting (scope, scope_id, key, value)"
+                    " VALUES ('problem', :p, 'solve.separable', CAST(:v AS jsonb))"), {"p": problem, "v": "true" if on else "false"})
+    db.commit()
+    try:
+        run_id = enqueue_run(db, scenario, time_limit=10.0, solver="highs")
+        assert claim_next(db) == run_id
+        outcome = execute_run(db, run_id)
+        params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+        # A lexicographic run reports its first term (x + y = 4); weighted, the sum.
+        assert outcome.status == "optimal" and outcome.objective == (4 if mode == "lex" else 7)
+        assert params["separable"] is on
+        if record is None:
+            assert "blocks" not in params
+        else:
+            assert {k: params["blocks"][k] for k in record} == record
+        assignments = db.execute(text("SELECT assignments FROM solution WHERE run_id = :r"), {"r": run_id}).scalar_one()
+        assert set(assignments) == {"x", "y", "z", "w"}
+    finally:
+        db.execute(text("DELETE FROM run"))
+        db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+        db.commit()
+
+
+def test_a_stray_decision_is_not_worth_a_split():
+    lone = _model(_vars("x", "y", "z"), [_row("c1", {"x": 1, "y": 1})])
+    assert len(blocks(lone)) == 2 and not worth_splitting(blocks(lone))
+    two = _model(_vars("x", "y"), [_row("c1", {"x": 1}), _row("c2", {"y": 1})])
+    assert worth_splitting(blocks(two))

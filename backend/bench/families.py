@@ -40,6 +40,9 @@ whole-number models that only reach CP-SAT once their rules are scaled.
   no optimum lies past it -- and grows with the size, which is what the
   comparison is about: the time-indexed model grows with the horizon, the
   interval model does not.
+- `facility_regions` / `knapsack_depots` -- four independent `facility` or
+  `knapsack` instances in one model, every name suffixed: separable blocks
+  (`app.solve.blocks`, setting `solve.separable`). Comparison only.
 """
 
 from __future__ import annotations
@@ -570,6 +573,66 @@ def rota_teams(size: str, instance: int) -> tuple[dict, dict]:
     return ir, data
 
 
+# -- separable: independent copies (Phase 14) -----------------------------------------
+
+_COPIES = 4
+
+
+def _renamed(ir: dict, data: dict, suffix: str) -> tuple[dict, dict]:
+    """The model with every set, parameter, decision, rule and goal term
+    renamed -- a copy that shares nothing with the original."""
+    sets = set(ir["sets"])
+    pars, variables = set(ir["parameters"]), set(ir["variables"])
+
+    def walk(node):
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        out = {}
+        for key, value in node.items():
+            if key == "var" and value in variables or key == "par" and value in pars or key == "set" and value in sets:
+                out[key] = value + suffix
+            else:
+                out[key] = walk(value)
+        return out
+
+    renamed = {
+        **ir,
+        "sets": [name + suffix for name in ir["sets"]],
+        "parameters": {name + suffix: {**spec, "index": [i + suffix for i in spec.get("index", [])]}
+                       for name, spec in ir["parameters"].items()},
+        "variables": {name + suffix: {**spec, "index": [i + suffix for i in spec.get("index", [])]}
+                      for name, spec in ir["variables"].items()},
+        "constraints": [{**walk(c), "id": c["id"] + suffix} for c in ir["constraints"]],
+        "objective": {**ir["objective"], "terms": [{**walk(t), "id": t["id"] + suffix} for t in ir["objective"]["terms"]]},
+    }
+    rows = {name + suffix: [{(k + suffix if k in sets else k): v for k, v in row.items()} for row in values]
+            for name, values in data["parameters"].items()}
+    return renamed, {**data, "sets": {name + suffix: members for name, members in data["sets"].items()}, "parameters": rows}
+
+
+def _separable(family: Callable[[str, int], tuple[dict, dict]]) -> Callable[[str, int], tuple[dict, dict]]:
+    """`_COPIES` independent instances of a family in one model: what
+    solving separable blocks at once is for (`app.solve.blocks`)."""
+
+    def generate(size: str, instance: int) -> tuple[dict, dict]:
+        copies = [_renamed(*family(size, instance * _COPIES + n), f"_{n}") for n in range(_COPIES)]
+        ir = {
+            **copies[0][0],
+            "sets": [s for c, _ in copies for s in c["sets"]],
+            "parameters": {k: v for c, _ in copies for k, v in c["parameters"].items()},
+            "variables": {k: v for c, _ in copies for k, v in c["variables"].items()},
+            "constraints": [r for c, _ in copies for r in c["constraints"]],
+            "objective": {**copies[0][0]["objective"], "terms": [t for c, _ in copies for t in c["objective"]["terms"]]},
+        }
+        data = _data({k: v for _, d in copies for k, v in d["sets"].items()},
+                     {k: v for _, d in copies for k, v in d["parameters"].items()})
+        return ir, data
+
+    return generate
+
+
 FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota": rota,
     "facility": facility,
@@ -580,6 +643,8 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "flow_shop": flow_shop,
     "flow_shop_timed": flow_shop_timed,
     "rota_teams": rota_teams,
+    "facility_regions": _separable(facility),
+    "knapsack_depots": _separable(knapsack),
 }
 
 
@@ -588,7 +653,7 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
 #: nightly's 30 s limit, so it would prove it some nights and not others --
 #: a "proof lost" that is only the clock. The MIP backends find nothing
 #: there in 60 s at all (bench/results/2026-09-23-flow-shop-formulations.md).
-COMPARISON_ONLY = frozenset({"flow_shop_timed", "rota_teams"})
+COMPARISON_ONLY = frozenset({"flow_shop_timed", "rota_teams", "facility_regions", "knapsack_depots"})
 
 
 def generate(family: str, size: str, instance: int = 0) -> Instance:

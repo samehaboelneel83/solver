@@ -9,6 +9,8 @@ dead worker:
 
 * **memory** -- `RLIMIT_AS` at `SOLVE_MEMORY_MB` (default 4096). An
   allocation past it fails in the child: "ran out of memory (limit 4096 MB)".
+* **core files** -- none: the child is not dumpable (`PR_SET_DUMPABLE` 0),
+  so a killed solve leaves no multi-gigabyte dump on the host.
 * **CPU** -- `RLIMIT_CPU` at the run's time limit x its workers + 30 s. A
   solver that ignores its own clock is stopped by the kernel.
 * **wall clock** -- the parent's own deadline, time limit + 15 s: SIGTERM,
@@ -179,6 +181,20 @@ def _looks_like_memory(exc: BaseException) -> bool:
     return False
 
 
+def _no_core_dump() -> None:  # pragma: no cover -- in the child
+    """No core dump when a limit kills the child. A solver's address space
+    is gigabytes, and under Docker Desktop the kernel pipes each dump to the
+    host's disk (%TEMP%/wsl-crashes) -- ten filled 13.8 GB of C: on
+    2026-09-23. A piped dump ignores `RLIMIT_CORE` 0; a process that is not
+    dumpable (`PR_SET_DUMPABLE` 0) is never dumped at all."""
+    try:
+        import ctypes
+
+        ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE, 0
+    except (OSError, AttributeError):
+        pass
+
+
 def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # pragma: no cover -- in the child
     # Loaded before the ceiling: importing the code is not the solve.
     fn = _resolve(target)
@@ -188,8 +204,10 @@ def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # prag
         memory = limits["memory_mb"] * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
         resource.setrlimit(resource.RLIMIT_CPU, (limits["cpu_s"], limits["cpu_s"] + 5))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except (ImportError, ValueError, OSError):
         pass
+    _no_core_dump()
 
     def progress(kind: str, payload: dict) -> None:
         conn.send(("progress", kind, payload))

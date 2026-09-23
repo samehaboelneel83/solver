@@ -24,6 +24,12 @@ pytestmark = pytest.mark.skipif(not sandbox.enabled(), reason="no fork on this p
 HERE = "tests.test_sandbox"
 
 
+def dumpable(*, should_stop, on_progress):
+    import ctypes
+
+    return ctypes.CDLL(None).prctl(3, 0, 0, 0, 0)  # PR_GET_DUMPABLE
+
+
 def answer(*, value, should_stop, on_progress):
     on_progress("incumbent", {"t": 0.1, "objective": 3.0})
     on_progress("bound", {"t": 0.2, "bound": 2.0})
@@ -120,3 +126,9 @@ def test_a_run_that_runs_out_of_memory_fails_with_a_reason_and_the_worker_goes_o
     fed = enqueue_run(db, seeded["scenario_id"], time_limit=10.0)
     assert work_once(db) == fed
     assert db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": fed}).scalar_one() in ("optimal", "feasible")
+
+
+def test_a_killed_solve_leaves_no_core_file():
+    """Under Docker Desktop a core dump lands on the host's disk: ten of a
+    solver's filled 13.8 GB of C: on 2026-09-23."""
+    assert sandbox.run(f"{HERE}:dumpable", {}, time_limit=5) == 0
