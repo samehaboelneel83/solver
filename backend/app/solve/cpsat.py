@@ -215,6 +215,12 @@ def _add_curve(model: cp_model.CpModel, cp_vars: dict, curve) -> None:
     import math
 
     lo, hi = math.ceil(curve.points[0][0]), math.floor(curve.points[-1][0])
+    if hi < lo:
+        # No whole x on the curve at all: nothing can hold, as on every
+        # other backend -- infeasible, not an invalid model.
+        model.Add(cp_vars[curve.x] < 0)
+        model.Add(cp_vars[curve.x] > 0)
+        return
     table = [_whole(curve.value_at(Decimal(k)), f"the curve at {k}") for k in range(lo, hi + 1)]
     position = model.NewIntVar(0, hi - lo, "")
     model.Add(position == cp_vars[curve.x] - lo)

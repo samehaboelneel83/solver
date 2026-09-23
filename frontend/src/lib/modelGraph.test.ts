@@ -192,6 +192,28 @@ describe("buildModelView on models that are not tidy", () => {
     expect(modelDetails(rule)).toContainEqual(["Kind", "Rule that must hold (hard), quadratic"]);
   });
 
+  it("draws a piecewise curve as a linear reading of its variable, in a rule and in the goal", () => {
+    const x = { var: "x", index: [] };
+    const curve = { pwl: x, points: [[0, 0], [2, 10], [4, 16]] };
+    const { graph: built } = buildModelView(
+      {
+        sets: [],
+        parameters: {},
+        variables: { x: { index: [], domain: "integer", lower: 0, upper: 4 } },
+        constraints: [{ id: "c_budget", left: curve, relation: "<=", right: { const: 12 }, severity: "hard" }],
+        objective: { sense: "minimize", terms: [{ id: "o", weight: 1, expression: curve }] },
+      },
+      []
+    );
+    const rule = built.nodes.find((node) => node.id === "model-con-c_budget");
+    expect(rule?.label).toBe("c_budget\nmust hold");
+    expect(modelDetails(rule)).toContainEqual(["Rule", "curve(x[], 3 points) ≤ 12"]);
+    expect(built.edges.some((e) => e.source === "model-var-x" && e.target === "model-con-c_budget")).toBe(true);
+    const objective = built.nodes.find((node) => node.id === OBJECTIVE_NODE_ID);
+    expect(objective?.label).toBe("minimize\n1 term");
+    expect(modelDetails(objective)).toContainEqual(["o", "1 × curve(x[], 3 points)"]);
+  });
+
   it("is empty, not broken, with no model at all", () => {
     const { graph: built } = buildModelView(null, []);
     expect(built.nodes).toEqual([]);

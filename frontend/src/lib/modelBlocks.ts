@@ -188,6 +188,10 @@ export function termBlock(term: Term | undefined): SerialBlock {
   if ("const" in term) return fixed({ type: "ir_const", fields: { VALUE: String(term.const) } });
   if ("var" in term) return fixed({ type: "ir_var", fields: { NAME: term.var, INDEX: bracket(term.index) } });
   if ("par" in term) return fixed({ type: "ir_par", fields: { NAME: term.par, INDEX: bracket(term.index) } });
+  if ("pwl" in term) {
+    // No curve block yet (the editor slice): the variable it is a curve of.
+    return fixed({ type: "ir_var", fields: { NAME: `curve(${term.pwl.var})`, INDEX: bracket(term.pwl.index) } });
+  }
   if ("attr" in term) return fixed({ type: "ir_attr", fields: { NAME: term.attr.name, OF: term.attr.of } });
   if ("sum" in term) {
     return fixed({

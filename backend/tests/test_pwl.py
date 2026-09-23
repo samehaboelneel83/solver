@@ -265,6 +265,21 @@ def test_hand_worked(name, ir, expected, backend_name):
         assert abs(y - curve.value_at(x)) <= Decimal("1e-6"), (x, y)
 
 
+def test_a_whole_x_on_a_curve_between_whole_numbers_is_infeasible_everywhere():
+    """0.2..0.8 covers no whole number: no answer, on every backend that
+    takes it -- CP-SAT's table would be empty, which is not an error."""
+    ir = _ir("integer", [[0.2, 0], [0.8, 1]], "minimize")
+    compiled = compile_model(ir, NO_DATA)
+    found = refine(classify(ir, NO_DATA), compiled)
+    for name in ("cp-sat", "scip", "highs", "milp"):
+        try:
+            choose(found, name)
+        except NoBackend:
+            continue
+        result, _ = solve_compiled(by_name(name), compiled, time_limit=10)
+        assert result.status == "infeasible", (name, result.status)
+
+
 # -- random models against exact arithmetic -----------------------------------------------
 
 

@@ -115,6 +115,13 @@ describe("referencesOf", () => {
   });
 });
 
+describe("referencesOf a piecewise curve", () => {
+  it("finds the variable the curve is of", () => {
+    const term = { pwl: { var: "units", index: [] }, points: [[0, 0], [1, 5]] } as Term;
+    expect([...referencesOf(term).names]).toEqual(["units"]);
+  });
+});
+
 describe("strandedBy", () => {
   const constraints: Constraint[] = [
     {

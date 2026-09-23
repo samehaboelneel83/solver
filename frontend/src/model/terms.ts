@@ -360,6 +360,10 @@ export function describeTerm(term: Term | undefined | null): string {
     }
     case "add":
       return (term as { add: Term[] }).add.map(describeTerm).join(" + ");
+    case "pwl": {
+      const t = term as { pwl: { var: string; index: string[] }; points: [number, number][] };
+      return `curve(${t.pwl.var}[${t.pwl.index.join(", ")}], ${t.points.length} points)`;
+    }
     default: {
       const t = term as { mul: [Term, Term] };
       return `${describeTerm(t.mul[0])} × ${describeTerm(t.mul[1])}`;
@@ -373,6 +377,7 @@ export function describeTerm(term: Term | undefined | null): string {
 export function degree(term: Term): number {
   switch (termKind(term)) {
     case "var":
+    case "pwl":
       return 1;
     case "sum":
       return degree((term as { sum: Term }).sum);

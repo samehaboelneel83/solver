@@ -76,7 +76,7 @@ function estimateWidth(lines: string[], pxPerChar: number, min: number, padding:
 function degree(term: unknown): number {
   if (!term || typeof term !== "object") return 0;
   const t = term as Record<string, unknown>;
-  if (typeof t.var === "string") return 1;
+  if (typeof t.var === "string" || t.pwl !== undefined) return 1;
   if (t.sum !== undefined) return degree(t.sum);
   if (Array.isArray(t.add)) return Math.max(0, ...t.add.map(degree));
   if (Array.isArray(t.mul)) return t.mul.reduce((total: number, child) => total + degree(child), 0);
@@ -111,6 +111,8 @@ function collect(
     const list = t[key];
     if (Array.isArray(list)) list.forEach((item) => collect(item, found, bound));
   }
+  // A piecewise curve reads the variable it is a curve of.
+  if (t.pwl && typeof t.pwl === "object") collect(t.pwl, found, bound);
 }
 
 /**
