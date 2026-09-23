@@ -559,6 +559,22 @@ complete.**
 
 ---
 
+**Progress (2026-09-23):** native IIS is done (`79d8b1a`). `highs.iis`
+asks HiGHS for an infeasible subset of a linear model's relaxation, in the
+HiGHS child; `diagnose.explain` treats it as a *core* -- confirmed
+infeasible with the run's own backend, then shrunk by deletion filtering on
+the core alone -- so the verdicts stay the run's and the result is proven
+irreducible, for any backend. No core (relaxation feasible, switches,
+curves, scheduling, HiGHS not finishing) and the full search runs. The
+run records `conflict_method` / `_probes` / `_seconds`. Measured
+(`bench/results/2026-09-23-native-iis.md`): never more probes, 2 against
+45 where the conflict is small in a big model, little saved where it is
+most of the model, ~0.5 s fixed for the HiGHS child. HiGHS's
+`Irreducible` flag took 49 s against 1 s on a 12,340-row relaxation and
+ignores `time_limit`, so it is off. Still open in this phase: CP-SAT
+assumption cores, a faster shrink of a large core (facility L exhausts
+the 200-probe budget either way), and the explanations UI.
+
 ## Phase 12 — Caching and warm starts (~2 weeks)
 
 - **Result cache:** key = sha256(ir_hash, dataset_hash, scenario_patch, solver, SolveParams incl. seed).

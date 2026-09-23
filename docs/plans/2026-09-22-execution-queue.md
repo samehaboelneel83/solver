@@ -54,7 +54,7 @@ lane; no LLM / NL→IR work.
 
 ## Phase 11 — explanations
 
-- [ ] (11) Native IIS — done when HiGHS LP conflicts come from its own IIS (or a measured fallback), with probes and time compared.
+- [x] (11) Native IIS — done when HiGHS LP conflicts come from its own IIS (or a measured fallback), with probes and time compared. *(`79d8b1a`: `highs.iis` (strategy FromLp) proposes a core for any linear model, confirmed and shrunk with the run's own backend; no core, the full search. `bench/results/2026-09-23-native-iis.md`: never more probes, rota L 2 against 45, facility little saved, ~0.5 s fixed; HiGHS's Irreducible flag measured at 49 s vs 1 s and off. Live: feed blend with a 60 kg protein floor, infeasible on GLOP, conflict c_protein + c_fibre (worked by hand: 60 kg of protein carries at least 8.2 kg of fibre against a 5 kg cap), minimal, method iis, 3 probes, 0.48 s.)*
 - [ ] (11) CP-SAT assumption cores — done when CP-SAT diagnoses via enforcement literals and `SufficientAssumptionsForInfeasibility`.
 - [ ] (11) Minimal conflicts — done when cores are shrunk to minimal by deletion filtering on the core only, and `conflict_minimal` is honest.
 - [ ] (11) Explanations UI — done when the run page shows the new conflicts in business language, verified in a browser.
