@@ -69,7 +69,7 @@ describe("DeclarationsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/demand is used by c_cover/i);
   });
 
-  it("shows an interval read-only, and offers no interval to pick", () => {
+  it("shows an interval by its parts, and never turns an existing variable into one", () => {
     renderEditor({
       variables: {
         assign: { index: ["employee", "day"], domain: "binary" },
@@ -175,7 +175,60 @@ describe("DeclarationsEditor", () => {
       "yes or no",
       "a whole number",
       "any number",
+      "a span of time",
     ]);
+  });
+
+  it("makes a new interval whole: its start and end are declared with it", () => {
+    const onChange = renderEditor();
+    fireEvent.change(screen.getByLabelText(/new variable/i), { target: { value: "shift_block" } });
+    fireEvent.change(screen.getByLabelText(/^decides$/i), { target: { value: "interval" } });
+    const indexChoices = screen.getByRole("group", { name: /one for every/i });
+    fireEvent.click(within(indexChoices).getByRole("checkbox", { name: /^day/ }));
+    fireEvent.click(screen.getByRole("button", { name: /add variable/i }));
+
+    const variables = onChange.mock.calls.at(-1)![0].variables;
+    expect(variables.shift_block).toEqual({
+      index: ["day"], domain: "interval", start: "shift_block_start", end: "shift_block_end", size: 1,
+    });
+    expect(variables.shift_block_start).toEqual({ index: ["day"], domain: "integer", lower: 0 });
+    expect(variables.shift_block_end).toEqual({ index: ["day"], domain: "integer", lower: 0 });
+  });
+
+  it("edits an interval's parts from declarations over its own sets", () => {
+    const onChange = renderEditor({
+      parameters: { demand: { index: ["day"] } },
+      variables: {
+        assign: { index: ["employee", "day"], domain: "binary" },
+        on: { index: ["day"], domain: "binary" },
+        b: { index: ["day"], domain: "integer" },
+        e: { index: ["day"], domain: "integer" },
+        wrong_index: { index: ["employee"], domain: "integer" },
+        task: { index: ["day"], domain: "interval", start: "b", end: "e", size: 3 },
+      },
+    });
+    const starts = screen.getByLabelText("task starts at") as HTMLSelectElement;
+    expect(Array.from(starts.options).map((o) => o.value)).toEqual(["b", "e"]);
+
+    fireEvent.change(screen.getByLabelText("task lasts"), { target: { value: "demand" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.task.size).toBe("demand");
+
+    fireEvent.change(screen.getByLabelText("task happens"), { target: { value: "on" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.task.presence).toBe("on");
+  });
+
+  it("refuses to remove a variable an interval is built from, naming the interval", () => {
+    renderEditor({
+      variables: {
+        assign: { index: ["employee", "day"], domain: "binary" },
+        b: { index: ["day"], domain: "integer" },
+        e: { index: ["day"], domain: "integer" },
+        task: { index: ["day"], domain: "interval", start: "b", end: "e", size: 3 },
+      },
+    });
+    const card = screen.getByText("b[day]").closest("div")!.parentElement!;
+    fireEvent.click(within(card).getByRole("button", { name: /remove/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/b is used by task/);
   });
 
   it("says a continuous variable decides any number, not a whole number", () => {

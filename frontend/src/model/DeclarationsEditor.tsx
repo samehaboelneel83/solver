@@ -66,11 +66,11 @@ export default function DeclarationsEditor({
     name: string,
     then: () => void
   ) {
-    const broken = strandedBy({ kind, name }, constraints, objectiveTerms);
+    const broken = strandedBy({ kind, name }, constraints, objectiveTerms, variables);
     if (broken.length > 0) {
       setRefusal(
         `${name} is used by ${broken.join(", ")}. Change ${
-          broken.length > 1 ? "those rules" : "that rule"
+          broken.length > 1 ? "those" : "that"
         } first, then remove it.`
       );
       return;
@@ -176,12 +176,13 @@ export default function DeclarationsEditor({
                 </button>
               </div>
               {spec.domain === "interval" ? (
-                <p className="mt-1 text-xs text-slate-600">
-                  {name} is a span of time: from {spec.start} to {spec.end}, lasting{" "}
-                  {spec.size}
-                  {spec.presence ? `, and only if ${spec.presence}` : ""}. Kept as published; an
-                  interval cannot be edited here yet.
-                </p>
+                <IntervalFields
+                  name={name}
+                  spec={spec}
+                  variables={variables}
+                  parameters={parameters}
+                  onChange={(next) => apply({ variables: { ...variables, [name]: next } })}
+                />
               ) : (
               <>
               <div className="mt-1">
@@ -260,14 +261,34 @@ export default function DeclarationsEditor({
           <AddVariable
             sets={sets}
             taken={[...Object.keys(variables), ...Object.keys(parameters)]}
-            onAdd={(variable) =>
+            onAdd={(variable) => {
+              if (variable.domain !== "interval") {
+                apply({
+                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain } },
+                });
+                return;
+              }
+              // An interval is a start and an end: make them with it, so the
+              // new declaration is whole from the first render.
+              const taken = new Set([...Object.keys(variables), ...Object.keys(parameters), variable.name]);
+              const free = (stem: string) => {
+                let candidate = stem;
+                for (let n = 2; taken.has(candidate); n += 1) candidate = `${stem}_${n}`;
+                taken.add(candidate);
+                return candidate;
+              };
+              const start = free(`${variable.name}_start`);
+              const end = free(`${variable.name}_end`);
+              const part = { index: variable.index, domain: "integer" as const, lower: 0 };
               apply({
                 variables: {
                   ...variables,
-                  [variable.name]: { index: variable.index, domain: variable.domain },
+                  [start]: part,
+                  [end]: part,
+                  [variable.name]: { index: variable.index, domain: "interval", start, end, size: 1 },
                 },
-              })
-            }
+              });
+            }}
           />
         </Card>
       </div>
@@ -275,9 +296,117 @@ export default function DeclarationsEditor({
   );
 }
 
-/** The domains a variable can be given here. An interval is kept and shown,
- * not built: it names other variables, which the editor slice will offer. */
+/** What an existing number or yes-or-no variable can be changed into. Not an
+ * interval: that is a different kind of declaration, made new with its start
+ * and end (`AddVariable`). */
 const SETTABLE_DOMAINS = VARIABLE_DOMAINS.filter((domain) => domain !== "interval");
+
+const sameIndex = (a: readonly string[] | undefined, b: readonly string[]) =>
+  a !== undefined && a.length === b.length && a.every((set, i) => set === b[i]);
+
+/**
+ * An interval's parts: its start and end (whole-number variables), its size
+ * (a whole number, or a parameter), and, optionally, the yes-or-no that says
+ * whether it happens. Each offered only where declared over the interval's
+ * own sets, as the contract asks.
+ */
+function IntervalFields({
+  name,
+  spec,
+  variables,
+  parameters,
+  onChange,
+}: {
+  name: string;
+  spec: VariableSpec;
+  variables: Record<string, VariableSpec>;
+  parameters: Record<string, { index: string[] }>;
+  onChange: (next: VariableSpec) => void;
+}) {
+  const ids = { start: useId(), end: useId(), size: useId(), presence: useId(), number: useId() };
+  const of = (domain: string) =>
+    Object.entries(variables)
+      .filter(([other, v]) => other !== name && v.domain === domain && sameIndex(v.index, spec.index))
+      .map(([other]) => other);
+  const integers = of("integer");
+  const switches = of("binary");
+  const sizes = Object.entries(parameters)
+    .filter(([, p]) => sameIndex(p.index, spec.index))
+    .map(([parameter]) => parameter);
+  const bySize = typeof spec.size === "string";
+  const choice = (id: string, label: string, value: string, options: string[], set: (v: string) => void, blank?: string) => (
+    <div>
+      <label htmlFor={id} className="block text-xs text-slate-600">
+        {label}
+      </label>
+      <select id={id} className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`} value={value} onChange={(e) => set(e.target.value)}>
+        {blank !== undefined && <option value="">{blank}</option>}
+        {blank === undefined && !options.includes(value) && <option value={value}>{value || "choose…"}</option>}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="mt-1 space-y-2">
+      <p className="text-xs text-slate-600">
+        {name} is a span of time: from {spec.start} to {spec.end}, lasting {spec.size}
+        {spec.presence ? `, and only if ${spec.presence}` : ""}.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        {choice(ids.start, `${name} starts at`, spec.start ?? "", integers, (start) => onChange({ ...spec, start }))}
+        {choice(ids.end, `${name} ends at`, spec.end ?? "", integers, (end) => onChange({ ...spec, end }))}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        {choice(
+          ids.size,
+          `${name} lasts`,
+          bySize ? String(spec.size) : "",
+          sizes,
+          (size) => onChange({ ...spec, size: size === "" ? 1 : size }),
+          "a fixed number"
+        )}
+        {!bySize && (
+          <div>
+            <label htmlFor={ids.number} className="block text-xs text-slate-600">
+              {name} length
+            </label>
+            <input
+              id={ids.number}
+              inputMode="numeric"
+              className={`${INPUT_CLASS} mt-0.5 w-20 text-xs`}
+              value={String(spec.size ?? 0)}
+              onChange={(event) => {
+                // A size is a non-negative whole number (interval_size_invalid).
+                if (!/^\d*$/.test(event.target.value)) return;
+                onChange({ ...spec, size: event.target.value === "" ? 0 : Number(event.target.value) });
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {choice(
+        ids.presence,
+        `${name} happens`,
+        spec.presence ?? "",
+        switches,
+        (presence) => {
+          if (presence === "") {
+            const { presence: _always, ...rest } = spec;
+            onChange(rest);
+            return;
+          }
+          onChange({ ...spec, presence });
+        },
+        "always"
+      )}
+    </div>
+  );
+}
 
 /** Planner language for a variable domain — not the contract token. */
 function domainPhrase(domain: string): string {
@@ -387,7 +516,7 @@ function AddVariable({
             value={domain}
             onChange={(event) => setDomain(event.target.value as VariableDomain)}
           >
-            {SETTABLE_DOMAINS.map((option) => (
+            {VARIABLE_DOMAINS.map((option) => (
               <option key={option} value={option}>
                 {domainPhrase(option)}
               </option>

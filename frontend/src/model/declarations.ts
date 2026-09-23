@@ -155,28 +155,47 @@ export function referencesOf(
 export function strandedBy(
   removal: { kind: "set" | "parameter" | "variable"; name: string },
   constraints: readonly Constraint[],
-  objectiveTerms: readonly ObjectiveTerm[]
+  objectiveTerms: readonly ObjectiveTerm[],
+  variables: Readonly<Record<string, VariableSpec>> = {}
 ): string[] {
   const broken: string[] = [];
 
-  const mentions = (term: Term): boolean => {
+  const mentions = (term: Term | undefined): boolean => {
+    if (term == null) return false;
     const { sets, names } = referencesOf(term);
     return removal.kind === "set" ? sets.has(removal.name) : names.has(removal.name);
   };
+  const ranges = (bindings: readonly { set: string }[] | undefined) =>
+    removal.kind === "set" && (bindings ?? []).some((b) => b.set === removal.name);
+  const isNamed = (name: string | undefined) => removal.kind !== "set" && name === removal.name;
 
   for (const constraint of constraints) {
-    const inBindings =
-      removal.kind === "set" && (constraint.forall ?? []).some((b) => b.set === removal.name);
+    const schedule = constraint.no_overlap ?? constraint.cumulative;
     if (
-      inBindings ||
-      (constraint.left != null && mentions(constraint.left)) ||
-      (constraint.right != null && mentions(constraint.right))
+      ranges(constraint.forall) ||
+      mentions(constraint.left) ||
+      mentions(constraint.right) ||
+      // The switch of a conditional rule, and a scheduling rule's intervals,
+      // the sets it ranges over, and what it counts.
+      isNamed(constraint.when?.var) ||
+      (schedule !== undefined &&
+        (isNamed(schedule.interval.var) ||
+          ranges(schedule.over) ||
+          mentions(constraint.cumulative?.demand) ||
+          mentions(constraint.cumulative?.capacity)))
     ) {
       broken.push(constraint.id);
     }
   }
   for (const term of objectiveTerms) {
-    if (term.expression != null && mentions(term.expression)) broken.push(term.id);
+    if (mentions(term.expression)) broken.push(term.id);
+  }
+  // An interval is built from other declarations: its start and end, its
+  // presence, and a size read from a parameter.
+  for (const [name, spec] of Object.entries(variables)) {
+    if (spec.domain !== "interval") continue;
+    const parts = [spec.start, spec.end, spec.presence, typeof spec.size === "string" ? spec.size : undefined];
+    if (parts.some(isNamed)) broken.push(name);
   }
   return broken;
 }

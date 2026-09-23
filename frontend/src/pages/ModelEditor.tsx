@@ -24,6 +24,7 @@ import {
 import { checkIrShape } from "../ir";
 import { IR_VERSION, isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import WhenEditor from "../model/WhenEditor";
+import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
@@ -32,7 +33,6 @@ import {
   cleanBinding,
   cleanTerm,
   declaredRelationships,
-  describeBinding,
   describeSchedule,
   describeTerm,
   describeWhen,
@@ -335,6 +335,21 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         }
         if (next.left) next = { ...next, left: cleanTerm(next.left) };
         if (next.right) next = { ...next, right: cleanTerm(next.right) };
+        if (next.no_overlap) {
+          next = { ...next, no_overlap: { ...next.no_overlap, over: next.no_overlap.over.map(cleanBinding) } };
+        }
+        if (next.cumulative) {
+          const body = next.cumulative;
+          next = {
+            ...next,
+            cumulative: {
+              ...body,
+              over: body.over.map(cleanBinding),
+              demand: cleanTerm(body.demand),
+              capacity: cleanTerm(body.capacity),
+            },
+          };
+        }
         return next;
       }),
       ...(draft.objective.terms.length > 0
@@ -534,6 +549,24 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         >
           Add a rule
         </button>
+        {newSchedulingRule("c_", context) !== null && (
+          <button
+            type="button"
+            className="ml-2 mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            onClick={() =>
+              setDraft((current) => {
+                if (!current) return current;
+                const rule = newSchedulingRule(
+                  freeNumberedId("c_", current.constraints.map((constraint) => constraint.id)),
+                  context
+                );
+                return rule ? { ...current, constraints: [...current.constraints, rule] } : current;
+              })
+            }
+          >
+            Add a scheduling rule
+          </button>
+        )}
       </section>
 
       <section aria-labelledby="objective-heading" className="mb-6">
@@ -690,15 +723,7 @@ function ConstraintCard({
       }
     >
       {describeSchedule(constraint) !== null ? (
-        <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-          <p className="font-mono text-xs">
-            {constraint.forall?.length ? `for every ${constraint.forall.map(describeBinding).join(", ")}: ` : ""}
-            {describeSchedule(constraint)}
-          </p>
-          <p className="mt-1">
-            A scheduling rule, always required. Kept as published; it cannot be edited here yet.
-          </p>
-        </div>
+        <SchedulingEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.left == null || constraint.right == null ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>
