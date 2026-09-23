@@ -71,7 +71,7 @@ lane; no LLM / NL→IR work.
 
 ## Phase 15 — multiple objectives and uncertainty
 
-- [ ] (15) Pareto with trade-off chart — done when two objectives yield an epsilon-constraint front stored as points and drawn on the run page, each point linked to its run.
+- [x] (15) Pareto with trade-off chart — done when two objectives yield an epsilon-constraint front stored as points and drawn on the run page, each point linked to its run. *(`1e78f90`, `da9433f`, migration 0045 (rehearsed up/down/up): `pareto_steps` on a run, `app.solve.pareto` (ends lexicographically, steps-1 bounds, each point refined onto the front), each point a run of its own linked from `pareto_point`; the run page asks for it and draws it. Hand-worked (1,9) (6,6) (9,1) on CP-SAT, HiGHS and SCIP -- (6,6) is the point no weighting finds. Found in the full suite and fixed before deploy: the table's tenant trigger fired on the FK's nulling update and could refuse deleting a front's runs; insert-only now. Live in a browser: feed blend cost against fibre, 11 points from 43.5318 (the known optimum) to 48.8571, a point opens its run and links back.)*
 - [ ] (15) IR uncertainty — done when parameters may declare `uncertainty {interval|scenarios, deviation, gamma}` in the contract and editor.
 - [ ] (15) Robust solving — done when Bertsimas–Sim Γ rows are reformulated exactly, equivalence-tested, and the price of robustness is reported.
 

@@ -716,6 +716,21 @@ per-domain tuned settings remain open.
   by k-medoids on parameter vectors; out-of-sample evaluation reported (with confidence interval).
 - **Chance constraints:** SAA with one indicator per sample and `Σ violations ≤ ε·N` (needs Phase 10 indicators).
 
+
+**Progress (2026-09-23):** Pareto with a trade-off chart is done
+(`1e78f90`, migration 0045). A run asked with `pareto_steps` solves the
+front between the goal's two terms by epsilon-constraint: each end
+lexicographically, then `steps - 1` bounds on the second term, each point
+refined (best first term under the bound, then best second term under
+that) so it is on the front rather than under it. Each point is recorded
+as a finished run of its own (`params.pareto_of`) and linked from
+`pareto_point`; the run's own answer is the first end; a front is never
+reused from, or stored into, the result cache; the runs list hides the
+points. Exactly two linear terms and required rules only -- anything else
+is refused by name. Not done from the plan: warm-starting each step (warm
+starts are off platform-wide on their own bench) and weighted-sum mode,
+which is left documented as the thing that misses unsupported points
+(`tests/test_pareto.py` pins one).
 ---
 
 ## Phase 16 — Nonlinear stage 3b (~4 weeks) — coordinates with the in-flight SCIP work
