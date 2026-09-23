@@ -786,7 +786,14 @@ declared-bound partner becomes four linear rows, so a model whose every
 product is of that kind is a MILP and HiGHS takes it (such runs that went to
 SCIP now go to HiGHS; exactness is tested, speed was not benchmarked). The
 continuous-by-continuous envelope is a relaxation, and is not used as an
-answer anywhere; SCIP builds it internally for exact solves.
+answer anywhere; SCIP builds it internally for exact solves. SOCP
+detection is done (`e550d2f`): each quadratic rule is labelled a convex
+quadratic, a second-order cone (standard or rotated, on one nappe by the
+bounds) or not proven convex; a model whose rules all are, under a goal
+that curves the right way, needs `socp` and is recorded as a convex
+program -- SCIP takes it now, a conic solver would later. Phase 16's queued
+items are all done; IPOPT and Decision 5 (a local optimum shown) are not
+queued, and the loop's defaults keep them out.
 
 ---
 
