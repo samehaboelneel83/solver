@@ -634,6 +634,14 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
     fireEvent.focus(capability);
     fireEvent.change(capability, { target: { value: "run" } });
     fireEvent.mouseDown(await screen.findByRole("option", { name: /run\.submit/ }));
+    // Create only once the form holds both: the parent role's label arrives
+    // from its own options request, and a loaded test run could click in
+    // the tick before it -- then the form (rightly) says "Role is required"
+    // and posts nothing.
+    await waitFor(() => {
+      expect((screen.getByTestId("field-role_id") as HTMLInputElement).value).toMatch(/planner/);
+      expect((screen.getByTestId("field-capability_code") as HTMLInputElement).value).toMatch(/run\.submit/);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
