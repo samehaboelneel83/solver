@@ -1,4 +1,4 @@
-# Development session handover — 2026-09-24 (updated after GIS 10)
+# Development session handover — 2026-09-24 (updated after R1 and Blocks 3–4)
 
 For an AI coding assistant continuing this project with no memory of the session. **The code is the authority; this document is a map.** Where it says "uncertain", verify before relying on it.
 
@@ -6,7 +6,7 @@ Companion documents in the repo (read in this order after this one):
 
 1. `docs/plans/2026-09-22-execution-queue.md` — the work queue; every item ticked with its commits and what was verified live.
 2. `docs/plans/2026-09-22-handover.md` — the standing handover (state line, procedures, gotchas). Its **State:** line names the deployed commit.
-3. `docs/superpowers/plans/2026-09-24-blockly-edit-mode.md` — the plan being executed (Blocks 1–2 done, Blocks 3–4 open).
+3. `docs/superpowers/plans/2026-09-24-blockly-edit-mode.md` — the Blockly edit-mode plan (Blocks 0–4 all done).
 4. `docs/superpowers/specs/2026-09-24-blockly-edit-mode-design.md`, `docs/superpowers/specs/2026-09-24-spatial-region-partitioning-design.md` — the approved designs.
 5. `docs/contracts/problem-ir.md` — the IR contract (the model document every part of the platform reads).
 
@@ -35,10 +35,10 @@ Companion documents in the repo (read in this order after this one):
 
 The session ran the execution queue autonomously under the user's standing instruction **"go with your recommendations"** (a `/loop`): one queue item at a time, each built with tests, full check green, deployed from a clean worktree, verified live in a browser, ticked in the queue and handover.
 
-At the moment of handover (after GIS 10) the next items are, in queue order:
+At the moment of handover (after R1, Blocks 3 and Blocks 4) the next items are, in queue order:
 
-- **R1–R12 — the optimization target roadmap's open items** (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap", placed **before** Blocks 3–4. **R1 (PDLP for very large LPs) is next.** The GPU lane and LLM/NL→IR stay out (standing defaults).
-- **Blocks 3 and Blocks 4** of the Blockly edit mode (plan Tasks 6–9), after R1–R12 unless the user reorders.
+- **R2–R12 — the optimization target roadmap's remaining open items** (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap". **R2 (portfolio racing) is next.** The GPU lane and LLM/NL→IR stay out (standing defaults).
+- R1 (PDLP) is done. Blocks 3–4 were moved ahead of R2 when the user asked to "create and edit well using blocks" (with a screenshot of the optimization view's read-only blocks showing "(choose)"), and are done.
 
 Acceptance criteria for everything in the queue: full check green (`bash scripts/check.sh`), migration rehearsed up/down/up on a copy of the live database, deployed, verified live in Chrome (API and UI), test data cleaned up, queue + handover updated, committed by path.
 
@@ -73,22 +73,27 @@ Every item below was tested (unit + full check) and verified live unless it says
 | 21 | Fix: connected models could not be solved from the Runs page | found in GIS 9's screenshot | `pages/Runs.tsx` `unexpressedRules` | a connected rule was taken for a pre-contract sketch; Solve was hidden |
 | 22 | **GIS 10** each grid cell's elevation and slope from terrain-RGB tiles | user request (their `egypt_terrain` tileset) | `app/spatial/terrain.py`, `app/api/grids.py` (`elevation`, `_terrain`), `GridGeneratorForm.tsx`, `requirements.txt` (+Pillow) | `c27889c`; live: 81 one-km cells Giza→Mokattam, 18.4–197.6 m (Nile cells 23–29 m, Mokattam up to 196 m) |
 | 23 | Roadmap open items queued as R1–R12 | user: "go ahead on the roadmap" | `docs/plans/2026-09-22-execution-queue.md` | `3712016`; ordered by value against cost |
+| 24 | Fix: the read-only blocks showed "(choose)" over sets, data and attributes | the user's screenshot | `lib/irBlocks/vocabulary.ts` (`OpenDropdown.getOptions`) | `21a2257`; Blockly cached the options before the value loaded |
+| 25 | **R1** PDLP for very large LPs; `approximate` optimality | roadmap Phase 14 | migration 0051, `app/solve/pdlp.py`, `lp.py`, `backends.py`, `service.py`, `genui/translate.py`, `api/runs.py`, `pages/Runs.tsx`, `bench/pdlp.py` | `fc88049` + read-back fix; `solve.pdlp` off by the bench; live 43.5317 shown "optimal to within a tolerance" |
+| 26 | Symmetry detection made linear | found by the R1 bench | `app/solve/symmetry.py` (`_by_member`) | `716b0b5`; 250k-decision compile 213 s → 4.7 s |
+| 27 | **Blocks 3** every construct as its own block | Blockly plan Task 6 | `lib/irBlocks/{vocabulary,toBlocks,toIr,catalogue}.ts` | `3feccaa`, `4762dc0`; no opaque block for any fixture/template; live workshop makespan 9 → 8 after a size edit by mouse |
+| 28 | **Blocks 4** validate route, refusals on blocks, Edit mode in the optimization view | Blockly plan Tasks 7–9 | `api/problems.py` (`validate_version`), `model/useDraftRefusal.ts`, `components/BlocksEditor.tsx` (`showRefusal`), `modelStyles/BlocklyEdit.tsx`, `GraphEditor.tsx`, `irBlocks/buildByBlocks.test.ts` | `2a06560`, `0ea6a8f`, `d504070`; live mouse checks in §11 |
 
 ## 4. Current project state
 
-**Deployed:** code at `c27889c` (GIS 10; backend image rebuilt with Pillow); database at **migration 0050** (GIS 10 added none).
+**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0051** (R1).
 
 ### ✅ Completed
 - Everything in §3.
 - The whole spatial region-partitioning plan (GIS 1–8), GIS 9 (basemaps) and GIS 10 (elevation and slope per cell).
-- Blocks 0, 1, 2 of the Blockly edit mode.
+- Blocks 0–4 of the Blockly edit mode: the whole plan.
+- R1 (PDLP).
 
 ### 🟡 Partially completed
-- **Blockly edit mode:** blocks exist for declarations, plain rules, bindings/filters/`via`, goal terms and plain terms. **Advanced constructs** (`when`, `pwl`, `fn`, interval variables, `no_overlap`/`cumulative`, `connected`, parameter `uncertainty`, `add` > 8 terms) are carried **verbatim in opaque blocks** (`ir_opaque_*`): shown, movable/deletable, not editable. Refusals are not yet shown on the block that caused them; there is no dry-run validate route and no Edit mode in the optimization view.
+- Nothing mid-item. (An opaque block remains only for a shape the blocks could not write back exactly -- e.g. a `connected` rule whose decision is indexed [group, unit], a curve of more than 12 points, an `add` of one term.)
 
 ### ❌ Not completed
-- R1–R12 (the roadmap's open items) — queued, none started; R1 PDLP is next.
-- Blocks 3 (plan Task 6), Blocks 4 (plan Tasks 7–9).
+- R2–R12 (the roadmap's remaining open items) — queued; R2 portfolio racing is next.
 - Connectivity at scale ("approach C": cuts or a heuristic warm start) — not queued as an item yet; recorded as the bench's conclusion.
 - Vector tiles (`egypt_osm`, `pbf`) — not rendered anywhere.
 - GeometryPreview thumbnails have no basemap (deliberately, 64–96 px).
@@ -99,12 +104,14 @@ Every item below was tested (unit + full check) and verified live unless it says
 - `spatial.tiles_index` is set to `http://localhost:8080/index.json` — works only in a browser on the host machine (the browser fetches tiles itself).
 - The tile server's metadata text is double-encoded (UTF-8 read as Windows-1252); repaired for display only. The fix belongs in the user's `.mbtiles` metadata.
 - `Blockly.inject` cannot run under jsdom (canvas text measurement); the editor's logic is tested on a headless workspace and the injected editor only in live browser checks.
-- Renaming a decision in blocks does not rename blocks that reference it; those references then show the stale name and are refused (`reference_undeclared`) — by design, but not yet mapped onto the block (Blocks 4, Task 8).
+- Renaming a decision in blocks does not rename blocks that reference it; those references then show the stale name and are refused (`reference_undeclared`) — by design; the refusal now shows as a warning on the referencing block.
+- Every rule block shows an empty "only when" slot (the `when` condition): visual weight on models that never use it.
+- `solve.pdlp` is off: at the sizes this platform builds (≤ ~2M nonzeros under the 4 GB ceiling) GLOP still proves the optimum (`backend/bench/results/2026-09-24-pdlp.md`).
+- The Runs page asks every solved run for its map; a non-spatial run answers 404 by design (console shows one 404).
 - **Slope on built-up ground reads 4–6 %** even where the land is flat: Copernicus GLO-30 is a *surface* model (buildings and trees count). Not a bug in `terrain.py`; say so to users reading `slope_pct` in cities.
 - **C: disk ~15 GB free (96 %)**; Docker's disk image and WSL crash dumps live there.
 
 ### 🔧 Temporary workarounds
-- Opaque blocks for advanced constructs (removed by Blocks 3; the test "needs no opaque block for any fixture or template" is written in the plan's Task 6).
 - `test_bench.py`'s small-size agreement test excludes `districting` (`_NOT_SMALL`): its S instance is sized to be hard (HiGHS up to 72 s). Exactness is covered by `tests/test_connected.py`'s brute force.
 
 ## 5. Files changed (this session, `0c89b46~1..HEAD`)
@@ -175,8 +182,9 @@ loadBlocks(workspace, json)                 // load with name rules off (see bel
 | 0048 | `setting_key` `solve.probe` (boolean, **false**) | same |
 | 0049 | enum `attr_type` += `geometry` (autocommit block); `attr_value_matches_type` and `entity_validate` judge GeoJSON; `setting_key` `spatial.crs` (number, 4326) | refuses while geometry attributes exist; leaves the enum value |
 | 0050 | `setting_key` `spatial.tiles_index` (string, `""`) | deletes key and settings |
+| 0051 | `run_optimality_known` CHECK allows `approximate`; `setting_key` `solve.pdlp` (boolean, **false**) | refuses while approximate runs exist; deletes key and settings |
 
-All rehearsed up → down → up on a copy of the live database (`pg_dump | psql` into `solver_migtest`, then dropped). **Live data change:** `setting` row `platform / spatial.tiles_index = "http://localhost:8080/index.json"` (set through the API in GIS 9's check; intended to stay). `setting_key.value_type` allows only `number | string | boolean`. Pending DB work: none (GIS 10 adds no migration unless a setting is needed — see §13).
+All rehearsed up → down → up on a copy of the live database (`pg_dump | psql` into `solver_migtest`, then dropped). **Live data change:** `setting` row `platform / spatial.tiles_index = "http://localhost:8080/index.json"` (set through the API in GIS 9's check; intended to stay). `setting_key.value_type` allows only `number | string | boolean`. Pending DB work: none.
 
 ## 8. APIs / integrations
 
@@ -186,7 +194,10 @@ New endpoints (all under the existing JWT bearer auth; tenant isolation by RLS �
 |---|---|---|
 | `POST /api/v1/domains/{id}/grids` | make a grid | body `GridRequest {boundary_entity_id? | boundary?, shape: square|hex, size_m (0, 1e6], entity_type, keep: centre|overlap, layers ≤ 200k points, replace}` → 201 `GridReport {entity_type_id, relationship_type_id, cells, edges, dropped, layer_totals, layer_outside}`; 409 `{message, cells, scenarios}` when cells exist and `replace` is false; 422 named causes (>20,000 cells, bad ring, too wide) ; requires `domain.edit` |
 | `GET /api/v1/runs/{id}/map[?dissolve=true]` | GeoJSON of a run's partition | per unit `{key, group, subgroup, <numbers>}`; dissolved per group `{group, subgroup, cells, <totals>}`; 404 "this run has no connected rule over units with a geometry" |
-| `GET /api/v1/runs/{id}/genui` | SSE GenUI events | `spatial-map` component at settle for a spatial run that ended well |
+| `GET /api/v1/runs/{id}/genui` | SSE GenUI events | `spatial-map` component at settle for a spatial run that ended well; an `approximate` optimum is a warning, "optimal to within a small tolerance -- not proven the best" |
+| `POST /api/v1/problems/{id}/versions/validate` | dry-run publish | body `{ir}` → `{ok: true}` or the exact 422 publish gives; writes nothing; requires `model.publish` |
+
+Changed: `RunSummary.optimality` (`GET /api/v1/runs…`) may be `approximate` (R1); a request may name solver `pdlp`.
 
 Existing endpoints used: `POST /api/v1/problems/{id}/versions`, `POST /api/v1/scenarios/{id}/runs` (`time_limit_s ≤ 60`), `GET/PUT /api/v1/settings`, `POST /api/v1/templates/{id}/apply`, `POST /api/v1/classify`.
 
@@ -220,16 +231,16 @@ No LLM integration: `LLM_ENABLED=false`; a vLLM endpoint the user described earl
 
 | What | Command | Result at handover |
 |---|---|---|
-| Everything | `SOLVER_BACKEND_IMAGE=solver-backend-test bash scripts/check.sh` (requirements changed) | GIS 10: backend 3,501 passed; frontend 1,991/1,992 in the check -- the one failure, `EntitiesExpression.test.tsx` "does not show a 422 as a generic list failure", timed out at 5.1 s under load and passed alone and in a full rerun (1,992/1,992). A known load flake. |
+| Everything | `bash scripts/check.sh` (`SOLVER_BACKEND_IMAGE=solver-backend-test` when requirements change) | green after R1, and after Blocks 3–4 (see §4 for the run). `EntitiesExpression.test.tsx` "does not show a 422 as a generic list failure" is a known load flake (5 s timeout under load). |
 | One backend file | `MSYS_NO_PATHCONV=1 docker run --rm --network solver_solver_net -v "D:/solver/backend:/app" -w /app --env-file D:/solver/.env -e CLICKHOUSE_HOST=clickhouse solver-backend-test sh -c 'TEST_DATABASE_URL=${DATABASE_URL}_test pytest -q tests/<file>'` | |
-| Frontend | `cd frontend && npx vitest run [src/<path>]` | 1,992 tests in 100 files, green |
-| Backend | pytest | 3,501 tests, green |
+| Frontend | `cd frontend && npx vitest run [src/<path>]` | 2,019 tests in 103 files, green |
+| Backend | pytest | green (R1 added `test_pdlp.py`, Blocks 4 `test_validate_version.py`) |
 | Live checks | `cd frontend && SHOTS=<dir> node _browser_check_<name>.mjs` (gitignored) | each creates its own domain and deletes it |
 
-Known to work live (this session): grid form, connected editor, partition map + export, region template from the Dashboard, draft persistence, Blocks tab edits, basemaps (Satellite, Topo) with solving from the Runs page, grids with elevation and slope from the real terrain tiles.
+Known to work live (this session): grid form, connected editor, partition map + export, region template from the Dashboard, draft persistence, Blocks tab edits, basemaps (Satellite, Topo) with solving from the Runs page, grids with elevation and slope from the real terrain tiles; a PDLP run chosen on the Runs page (43.5317, shown approximate); the read-only blocks showing their values; Edit mode in the optimization view (toolbox, a block dragged by mouse beside the model holds Publish, a mouse edit published as a new version); the workshop template edited as blocks (interval size by keyboard, published, solved: makespan 9 → 8); a refusal shown on the block that caused it (`_browser_check_refusal.mjs`).
 
 Still needs testing:
-- the injected Blockly editor with drag-and-drop by mouse (planned in Task 9); anything in Blocks 3–4;
+- dragging a block **into** a socket by mouse (the live checks drop onto empty canvas, type into fields and pick from dropdowns; connecting is covered headless by `buildByBlocks.test.ts`);
 - **GIS 10's reprojection branch** (`_terrain` when `spatial.crs` != 4326, `Transformer.from_crs(crs, 4326, always_xy=True)`): every fixture and live domain is 4326, so it has never run.
 
 **Test gotchas learned:** Blockly change events are async (`vi.waitFor`); `localStorage` must be cleared between Model editor tests (`clearDraft(1)` also empties the in-memory fallback); a nested `beforeEach` runs after the file's own; the machine's default locale is Arabic (use explicit `en-GB` for clock times in English sentences); `git core.autocrlf=true` rewrites JSON fixtures with CRLF on checkout (compare fixtures as data); Playwright `networkidle` can resolve before React renders new requests — wait for the specific response.
@@ -240,7 +251,8 @@ Still needs testing:
 - Ask the user only if a choice is irreversible, costs money, or contradicts the plan; otherwise "go with your recommendations".
 - IR contract changes go into **both** validators, the shared fixtures, the Pydantic models and `docs/contracts/problem-ir.md`, with parity tests green.
 - Model versions are immutable; publishing always writes a new version.
-- The Blockly edit mode: **the draft IR is the only truth** (approach A); block positions are not saved; one draft per problem shared by forms, Blocks tab and (later) the optimization view; the round trip must stay exact over every valid fixture and template.
+- The Blockly edit mode: **the draft IR is the only truth** (approach A); block positions are not saved; one draft per problem shared by forms, Blocks tab and the optimization view's Edit mode; the round trip must stay exact over every valid fixture and template, with no opaque block for any of them.
+- `optimality` is `global | local | approximate | none`; only `global` answers enter the result cache, per-problem memory and the probe race.
 - Solver techniques are switched by settings whose defaults are decided by benchmark (`backend/bench/`), not by preference.
 - Commit by path — **never `git add -A`**; throwaway probes are gitignored (`frontend/_browser_check_*.mjs`); don't commit `bench/_*.json`.
 - Migrations: check `git log` for the latest number before numbering; rehearse up/down/up on a live copy; migrate **before** restarting.
@@ -252,10 +264,7 @@ Still needs testing:
 
 **High priority**
 
-1. **R1 — PDLP for very large LPs** (roadmap Phase 14; queue item R1). First confirm what the installed OR-Tools (9.15.6755) exposes for PDLP in `solver-backend-test`, and read `app/solve/backends.py` for how `proves` / `provides` gate a backend whose answers are approximate. PDLP answers are **approximate** (tolerance shown), never `optimal`. The roadmap's trigger (nnz > 10^7) may never fire on this platform's models: the bench decides whether a lower threshold is worth it, or whether R1 ships as a registered but rarely chosen backend -- a finding to record, not a reason to skip.
-2. **R2–R12** in queue order (portfolio racing, LNS, near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition).
-3. **Blocks 3** (plan Task 6): blocks for `when`, `pwl`, `fn`, interval variables, `no_overlap`, `cumulative`, `connected`, parameter uncertainty, `add` up to 16; the round trip must then emit **no** `ir_opaque_*` block for any fixture or template.
-4. **Blocks 4** (plan Tasks 7–9): `POST /api/v1/problems/{id}/versions/validate` (dry run, same 422 body as publish), refusals shown on the offending block (`blockForLoc`), Edit mode in the optimization view over the same draft, headless feed-blend build by blocks, live mouse-driven check.
+1. **R2–R12** in queue order: R2 portfolio racing is next, then LNS, near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition.
 
 **Medium priority**
 
@@ -269,7 +278,7 @@ Still needs testing:
 
 ## 14. Recommended next step
 
-Start **R1 (PDLP)**: read the R1 line in `docs/plans/2026-09-22-execution-queue.md`, the Phase 14 PDLP bullet in `docs/plans/2026-09-22-optimization-target-roadmap.md`, and `backend/app/solve/backends.py` (the backend entries, `proves`, `provides`, `classes`, ranking); check what OR-Tools 9.15.6755 exposes for PDLP in `solver-backend-test`; then write the backend test-first (a small LP whose optimum is known, solved to PDLP's tolerance and reported approximate) and a bench over large LPs to set the selection threshold.
+Start **R2 (portfolio racing)**: read the R2 line in `docs/plans/2026-09-22-execution-queue.md` and the roadmap's bullet for it, then `backend/app/solve/race.py` and `service.py`'s probe race (`solve.probe`, off by the bench): R2 may extend it rather than start fresh. Test-first, bench-gated setting, as every solver technique here.
 
 ## 15. Continuation instructions
 
@@ -288,7 +297,7 @@ You are continuing an existing development session on the "Problem Solver" optim
 
 Handover: docs/plans/2026-09-24-session-handover.md (then docs/plans/2026-09-22-execution-queue.md and docs/plans/2026-09-22-handover.md).
 
-State: deployed, database at migration 0050. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), Blockly edit mode Blocks 0-2 (shared draft, Blocks tab, exact IR<->blocks round trip), and elevation and slope per grid cell from its terrain tiles (GIS 10). Next: the optimization target roadmap's open items R1-R12 in queue order, starting with R1 (PDLP for very large LPs), then Blocks 3 and 4 per docs/superpowers/plans/2026-09-24-blockly-edit-mode.md.
+State: deployed, database at migration 0051. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), elevation and slope per grid cell from its terrain tiles (GIS 10), the whole Blockly edit mode (Blocks 0-4: shared draft, Blocks tab, every construct as a block, refusals on blocks, Edit mode in the optimization view) and R1 (PDLP, answers shown as approximate). Next: the optimization target roadmap's remaining items R2-R12 in queue order, starting with R2 (portfolio racing).
 
 Rules: go with your recommendations; ask me only if a choice is irreversible, costs money, or contradicts the plan. Full check (bash scripts/check.sh) green before commit; commit by path, never git add -A; rehearse migrations up/down/up on a copy of the live DB; deploy from a clean worktree and prune Docker images (C: is nearly full); verify live in a browser; never read .env.
 ```
