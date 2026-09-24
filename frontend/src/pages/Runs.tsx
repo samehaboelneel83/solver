@@ -274,9 +274,11 @@ export function unexpressedRules(ir: Record<string, unknown> | undefined): strin
       (rule) =>
         rule &&
         (rule.left === undefined || rule.right === undefined) &&
-        // A scheduling rule has no left or right: it is expressed differently.
+        // A scheduling or connected rule has no left or right: it is
+        // expressed differently, and solves.
         rule.no_overlap === undefined &&
-        rule.cumulative === undefined
+        rule.cumulative === undefined &&
+        rule.connected === undefined
     )
     .map((rule) => String(rule.id ?? "?"));
 }

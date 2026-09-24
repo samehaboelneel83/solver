@@ -8,11 +8,15 @@ const INDEX = [
     description: "Esri World Imagery â€“ Egypt, Z1-Z11",
     attribution: "Tiles Â© Esri â€” Source: Esri, Earthstar Geographics, and the GIS User Community" },
   { tiles: ["http://localhost:8080/data/egypt_terrain/{z}/{x}/{y}.png"], name: "Egypt Terrain RGB", id: "egypt_terrain", encoding: "mapbox", minzoom: 0, maxzoom: 12 },
+  // Added to the server later the same day: vector tiles, not a picture.
+  { tiles: ["http://localhost:8080/data/egypt_osm/{z}/{x}/{y}.pbf"], name: "OSM Egypt (OpenMapTiles)", id: "egypt_osm", format: "pbf", minzoom: 0, maxzoom: 12 },
 ];
 
 describe("the tile index", () => {
-  it("offers the pictures as backgrounds and leaves the terrain data out", () => {
+  it("offers the pictures as backgrounds and leaves terrain data and vector tiles out", () => {
     expect(basemapsOf(INDEX).map((b) => b.id)).toEqual(["egypt_topo", "egypt_satellite"]);
+    // With no `format`, the tile address's extension says what it is.
+    expect(basemapsOf([{ tiles: ["http://t/{z}/{x}/{y}.png?key=1"], id: "a" }, { tiles: ["http://t/{z}/{x}/{y}.mvt"], id: "b" }]).map((b) => b.id)).toEqual(["a"]);
     expect(basemapsOf({ not: "a list" })).toEqual([]);
   });
 

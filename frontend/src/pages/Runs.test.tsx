@@ -238,6 +238,19 @@ describe("unexpressedRules and scheduling", () => {
   });
 });
 
+describe("unexpressedRules and a connected rule", () => {
+  it("does not call a connected rule unexpressed, so its model can be solved", () => {
+    expect(
+      unexpressedRules({
+        constraints: [
+          { id: "c_zones", connected: { assign: { var: "assign", index: ["u", "z"] }, units: { index: "u", set: "cell" }, groups: { index: "z", set: "zone" }, via: "adjacent" }, severity: "hard" },
+          { id: "c_old", note: "named only" },
+        ],
+      })
+    ).toEqual(["c_old"]);
+  });
+});
+
 describe("unexpressedRules", () => {
   it("names rules that carry no arithmetic, and nothing for an expressed model", () => {
     expect(

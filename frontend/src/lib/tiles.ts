@@ -3,9 +3,20 @@
  * Web Mercator arithmetic that puts cells on the imagery.
  *
  * The index is the list a tile server publishes (`/index.json`: one
- * TileJSON per tileset). A tileset with an `encoding` (terrain-RGB) is data,
- * not a picture, and is not offered as a background.
+ * TileJSON per tileset). Only pictures are offered as a background: a
+ * tileset with an `encoding` (terrain-RGB) is elevation data, and a vector
+ * tileset (`pbf`, OpenMapTiles) needs a style and a renderer to be seen.
  */
+
+const PICTURES = new Set(["png", "jpg", "jpeg", "webp"]);
+
+/** The picture format of a tileset: its `format`, else its tile address's extension. */
+function formatOf(tileset: Record<string, unknown>): string {
+  const declared = String(tileset.format ?? "").toLowerCase();
+  if (declared) return declared;
+  const match = /\.([a-z0-9]+)(?:\?.*)?$/i.exec(String((tileset.tiles as string[])[0]));
+  return match ? match[1].toLowerCase() : "";
+}
 
 export type Basemap = {
   id: string;
@@ -52,7 +63,7 @@ export function basemapsOf(index: unknown): Basemap[] {
   if (!Array.isArray(index)) return [];
   return index
     .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
-    .filter((t) => !t.encoding && Array.isArray(t.tiles) && typeof t.tiles[0] === "string")
+    .filter((t) => !t.encoding && Array.isArray(t.tiles) && typeof t.tiles[0] === "string" && PICTURES.has(formatOf(t)))
     .map((t) => ({
       id: String(t.id ?? t.name ?? (t.tiles as string[])[0]),
       name: repairText(String(t.name ?? t.id ?? "Basemap")),
