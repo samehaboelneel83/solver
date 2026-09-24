@@ -181,3 +181,49 @@ def test_a_highs_run_records_the_ordering_only_when_the_setting_says_so(db, empt
         assert "employee" in {entry["set"] for entry in params["symmetry_rows"]}
     else:
         assert "symmetry_rows" not in params
+
+
+def _reference_signature(set_name, row, ir, data):
+    """The detection as first written: every cell and edge scanned for every member."""
+    from app.solve.compile import parameter_index
+
+    key = row["id"]
+    attributes = tuple(sorted((k, repr(v)) for k, v in row.items() if k != "id"))
+    cells = []
+    for name, spec in (ir.get("parameters") or {}).items():
+        order = spec.get("index", [])
+        if set_name not in order:
+            continue
+        at = order.index(set_name)
+        for cell in data.get("parameters", {}).get(name, []):
+            index = parameter_index(cell, order)
+            if index[at] == key:
+                cells.append((name, index[:at] + index[at + 1:], repr(cell["value"])))
+    edges = []
+    for rel in ir.get("relationships") or []:
+        for edge in data.get("relationships", {}).get(rel, []):
+            if edge["from"] == key:
+                edges.append((rel, "to", edge["to"]))
+            if edge["to"] == key:
+                edges.append((rel, "from", edge["from"]))
+    return attributes, tuple(sorted(cells)), tuple(sorted(edges))
+
+
+@pytest.mark.parametrize("family", ["rota_teams", "rota", "facility", "knapsack", "flow_shop"])
+def test_the_one_pass_detection_finds_exactly_what_the_member_by_member_one_did(family):
+    """Bucketing cells and edges by member (the PDLP bench's compile fix) changes no class."""
+    from bench.families import generate
+    from app.solve.symmetry import _linked, classes
+
+    instance = generate(family, "S", 0)
+    ir, data = instance.ir, instance.data
+    expected = []
+    for set_name in ir.get("sets") or []:
+        if any(spec.get("index", []).count(set_name) > 1 for spec in (ir.get("parameters") or {}).values()):
+            continue
+        rows = data.get("sets", {}).get(set_name, [])
+        groups = {}
+        for row in rows:
+            groups.setdefault(_reference_signature(set_name, row, ir, data), []).append(row["id"])
+        expected += [(set_name, tuple(m)) for m in groups.values() if len(m) > 1 and not _linked(m, ir, data)]
+    assert classes(ir, data) == expected

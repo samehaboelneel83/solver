@@ -45,7 +45,15 @@ def classes(ir: dict[str, Any], data: dict[str, Any]) -> list[tuple[str, tuple[s
         if any(spec.get("index", []).count(set_name) > 1 for spec in parameters.values()):
             continue
         rows = data.get("sets", {}).get(set_name, [])
-        signature = {row["id"]: _signature(set_name, row, ir, data) for row in rows}
+        cells, edges = _by_member(set_name, ir, data)
+        signature = {
+            row["id"]: (
+                tuple(sorted((k, repr(v)) for k, v in row.items() if k != "id")),
+                tuple(sorted(cells.get(row["id"], []))),
+                tuple(sorted(edges.get(row["id"], []))),
+            )
+            for row in rows
+        }
         groups: dict[Any, list[str]] = {}
         for row in rows:
             groups.setdefault(signature[row["id"]], []).append(row["id"])
@@ -55,10 +63,14 @@ def classes(ir: dict[str, Any], data: dict[str, Any]) -> list[tuple[str, tuple[s
     return found
 
 
-def _signature(set_name: str, row: dict[str, Any], ir: dict[str, Any], data: dict[str, Any]):
-    key = row["id"]
-    attributes = tuple(sorted((k, repr(v)) for k, v in row.items() if k != "id"))
-    cells = []
+def _by_member(set_name: str, ir: dict[str, Any], data: dict[str, Any]):
+    """Each member's parameter cells and incident edges -- what its signature
+    compares -- gathered in one pass over the data.
+
+    Once per member used to scan every cell of every parameter: members x
+    cells, quadratic, and on every compile (the PDLP bench found it: 14.9 s of
+    a 15.6 s compile at 22,500 decisions)."""
+    cells: dict[Any, list] = {}
     for name, spec in (ir.get("parameters") or {}).items():
         order = spec.get("index", [])
         if set_name not in order:
@@ -66,16 +78,13 @@ def _signature(set_name: str, row: dict[str, Any], ir: dict[str, Any], data: dic
         at = order.index(set_name)
         for cell in data.get("parameters", {}).get(name, []):
             index = parameter_index(cell, order)
-            if index[at] == key:
-                cells.append((name, index[:at] + index[at + 1 :], repr(cell["value"])))
-    edges = []
+            cells.setdefault(index[at], []).append((name, index[:at] + index[at + 1 :], repr(cell["value"])))
+    edges: dict[Any, list] = {}
     for rel in ir.get("relationships") or []:
         for edge in data.get("relationships", {}).get(rel, []):
-            if edge["from"] == key:
-                edges.append((rel, "to", edge["to"]))
-            if edge["to"] == key:
-                edges.append((rel, "from", edge["from"]))
-    return attributes, tuple(sorted(cells)), tuple(sorted(edges))
+            edges.setdefault(edge["from"], []).append((rel, "to", edge["to"]))
+            edges.setdefault(edge["to"], []).append((rel, "from", edge["from"]))
+    return cells, edges
 
 
 def _linked(members: list[str], ir: dict[str, Any], data: dict[str, Any]) -> bool:
