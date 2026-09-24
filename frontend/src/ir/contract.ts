@@ -506,6 +506,16 @@ export const IR_RULES: readonly IrRule[] = [
     text: "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`",
   },
   {
+    code: "stage_needs_version_2",
+    where: "shape",
+    text: "a variable's `stage` appears only in a version 2 document",
+  },
+  {
+    code: "stage_invalid",
+    where: "shape",
+    text: "a variable's `stage` is 1 (decided now) or 2 (decided once the uncertain data is known), and an interval has none",
+  },
+  {
     code: "connected_needs_version_2",
     where: "shape",
     text: "a `connected` rule appears only in a version 2 document",

@@ -375,7 +375,11 @@ export function defineIrBlocks(): void {
         .appendField(new Blockly.FieldLabel("from"), "FROM")
         .appendField(numberText(""), "LOWER")
         .appendField(new Blockly.FieldLabel("to"), "TO")
-        .appendField(numberText(""), "UPPER");
+        .appendField(numberText(""), "UPPER")
+        .appendField(
+          fixed(["", "1", "2"], (s) => ({ "": "(one stage)", "1": "decided now", "2": "once the data is known" })[s] ?? s),
+          "STAGE"
+        );
       // An interval (scheduling): its start and end are integer decisions
       // with its own index, its length a whole number or data, and it may
       // be optional -- present only when a yes-or-no decision says so.

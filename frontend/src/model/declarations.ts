@@ -54,6 +54,8 @@ export type VariableSpec = {
   end?: string;
   size?: number | string;
   presence?: string;
+  /** When it is decided (version 2): 1 now, 2 once the uncertain data is known. */
+  stage?: 1 | 2;
 };
 export type VariableDeclaration = { name: string } & VariableSpec;
 
@@ -78,7 +80,13 @@ export function withDomain(spec: VariableSpec, domain: VariableDomain): Variable
 
 /** Drop empty optionals and binary bounds so the published declaration matches the contract. */
 export function cleanVariable(spec: VariableSpec): VariableSpec {
-  return withDomain(spec, spec.domain);
+  return withStage(withDomain(spec, spec.domain), spec.stage);
+}
+
+/** A stage kept or dropped (an interval has none: its start and end carry it). */
+export function withStage(spec: VariableSpec, stage: 1 | 2 | undefined): VariableSpec {
+  const { stage: _previous, ...rest } = spec;
+  return stage !== undefined && spec.domain !== "interval" ? { ...rest, stage } : rest;
 }
 
 const NAME_RE = new RegExp(NAME_PATTERN);

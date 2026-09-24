@@ -884,3 +884,20 @@ describe("statusNote and an approximate optimum", () => {
     expect(statusNote({ status: "optimal", optimality: "approximate" })).toMatch(/^Optimal to within a small tolerance/);
   });
 });
+
+describe("a stochastic plan (queue R7)", () => {
+  it("says it is the best plan for its futures, what waits, and what it costs out of sample -- never proven best", async () => {
+    const { statusNote } = await import("./Runs");
+    const note = statusNote({
+      status: "optimal",
+      optimality: "approximate",
+      params: { stochastic: { samples: 20, stage_two: ["sell"], expected: 158.1,
+        out_of_sample: { futures: 20, mean: 167.0176, ci95: 17.14, unmet: 1 } } },
+    });
+    expect(note).toBe(
+      "The best plan for 20 sampled futures -- what to decide now; sell waits for the data. " +
+        "On 20 fresh futures it averages 167.018, give or take 17.1 (95%). It cannot meet 1 of them at all."
+    );
+    expect(note).not.toMatch(/^Optimal|proven/);
+  });
+});

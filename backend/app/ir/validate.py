@@ -93,7 +93,7 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 #: the new index's own name.
 _VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
-_VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper"}) | INTERVAL_KEYS
+_VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INTERVAL_KEYS
 _PARAMETER_KEYS = frozenset({"index", "uncertainty"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
@@ -395,6 +395,9 @@ class _ShapeChecker:
             problem = self._check_bounds(name, declaration, at)
             if problem:
                 return problem
+            problem = self._check_stage(name, declaration, at)
+            if problem:
+                return problem
             self.variables[name] = list(index)
         for name, declaration in variables.items():
             if declaration["domain"] == "interval":
@@ -473,6 +476,32 @@ class _ShapeChecker:
                 [*at, "size"],
                 f"the size of the interval {name!r} is {json.dumps(size)}; a size is a "
                 "non-negative whole number, or a parameter",
+            )
+        return None
+
+    def _check_stage(self, name: str, declaration: dict[str, Any], at: Loc):
+        """When a decision is made (version 2): `1`, now -- the plan -- or `2`,
+        once the uncertain data is known -- the recourse. What a two-stage
+        stochastic solve reads; every other solve ignores it. An interval has
+        none: its start and end carry the stage."""
+        if "stage" not in declaration:
+            return None
+        loc: Loc = [*at, "stage"]
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "stage_needs_version_2",
+                loc,
+                f"{name!r} declares a stage, which version 1 does not have; publish it as version 2",
+            )
+        stage = declaration["stage"]
+        if declaration["domain"] == "interval":
+            return Refusal("stage_invalid", loc, f"{name!r} is an interval; its start and end carry the stage")
+        if isinstance(stage, bool) or stage not in (1, 2):
+            return Refusal(
+                "stage_invalid",
+                loc,
+                f"{name!r}'s stage is 1 (decided now) or 2 (decided once the uncertain data is known), "
+                f"not {json.dumps(stage)}",
             )
         return None
 

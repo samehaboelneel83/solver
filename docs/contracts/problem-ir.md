@@ -284,6 +284,7 @@ decimals exist. `3` does not become `3.000000`.
 | `index` | yes | Set names. **Empty** for a scalar variable. Up to 6. |
 | `domain` | yes | `binary`, `integer` or `continuous`. Nothing defaults it — see §7. |
 | `lower`, `upper` | no | Numbers, `lower <= upper`, only on an `integer` or `continuous` variable. A binary one's bounds are 0 and 1. An `integer` variable's bounds must be **whole**: a fractional bound would be rounded by every solver that took it, and differently by some. |
+| `stage` | no | Version 2. `1`: decided **now**, before the uncertain data is known (the plan); `2`: decided **once it is known** (the recourse). Only a two-stage stochastic solve reads it (setting `solve.stochastic_samples`, queue R7); every other solve ignores it. Absent means now. An interval has none -- its start and end carry it. Refused: `stage_needs_version_2`, `stage_invalid`. |
 
 *Invented*, all of it.
 

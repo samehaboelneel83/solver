@@ -162,11 +162,13 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
           ...(presence ? { presence } : {}),
         };
       } else {
+        const stage = fieldOf(d, "STAGE");
         variables[name] = {
           index,
           domain,
           ...(fieldOf(d, "LOWER") !== "" ? { lower } : {}),
           ...(fieldOf(d, "UPPER") !== "" ? { upper } : {}),
+          ...(stage === "1" || stage === "2" ? { stage: Number(stage) } : {}),
         };
       }
     } else if (d.type === "ir_parameter") {

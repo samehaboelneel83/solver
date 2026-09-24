@@ -81,6 +81,22 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   cancelled: "Stopped before an answer.",
 };
 
+/** A two-stage stochastic run's record (queue R7). */
+export type StochasticRecord = {
+  samples: number;
+  stage_two: string[];
+  expected: number | null;
+  out_of_sample?: { futures: number; mean: number | null; ci95: number | null; unmet: number };
+};
+
+/** What the plan is likely to be worth on futures it was not chosen for. */
+export function stochasticOutlook(record: StochasticRecord): string {
+  const out = record.out_of_sample;
+  if (!out || out.mean === null) return "It could not be costed on fresh futures.";
+  const unmet = out.unmet > 0 ? ` It cannot meet ${out.unmet} of them at all.` : "";
+  return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}`;
+}
+
 /** A run's model structure (queue R4) in a few words: the input to a decomposition. */
 export function structureText(found: ModelStructure): string {
   if (found.linking_rules === 0) return `${found.blocks} independent parts`;
@@ -103,8 +119,8 @@ export function statusNote(run: {
   gap?: number | null;
   /** The run was stopped on request and kept the answer it had. */
   stopped?: boolean;
-  /** An approximate optimum's tolerance (PDLP), recorded on the run. */
-  params?: { tolerance?: number } | Record<string, unknown>;
+  /** An approximate optimum's tolerance (PDLP), or the stochastic record (R7), on the run. */
+  params?: { tolerance?: number; stochastic?: StochasticRecord } | Record<string, unknown>;
 }): string {
   if (run.status === "feasible" && run.stopped) {
     return typeof run.gap === "number"
@@ -113,6 +129,14 @@ export function statusNote(run: {
   }
   if (run.status === "feasible" && typeof run.gap === "number") {
     return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
+  }
+  const stochastic = (run.params as { stochastic?: StochasticRecord } | undefined)?.stochastic;
+  if (run.status === "optimal" && run.optimality === "approximate" && stochastic) {
+    return (
+      `The best plan for ${stochastic.samples} sampled futures -- what to decide now; ` +
+      `${stochastic.stage_two.join(", ")} ${stochastic.stage_two.length === 1 ? "waits" : "wait"} for the data. ` +
+      stochasticOutlook(stochastic)
+    );
   }
   if (run.status === "optimal" && run.optimality === "approximate") {
     const tolerance = run.params?.tolerance;

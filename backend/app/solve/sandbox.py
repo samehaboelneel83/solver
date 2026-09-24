@@ -301,6 +301,25 @@ def lagrange_in_child(*, backend: str, compiled, found, answer, time_limit: floa
     return bounded.bound, bounded.record
 
 
+def stochastic_in_child(*, backend: str, ir, data, compiled, samples: int, time_limit: float, seed, workers: int,
+                        gap_rel: float, should_stop, on_progress):
+    """The two-stage stochastic solve (app.solve.stochastic) in one child: the extensive form and every
+    out-of-sample future solved here."""
+    from app.solve import stochastic
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+
+    def run(model, seconds):
+        return solve_compiled(chosen, model, time_limit=seconds, seed=seed, should_stop=should_stop,
+                              workers=workers, gap_rel=gap_rel)[0]
+
+    solved = stochastic.solve(ir, data, compiled, run, samples=samples, time_limit=time_limit, seed=seed,
+                              should_stop=should_stop)
+    return solved.solution, solved.record
+
+
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain

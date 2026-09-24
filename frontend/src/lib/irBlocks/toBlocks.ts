@@ -32,7 +32,7 @@ export type Workspace = { blocks: { languageVersion: 0; blocks: SerialBlock[] } 
 
 type Json = Record<string, unknown>;
 
-const VARIABLE_KEYS = new Set(["index", "domain", "lower", "upper"]);
+const VARIABLE_KEYS = new Set(["index", "domain", "lower", "upper", "stage"]);
 const INTERVAL_VARIABLE_KEYS = new Set(["index", "domain", "start", "end", "size", "presence"]);
 const RULE_KEYS = new Set(["id", "note", "forall", "left", "relation", "right", "severity", "weight", "when"]);
 /** The most terms an `add` block holds; a longer sum is carried opaque rather than nested (nesting would not round-trip). */
@@ -180,7 +180,8 @@ export function irToBlocks(
         ? Object.keys(spec).every((k) => INTERVAL_VARIABLE_KEYS.has(k)) &&
           isName(spec.start) && isName(spec.end) && (isName(spec.size) || Number.isInteger(spec.size)) &&
           (spec.presence === undefined || isName(spec.presence))
-        : Object.keys(spec).every((k) => VARIABLE_KEYS.has(k));
+        : Object.keys(spec).every((k) => VARIABLE_KEYS.has(k)) &&
+          (spec.stage === undefined || spec.stage === 1 || spec.stage === 2);
       if (!known) return opaque("declaration", loc, { kind: "variable", name, spec }, `decide ${name} (kept as it is)`);
       const index = (spec.index as string[]) ?? [];
       return block(loc, {
@@ -192,6 +193,7 @@ export function irToBlocks(
           DOMAIN: String(spec.domain ?? "binary"),
           LOWER: spec.lower === undefined ? "" : String(spec.lower),
           UPPER: spec.upper === undefined ? "" : String(spec.upper),
+          STAGE: spec.stage === 1 || spec.stage === 2 ? String(spec.stage) : "",
           ...(interval
             ? { START: String(spec.start), END: String(spec.end), SIZE: String(spec.size), PRESENCE: (spec.presence as string) ?? "" }
             : {}),

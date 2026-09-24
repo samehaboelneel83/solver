@@ -63,7 +63,7 @@ const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via
  */
 const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
-const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", ...INTERVAL_KEYS]);
+const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", "stage", ...INTERVAL_KEYS]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
@@ -391,6 +391,8 @@ class ShapeChecker {
       if (intervalKeys) return intervalKeys;
       const bounds = this.checkBounds(name, declaration, at);
       if (bounds) return bounds;
+      const stage = this.checkStage(name, declaration, at);
+      if (stage) return stage;
       this.variables.set(name, index as string[]);
     }
     for (const [name, declaration] of Object.entries(variables)) {
@@ -482,6 +484,31 @@ class ShapeChecker {
         "interval_size_invalid",
         [...at, "size"],
         `the size of the interval '${name}' is ${show(size)}; a size is a non-negative whole number, or a parameter`
+      );
+    }
+    return null;
+  }
+
+  /** `_check_stage` in `app/ir/validate.py`, in the same order. */
+  private checkStage(name: string, declaration: Json, at: IrLoc): IrRefusal | null {
+    if (!("stage" in declaration)) return null;
+    const loc: IrLoc = [...at, "stage"];
+    if (this.ir.version === 1) {
+      return refusal(
+        "stage_needs_version_2",
+        loc,
+        `'${name}' declares a stage, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const stage = declaration.stage;
+    if (declaration.domain === "interval") {
+      return refusal("stage_invalid", loc, `'${name}' is an interval; its start and end carry the stage`);
+    }
+    if (stage !== 1 && stage !== 2) {
+      return refusal(
+        "stage_invalid",
+        loc,
+        `'${name}''s stage is 1 (decided now) or 2 (decided once the uncertain data is known), not ${show(stage)}`
       );
     }
     return null;

@@ -185,6 +185,9 @@ class Variable(_Model):
     end: Optional[Name] = None
     size: Optional[Union[Annotated[StrictInt, Field(ge=0)], Name]] = None
     presence: Optional[Name] = None
+    # When it is decided (version 2): 1 now, 2 once the uncertain data is
+    # known -- what a two-stage stochastic solve reads.
+    stage: Optional[Literal[1, 2]] = None
 
     @model_validator(mode="after")
     def _interval_keys(self) -> "Variable":
@@ -195,6 +198,8 @@ class Variable(_Model):
                 raise ValueError("an interval names its start, end and size and carries no bounds")
         elif any(v is not None for v in (*parts.values(), self.presence)):
             raise ValueError("only an interval names a start, end, size or presence")
+        if self.domain == "interval" and self.stage is not None:
+            raise ValueError("an interval has no stage; its start and end carry it")
         return self
 
 

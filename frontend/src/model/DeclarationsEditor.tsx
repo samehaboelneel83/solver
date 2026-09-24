@@ -6,6 +6,7 @@ import {
   strandedBy,
   variableNameProblem,
   withDomain,
+  withStage,
   type ParameterDeclaration,
   type VariableDeclaration,
   type VariableSpec,
@@ -214,9 +215,9 @@ export default function DeclarationsEditor({
                     apply({
                       variables: {
                         ...variables,
-                        [name]: withDomain(
-                          spec,
-                          event.target.value as VariableDomain
+                        [name]: withStage(
+                          withDomain(spec, event.target.value as VariableDomain),
+                          spec.stage
                         ),
                       },
                     })
@@ -227,6 +228,29 @@ export default function DeclarationsEditor({
                       {domainPhrase(option)}
                     </option>
                   ))}
+                </select>
+              </div>
+              <div className="mt-1">
+                <label className="block text-xs text-slate-600" htmlFor={`var-stage-${name}`}>
+                  {name} is decided
+                </label>
+                <select
+                  id={`var-stage-${name}`}
+                  className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
+                  value={spec.stage === undefined ? "" : String(spec.stage)}
+                  onChange={(event) =>
+                    apply({
+                      variables: {
+                        ...variables,
+                        [name]: withStage(spec, event.target.value === "" ? undefined : (Number(event.target.value) as 1 | 2)),
+                      },
+                    })
+                  }
+                  title="For a two-stage stochastic solve: what is decided now, and what waits until the uncertain data is known"
+                >
+                  <option value="">whenever (one stage)</option>
+                  <option value="1">now, before the data is known</option>
+                  <option value="2">once the uncertain data is known</option>
                 </select>
               </div>
               {spec.domain !== "binary" && (

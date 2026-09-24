@@ -215,3 +215,13 @@ describe("a connected rule and what it reads", () => {
     expect(strandedBy({ kind: "set", name: "employee" }, [rule], [])).toEqual([]);
   });
 });
+
+describe("a decision's stage (queue R7)", () => {
+  it("survives cleaning and a change of domain, and an interval never carries one", async () => {
+    const { cleanVariable, withDomain, withStage } = await import("./declarations");
+    expect(cleanVariable({ index: [], domain: "continuous", lower: 0, stage: 2 })).toEqual({ index: [], domain: "continuous", lower: 0, stage: 2 });
+    expect(withStage(withDomain({ index: [], domain: "continuous", stage: 1 }, "binary"), 1)).toEqual({ index: [], domain: "binary", stage: 1 });
+    expect(withStage({ index: [], domain: "interval", start: "b", end: "f", size: 1 }, 2)).not.toHaveProperty("stage");
+    expect(withStage({ index: [], domain: "integer", stage: 2 }, undefined)).toEqual({ index: [], domain: "integer" });
+  });
+});

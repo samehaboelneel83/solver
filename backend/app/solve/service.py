@@ -47,6 +47,7 @@ from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
 from app.solve import lagrange as lagrange_rows
+from app.solve import stochastic as stochastic_rows
 from app.solve import lns as lns_rows
 from app.solve import race as race_rows
 from app.solve.fingerprint import fingerprint as fingerprint_of
@@ -159,6 +160,8 @@ def enqueue_run(
     from_settings["lagrangian"] = settings["solve.lagrangian"].source
     local_fallback = bool(settings["solve.local_fallback"].value)
     from_settings["local_fallback"] = settings["solve.local_fallback"].source
+    stochastic_samples = int(settings["solve.stochastic_samples"].value or 0)
+    from_settings["stochastic_samples"] = settings["solve.stochastic_samples"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -218,6 +221,7 @@ def enqueue_run(
         "lns": lns,
         "lagrangian": lagrangian,
         "local_fallback": local_fallback,
+        "stochastic_samples": stochastic_samples,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -623,6 +627,10 @@ def _execute(
         lns_record = None
         lagrange_record = None
         local_record = None
+        # A two-stage stochastic solve (setting `solve.stochastic_samples`,
+        # app.solve.stochastic, queue R7): asked for, and a decision waits for the data.
+        stochastic_wanted = bool(params.get("stochastic_samples")) and bool(stochastic_rows.second_stage(ir))
+        stochastic_record, record_model = None, None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
@@ -634,6 +642,7 @@ def _execute(
                     if recalled is not None:
                         backend, why = by_name(recalled.solver), recalled.evidence
                 if (params.get("portfolio") and not params.get("requested_solver") and recalled is None
+                        and not stochastic_wanted
                         and not params.get("pareto_steps") and not params.get("robust")):
                     # Every admissible solver at once for the whole time
                     # (app.solve.race, queue R2) -- in place of the probe race.
@@ -641,7 +650,7 @@ def _execute(
                     portfolio_skipped = race_rows.should_portfolio(found.model_class, numbers, candidates)
                     portfolio_candidates = None if portfolio_skipped else candidates
                 if (params.get("probe") and not params.get("requested_solver") and recalled is None
-                        and portfolio_candidates is None
+                        and portfolio_candidates is None and not stochastic_wanted
                         and not params.get("pareto_steps") and not params.get("robust")):
                     # Nothing to remember: race the admissible solvers
                     # briefly (app.solve.race, queue 17b).
@@ -779,7 +788,7 @@ def _execute(
                     workers=workers,
                     should_stop=stop.is_set,
                 )
-            if params.get("separable"):
+            if params.get("separable") and not stochastic_wanted:
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -793,7 +802,22 @@ def _execute(
                     blocks_record = {"solved_whole": refused or "the model is one block"}
                     parts = None
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
-                if parts is not None:
+                if stochastic_wanted:
+                    result, stochastic_record = sandbox.run(
+                        "app.solve.sandbox:stochastic_in_child",
+                        {"backend": backend.name, "ir": ir, "data": data, "compiled": solving_model,
+                         "samples": params["stochastic_samples"], "time_limit": time_limit, "seed": seed,
+                         "workers": workers, "gap_rel": gap_rel},
+                        time_limit=time_limit,
+                        workers=workers,
+                        should_stop=stop.is_set,
+                    )
+                    reason = None
+                    # The answer is the plan: the rules it answers for are the ones that read only it.
+                    plan_keys = set(result.assignments)
+                    record_model = replace(compiled, constraints=[
+                        c for c in compiled.constraints if {*c.left.coeffs, *c.right.coeffs} <= plan_keys])
+                elif parts is not None:
 
                     def run_one(piece, share, piece_hint):
                         return sandbox.run(
@@ -875,7 +899,7 @@ def _execute(
                                                             should_stop=stop.is_set)
         except _Answered:
             pass
-        except (Unsupported, sandbox.SandboxFailed) as exc:
+        except (Unsupported, sandbox.SandboxFailed, stochastic_rows.NotStochastic) as exc:
             # The model is valid and this compiler cannot express it, or its
             # solve outgrew the sandbox. Either is a failed run with a reason,
             # not a crash and not an empty answer.
@@ -933,6 +957,8 @@ def _execute(
         extra["lagrangian_bound"] = lagrange_record
     if local_record is not None:
         extra["local_fallback_run"] = local_record
+    if stochastic_record is not None:
+        extra["stochastic"] = stochastic_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
@@ -976,7 +1002,7 @@ def _execute(
             ),
             {"s": backend.name, "extra": _json(extra), "r": run_id},
         )
-        _record(db, run_id, compiled, result)
+        _record(db, run_id, record_model or compiled, result)
         if result.objective is not None:
             events.final(result.objective, result.best_bound, result.wall_seconds)
         # What the answer may claim, as the backend that found it declares
@@ -984,7 +1010,9 @@ def _execute(
         # as "optimal" from a global one, and the run must not blur the two.
         db.execute(
             text("UPDATE run SET optimality = :o WHERE id = :r"),
-            {"o": optimality_of(backend, result.status), "r": run_id},
+            # A stochastic plan is best for the sampled futures: an estimate, never proven best.
+            {"o": "approximate" if stochastic_record is not None and result.status == "optimal"
+             else optimality_of(backend, result.status), "r": run_id},
         )
         if points:
             _record_front(db, run_id, compiled, backend, points)
