@@ -23,7 +23,9 @@ def _templates() -> dict:
 
 
 def test_the_frontend_reads_every_template_as_it_is():
-    wanted = json.dumps(_templates(), indent=1, sort_keys=True) + "\n"
+    templates = _templates()
     if os.environ.get("SOLVER_WRITE_TEMPLATE_IRS") == "1":
-        PATH.write_text(wanted, encoding="utf-8")
-    assert PATH.read_text(encoding="utf-8") == wanted, "run with SOLVER_WRITE_TEMPLATE_IRS=1 to refresh"
+        PATH.write_text(json.dumps(templates, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    # Compared as data, not bytes: a Windows checkout writes the file with
+    # CRLF line ends (core.autocrlf), which is the same document.
+    assert json.loads(PATH.read_text(encoding="utf-8")) == templates, "run with SOLVER_WRITE_TEMPLATE_IRS=1 to refresh"

@@ -56,7 +56,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
     mark(b, loc);
     const where = [...stackOf(b.inputs?.WHERE)].map((f, k) => {
       mark(f, [...loc, "where", k]);
-      let value: unknown = null;
+      let value: unknown;
       try {
         value = JSON.parse(fieldOf(f, "VALUE"));
       } catch {
