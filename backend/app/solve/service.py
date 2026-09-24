@@ -45,6 +45,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve import lns as lns_rows
 from app.solve import race as race_rows
 from app.solve.fingerprint import fingerprint as fingerprint_of
 from app.solve import robust as robust_rows
@@ -150,6 +151,8 @@ def enqueue_run(
     from_settings["probe"] = settings["solve.probe"].source
     portfolio = bool(settings["solve.portfolio"].value)
     from_settings["portfolio"] = settings["solve.portfolio"].source
+    lns = bool(settings["solve.lns"].value)
+    from_settings["lns"] = settings["solve.lns"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -206,6 +209,7 @@ def enqueue_run(
         "memory": memory,
         "probe": probe,
         "portfolio": portfolio,
+        "lns": lns,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -606,6 +610,7 @@ def _execute(
         )
         race_candidates, race_record, race_skipped = None, None, None
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
+        lns_record = None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
@@ -794,7 +799,29 @@ def _execute(
                         solving_model, parts, run_one, workers=workers, optimal_gap=OPTIMAL_GAP, hint=hint
                     )
                     solving.set_attribute("blocks", len(parts))
+                elif params.get("lns") and lns_rows.applies(backend.name, solving_model) is None:
+                    # Fix most of a stalled answer and solve the rest again
+                    # (setting `solve.lns`, app.solve.lns, queue R3).
+                    result, lns_record = sandbox.run(
+                        "app.solve.sandbox:lns_in_child",
+                        {
+                            "backend": backend.name,
+                            "compiled": solving_model,
+                            "time_limit": time_limit,
+                            "seed": seed,
+                            "workers": workers,
+                            "gap_rel": gap_rel,
+                            "symmetry": bool(params.get("symmetry")),
+                        },
+                        time_limit=time_limit,
+                        workers=workers,
+                        on_progress=events.progress,
+                        should_stop=stop.is_set,
+                    )
+                    reason = None
                 else:
+                    if params.get("lns"):
+                        lns_record = {"used": False, "why": lns_rows.applies(backend.name, solving_model)}
                     # In a child process with a memory ceiling, a CPU allowance
                     # and a deadline (app.solve.sandbox, Phase 9): a model that
                     # outgrows them fails with a reason, not the worker.
@@ -870,6 +897,8 @@ def _execute(
         extra["portfolio"] = portfolio_record
     if portfolio_skipped is not None:
         extra["portfolio_skipped"] = portfolio_skipped
+    if lns_record is not None:
+        extra["lns"] = lns_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]

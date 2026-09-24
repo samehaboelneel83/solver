@@ -263,6 +263,24 @@ def pareto_in_child(*, backend: str, compiled, steps: int, time_limit: float, se
     return front(chosen, compiled, steps=steps, time_limit=time_limit, solve=solve)
 
 
+def lns_in_child(*, backend: str, compiled, time_limit: float, seed, workers: int, gap_rel: float,
+                 should_stop, on_progress, symmetry=False):
+    """The large-neighbourhood search (app.solve.lns) in one child: every neighbourhood's solve
+    in this process, so the search pays for one sandbox, not one per round."""
+    from app.solve import lns
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+
+    def run(model, seconds, hint):
+        return solve_compiled(chosen, model, time_limit=seconds, seed=seed, should_stop=should_stop,
+                              workers=workers, gap_rel=gap_rel, hint=hint, symmetry=symmetry)[0]
+
+    searched = lns.search(compiled, run, time_limit=time_limit, seed=seed, should_stop=should_stop)
+    return searched.solution, searched.record
+
+
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain
