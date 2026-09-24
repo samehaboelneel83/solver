@@ -1,0 +1,567 @@
+/**
+ * The editable block vocabulary (Blockly edit mode spec §3): one block per
+ * IR construct. A choice is a dropdown filled from the workspace's catalogue
+ * and the block's own surroundings (`catalogue.ts`), so it only offers what
+ * the contract would accept there.
+ *
+ * Two rules keep a loaded model exactly what the draft says:
+ *
+ * - **A dropdown keeps any value it is given.** Blockly's own dropdown
+ *   refuses a value missing from its options; ours (`OpenDropdown`) takes
+ *   it and lists it, so a set whose type was renamed or a decision since
+ *   deleted is shown by name and refused by the validators -- never blanked.
+ * - **Nothing is judged while loading.** Name rules and the parameter
+ *   index lookup apply to what a person types or picks; `loadBlocks` turns
+ *   them off while a draft is being shown, so a draft with a bad name is
+ *   shown with its bad name.
+ *
+ * `toBlocks.ts` and `toIr.ts` rely on the field and input names here; the
+ * plan's Task 3 table lists them.
+ */
+import * as Blockly from "blockly";
+import { FILTER_OPERATORS, OBJECTIVE_MODES, RELATIONS, SENSES, SEVERITIES, TRAVERSAL_DEPTHS } from "../../ir/contract";
+import { NONE, catalogueOf, declared, menu, scopeAt } from "./catalogue";
+
+const NAME = /^[a-z][a-z0-9_]*$/;
+const MAX_ARITY = 4;
+const MAX_ADD = 8;
+
+// Loose typing for block `this`: Blockly's `Block` plus our own shape state.
+type B = Blockly.Block & {
+  arity?: number;
+  count?: number;
+  index?: string[];
+  version?: number;
+  json?: unknown;
+  setSlots?(n: number): void;
+  setTerms?(n: number): void;
+};
+
+let loading = false;
+
+/** Load a serialised workspace without judging what it says (see the module note). */
+export function loadBlocks(workspace: Blockly.Workspace, json: object): void {
+  loading = true;
+  try {
+    Blockly.serialization.workspaces.load(json, workspace);
+  } finally {
+    loading = false;
+  }
+}
+
+/** A dropdown that accepts any string value and always lists the one it holds. */
+class OpenDropdown extends Blockly.FieldDropdown {
+  protected override doClassValidation_(newValue?: string): string | null {
+    return typeof newValue === "string" ? newValue : null;
+  }
+}
+
+/** Options recomputed each time the menu opens, from the block's surroundings. */
+function dynamic(
+  values: (block: Blockly.Block) => string[],
+  label?: (value: string) => string,
+  validator?: (value: string) => string | null
+): Blockly.FieldDropdown {
+  return new OpenDropdown(function (this: Blockly.FieldDropdown) {
+    const block = this.getSourceBlock();
+    return menu(block ? values(block) : [], this.getValue(), label);
+  }, validator);
+}
+
+/** A fixed list of choices, still keeping a value from outside it. */
+function fixed(values: readonly string[], label?: (value: string) => string, validator?: (value: string) => string | null): Blockly.FieldDropdown {
+  return dynamic(() => [...values], label ?? ((v) => v), validator);
+}
+
+/** A name the platform accepts and no other block of these kinds uses in `field`. */
+function nameField(initial: string, kinds: readonly string[], field: string): Blockly.FieldTextInput {
+  return new Blockly.FieldTextInput(initial, function (this: Blockly.FieldTextInput, text: string) {
+    if (loading) return text;
+    if (!NAME.test(text)) return null;
+    const self = this.getSourceBlock();
+    const clash = self?.workspace
+      .getAllBlocks(false)
+      .some((other) => other !== self && kinds.includes(other.type) && other.getFieldValue(field) === text);
+    return clash ? null : text;
+  });
+}
+
+/** A number as text, or empty for "not given" -- never other text. */
+function numberText(initial: string): Blockly.FieldTextInput {
+  return new Blockly.FieldTextInput(initial, (text: string) =>
+    loading || text === "" || Number.isFinite(Number(text)) ? text : null
+  );
+}
+
+function rerender(block: Blockly.Block) {
+  if ((block as Blockly.BlockSvg).rendered) (block as Blockly.BlockSvg).queueRender();
+}
+
+/** Grow or shrink a row of slots named `${prefix}${i}` to `n`, each placed before `before` when given. */
+function reshape(block: B, key: "arity" | "count", n: number, add: (i: number) => void, prefix: string, before?: string) {
+  const had = block[key] ?? 0;
+  for (let i = had - 1; i >= n; i -= 1) block.removeInput(`${prefix}${i}`, true);
+  for (let i = had; i < n; i += 1) {
+    add(i);
+    if (before && block.getInput(before)) block.moveInputBefore(`${prefix}${i}`, before);
+  }
+  block[key] = n;
+  rerender(block);
+}
+
+/** Index slots IDX0.. of a reference: each offers the indices bound here to the set its declaration expects there. */
+function refSlots(block: B, n: number, expected: (i: number) => string | undefined) {
+  reshape(
+    block,
+    "arity",
+    n,
+    (i) =>
+      block
+        .appendDummyInput(`SLOT${i}`)
+        .appendField(i === 0 ? "[" : ",")
+        .appendField(
+          dynamic((b) =>
+            [...scopeAt(b)].filter(([, set]) => expected(i) === undefined || set === expected(i)).map(([index]) => index)
+          ),
+          `IDX${i}`
+        ),
+    "SLOT"
+  );
+}
+
+const COLOUR = {
+  model: "#475569",
+  set: "#0d9488",
+  decision: "#2563eb",
+  data: "#64748b",
+  rule: "#334155",
+  binding: "#0f766e",
+  goal: "#16a34a",
+  variable: "#3b82f6",
+  parameter: "#94a3b8",
+  constant: "#78716c",
+  attribute: "#14b8a6",
+  sum: "#7c3aed",
+  operator: "#59c059",
+  opaque: "#a8a29e",
+};
+
+const choose = (v: string) => v || "(choose)";
+
+/** A reference to a declared decision or data: NAME, then its index slots. */
+function referenceBlock(kind: "variables" | "parameters", word: string, colour: string) {
+  const declaration = (ws: Blockly.Workspace, name: string) => declared(ws)[kind].get(name);
+  return {
+    init(this: B) {
+      const input = this.appendDummyInput("HEAD");
+      if (word) input.appendField(word);
+      input.appendField(
+        dynamic(
+          (b) =>
+            [...declared(b.workspace)[kind]]
+              .filter(([, spec]) => kind !== "variables" || (spec as { domain: string }).domain !== "interval")
+              .map(([name]) => name),
+          choose,
+          (name: string) => {
+            if (!loading) {
+              const spec = declaration(this.workspace, name);
+              if (spec) refSlots(this, spec.index.length, (i) => declaration(this.workspace, this.getFieldValue("NAME"))?.index[i]);
+            }
+            return name;
+          }
+        ),
+        "NAME"
+      );
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(colour);
+      this.arity = 0;
+    },
+    saveExtraState(this: B) {
+      return { arity: this.arity ?? 0 };
+    },
+    loadExtraState(this: B, state: { arity: number }) {
+      refSlots(this, state.arity, (i) => declaration(this.workspace, this.getFieldValue("NAME"))?.index[i]);
+    },
+  };
+}
+
+function opaqueBlock(shape: "declaration" | "rule" | "term") {
+  return {
+    init(this: B) {
+      this.appendDummyInput().appendField(new Blockly.FieldLabelSerializable(""), "LABEL");
+      if (shape === "term") this.setOutput(true, "Number");
+      else {
+        this.setPreviousStatement(true, shape);
+        this.setNextStatement(true, shape);
+      }
+      this.setColour(COLOUR.opaque);
+      this.setTooltip("Part of the model the blocks cannot edit yet: it is kept exactly as it is. The forms can edit it.");
+    },
+    saveExtraState(this: B) {
+      return { json: this.json };
+    },
+    loadExtraState(this: B, state: { json: unknown }) {
+      this.json = state.json;
+    },
+  };
+}
+
+export function defineIrBlocks(): void {
+  if (Blockly.Blocks.ir_model) return;
+
+  Blockly.Blocks.ir_model = {
+    init(this: B) {
+      this.appendDummyInput().appendField("optimization model").appendField(new Blockly.FieldLabelSerializable(""), "TITLE");
+      this.appendDummyInput()
+        .appendField("the goal is to")
+        .appendField(fixed(SENSES), "SENSE")
+        .appendField("its terms")
+        .appendField(fixed(OBJECTIVE_MODES, (m) => (m === "lex" ? "in order of importance" : "weighted together")), "MODE");
+      this.appendStatementInput("DECLARE").setCheck("declaration").appendField("sets, decisions and data");
+      this.appendStatementInput("RULES").setCheck("rule").appendField("rules");
+      this.appendStatementInput("GOAL").setCheck("goal_term").appendField("goal");
+      this.setDeletable(false);
+      this.setColour(COLOUR.model);
+      this.version = 2;
+    },
+    saveExtraState(this: B) {
+      return { version: this.version };
+    },
+    loadExtraState(this: B, state: { version: number }) {
+      this.version = state.version;
+    },
+  };
+
+  Blockly.Blocks.ir_set = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("set")
+        .appendField(
+          dynamic((b) => {
+            const taken = declared(b.workspace).sets;
+            const own = b.getFieldValue("SET");
+            return catalogueOf(b.workspace).entityTypes.map((t) => t.name).filter((n) => n === own || !taken.includes(n));
+          }, choose),
+          "SET"
+        );
+      this.setPreviousStatement(true, "declaration");
+      this.setNextStatement(true, "declaration");
+      this.setColour(COLOUR.set);
+      this.setTooltip("A set the model ranges over: every entity of this type");
+    },
+  };
+
+  Blockly.Blocks.ir_variable = {
+    init(this: B) {
+      this.appendDummyInput("HEAD")
+        .appendField("decide")
+        .appendField(nameField("x", ["ir_variable"], "NAME"), "NAME")
+        .appendField("over")
+        .appendField(
+          fixed(["0", "1", "2", "3", "4"], (n) => (n === "1" ? "1 set" : `${n} sets`), (n: string) => {
+            this.setSlots!(Number(n));
+            return n;
+          }),
+          "ARITY"
+        );
+      this.appendDummyInput("DOMAIN_ROW")
+        .appendField("as")
+        .appendField(
+          fixed(["binary", "integer", "continuous"], (d) => (d === "binary" ? "yes or no" : d), (domain: string) => {
+            for (const name of ["FROM", "LOWER", "TO", "UPPER"]) this.getField(name)?.setVisible(domain !== "binary");
+            rerender(this);
+            return domain;
+          }),
+          "DOMAIN"
+        )
+        .appendField(new Blockly.FieldLabel("from"), "FROM")
+        .appendField(numberText(""), "LOWER")
+        .appendField(new Blockly.FieldLabel("to"), "TO")
+        .appendField(numberText(""), "UPPER");
+      for (const name of ["FROM", "LOWER", "TO", "UPPER"]) this.getField(name)!.setVisible(false);
+      this.setInputsInline(true);
+      this.setPreviousStatement(true, "declaration");
+      this.setNextStatement(true, "declaration");
+      this.setColour(COLOUR.decision);
+      this.setTooltip("A decision the solver makes");
+      this.arity = 0;
+    },
+    setSlots(this: B, n: number) {
+      reshape(
+        this,
+        "arity",
+        Math.max(0, Math.min(MAX_ARITY, n)),
+        (i) =>
+          this.appendDummyInput(`SETSLOT${i}`)
+            .appendField(i === 0 ? "[" : "×")
+            .appendField(dynamic((b) => catalogueOf(b.workspace).entityTypes.map((t) => t.name), choose), `SET${i}`),
+        "SETSLOT",
+        "DOMAIN_ROW"
+      );
+    },
+    saveExtraState(this: B) {
+      return { arity: this.arity ?? 0 };
+    },
+    loadExtraState(this: B, state: { arity: number }) {
+      this.setSlots!(state.arity);
+      this.setFieldValue(String(state.arity), "ARITY");
+    },
+  };
+
+  Blockly.Blocks.ir_parameter = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("data")
+        .appendField(
+          dynamic(
+            (b) => {
+              const taken = [...declared(b.workspace).parameters.keys()];
+              const own = b.getFieldValue("NAME");
+              return catalogueOf(b.workspace).parameters.map((p) => p.name).filter((n) => n === own || !taken.includes(n));
+            },
+            choose,
+            (name: string) => {
+              if (!loading) {
+                const def = catalogueOf(this.workspace).parameters.find((p) => p.name === name);
+                this.index = def ? [...def.index] : [];
+                this.setFieldValue(this.index.length ? `[${this.index.join(", ")}]` : "", "INDEX");
+              }
+              return name;
+            }
+          ),
+          "NAME"
+        )
+        .appendField(new Blockly.FieldLabelSerializable(""), "INDEX");
+      this.setPreviousStatement(true, "declaration");
+      this.setNextStatement(true, "declaration");
+      this.setColour(COLOUR.data);
+      this.setTooltip("Numbers the model reads, from the domain's parameter of this name");
+      this.index = [];
+    },
+    saveExtraState(this: B) {
+      return { index: this.index ?? [] };
+    },
+    loadExtraState(this: B, state: { index: string[] }) {
+      this.index = [...state.index];
+    },
+  };
+
+  Blockly.Blocks.ir_rule = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("rule")
+        .appendField(nameField("c_1", RULE_KINDS, "ID"), "ID")
+        .appendField(
+          fixed(SEVERITIES, (s) => (s === "hard" ? "must hold" : "may bend, at"), (severity: string) => {
+            this.getField("WEIGHT")?.setVisible(severity === "soft");
+            this.getField("PER_UNIT")?.setVisible(severity === "soft");
+            rerender(this);
+            return severity;
+          }),
+          "SEVERITY"
+        )
+        .appendField(numberText("1"), "WEIGHT")
+        .appendField(new Blockly.FieldLabel("per unit"), "PER_UNIT");
+      this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
+      this.appendStatementInput("FORALL").setCheck("binding").appendField("for every");
+      this.appendValueInput("LEFT").setCheck("Number");
+      this.appendDummyInput().appendField(fixed(RELATIONS, (r) => ({ "<=": "≤", ">=": "≥" })[r] ?? r), "RELATION");
+      this.appendValueInput("RIGHT").setCheck("Number");
+      this.setPreviousStatement(true, "rule");
+      this.setNextStatement(true, "rule");
+      this.setColour(COLOUR.rule);
+      this.setTooltip("A rule every answer must satisfy, or may break at a price");
+      this.getField("WEIGHT")!.setVisible(false);
+      this.getField("PER_UNIT")!.setVisible(false);
+    },
+  };
+
+  Blockly.Blocks.ir_binding = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField(
+          new Blockly.FieldTextInput("i", (text: string) => (loading || NAME.test(text) ? text : null)),
+          "INDEX"
+        )
+        .appendField("in")
+        .appendField(dynamic((b) => declared(b.workspace).sets, choose), "SET");
+      const walks = (value: string) => {
+        for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH"]) this.getField(name)?.setVisible(value !== NONE);
+        rerender(this);
+        return value;
+      };
+      this.appendDummyInput("VIA")
+        .appendField(
+          dynamic(
+            (b) => {
+              const set = b.getFieldValue("SET");
+              return [NONE, ...catalogueOf(b.workspace).relationships.filter((r) => r.from === set || r.to === set).map((r) => r.name)];
+            },
+            (v) => (v ? `via ${v}` : "(every one)"),
+            walks
+          ),
+          "VIA_REL"
+        )
+        .appendField(fixed(["from", "to"], (e) => (e === "from" ? "from" : "back to")), "VIA_END")
+        .appendField(
+          dynamic((b) => {
+            const rel = catalogueOf(b.workspace).relationships.find((r) => r.name === b.getFieldValue("VIA_REL"));
+            const anchorSet = rel ? (b.getFieldValue("VIA_END") === "from" ? rel.from : rel.to) : undefined;
+            return [...scopeAt(b)].filter(([, set]) => anchorSet === undefined || set === anchorSet).map(([index]) => index);
+          }, choose),
+          "VIA_ANCHOR"
+        )
+        .appendField(fixed([NONE, ...TRAVERSAL_DEPTHS], (d) => ({ "": "one step", one: "exactly one step", any: "any number of steps", any_or_self: "any steps, or itself" })[d] ?? d), "VIA_DEPTH");
+      this.appendStatementInput("WHERE").setCheck("filter").appendField("only where");
+      for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH"]) this.getField(name)!.setVisible(false);
+      this.setPreviousStatement(true, "binding");
+      this.setNextStatement(true, "binding");
+      this.setColour(COLOUR.binding);
+      this.setTooltip("An index ranging over a set: once for every entity of it, or only those a filter keeps");
+    },
+  };
+
+  Blockly.Blocks.ir_filter = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField(
+          dynamic((b) => {
+            const set = b.getSurroundParent()?.getFieldValue("SET");
+            return (catalogueOf(b.workspace).entityTypes.find((t) => t.name === set)?.attributes ?? []).map((a) => a.name);
+          }, choose),
+          "ATTR"
+        )
+        .appendField(fixed(FILTER_OPERATORS, (o) => ({ "!=": "≠", "<=": "≤", ">=": "≥", in: "is one of", notIn: "is none of" })[o] ?? o), "OP")
+        .appendField(
+          new Blockly.FieldTextInput('""', (text: string) => {
+            if (loading) return text;
+            try {
+              JSON.parse(text);
+              return text;
+            } catch {
+              return null;
+            }
+          }),
+          "VALUE"
+        );
+      this.setPreviousStatement(true, "filter");
+      this.setNextStatement(true, "filter");
+      this.setColour(COLOUR.binding);
+      this.setTooltip('A value as written in JSON: 3, "north", true, or a list ["a", "b"] for "is one of"');
+    },
+  };
+
+  Blockly.Blocks.ir_goal_term = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("goal term")
+        .appendField(nameField("o_1", ["ir_goal_term"], "ID"), "ID")
+        .appendField("weight")
+        .appendField(numberText("1"), "WEIGHT");
+      this.appendValueInput("EXPRESSION").setCheck("Number").appendField("of");
+      this.setPreviousStatement(true, "goal_term");
+      this.setNextStatement(true, "goal_term");
+      this.setColour(COLOUR.goal);
+    },
+  };
+
+  Blockly.Blocks.ir_const = {
+    init(this: B) {
+      this.appendDummyInput().appendField(numberText("0"), "VALUE");
+      this.setOutput(true, "Number");
+      this.setColour(COLOUR.constant);
+    },
+  };
+
+  Blockly.Blocks.ir_var = referenceBlock("variables", "", COLOUR.variable);
+  Blockly.Blocks.ir_par = referenceBlock("parameters", "", COLOUR.parameter);
+
+  Blockly.Blocks.ir_attr = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField(
+          dynamic((b) => {
+            const set = scopeAt(b).get(b.getFieldValue("OF"));
+            return (catalogueOf(b.workspace).entityTypes.find((t) => t.name === set)?.attributes ?? [])
+              .filter((a) => a.data_type === "integer" || a.data_type === "number")
+              .map((a) => a.name);
+          }, choose),
+          "NAME"
+        )
+        .appendField("of")
+        .appendField(dynamic((b) => [...scopeAt(b).keys()], choose), "OF");
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(COLOUR.attribute);
+    },
+  };
+
+  Blockly.Blocks.ir_sum = {
+    init(this: B) {
+      this.appendStatementInput("OVER").setCheck("binding").appendField("sum over");
+      this.appendValueInput("BODY").setCheck("Number").appendField("of");
+      this.setOutput(true, "Number");
+      this.setColour(COLOUR.sum);
+    },
+  };
+
+  Blockly.Blocks.ir_add = {
+    init(this: B) {
+      this.appendDummyInput("HEAD")
+        .appendField("add")
+        .appendField(
+          fixed(
+            Array.from({ length: MAX_ADD - 1 }, (_, i) => String(i + 2)),
+            (n) => `${n} terms`,
+            (n: string) => {
+              this.setTerms!(Number(n));
+              return n;
+            }
+          ),
+          "COUNT"
+        );
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(COLOUR.operator);
+      this.count = 0;
+      this.setTerms!(2);
+    },
+    setTerms(this: B, n: number) {
+      reshape(this, "count", Math.max(2, Math.min(MAX_ADD, n)), (i) => {
+        const input = this.appendValueInput(`T${i}`).setCheck("Number");
+        if (i > 0) input.appendField("+");
+      }, "T");
+    },
+    saveExtraState(this: B) {
+      return { count: this.count ?? 2 };
+    },
+    loadExtraState(this: B, state: { count: number }) {
+      this.setTerms!(state.count);
+      this.setFieldValue(String(state.count), "COUNT");
+    },
+  };
+
+  Blockly.Blocks.ir_mul = {
+    init(this: B) {
+      this.appendValueInput("A").setCheck("Number");
+      this.appendValueInput("B").setCheck("Number").appendField("×");
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(COLOUR.operator);
+    },
+  };
+
+  Blockly.Blocks.ir_opaque_declaration = opaqueBlock("declaration");
+  Blockly.Blocks.ir_opaque_rule = opaqueBlock("rule");
+  Blockly.Blocks.ir_opaque_term = opaqueBlock("term");
+}
+
+/** Rule-like blocks, whose ids share one namespace (constraint ids are unique). */
+export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected"] as const;
+
+export const IR_BLOCK_TYPES = [
+  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
+  "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
+  "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
+] as const;
