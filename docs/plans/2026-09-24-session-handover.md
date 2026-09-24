@@ -1,4 +1,4 @@
-# Development session handover — 2026-09-24 (updated after R9)
+# Development session handover — 2026-09-24 (updated after R10)
 
 For an AI coding assistant continuing this project with no memory of the session. **The code is the authority; this document is a map.** Where it says "uncertain", verify before relying on it.
 
@@ -35,10 +35,10 @@ Companion documents in the repo (read in this order after this one):
 
 The session ran the execution queue autonomously under the user's standing instruction **"go with your recommendations"** (a `/loop`): one queue item at a time, each built with tests, full check green, deployed from a clean worktree, verified live in a browser, ticked in the queue and handover.
 
-At the moment of handover (after R9) the next items are, in queue order:
+At the moment of handover (after R10) the next items are, in queue order:
 
-- **R10–R12 — the optimization target roadmap's remaining open items** (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap". **R10 (tuning search per template family) is next.** The GPU lane and LLM/NL→IR stay out (standing defaults).
-- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane) R7 (two-stage stochastic), R8 (chance constraints) and R9 (rolling horizon) are done; R2, R3, R5, R6's fallback and R9 are off by the bench; R7/R8 are opt-in per problem. Blocks 3–4 were moved ahead of R2 when the user asked to "create and edit well using blocks" (with a screenshot of the optimization view's read-only blocks showing "(choose)"), and are done.
+- **R11–R12 — the optimization target roadmap's remaining open items** (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap". **R11 (learned solver selector in shadow mode) is next.** The GPU lane and LLM/NL→IR stay out (standing defaults).
+- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane) R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon) and R10 (tuning search) are done; R2, R3, R5, R6's fallback and R9 are off by the bench; R7/R8 are opt-in per problem. Blocks 3–4 were moved ahead of R2 when the user asked to "create and edit well using blocks" (with a screenshot of the optimization view's read-only blocks showing "(choose)"), and are done.
 
 Acceptance criteria for everything in the queue: full check green (`bash scripts/check.sh`), migration rehearsed up/down/up on a copy of the live database, deployed, verified live in Chrome (API and UI), test data cleaned up, queue + handover updated, committed by path.
 
@@ -77,6 +77,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 | 25 | **R1** PDLP for very large LPs; `approximate` optimality | roadmap Phase 14 | migration 0051, `app/solve/pdlp.py`, `lp.py`, `backends.py`, `service.py`, `genui/translate.py`, `api/runs.py`, `pages/Runs.tsx`, `bench/pdlp.py` | `fc88049` + read-back fix; `solve.pdlp` off by the bench; live 43.5317 shown "optimal to within a tolerance" |
 | 26 | Symmetry detection made linear | found by the R1 bench | `app/solve/symmetry.py` (`_by_member`) | `716b0b5`; 250k-decision compile 213 s → 4.7 s |
 | 27 | **Blocks 3** every construct as its own block | Blockly plan Task 6 | `lib/irBlocks/{vocabulary,toBlocks,toIr,catalogue}.ts` | `3feccaa`, `4762dc0`; no opaque block for any fixture/template; live workshop makespan 9 → 8 after a size edit by mouse |
+| 37 | **R10** tuning search; tuned options per domain/problem | roadmap Phase 13 | migration 0058, `app/solve/params.py` (`parse_setting`), `service.py` (`SettingUnusable`), `api/runs.py` (422), `sandbox.py`, `bench/tune.py` | `f18b8ea`; one family tuned (rota/CP-SAT); nothing set live |
 | 36 | **R9** relax-and-fix over time | roadmap Phase 13 | migration 0057, `app/solve/horizon.py`, `service.py` (`_time_set`), `sandbox.py`, `bench/horizon.py`, `pages/Runs.tsx` | `093a03e`; `solve.rolling_horizon` off by the bench; live: weekly_rota in 3 stretches, 3669 |
 | 35 | **R8** chance constraints (SAA) | roadmap Phase 15 | IR `chance` (both validators, fixtures, models, contract doc, rule block), `compile.py` (`Constraint.chance`), `stochastic.py` (switches, budget, held share), `service.py` (integral class), `pages/Runs.tsx` | `ffee3c5`; live: held 70% vs 90% asked at 20 futures -- shown |
 | 34 | **R7** two-stage stochastic (SAA) | roadmap Phase 15 | IR `stage` (both validators, fixtures, models, contract doc, forms, blocks), migration 0056, `app/solve/stochastic.py`, `service.py`, `sandbox.py`, `pages/Runs.tsx` | `f69a7b8`; `solve.stochastic_samples` opt-in; live: newsvendor, stages set in the forms, plan `approximate` |
@@ -89,19 +90,19 @@ Every item below was tested (unit + full check) and verified live unless it says
 
 ## 4. Current project state
 
-**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0057** (R9).
+**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0058** (R10).
 
 ### ✅ Completed
 - Everything in §3.
 - The whole spatial region-partitioning plan (GIS 1–8), GIS 9 (basemaps) and GIS 10 (elevation and slope per cell).
 - Blocks 0–4 of the Blockly edit mode: the whole plan.
-- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane), R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon).
+- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane), R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon), R10 (tuning search).
 
 ### 🟡 Partially completed
 - Nothing mid-item. (An opaque block remains only for a shape the blocks could not write back exactly -- e.g. a `connected` rule whose decision is indexed [group, unit], a curve of more than 12 points, an `add` of one term.)
 
 ### ❌ Not completed
-- R10–R12 (the roadmap's remaining open items) — queued; R10 tuning search is next.
+- R11–R12 (the roadmap's remaining open items) — queued; R11 learned selector (shadow mode) is next.
 - Connectivity at scale ("approach C": cuts or a heuristic warm start) — not queued as an item yet; recorded as the bench's conclusion.
 - Vector tiles (`egypt_osm`, `pbf`) — not rendered anywhere.
 - GeometryPreview thumbnails have no basemap (deliberately, 64–96 px).
@@ -190,6 +191,7 @@ loadBlocks(workspace, json)                 // load with name rules off (see bel
 | 0048 | `setting_key` `solve.probe` (boolean, **false**) | same |
 | 0049 | enum `attr_type` += `geometry` (autocommit block); `attr_value_matches_type` and `entity_validate` judge GeoJSON; `setting_key` `spatial.crs` (number, 4326) | refuses while geometry attributes exist; leaves the enum value |
 | 0050 | `setting_key` `spatial.tiles_index` (string, `""`) | deletes key and settings |
+| 0058 | `setting_key` `solve.solver_params`, `solve.tuned_from` (string, **""**) | deletes keys and settings |
 | 0057 | `setting_key` `solve.rolling_horizon` (boolean, **false**) | deletes key and settings |
 | 0056 | `setting_key` `solve.stochastic_samples` (number, **0**) | deletes key and settings |
 | 0055 | `setting_key` `solve.local_fallback` (boolean, **false**) | deletes key and settings |
@@ -278,7 +280,7 @@ Still needs testing:
 
 **High priority**
 
-1. **R10–R12** in queue order: R10 tuning search is next, then near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition.
+1. **R11–R12** in queue order: R11 learned selector (shadow mode) is next, then near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition.
 
 **Medium priority**
 
@@ -292,7 +294,7 @@ Still needs testing:
 
 ## 14. Recommended next step
 
-Start **R10 (tuning search per template family over the whitelisted solver options)**: read the R10 line in the queue and the roadmap's Phase 13 "Tuning" bullet; the whitelisted options live in `app/solve/params.py` and the benchmark's winners in `solver_param_table`. Optuna (TPE) is a new dependency -- or a small random/grid search with no dependency, if that is enough for the handful of options. Results stored as a setting at domain/problem level with the bench report linked. Build `solver-backend-test` first if requirements change.
+Start **R11 (learned solver selector in shadow mode)**: read the R11 line in the queue and the roadmap's Phase 17. Every run already stores its fingerprint (`app/solve/fingerprint.py`) and ClickHouse `run_fact` holds outcomes; a selector trained on fingerprint -> best backend records its pick beside the rules' choice on each run, and acts on nothing (shadow mode). The roadmap names LightGBM -- check what the data volume justifies first: with few runs, a nearest-neighbour or decision-tree pick from the bench's own runs may be all that is honest. Test-first; no setting changes behaviour.
 
 ## 15. Continuation instructions
 
@@ -311,7 +313,7 @@ You are continuing an existing development session on the "Problem Solver" optim
 
 Handover: docs/plans/2026-09-24-session-handover.md (then docs/plans/2026-09-22-execution-queue.md and docs/plans/2026-09-22-handover.md).
 
-State: deployed, database at migration 0057. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), elevation and slope per grid cell from its terrain tiles (GIS 10), the whole Blockly edit mode (Blocks 0-4: shared draft, Blocks tab, every construct as a block, refusals on blocks, Edit mode in the optimization view) R1 (PDLP, answers shown as approximate), R2 (portfolio racing) and R3 (LNS), both off by the bench, R4 (near-separable detection, reported in the Model editor and on runs), R5 (Lagrangian bound, off by the bench) R6 (IPOPT, a local lane recorded `local`; its fallback off by the bench) R7 (two-stage stochastic programming: a decision's `stage`, sampled futures, opt-in) R8 (chance constraints: a rule's `chance`) and R9 (relax-and-fix over a time set, off by the bench). Next: the optimization target roadmap's remaining items R10-R12 in queue order, starting with R10 (tuning search).
+State: deployed, database at migration 0058. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), elevation and slope per grid cell from its terrain tiles (GIS 10), the whole Blockly edit mode (Blocks 0-4: shared draft, Blocks tab, every construct as a block, refusals on blocks, Edit mode in the optimization view) R1 (PDLP, answers shown as approximate), R2 (portfolio racing) and R3 (LNS), both off by the bench, R4 (near-separable detection, reported in the Model editor and on runs), R5 (Lagrangian bound, off by the bench) R6 (IPOPT, a local lane recorded `local`; its fallback off by the bench) R7 (two-stage stochastic programming: a decision's `stage`, sampled futures, opt-in) R8 (chance constraints: a rule's `chance`) R9 (relax-and-fix over a time set, off by the bench) and R10 (tuning search: one family tuned; `solve.solver_params` per domain/problem). Next: the optimization target roadmap's remaining items R11-R12 in queue order, starting with R11 (learned selector in shadow mode).
 
 Rules: go with your recommendations; ask me only if a choice is irreversible, costs money, or contradicts the plan. Full check (bash scripts/check.sh) green before commit; commit by path, never git add -A; rehearse migrations up/down/up on a copy of the live DB; deploy from a clean worktree and prune Docker images (C: is nearly full); verify live in a browser; never read .env.
 ```
