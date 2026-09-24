@@ -125,27 +125,46 @@ export function SolverStatusSkeleton({ record }: GenUIProps) {
 
 // -- solver progress -----------------------------------------------------------
 
-function Curve({ history }: { history: Record<string, unknown>[] }) {
+/** Best answer and bound over time, stepped as the solver reported them.
+ * Padded inside its box, so a value at the edge of the range is drawn, not
+ * clipped; a range that has not opened yet gets a small span around it. */
+export function Curve({ history }: { history: Record<string, unknown>[] }) {
   const points = history
     .map((h) => ({ t: num(h.elapsed), o: num(h.objective), b: num(h.bound) }))
     .filter((p): p is { t: number; o: number | null; b: number | null } => p.t !== null);
   const values = points.flatMap((p) => [p.o, p.b]).filter((v): v is number => v !== null);
   if (points.length < 2 || values.length < 2) return null;
-  const [w, h] = [320, 90];
+  const [w, h, pad, left] = [320, 96, 8, 52];
   const tMax = Math.max(...points.map((p) => p.t)) || 1;
-  const [lo, hi] = [Math.min(...values), Math.max(...values)];
-  const x = (t: number) => (t / tMax) * w;
-  const y = (v: number) => (hi === lo ? h / 2 : h - ((v - lo) / (hi - lo)) * h);
-  const line = (pick: (p: (typeof points)[number]) => number | null) =>
-    points
-      .filter((p) => pick(p) !== null)
-      .map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(pick(p)!).toFixed(1)}`)
-      .join(" ");
+  let [lo, hi] = [Math.min(...values), Math.max(...values)];
+  if (hi - lo < 1e-9 * Math.max(1, Math.abs(hi))) [lo, hi] = [lo - 1, hi + 1];
+  const x = (t: number) => left + (t / tMax) * (w - left - pad);
+  const y = (v: number) => pad + (1 - (v - lo) / (hi - lo)) * (h - 2 * pad);
+  const line = (pick: (p: (typeof points)[number]) => number | null) => {
+    let d = "";
+    let last: number | null = null;
+    for (const p of points) {
+      const v = pick(p);
+      if (v === null) continue;
+      d += last === null ? `M${x(p.t).toFixed(1)},${y(v).toFixed(1)}` : ` H${x(p.t).toFixed(1)} V${y(v).toFixed(1)}`;
+      last = v;
+    }
+    return d;
+  };
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="mt-2 h-24 w-full" role="img" aria-label="best answer and bound over time">
-      <path d={line((p) => p.b)} fill="none" stroke="rgb(148 163 184)" strokeDasharray="4 3" strokeWidth="1.5" />
-      <path d={line((p) => p.o)} fill="none" stroke="rgb(37 99 235)" strokeWidth="2" />
-    </svg>
+    <figure className="mt-2">
+      <svg viewBox={`0 0 ${w} ${h}`} className="h-28 w-full" role="img" aria-label="best answer and bound over time">
+        <text x={left - 6} y={pad + 4} textAnchor="end" className="fill-slate-500 text-[9px]">{formatNumber(hi)}</text>
+        <text x={left - 6} y={h - pad} textAnchor="end" className="fill-slate-500 text-[9px]">{formatNumber(lo)}</text>
+        <line x1={left} x2={left} y1={pad} y2={h - pad} stroke="rgb(226 232 240)" />
+        <path data-series="bound" d={line((p) => p.b)} fill="none" stroke="rgb(148 163 184)" strokeDasharray="4 3" strokeWidth="1.5" />
+        <path data-series="objective" d={line((p) => p.o)} fill="none" stroke="rgb(37 99 235)" strokeWidth="2" />
+      </svg>
+      <figcaption className="flex gap-4 text-xs text-slate-500">
+        <span><span className="mr-1 inline-block h-0.5 w-4 bg-blue-600 align-middle" />best answer</span>
+        <span><span className="mr-1 inline-block w-4 border-t border-dashed border-slate-400 align-middle" />bound</span>
+      </figcaption>
+    </figure>
   );
 }
 
