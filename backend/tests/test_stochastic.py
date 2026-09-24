@@ -54,6 +54,7 @@ def test_the_plan_is_the_newsvendor_quantile_not_the_order_for_the_average_deman
     # 50 futures: the 2/3 quantile within about two of its standard errors (6.7).
     assert 100 < order < 133
     assert set(solved.solution.assignments) == {("order", ())}  # the plan only: selling waits for the data
+    assert solved.solution.wall_seconds > 0.05  # the whole solve, costing the plan included
     out = solved.record["out_of_sample"]
     assert out["unmet"] == 0 and out["futures"] == 50
     assert abs(out["mean"] - 166.67) <= out["ci95"] + 5  # the true expected profit, within the interval

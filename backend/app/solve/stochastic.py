@@ -33,6 +33,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import time
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable
@@ -165,6 +166,7 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     why = refusal(ir, compiled)
     if why is not None:
         raise NotStochastic(why)
+    started = time.monotonic()
     count = max(2, min(MAX_SAMPLES, int(samples)))
     recourse = second_stage(ir)
     base = seed if seed is not None else 0
@@ -195,4 +197,6 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     else:
         record["out_of_sample"] = {"futures": unmet, "mean": None, "ci95": None, "unmet": unmet}
     # The plan is the answer: what to decide now. Recourse is decided later, per future.
-    return Stochastic(replace(solved, assignments=plan, best_bound=None), record)
+    # The run's time is the whole of it: the extensive form and the plan costed out of sample.
+    return Stochastic(replace(solved, assignments=plan, best_bound=None,
+                              wall_seconds=round(time.monotonic() - started, 3)), record)
