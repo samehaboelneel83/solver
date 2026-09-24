@@ -2,7 +2,8 @@ import * as Blockly from "blockly";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { setCatalogue } from "../lib/irBlocks/catalogue";
 import { defineIrBlocks, toolboxFor } from "../lib/irBlocks/vocabulary";
-import { bindWorkspace, showIr } from "./BlocksEditor";
+import { blocksToIr } from "../lib/irBlocks/toIr";
+import { bindWorkspace, showIr, showRefusal } from "./BlocksEditor";
 
 const IR = { version: 2, sets: ["day"], parameters: {}, variables: { x: { index: ["day"], domain: "binary" } }, constraints: [] };
 const now = (run: () => void) => run();
@@ -76,5 +77,34 @@ describe("the Blocks editor's workspace", () => {
     expect(empty).toContain('"ir_rule"');
     const full = JSON.stringify(toolboxFor({ entityTypes: [{ name: "feed", attributes: [{ name: "protein", data_type: "number" }] }], parameters: [{ name: "cost", index: ["feed"] }], relationships: [] }));
     for (const type of ["ir_set", "ir_par", "ir_attr", "ir_filter", "ir_binding"]) expect(full).toContain(`"${type}"`);
+  });
+
+  it("puts a refusal on the block that caused it, moves it with the next, and clears it with none", async () => {
+    const ws = workspace();
+    showIr(ws, { ...IR, constraints: [{ id: "c", left: { var: "x", index: ["d"] }, relation: "<=", right: { const: null }, severity: "hard", forall: [{ index: "d", set: "day" }] }] });
+    const onChange = vi.fn();
+    bindWorkspace(ws, onChange, now);
+    const { paths } = blocksToIr(Blockly.serialization.workspaces.save(ws) as Parameters<typeof blocksToIr>[0]);
+    const idAt = (loc: (string | number)[]) => [...paths].find(([, p]) => JSON.stringify(p) === JSON.stringify(loc))![0];
+    const warn = vi.fn();
+    for (const block of ws.getAllBlocks(false)) block.setWarningText = warn.bind(null, block.id);
+
+    const first = showRefusal(ws, paths, { loc: ["constraints", 0, "right", "const"], message: "null is not a number" }, null);
+    expect(first).toBe(idAt(["constraints", 0, "right"]));
+    expect(warn).toHaveBeenLastCalledWith(first, "null is not a number");
+
+    const second = showRefusal(ws, paths, { loc: ["constraints", 0, "left"], message: "x is not declared" }, first);
+    expect(second).toBe(idAt(["constraints", 0, "left"]));
+    expect(warn).toHaveBeenCalledWith(first, null);
+    expect(warn).toHaveBeenLastCalledWith(second, "x is not declared");
+
+    expect(showRefusal(ws, paths, { loc: ["objective"], message: "the model has no goal" }, second)).toBe("model-root");
+    expect(warn).toHaveBeenLastCalledWith("model-root", "the model has no goal");
+
+    expect(showRefusal(ws, paths, null, "model-root")).toBeNull();
+    expect(warn).toHaveBeenLastCalledWith("model-root", null);
+    // Showing it is not an edit: the draft is never written for it.
+    await settle();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

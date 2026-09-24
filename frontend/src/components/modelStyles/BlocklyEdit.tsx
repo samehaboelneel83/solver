@@ -4,11 +4,11 @@ import BlocksEditor from "../BlocksEditor";
 import { useToast } from "../ToastProvider";
 import { formatApiError } from "../../api/errors";
 import { useCreateVersion, useEntityTypes, useParameters, useRelationshipTypes, type Id } from "../../api/v1";
-import { checkIrShape } from "../../ir";
 import { catalogueFrom } from "../../lib/irBlocks/catalogue";
 import DraftBar, { DraftConflict } from "../../model/DraftBar";
 import { EMPTY_MODEL, publishable } from "../../model/draftIr";
 import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../../model/draftStore";
+import { useDraftRefusal } from "../../model/useDraftRefusal";
 
 export type BlocklyEditProps = {
   domainId: Id;
@@ -52,7 +52,7 @@ export default function BlocklyEdit({ domainId, problemId, versionId, versionNum
     [entityTypes.data, parameters.data, relationshipTypes.data]
   );
   const toPublish = useMemo(() => (workingIr ? publishable(workingIr) : null), [workingIr]);
-  const refusal = toPublish ? checkIrShape(toPublish) : null;
+  const refusal = useDraftRefusal(problemId, toPublish);
 
   if (conflict && stored) {
     return (
@@ -112,6 +112,7 @@ export default function BlocklyEdit({ domainId, problemId, versionId, versionNum
         <BlocksEditor
           ir={workingIr}
           catalogue={catalogue}
+          refusal={refusal}
           fill
           onChange={(next, _paths, left) => {
             setOutside(left);

@@ -13,10 +13,43 @@ import { useEffect, useRef } from "react";
 import * as Blockly from "blockly";
 import { setCatalogue, type BlockCatalogue } from "../lib/irBlocks/catalogue";
 import { irToBlocks, type IrLoc } from "../lib/irBlocks/toBlocks";
-import { blocksToIr } from "../lib/irBlocks/toIr";
+import { blockForLoc, blocksToIr } from "../lib/irBlocks/toIr";
 import { defineIrBlocks, loadBlocks, toolboxFor } from "../lib/irBlocks/vocabulary";
 
 export type BlocksChange = (ir: Record<string, unknown>, paths: Map<string, IrLoc>, outside: number) => void;
+export type BlockRefusal = { loc: IrLoc; message: string };
+
+/** Where each block landed in the IR the workspace makes. */
+function pathsOf(workspace: Blockly.Workspace): Map<string, IrLoc> {
+  return blocksToIr(Blockly.serialization.workspaces.save(workspace) as Parameters<typeof blocksToIr>[0]).paths;
+}
+
+/**
+ * Put `refusal` on the block that caused it -- the block whose place in the
+ * IR is the longest prefix of the refusal's, else the model block itself --
+ * clearing the block the last
+ * one was on. Returns the id it landed on. Showing a warning is not an edit,
+ * so no event is announced (it must never write the draft).
+ */
+export function showRefusal(
+  workspace: Blockly.Workspace,
+  paths: Map<string, IrLoc>,
+  refusal: BlockRefusal | null | undefined,
+  previous: string | null
+): string | null {
+  Blockly.Events.disable();
+  try {
+    if (previous) workspace.getBlockById(previous)?.setWarningText(null);
+    // A refusal of the model as a whole (no decisions at all) lands on the model block.
+    const id = refusal ? blockForLoc(paths, refusal.loc) ?? "model-root" : null;
+    const block = id ? workspace.getBlockById(id) : null;
+    if (!refusal || !block) return null;
+    block.setWarningText(refusal.message);
+    return block.id;
+  } finally {
+    Blockly.Events.enable();
+  }
+}
 
 /** Load `ir` into `workspace` without announcing it as an edit: showing the draft is not changing it. */
 export function showIr(workspace: Blockly.Workspace, ir: Record<string, unknown>): void {
@@ -65,11 +98,14 @@ export default function BlocksEditor({
   ir,
   catalogue,
   onChange,
+  refusal = null,
   fill = false,
 }: {
   ir: Record<string, unknown>;
   catalogue: BlockCatalogue;
   onChange: BlocksChange;
+  /** Why the draft may not be published yet, and where: shown as a warning on that block. */
+  refusal?: BlockRefusal | null;
   /** Fill the parent's height (the optimization view) rather than take most of the window's. */
   fill?: boolean;
 }) {
@@ -82,6 +118,11 @@ export default function BlocksEditor({
   const lastEmitted = useRef<string | null>(null);
   const irRef = useRef(ir);
   irRef.current = ir;
+  // Where each block sits in the IR, and the block now carrying a refusal.
+  const paths = useRef<Map<string, IrLoc>>(new Map());
+  const warned = useRef<string | null>(null);
+  const refusalRef = useRef(refusal);
+  refusalRef.current = refusal;
 
   useEffect(() => {
     if (!host.current) return;
@@ -99,9 +140,12 @@ export default function BlocksEditor({
     setCatalogue(ws, catalogue);
     showIr(ws, irRef.current);
     lastEmitted.current = JSON.stringify(irRef.current);
-    const unbind = bindWorkspace(ws, (next, paths, outside) => {
+    paths.current = pathsOf(ws);
+    warned.current = showRefusal(ws, paths.current, refusalRef.current, null);
+    const unbind = bindWorkspace(ws, (next, where, outside) => {
       lastEmitted.current = JSON.stringify(next);
-      onChangeRef.current(next, paths, outside);
+      paths.current = where;
+      onChangeRef.current(next, where, outside);
     });
     const observer = new ResizeObserver(() => Blockly.svgResize(ws));
     observer.observe(host.current);
@@ -129,7 +173,15 @@ export default function BlocksEditor({
     // Changed from elsewhere: Discard, the Forms tab, another browser tab.
     showIr(ws, ir);
     lastEmitted.current = text;
+    paths.current = pathsOf(ws);
+    warned.current = showRefusal(ws, paths.current, refusalRef.current, null);
   }, [ir]);
+
+  useEffect(() => {
+    const ws = workspace.current;
+    if (!ws) return;
+    warned.current = showRefusal(ws, paths.current, refusal, warned.current);
+  }, [refusal?.message, JSON.stringify(refusal?.loc ?? null)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
