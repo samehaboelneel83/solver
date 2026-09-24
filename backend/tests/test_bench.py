@@ -28,10 +28,19 @@ def test_an_instance_is_the_same_every_time(family):
     assert generate(family, "M", 3).data != generate(family, "M", 4).data
 
 
-def test_the_small_sizes_solve_on_every_backend_that_takes_them_and_agree():
-    rows = run(sorted(FAMILIES), ["S"], time_limit=20)
+#: Families whose S is sized to be hard, not small. districting's S sits
+#: where the exact flow starts to strain: CP-SAT proves it in 2-5 s, the
+#: MIP backends take up to 78 s (bench/results/2026-09-24-districting.md).
+#: That the flow is exact on every backend is pinned by brute force in
+#: tests/test_connected.py instead.
+_NOT_SMALL = frozenset({"districting"})
 
-    assert {row["family"] for row in rows} == set(FAMILIES)
+
+def test_the_small_sizes_solve_on_every_backend_that_takes_them_and_agree():
+    families = sorted(set(FAMILIES) - _NOT_SMALL)
+    rows = run(families, ["S"], time_limit=20)
+
+    assert {row["family"] for row in rows} == set(families)
     assert all(row["status"] == "optimal" for row in rows), [
         (row["instance"], row["backend"], row["status"]) for row in rows if row["status"] != "optimal"
     ]
@@ -40,7 +49,7 @@ def test_the_small_sizes_solve_on_every_backend_that_takes_them_and_agree():
     # nothing -- except one only CP-SAT holds (intervals), which must agree
     # with its twin formulation on the same data instead.
     twins = {"flow_shop": "flow_shop_timed"}
-    for family in FAMILIES:
+    for family in families:
         if family in twins:
             continue
         assert len({row["backend"] for row in rows if row["family"] == family}) >= 2, family

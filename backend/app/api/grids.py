@@ -118,8 +118,9 @@ def _scenarios_using(db: Session, domain_id: int, entity_type: str) -> list[int]
     )
 
 
-def write_grid(db: Session, domain_id: int, body: GridRequest) -> GridReport:
-    """The grid, written. Commits; raises HTTPException with a named cause."""
+def write_grid(db: Session, domain_id: int, body: GridRequest, *, commit: bool = True) -> GridReport:
+    """The grid, written; raises HTTPException with a named cause. Commits,
+    unless the caller's own transaction is to hold it (template apply)."""
     if db.execute(text("SELECT 1 FROM domain WHERE id = :d"), {"d": domain_id}).first() is None:
         raise HTTPException(404, "domain not found")
     boundary = _boundary(db, body)
@@ -191,7 +192,10 @@ def write_grid(db: Session, domain_id: int, body: GridRequest) -> GridReport:
                      attrs={"shared_m": e.shared_m})
         for e in edges
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     totals = {c: sum(v.get(c, 0.0) for v in sums.values()) for c in columns}
     return GridReport(entity_type_id=cell_type.id, relationship_type_id=adjacent.id, cells=len(cells),
                       edges=len(edges), dropped=dropped, layer_totals=totals, layer_outside=lost)

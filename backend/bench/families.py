@@ -47,6 +47,7 @@ whole-number models that only reach CP-SAT once their rules are scaled.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -633,6 +634,41 @@ def _separable(family: Callable[[str, int], tuple[dict, dict]]) -> Callable[[str
     return generate
 
 
+#: Side of the square grid, and zones (GIS 8): the region template's model
+#: -- one zone per cell, balanced within 10%, each zone connected, compact
+#: about fixed centres -- on grids that bracket where the exact flow stops.
+_DISTRICTING = {"S": (10, 4), "M": (14, 6), "L": (20, 8), "XL": (40, 12)}
+
+
+def districting(size: str, instance: int) -> tuple[dict, dict]:
+    from app.regions import build_ir
+
+    side, zones = _DISTRICTING[size]
+    rnd = random.Random(f"districting-{size}-{instance}")
+    # An uneven city: dense around a centre placed per instance, thin at the
+    # edges. With people spread evenly the nearest-centre split is already
+    # balanced, connected and optimal, and the bench would measure nothing.
+    hot_r, hot_c, spread = rnd.uniform(0, side), rnd.uniform(0, side), side / 4
+    cells = [{"id": f"c{r}_{c}", "row": r, "col": c,
+              "population": int(rnd.randint(50, 150) * (1 + 8 * math.exp(-((r - hot_r) ** 2 + (c - hot_c) ** 2) / (2 * spread ** 2))))}
+             for r in range(side) for c in range(side)]
+    edges = [{"from": f"c{r}_{c}", "to": f"c{r + dr}_{c + dc}"}
+             for r in range(side) for c in range(side) for dr, dc in ((0, 1), (1, 0))
+             if r + dr < side and c + dc < side]
+    # Centres at the middles of a near-square tiling of the grid.
+    across = max(1, round(zones ** 0.5))
+    while zones % across:
+        across -= 1
+    down = zones // across
+    centres = [{"id": f"z{k}", "row": int((k // across + 0.5) * side / down), "col": int((k % across + 0.5) * side / across)}
+               for k in range(zones)]
+    total = sum(cell["population"] for cell in cells)
+    ir = build_ir(zones=zones, total=total, nested=False, shape="square")
+    data = {"sets": {"cell": cells, "zone": centres}, "parameters": {}, "parameter_defaults": {},
+            "relationships": {"adjacent": edges}}
+    return ir, data
+
+
 FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota": rota,
     "facility": facility,
@@ -645,6 +681,7 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
     "rota_teams": rota_teams,
     "facility_regions": _separable(facility),
     "knapsack_depots": _separable(knapsack),
+    "districting": districting,
 }
 
 
@@ -653,7 +690,7 @@ FAMILIES: dict[str, Callable[[str, int], tuple[dict, dict]]] = {
 #: nightly's 30 s limit, so it would prove it some nights and not others --
 #: a "proof lost" that is only the clock. The MIP backends find nothing
 #: there in 60 s at all (bench/results/2026-09-23-flow-shop-formulations.md).
-COMPARISON_ONLY = frozenset({"flow_shop_timed", "rota_teams", "facility_regions", "knapsack_depots"})
+COMPARISON_ONLY = frozenset({"flow_shop_timed", "rota_teams", "facility_regions", "knapsack_depots", "districting"})
 
 
 def generate(family: str, size: str, instance: int = 0) -> Instance:

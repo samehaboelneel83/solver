@@ -800,6 +800,32 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
         # Skip cells that already exist so a second apply does not 409.
         db.execute(pg_insert(ParameterValue).values(cells).on_conflict_do_nothing())
 
+    for spec in seed.get("grids") or []:
+        _plant_grid(db, domain_id, spec, entities)
+
+
+def _plant_grid(db: Session, domain_id: int, spec: Any, entities: dict[tuple[str, str], Entity]) -> None:
+    """A seed's grid (GIS 8): cells and adjacency over one of the seed's own
+    records, made after the records exist. A type that already has cells is
+    left alone, as every other name in a seed is -- a second apply does not
+    remake a grid a scenario may already use."""
+    from app.api.grids import GridRequest, write_grid
+
+    if not isinstance(spec, dict):
+        return
+    end = _seed_end(spec.get("boundary_entity"))
+    if end is None or end not in entities:
+        return
+    existing = db.execute(
+        select(func.count(Entity.id))
+        .join(EntityType, EntityType.id == Entity.entity_type_id)
+        .where(EntityType.domain_id == domain_id, EntityType.name == spec.get("entity_type"))
+    ).scalar_one()
+    if existing:
+        return
+    body = {k: v for k, v in spec.items() if k != "boundary_entity"}
+    write_grid(db, domain_id, GridRequest(**body, boundary_entity_id=entities[end].id), commit=False)
+
 
 def seed_workforce_demo(db: Session) -> dict[str, Any]:
     """Create the "Workforce" demo domain, or report that it is already there.

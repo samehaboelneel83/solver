@@ -28,7 +28,13 @@ makespan: Johnson's rule orders the jobs B, then A and C (either way), for
 9 -- and 9 is also a lower bound, since welding takes 8 and cannot start
 before the shortest cut (B's 1) ends. Only CP-SAT holds intervals.
 
-All three are refreshed on every start, as `weekly_rota` is, so a live
+**region_partitioning** -- districts (IR version 2, spatial). A 10 km x 8 km
+area in 1 km hexes with a population layer, cut into 4 connected zones of
+2 connected sub-zones each, balanced and compact. Built in `app.regions`,
+whose docstring says why the goal is a moment of inertia and why the cells
+are 1 km.
+
+All four are refreshed on every start, as `weekly_rota` is, so a live
 database cannot drift from this file.
 """
 
@@ -40,6 +46,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.v1_problem import Template
+from app.regions import REGION_PARTITIONING, build_ir, build_seed
 
 FEED_BLEND = "feed_blend"
 LOAD_BALANCE = "load_balance"
@@ -270,6 +277,7 @@ SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     FEED_BLEND: (FEED_BLEND_SEED, FEED_BLEND_IR),
     LOAD_BALANCE: (LOAD_BALANCE_SEED, LOAD_BALANCE_IR),
     WORKSHOP: (WORKSHOP_SEED, WORKSHOP_IR),
+    REGION_PARTITIONING: (build_seed(), build_ir()),
 }
 
 
