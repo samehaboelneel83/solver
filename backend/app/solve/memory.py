@@ -44,6 +44,12 @@ def recall(history: list[tuple[str, float]], admissible: set[str]) -> Recalled |
         return None
     ranked = sorted(proven, key=lambda s: (median(proven[s]), s))
     best = ranked[0]
-    said = [f"{best} proved {len(proven[best])} of this problem's recent runs in a median {median(proven[best]):.3g} s"]
-    said += [f"{s} {len(proven[s])} in {median(proven[s]):.3g} s" for s in ranked[1:]]
+    said = [f"{best} proved {len(proven[best])} of this problem's recent runs in a median {_seconds(median(proven[best]))}"]
+    said += [f"{s} {len(proven[s])} in {_seconds(median(proven[s]))}" for s in ranked[1:]]
     return Recalled(best, "remembered: " + "; ".join(said))
+
+
+def _seconds(value: float) -> str:
+    """Three figures, in milliseconds under a second: "0 s" says nothing."""
+    return f"{value * 1000:.3g} ms" if value < 1 else f"{value:.3g} s"
+

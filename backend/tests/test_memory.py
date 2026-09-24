@@ -17,6 +17,8 @@ def test_the_fastest_median_among_admissible_solvers_wins():
     assert got.solver == "highs"
     assert got.evidence == ("remembered: highs proved 2 of this problem's recent runs in a median 1 s; "
                             "cp-sat 2 in 2.2 s")
+    fast = recall([("glop", 0.0042), ("glop", 0.0038)], {"glop"})
+    assert fast.evidence == "remembered: glop proved 2 of this problem's recent runs in a median 4 ms"
 
 
 def test_one_lucky_run_decides_nothing():
