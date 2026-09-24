@@ -144,9 +144,9 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
   return (
     <Card title={title}>
       {onCanvas ? (
-        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="h-auto w-full" role="img" aria-label={label} />
+        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="h-auto w-full max-w-xl" role="img" aria-label={label} />
       ) : (
-        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label={label}>
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full max-w-xl" role="img" aria-label={label}>
           {at &&
             features.map((f) => (
               <path
