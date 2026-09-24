@@ -110,8 +110,9 @@ class RunSummary(BaseModel):
     status: str
     # Migration 0028. `global`: proven the best of all answers. `local`: the
     # best among its neighbours -- a better one may exist elsewhere. `none`:
-    # an answer, with no claim to be the best. Null when there is no answer.
-    optimality: Literal["global", "local", "none"] | None = None
+    # an answer, with no claim to be the best. `approximate` (0051): optimal to
+    # a tolerance (PDLP), not proven. Null when there is no answer.
+    optimality: Literal["global", "local", "approximate", "none"] | None = None
     solver: str
     solver_version: str | None
     compiler_version: str | None

@@ -99,3 +99,6 @@ def test_a_large_lp_run_is_recorded_approximate_with_its_tolerance(tenants, db, 
     assert (status, optimality) == ("optimal", "approximate")
     assert solver.startswith("pdlp") and params["tolerance"] == lp.PDLP_TOLERANCE
     assert params["chosen_solver"] == "pdlp" and params["pdlp"] is True
+    # And the API reads it back as such: the run page and the list both show it.
+    read = client.get(f"/api/v1/runs/{run_id}", headers=tenants["a"])
+    assert read.status_code == 200 and read.json()["optimality"] == "approximate"
