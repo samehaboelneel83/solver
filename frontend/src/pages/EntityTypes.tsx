@@ -19,6 +19,7 @@ import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
+import GridGeneratorForm from "../components/GridGeneratorForm";
 import { useCreateEntityType, useEntityTypes, type EntityRole, type Id } from "../api/v1";
 import { typeColour } from "../lib/colour";
 import { useCapabilities } from "../hooks/useCapability";
@@ -60,6 +61,7 @@ export default function EntityTypes() {
         <>
           <TypeList domainId={domainId} />
           {canEdit && <CreateTypeForm domainId={domainId} />}
+          {canEdit && <GridSection domainId={domainId} />}
         </>
       )}
     </div>
@@ -313,6 +315,17 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
           {createType.isPending ? "Saving…" : "Create entity type"}
         </button>
       </form>
+    </section>
+  );
+}
+
+/** GIS 3: cells and their adjacency, made over an area drawn on a record. */
+function GridSection({ domainId }: { domainId: Id }) {
+  const { data } = useEntityTypes(domainId, { limit: 500 });
+  return (
+    <section className="mt-6 rounded-md border border-slate-200 bg-white p-4" aria-labelledby="grid-heading">
+      <h2 id="grid-heading" className="mb-2 font-medium text-slate-900">Make a grid</h2>
+      <GridGeneratorForm domainId={domainId} entityTypes={data?.items ?? []} />
     </section>
   );
 }

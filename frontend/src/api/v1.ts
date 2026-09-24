@@ -1119,6 +1119,34 @@ export const useCreateRun = () =>
   useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
 export const useCancelRun = () => useV1Mutation((id: Id) => cancelRun(id));
 
+// --- grids (spatial, GIS 3) -------------------------------------------------
+
+export type GridRequest = {
+  boundary_entity_id?: Id | null;
+  boundary?: Record<string, unknown> | null;
+  shape: "square" | "hex";
+  size_m: number;
+  entity_type: string;
+  keep?: "centre" | "overlap";
+  layers?: Record<string, unknown>[];
+  replace?: boolean;
+};
+
+export type GridReport = {
+  entity_type_id: Id;
+  relationship_type_id: Id;
+  cells: number;
+  edges: number;
+  dropped: number;
+  layer_totals: Record<string, number>;
+  layer_outside: Record<string, number>;
+};
+
+export const makeGrid = (domainId: Id, body: GridRequest) =>
+  send<GridReport>("POST", `/api/v1/domains/${domainId}/grids`, body);
+export const useMakeGrid = () =>
+  useV1Mutation(({ domainId, body }: { domainId: Id; body: GridRequest }) => makeGrid(domainId, body));
+
 export function useRunComparison(left: Id | null | undefined, right: Id | null | undefined) {
   return useQuery({
     queryKey: [V1, "compare", left, right],
