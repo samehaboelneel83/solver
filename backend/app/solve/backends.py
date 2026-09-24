@@ -65,7 +65,9 @@ class Backend:
     #: neighbours, with a better one possibly elsewhere. Required, with no
     #: default, so a local solver cannot be registered without saying so: a
     #: local optimum shown as "optimal" looks exactly like the best answer.
-    proves: Literal["global", "local"]
+    #: A third, `approximate` (migration 0051): optimal to a stated tolerance,
+    #: not proven -- a first-order method such as PDLP.
+    proves: Literal["global", "local", "approximate"]
     #: Whether this build actually has it.
     is_available: Callable[[], bool] = field(default=lambda: True)
     note: str = ""
@@ -149,6 +151,32 @@ def _lp_available() -> bool:
     from app.solve import lp
 
     return lp.available()
+
+
+def _pdlp_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+    seed: int | None = None,
+    gap_rel: float = 0.0,
+    on_progress=None,
+    hint: dict | None = None,
+    solver_params: dict | None = None,
+) -> Solution:
+    from app.solve import lp
+
+    return lp.solve(
+        compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+        gap_rel=gap_rel, on_progress=on_progress, engine=lp.PDLP,
+    )
+
+
+def _pdlp_available() -> bool:
+    from app.solve import lp
+
+    return lp.available(lp.PDLP)
 
 
 def _highs_solve(
@@ -395,7 +423,26 @@ SCIP = Backend(
     planner_choice="A global nonlinear solver will take this by default.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP)
+PDLP = Backend(
+    name="pdlp",
+    classes=frozenset({"LP"}),
+    # What GLOP takes, and `large-scale`: the need `app.solve.pdlp` adds to a
+    # linear program past its size threshold when `solve.pdlp` is on -- the
+    # one need only this backend provides, so nothing else is chosen then.
+    provides=frozenset(
+        {"linear", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints", "pwl-convex", "large-scale"}
+    ),
+    # Last: an ordinary linear program goes to the simplex or interior-point
+    # solvers, whose optimum is proven.
+    rank=3,
+    solve=_pdlp_solve,
+    proves="approximate",
+    is_available=_pdlp_available,
+    note="a first-order method for very large linear programs; optimal to a tolerance, not proven",
+    planner_choice="A solver for very large linear programs will take this; its answer is optimal to a small tolerance.",
+)
+
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP)
 
 
 class NoBackend(Exception):

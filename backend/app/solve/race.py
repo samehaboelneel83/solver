@@ -34,6 +34,8 @@ def probe_seconds(time_limit: float) -> float:
 
 def should_race(fingerprint: dict[str, Any] | None, candidates: list[str], time_limit: float) -> str | None:
     """None when a race is worth running, else why not (recorded on the run)."""
+    if not candidates:
+        return "no solver that proves its answer takes this model"
     if len(candidates) < 2:
         return "only one solver takes this model"
     if time_limit < 3 * probe_seconds(time_limit):

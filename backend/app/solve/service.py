@@ -148,6 +148,8 @@ def enqueue_run(
     from_settings["memory"] = settings["solve.memory"].source
     probe = bool(settings["solve.probe"].value)
     from_settings["probe"] = settings["solve.probe"].source
+    pdlp = bool(settings["solve.pdlp"].value)
+    from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -198,6 +200,7 @@ def enqueue_run(
         "warm_start": warm_start,
         "symmetry": symmetry,
         "separable": separable,
+        "pdlp": pdlp,
         "memory": memory,
         "probe": probe,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
@@ -585,6 +588,12 @@ def _execute(
             # Fractional data made whole exactly, so CP-SAT may take it
             # (migration 0039); a model that cannot be scaled says why.
             found = admit_scaled(found, compiled)
+        if params.get("pdlp"):
+            # A linear program past the size threshold goes to PDLP, whose
+            # answer is optimal to a tolerance (app.solve.pdlp, migration 0051).
+            from app.solve.pdlp import admit as admit_large
+
+            found = admit_large(found, compiled)
         events.stage(
             "compiled",
             model_class=found.model_class,
@@ -800,6 +809,11 @@ def _execute(
     # attribute to a choice is not reproducible. Empty ranges ride along:
     # they are a fact about this compile, not a second table.
     extra = {"chosen_solver": backend.name, "why_solver": why}
+    if backend.proves == "approximate":
+        # What "optimal" means for this answer: to this tolerance, not proven.
+        from app.solve.lp import PDLP_TOLERANCE
+
+        extra["tolerance"] = PDLP_TOLERANCE
     if any(c.when for c in compiled.constraints) and "indicator" not in backend.provides:
         # What the solver was actually given: the conditional rules as big-M
         # rows, and the largest M each needed (principle 7: say so).
@@ -1396,11 +1410,15 @@ class RunEvents:
 
 
 def _admissible(found) -> set[str]:
-    """Every available backend the rules let take this model."""
+    """Every available backend the rules let take this model and that proves
+    its optimum: memory and the probe race compare proofs, and an
+    approximate answer (PDLP) is none."""
     from app.solve.backends import REGISTRY
 
     names = set()
     for candidate in REGISTRY:
+        if candidate.proves != "global":
+            continue
         try:
             choose(found, candidate.name)
             names.add(candidate.name)
@@ -1421,7 +1439,10 @@ def _recall(db: Session, run_id: int, found):
         text(
             "SELECT r.solver, r.wall_time_s FROM run r JOIN scenario s ON s.id = r.scenario_id"
             " WHERE s.problem_id = (SELECT s2.problem_id FROM run r2 JOIN scenario s2 ON s2.id = r2.scenario_id WHERE r2.id = :r)"
-            "   AND r.id <> :r AND r.status = 'optimal' AND r.reused_from IS NULL AND r.wall_time_s IS NOT NULL"
+            # A proven optimum only: an approximate one (PDLP) says nothing
+            # about which solver proves this problem fastest.
+            "   AND r.id <> :r AND r.status = 'optimal' AND r.optimality = 'global'"
+            "   AND r.reused_from IS NULL AND r.wall_time_s IS NOT NULL"
             "   AND r.params->>'pareto_of' IS NULL"
             " ORDER BY r.id DESC LIMIT :n"
         ),

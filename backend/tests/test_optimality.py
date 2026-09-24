@@ -65,17 +65,17 @@ def test_every_backend_declares_what_its_optimum_proves():
     """Required, not defaulted: a backend added without saying would be a
     local solver reporting "optimal" with nothing to tell it apart."""
     for backend in REGISTRY:
-        assert backend.proves in ("global", "local"), backend.name
+        assert backend.proves in ("global", "local", "approximate"), backend.name
     field = next(f for f in dataclasses.fields(CP_SAT) if f.name == "proves")
     assert field.default is dataclasses.MISSING
 
 
-def test_every_backend_today_proves_the_global_optimum():
-    """They all solve linear models, which are convex, so the optimum each
-    proves is the global one. A local solver joining the registry changes
-    this test on purpose."""
+def test_every_backend_today_proves_the_global_optimum_but_pdlp():
+    """They solve convex models exactly, so the optimum each proves is the
+    global one -- except PDLP, whose optimum holds to a tolerance (migration
+    0051). A local solver joining the registry changes this test on purpose."""
     assert {backend.name: backend.proves for backend in REGISTRY} == {
-        backend.name: "global" for backend in REGISTRY
+        **{backend.name: "global" for backend in REGISTRY}, "pdlp": "approximate"
     }
 
 

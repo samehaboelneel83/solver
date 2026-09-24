@@ -224,7 +224,12 @@ class Translator:
                                     data={"source": "run", "runId": self.run_id})
                 out += self._complete("map")
         out += self._complete("summary")
-        if status == "optimal":
+        if status == "optimal" and record.get("optimality") == "approximate":
+            # PDLP: optimal to a tolerance, not proven -- never "the best".
+            out.append(self._say(f"Solved: {record.get('objective')}, optimal to within a small tolerance -- "
+                                 "not proven the best."))
+            out += self._enter("warning")
+        elif status == "optimal":
             out.append(self._say(f"Solved: {record.get('objective')}, proven the best "
                                  f"({record.get('optimality') or 'global'})."))
             out += self._enter("complete")

@@ -875,3 +875,12 @@ describe("howFound", () => {
     expect(howFound({}, "cp-sat")).toBeNull();
   });
 });
+
+describe("statusNote and an approximate optimum", () => {
+  it("never calls a PDLP answer proven, and says its tolerance", () => {
+    const note = statusNote({ status: "optimal", optimality: "approximate", params: { tolerance: 1e-6 } });
+    expect(note).toMatch(/^Optimal to within a tolerance of 0\.000001 -- /);
+    expect(note).toMatch(/not proven the best/);
+    expect(statusNote({ status: "optimal", optimality: "approximate" })).toMatch(/^Optimal to within a small tolerance/);
+  });
+});

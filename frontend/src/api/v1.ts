@@ -505,7 +505,8 @@ export type ConstraintOutcome = {
 /** What an answer may claim (migration 0028). `global`: proven the best of
  * all answers. `local`: the best among its neighbours -- a better one may
  * exist. `none`: an answer, with no claim to be the best. */
-export type Optimality = "global" | "local" | "none";
+/** `approximate` (migration 0051): optimal to a tolerance, not proven -- PDLP. */
+export type Optimality = "global" | "local" | "approximate" | "none";
 
 export type RunSummary = {
   id: Id;

@@ -141,3 +141,14 @@ def test_a_spatial_run_that_ended_well_also_shows_its_map():
     failed = _whole(Translator(13, status="queued", time_limit_s=10, spatial=True), {**record, "status": "infeasible"})
     for stream in (plain, failed):
         assert not any(e["event"] == "component.created" and e["component"]["type"] == "spatial-map" for e in stream)
+
+
+def test_an_approximate_optimum_is_never_said_to_be_proven():
+    """PDLP (queue R1): optimal to a tolerance -- the stream warns rather than completing."""
+    record = {"status": "optimal", "objective": 12.5, "best_bound": None, "gap": None, "optimality": "approximate",
+              "wall_time_s": 0.2, "solver": "pdlp", "error": None}
+    events = _whole(Translator(14, status="queued", time_limit_s=10), record)
+    said = [e["text"] for e in events if e["event"] == "agent.message"]
+    assert any("not proven the best" in text for text in said)
+    assert not any("proven the best (" in text for text in said)
+    assert _states(events)[-1] == "warning"

@@ -96,6 +96,8 @@ export function statusNote(run: {
   gap?: number | null;
   /** The run was stopped on request and kept the answer it had. */
   stopped?: boolean;
+  /** An approximate optimum's tolerance (PDLP), recorded on the run. */
+  params?: { tolerance?: number } | Record<string, unknown>;
 }): string {
   if (run.status === "feasible" && run.stopped) {
     return typeof run.gap === "number"
@@ -104,6 +106,14 @@ export function statusNote(run: {
   }
   if (run.status === "feasible" && typeof run.gap === "number") {
     return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
+  }
+  if (run.status === "optimal" && run.optimality === "approximate") {
+    const tolerance = run.params?.tolerance;
+    return (
+      `Optimal to within ${typeof tolerance === "number" ? `a tolerance of ${tolerance}` : "a small tolerance"} -- ` +
+      "very close to the best possible, but not proven the best. A method for very large models answered it; " +
+      "an exact solver proves the optimum when the model is small enough."
+    );
   }
   if (run.status === "optimal" && run.optimality === "local") {
     return "The best answer near where the search looked -- not proven the best overall. A better one may exist; solving from another start, or with a global solver, is how to find out.";
