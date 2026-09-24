@@ -106,7 +106,7 @@ stays as a description of the model (Workspace, analytics).
 Spec `docs/superpowers/specs/2026-09-24-spatial-region-partitioning-design.md`, plan
 `docs/superpowers/plans/2026-09-24-spatial-region-partitioning.md` -- one item per plan task.
 
-- [ ] (GIS 1) The geometry attribute type -- plan Task 1.
+- [x] (GIS 1) The geometry attribute type -- plan Task 1. *(`465989e`, migration 0049 (rehearsed up/down/up; the enum value stays on downgrade, which is refused while any geometry exists): GeoJSON Point/Polygon/MultiPolygon, 10,000 positions at most, judged coarsely by the shared `attr_value_matches_type` (now also used by `entity_validate`) and fully by the API, naming the ring or position; no filter operator, not arithmetic; setting `spatial.crs` (4326). The demo units gain an optional `site` point so the seed exercises every type. Live in a browser: an unclosed ring refused with "ring 0 is not closed: it starts at [31.2, 30] and ends at [31.2, 30.05]", a closed one drawn as typed and saved.)*
 - [ ] (GIS 2) Projection and the pure grid -- plan Task 2.
 - [ ] (GIS 3) The grid generator endpoint and form -- plan Task 3.
 - [ ] (GIS 4) The `connected` rule in the contract -- plan Task 4.
