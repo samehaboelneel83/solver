@@ -47,4 +47,17 @@ describe("the progress curve", () => {
     expect(screen.queryByText("21,485")).not.toBeInTheDocument();
     expect(screen.getByText("the opening bound, before the first answer, is off the scale")).toBeInTheDocument();
   });
+
+  it("draws in order of time, whatever order the reports arrived in", () => {
+    const { container } = render(
+      <Curve history={[
+        { elapsed: 2, objective: 12, bound: 20 },
+        { elapsed: 1, objective: 10, bound: 20 },
+        { elapsed: 3, objective: 15, bound: 16 },
+      ]} />
+    );
+    const d = container.querySelector('[data-series="objective"]')!.getAttribute("d")!;
+    const xs = [...d.matchAll(/(?:M|H)([\d.]+)/g)].map((m) => Number(m[1]));
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+  });
 });

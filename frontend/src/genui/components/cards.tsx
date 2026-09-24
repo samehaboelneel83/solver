@@ -131,7 +131,9 @@ export function SolverStatusSkeleton({ record }: GenUIProps) {
 export function Curve({ history }: { history: Record<string, unknown>[] }) {
   const points = history
     .map((h) => ({ t: num(h.elapsed), o: num(h.objective), b: num(h.bound) }))
-    .filter((p): p is { t: number; o: number | null; b: number | null } => p.t !== null);
+    .filter((p): p is { t: number; o: number | null; b: number | null } => p.t !== null)
+    // By time, not by arrival: a solver's last report can carry an earlier clock.
+    .sort((a, b) => a.t - b.t);
   // The scale is the part of the run after its first answer: a solver's
   // opening bound (before any answer exists) can be far off, and scaling to
   // it flattens everything that matters. It is marked, not hidden.
