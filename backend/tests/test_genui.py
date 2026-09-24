@@ -116,3 +116,11 @@ def test_another_organization_cannot_watch_the_genui_stream(tenants, db):  # noq
     run_id = _run(db, _knapsack(10), "genui-private")
     with TestClient(app).stream("GET", f"/api/v1/runs/{run_id}/genui", headers=tenants["b"]) as response:
         assert response.status_code == 404
+
+
+def test_a_probe_race_is_told_as_trying_the_solvers():
+    t = Translator(10, status="queued", time_limit_s=10)
+    t.opening()
+    events = t.feed("stage", {"stage": "probing", "solvers": ["cp-sat", "highs"], "seconds": 1.0})
+    assert {"event": "agent.message", "text": "Trying cp-sat, highs for 1 s each; the best goes on."} in events
+    assert _states(events) == ["selecting_solver"]

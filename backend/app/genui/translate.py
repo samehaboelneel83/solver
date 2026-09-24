@@ -153,6 +153,11 @@ class Translator:
             out += self._create("solver", "solver-status", props={"title": "Solver"})
             out += self._data("solver", {"solver": facts.get("solver"), "why": facts.get("why"),
                                          "modelClass": facts.get("model_class")}, state="hydrated")
+        elif stage == "probing":
+            # The probe race (app.solve.race): the choice is being tried, not assumed.
+            out += self._enter("selecting_solver")
+            solvers = ", ".join(facts.get("solvers") or [])
+            out.append(self._say(f"Trying {solvers} for {facts.get('seconds', 0):g} s each; the best goes on."))
         elif stage == "solving":
             out += self._create("solver", "solver-status", props={"title": "Solver"})
             if "solver" not in self.completed:

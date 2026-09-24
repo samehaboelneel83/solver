@@ -45,6 +45,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve import race as race_rows
 from app.solve.fingerprint import fingerprint as fingerprint_of
 from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
@@ -145,6 +146,8 @@ def enqueue_run(
     from_settings["separable"] = settings["solve.separable"].source
     memory = bool(settings["solve.memory"].value)
     from_settings["memory"] = settings["solve.memory"].source
+    probe = bool(settings["solve.probe"].value)
+    from_settings["probe"] = settings["solve.probe"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -196,6 +199,7 @@ def enqueue_run(
         "symmetry": symmetry,
         "separable": separable,
         "memory": memory,
+        "probe": probe,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -588,15 +592,24 @@ def _execute(
             rules=len(compiled.constraints),
             **({"fingerprint": numbers} if numbers else {}),
         )
+        race_candidates, race_record, race_skipped = None, None, None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
+                recalled = None
                 if params.get("memory") and not params.get("requested_solver"):
                     # The problem's own history, among what the rules admit
                     # for this model (app.solve.memory, queue 17a).
                     recalled = _recall(db, run_id, found)
                     if recalled is not None:
                         backend, why = by_name(recalled.solver), recalled.evidence
+                if (params.get("probe") and not params.get("requested_solver") and recalled is None
+                        and not params.get("pareto_steps") and not params.get("robust")):
+                    # Nothing to remember: race the admissible solvers
+                    # briefly (app.solve.race, queue 17b).
+                    candidates = sorted(_admissible(found), key=_rank_of)
+                    race_skipped = race_rows.should_race(numbers, candidates, time_limit)
+                    race_candidates = None if race_skipped else candidates
                 choosing.set_attribute("solver", backend.name)
             bind_log(solver=backend.name)
             events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
@@ -664,6 +677,32 @@ def _execute(
             if points:
                 result, reason = _point_solution(compiled, points[0]), None
                 raise _Answered
+            if race_candidates:
+
+                def probe_one(name: str, seconds: float, share: int, stop_probe):
+                    try:
+                        return sandbox.run(
+                            "app.solve.sandbox:solve_in_child",
+                            {"backend": name, "compiled": solving_model, "time_limit": seconds, "seed": seed,
+                             "workers": share, "gap_rel": gap_rel},
+                            time_limit=seconds,
+                            workers=share,
+                            should_stop=lambda: stop.is_set() or stop_probe(),
+                        )[0]
+                    except (Unsupported, sandbox.SandboxFailed):
+                        return Solution("unknown", False, None, {}, seconds, name)
+
+                events.stage("probing", solvers=race_candidates, seconds=race_rows.probe_seconds(time_limit))
+                raced = race_rows.run_race(race_candidates, probe_one, workers=workers, time_limit=time_limit,
+                                           sense=compiled.sense, rule=backend.name)
+                backend, why, race_record = by_name(raced.winner), raced.evidence, raced.record
+                bind_log(solver=backend.name)
+                events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
+                if raced.answer is not None:
+                    # A probe proved it: that is the answer, solved once.
+                    result, reason = raced.answer, None
+                    raise _Answered
+                time_limit = max(1.0, time_limit - raced.probe_s)
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
             if robust_record:
                 # The nominal answer, for the price of robustness: the same
@@ -771,6 +810,10 @@ def _execute(
         extra["symmetry_rows"] = symmetry_rows.order_rows(compiled)[1]
     if blocks_record is not None:
         extra["blocks"] = blocks_record
+    if race_record is not None:
+        extra["probes"] = race_record
+    if race_skipped is not None:
+        extra["probe_skipped"] = race_skipped
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
@@ -1352,17 +1395,28 @@ class RunEvents:
             logger.warning("could not record a run event", exc_info=True)
 
 
-def _recall(db: Session, run_id: int, found):
+def _admissible(found) -> set[str]:
+    """Every available backend the rules let take this model."""
     from app.solve.backends import REGISTRY
-    from app.solve.memory import RECENT, recall
 
-    admissible = set()
+    names = set()
     for candidate in REGISTRY:
         try:
             choose(found, candidate.name)
-            admissible.add(candidate.name)
+            names.add(candidate.name)
         except NoBackend:
             continue
+    return names
+
+
+def _rank_of(name: str) -> tuple[int, str]:
+    return (by_name(name).rank, name)
+
+
+def _recall(db: Session, run_id: int, found):
+    from app.solve.memory import RECENT, recall
+
+    admissible = _admissible(found)
     history = db.execute(
         text(
             "SELECT r.solver, r.wall_time_s FROM run r JOIN scenario s ON s.id = r.scenario_id"
