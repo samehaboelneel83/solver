@@ -48,6 +48,12 @@ describe("blocks round-trip every model exactly", () => {
     expect(canonical(back)).toEqual(canonical(ir));
   });
 
+  it("needs no opaque block for any of them: every construct has its own block (Blocks 3)", () => {
+    for (const [name, ir] of CASES) {
+      expect(JSON.stringify(irToBlocks(ir, { editable: true })), name).not.toMatch(/"type":"ir_opaque_/);
+    }
+  });
+
   it("covers every fixture and template (a new one is picked up, not skipped)", () => {
     expect(CASES.length).toBe(FIXTURES.valid.length + Object.keys(TEMPLATES).length);
     expect(CASES.length).toBeGreaterThanOrEqual(28);

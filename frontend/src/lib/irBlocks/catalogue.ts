@@ -32,7 +32,8 @@ export function menu(values: string[], current: string | null | undefined, label
   return all.map((value) => [label(value), value]);
 }
 
-function bindingsOf(first: Blockly.Block | null): [string, string][] {
+/** index -> set for each binding in the stack starting at `first`. */
+export function bindingsOf(first: Blockly.Block | null): [string, string][] {
   const out: [string, string][] = [];
   for (let b = first; b; b = b.getNextBlock()) {
     if (b.type === "ir_binding") out.push([b.getFieldValue("INDEX"), b.getFieldValue("SET")]);
@@ -54,7 +55,7 @@ function inputHolding(parent: Blockly.Block, child: Blockly.Block): string | nul
 
 /**
  * index -> set for every index bound around `block`: the enclosing rule's
- * FORALL (and a scheduling rule's OVER, Task 6), enclosing sums' OVER when
+ * FORALL (and a cumulative's OVER, for its demand), enclosing sums' OVER when
  * the block is in the sum's BODY, and -- for a binding -- the bindings
  * before it in its own stack (a `via` anchors on an earlier index, never on
  * itself). Outer scopes first, so a Map keeps the reading order.
@@ -78,7 +79,9 @@ export function scopeAt(block: Blockly.Block): Map<string, string> {
     if (parent.type === "ir_sum" && holding === "BODY") layers.unshift(bindingsOf(parent.getInputTargetBlock("OVER")));
     if (parent.type === "ir_sum" && holding === "OVER") continue;
     if (["ir_rule", "ir_no_overlap", "ir_cumulative"].includes(parent.type) && holding !== "FORALL") {
-      if (["ir_no_overlap", "ir_cumulative"].includes(parent.type) && holding !== "OVER") layers.unshift(bindingsOf(parent.getInputTargetBlock("OVER")));
+      // A cumulative's demand is per interval, so it sees the OVER indices;
+      // its capacity is one number for them all, so it does not.
+      if (parent.type === "ir_cumulative" && holding === "DEMAND") layers.unshift(bindingsOf(parent.getInputTargetBlock("OVER")));
       layers.unshift(bindingsOf(parent.getInputTargetBlock("FORALL")));
     }
   }

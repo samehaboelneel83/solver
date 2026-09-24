@@ -126,3 +126,88 @@ describe("what a dropdown shows", () => {
     expect(ws.getBlockById("var")!.getField("SET0")!.getText()).toBe("feed");
   });
 });
+
+describe("the advanced constructs' blocks (Blocks 3)", () => {
+  const DECLARE = {
+    type: "ir_variable", fields: { NAME: "open", ARITY: "1", SET0: "day", DOMAIN: "binary" }, extraState: { arity: 1 },
+    next: { block: {
+      type: "ir_variable", fields: { NAME: "hours", ARITY: "1", SET0: "day", DOMAIN: "integer", LOWER: "0", UPPER: "8" }, extraState: { arity: 1 },
+      next: { block: {
+        type: "ir_variable", fields: { NAME: "assign", ARITY: "2", SET0: "employee", SET1: "day", DOMAIN: "binary" }, extraState: { arity: 2 },
+        next: { block: {
+          type: "ir_variable", fields: { NAME: "shift", ARITY: "1", SET0: "day", DOMAIN: "interval", START: "hours", END: "hours", SIZE: "4" }, extraState: { arity: 1 },
+        } },
+      } },
+    } },
+  };
+
+  it("a condition offers only yes-or-no decisions, and only the indices its rule binds", () => {
+    const ws = load([MODEL(
+      { type: "ir_rule", fields: { ID: "c", SEVERITY: "hard", RELATION: "<=" },
+        inputs: {
+          FORALL: { block: { type: "ir_binding", fields: { INDEX: "d", SET: "day" } } },
+          WHEN: { block: { type: "ir_when", id: "w", fields: { VAR: "open", IDX0: "d", IS: "0" }, extraState: { arity: 1, isGiven: true } } },
+        } },
+      DECLARE,
+    )]);
+    const w = ws.getBlockById("w")!;
+    expect(options(w, "VAR")).toEqual(["open", "assign"]);
+    expect(options(w, "IDX0")).toEqual(["d"]);
+  });
+
+  it("a connected rule offers only decisions of two different sets, and relationships of its units to themselves", () => {
+    const ws = load([MODEL(
+      { type: "ir_connected", id: "k", fields: { ID: "c", VAR: "assign", U_INDEX: "e", U_SET: "employee", Z_INDEX: "d", Z_SET: "day", VIA: "works_with", EMPTY: "forbidden" }, extraState: { emptyGiven: false } },
+      DECLARE,
+    )]);
+    const k = ws.getBlockById("k")!;
+    expect(options(k, "VAR")).toEqual(["assign"]);
+    expect(options(k, "VIA")).toEqual(["works_with"]);
+  });
+
+  it("choosing a connected rule's decision fills in its units and groups", () => {
+    const ws = load([MODEL(
+      { type: "ir_connected", id: "k", fields: { ID: "c", VAR: "", U_INDEX: "", U_SET: "", Z_INDEX: "", Z_SET: "", VIA: "", EMPTY: "forbidden" }, extraState: { emptyGiven: false } },
+      DECLARE,
+    )]);
+    const k = ws.getBlockById("k")!;
+    k.setFieldValue("assign", "VAR");
+    expect(["U_INDEX", "U_SET", "Z_INDEX", "Z_SET"].map((f) => k.getFieldValue(f))).toEqual(["e", "employee", "d", "day"]);
+  });
+
+  it("a function lists every function of the catalogue with its curvature", () => {
+    const ws = load([MODEL({ type: "ir_rule", fields: { ID: "c", SEVERITY: "hard", RELATION: "<=" },
+      inputs: { LEFT: { block: { type: "ir_fn", id: "f", fields: { NAME: "log" } } } } })]);
+    const labels = (ws.getBlockById("f")!.getField("NAME") as Blockly.FieldDropdown).getOptions(false).map(([label]) => label);
+    expect(labels).toEqual(["exp — convex", "log — concave", "sqrt — concave", "abs — convex", "sin — neither", "cos — neither"]);
+  });
+
+  it("a cumulative's demand sees its OVER indices; its capacity does not", () => {
+    const ws = load([MODEL(
+      { type: "ir_cumulative", id: "cu", fields: { ID: "c", INTERVAL: "shift", IDX0: "d" }, extraState: { arity: 1 },
+        inputs: {
+          OVER: { block: { type: "ir_binding", fields: { INDEX: "d", SET: "day" } } },
+          DEMAND: { block: { type: "ir_attr", id: "dem", fields: { OF: "", NAME: "" } } },
+          CAPACITY: { block: { type: "ir_attr", id: "cap", fields: { OF: "", NAME: "" } } },
+        } },
+      DECLARE,
+    )]);
+    expect([...scopeAt(ws.getBlockById("dem")!).keys()]).toEqual(["d"]);
+    expect([...scopeAt(ws.getBlockById("cap")!).keys()]).toEqual([]);
+    // Its own interval slots read its OVER, and it offers only interval decisions.
+    expect(options(ws.getBlockById("cu")!, "IDX0")).toEqual(["d"]);
+    expect(options(ws.getBlockById("cu")!, "INTERVAL")).toEqual(["shift"]);
+  });
+
+  it("an interval's start and end offer integer decisions with its own index; a plain reference never names an interval", () => {
+    const ws = load([MODEL(
+      { type: "ir_rule", fields: { ID: "c", SEVERITY: "hard", RELATION: "<=" },
+        inputs: { LEFT: { block: { type: "ir_var", id: "v", extraState: { arity: 0 }, fields: { NAME: "" } } } } },
+      DECLARE,
+    )]);
+    const shift = ws.getAllBlocks(false).find((b) => b.type === "ir_variable" && b.getFieldValue("NAME") === "shift")!;
+    expect(options(shift, "START")).toEqual(["hours"]);
+    expect(options(shift, "PRESENCE")).toEqual(["", "open"]);
+    expect(options(ws.getBlockById("v")!, "NAME")).not.toContain("shift");
+  });
+});

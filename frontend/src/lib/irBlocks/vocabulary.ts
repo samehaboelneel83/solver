@@ -19,12 +19,14 @@
  * plan's Task 3 table lists them.
  */
 import * as Blockly from "blockly";
-import { FILTER_OPERATORS, OBJECTIVE_MODES, RELATIONS, SENSES, SEVERITIES, TRAVERSAL_DEPTHS } from "../../ir/contract";
-import { NONE, catalogueOf, declared, menu, scopeAt } from "./catalogue";
+import { FILTER_OPERATORS, FUNCTIONS, OBJECTIVE_MODES, RELATIONS, SENSES, SEVERITIES, TRAVERSAL_DEPTHS, UNCERTAINTY_KINDS } from "../../ir/contract";
+import { NONE, bindingsOf, catalogueOf, declared, menu, scopeAt } from "./catalogue";
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const MAX_ARITY = 4;
-const MAX_ADD = 8;
+const MAX_ADD = 16;
+/** The most points a curve block holds. */
+export const MAX_POINTS = 12;
 
 // Loose typing for block `this`: Blockly's `Block` plus our own shape state.
 type B = Blockly.Block & {
@@ -32,9 +34,12 @@ type B = Blockly.Block & {
   count?: number;
   index?: string[];
   version?: number;
+  isGiven?: boolean;
+  emptyGiven?: boolean;
   json?: unknown;
   setSlots?(n: number): void;
   setTerms?(n: number): void;
+  setPoints?(n: number): void;
 };
 
 let loading = false;
@@ -123,8 +128,19 @@ function reshape(block: B, key: "arity" | "count", n: number, add: (i: number) =
   rerender(block);
 }
 
-/** Index slots IDX0.. of a reference: each offers the indices bound here to the set its declaration expects there. */
-function refSlots(block: B, n: number, expected: (i: number) => string | undefined) {
+/**
+ * Index slots IDX0.. of a reference: each offers the indices bound here to
+ * the set its declaration expects there. `scope` is where the indices come
+ * from -- around the block by default; a scheduling rule's own slots read
+ * its own FORALL and OVER. `before` places the slots ahead of that input.
+ */
+function refSlots(
+  block: B,
+  n: number,
+  expected: (i: number) => string | undefined,
+  scope: (b: Blockly.Block) => Map<string, string> = scopeAt,
+  before?: string
+) {
   reshape(
     block,
     "arity",
@@ -135,13 +151,30 @@ function refSlots(block: B, n: number, expected: (i: number) => string | undefin
         .appendField(i === 0 ? "[" : ",")
         .appendField(
           dynamic((b) =>
-            [...scopeAt(b)].filter(([, set]) => expected(i) === undefined || set === expected(i)).map(([index]) => index)
+            [...scope(b)].filter(([, set]) => expected(i) === undefined || set === expected(i)).map(([index]) => index)
           ),
           `IDX${i}`
         ),
-    "SLOT"
+    "SLOT",
+    before
   );
 }
+
+/** The decisions declared in the model that `keep` admits, by name. */
+function decisions(b: Blockly.Block, keep: (spec: { index: string[]; domain: string }) => boolean): string[] {
+  return [...declared(b.workspace).variables].filter(([, spec]) => keep(spec)).map(([name]) => name);
+}
+
+/** The indices a scheduling rule's own interval slots may use: those around it, then its FORALL and OVER. */
+function ownScope(b: Blockly.Block): Map<string, string> {
+  const scope = new Map(scopeAt(b));
+  for (const [index, set] of [...bindingsOf(b.getInputTargetBlock("FORALL")), ...bindingsOf(b.getInputTargetBlock("OVER"))]) {
+    if (index && !scope.has(index)) scope.set(index, set);
+  }
+  return scope;
+}
+
+const sameIndex = (a: string[], b: string[]) => a.length === b.length && a.every((set, i) => set === b[i]);
 
 const COLOUR = {
   model: "#475569",
@@ -221,6 +254,50 @@ function opaqueBlock(shape: "declaration" | "rule" | "term") {
   };
 }
 
+/** A scheduling rule: intervals that never overlap, or that never use more than a capacity at once. */
+function schedulingBlock(kind: "no_overlap" | "cumulative") {
+  return {
+    init(this: B) {
+      const spec = (name: string) => declared(this.workspace).variables.get(name);
+      this.appendDummyInput()
+        .appendField("rule")
+        .appendField(nameField("c_1", RULE_KINDS, "ID"), "ID")
+        .appendField(kind === "no_overlap" ? "no two overlap" : "shares a capacity");
+      this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
+      this.appendStatementInput("FORALL").setCheck("binding").appendField("for every");
+      this.appendDummyInput("HEAD")
+        .appendField("the intervals")
+        .appendField(
+          dynamic((b) => decisions(b, (v) => v.domain === "interval"), choose, (name: string) => {
+            if (!loading) refSlots(this, spec(name)?.index.length ?? 0, (i) => spec(this.getFieldValue("INTERVAL"))?.index[i], ownScope, "OVER");
+            return name;
+          }),
+          "INTERVAL"
+        );
+      this.appendStatementInput("OVER").setCheck("binding").appendField("over");
+      if (kind === "cumulative") {
+        this.appendValueInput("DEMAND").setCheck("Number").appendField("each using");
+        this.appendValueInput("CAPACITY").setCheck("Number").appendField("never more than, at once");
+      }
+      this.setPreviousStatement(true, "rule");
+      this.setNextStatement(true, "rule");
+      this.setColour(COLOUR.rule);
+      this.setTooltip(
+        kind === "no_overlap"
+          ? "Of the intervals over these indices, no two are ever running at the same time"
+          : "The intervals over these indices, each using its amount while it runs, never use more than the capacity at once"
+      );
+      this.arity = 0;
+    },
+    saveExtraState(this: B) {
+      return { arity: this.arity ?? 0 };
+    },
+    loadExtraState(this: B, state: { arity: number }) {
+      refSlots(this, state.arity, (i) => declared(this.workspace).variables.get(this.getFieldValue("INTERVAL"))?.index[i], ownScope, "OVER");
+    },
+  };
+}
+
 export function defineIrBlocks(): void {
   if (Blockly.Blocks.ir_model) return;
 
@@ -282,23 +359,52 @@ export function defineIrBlocks(): void {
       this.appendDummyInput("DOMAIN_ROW")
         .appendField("as")
         .appendField(
-          fixed(["binary", "integer", "continuous"], (d) => (d === "binary" ? "yes or no" : d), (domain: string) => {
-            for (const name of ["FROM", "LOWER", "TO", "UPPER"]) this.getField(name)?.setVisible(domain !== "binary");
-            rerender(this);
-            return domain;
-          }),
+          fixed(
+            ["binary", "integer", "continuous", "interval"],
+            (d) => ({ binary: "yes or no", interval: "an interval of time" })[d] ?? d,
+            (domain: string) => {
+              for (const name of ["FROM", "LOWER", "TO", "UPPER"]) this.getField(name)?.setVisible(domain === "integer" || domain === "continuous");
+              this.getInput("INTERVAL_ROW")?.setVisible(domain === "interval");
+              rerender(this);
+              return domain;
+            }
+          ),
           "DOMAIN"
         )
         .appendField(new Blockly.FieldLabel("from"), "FROM")
         .appendField(numberText(""), "LOWER")
         .appendField(new Blockly.FieldLabel("to"), "TO")
         .appendField(numberText(""), "UPPER");
+      // An interval (scheduling): its start and end are integer decisions
+      // with its own index, its length a whole number or data, and it may
+      // be optional -- present only when a yes-or-no decision says so.
+      const ownSets = (b: Blockly.Block) => Array.from({ length: Number(b.getFieldValue("ARITY")) }, (_, i) => b.getFieldValue(`SET${i}`));
+      const part = (keep: (domain: string) => boolean) =>
+        dynamic((b) => decisions(b, (spec) => keep(spec.domain) && sameIndex(spec.index, ownSets(b))), choose);
+      this.appendDummyInput("INTERVAL_ROW")
+        .appendField("starts at")
+        .appendField(part((d) => d === "integer"), "START")
+        .appendField("ends at")
+        .appendField(part((d) => d === "integer"), "END")
+        .appendField("lasts")
+        .appendField(
+          new Blockly.FieldTextInput("1", (text: string) => (loading || /^\d+$/.test(text) || NAME.test(text) ? text : null)),
+          "SIZE"
+        )
+        .appendField(
+          dynamic(
+            (b) => [NONE, ...decisions(b, (spec) => spec.domain === "binary" && sameIndex(spec.index, ownSets(b)))],
+            (v) => (v ? `only if ${v}` : "(always there)")
+          ),
+          "PRESENCE"
+        );
+      this.getInput("INTERVAL_ROW")!.setVisible(false);
       for (const name of ["FROM", "LOWER", "TO", "UPPER"]) this.getField(name)!.setVisible(false);
       this.setInputsInline(true);
       this.setPreviousStatement(true, "declaration");
       this.setNextStatement(true, "declaration");
       this.setColour(COLOUR.decision);
-      this.setTooltip("A decision the solver makes");
+      this.setTooltip("A decision the solver makes. An interval lasts a whole number of steps, or as long as the data of that name says");
       this.arity = 0;
     },
     setSlots(this: B, n: number) {
@@ -347,10 +453,27 @@ export function defineIrBlocks(): void {
           "NAME"
         )
         .appendField(new Blockly.FieldLabelSerializable(""), "INDEX");
+      const deviates = (kind: string) => {
+        for (const name of ["DEVIATION", "GAMMA_LABEL", "GAMMA", "CELLS"]) this.getField(name)?.setVisible(kind === "interval");
+        rerender(this);
+        return kind;
+      };
+      this.appendDummyInput("UNCERTAINTY_ROW")
+        .appendField(
+          fixed(["exact", ...UNCERTAINTY_KINDS], (k) => ({ exact: "known exactly", interval: "may deviate by", scenarios: "varies by scenario" })[k] ?? k, deviates),
+          "UNCERTAINTY"
+        )
+        .appendField(numberText("0.1"), "DEVIATION")
+        .appendField(new Blockly.FieldLabel("of each value, in at most"), "GAMMA_LABEL")
+        .appendField(numberText(""), "GAMMA")
+        .appendField(new Blockly.FieldLabel("cells at once"), "CELLS");
+      for (const name of ["DEVIATION", "GAMMA_LABEL", "GAMMA", "CELLS"]) this.getField(name)!.setVisible(false);
       this.setPreviousStatement(true, "declaration");
       this.setNextStatement(true, "declaration");
       this.setColour(COLOUR.data);
-      this.setTooltip("Numbers the model reads, from the domain's parameter of this name");
+      this.setTooltip(
+        "Numbers the model reads, from the domain's parameter of this name. If they are uncertain, a robust solve protects against them: a deviation is a fraction of each value; leave the cell count empty for all of them"
+      );
       this.index = [];
     },
     saveExtraState(this: B) {
@@ -379,6 +502,7 @@ export function defineIrBlocks(): void {
         .appendField(new Blockly.FieldLabel("per unit"), "PER_UNIT");
       this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
       this.appendStatementInput("FORALL").setCheck("binding").appendField("for every");
+      this.appendStatementInput("WHEN").setCheck("when").appendField("only when");
       this.appendValueInput("LEFT").setCheck("Number");
       this.appendDummyInput().appendField(fixed(RELATIONS, (r) => ({ "<=": "≤", ">=": "≥" })[r] ?? r), "RELATION");
       this.appendValueInput("RIGHT").setCheck("Number");
@@ -566,6 +690,187 @@ export function defineIrBlocks(): void {
     },
   };
 
+  Blockly.Blocks.ir_when = {
+    init(this: B) {
+      const spec = (name: string) => declared(this.workspace).variables.get(name);
+      this.appendDummyInput("HEAD").appendField(
+        dynamic((b) => decisions(b, (v) => v.domain === "binary"), choose, (name: string) => {
+          if (!loading) refSlots(this, spec(name)?.index.length ?? 0, (i) => spec(this.getFieldValue("VAR"))?.index[i], scopeAt, "IS_ROW");
+          return name;
+        }),
+        "VAR"
+      );
+      this.appendDummyInput("IS_ROW")
+        .appendField("is")
+        .appendField(
+          fixed(["1", "0"], (v) => (v === "1" ? "yes" : "no"), (v: string) => {
+            if (!loading) this.isGiven = true;
+            return v;
+          }),
+          "IS"
+        );
+      this.setInputsInline(true);
+      this.setPreviousStatement(true, "when");
+      this.setColour(COLOUR.binding);
+      this.setTooltip("The rule holds only when this yes-or-no decision is yes (or no); otherwise it does not apply");
+      this.arity = 0;
+      this.isGiven = false;
+    },
+    saveExtraState(this: B) {
+      return { arity: this.arity ?? 0, isGiven: this.isGiven ?? false };
+    },
+    loadExtraState(this: B, state: { arity: number; isGiven?: boolean }) {
+      refSlots(this, state.arity, (i) => declared(this.workspace).variables.get(this.getFieldValue("VAR"))?.index[i], scopeAt, "IS_ROW");
+      this.isGiven = !!state.isGiven;
+    },
+  };
+
+  Blockly.Blocks.ir_no_overlap = schedulingBlock("no_overlap");
+  Blockly.Blocks.ir_cumulative = schedulingBlock("cumulative");
+
+  Blockly.Blocks.ir_connected = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("rule")
+        .appendField(nameField("c_1", RULE_KINDS, "ID"), "ID")
+        .appendField("keeps each group in one piece");
+      this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
+      const seed = (set: string) => set.match(/[a-z]/)?.[0] ?? "i";
+      const indexName = () => new Blockly.FieldTextInput("", (t: string) => (loading || NAME.test(t) ? t : null));
+      this.appendDummyInput()
+        .appendField("the decision")
+        .appendField(
+          dynamic(
+            (b) => decisions(b, (v) => v.domain === "binary" && v.index.length === 2 && v.index[0] !== v.index[1]),
+            choose,
+            (name: string) => {
+              const spec = declared(this.workspace).variables.get(name);
+              if (!loading && spec && spec.index.length === 2) {
+                // Choosing the decision decides the rest: its first set is the units, its second the groups.
+                const [units, groups] = spec.index;
+                const u = seed(units);
+                const z = seed(groups) === u ? `${seed(groups)}2` : seed(groups);
+                this.setFieldValue(units, "U_SET");
+                this.setFieldValue(groups, "Z_SET");
+                this.setFieldValue(u, "U_INDEX");
+                this.setFieldValue(z, "Z_INDEX");
+              }
+              return name;
+            }
+          ),
+          "VAR"
+        )
+        .appendField("puts each")
+        .appendField(indexName(), "U_INDEX")
+        .appendField("in")
+        .appendField(dynamic((b) => declared(b.workspace).sets, choose), "U_SET")
+        .appendField("in one")
+        .appendField(indexName(), "Z_INDEX")
+        .appendField("in")
+        .appendField(dynamic((b) => declared(b.workspace).sets, choose), "Z_SET");
+      this.appendDummyInput()
+        .appendField("neighbours by")
+        .appendField(
+          dynamic((b) => {
+            const units = b.getFieldValue("U_SET");
+            return catalogueOf(b.workspace).relationships.filter((r) => r.from === units && r.to === units).map((r) => r.name);
+          }, choose),
+          "VIA"
+        )
+        .appendField(
+          fixed(["forbidden", "allowed"], (e) => (e === "forbidden" ? "and no group empty" : "and a group may be empty"), (e: string) => {
+            if (!loading) this.emptyGiven = true;
+            return e;
+          }),
+          "EMPTY"
+        );
+      this.setPreviousStatement(true, "rule");
+      this.setNextStatement(true, "rule");
+      this.setColour(COLOUR.rule);
+      this.setTooltip("Every group's units form one connected piece, where two units are neighbours by the relationship chosen");
+      this.emptyGiven = false;
+    },
+    saveExtraState(this: B) {
+      return { emptyGiven: this.emptyGiven ?? false };
+    },
+    loadExtraState(this: B, state: { emptyGiven?: boolean }) {
+      this.emptyGiven = !!state.emptyGiven;
+    },
+  };
+
+  Blockly.Blocks.ir_pwl = {
+    init(this: B) {
+      const spec = (name: string) => declared(this.workspace).variables.get(name);
+      this.appendDummyInput("HEAD")
+        .appendField("curve of")
+        .appendField(
+          dynamic((b) => decisions(b, (v) => v.domain !== "interval"), choose, (name: string) => {
+            if (!loading) refSlots(this, spec(name)?.index.length ?? 0, (i) => spec(this.getFieldValue("VAR"))?.index[i], scopeAt, "COUNT_ROW");
+            return name;
+          }),
+          "VAR"
+        );
+      this.appendDummyInput("COUNT_ROW")
+        .appendField("through")
+        .appendField(
+          fixed(
+            Array.from({ length: MAX_POINTS - 1 }, (_, i) => String(i + 2)),
+            (n) => `${n} points`,
+            (n: string) => {
+              this.setPoints!(Number(n));
+              return n;
+            }
+          ),
+          "COUNT"
+        );
+      this.setOutput(true, "Number");
+      this.setColour(COLOUR.sum);
+      this.setTooltip("A curve through these points, straight between them, read at the decision's value: x rising from point to point");
+      this.arity = 0;
+      this.count = 0;
+      this.setPoints!(2);
+    },
+    setPoints(this: B, n: number) {
+      reshape(
+        this,
+        "count",
+        Math.max(2, Math.min(MAX_POINTS, n)),
+        (i) =>
+          this.appendDummyInput(`P${i}`)
+            .appendField(i === 0 ? "at" : "then")
+            .appendField(numberText(String(i)), `X${i}`)
+            .appendField("→")
+            .appendField(numberText("0"), `Y${i}`),
+        "P"
+      );
+    },
+    saveExtraState(this: B) {
+      return { arity: this.arity ?? 0, count: this.count ?? 2 };
+    },
+    loadExtraState(this: B, state: { arity: number; count: number }) {
+      refSlots(this, state.arity, (i) => declared(this.workspace).variables.get(this.getFieldValue("VAR"))?.index[i], scopeAt, "COUNT_ROW");
+      this.setPoints!(state.count);
+      this.setFieldValue(String(state.count), "COUNT");
+    },
+  };
+
+  Blockly.Blocks.ir_fn = {
+    init(this: B) {
+      this.appendValueInput("OF")
+        .setCheck("Number")
+        .appendField(fixed(Object.keys(FUNCTIONS), (n) => `${n} — ${FUNCTIONS[n]?.convexity ?? "?"}`), "NAME")
+        .appendField("of");
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(COLOUR.operator);
+      this.setTooltip(
+        Object.entries(FUNCTIONS)
+          .map(([name, f]) => `${name}: ${f.text} (${f.convexity})`)
+          .join("; ")
+      );
+    },
+  };
+
   Blockly.Blocks.ir_opaque_declaration = opaqueBlock("declaration");
   Blockly.Blocks.ir_opaque_rule = opaqueBlock("rule");
   Blockly.Blocks.ir_opaque_term = opaqueBlock("term");
@@ -577,6 +882,7 @@ export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cum
 export const IR_BLOCK_TYPES = [
   "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
+  "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_pwl", "ir_fn",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
 ] as const;
 
@@ -590,15 +896,27 @@ export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
   const hasParameters = catalogue.parameters.length > 0;
   const hasNumbers = catalogue.entityTypes.some((t) => t.attributes.some((a) => a.data_type === "integer" || a.data_type === "number"));
   const hasAttributes = catalogue.entityTypes.some((t) => t.attributes.length > 0);
+  const hasSelfRelationship = catalogue.relationships.some((r) => r.from === r.to);
   const blocks = (types: (string | false)[]) => types.filter((t): t is string => !!t).map((type) => ({ kind: "block", type }));
   return {
     kind: "categoryToolbox",
     contents: [
       { kind: "category", name: "Declare", colour: "#0d9488", contents: blocks([hasTypes && "ir_set", "ir_variable", hasParameters && "ir_parameter"]) },
-      { kind: "category", name: "Rules", colour: "#334155", contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter"]) },
+      {
+        kind: "category",
+        name: "Rules",
+        colour: "#334155",
+        contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter", "ir_when"]),
+      },
+      {
+        kind: "category",
+        name: "Scheduling and areas",
+        colour: "#0f766e",
+        contents: blocks(["ir_no_overlap", "ir_cumulative", hasSelfRelationship && "ir_connected"]),
+      },
       { kind: "category", name: "Goal", colour: "#16a34a", contents: blocks(["ir_goal_term"]) },
       { kind: "category", name: "Values", colour: "#3b82f6", contents: blocks(["ir_const", "ir_var", hasParameters && "ir_par", hasNumbers && "ir_attr"]) },
-      { kind: "category", name: "Arithmetic", colour: "#7c3aed", contents: blocks(["ir_sum", "ir_add", "ir_mul"]) },
+      { kind: "category", name: "Arithmetic", colour: "#7c3aed", contents: blocks(["ir_sum", "ir_add", "ir_mul", "ir_pwl", "ir_fn"]) },
     ],
   };
 }
