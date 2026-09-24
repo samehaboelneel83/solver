@@ -25,6 +25,7 @@ from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_domain import AttributeDef, Entity, EntityType, Relationship, RelationshipType
 from app.settings_resolve import resolve
+from app.spatial import terrain
 from app.spatial.geometry import validate_geometry
 from app.spatial.grid import TooManyCells, make_grid, sum_points
 from app.spatial.project import OutOfRange
@@ -51,6 +52,9 @@ class GridRequest(BaseModel):
     #: {"lon", "lat", <column>: number}, or GeoJSON Point features.
     layers: list[dict[str, Any]] = Field(default_factory=list, max_length=MAX_LAYER_ROWS)
     replace: bool = False
+    #: Give each cell its mean elevation and slope from the terrain tiles of
+    #: the tile index the setting `spatial.tiles_index` names (GIS 10).
+    elevation: bool = False
 
 
 class GridReport(BaseModel):
@@ -61,6 +65,35 @@ class GridReport(BaseModel):
     dropped: int
     layer_totals: dict[str, float]
     layer_outside: dict[str, float]
+    #: With `elevation`: cells the terrain does not cover (no value given), and
+    #: the lowest and highest cell elevation found.
+    elevation_missing: int = 0
+    elevation_range: list[float] | None = None
+
+
+#: The two attributes `elevation` adds.
+TERRAIN_ATTRIBUTES = [("elevation_m", "number"), ("slope_pct", "number")]
+
+
+def _terrain(db: Session, domain_id: int, cells: list, crs: int, size_m: float) -> dict[str, tuple[float, float] | None]:
+    """Each cell's (elevation m, slope %) from the terrain tiles, or None where they do not reach."""
+    from pyproj import Transformer
+    from shapely.geometry import shape
+    from shapely.ops import transform
+
+    address = str(resolve(db, domain_id=domain_id)["spatial.tiles_index"].value or "").strip()
+    try:
+        source = terrain.terrain_source(address, fetch=terrain.fetch_bytes)
+    except terrain.TerrainError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    to_lonlat = None if crs == 4326 else Transformer.from_crs(crs, 4326, always_xy=True).transform
+    polygons = {c.key: shape(c.geometry) if to_lonlat is None else transform(to_lonlat, shape(c.geometry)) for c in cells}
+    latitude = sum(p.centroid.y for p in polygons.values()) / max(len(polygons), 1)
+    sampler = terrain.Sampler(source, terrain.zoom_for(size_m, latitude, source), fetch=terrain.fetch_bytes)
+    try:
+        return {key: terrain.cell_terrain(polygon, sampler) for key, polygon in polygons.items()}
+    except OSError as exc:
+        raise HTTPException(422, f"the terrain tiles could not be read from the tile server ({exc})") from exc
 
 
 def _points(layers: list[dict[str, Any]]) -> list[tuple[float, float, dict[str, float]]]:
@@ -131,9 +164,13 @@ def write_grid(db: Session, domain_id: int, body: GridRequest, *, commit: bool =
         raise HTTPException(422, str(exc)) from exc
     sums, lost = sum_points(cells, _points(body.layers), crs)
     columns = sorted({name for values in sums.values() for name in values} | set(lost))
-    clash = [c for c in columns if c in {name for name, _ in CELL_ATTRIBUTES}]
+    reserved = {name for name, _ in CELL_ATTRIBUTES} | ({name for name, _ in TERRAIN_ATTRIBUTES} if body.elevation else set())
+    clash = [c for c in columns if c in reserved]
     if clash:
         raise HTTPException(422, f"layer column {clash[0]!r} is one every cell already carries; rename it")
+
+    # Before any write: a terrain that cannot be read refuses the whole grid.
+    heights = _terrain(db, domain_id, cells, crs, body.size_m) if body.elevation else {}
 
     cell_type = db.query(EntityType).filter_by(domain_id=domain_id, name=body.entity_type).one_or_none()
     if cell_type is not None:
@@ -155,7 +192,7 @@ def write_grid(db: Session, domain_id: int, body: GridRequest, *, commit: bool =
         db.add(cell_type)
         db.flush()
     have = {a.name: a.data_type for a in db.query(AttributeDef).filter_by(entity_type_id=cell_type.id)}
-    for name, kind in [*CELL_ATTRIBUTES, *((c, "number") for c in columns)]:
+    for name, kind in [*CELL_ATTRIBUTES, *(TERRAIN_ATTRIBUTES if body.elevation else []), *((c, "number") for c in columns)]:
         if name not in have:
             db.add(AttributeDef(entity_type_id=cell_type.id, name=name, data_type=kind))
         elif have[name] != kind:
@@ -169,7 +206,10 @@ def write_grid(db: Session, domain_id: int, body: GridRequest, *, commit: bool =
             label=cell.key,
             sort_order=n,
             attrs={"geometry": cell.geometry, "centroid": cell.centroid, "area_m2": cell.area_m2, "row": cell.row,
-                   "col": cell.col, "coverage": cell.coverage, **{c: sums.get(cell.key, {}).get(c, 0.0) for c in columns}},
+                   "col": cell.col, "coverage": cell.coverage, **{c: sums.get(cell.key, {}).get(c, 0.0) for c in columns},
+                   # A cell the terrain does not reach gets no value, not a made-up zero.
+                   **({"elevation_m": round(heights[cell.key][0], 1), "slope_pct": round(heights[cell.key][1], 2)}
+                      if heights.get(cell.key) else {})},
         )
         for n, cell in enumerate(cells)
     ]
@@ -197,8 +237,11 @@ def write_grid(db: Session, domain_id: int, body: GridRequest, *, commit: bool =
     else:
         db.flush()
     totals = {c: sum(v.get(c, 0.0) for v in sums.values()) for c in columns}
+    found = [h[0] for h in heights.values() if h]
     return GridReport(entity_type_id=cell_type.id, relationship_type_id=adjacent.id, cells=len(cells),
-                      edges=len(edges), dropped=dropped, layer_totals=totals, layer_outside=lost)
+                      edges=len(edges), dropped=dropped, layer_totals=totals, layer_outside=lost,
+                      elevation_missing=sum(1 for h in heights.values() if h is None) if body.elevation else 0,
+                      elevation_range=[round(min(found), 1), round(max(found), 1)] if found else None)
 
 
 @router.post("/domains/{domain_id}/grids", status_code=201, response_model=GridReport)

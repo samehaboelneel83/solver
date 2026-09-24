@@ -7,7 +7,7 @@
 import { useId, useMemo, useState } from "react";
 import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
-import { useEntitiesOfTypes, useMakeGrid, type EntityType, type GridReport, type Id } from "../api/v1";
+import { useEntitiesOfTypes, useMakeGrid, useSettings, type EntityType, type GridReport, type Id } from "../api/v1";
 import GeometryPreview from "./GeometryPreview";
 
 /** `lon,lat,<column>...` rows into point records; a header line is required. */
@@ -67,6 +67,11 @@ export default function GridGeneratorForm({ domainId, entityTypes }: { domainId:
   const [report, setReport] = useState<GridReport | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [inUse, setInUse] = useState<{ cells: number; scenarios: number[] } | null>(null);
+  const [elevation, setElevation] = useState(false);
+  // Elevation is offered only when a tile index is named (GIS 10); the
+  // server finds the terrain tileset in it.
+  const settings = useSettings({ domainId });
+  const tilesIndex = String(settings.data?.items?.find((item) => item.key === "spatial.tiles_index")?.value ?? "").trim();
 
   const chosen = boundaries.find((e) => String(e.id) === boundary) ?? boundaries[0];
   const points = parsePointsCsv(csv);
@@ -87,6 +92,7 @@ export default function GridGeneratorForm({ domainId, entityTypes }: { domainId:
           keep,
           layers: points.rows,
           replace,
+          ...(elevation && tilesIndex ? { elevation: true } : {}),
         },
       },
       {
@@ -170,6 +176,12 @@ export default function GridGeneratorForm({ domainId, entityTypes }: { domainId:
           points.rows.length > 0 && <p className="text-xs text-slate-500">{points.rows.length} points.</p>
         )}
       </div>
+      {tilesIndex && (
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={elevation} onChange={(event) => setElevation(event.target.checked)} />
+          Add each cell&rsquo;s elevation and slope, from the terrain tiles
+        </label>
+      )}
       <button type="submit" className="rounded bg-blue-600 px-3 py-1.5 text-white disabled:opacity-50"
         disabled={!chosen || !(width > 0) || points.problem !== null || make.isPending}>
         {make.isPending ? "Making the grid…" : "Make the grid"}
@@ -187,6 +199,9 @@ export default function GridGeneratorForm({ domainId, entityTypes }: { domainId:
         <p role="status" className="text-slate-700">
           Made {report.cells} cells and {report.edges} adjacencies ({report.dropped} dropped at the boundary).
           {Object.entries(report.layer_outside).map(([column, amount]) => ` ${amount} of ${column} fell outside the grid.`)}
+          {report.elevation_range && ` Elevation from ${report.elevation_range[0]} to ${report.elevation_range[1]} m.`}
+          {(report.elevation_missing ?? 0) > 0 &&
+            ` ${report.elevation_missing} ${report.elevation_missing === 1 ? "cell is" : "cells are"} beyond the terrain tiles and ${report.elevation_missing === 1 ? "has" : "have"} no elevation.`}
         </p>
       )}
     </form>

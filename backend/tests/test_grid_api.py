@@ -104,3 +104,53 @@ def test_another_organization_cannot_grid_this_domain(tenants, db):  # noqa: F81
     other = client.post(f"/api/v1/domains/{tenants['domain_a']}/grids", headers=tenants["b"],
                         json={"boundary": SQUARE_KM, "shape": "square", "size_m": 500, "entity_type": "cell"})
     assert other.status_code == 404
+
+
+def _tiles_index(db, domain):
+    db.execute(text("INSERT INTO setting (scope, scope_id, key, value) VALUES ('domain', :d, 'spatial.tiles_index',"
+                    " CAST('\"http://localhost:8080/index.json\"' AS jsonb))"), {"d": domain})
+    db.commit()
+
+
+def test_cells_take_their_elevation_and_slope_from_the_terrain(tenants, db, monkeypatch):  # noqa: F811
+    """GIS 10: a plane rising 1000 m per degree east; at the equator a degree is 111,320 m, so 0.898 %."""
+    from app.spatial import terrain
+    from tests.test_terrain import _server
+
+    client = TestClient(app)
+    domain = tenants["domain_a"]
+    _tiles_index(db, domain)
+    monkeypatch.setattr(terrain, "fetch_bytes", _server(lambda lon, lat: 50 + 1000 * (lon - 3.0)))
+    report = _post(client, tenants, domain, boundary=SQUARE_KM, shape="square", size_m=500, entity_type="cell", elevation=True)
+    assert report.status_code == 201, report.text
+    r = report.json()
+    assert r["elevation_missing"] == 0 and r["elevation_range"][0] < r["elevation_range"][1]
+    rows = db.execute(text("SELECT attrs FROM entity WHERE entity_type_id = :t"), {"t": r["entity_type_id"]}).scalars().all()
+    assert all(abs(a["slope_pct"] - 1000 / 111_320 * 100) < 0.1 for a in rows)
+    west = min(rows, key=lambda a: a["col"] * 10 + a["row"])
+    assert abs(west["elevation_m"] - (50 + 1000 * (west["centroid"]["coordinates"][0] - 3.0))) < 1.5
+    kinds = dict(db.execute(text("SELECT name, data_type::text FROM attribute_def WHERE entity_type_id = :t"),
+                            {"t": r["entity_type_id"]}).all())
+    assert kinds["elevation_m"] == kinds["slope_pct"] == "number"
+
+
+def test_elevation_without_a_tile_index_is_refused_by_name(tenants, db):  # noqa: F811
+    report = _post(TestClient(app), tenants, tenants["domain_a"], boundary=SQUARE_KM, shape="square", size_m=500,
+                   entity_type="cell", elevation=True)
+    assert report.status_code == 422 and "spatial.tiles_index" in report.text
+    assert db.execute(text("SELECT count(*) FROM entity_type WHERE domain_id = :d AND name = 'cell'"),
+                      {"d": tenants["domain_a"]}).scalar_one() == 0  # nothing written
+
+
+def test_cells_the_terrain_does_not_reach_get_no_value_and_are_counted(tenants, db, monkeypatch):  # noqa: F811
+    from app.spatial import terrain
+    from tests.test_terrain import _server
+
+    domain = tenants["domain_a"]
+    _tiles_index(db, domain)
+    monkeypatch.setattr(terrain, "fetch_bytes", _server(lambda lon, lat: 5.0, covered=lambda x, y: False))
+    r = _post(TestClient(app), tenants, domain, boundary=SQUARE_KM, shape="square", size_m=500, entity_type="cell",
+              elevation=True).json()
+    assert r["elevation_missing"] == 4 and r["elevation_range"] is None
+    rows = db.execute(text("SELECT attrs FROM entity WHERE entity_type_id = :t"), {"t": r["entity_type_id"]}).scalars().all()
+    assert not any("elevation_m" in a for a in rows)

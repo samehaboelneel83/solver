@@ -1141,6 +1141,8 @@ export type GridRequest = {
   keep?: "centre" | "overlap";
   layers?: Record<string, unknown>[];
   replace?: boolean;
+  /** Each cell's mean elevation and slope from the terrain tiles (GIS 10). */
+  elevation?: boolean;
 };
 
 export type GridReport = {
@@ -1151,6 +1153,8 @@ export type GridReport = {
   dropped: number;
   layer_totals: Record<string, number>;
   layer_outside: Record<string, number>;
+  elevation_missing?: number;
+  elevation_range?: [number, number] | null;
 };
 
 export const makeGrid = (domainId: Id, body: GridRequest) =>

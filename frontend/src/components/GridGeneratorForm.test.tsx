@@ -74,7 +74,8 @@ describe("GridGeneratorForm", () => {
   it("explains what a grid needs when no type has a shape", () => {
     renderForm([PLAIN]);
     expect(screen.getByText(/give an entity type a/)).toBeInTheDocument();
-    expect(apiFetch).not.toHaveBeenCalled();
+    // Nothing to draw a grid over: no records are fetched (settings may be read).
+    expect((apiFetch as any).mock.calls.filter(([path]: [string]) => !path.startsWith("/api/v1/settings"))).toEqual([]);
   });
 
   it("offers only records with an area, and sends the grid over the one chosen", async () => {
@@ -139,5 +140,38 @@ describe("GridGeneratorForm", () => {
     await screen.findByRole("option", { name: "Cairo" });
     fireEvent.click(screen.getByRole("button", { name: "Make the grid" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("40000 cells");
+  });
+});
+
+describe("GridGeneratorForm and elevation", () => {
+  function serveWith(tilesIndex: string, report: Record<string, unknown> = REPORT) {
+    (apiFetch as any).mockReset();
+    (apiFetch as any).mockImplementation((path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve(report);
+      if (path.startsWith("/api/v1/settings")) {
+        return Promise.resolve({ items: [{ key: "spatial.tiles_index", value: tilesIndex, source: "platform", value_type: "string", description: "" }], total: 1 });
+      }
+      if (path.startsWith("/api/v1/entities")) return Promise.resolve({ items: ENTITIES, total: 2 });
+      return Promise.resolve({ items: [], total: 0 });
+    });
+  }
+
+  it("is not offered without a tile index", async () => {
+    serveWith("");
+    renderForm();
+    await screen.findByRole("option", { name: "Cairo" });
+    expect(screen.queryByLabelText(/elevation and slope/)).toBeNull();
+  });
+
+  it("asks for it when ticked, and says what came back", async () => {
+    serveWith("http://localhost:8080/index.json", { ...REPORT, layer_outside: {}, elevation_missing: 3, elevation_range: [12.5, 88] });
+    renderForm();
+    await screen.findByRole("option", { name: "Cairo" });
+    fireEvent.click(await screen.findByLabelText(/elevation and slope/));
+    fireEvent.click(screen.getByRole("button", { name: "Make the grid" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Elevation from 12.5 to 88 m. 3 cells are beyond the terrain tiles and have no elevation."
+    );
+    expect(JSON.parse(posts()[0][1].body).elevation).toBe(true);
   });
 });
