@@ -535,6 +535,40 @@ grid.
 - A degree of 1 when the argument reads a decision (it stands for one), 0
   when it is data -- so `x * log(y)` is quadratic, as the product rule says.
 
+### 4.4 `connected` — each group one piece (version 2)
+
+A constraint may be a connectivity rule in place of `left`/`relation`/`right`,
+as it may be a scheduling rule:
+
+```json
+{ "id": "c_zone_connected", "severity": "hard",
+  "connected": { "assign": {"var": "assign", "index": ["u", "z"]},
+                 "units":  {"index": "u", "set": "cell"},
+                 "groups": {"index": "z", "set": "zone"},
+                 "via": "adjacent",
+                 "empty": "forbidden" } }
+```
+
+**Meaning:** for every group `z`, the units with `assign[u,z] = 1` form one
+connected piece over the edges of `via` -- a zone is one contiguous area, not
+two islands. `empty` is `forbidden` (the default: every group takes at least
+one unit) or `allowed`. The rule binds its own `units` and `groups`, so it is
+never inside a `forall`, and it is hard and unconditional: a piece that is
+half connected has no price. The compiler turns it into an exact flow (the
+spatial spec's §4), so every backend that solves a MILP solves it.
+
+Refusals, all `shape` but the last:
+
+| code | when |
+|---|---|
+| `connected_needs_version_2` | the document is version 1 |
+| `connected_malformed` | a key missing or unknown, `empty` neither value, or the rule also carries an expression, a scheduling rule or a `forall` -- located at that key |
+| `connected_on_soft` | `severity` is not `hard`, or a `weight` or `when` is given |
+| `connected_index_mismatch` | the variable is not read `[units' index, groups' index]` |
+| `connected_not_binary` | the variable is not binary |
+| `connected_via_invalid` | `via` is not in `relationships` |
+| `connected_via_not_self` (domain) | `via` does not join the units' entity type to itself |
+
 ## 5. What is deliberately not supported yet
 
 Each of these was considered and left out for a reason, not overlooked.
@@ -616,10 +650,10 @@ document against the same contract before sending, so a 422 from the server is
 either a hand-written request or a client that has not reloaded the contract,
 and naming one thing precisely beats listing several.
 
-The 76 rules are in `contract.json`, each marked `shape` (66 of them: decidable
-from the document alone, and both languages decide those) or `domain` (10: needs
+The 109 rules are in `contract.json`, each marked `shape` (98 of them: decidable
+from the document alone, and both languages decide those) or `domain` (11: needs
 the domain's rows, so the server only). The split mirrors `parse.py` /
-`compiler.py`. `ir_fixtures.json` carries 12 valid documents and 86 invalid ones
+`compiler.py`. `ir_fixtures.json` carries 23 valid documents and 129 invalid ones
 — at least one per rule, several rules having more than one where the rule has
 two halves or where a fault has to be reached through a construct no other case
 goes through.

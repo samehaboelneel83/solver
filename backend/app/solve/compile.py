@@ -570,6 +570,11 @@ class _Compiler:
         if kind is not None:
             self._expand_scheduling(spec, kind)
             return
+        if "connected" in spec:
+            raise Unsupported(
+                f"constraint {spec['id']!r} is a connected rule, which the contract accepts and "
+                "no solver here compiles yet"
+            )
         if "left" not in spec or "right" not in spec:
             # A model version published before the IR contract existed: its
             # constraints carry an id and a prose note and nothing to solve.

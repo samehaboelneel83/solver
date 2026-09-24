@@ -24,6 +24,7 @@ import {
   INTERVAL_KEYS,
   UNCERTAINTY_KINDS,
   SCHEDULING_KEYS,
+  CONNECTED_KEYS,
   FILTER_OPERATORS,
   FUNCTIONS,
   ACCEPTED_VERSIONS,
@@ -576,6 +577,11 @@ class ShapeChecker {
         if (problem) return problem;
         continue;
       }
+      if ("connected" in constraint) {
+        const problem = this.checkConnected(constraint, at, identifier);
+        if (problem) return problem;
+        continue;
+      }
 
       for (const key of ["left", "relation", "right"] as const) {
         if (!(key in constraint)) {
@@ -613,6 +619,109 @@ class ShapeChecker {
       }
       const when = this.checkWhen(constraint, at, scope, identifier);
       if (when) return when;
+    }
+    return null;
+  }
+
+  /** `connected` (version 2): the same checks, in the same order and with
+   * the same locs, as `_check_connected` in `app/ir/validate.py`. */
+  private checkConnected(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
+    if (this.ir.version === 1) {
+      return refusal(
+        "connected_needs_version_2",
+        at,
+        `the constraint '${identifier}' is a connected rule, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const body = constraint.connected;
+    const loc: IrLoc = [...at, "connected"];
+    const beside = ["left", "relation", "right", "forall", "no_overlap", "cumulative"].filter((key) => key in constraint);
+    if (beside.length > 0) {
+      return refusal(
+        "connected_malformed",
+        [...at, beside[0]],
+        `the constraint '${identifier}' is a connected rule and also carries ${beside[0]}; a connected rule is ` +
+          "not also an expression, and binds its own indices"
+      );
+    }
+    if (!isObject(body)) {
+      return refusal(
+        "connected_malformed",
+        loc,
+        "a connected rule names assign, units, groups and via, and optionally empty"
+      );
+    }
+    let odd: string | undefined =
+      ["assign", "units", "groups", "via"].find((key) => !(key in body)) ??
+      Object.keys(body).find((key) => !CONNECTED_KEYS.includes(key));
+    if (odd === undefined && "empty" in body && body.empty !== "forbidden" && body.empty !== "allowed") odd = "empty";
+    if (odd !== undefined) {
+      const what = !(odd in body) ? "missing" : odd === "empty" ? "forbidden or allowed" : "not one of them";
+      return refusal(
+        "connected_malformed",
+        [...loc, odd],
+        `a connected rule names assign, units, groups and via, and optionally empty (forbidden or allowed); '${odd}' is ${what}`
+      );
+    }
+    for (const key of ["severity", "weight", "when"]) {
+      if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
+        return refusal(
+          "connected_on_soft",
+          [...at, key],
+          `the connected rule '${identifier}' is hard and unconditional; a piece that is half connected has no price`
+        );
+      }
+    }
+    if (constraint.severity !== "hard") {
+      return refusal(
+        "constraint_severity_unsupported",
+        [...at, "severity"],
+        `${show(constraint.severity)} is not a severity; a connected rule is hard`
+      );
+    }
+    let scope = new Map<string, string>();
+    for (const part of ["units", "groups"] as const) {
+      const inner = this.checkBindings([body[part]], [...loc, part], scope);
+      if ("code" in inner) {
+        // One binding, addressed as the body's own key, not as a list.
+        const problem = inner as IrRefusal;
+        return { ...problem, loc: [...loc, part, ...problem.loc.slice(loc.length + 2)] };
+      }
+      scope = inner as Map<string, string>;
+    }
+    const assign = body.assign;
+    if (!isObject(assign) || Object.keys(assign).length !== 2 || !("var" in assign) || !("index" in assign)) {
+      return refusal(
+        "connected_malformed",
+        [...loc, "assign"],
+        'a connected rule names its variable as {"var": "assign", "index": [unit, group]}'
+      );
+    }
+    const expected = [(body.units as Json).index, (body.groups as Json).index];
+    const index = assign.index;
+    if (!Array.isArray(index) || index.length !== 2 || index[0] !== expected[0] || index[1] !== expected[1]) {
+      return refusal(
+        "connected_index_mismatch",
+        [...loc, "assign", "index"],
+        `'${String(assign.var)}' is read as [${expected.join(", ")}]: the units' index, then the groups' index`
+      );
+    }
+    const reference = this.reference(assign, [...loc, "assign"], scope, "var", this.variables);
+    if (reference) return reference;
+    const declared = (this.ir.variables as Record<string, Json>)[assign.var as string];
+    if (declared.domain !== "binary") {
+      return refusal(
+        "connected_not_binary",
+        [...loc, "assign", "var"],
+        `'${String(assign.var)}' must be binary: a unit is in a group or it is not`
+      );
+    }
+    if (typeof body.via !== "string" || !this.relationships.has(body.via)) {
+      return refusal(
+        "connected_via_invalid",
+        [...loc, "via"],
+        `${show(body.via)} is not a relationship this model declares in relationships, so no dataset would carry its edges`
+      );
     }
     return null;
   }

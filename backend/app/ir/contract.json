@@ -626,6 +626,41 @@
       "code": "uncertainty_malformed",
       "where": "shape",
       "text": "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`"
+    },
+    {
+      "code": "connected_needs_version_2",
+      "where": "shape",
+      "text": "a `connected` rule appears only in a version 2 document"
+    },
+    {
+      "code": "connected_malformed",
+      "where": "shape",
+      "text": "a `connected` names `assign`, `units`, `groups` and `via`, and optionally `empty` (`forbidden` or `allowed`), and is not also an expression or inside a `forall`"
+    },
+    {
+      "code": "connected_not_binary",
+      "where": "shape",
+      "text": "a `connected` rule's variable is declared binary"
+    },
+    {
+      "code": "connected_index_mismatch",
+      "where": "shape",
+      "text": "a `connected` rule's variable is indexed by its units' index, then its groups' index"
+    },
+    {
+      "code": "connected_via_invalid",
+      "where": "shape",
+      "text": "a `connected` rule's `via` is a declared relationship"
+    },
+    {
+      "code": "connected_on_soft",
+      "where": "shape",
+      "text": "a `connected` rule is hard and unconditional"
+    },
+    {
+      "code": "connected_via_not_self",
+      "where": "domain",
+      "text": "a `connected` rule's `via` joins the units' entity type to itself"
     }
   ],
   "uncertaintyKinds": [

@@ -115,6 +115,27 @@
             "required": true
           }
         ]
+      },
+      {
+        "name": "cell",
+        "role": "location",
+        "attributes": [
+          {
+            "name": "area_m2",
+            "data_type": "number",
+            "default_value": 0.0
+          }
+        ]
+      },
+      {
+        "name": "district",
+        "role": "org",
+        "attributes": [
+          {
+            "name": "code",
+            "data_type": "text"
+          }
+        ]
       }
     ],
     "parameters": [
@@ -140,6 +161,13 @@
         "from": "employee",
         "to": "unit",
         "cardinality": "many_to_one",
+        "is_hierarchy": false
+      },
+      {
+        "name": "adjacent",
+        "from": "cell",
+        "to": "cell",
+        "cardinality": "many_to_many",
         "is_hierarchy": false
       }
     ]
@@ -2233,6 +2261,185 @@
                     "set": "shift"
                   }
                 ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "districts_connected",
+      "why": "A connected rule (version 2): each district's cells form one piece over `adjacent`.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "districts_connected_empty_allowed",
+      "why": "`empty: allowed` lets a district take no cells at all.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent",
+              "empty": "allowed"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
               }
             }
           ]
@@ -9453,6 +9660,1253 @@
                     "set": "shift"
                   }
                 ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_needs_version_2",
+      "loc": [
+        "constraints",
+        1
+      ],
+      "why": "Version 1 has no connected rule; the rule as a whole is what makes the document version 2.",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "via"
+      ],
+      "why": "A connected rule without `via` does not say which edges make one piece.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              }
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "empty"
+      ],
+      "why": "`empty` is forbidden or allowed, nothing else.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent",
+              "empty": "sometimes"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "relation"
+      ],
+      "why": "A connected rule is not also an expression.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            },
+            "relation": "="
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "forall"
+      ],
+      "why": "A connected rule binds its own units and groups; a forall around it has nothing to range.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            },
+            "forall": [
+              {
+                "index": "w",
+                "set": "cell"
+              }
+            ]
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_malformed",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "shape"
+      ],
+      "why": "A connected rule carries only its own keys; the grid's cell shape is the grid's business.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent",
+              "shape": "hex"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_not_binary",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "assign",
+        "var"
+      ],
+      "why": "A unit is in a group or it is not; an integer assignment has no such reading.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "integer"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_index_mismatch",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "assign",
+        "index"
+      ],
+      "why": "The variable is read as assign[unit, group]; the other order is a different variable.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "z",
+                  "u"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_via_invalid",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "via"
+      ],
+      "why": "`via` names a relationship the document declares, so the dataset carries its edges.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "nope"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_on_soft",
+      "loc": [
+        "constraints",
+        1,
+        "severity"
+      ],
+      "why": "Connectivity is hard: a piece that is half connected has no price.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "soft",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_on_soft",
+      "loc": [
+        "constraints",
+        1,
+        "weight"
+      ],
+      "why": "A weight is the price of breaking a rule; a connected rule has none.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            },
+            "weight": 5
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_on_soft",
+      "loc": [
+        "constraints",
+        1,
+        "when"
+      ],
+      "why": "Connectivity is unconditional.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "adjacent"
+            },
+            "when": {
+              "var": "assign",
+              "index": [
+                "u",
+                "z"
+              ]
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "connected_via_not_self",
+      "loc": [
+        "constraints",
+        1,
+        "connected",
+        "via"
+      ],
+      "why": "`reports_to` joins unit to unit; the cells can only be one piece over a relationship from cell to cell. Only the domain knows its ends.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "district"
+        ],
+        "relationships": [
+          "adjacent",
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "assign": {
+            "index": [
+              "cell",
+              "district"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one_each",
+            "forall": [
+              {
+                "index": "u",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "over": [
+                {
+                  "index": "z",
+                  "set": "district"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_connected",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "assign",
+                "index": [
+                  "u",
+                  "z"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "groups": {
+                "index": "z",
+                "set": "district"
+              },
+              "via": "reports_to"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_none",
+              "weight": 1,
+              "expression": {
+                "const": 0
               }
             }
           ]

@@ -505,6 +505,41 @@ export const IR_RULES: readonly IrRule[] = [
     where: "shape",
     text: "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`",
   },
+  {
+    code: "connected_needs_version_2",
+    where: "shape",
+    text: "a `connected` rule appears only in a version 2 document",
+  },
+  {
+    code: "connected_malformed",
+    where: "shape",
+    text: "a `connected` names `assign`, `units`, `groups` and `via`, and optionally `empty` (`forbidden` or `allowed`), and is not also an expression or inside a `forall`",
+  },
+  {
+    code: "connected_not_binary",
+    where: "shape",
+    text: "a `connected` rule's variable is declared binary",
+  },
+  {
+    code: "connected_index_mismatch",
+    where: "shape",
+    text: "a `connected` rule's variable is indexed by its units' index, then its groups' index",
+  },
+  {
+    code: "connected_via_invalid",
+    where: "shape",
+    text: "a `connected` rule's `via` is a declared relationship",
+  },
+  {
+    code: "connected_on_soft",
+    where: "shape",
+    text: "a `connected` rule is hard and unconditional",
+  },
+  {
+    code: "connected_via_not_self",
+    where: "domain",
+    text: "a `connected` rule's `via` joins the units' entity type to itself",
+  },
 ];
 
 export const SHAPE_RULES: ReadonlySet<string> = new Set(
@@ -531,6 +566,8 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   // Scheduling rules (version 2), in place of left/relation/right.
   "no_overlap",
   "cumulative",
+  // The connectivity rule (version 2), likewise.
+  "connected",
 ]);
 
 /** The two scheduling rules, and the keys each carries (`SCHEDULING_KEYS`
@@ -539,6 +576,9 @@ export const SCHEDULING_KEYS: Readonly<Record<"no_overlap" | "cumulative", reado
   no_overlap: ["interval", "over"],
   cumulative: ["interval", "over", "demand", "capacity"],
 };
+
+/** What a `connected` rule names; `empty` is optional (`CONNECTED_KEYS`). */
+export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "via", "empty"];
 
 /** What an interval declaration names beyond `index` and `domain`. */
 export const INTERVAL_KEYS = ["start", "end", "size", "presence"] as const;

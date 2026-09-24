@@ -231,9 +231,20 @@ class Cumulative(_Model):
     capacity: Term
 
 
+class ConnectedBody(_Model):
+    """For every group, the units assigned to it are one piece over `via`
+    (version 2). `empty: allowed` lets a group take no units."""
+
+    assign: VarRef
+    units: Binding
+    groups: Binding
+    via: Name
+    empty: Literal["forbidden", "allowed"] = "forbidden"
+
+
 class Constraint(_Model):
     """An expression -- `left relation right` -- or, in version 2, one
-    scheduling rule in its place."""
+    scheduling rule or one connected rule in its place."""
 
     id: Name
     note: Optional[str] = None
@@ -243,6 +254,7 @@ class Constraint(_Model):
     right: Optional[Term] = None
     no_overlap: Optional[NoOverlap] = None
     cumulative: Optional[Cumulative] = None
+    connected: Optional[ConnectedBody] = None
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
@@ -251,7 +263,10 @@ class Constraint(_Model):
     def _one_kind(self) -> "Constraint":
         expression = [self.left, self.relation, self.right]
         scheduling = [k for k in (self.no_overlap, self.cumulative) if k is not None]
-        if scheduling:
+        if self.connected is not None:
+            if scheduling or self.forall is not None or any(part is not None for part in expression):
+                raise ValueError("a connected rule is neither an expression nor inside a forall")
+        elif scheduling:
             if len(scheduling) > 1 or any(part is not None for part in expression):
                 raise ValueError("a constraint is one expression or one scheduling rule")
         elif any(part is None for part in expression):
@@ -282,7 +297,7 @@ class ProblemIR(_Model):
     relationships: Optional[list[Name]] = None
 
 
-for _model in (Sum, Add, Mul, Fn, NoOverlap, Cumulative, Constraint, ObjectiveTerm):
+for _model in (Sum, Add, Mul, Fn, NoOverlap, Cumulative, ConnectedBody, Constraint, ObjectiveTerm):
     _model.model_rebuild()
 
 

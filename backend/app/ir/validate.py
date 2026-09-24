@@ -41,6 +41,7 @@ from app.expressions.catalogue import operators_for
 from app.ir.contract import (
     ALL_KEYS,
     ARITHMETIC_ATTR_TYPES,
+    CONNECTED_KEYS,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
     UNCERTAINTY_KINDS,
@@ -559,6 +560,11 @@ class _ShapeChecker:
                 if problem:
                     return problem
                 continue
+            if "connected" in constraint:
+                problem = self._check_connected(constraint, at, identifier)
+                if problem:
+                    return problem
+                continue
 
             for key in ("left", "relation", "right"):
                 if key not in constraint:
@@ -674,6 +680,100 @@ class _ShapeChecker:
                         f"the {key} of {identifier!r} reads a decision; it is a number the "
                         "data gives",
                     )
+        return None
+
+    def _check_connected(self, constraint: dict[str, Any], at: Loc, identifier: str):
+        """`connected` (version 2): for every group, the units assigned to it
+        form one piece over `via` -- a district is one contiguous area. The
+        rule binds its own units and groups, so it stands outside any forall."""
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "connected_needs_version_2",
+                at,
+                f"the constraint {identifier!r} is a connected rule, which version 1 does not have; "
+                "publish it as version 2",
+            )
+        body = constraint["connected"]
+        loc: Loc = [*at, "connected"]
+        beside = [key for key in ("left", "relation", "right", "forall", *SCHEDULING_KEYS) if key in constraint]
+        if beside:
+            return Refusal(
+                "connected_malformed",
+                [*at, beside[0]],
+                f"the constraint {identifier!r} is a connected rule and also carries {beside[0]}; a "
+                "connected rule is not also an expression, and binds its own indices",
+            )
+        if not isinstance(body, dict):
+            return Refusal(
+                "connected_malformed",
+                loc,
+                "a connected rule names assign, units, groups and via, and optionally empty",
+            )
+        odd = next((key for key in ("assign", "units", "groups", "via") if key not in body), None) or next(
+            (key for key in body if key not in CONNECTED_KEYS), None
+        )
+        if odd is None and body.get("empty", "forbidden") not in ("forbidden", "allowed"):
+            odd = "empty"
+        if odd is not None:
+            what = "missing" if odd not in body else "forbidden or allowed" if odd == "empty" else "not one of them"
+            return Refusal(
+                "connected_malformed",
+                [*loc, odd],
+                "a connected rule names assign, units, groups and via, and optionally empty "
+                f"(forbidden or allowed); {odd!r} is {what}",
+            )
+        for key in ("severity", "weight", "when"):
+            if key in constraint and (key != "severity" or constraint[key] != "hard"):
+                return Refusal(
+                    "connected_on_soft",
+                    [*at, key],
+                    f"the connected rule {identifier!r} is hard and unconditional; a piece that is "
+                    "half connected has no price",
+                )
+        if constraint.get("severity") != "hard":
+            return Refusal(
+                "constraint_severity_unsupported",
+                [*at, "severity"],
+                f"{json.dumps(constraint.get('severity'))} is not a severity; a connected rule is hard",
+            )
+        scope: dict[str, str] = {}
+        for part in ("units", "groups"):
+            inner = self.check_bindings([body[part]], [*loc, part], scope)
+            if isinstance(inner, Refusal):
+                # One binding, addressed as the body's own key, not as a list.
+                return Refusal(inner.code, [*loc, part, *inner.loc[len(loc) + 2 :]], inner.message)
+            scope = inner
+        assign = body["assign"]
+        if not isinstance(assign, dict) or set(assign) != {"var", "index"}:
+            return Refusal(
+                "connected_malformed",
+                [*loc, "assign"],
+                'a connected rule names its variable as {"var": "assign", "index": [unit, group]}',
+            )
+        expected = [body["units"]["index"], body["groups"]["index"]]
+        if assign["index"] != expected:
+            return Refusal(
+                "connected_index_mismatch",
+                [*loc, "assign", "index"],
+                f"{assign['var']!r} is read as [{', '.join(expected)}]: the units' index, then the "
+                "groups' index",
+            )
+        problem = self._reference(assign, [*loc, "assign"], scope, "var", self.variables)
+        if problem:
+            return problem
+        if self.ir["variables"][assign["var"]].get("domain") != "binary":
+            return Refusal(
+                "connected_not_binary",
+                [*loc, "assign", "var"],
+                f"{assign['var']!r} must be binary: a unit is in a group or it is not",
+            )
+        if body["via"] not in self.relationships:
+            return Refusal(
+                "connected_via_invalid",
+                [*loc, "via"],
+                f"{json.dumps(body['via'])} is not a relationship this model declares in "
+                "relationships, so no dataset would carry its edges",
+            )
         return None
 
     def _check_when(self, constraint: dict[str, Any], at: Loc, scope: dict[str, str], identifier: str):
@@ -1483,6 +1583,11 @@ class _DomainChecker:
                 problem = self._bindings(constraint["forall"], [*at, "forall"], scope)
                 if problem:
                     return problem
+            if "connected" in constraint:
+                problem = self._connected(constraint["connected"], [*at, "connected"])
+                if problem:
+                    return problem
+                continue
             kind = next((k for k in SCHEDULING_KEYS if k in constraint), None)
             if kind is not None:
                 body = constraint[kind]
@@ -1506,6 +1611,25 @@ class _DomainChecker:
                 problem = self._term(term["expression"], ["objective", "terms", i, "expression"], {})
                 if problem:
                     return problem
+        return None
+
+    def _connected(self, body: dict[str, Any], loc: Loc) -> Refusal | None:
+        """The units and groups as bindings, and `via` joining the units'
+        type to itself: one piece is a walk from unit to unit."""
+        scope: dict[str, str] = {}
+        for part in ("units", "groups"):
+            problem = self._bindings([body[part]], [*loc, part], scope)
+            if problem:
+                return Refusal(problem.code, [*loc, part, *problem.loc[len(loc) + 2 :]], problem.message)
+        units = body["units"]["set"]
+        ends = self.world.relationship_ends[body["via"]]
+        if ends != (units, units):
+            return Refusal(
+                "connected_via_not_self",
+                [*loc, "via"],
+                f"{body['via']!r} joins {ends[0]} to {ends[1]}; the {units} cells are one piece "
+                f"only over a relationship from {units} to {units}",
+            )
         return None
 
     def _bindings(self, bindings: list[Any], loc: Loc, scope: dict[str, str]) -> Refusal | None:

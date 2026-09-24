@@ -85,6 +85,8 @@ CONSTRAINT_KEYS: frozenset[str] = frozenset(
         "id", "note", "forall", "left", "relation", "right", "severity", "weight", "when",
         # Scheduling rules (version 2), in place of left/relation/right.
         "no_overlap", "cumulative",
+        # The connectivity rule (version 2), likewise.
+        "connected",
     }
 )
 #: The two scheduling rules, and the keys each carries.
@@ -92,6 +94,8 @@ SCHEDULING_KEYS: dict[str, frozenset[str]] = {
     "no_overlap": frozenset({"interval", "over"}),
     "cumulative": frozenset({"interval", "over", "demand", "capacity"}),
 }
+#: What a `connected` rule names; `empty` is optional.
+CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", "empty"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 
