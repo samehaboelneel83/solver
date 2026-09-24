@@ -365,6 +365,12 @@ def test_golden(ir, backend, status, objective):
     assert result.status == status, reason
     if objective is None:
         assert result.objective is None
+    elif backend.proves == "local":
+        # A local solver's optimum is the best nearby (queue R6): never better
+        # than the global one, and on a convex model the same.
+        got = Decimal(str(result.objective))
+        slack = Decimal("1e-6") * max(Decimal(1), abs(objective))
+        assert (got >= objective - slack) if ir["objective"]["sense"] == "minimize" else (got <= objective + slack), got
     else:
         got = Decimal(str(result.objective))
         assert abs(got - objective) <= Decimal("1e-6") * max(Decimal(1), abs(objective)), got

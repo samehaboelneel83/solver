@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.solve.backends import NoBackend, by_name, choose, optimality_of
 from app.solve.classify import classify
 from app.solve.convexity import refine
+from app.solve.lp import NotContinuous
 from app.solve.compile import (
     DEFAULT_UPPER,
     Compiled,
@@ -156,6 +157,8 @@ def enqueue_run(
     from_settings["lns"] = settings["solve.lns"].source
     lagrangian = bool(settings["solve.lagrangian"].value)
     from_settings["lagrangian"] = settings["solve.lagrangian"].source
+    local_fallback = bool(settings["solve.local_fallback"].value)
+    from_settings["local_fallback"] = settings["solve.local_fallback"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -214,6 +217,7 @@ def enqueue_run(
         "portfolio": portfolio,
         "lns": lns,
         "lagrangian": lagrangian,
+        "local_fallback": local_fallback,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -618,6 +622,7 @@ def _execute(
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
         lns_record = None
         lagrange_record = None
+        local_record = None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
@@ -852,6 +857,15 @@ def _execute(
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
+            if (params.get("local_fallback") and backend.name == "scip" and result.status in ("unknown", "feasible")
+                    and not stop.is_set()):
+                # SCIP ended without a proof on a continuous nonlinear model:
+                # IPOPT, from SCIP's answer when there is one (setting
+                # `solve.local_fallback`, app.solve.ipopt, queue R6).
+                result, backend, local_record = _local_fallback(solving_model, found, backend, result,
+                                                                time_limit=time_limit, seed=seed, workers=workers,
+                                                                should_stop=stop.is_set)
+                bind_log(solver=backend.name)
             if params.get("lagrangian") and result.status == "feasible" and result.objective is not None:
                 # An answer without a proof: a bound from relaxing the few rules
                 # that tie the model's blocks (setting `solve.lagrangian`,
@@ -917,6 +931,8 @@ def _execute(
         extra["structure"] = structure_record
     if lagrange_record is not None:
         extra["lagrangian_bound"] = lagrange_record
+    if local_record is not None:
+        extra["local_fallback_run"] = local_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
@@ -1227,6 +1243,52 @@ def _solve_lex(
     # The last stage's bound is on the last stage's goal, not on the primary
     # term reported as the objective, so no gap can honestly be given.
     return replace(result, wall_seconds=round(wall, 3), objective=primary, best_bound=None)
+
+
+#: The share of the time given to IPOPT after SCIP ends without a proof (queue R6).
+LOCAL_SHARE = 0.25
+
+
+def _local_fallback(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):
+    """After SCIP ends without a proof on a continuous nonlinear model: IPOPT, from SCIP's answer.
+
+    With no answer from SCIP, IPOPT's is the run's, and it claims what IPOPT proves -- `local`. With
+    one, IPOPT polishes it: a better answer is kept, SCIP's global bound still stands over it, and it is
+    optimal only if it meets that bound (then proven best, by SCIP's bound)."""
+    from app.solve.backends import IPOPT
+
+    if not IPOPT.is_available() or found.model_class not in IPOPT.classes or (found.needs - IPOPT.provides):
+        return result, backend, {"used": False, "why": f"ipopt cannot take a {found.model_class} model like this"}
+    seconds = max(1.0, LOCAL_SHARE * time_limit)
+    hint = result.assignments or None
+    try:
+        local, _ = sandbox.run(
+            "app.solve.sandbox:solve_in_child",
+            {"backend": "ipopt", "compiled": compiled, "time_limit": seconds, "seed": seed, "workers": workers,
+             "gap_rel": 0.0, "hint": hint},
+            time_limit=seconds, workers=workers, should_stop=should_stop,
+        )
+    except (Unsupported, NotContinuous, sandbox.SandboxFailed) as exc:
+        return result, backend, {"used": False, "why": str(exc)}
+    record = {"used": True, "from": "scip's answer" if hint else "the middle of each range",
+              "ipopt_status": local.status, "ipopt_objective": local.objective, "scip_objective": result.objective}
+    if local.objective is None:
+        return result, backend, {**record, "kept": False}
+    if result.objective is None:
+        # Nothing from SCIP: IPOPT's answer, worth what IPOPT proves.
+        return local, IPOPT, {**record, "kept": True}
+    # Better by more than rounding: IPOPT's answer is read back to six places.
+    margin = 1e-7 * max(1.0, abs(float(result.objective)))
+    better = (float(local.objective) < float(result.objective) - margin if compiled.sense == "minimize"
+              else float(local.objective) > float(result.objective) + margin)
+    if not better:
+        return result, backend, {**record, "kept": False}
+    gap = gap_of(local.objective, result.best_bound)
+    proven = gap is not None and gap <= OPTIMAL_GAP
+    polished = replace(result, objective=local.objective, assignments=local.assignments,
+                       status="optimal" if proven else "feasible", optimal=proven,
+                       wall_seconds=round(result.wall_seconds + local.wall_seconds, 3))
+    return polished, backend, {**record, "kept": True}
 
 
 def _lagrangian_bound(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):

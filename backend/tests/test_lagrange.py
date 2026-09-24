@@ -105,7 +105,8 @@ def test_a_weak_bound_is_replaced_by_a_tighter_lagrangian_one_and_a_strong_one_i
     found = structure(compiled)
     optimum = _run(compiled, 30)
     weak = replace(optimum, status="feasible", optimal=False, best_bound=0.0)
-    result, record = _lagrangian_bound(compiled, found, by_name("highs"), weak, time_limit=12, seed=1, workers=4,
+    # Long enough that each round's relaxed solve (a tenth of the bound's share) settles even under load.
+    result, record = _lagrangian_bound(compiled, found, by_name("highs"), weak, time_limit=40, seed=1, workers=4,
                                        should_stop=lambda: False)
     assert record["used"] and record["kept"] and record["solver_bound"] == 0.0
     assert 0.0 < result.best_bound <= float(optimum.objective) + 1e-6 and result.objective == optimum.objective

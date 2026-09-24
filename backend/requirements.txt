@@ -22,3 +22,5 @@ shapely==2.0.6
 pyproj==3.7.0
 # Terrain-RGB tiles are PNGs: read to sample elevation per grid cell (GIS 10).
 Pillow==11.0.0
+# IPOPT, carried in casadi's wheel: the local nonlinear lane (queue R6).
+casadi==3.8.1

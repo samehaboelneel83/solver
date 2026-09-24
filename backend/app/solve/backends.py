@@ -442,7 +442,51 @@ PDLP = Backend(
     planner_choice="A solver for very large linear programs will take this; its answer is optimal to a small tolerance.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP)
+def _ipopt_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+    seed: int | None = None,
+    gap_rel: float = 0.0,
+    on_progress=None,
+    hint: dict | None = None,
+    solver_params: dict | None = None,
+) -> Solution:
+    from app.solve import ipopt
+
+    return ipopt.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+                       gap_rel=gap_rel, on_progress=on_progress, hint=hint)
+
+
+def _ipopt_available() -> bool:
+    from app.solve import ipopt
+
+    return ipopt.available()
+
+
+IPOPT = Backend(
+    name="ipopt",
+    # Continuous nonlinear and quadratic models: an interior-point method
+    # needs a slope everywhere, so nothing whole-numbered and no corners.
+    classes=frozenset({"NLP", "QP", "QCQP"}),
+    provides=frozenset(
+        {"linear", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints", "quadratic",
+         "quadratic-constraints", "nonconvex", "functions"}
+    ),
+    # Last: whatever a global solver can take goes there first. IPOPT is asked
+    # for by name, or takes over when SCIP ends with nothing (`solve.local_fallback`).
+    rank=4,
+    solve=_ipopt_solve,
+    # The best answer nearby, and nothing about elsewhere: a local optimum.
+    proves="local",
+    is_available=_ipopt_available,
+    note="IPOPT (interior point); the best answer near where it starts -- a local optimum, never proven best",
+    planner_choice="A local nonlinear solver will take this; its answer is the best nearby, not proven the best.",
+)
+
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT)
 
 
 class NoBackend(Exception):
@@ -479,10 +523,14 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
             )
         return backend, f"asked for {backend.name}"
 
+    # A local solver is never the rules' choice: its optimum may not be the
+    # best, so it runs only when asked for by name or as a fallback that says
+    # so (`solve.local_fallback`) -- a model nothing global takes is refused.
     fits = [
         b
         for b in sorted(REGISTRY, key=lambda b: b.rank)
-        if b.is_available() and found.model_class in b.classes and not (found.needs - b.provides)
+        if b.proves != "local"
+        and b.is_available() and found.model_class in b.classes and not (found.needs - b.provides)
     ]
     if not fits:
         raise NoBackend(

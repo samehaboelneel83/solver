@@ -201,8 +201,11 @@ def _no_core_dump() -> None:  # pragma: no cover -- in the child
 
 
 def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # pragma: no cover -- in the child
-    # Loaded before the ceiling: importing the code is not the solve.
+    # Loaded before the ceiling: importing the code is not the solve -- nor is
+    # the ctypes call that makes this process undumpable, which a small
+    # ceiling would otherwise refuse to map.
     fn = _resolve(target)
+    _no_core_dump()
     try:
         import resource
 
@@ -212,7 +215,6 @@ def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # prag
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except (ImportError, ValueError, OSError):
         pass
-    _no_core_dump()
 
     def progress(kind: str, payload: dict) -> None:
         conn.send(("progress", kind, payload))
