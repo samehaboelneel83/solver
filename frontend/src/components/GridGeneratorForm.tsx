@@ -162,7 +162,7 @@ export default function GridGeneratorForm({ domainId, entityTypes }: { domainId:
         <label htmlFor={ids.csv} className="block text-xs text-slate-600">
           Points to add up per cell (optional CSV: <span className="font-mono">lon,lat,population,...</span>)
         </label>
-        <textarea id={ids.csv} rows={3} className="w-full rounded border px-2 py-1 font-mono text-xs" value={csv}
+        <textarea id={ids.csv} rows={4} className="w-full rounded border px-2 py-1 font-mono text-xs" value={csv}
           onChange={(e) => setCsv(e.target.value)} placeholder={"lon,lat,population\n31.24,30.05,1200"} />
         {points.problem ? (
           <p role="alert" className="text-xs text-rose-700">{points.problem}</p>
