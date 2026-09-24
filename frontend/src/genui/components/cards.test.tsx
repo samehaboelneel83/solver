@@ -34,4 +34,17 @@ describe("the progress curve", () => {
     const { container } = render(<Curve history={[{ elapsed: 1, objective: 5, bound: 5 }, { elapsed: 2, objective: 5, bound: 5 }]} />);
     expect(container.querySelector('[data-series="objective"]')!.getAttribute("d")).not.toMatch(/NaN|Infinity/);
   });
+
+  it("scales to the run after its first answer and says the opening bound is off the scale", () => {
+    render(
+      <Curve history={[
+        { elapsed: 0.01, objective: null, bound: 21485 },
+        { elapsed: 0.2, objective: 11300, bound: 11400 },
+        { elapsed: 30, objective: 11355, bound: 11376 },
+      ]} />
+    );
+    expect(screen.getByText("11,400")).toBeInTheDocument();
+    expect(screen.queryByText("21,485")).not.toBeInTheDocument();
+    expect(screen.getByText("the opening bound, before the first answer, is off the scale")).toBeInTheDocument();
+  });
 });

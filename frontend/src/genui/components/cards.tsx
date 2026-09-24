@@ -132,14 +132,20 @@ export function Curve({ history }: { history: Record<string, unknown>[] }) {
   const points = history
     .map((h) => ({ t: num(h.elapsed), o: num(h.objective), b: num(h.bound) }))
     .filter((p): p is { t: number; o: number | null; b: number | null } => p.t !== null);
-  const values = points.flatMap((p) => [p.o, p.b]).filter((v): v is number => v !== null);
+  // The scale is the part of the run after its first answer: a solver's
+  // opening bound (before any answer exists) can be far off, and scaling to
+  // it flattens everything that matters. It is marked, not hidden.
+  const first = points.findIndex((p) => p.o !== null);
+  const scaled = first > 0 ? points.slice(first) : points;
+  const values = scaled.flatMap((p) => [p.o, p.b]).filter((v): v is number => v !== null);
+  const offScale = first > 0 && points.slice(0, first).some((p) => p.b !== null);
   if (points.length < 2 || values.length < 2) return null;
   const [w, h, pad, left] = [320, 96, 8, 52];
   const tMax = Math.max(...points.map((p) => p.t)) || 1;
   let [lo, hi] = [Math.min(...values), Math.max(...values)];
   if (hi - lo < 1e-9 * Math.max(1, Math.abs(hi))) [lo, hi] = [lo - 1, hi + 1];
   const x = (t: number) => left + (t / tMax) * (w - left - pad);
-  const y = (v: number) => pad + (1 - (v - lo) / (hi - lo)) * (h - 2 * pad);
+  const y = (v: number) => Math.min(h - pad, Math.max(pad, pad + (1 - (v - lo) / (hi - lo)) * (h - 2 * pad)));
   const line = (pick: (p: (typeof points)[number]) => number | null) => {
     let d = "";
     let last: number | null = null;
@@ -163,6 +169,7 @@ export function Curve({ history }: { history: Record<string, unknown>[] }) {
       <figcaption className="flex gap-4 text-xs text-slate-500">
         <span><span className="mr-1 inline-block h-0.5 w-4 bg-blue-600 align-middle" />best answer</span>
         <span><span className="mr-1 inline-block w-4 border-t border-dashed border-slate-400 align-middle" />bound</span>
+        {offScale && <span>the opening bound, before the first answer, is off the scale</span>}
       </figcaption>
     </figure>
   );
