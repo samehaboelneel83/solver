@@ -148,6 +148,8 @@ def enqueue_run(
     from_settings["memory"] = settings["solve.memory"].source
     probe = bool(settings["solve.probe"].value)
     from_settings["probe"] = settings["solve.probe"].source
+    portfolio = bool(settings["solve.portfolio"].value)
+    from_settings["portfolio"] = settings["solve.portfolio"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -203,6 +205,7 @@ def enqueue_run(
         "pdlp": pdlp,
         "memory": memory,
         "probe": probe,
+        "portfolio": portfolio,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -602,6 +605,7 @@ def _execute(
             **({"fingerprint": numbers} if numbers else {}),
         )
         race_candidates, race_record, race_skipped = None, None, None
+        portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
@@ -612,7 +616,15 @@ def _execute(
                     recalled = _recall(db, run_id, found)
                     if recalled is not None:
                         backend, why = by_name(recalled.solver), recalled.evidence
+                if (params.get("portfolio") and not params.get("requested_solver") and recalled is None
+                        and not params.get("pareto_steps") and not params.get("robust")):
+                    # Every admissible solver at once for the whole time
+                    # (app.solve.race, queue R2) -- in place of the probe race.
+                    candidates = sorted(_admissible(found), key=_rank_of)
+                    portfolio_skipped = race_rows.should_portfolio(found.model_class, numbers, candidates)
+                    portfolio_candidates = None if portfolio_skipped else candidates
                 if (params.get("probe") and not params.get("requested_solver") and recalled is None
+                        and portfolio_candidates is None
                         and not params.get("pareto_steps") and not params.get("robust")):
                     # Nothing to remember: race the admissible solvers
                     # briefly (app.solve.race, queue 17b).
@@ -685,6 +697,32 @@ def _execute(
                 return _cancelled_outcome(db, run_id)
             if points:
                 result, reason = _point_solution(compiled, points[0]), None
+                raise _Answered
+            if portfolio_candidates:
+
+                def entrant(name: str, seconds: float, share: int, stop_others):
+                    try:
+                        return sandbox.run(
+                            "app.solve.sandbox:solve_in_child",
+                            {"backend": name, "compiled": solving_model, "time_limit": seconds, "seed": seed,
+                             "workers": share, "gap_rel": gap_rel, "symmetry": bool(params.get("symmetry"))},
+                            time_limit=seconds,
+                            workers=share,
+                            should_stop=stop.is_set,
+                            # Beaten: its answer is not wanted, and a solver that
+                            # does not look at `should_stop` would run to the end.
+                            abandon=stop_others,
+                        )[0]
+                    except (Unsupported, sandbox.SandboxFailed):
+                        return Solution("unknown", False, None, {}, seconds, name)
+
+                events.stage("portfolio", solvers=portfolio_candidates, seconds=time_limit)
+                raced = race_rows.run_portfolio(portfolio_candidates, entrant, workers=workers,
+                                                time_limit=time_limit, sense=compiled.sense, rule=backend.name)
+                backend, why, portfolio_record = by_name(raced.winner), raced.evidence, raced.record
+                bind_log(solver=backend.name)
+                events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
+                result, reason = raced.answer, None
                 raise _Answered
             if race_candidates:
 
@@ -828,6 +866,10 @@ def _execute(
         extra["probes"] = race_record
     if race_skipped is not None:
         extra["probe_skipped"] = race_skipped
+    if portfolio_record is not None:
+        extra["portfolio"] = portfolio_record
+    if portfolio_skipped is not None:
+        extra["portfolio_skipped"] = portfolio_skipped
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]

@@ -76,10 +76,16 @@ def run(
     deadline_s: float | None = None,
     on_progress: Callable[[str, dict], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    abandon: Callable[[], bool] | None = None,
 ) -> Any:
     """Call `target` ("module:function") with `kwargs` in a sandboxed child
     and return what it returns; its own exceptions are raised here. The
-    function is given `should_stop` and `on_progress` keyword arguments."""
+    function is given `should_stop` and `on_progress` keyword arguments.
+
+    `should_stop` asks the child to stop and keeps what it found -- a solver
+    that does not look runs on to its time limit. `abandon` ends the child
+    at once and raises `Abandoned`: for work whose answer is no longer
+    wanted (a portfolio entrant another solver has beaten)."""
     if not enabled():
         fn = _resolve(target)
         return fn(**kwargs, should_stop=should_stop, on_progress=on_progress)
@@ -97,6 +103,9 @@ def run(
         while outcome is None:
             if should_stop is not None and should_stop() and not stop.is_set():
                 stop.set()
+            if abandon is not None and abandon():
+                _end(process)
+                raise Abandoned("abandoned: its answer was no longer wanted")
             if time.monotonic() > deadline:
                 _end(process)
                 raise SandboxFailed(
@@ -129,6 +138,10 @@ def run(
     if kind == "memory":
         raise SandboxFailed(f"ran out of memory (limit {limits['memory_mb']} MB)")
     raise payload  # the child's own exception, e.g. Unsupported
+
+
+class Abandoned(SandboxFailed):
+    """The child was ended on purpose (`abandon`), not by a failure."""
 
 
 def _end(process) -> None:

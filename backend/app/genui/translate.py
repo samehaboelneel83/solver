@@ -161,6 +161,12 @@ class Translator:
             out += self._enter("selecting_solver")
             solvers = ", ".join(facts.get("solvers") or [])
             out.append(self._say(f"Trying {solvers} for {facts.get('seconds', 0):g} s each; the best goes on."))
+        elif stage == "portfolio":
+            # The portfolio (app.solve.race): every solver at once, the first proof wins.
+            out += self._enter("selecting_solver")
+            solvers = ", ".join(facts.get("solvers") or [])
+            out.append(self._say(f"Racing {solvers} at once for up to {facts.get('seconds', 0):g} s; the first proof wins, "
+                                 "else the best answer at the deadline."))
         elif stage == "solving":
             out += self._create("solver", "solver-status", props={"title": "Solver"})
             if "solver" not in self.completed:

@@ -111,6 +111,15 @@ def test_a_stop_request_reaches_the_child():
     assert result == "stopped"
 
 
+def test_a_child_that_ignores_a_stop_is_ended_at_once_when_abandoned():
+    """A portfolio's beaten entrant: a solver that never looks at `should_stop` must not run to its limit."""
+    started = time.monotonic()
+    asked = started + 0.3
+    with pytest.raises(sandbox.Abandoned):
+        sandbox.run(f"{HERE}:linger", {}, time_limit=30, abandon=lambda: time.monotonic() > asked)
+    assert time.monotonic() - started < 5
+
+
 def test_a_run_that_runs_out_of_memory_fails_with_a_reason_and_the_worker_goes_on(
     db, empty_queue, monkeypatch  # noqa: F811
 ):
