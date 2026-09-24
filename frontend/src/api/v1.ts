@@ -28,6 +28,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ExpressionDocument } from "../expressions/document";
 import { ApiError, apiFetch } from "./client";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
 
 // --- shared -------------------------------------------------------------
 
@@ -1093,6 +1094,30 @@ export const useRevokeApiKey = () => useV1Mutation(revokeApiKey);
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
+}
+
+/** What publishing `ir` would say, without publishing it (Blocks 4). */
+export const validateVersion = (problemId: Id, ir: Record<string, unknown>) =>
+  send<{ ok: true }>("POST", `/api/v1/problems/${problemId}/versions/validate`, { ir });
+
+/** The domain's check of a draft, asked once it has been still for half a second; `ir` null asks nothing. */
+export function useValidateVersion(problemId: Id | null | undefined, ir: Record<string, unknown> | null) {
+  const text = useDebouncedValue(ir === null ? null : JSON.stringify(ir), 500);
+  return useQuery({
+    queryKey: [V1, "validate-version", problemId, text],
+    queryFn: () => validateVersion(problemId as Id, JSON.parse(text as string) as Record<string, unknown>),
+    enabled: isId(problemId) && text !== null,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** A 422 from publish or validate as the refusal it names: where in the IR, and why. Anything else is null. */
+export function irRefusalOf(error: unknown): { loc: (string | number)[]; message: string } | null {
+  const first = validationErrors(error)[0];
+  if (!first) return null;
+  const loc = first.loc[0] === "body" ? first.loc.slice(1) : first.loc;
+  return { loc: loc[0] === "ir" ? loc.slice(1) : loc, message: first.msg };
 }
 
 export function useClassify(ir: Record<string, unknown> | null, problemId?: Id | null) {

@@ -2,6 +2,7 @@
 
     GET    /api/v1/problems/{id}/versions   ?limit=&offset=   newest first, no `ir`
     POST   /api/v1/problems/{id}/versions   {ir, note}        -> the created version
+    POST   /api/v1/problems/{id}/versions/validate  {ir}      -> {ok: true}, or the 422 publish would give; writes nothing
     GET    /api/v1/versions/{id}                              -> one version, with `ir`
     POST   /api/v1/templates/{id}/apply     {domain_id, name?} or {problem_id} or {domain_name}
     GET    /api/v1/scenarios                ?problem_id=&model_version_id=&limit=&offset=
@@ -436,6 +437,21 @@ def list_versions(
     return ModelVersionList(
         items=[ModelVersionSummary.model_validate(dict(row)) for row in rows], total=total
     )
+
+
+@router.post("/problems/{problem_id}/versions/validate")
+def validate_version(
+    problem_id: int,
+    payload: ModelVersionCreate,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("model.publish")),
+) -> dict[str, bool]:
+    """What publishing this IR would say, without publishing it: the block
+    editor asks on every pause, so a refusal only the domain can make (a
+    set that is not one of its entity types) shows before Publish. Writes
+    nothing; answers exactly as `create_version` would refuse."""
+    _check_ir(db, _get_problem(db, problem_id), payload.ir)
+    return {"ok": True}
 
 
 @router.post("/problems/{problem_id}/versions", status_code=201)

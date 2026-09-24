@@ -21,7 +21,6 @@ import {
   type EmptyRange,
   type Id,
 } from "../api/v1";
-import { checkIrShape } from "../ir";
 import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
@@ -33,6 +32,7 @@ import BlocksEditor from "../components/BlocksEditor";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
+import { useDraftRefusal } from "../model/useDraftRefusal";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
   parameterOptions,
@@ -294,10 +294,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   }, [ir, draft, entityTypes.data, relationshipTypes.data]);
 
   const nextIr = useMemo(() => (workingIr && draft ? publishable(withFormDraft(workingIr, draft)) : null), [workingIr, draft]);
-  // `checkIrShape` answers with the refusal itself, or null when the
-  // document is shaped right. The server judges it again -- this is the
-  // half that can be answered without the domain.
-  const refusal = nextIr ? checkIrShape(nextIr) : null;
+  // Why Publish would be refused: the contract's shape rules at once, the
+  // domain's own from the server's dry run a moment later (`useDraftRefusal`).
+  const refusal = useDraftRefusal(problemId, nextIr as Record<string, unknown> | null);
   const classification = useClassify(
     nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null,
     problemId
@@ -433,6 +432,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           <BlocksEditor
             ir={workingIr}
             catalogue={catalogue}
+            refusal={refusal}
             onChange={(next, _paths, left) => {
               setOutside(left);
               setIr(next);

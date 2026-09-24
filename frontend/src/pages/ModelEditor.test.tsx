@@ -1039,3 +1039,28 @@ describe("ModelEditor's Blocks tab", () => {
     expect(await screen.findByText(/the forms are the keyboard and screen-reader way to edit it/i)).toBeInTheDocument();
   });
 });
+
+describe("the domain's check of the draft (Blocks 4)", () => {
+  it("a refusal only the domain can make, from the validate route, holds Publish and is shown", async () => {
+    const { ApiError } = await import("../api/client");
+    stub({
+      write: (path: string) =>
+        path.endsWith("/versions/validate")
+          ? Promise.reject(new ApiError(422, JSON.stringify({ detail: [{ loc: ["body", "ir", "sets", 1], msg: "the domain has no entity type 'day'" }] })))
+          : Promise.resolve({ id: 23, version: 3 }),
+    });
+    renderPage();
+    const publish = await screen.findByRole("button", { name: /publish a new version/i });
+    expect(await screen.findByText("the domain has no entity type 'day'", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(publish).toBeDisabled();
+    expect(publish).toHaveAttribute("title", "the domain has no entity type 'day'");
+  });
+
+  it("asks the server only about a draft the shape rules accept", async () => {
+    renderPage();
+    await screen.findByRole("button", { name: /publish a new version/i });
+    await waitFor(() =>
+      expect(mockFetch.mock.calls.some(([path]) => String(path).endsWith("/versions/validate"))).toBe(true), { timeout: 3000 }
+    );
+  });
+});
