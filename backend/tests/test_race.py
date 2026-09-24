@@ -222,8 +222,9 @@ def test_a_run_by_portfolio_keeps_the_winners_answer_and_records_every_entrant(d
     outcome = execute_run(db, run_id)
     row = db.execute(text("SELECT solver, optimality, params FROM run WHERE id = :r"), {"r": run_id}).mappings().one()
     assert outcome.status == "optimal" and outcome.objective == 7 and row["optimality"] == "global"
-    entrants = row["params"]["portfolio"]
+    entrants = row["params"]["portfolio_entrants"]
     assert {e["solver"] for e in entrants} >= {"cp-sat", "highs"}
     assert row["params"]["why_solver"].startswith("portfolio (")
     assert "probes" not in row["params"]
+    assert row["params"]["portfolio"] is True  # the setting as asked, beside what the race did
     assert row["params"]["chosen_solver"] in {e["solver"] for e in entrants if e["status"] == "optimal"}

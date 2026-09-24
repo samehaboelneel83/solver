@@ -281,6 +281,24 @@ def lns_in_child(*, backend: str, compiled, time_limit: float, seed, workers: in
     return searched.solution, searched.record
 
 
+def lagrange_in_child(*, backend: str, compiled, found, answer, time_limit: float, seed, workers: int,
+                      should_stop, on_progress):
+    """The Lagrangian bound (app.solve.lagrange) in one child: every round's relaxed solve here."""
+    from app.solve import lagrange
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+    rows = lagrange.linking_rows(compiled, found)
+
+    def run(model, seconds):
+        return solve_compiled(chosen, model, time_limit=seconds, seed=seed, should_stop=should_stop,
+                              workers=workers)[0]
+
+    bounded = lagrange.search(compiled, rows, run, answer=answer, time_limit=time_limit, should_stop=should_stop)
+    return bounded.bound, bounded.record
+
+
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain

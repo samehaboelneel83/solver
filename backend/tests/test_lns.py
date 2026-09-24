@@ -155,6 +155,7 @@ def test_a_run_with_lns_on_records_what_it_did(db, empty_queue):  # noqa: F811
     outcome = execute_run(db, run_id)
     params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
     assert outcome.status == "optimal" and outcome.objective == 7
-    assert params["lns"] == {"used": False, "why": "the first solve ended optimal"}
+    assert params["lns_search"] == {"used": False, "why": "the first solve ended optimal"}
+    assert params["lns"] is True  # the setting as asked, beside what the search did
     # How the model splits is recorded on every run (queue R4): one decision is one block.
     assert params["structure"]["blocks"] == 1

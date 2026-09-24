@@ -45,6 +45,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve import lagrange as lagrange_rows
 from app.solve import lns as lns_rows
 from app.solve import race as race_rows
 from app.solve.fingerprint import fingerprint as fingerprint_of
@@ -153,6 +154,8 @@ def enqueue_run(
     from_settings["portfolio"] = settings["solve.portfolio"].source
     lns = bool(settings["solve.lns"].value)
     from_settings["lns"] = settings["solve.lns"].source
+    lagrangian = bool(settings["solve.lagrangian"].value)
+    from_settings["lagrangian"] = settings["solve.lagrangian"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -210,6 +213,7 @@ def enqueue_run(
         "probe": probe,
         "portfolio": portfolio,
         "lns": lns,
+        "lagrangian": lagrangian,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -613,6 +617,7 @@ def _execute(
         structure_record = block_rows.structure(compiled)
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
         lns_record = None
+        lagrange_record = None
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
@@ -847,6 +852,13 @@ def _execute(
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
+            if params.get("lagrangian") and result.status == "feasible" and result.objective is not None:
+                # An answer without a proof: a bound from relaxing the few rules
+                # that tie the model's blocks (setting `solve.lagrangian`,
+                # app.solve.lagrange, queue R5), kept only when it is tighter.
+                result, lagrange_record = _lagrangian_bound(solving_model, structure_record, backend, result,
+                                                            time_limit=time_limit, seed=seed, workers=workers,
+                                                            should_stop=stop.is_set)
         except _Answered:
             pass
         except (Unsupported, sandbox.SandboxFailed) as exc:
@@ -896,13 +908,15 @@ def _execute(
     if race_skipped is not None:
         extra["probe_skipped"] = race_skipped
     if portfolio_record is not None:
-        extra["portfolio"] = portfolio_record
+        extra["portfolio_entrants"] = portfolio_record
     if portfolio_skipped is not None:
         extra["portfolio_skipped"] = portfolio_skipped
     if lns_record is not None:
-        extra["lns"] = lns_record
+        extra["lns_search"] = lns_record
     if structure_record is not None:
         extra["structure"] = structure_record
+    if lagrange_record is not None:
+        extra["lagrangian_bound"] = lagrange_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
@@ -1213,6 +1227,31 @@ def _solve_lex(
     # The last stage's bound is on the last stage's goal, not on the primary
     # term reported as the objective, so no gap can honestly be given.
     return replace(result, wall_seconds=round(wall, 3), objective=primary, best_bound=None)
+
+
+def _lagrangian_bound(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):
+    """`result` with the Lagrangian bound when it is tighter than the solver's own, and what was tried."""
+    why = lagrange_rows.applies(compiled, found)
+    if why is not None:
+        return result, {"used": False, "why": why}
+    seconds = max(1.0, lagrange_rows.SHARE * time_limit)
+    try:
+        bound, record = sandbox.run(
+            "app.solve.sandbox:lagrange_in_child",
+            {"backend": backend.name, "compiled": compiled, "found": found, "answer": result.objective,
+             "time_limit": seconds, "seed": seed, "workers": workers},
+            time_limit=seconds, workers=workers, should_stop=should_stop,
+        )
+    except (Unsupported, sandbox.SandboxFailed) as exc:
+        return result, {"used": False, "why": str(exc)}
+    own = result.best_bound
+    tighter = bound is not None and (own is None or (bound > own if compiled.sense == "minimize" else bound < own))
+    record = {"used": True, **record, "solver_bound": own, "kept": tighter}
+    if not tighter:
+        return result, record
+    proven = gap_of(result.objective, bound) is not None and gap_of(result.objective, bound) <= OPTIMAL_GAP
+    return replace(result, best_bound=bound, status="optimal" if proven else result.status,
+                   optimal=proven or result.optimal), record
 
 
 def solve_compiled(
