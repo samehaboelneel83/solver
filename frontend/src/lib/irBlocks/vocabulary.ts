@@ -356,7 +356,8 @@ export function defineIrBlocks(): void {
           }),
           "ARITY"
         );
-      this.appendDummyInput("DOMAIN_ROW")
+      // Ends its row: an interval's start, end and length go on the next line, not off the right edge.
+      this.appendEndRowInput("DOMAIN_ROW")
         .appendField("as")
         .appendField(
           fixed(
