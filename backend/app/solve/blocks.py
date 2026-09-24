@@ -18,6 +18,17 @@ solved in turn across the whole model); soft rules (their penalties are
 settled against the whole goal); symmetry-ordering rows (a class of
 interchangeable entities may span blocks); a trade-off front and a robust
 counterpart (they rewrite the model first). Target roadmap Phase 14.
+
+**Near-separable models** (`structure`, queue R4): a model that is one block
+may be many blocks tied together by a few rules -- one nurse's week per
+nurse, joined only by each shift's cover; one site's shipments per site,
+joined only by each customer's demand. For every set the decisions range
+over, decisions are grouped by their member of it; a rule instance reading
+two groups is a linking rule, and what is left falls into blocks. The set
+whose grouping leaves the fewest linking rules, with no block holding most
+of the model, is reported: "k blocks by person, m linking rules". Reported
+only -- the input to a decomposition, which is per template (R12), never
+automatic.
 """
 
 from __future__ import annotations
@@ -257,3 +268,84 @@ def solve(compiled: Compiled, parts: list[Block], run_one, *, workers: int, opti
         "seconds": [round(r.wall_seconds, 3) for r in results],
     }
     return merge(pieces, results, optimal_gap=optimal_gap), reason, record
+
+
+#: A near-separable report needs linking rules to be at most this share of the rows ...
+LINKING_SHARE = 0.2
+#: ... and no block to hold more than this share of the decisions.
+LARGEST_SHARE = 0.8
+
+
+def _is_decision(key: VarKey) -> bool:
+    return not key[0].startswith("__")
+
+
+def _components(compiled: Compiled, skip: set[int]) -> dict[VarKey, VarKey]:
+    """Each variable's component root, joining every row not in `skip` and every tie a row does not carry."""
+    links = _Links(compiled.variables)
+    for i in range(len(compiled.constraints)):
+        if i not in skip:
+            links.join(_row_keys(compiled, i))
+    for a, b in compiled.objective_quadratic:
+        links.join([a, b])
+    for spec in compiled.intervals.values():
+        links.join([spec.start, spec.end, *([spec.presence] if spec.presence else [])])
+    for curve in compiled.pwl:
+        links.join([curve.x, curve.y])
+    for function in compiled.functions:
+        links.join([function.y, *function.argument.coeffs])
+    return {key: links.find(key) for key in compiled.variables}
+
+
+def _sizes(compiled: Compiled, roots: dict[VarKey, VarKey]) -> list[int]:
+    counts: dict[VarKey, int] = {}
+    for key, root in roots.items():
+        if _is_decision(key):
+            counts[root] = counts.get(root, 0) + 1
+    return sorted(counts.values(), reverse=True)
+
+
+def structure(compiled: Compiled) -> dict[str, Any]:
+    """How the model splits: `{"blocks", "linking_rules", "linking", "by", "largest_share"}` --
+    exact blocks (`linking_rules` 0) when it is separable, else the near-separable grouping with the
+    fewest linking rule instances, else one block. `linking` names the rules (by id) that tie it."""
+    decisions = sum(1 for key in compiled.variables if _is_decision(key))
+    whole = _sizes(compiled, _components(compiled, set()))
+    if len(whole) > 1 or decisions == 0:
+        return {"blocks": max(1, len(whole)), "linking_rules": 0, "linking": [], "by": None,
+                "largest_share": round(whole[0] / decisions, 3) if whole else 1.0}
+    rows = len(compiled.constraints)
+    sets = sorted({name for index in compiled.var_index_sets.values() for name in index})
+    best: dict[str, Any] | None = None
+    for by in sets:
+        def group(key: VarKey, by=by):
+            index = compiled.var_index_sets.get(key[0], [])
+            return key[1][index.index(by)] if by in index and len(key[1]) > index.index(by) else None
+
+        linking = set()
+        for i in range(rows):
+            groups = {g for g in (group(k) for k in _row_keys(compiled, i) if _is_decision(k)) if g is not None}
+            if len(groups) > 1:
+                linking.add(i)
+        if not linking or len(linking) > LINKING_SHARE * rows:
+            continue
+        sizes = _sizes(compiled, _components(compiled, linking))
+        if len(sizes) < 2 or sizes[0] > LARGEST_SHARE * decisions:
+            continue
+        found = {"blocks": len(sizes), "linking_rules": len(linking),
+                 "linking": sorted({compiled.constraints[i].id for i in linking}), "by": by,
+                 "largest_share": round(sizes[0] / decisions, 3)}
+        if best is None or (found["linking_rules"], -found["blocks"]) < (best["linking_rules"], -best["blocks"]):
+            best = found
+    return best or {"blocks": 1, "linking_rules": 0, "linking": [], "by": None, "largest_share": 1.0}
+
+
+def said(found: dict[str, Any]) -> str | None:
+    """The structure in a planner's words, or None for a model that is one block."""
+    if found["blocks"] < 2:
+        return None
+    if not found["linking_rules"]:
+        return f"it falls into {found['blocks']} independent parts, solved separately when that is on"
+    rules = ", ".join(found["linking"])
+    return (f"it is {found['blocks']} parts, one per {found['by']}, tied together only by "
+            f"{found['linking_rules']} instance{'s' if found['linking_rules'] != 1 else ''} of {rules}")

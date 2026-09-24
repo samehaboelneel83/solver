@@ -609,6 +609,8 @@ def _execute(
             **({"fingerprint": numbers} if numbers else {}),
         )
         race_candidates, race_record, race_skipped = None, None, None
+        # How the model splits (app.solve.blocks.structure, queue R4): recorded, not acted on.
+        structure_record = block_rows.structure(compiled)
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
         lns_record = None
         try:
@@ -899,6 +901,8 @@ def _execute(
         extra["portfolio_skipped"] = portfolio_skipped
     if lns_record is not None:
         extra["lns"] = lns_record
+    if structure_record is not None:
+        extra["structure"] = structure_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]

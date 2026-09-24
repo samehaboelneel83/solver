@@ -625,6 +625,16 @@ export type Classification = {
    * has nothing that can take the model. The editor shows this; it never
    * offers a solver picker. */
   would_solve: string | null;
+  /** How the model splits (queue R4): blocks, and the rules that tie them. Null without the domain. */
+  structure?: ModelStructure | null;
+};
+
+export type ModelStructure = {
+  blocks: number;
+  linking_rules: number;
+  linking: string[];
+  by: string | null;
+  largest_share: number;
 };
 
 export const classifyIr = (ir: Record<string, unknown>, problemId?: Id | null) =>

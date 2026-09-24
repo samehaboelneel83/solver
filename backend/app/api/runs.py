@@ -397,15 +397,24 @@ def classify_model(
             empty_ranges = []
 
     found = classify(payload.ir, data)
+    structure, planner = None, list(found.planner)
     if compiled is not None:
         # The same convexity step a run takes, so the editor does not name
         # a solver for a quadratic model the run would then refuse.
         found = refine(found, compiled)
+        planner = list(found.planner)
+        # How it splits (queue R4): the input to a decomposition, said plainly.
+        from app.solve.blocks import said, structure as structure_of
+
+        structure = structure_of(compiled)
+        if (line := said(structure)) is not None:
+            planner.append(line)
     return {
         "model_class": found.model_class,
         "needs": sorted(found.needs),
         "reasons": found.reasons,
-        "planner": found.planner,
+        "planner": planner,
+        "structure": structure,
         "empty_ranges": empty_ranges,
         "would_solve": planner_choice_for(found),
     }

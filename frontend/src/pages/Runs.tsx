@@ -16,6 +16,7 @@ useScenario,
   useScenarios,
   useSolvers,
   type ConflictItem,
+  type ModelStructure,
   type ParetoPoint,
   type ConstraintOutcome,
   type Id,
@@ -79,6 +80,12 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   running: "Solving.",
   cancelled: "Stopped before an answer.",
 };
+
+/** A run's model structure (queue R4) in a few words: the input to a decomposition. */
+export function structureText(found: ModelStructure): string {
+  if (found.linking_rules === 0) return `${found.blocks} independent parts`;
+  return `${found.blocks} parts by ${found.by ?? "?"}, tied by ${found.linking_rules} ${found.linking.join(", ")}`;
+}
 
 /**
  * What the status means, qualified by what the answer may claim.
@@ -675,6 +682,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     classified_as?: string;
     objective_mode?: string;
     objective_terms?: { id: string; value: number }[];
+    structure?: ModelStructure;
   };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
@@ -861,6 +869,9 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
           <Fact label="Solver" value={data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
+          {params.structure && params.structure.blocks > 1 && (
+            <Fact label="How it splits" value={structureText(params.structure)} />
+          )}
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
           {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (
             <Fact
