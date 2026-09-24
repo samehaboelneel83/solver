@@ -114,3 +114,18 @@ export function partOfBlock(id: string | null, parentOf: (id: string) => string 
   }
   return null;
 }
+
+/** The catalogue from what the domain's API lists: entity types with their
+ * attributes, parameter defs (index as type ids) and relationship types. */
+export function catalogueFrom(
+  entityTypes: readonly { id: number | string; name: string; attributes?: readonly { name: string; data_type: string }[] }[],
+  parameterDefs: readonly { name: string; index_type_ids: readonly (number | string)[] }[],
+  relationshipTypes: readonly { name: string; from_type_id: number | string; to_type_id: number | string }[]
+): BlockCatalogue {
+  const nameOf = (id: number | string) => entityTypes.find((t) => String(t.id) === String(id))?.name ?? `#${id}`;
+  return {
+    entityTypes: entityTypes.map((t) => ({ name: t.name, attributes: (t.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })) })),
+    parameters: parameterDefs.map((p) => ({ name: p.name, index: p.index_type_ids.map(nameOf) })),
+    relationships: relationshipTypes.map((r) => ({ name: r.name, from: nameOf(r.from_type_id), to: nameOf(r.to_type_id) })),
+  };
+}

@@ -29,6 +29,8 @@ import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
 import DraftBar, { DraftConflict } from "../model/DraftBar";
+import BlocksEditor from "../components/BlocksEditor";
+import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
@@ -198,6 +200,21 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toast = useToast();
 
   const [failure, setFailure] = useState<string | null>(null);
+  // Forms | Blocks (Blockly edit mode spec §6), in the URL so a reload keeps it.
+  const view = searchParams.get("view") === "blocks" ? "blocks" : "forms";
+  const setView = (next: "forms" | "blocks") =>
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current);
+        if (next === "blocks") params.set("view", "blocks");
+        else params.delete("view");
+        return params;
+      },
+      { replace: true }
+    );
+  // Blocks dropped beside the model rather than in it: not part of it, so
+  // Publish waits until they are placed or deleted.
+  const [outside, setOutside] = useState(0);
 
   const ir = (scratch ? EMPTY_MODEL : latest.data?.ir) as Record<string, unknown> | undefined;
   const seedKey: DraftBase | null = scratch ? "scratch" : baseId === null ? null : `version-${Number(baseId)}`;
@@ -237,6 +254,18 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       ir: withFormDraft(workingIr, next),
     });
   }
+
+  /** A whole-IR edit (the Blocks tab), through the same store as `setDraft`. */
+  function setIr(next: Record<string, unknown>) {
+    if (seedKey === null) return;
+    if (readDraft(Number(problemId))) updateDraftIr(Number(problemId), () => next);
+    else writeDraft({ problemId: Number(problemId), base: seedKey, baseVersion: seedKey === "scratch" ? null : base?.version ?? null, ir: next });
+  }
+
+  const catalogue = useMemo(
+    () => catalogueFrom(entityTypes.data?.items ?? [], parameters.data?.items ?? [], relationshipTypes.data?.items ?? []),
+    [entityTypes.data, parameters.data, relationshipTypes.data]
+  );
 
   const context: ModelContext | null = useMemo(() => {
     if (!ir || !draft) return null;
@@ -391,6 +420,39 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <p className="mb-4 text-sm text-slate-600">Starting a model from nothing.</p>
       )}
 
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
+          {(["forms", "blocks"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={view === tab}
+              onClick={() => setView(tab)}
+              className={`px-3 py-1.5 text-sm ${view === tab ? "bg-blue-700 text-white" : "bg-white text-slate-700"}`}
+            >
+              {tab === "forms" ? "Forms" : "Blocks"}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">
+          Blocks are a drag-and-drop view of the same model. The forms are the keyboard and screen-reader way to edit it.
+        </p>
+      </div>
+
+      {view === "blocks" && workingIr ? (
+        <div className="mb-6">
+          <BlocksEditor
+            ir={workingIr}
+            catalogue={catalogue}
+            onChange={(next, _paths, left) => {
+              setOutside(left);
+              setIr(next);
+            }}
+          />
+        </div>
+      ) : (
+      <>
       <DeclarationsEditor
         sets={draft.sets}
         parameters={draft.parameters}
@@ -519,6 +581,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           onChange={(objective) => setDraft((current) => current && { ...current, objective })}
         />
       </section>
+      </>
+      )}
 
       {refusal === null && classification.data && (
         <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -581,7 +645,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       <DraftBar
         draft={stored}
         publishing={createVersion.isPending}
-        blocked={refusal ? refusal.message : null}
+        blocked={
+          view === "blocks" && outside > 0
+            ? `${outside} ${outside === 1 ? "block is" : "blocks are"} outside the model: put ${outside === 1 ? "it" : "them"} inside, or delete ${outside === 1 ? "it" : "them"}`
+            : refusal
+              ? refusal.message
+              : null
+        }
         onPublish={publish}
         onDiscard={() => clearDraft(Number(problemId))}
       />

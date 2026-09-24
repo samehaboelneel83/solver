@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { EntityType } from "../api/v1";
-import { BLOCK_DEFINITIONS, modelToBlocks, partOfBlock, termBlock, type SerialBlock } from "./modelBlocks";
+import { partFor, readOnlyWorkspace } from "./irBlocks/readOnly";
+import type { SerialBlock } from "./irBlocks/toBlocks";
+import { IR_BLOCK_TYPES } from "./irBlocks/vocabulary";
 import { buildModelView, OBJECTIVE_NODE_ID } from "./modelGraph";
 import { layoutModel } from "./modelLayout";
 import { reteNodes } from "./modelNodes";
@@ -45,13 +47,13 @@ function* walk(block: SerialBlock): Generator<SerialBlock> {
 }
 
 describe("Blockly: the model as blocks", () => {
-  const workspace = modelToBlocks(WORKFORCE, graph, "weekly_rota");
+  const workspace = readOnlyWorkspace(WORKFORCE, graph, "weekly_rota");
   const [root] = workspace.blocks.blocks;
   const all = [...walk(root)];
 
-  it("defines a block for every kind it uses", () => {
-    const defined = new Set(BLOCK_DEFINITIONS.map((definition) => definition.type));
-    for (const block of all) expect(defined.has(block.type), block.type).toBe(true);
+  it("uses only the editable vocabulary's blocks, and no opaque carrier for this model", () => {
+    for (const block of all) expect(IR_BLOCK_TYPES as readonly string[], block.type).toContain(block.type);
+    expect(all.some((block) => block.type.startsWith("ir_opaque_"))).toBe(false);
   });
 
   it("gives every part of the model its node id, so a click selects the same thing", () => {
@@ -61,51 +63,53 @@ describe("Blockly: the model as blocks", () => {
 
   it("draws a rule as its 'for every' and its two sides", () => {
     const cover = all.find((block) => block.id === "model-con-c_cover_demand")!;
-    expect(cover.type).toBe("ir_rule_hard");
-    expect(cover.fields).toMatchObject({ ID: "c_cover_demand", FORALL: "d in day, s in shift", RELATION: "≥" });
+    expect(cover.type).toBe("ir_rule");
+    expect(cover.fields).toMatchObject({ ID: "c_cover_demand", SEVERITY: "hard", RELATION: ">=" });
+    const forall = [...walk(cover.inputs!.FORALL.block)].filter((b) => b.type === "ir_binding").map((b) => b.fields!.INDEX);
+    expect(forall).toEqual(["d", "s"]);
     const left = cover.inputs!.LEFT.block;
     expect(left.type).toBe("ir_sum");
-    expect(left.fields!.OVER).toBe("e in employee");
-    expect(left.inputs!.BODY.block).toMatchObject({ type: "ir_var", fields: { NAME: "assign", INDEX: "[e, d, s]" } });
-    expect(cover.inputs!.RIGHT.block).toMatchObject({ type: "ir_par", fields: { NAME: "demand", INDEX: "[d, s]" } });
+    expect(left.inputs!.OVER.block.fields).toMatchObject({ INDEX: "e", SET: "employee" });
+    expect(left.inputs!.BODY.block).toMatchObject({ type: "ir_var", fields: { NAME: "assign", IDX0: "e", IDX1: "d", IDX2: "s" } });
+    expect(cover.inputs!.RIGHT.block).toMatchObject({ type: "ir_par", fields: { NAME: "demand", IDX0: "d", IDX1: "s" } });
   });
 
   it("marks a rule that may bend, with its price", () => {
     const soft = all.find((block) => block.id === "model-con-c_north_region_lates")!;
-    expect(soft.type).toBe("ir_rule_soft");
-    expect(soft.fields!.PRICE).toBe("4");
+    expect(soft.fields).toMatchObject({ SEVERITY: "soft", WEIGHT: "4" });
   });
 
-  it("stacks the goal's terms under it", () => {
-    const goal = all.find((block) => block.id === OBJECTIVE_NODE_ID)!;
-    expect(goal.fields!.SENSE).toBe("minimize");
-    expect(goal.inputs!.TERMS.block.type).toBe("ir_goal_term");
+  it("stacks the goal's terms in the model, the first carrying the goal's node id", () => {
+    expect(root.fields!.SENSE).toBe("minimize");
+    expect(root.inputs!.GOAL.block).toMatchObject({ type: "ir_goal_term", id: OBJECTIVE_NODE_ID });
   });
 
   it("is read-only: nothing moves, edits or deletes", () => {
     for (const block of all) expect([block.movable, block.editable, block.deletable]).toEqual([false, false, false]);
   });
 
-  it("draws a sum of three as nested pluses, and a product as its two factors", () => {
+  it("draws a sum of three as one block of three, and a product as its two factors", () => {
     const x = { var: "x", index: [] };
-    const sum = termBlock({ add: [x, { const: 2 }, x] });
-    expect(sum.type).toBe("ir_add");
-    expect(sum.inputs!.B.block.type).toBe("ir_add");
-    expect(termBlock({ mul: [{ const: 3 }, x] }).inputs!.A.block.fields!.VALUE).toBe("3");
+    const model = { constraints: [{ id: "c", left: { add: [x, { const: 2 }, x] }, relation: "<=", right: { mul: [{ const: 3 }, x] }, severity: "hard" }] };
+    const [rule] = [...walk(readOnlyWorkspace(model, buildModelView({}, []).graph).blocks.blocks[0])].filter((b) => b.type === "ir_rule");
+    expect(rule.inputs!.LEFT.block).toMatchObject({ type: "ir_add", extraState: { count: 3 } });
+    expect(rule.inputs!.RIGHT.block.inputs!.A.block.fields!.VALUE).toBe("3");
   });
 
-  it("draws a rule published before the IR contract without failing", () => {
-    const old = modelToBlocks({ constraints: [{ id: "c_old" }] }, buildModelView({}, []).graph);
+  it("draws a rule published before the IR contract without failing, kept as it is", () => {
+    const old = readOnlyWorkspace({ constraints: [{ id: "c_old" }] }, buildModelView({}, []).graph);
     const rule = [...walk(old.blocks.blocks[0])].find((block) => block.id === "model-con-c_old")!;
-    expect(rule.fields!.RELATION).toBe("(no expression)");
-    expect(rule.inputs).toEqual({});
+    expect(rule.type).toBe("ir_opaque_rule");
+    expect(rule.extraState).toEqual({ json: { id: "c_old" } });
   });
 
-  it("selects the part a clicked term belongs to", () => {
-    const parents: Record<string, string> = { t2: "t1", t1: "model-con-c", "model-con-c": "model-root" };
-    const known = new Set(["model-con-c"]);
-    expect(partOfBlock("t2", (id) => parents[id] ?? null, known)).toBe("model-con-c");
-    expect(partOfBlock("model-root", (id) => parents[id] ?? null, known)).toBeNull();
+  it("selects the part a clicked term belongs to, and the goal for any goal term", () => {
+    const parents: Record<string, string> = { t2: "t1", t1: "model-con-c", "model-con-c": "model-root", t9: "model-objective-term-2" };
+    const known = new Set(["model-con-c", OBJECTIVE_NODE_ID]);
+    const up = (id: string) => parents[id] ?? null;
+    expect(partFor("t2", up, known)).toBe("model-con-c");
+    expect(partFor("model-root", up, known)).toBeNull();
+    expect(partFor("t9", up, known)).toBe(OBJECTIVE_NODE_ID);
   });
 });
 

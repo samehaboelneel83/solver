@@ -12,6 +12,22 @@ vi.mock("../api/client", async () => {
   return { ...actual, apiFetch: vi.fn() };
 });
 
+// Blockly cannot draw in jsdom (it measures text on a canvas), so the Blocks
+// tab's editor is a stand-in here: these tests are about the page's side --
+// what the tab shows, and what an edit made in it does to the draft. The
+// editor itself is tested headless (BlocksEditor.test.ts) and live.
+vi.mock("../components/BlocksEditor", () => ({
+  default: ({ ir, onChange }: { ir: Record<string, unknown>; onChange: (ir: Record<string, unknown>, paths: Map<string, unknown>, outside: number) => void }) => (
+    <div data-testid="blocks-editor">
+      <span data-testid="blocks-ir">{JSON.stringify(ir)}</span>
+      <button type="button" onClick={() => onChange({ ...ir, constraints: [...(ir.constraints as unknown[]).map((c) => ({ ...(c as object), note: "changed in blocks" }))] }, new Map(), 0)}>
+        edit in blocks
+      </button>
+      <button type="button" onClick={() => onChange(ir, new Map(), 1)}>drop a block beside the model</button>
+    </div>
+  ),
+}));
+
 const { apiFetch } = await import("../api/client");
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -995,5 +1011,31 @@ describe("ModelEditor and the shared draft", () => {
     renderPage();
     fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "y" } });
     expect(screen.getByText(/not saved in this browser: they are lost on reload/i)).toBeInTheDocument();
+  });
+});
+
+describe("ModelEditor's Blocks tab", () => {
+  it("edits the same draft the forms edit, both ways", async () => {
+    renderPage();
+    fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "changed in forms" } });
+    fireEvent.click(screen.getByRole("tab", { name: "Blocks" }));
+    expect(screen.getByTestId("blocks-ir").textContent).toContain("changed in forms");
+    fireEvent.click(screen.getByRole("button", { name: "edit in blocks" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Forms" }));
+    expect(await screen.findByDisplayValue("changed in blocks")).toBeInTheDocument();
+  });
+
+  it("holds Publish while a block sits outside the model, and says so", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Blocks" }));
+    fireEvent.click(screen.getByRole("button", { name: "drop a block beside the model" }));
+    const publish = screen.getByRole("button", { name: /publish a new version/i });
+    expect(publish).toBeDisabled();
+    expect(publish).toHaveAttribute("title", "1 block is outside the model: put it inside, or delete it");
+  });
+
+  it("says the forms are the accessible way to edit", async () => {
+    renderPage();
+    expect(await screen.findByText(/the forms are the keyboard and screen-reader way to edit it/i)).toBeInTheDocument();
   });
 });

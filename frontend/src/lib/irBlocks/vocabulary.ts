@@ -70,7 +70,11 @@ function dynamic(
 
 /** A fixed list of choices, still keeping a value from outside it. */
 function fixed(values: readonly string[], label?: (value: string) => string, validator?: (value: string) => string | null): Blockly.FieldDropdown {
-  return dynamic(() => [...values], label ?? ((v) => v), validator);
+  // Not through `dynamic`: a fixed list needs no block, and at construction
+  // there is none -- the first option must still be the default.
+  return new OpenDropdown(function (this: Blockly.FieldDropdown) {
+    return menu([...values], this.getValue(), label ?? ((v) => v));
+  }, validator);
 }
 
 /** A name the platform accepts and no other block of these kinds uses in `field`. */
@@ -565,3 +569,26 @@ export const IR_BLOCK_TYPES = [
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
 ] as const;
+
+/**
+ * The toolbox, by category (spec §3). A block is offered only when the
+ * domain has something to fill it with: no data block without a parameter,
+ * no set without an entity type, no attribute without a numeric attribute.
+ */
+export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
+  const hasTypes = catalogue.entityTypes.length > 0;
+  const hasParameters = catalogue.parameters.length > 0;
+  const hasNumbers = catalogue.entityTypes.some((t) => t.attributes.some((a) => a.data_type === "integer" || a.data_type === "number"));
+  const hasAttributes = catalogue.entityTypes.some((t) => t.attributes.length > 0);
+  const blocks = (types: (string | false)[]) => types.filter((t): t is string => !!t).map((type) => ({ kind: "block", type }));
+  return {
+    kind: "categoryToolbox",
+    contents: [
+      { kind: "category", name: "Declare", colour: "#0d9488", contents: blocks([hasTypes && "ir_set", "ir_variable", hasParameters && "ir_parameter"]) },
+      { kind: "category", name: "Rules", colour: "#334155", contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter"]) },
+      { kind: "category", name: "Goal", colour: "#16a34a", contents: blocks(["ir_goal_term"]) },
+      { kind: "category", name: "Values", colour: "#3b82f6", contents: blocks(["ir_const", "ir_var", hasParameters && "ir_par", hasNumbers && "ir_attr"]) },
+      { kind: "category", name: "Arithmetic", colour: "#7c3aed", contents: blocks(["ir_sum", "ir_add", "ir_mul"]) },
+    ],
+  };
+}

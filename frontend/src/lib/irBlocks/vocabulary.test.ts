@@ -102,3 +102,13 @@ describe("what a block offers", () => {
     expect((Blockly.serialization.blocks.save(ws.getBlockById("s")!) as unknown as { fields: { SET: string } }).fields.SET).toBe("");
   });
 });
+
+describe("a new block from the toolbox", () => {
+  it("starts from the first choice of every fixed list, not from nothing", () => {
+    const ws = new Blockly.Workspace();
+    const rule = ws.newBlock("ir_rule");
+    expect([rule.getFieldValue("SEVERITY"), rule.getFieldValue("RELATION")]).toEqual(["hard", "<="]);
+    expect(ws.newBlock("ir_variable").getFieldValue("DOMAIN")).toBe("binary");
+    expect(ws.newBlock("ir_model").getFieldValue("SENSE")).toBe("minimize");
+  });
+});
