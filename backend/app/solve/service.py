@@ -26,7 +26,7 @@ from typing import Any, Iterator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.solve.backends import NoBackend, choose, optimality_of
+from app.solve.backends import NoBackend, by_name, choose, optimality_of
 from app.solve.classify import classify
 from app.solve.convexity import refine
 from app.solve.compile import (
@@ -143,6 +143,8 @@ def enqueue_run(
     from_settings["symmetry"] = settings["solve.symmetry"].source
     separable = bool(settings["solve.separable"].value)
     from_settings["separable"] = settings["solve.separable"].source
+    memory = bool(settings["solve.memory"].value)
+    from_settings["memory"] = settings["solve.memory"].source
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
@@ -193,6 +195,7 @@ def enqueue_run(
         "warm_start": warm_start,
         "symmetry": symmetry,
         "separable": separable,
+        "memory": memory,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -588,6 +591,12 @@ def _execute(
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
+                if params.get("memory") and not params.get("requested_solver"):
+                    # The problem's own history, among what the rules admit
+                    # for this model (app.solve.memory, queue 17a).
+                    recalled = _recall(db, run_id, found)
+                    if recalled is not None:
+                        backend, why = by_name(recalled.solver), recalled.evidence
                 choosing.set_attribute("solver", backend.name)
             bind_log(solver=backend.name)
             events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
@@ -1341,6 +1350,30 @@ class RunEvents:
         except Exception:  # pragma: no cover -- watching must not break solving
             self.session.rollback()
             logger.warning("could not record a run event", exc_info=True)
+
+
+def _recall(db: Session, run_id: int, found):
+    from app.solve.backends import REGISTRY
+    from app.solve.memory import RECENT, recall
+
+    admissible = set()
+    for candidate in REGISTRY:
+        try:
+            choose(found, candidate.name)
+            admissible.add(candidate.name)
+        except NoBackend:
+            continue
+    history = db.execute(
+        text(
+            "SELECT r.solver, r.wall_time_s FROM run r JOIN scenario s ON s.id = r.scenario_id"
+            " WHERE s.problem_id = (SELECT s2.problem_id FROM run r2 JOIN scenario s2 ON s2.id = r2.scenario_id WHERE r2.id = :r)"
+            "   AND r.id <> :r AND r.status = 'optimal' AND r.reused_from IS NULL AND r.wall_time_s IS NOT NULL"
+            "   AND r.params->>'pareto_of' IS NULL"
+            " ORDER BY r.id DESC LIMIT :n"
+        ),
+        {"r": run_id, "n": RECENT},
+    ).all()
+    return recall([(solver, seconds) for solver, seconds in history], admissible)
 
 
 def _record_fingerprint(db: Session, run_id: int, compiled: Compiled) -> dict | None:
