@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -61,7 +62,14 @@ def run_genui(
     run = db.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    translator = Translator(run_id, status=str(run.status), time_limit_s=(run.params or {}).get("time_limit_s"))
+    ir = db.execute(
+        text("SELECT mv.ir FROM scenario s JOIN model_version mv ON mv.id = s.model_version_id WHERE s.id = :s"),
+        {"s": run.scenario_id},
+    ).scalar_one_or_none() or {}
+    spatial = any(isinstance(c, dict) and "connected" in c for c in ir.get("constraints", []))
+    translator = Translator(
+        run_id, status=str(run.status), time_limit_s=(run.params or {}).get("time_limit_s"), spatial=spatial
+    )
     return StreamingResponse(
         _stream(translator, run_id),
         media_type="text/event-stream",

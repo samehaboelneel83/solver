@@ -124,3 +124,20 @@ def test_a_probe_race_is_told_as_trying_the_solvers():
     events = t.feed("stage", {"stage": "probing", "solvers": ["cp-sat", "highs"], "seconds": 1.0})
     assert {"event": "agent.message", "text": "Trying cp-sat, highs for 1 s each; the best goes on."} in events
     assert _states(events) == ["selecting_solver"]
+
+
+def test_a_spatial_run_that_ended_well_also_shows_its_map():
+    """GIS 7: the partition, hydrated from the stored answer; never for a run without one."""
+    record = {"status": "optimal", "objective": 0, "best_bound": 0, "gap": 0.0, "optimality": "global",
+              "wall_time_s": 0.1, "solver": "cp-sat", "error": None}
+    events = _whole(Translator(11, status="queued", time_limit_s=10, spatial=True), record)
+    _check(events)
+    maps = [e["component"] for e in events if e["event"] == "component.created" and e["component"]["type"] == "spatial-map"]
+    assert maps == [{"id": "run-11-map", "type": "spatial-map", "state": "hydrated",
+                     "props": {"title": "The partition", "runId": 11}, "data": {"source": "run", "runId": 11}}]
+    assert {"event": "component.completed", "id": "run-11-map"} in events
+
+    plain = _whole(Translator(12, status="queued", time_limit_s=10), record)
+    failed = _whole(Translator(13, status="queued", time_limit_s=10, spatial=True), {**record, "status": "infeasible"})
+    for stream in (plain, failed):
+        assert not any(e["event"] == "component.created" and e["component"]["type"] == "spatial-map" for e in stream)

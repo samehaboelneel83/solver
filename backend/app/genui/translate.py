@@ -48,8 +48,11 @@ def _gap(objective, bound) -> float | None:
 
 
 class Translator:
-    def __init__(self, run_id: int, *, status: str, time_limit_s: float | None) -> None:
+    def __init__(self, run_id: int, *, status: str, time_limit_s: float | None, spatial: bool = False) -> None:
         self.run_id = run_id
+        # A run whose model keeps groups connected over units with a shape:
+        # its answer is also a map (GET /runs/{id}/map).
+        self.spatial = spatial
         self.time_limit = time_limit_s
         self.state: str | None = None
         self.done: list[str] = []
@@ -213,6 +216,13 @@ class Translator:
             out += self._data("time", {"value": record.get("wall_time_s")}, state="hydrated")
             for name in ("objective", "gap", "time"):
                 out += self._complete(name)
+            if self.spatial:
+                # The map reads the stored answer itself, so it is hydrated
+                # from the start: nothing is drawn from a guess mid-solve.
+                out += self._create("map", "spatial-map", state="hydrated",
+                                    props={"title": "The partition", "runId": self.run_id},
+                                    data={"source": "run", "runId": self.run_id})
+                out += self._complete("map")
         out += self._complete("summary")
         if status == "optimal":
             out.append(self._say(f"Solved: {record.get('objective')}, proven the best "

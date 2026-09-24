@@ -23,6 +23,7 @@ import {
   Timeline,
   TimelineSkeleton,
 } from "../components/cards";
+import SpatialMap, { SpatialMapSkeleton } from "../components/SpatialMap";
 
 export type RegistryEntry = {
   component: FC<GenUIProps>;
@@ -41,6 +42,7 @@ export const componentRegistry: Partial<Record<ComponentType, RegistryEntry>> = 
   "model-summary": { component: ModelSummary, skeleton: ModelSummarySkeleton, expandable: true },
   timeline: { component: Timeline, skeleton: TimelineSkeleton, expandable: false },
   "solver-log": { component: SolverLog, skeleton: SolverLogSkeleton, expandable: true },
+  "spatial-map": { component: SpatialMap, skeleton: SpatialMapSkeleton, expandable: true },
 };
 
 export function entryFor(type: ComponentType): RegistryEntry | undefined {

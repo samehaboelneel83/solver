@@ -30,6 +30,7 @@ export const COMPONENT_TYPES = [
   "validation-result",
   "confirmation",
   "timeline",
+  "spatial-map",
 ] as const;
 
 export const COMPONENT_STATES = ["skeleton", "hydrating", "hydrated", "interactive", "error"] as const;

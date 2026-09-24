@@ -28,6 +28,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
+import { RunMapView } from "../genui/components/SpatialMap";
 
 /**
  * Solving, and what came of it.
@@ -715,6 +716,14 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         <p role="alert" className="mb-4 whitespace-pre-line rounded bg-red-50 p-3 text-sm text-red-800">
           {data.error}
         </p>
+      )}
+
+      {/* A partition over cells with a shape: its answer is also a map. Any
+          other run answers the map request 404 and nothing is shown. */}
+      {(data.status === "optimal" || data.status === "feasible") && (
+        <div className="mb-4">
+          <RunMapView runId={id} quietIfNone />
+        </div>
       )}
 
       {/* `robust` is the request's `true` until the run settles, then its report. */}

@@ -33,7 +33,8 @@
     "solver-log",
     "validation-result",
     "confirmation",
-    "timeline"
+    "timeline",
+    "spatial-map"
   ],
   "componentStates": ["skeleton", "hydrating", "hydrated", "interactive", "error"],
   "agentStates": [

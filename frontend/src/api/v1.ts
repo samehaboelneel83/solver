@@ -704,6 +704,17 @@ export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): 
 }
 export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
 
+/** A spatial run's answer as GeoJSON (GIS 7): one Feature per unit with its
+ * group, or -- dissolved -- one per group with its cell count and totals. */
+export type RunMapFeature = {
+  type: "Feature";
+  geometry: { type: "Polygon" | "MultiPolygon"; coordinates: unknown };
+  properties: Record<string, unknown> & { group?: string | null; subgroup?: string | null };
+};
+export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[] };
+export const getRunMap = (id: Id, dissolve = false) =>
+  apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : ""}`);
+
 /** What moved between two runs -- and what may honestly be credited for it. */
 export type RunComparison = {
   left: ComparedRun;
