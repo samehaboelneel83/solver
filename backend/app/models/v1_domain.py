@@ -64,6 +64,7 @@ ATTR_TYPE = ENUM(
     "enum",
     "time",
     "date",
+    "geometry",
     name="attr_type",
     create_type=False,
 )

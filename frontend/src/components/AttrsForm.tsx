@@ -1,3 +1,4 @@
+import GeometryPreview from "./GeometryPreview";
 import { useId } from "react";
 import {
   FieldError,
@@ -137,6 +138,7 @@ const TYPE_HINT: Record<AttrType, string> = {
   enum: "",
   date: "",
   time: "",
+  geometry: 'GeoJSON: a Point, Polygon or MultiPolygon, such as {"type": "Point", "coordinates": [31.2, 30.0]}.',
 };
 
 function hintFor(attribute: AttributeDef): string {
@@ -220,6 +222,22 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
 
  
 function Control({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
+  if (attribute.data_type === "geometry") {
+    // GeoJSON typed or pasted, drawn beside it as it is written.
+    const shape = (() => {
+      try {
+        return draft ? (JSON.parse(draft) as unknown) : null;
+      } catch {
+        return null;
+      }
+    })();
+    return (
+      <div className="flex items-start gap-3">
+        <textarea {...common} rows={4} spellCheck={false} className={`${common.className ?? ""} font-mono text-xs`} />
+        {shape !== null && <GeometryPreview geometry={shape} size={88} />}
+      </div>
+    );
+  }
   if (attribute.data_type === "boolean" || attribute.data_type === "enum") {
     const options =
       attribute.data_type === "boolean"

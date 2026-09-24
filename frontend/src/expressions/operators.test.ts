@@ -33,10 +33,11 @@ function names(field: Parameters<typeof operatorsForField>[0]): string[] {
 }
 
 describe("the operator table", () => {
-  it("covers every v1 data type", () => {
+  it("covers every v1 data type -- a shape with none, as it is never compared", () => {
     for (const { value } of DATA_TYPES) {
       expect(OPERATORS_BY_TYPE[value], value).toBeDefined();
-      expect(OPERATORS_BY_TYPE[value].length, value).toBeGreaterThan(0);
+      if (value === "geometry") expect(OPERATORS_BY_TYPE[value]).toEqual([]);
+      else expect(OPERATORS_BY_TYPE[value].length, value).toBeGreaterThan(0);
     }
   });
 

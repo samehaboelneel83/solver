@@ -94,7 +94,7 @@ router = APIRouter(prefix="/api/v1", tags=["entity types"])
 # `translate_db_error` re-raises untouched -- i.e. a 500. A Literal turns it
 # into a 422 naming the field, like every other bad value here.
 EntityRole = Literal["agent", "resource", "time", "location", "task", "org", "other"]
-AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date"]
+AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date", "geometry"]
 
 
 def _validate_attribute_name(value: str | None) -> str | None:
@@ -165,6 +165,10 @@ def _default_value_matches(data_type: str, enum_values: list[str] | None, value:
         return data_type == "number" or (value % 1 == 0)
     if data_type == "enum":
         return isinstance(value, str) and value in (enum_values or [])
+    if data_type == "geometry":
+        from app.spatial.geometry import validate_geometry
+
+        return validate_geometry(value) is None
     # text, time and date are all `jsonb_typeof(value) = 'string'` in the
     # SQL function's ELSE branch. It does not parse a time or a date, and
     # neither does this: shadowing a CHECK more strictly than the CHECK
@@ -211,6 +215,7 @@ _DEFAULT_SHAPE = {
     "text": "string",
     "time": "string",
     "date": "string",
+    "geometry": "GeoJSON Point, Polygon or MultiPolygon",
 }
 
 

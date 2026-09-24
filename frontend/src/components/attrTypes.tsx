@@ -46,6 +46,7 @@ export const DATA_TYPES: { value: AttrType; label: string }[] = [
   { value: "enum", label: "Choice from a list" },
   { value: "time", label: "Time of day" },
   { value: "date", label: "Date" },
+  { value: "geometry", label: "Shape (GeoJSON)" },
 ];
 
 export function roleLabel(role: string): string {
@@ -145,6 +146,21 @@ export function parseAttrValue(
     case "time":
       if (!TIME_RE.test(text)) return { ok: false, message: `${label}: must be a time of day (HH:MM).` };
       return { ok: true, value: text };
+    case "geometry": {
+      // The server judges the shape in full and names the ring at fault;
+      // here only that it is GeoJSON of a kind this platform stores.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return { ok: false, message: `${label}: must be GeoJSON, such as {"type": "Point", "coordinates": [31.2, 30.0]}.` };
+      }
+      const kind = (parsed as { type?: unknown } | null)?.type;
+      if (!parsed || typeof parsed !== "object" || !["Point", "Polygon", "MultiPolygon"].includes(String(kind))) {
+        return { ok: false, message: `${label}: must be a GeoJSON Point, Polygon or MultiPolygon.` };
+      }
+      return { ok: true, value: parsed };
+    }
     case "text":
     default:
       return { ok: true, value: raw };

@@ -176,6 +176,7 @@ def test_seeded_attribute_definitions_are_pinned(seeded):
         ("shift", "ends_at", "time", True, None, None, None),
         ("shift", "starts_at", "time", True, None, None, None),
         ("unit", "cost_centre", "text", False, None, None, None),
+        ("unit", "site", "geometry", False, None, None, None),
     ]
 
     # Ruling 18: "no default" must be SQL NULL, not jsonb 'null'. The

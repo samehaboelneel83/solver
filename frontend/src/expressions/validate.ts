@@ -143,6 +143,7 @@ const TYPE_MESSAGE: Record<AttrType, string> = {
   enum: "must be one of the allowed values.",
   date: "must be a date (YYYY-MM-DD).",
   time: "must be a time of day (HH:MM).",
+  geometry: "is a shape, which is not compared.",
 };
 
 /** Whether one value fits `field`'s data type, or why not. */
@@ -173,6 +174,10 @@ function scalarProblem(field: ExpressionField, value: unknown): string | null {
       const parsed = parseAttrValue(type, value, [], "value");
       return parsed.ok ? null : TYPE_MESSAGE[type];
     }
+    case "geometry":
+      // No operator is offered on a shape (OPERATORS_BY_TYPE), so no value
+      // can reach here from the builder; a hand-written one is refused.
+      return TYPE_MESSAGE.geometry;
   }
 }
 

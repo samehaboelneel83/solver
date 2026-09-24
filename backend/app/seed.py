@@ -97,6 +97,17 @@ _UNITS = [
     ("support", "Support Desk", "head_office", "SUP-300"),
 ]
 
+# Where each site stands (a GeoJSON Point, lon/lat): the demo's one
+# `geometry` attribute, so the seed exercises every attribute type. The
+# support desk has no site of its own -- a geometry is optional.
+_UNIT_SITES = {
+    "head_office": [31.2357, 30.0444],
+    "north_region": [31.2400, 30.1200],
+    "south_region": [31.2300, 29.9600],
+    "depot_north": [31.2800, 30.1500],
+    "depot_south": [31.2100, 29.9300],
+}
+
 _EMPLOYEES = [
     ("ahmed", "Ahmed Salah", "depot_north", {
         "full_name": "Ahmed Salah", "hours_per_week": 40, "hourly_rate": 24.5,
@@ -319,7 +330,10 @@ def _weekly_rota_domain_seed() -> dict[str, Any]:
             "key": key,
             "label": label,
             "sort_order": index,
-            "attrs": {"cost_centre": cost_centre},
+            "attrs": {
+                "cost_centre": cost_centre,
+                **({"site": {"type": "Point", "coordinates": _UNIT_SITES[key]}} if key in _UNIT_SITES else {}),
+            },
         })
     for index, key in enumerate(_DAYS):
         entities.append({
@@ -401,7 +415,10 @@ def _weekly_rota_domain_seed() -> dict[str, Any]:
                 "name": "unit",
                 "role": "org",
                 "colour": "#7c3aed",
-                "attributes": [{"name": "cost_centre", "data_type": "text"}],
+                "attributes": [
+                    {"name": "cost_centre", "data_type": "text"},
+                    {"name": "site", "data_type": "geometry"},
+                ],
             },
             {
                 "name": "day",

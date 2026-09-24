@@ -87,7 +87,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -262,12 +262,32 @@ def list_entities(
     return EntityList(items=[EntityRead.model_validate(row) for row in rows], total=total)
 
 
+def _check_geometries(db: Session, entity_type_id: int, attrs: dict[str, Any] | None) -> None:
+    """A geometry is judged here in full (the trigger only coarsely), so a
+    refusal names the ring or position at fault (migration 0049)."""
+    if not attrs:
+        return
+    from app.spatial.geometry import validate_geometry
+
+    names = db.execute(
+        text("SELECT name FROM attribute_def WHERE entity_type_id = :t AND data_type::text = 'geometry'"),
+        {"t": entity_type_id},
+    ).scalars()
+    for name in names:
+        value = attrs.get(name)
+        if value is not None:
+            fault = validate_geometry(value)
+            if fault:
+                raise field_error(["attrs", name], fault, value)
+
+
 @router.post("/entities", status_code=201)
 def create_entity(
     payload: EntityCreate,
     db: Session = Depends(get_db),
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> EntityRead:
+    _check_geometries(db, payload.entity_type_id, payload.attrs)
     entity = Entity(**payload.model_dump())
     db.add(entity)
     _commit(db)
@@ -298,6 +318,8 @@ def update_entity(
     expected = changes.pop("updated_at", None)
     entity = _get_entity(db, entity_id, for_update=expected is not None)
     check_not_stale("entity", entity.updated_at, expected)
+    if "attrs" in changes:
+        _check_geometries(db, entity.entity_type_id, changes["attrs"])
     for field, value in changes.items():
         setattr(entity, field, value)
     # `entity_validate` is BEFORE INSERT **OR UPDATE**, so this path gets

@@ -225,6 +225,7 @@ export default function AttributeDefEditor({
     enum: "One of the allowed values above.",
     time: "Leave empty for no default.",
     date: "Leave empty for no default.",
+    geometry: "GeoJSON; usually left empty -- each record draws its own shape.",
   };
 
   return (

@@ -110,7 +110,7 @@ export function listDomains(): Promise<Page<Domain>> {
 // --- entity types and attribute definitions (Task 5) ----------------------
 
 export type EntityRole = "agent" | "resource" | "time" | "location" | "task" | "org" | "other";
-export type AttrType = "integer" | "number" | "text" | "boolean" | "enum" | "time" | "date";
+export type AttrType = "integer" | "number" | "text" | "boolean" | "enum" | "time" | "date" | "geometry";
 
 export type AttributeDef = {
   id: Id;

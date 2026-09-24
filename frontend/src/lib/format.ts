@@ -76,6 +76,12 @@ export function formatCellValue(
     return value ? { text: "✓", ariaLabel: "Yes" } : { text: "—", ariaLabel: "No" };
   }
 
+  if (typeof value === "object" && value !== null && ["Point", "Polygon", "MultiPolygon"].includes(String((value as { type?: unknown }).type))) {
+    // A shape: named, never printed as its coordinates.
+    const count = JSON.stringify((value as { coordinates?: unknown }).coordinates ?? []).match(/\[-?[\d.e+-]+,-?[\d.e+-]+/g)?.length ?? 0;
+    return { text: `${(value as { type: string }).type}, ${count} positions`, title: "GeoJSON shape" };
+  }
+
   if (typeof value === "object") {
     return { text: JSON.stringify(value) };
   }

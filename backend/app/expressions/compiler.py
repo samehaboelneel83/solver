@@ -145,6 +145,10 @@ def _attribute_value(name: str, data_type: str) -> ColumnElement[Any]:
             (sa.and_(kind == "string", text.regexp_match(_TIME_GUARD)), clock),
             else_=_null_like(clock),
         )
+    if data_type == "geometry":
+        # The GeoJSON object itself. It offers no filter operator
+        # (catalogue `operatorsByType`), so this is read only for display.
+        return sa.case((kind == "object", stored), else_=_null_like(stored))
     raise AssertionError(f"no reader for data type {data_type!r}")  # pragma: no cover
 
 

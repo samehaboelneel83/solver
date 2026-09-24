@@ -1,5 +1,6 @@
 import type { AttrType, EntityType, Id } from "../api/v1";
 import { EXPRESSION_FUNCTIONS, functionReturnType } from "./functions";
+import { OPERATORS_BY_TYPE } from "./operators";
 
 /**
  * What an expression may name, and how a name travels.
@@ -229,6 +230,9 @@ export function buildFieldCatalogue(input: FieldCatalogueInput): FieldCatalogue 
   for (const type of input.entityTypes) {
     const entityTypeId = String(type.id);
     for (const attribute of type.attributes ?? []) {
+      // A shape is drawn, never compared: it offers no operator, so it is
+      // not a field a filter could name.
+      if ((OPERATORS_BY_TYPE[attribute.data_type] ?? []).length === 0) continue;
       const ref: AttributeRef = { kind: "attribute", entityTypeId, attribute: attribute.name };
       addWithFunctions({
         id: encodeFieldId(ref),

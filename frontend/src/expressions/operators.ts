@@ -64,6 +64,9 @@ export const OPERATORS_BY_TYPE: Record<AttrType, readonly string[]> = {
   text: ["=", "!=", "contains", "doesNotContain", "beginsWith", "endsWith"],
   boolean: ["=", "!="],
   enum: ["=", "!=", "in", "notIn"],
+  // A shape is not compared; it is drawn (GeometryPreview) and read by the
+  // spatial operations, never filtered on.
+  geometry: [],
 };
 
 /** Offered on any field that can be absent. */
