@@ -98,5 +98,30 @@ choices that use only what the platform already records. The fingerprint
 stays as a description of the model (Workspace, analytics).
 
 - [x] (17a) Per-problem memory — done when a run of a problem that has settled runs before takes the solver (among those `choose` admits) that proved its recent runs fastest, `why_solver` says so with the evidence, a named solver or setting overrides it, it is off for a problem with no proven run, and it is checked against the rule choice on the bench. *(`ae3605e`, migration 0047 (rehearsed up/down/up): `app.solve.memory` -- the problem's last 20 proven runs (not reused, not front points), the admissible solver with the least median time over at least two; `why_solver` quotes it. Bench replay (`bench/results/2026-09-24-memory.md`): 1.3-2.8x faster on five of seven families, never twice as slow, no wrong answer -- `solve.memory` defaults on. Live: a new problem's first run gives the rule's reason; after proven runs by glop and highs, the next run is chosen by memory with the evidence. Found on the way and fixed (`8971c36`): the HiGHS worker, started as a new program, was dumpable again, and one killed at its CPU limit left 0.9 GB on C:.)*
-- [ ] (17b) Probe race — done when a run with no memory to go on gives each admissible solver a short probe at once in the sandbox, continues with the best (proven first, then the smaller gap, then the better bound), records the probes on the run, and never runs for a model the rules already settle in under the probe time; behind a setting whose default the bench decides.
+- [x] (17b) Probe race — done when a run with no memory to go on gives each admissible solver a short probe at once in the sandbox, continues with the best (proven first, then the smaller gap, then the better bound), records the probes on the run, and never runs for a model the rules already settle in under the probe time; behind a setting whose default the bench decides. *(`dfeb0a4`, migration 0048 (rehearsed): `app.solve.race` -- probes of a tenth of the time (1-5 s) at once with the threads shared, the first proof ends the race and is the answer, else the smallest gap continues; probes recorded, `why_solver` explains, the GenUI conversation says "Trying ..."; skipped with a reason for small models, short limits, robust and front runs. Bench (`bench/results/2026-09-24-probe.md`): 2x faster on rota_rates, twice as slow on facility L where the winner restarts after its probe -- so `solve.probe` is **off** by default. Live, switched on for one problem: four probes of 2 s on a 300-item, 8-dimension knapsack, SCIP had the smallest gap (0.204%) and went on to 8,604.)*
 - [x] (GenUI 1) GenUI workspace, phase 1 — done when the pipeline's steps stream as typed GenUI events (`protocol.json`, parity-tested), a `/workspace` page renders them through a registry with skeletons, hydration and shared-layout expansion, reduced motion is honoured, and it is checked live in a browser. *(`3a94ff6`, fixes `3cabe1c`, and the progress-curve fixes: the pipeline records seven stages; `app.genui.translate` turns them into agent states, messages and components with every number the run's own; `/workspace` renders them through a registry (seven components, skeletons of the same geometry, one subscription per card, one batch per frame, shared-layout expansion). Live: a 400-item, 10-dimension knapsack watched from queued to solving to result on CP-SAT, 11,355 shown as recorded, no console errors, no sideways scroll on a phone, reduced motion still; screenshots sent to the user. Fixed from the screenshots: message order, a duplicated reason, the progress curve clipped, scaled to the opening bound, and drawn in arrival order.)*
+
+## Spatial region partitioning (approved 2026-09-24, executed natively)
+
+Spec `docs/superpowers/specs/2026-09-24-spatial-region-partitioning-design.md`, plan
+`docs/superpowers/plans/2026-09-24-spatial-region-partitioning.md` -- one item per plan task.
+
+- [ ] (GIS 1) The geometry attribute type -- plan Task 1.
+- [ ] (GIS 2) Projection and the pure grid -- plan Task 2.
+- [ ] (GIS 3) The grid generator endpoint and form -- plan Task 3.
+- [ ] (GIS 4) The `connected` rule in the contract -- plan Task 4.
+- [ ] (GIS 5) `connected` compiled to an exact flow -- plan Task 5.
+- [ ] (GIS 6) The `connected` rule in the editor -- plan Task 6.
+- [ ] (GIS 7) The map: GeoJSON of a run, the `spatial-map` component, export -- plan Task 7.
+- [ ] (GIS 8) `region_partitioning` template and the `districting` bench -- plan Task 8.
+
+## Blockly edit mode (spec approved 2026-09-24; plan to be written after GIS)
+
+Spec `docs/superpowers/specs/2026-09-24-blockly-edit-mode-design.md`.
+
+- [ ] (Blocks 0) Implementation plan for the spec, written and committed.
+- [ ] (Blocks 1) Shared draft store; the Model editor moved onto it.
+- [ ] (Blocks 2) Editable blocks for declarations and plain rules and goal terms, `blocksToIr`, the round trip, the Blocks tab.
+- [ ] (Blocks 3) The advanced constructs' blocks; the round trip over every fixture and template.
+- [ ] (Blocks 4) Refusals on blocks, the dry-run validate route, Edit mode in the optimization view, the live browser check.
+
