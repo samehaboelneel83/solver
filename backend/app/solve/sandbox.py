@@ -238,7 +238,7 @@ def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # prag
 
 
 def solve_in_child(*, backend: str, compiled, time_limit: float, seed, workers: int, gap_rel: float,
-                   should_stop, on_progress, hint=None, symmetry=False):
+                   should_stop, on_progress, hint=None, symmetry=False, solver_params=None):
     """`solve_compiled`, by backend name (a registry entry does not cross a pipe)."""
     from app.solve.backends import by_name
     from app.solve.service import solve_compiled
@@ -246,6 +246,7 @@ def solve_in_child(*, backend: str, compiled, time_limit: float, seed, workers: 
     return solve_compiled(
         by_name(backend), compiled, time_limit=time_limit, seed=seed, should_stop=should_stop,
         workers=workers, gap_rel=gap_rel, on_progress=on_progress, hint=hint, symmetry=symmetry,
+        solver_params=solver_params,
     )
 
 

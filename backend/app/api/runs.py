@@ -37,7 +37,7 @@ from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solution
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
-from app.solve.service import CannotCancel, QuotaExceeded, cancel_run, enqueue_run
+from app.solve.service import CannotCancel, QuotaExceeded, SettingUnusable, cancel_run, enqueue_run
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
@@ -250,6 +250,12 @@ def create_run(
             pareto_steps=request.pareto_steps,
             robust=request.robust,
         )
+    except SettingUnusable as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "setting", "loc": ["settings", exc.key], "msg": str(exc)}],
+        ) from exc
     except QuotaExceeded as exc:
         # 422, not 429: the request is well-formed and the caller is not
         # sending too fast; what it asks for is over a limit, and the body

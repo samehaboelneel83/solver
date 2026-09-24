@@ -66,3 +66,23 @@ def parse(backend: str, name: str, text: str) -> Any:
         if str(value) == text:
             return value
     raise ValueError(f"{text!r} is not a whitelisted value of {backend}'s {name!r}")
+
+
+def parse_setting(text: str | None) -> dict[str, dict[str, Any]]:
+    """`solve.solver_params` (queue R10): "cp-sat.symmetry_level=0, highs.presolve=off" -> per backend,
+    each option whitelisted with a whitelisted value. Empty text is no override. Raises ValueError, naming
+    the part it cannot read."""
+    chosen: dict[str, dict[str, Any]] = {}
+    for part in (p.strip() for p in (text or "").split(",")):
+        if not part:
+            continue
+        head, _, value = part.partition("=")
+        backend, _, name = head.strip().partition(".")
+        if not value or not name:
+            raise ValueError(f"{part!r} is not backend.option=value")
+        if backend not in WHITELIST:
+            raise ValueError(f"{backend!r} has no whitelisted options")
+        chosen.setdefault(backend, {})[name.strip()] = parse(backend, name.strip(), value.strip())
+    for backend, options in chosen.items():
+        check(backend, options)
+    return chosen

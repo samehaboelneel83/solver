@@ -165,6 +165,14 @@ def enqueue_run(
     from_settings["stochastic_samples"] = settings["solve.stochastic_samples"].source
     rolling_horizon = bool(settings["solve.rolling_horizon"].value)
     from_settings["rolling_horizon"] = settings["solve.rolling_horizon"].source
+    # A tuning search's result (queue R10), checked against the whitelist before the run is queued.
+    tuned_params = str(settings["solve.solver_params"].value or "")
+    from_settings["solver_params"] = settings["solve.solver_params"].source
+    tuned_from = str(settings["solve.tuned_from"].value or "")
+    try:
+        solver_param_table.parse_setting(tuned_params)
+    except ValueError as exc:
+        raise SettingUnusable("solve.solver_params", f"the setting solve.solver_params cannot be used: {exc}") from exc
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -226,6 +234,7 @@ def enqueue_run(
         "local_fallback": local_fallback,
         "stochastic_samples": stochastic_samples,
         "rolling_horizon": rolling_horizon,
+        **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -625,6 +634,8 @@ def _execute(
             **({"fingerprint": numbers} if numbers else {}),
         )
         race_candidates, race_record, race_skipped = None, None, None
+        # A tuning's options for this problem or domain (setting `solve.solver_params`, queue R10).
+        tuned = solver_param_table.parse_setting(params.get("solver_params_setting"))
         # How the model splits (app.solve.blocks.structure, queue R4): recorded, not acted on.
         structure_record = block_rows.structure(compiled)
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
@@ -909,6 +920,7 @@ def _execute(
                             "gap_rel": gap_rel,
                             "hint": hint,
                             "symmetry": bool(params.get("symmetry")),
+                            "solver_params": tuned.get(backend.name),
                         },
                         time_limit=time_limit,
                         workers=workers,
@@ -998,9 +1010,10 @@ def _execute(
         extra["stochastic"] = stochastic_record
     if horizon_record is not None:
         extra["rolling_horizon_run"] = horizon_record
-    if solver_param_table.ENABLED.get(backend.name):
-        # The benchmark's winners, applied to every solve of this backend.
-        extra["solver_params"] = solver_param_table.ENABLED[backend.name]
+    applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
+    if applied:
+        # The benchmark's winners, applied to every solve of this backend, and a tuning's for this problem.
+        extra["solver_params"] = applied
     if stopped:
         extra["stopped_by_request"] = True
     if robust_record is not None:
@@ -1310,6 +1323,14 @@ def _solve_lex(
     # The last stage's bound is on the last stage's goal, not on the primary
     # term reported as the objective, so no gap can honestly be given.
     return replace(result, wall_seconds=round(wall, 3), objective=primary, best_bound=None)
+
+
+class SettingUnusable(ValueError):
+    """A setting whose value a run cannot use, named -- refused before the run is queued."""
+
+    def __init__(self, key: str, message: str) -> None:
+        super().__init__(message)
+        self.key = key
 
 
 def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:
