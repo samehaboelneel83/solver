@@ -911,3 +911,13 @@ describe("a chance rule's record (queue R8)", () => {
     ).toBe("On 20 fresh futures it averages 140, give or take 0 (95%). c_cover held in 95% of them (asked: 90%).");
   });
 });
+
+describe("a relax-and-fix answer (queue R9)", () => {
+  it("says it was planned a stretch at a time and is not proven best", async () => {
+    const { statusNote } = await import("./Runs");
+    expect(statusNote({ status: "feasible", params: { rolling_horizon_run: { used: true, windows: 3, time_set: "day" } } })).toBe(
+      "Planned 3 stretches of day one at a time, each with the later ones loosened: an answer that keeps every rule, " +
+        "but not proven the best -- solving the whole horizon at once is how to find out."
+    );
+  });
+});

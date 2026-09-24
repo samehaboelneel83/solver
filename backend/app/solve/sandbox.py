@@ -320,6 +320,23 @@ def stochastic_in_child(*, backend: str, ir, data, compiled, samples: int, time_
     return solved.solution, solved.record
 
 
+def horizon_in_child(*, backend: str, compiled, time_set: str, periods: list, time_limit: float, seed, workers: int,
+                     gap_rel: float, should_stop, on_progress):
+    """Relax-and-fix over the time set (app.solve.horizon) in one child: every window solved here."""
+    from app.solve import horizon
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+
+    def run(model, seconds):
+        return solve_compiled(chosen, model, time_limit=seconds, seed=seed, should_stop=should_stop,
+                              workers=workers, gap_rel=gap_rel)[0]
+
+    rolled = horizon.solve(compiled, time_set, periods, run, time_limit=time_limit, should_stop=should_stop)
+    return rolled.solution, rolled.record
+
+
 def explain_in_child(*, backend: str, compiled, probe_seconds: float, should_stop, on_progress):
     from app.solve.backends import by_name
     from app.solve.diagnose import explain

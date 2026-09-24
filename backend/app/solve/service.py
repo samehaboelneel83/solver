@@ -46,6 +46,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve import horizon as horizon_rows
 from app.solve import lagrange as lagrange_rows
 from app.solve import stochastic as stochastic_rows
 from app.solve import lns as lns_rows
@@ -162,6 +163,8 @@ def enqueue_run(
     from_settings["local_fallback"] = settings["solve.local_fallback"].source
     stochastic_samples = int(settings["solve.stochastic_samples"].value or 0)
     from_settings["stochastic_samples"] = settings["solve.stochastic_samples"].source
+    rolling_horizon = bool(settings["solve.rolling_horizon"].value)
+    from_settings["rolling_horizon"] = settings["solve.rolling_horizon"].source
     pdlp = bool(settings["solve.pdlp"].value)
     from_settings["pdlp"] = settings["solve.pdlp"].source
     if solver is None and settings["solve.solver"].value is not None:
@@ -222,6 +225,7 @@ def enqueue_run(
         "lagrangian": lagrangian,
         "local_fallback": local_fallback,
         "stochastic_samples": stochastic_samples,
+        "rolling_horizon": rolling_horizon,
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
         # The trace this run belongs to: the worker continues it
@@ -631,6 +635,7 @@ def _execute(
         # app.solve.stochastic, queue R7): asked for, and a decision waits for the data.
         stochastic_wanted = bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir)
         stochastic_record, record_model = None, None
+        horizon_record = None
         if stochastic_wanted and stochastic_rows.chance_rules(ir):
             # A chance rule is switched per future (queue R8): the extensive form has
             # binaries, held by a big-M from declared bounds where there is no indicator.
@@ -796,7 +801,18 @@ def _execute(
                     workers=workers,
                     should_stop=stop.is_set,
                 )
-            if params.get("separable") and not stochastic_wanted:
+            horizon_plan = None
+            if params.get("rolling_horizon") and not stochastic_wanted:
+                # Relax-and-fix over the model's time set (setting
+                # `solve.rolling_horizon`, app.solve.horizon, queue R9).
+                time_set = _time_set(db, run_id, solving_model)
+                periods = [str(row["id"]) for row in (data.get("sets") or {}).get(time_set or "", [])]
+                why_not = horizon_rows.applies(solving_model, time_set, periods)
+                if why_not is None:
+                    horizon_plan = (time_set, periods)
+                else:
+                    horizon_record = {"used": False, "why": why_not}
+            if params.get("separable") and not stochastic_wanted and horizon_plan is None:
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -825,6 +841,19 @@ def _execute(
                     plan_keys = set(result.assignments)
                     record_model = replace(compiled, constraints=[
                         c for c in compiled.constraints if {*c.left.coeffs, *c.right.coeffs} <= plan_keys])
+                elif horizon_plan is not None:
+                    windows_on = backend.name if "continuous" in backend.provides else "highs"
+                    result, horizon_record = sandbox.run(
+                        "app.solve.sandbox:horizon_in_child",
+                        {"backend": windows_on, "compiled": solving_model, "time_set": horizon_plan[0],
+                         "periods": horizon_plan[1], "time_limit": time_limit, "seed": seed, "workers": workers,
+                         "gap_rel": gap_rel},
+                        time_limit=time_limit,
+                        workers=workers,
+                        should_stop=stop.is_set,
+                    )
+                    horizon_record = {"used": True, "windows_on": windows_on, **horizon_record}
+                    reason = None
                 elif parts is not None:
 
                     def run_one(piece, share, piece_hint):
@@ -967,6 +996,8 @@ def _execute(
         extra["local_fallback_run"] = local_record
     if stochastic_record is not None:
         extra["stochastic"] = stochastic_record
+    if horizon_record is not None:
+        extra["rolling_horizon_run"] = horizon_record
     if solver_param_table.ENABLED.get(backend.name):
         # The benchmark's winners, applied to every solve of this backend.
         extra["solver_params"] = solver_param_table.ENABLED[backend.name]
@@ -1279,6 +1310,23 @@ def _solve_lex(
     # The last stage's bound is on the last stage's goal, not on the primary
     # term reported as the objective, so no gap can honestly be given.
     return replace(result, wall_seconds=round(wall, 3), objective=primary, best_bound=None)
+
+
+def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:
+    """The model's time set (queue R9): the first of its sets whose entity type the domain gives the
+    role `time` and that some decision is indexed by."""
+    names = db.execute(
+        text(
+            "SELECT et.name FROM entity_type et"
+            "  JOIN problem p ON p.domain_id = et.domain_id"
+            "  JOIN scenario s ON s.problem_id = p.id"
+            "  JOIN run r ON r.scenario_id = s.id"
+            " WHERE r.id = :r AND et.role = 'time'"
+        ),
+        {"r": run_id},
+    ).scalars().all()
+    indexed = {name for index in compiled.var_index_sets.values() for name in index}
+    return next((name for name in sorted(names) if name in indexed), None)
 
 
 #: The share of the time given to IPOPT after SCIP ends without a proof (queue R6).

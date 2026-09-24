@@ -137,6 +137,14 @@ export function statusNote(run: {
     return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
   }
   const stochastic = (run.params as { stochastic?: StochasticRecord } | undefined)?.stochastic;
+  const rolled = (run.params as { rolling_horizon_run?: { used?: boolean; windows?: number; time_set?: string } } | undefined)
+    ?.rolling_horizon_run;
+  if (run.status === "feasible" && rolled?.used) {
+    return (
+      `Planned ${rolled.windows} stretches of ${rolled.time_set} one at a time, each with the later ones loosened: ` +
+      "an answer that keeps every rule, but not proven the best -- solving the whole horizon at once is how to find out."
+    );
+  }
   if (run.status === "optimal" && run.optimality === "approximate" && stochastic) {
     return (
       `The best plan for ${stochastic.samples} sampled futures -- what to decide now` +
