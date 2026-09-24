@@ -331,6 +331,9 @@ class Compiled:
     # Classes of interchangeable entities, per set (`app.solve.symmetry`):
     # what a backend without symmetry detection may be told to order.
     symmetry: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
+    # The ids of `connected` rules (version 2): their rows are a flow over
+    # the relationship, counted apart by the fingerprint.
+    connectivity: list[str] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -422,6 +425,8 @@ class _Compiler:
         self.empty_ranges: list[dict[str, Any]] = []
         self._empty_seen: set[tuple[Any, ...]] = set()
         self._current_id: str | None = None
+        #: The ids of `connected` rules, whose rows are a flow (`app.solve.connected`).
+        self.connectivity: list[str] = []
 
     # -- setup ------------------------------------------------------------
 
@@ -454,6 +459,7 @@ class _Compiler:
             functions=list(self._fns),
             intervals=intervals,
             symmetry=self._symmetry(),
+            connectivity=self.connectivity,
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -571,10 +577,10 @@ class _Compiler:
             self._expand_scheduling(spec, kind)
             return
         if "connected" in spec:
-            raise Unsupported(
-                f"constraint {spec['id']!r} is a connected rule, which the contract accepts and "
-                "no solver here compiles yet"
-            )
+            from app.solve.connected import expand
+
+            expand(self, spec)
+            return
         if "left" not in spec or "right" not in spec:
             # A model version published before the IR contract existed: its
             # constraints carry an id and a prose note and nothing to solve.

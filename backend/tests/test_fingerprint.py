@@ -18,7 +18,7 @@ def test_two_knapsacks_worked_by_hand():
     # take[a1..b3]: six binaries. c_fits is two rows (one per sack), weights
     # 5 4 3 | 2 2 3 under 8 | 4: both knapsacks, 6 non-zeros, all whole.
     fp = fingerprint(compile_model(*_knapsacks()))
-    assert fp["version"] == VERSION == 1
+    assert fp["version"] == VERSION == 2
     assert (fp["variables"], fp["binary"], fp["integer"], fp["continuous"], fp["auxiliary"]) == (6, 6, 0, 0, 0)
     assert (fp["rows"], fp["nnz"], fp["rows_knapsack"], fp["rows_general"]) == (2, 6, 2, 0)
     assert fp["density"] == pytest.approx(6 / 12)

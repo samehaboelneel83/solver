@@ -93,7 +93,7 @@ def test_a_run_records_its_stages(db):
     compiled = by_name["compiled"]
     assert compiled["model_class"] == "IP" and compiled["variables"] == 1
     # The model's numbers ride along, as stored on the run.
-    assert compiled["fingerprint"]["variables"] == 1 and compiled["fingerprint"]["version"] == 1
+    assert compiled["fingerprint"]["variables"] == 1 and compiled["fingerprint"]["version"] == 2
     assert by_name["chosen"]["solver"] == "cp-sat" and "cp-sat" in by_name["chosen"]["why"]
     assert by_name["solving"]["solver"] == "cp-sat"
     assert by_name["settled"]["status"] == "optimal"

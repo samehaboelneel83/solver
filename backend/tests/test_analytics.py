@@ -61,7 +61,7 @@ def test_a_settled_run_becomes_one_fact(db, empty_queue, clickhouse):  # noqa: F
     import json
 
     stored = db.execute(text("SELECT params->'fingerprint' FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
-    assert json.loads(fact["fingerprint"]) == stored and stored["version"] == 1
+    assert json.loads(fact["fingerprint"]) == stored and stored["version"] == 2
     assert stored["variables"] == fact["variables"] and stored["rows"] == fact["rules"]
     (rows,) = clickhouse.query(
         f"SELECT JSONExtractInt(fingerprint, 'rows') FROM run_fact FINAL WHERE run_id = {int(run_id)}"

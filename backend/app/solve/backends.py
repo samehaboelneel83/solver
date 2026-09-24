@@ -226,6 +226,7 @@ CP_SAT = Backend(
     provides=frozenset(
         {
             "linear",
+            "connected",
             "integral",
             "soft-constraints",
             "quadratic",
@@ -291,6 +292,7 @@ HIGHS = Backend(
     provides=frozenset(
         {
             "linear",
+            "connected",
             "integral",
             "continuous",
             "fractional-data",
@@ -322,6 +324,7 @@ MILP = Backend(
     provides=frozenset(
         {
             "linear",
+            "connected",
             "integral",
             "continuous",
             "fractional-data",
@@ -359,6 +362,7 @@ SCIP = Backend(
     provides=frozenset(
         {
             "linear",
+            "connected",
             "integral",
             "continuous",
             "fractional-data",

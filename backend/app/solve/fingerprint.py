@@ -17,6 +17,7 @@ right`), all decisions yes-or-no and every coefficient 1 unless said:
 - `knapsack`   -- yes-or-no decisions, non-negative whole coefficients, <= a bound
 - `general`    -- anything else linear
 - `quadratic`, `conditional`, `scheduling` -- a product, a `when`, a scheduling rule
+- `connectivity` -- a row of a `connected` rule's flow (version 2 of this vector)
 
 `VERSION` changes whenever a field is added or its meaning changes, so a
 model trained on one version is never fed another's numbers unknowingly.
@@ -30,7 +31,7 @@ from typing import Any
 
 from app.solve.compile import Compiled, Constraint
 
-VERSION = 1
+VERSION = 2
 
 
 def _net(c: Constraint) -> tuple[dict, Decimal]:
@@ -41,6 +42,8 @@ def _net(c: Constraint) -> tuple[dict, Decimal]:
 
 
 def row_type(compiled: Compiled, c: Constraint) -> str:
+    if c.id in compiled.connectivity:
+        return "connectivity"
     if c.schedule is not None:
         return "scheduling"
     if c.quadratic:
@@ -105,7 +108,7 @@ def fingerprint(compiled: Compiled) -> dict[str, Any]:
         "density": round(nnz / (n_vars * n_rows), 6) if n_vars and n_rows else 0.0,
         **{f"rows_{kind}": types.get(kind, 0) for kind in (
             "partition", "cover", "packing", "cardinality", "knapsack", "general",
-            "quadratic", "conditional", "scheduling")},
+            "quadratic", "conditional", "scheduling", "connectivity")},
         "coef_min": min(magnitudes) if magnitudes else 0.0,
         "coef_max": max(magnitudes) if magnitudes else 0.0,
         # Orders of magnitude between the smallest and largest coefficient:

@@ -172,6 +172,14 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             "holds them"
         )
 
+    if any(isinstance(c, dict) and "connected" in c for c in ir.get("constraints", [])):
+        needs.add("connected")
+        reasons.append(
+            "a rule keeps each group's units in one connected piece, which a solver holds as a "
+            "flow over their adjacency"
+        )
+        planner.append("some groups must be one connected piece")
+
     if _has_pwl(ir):
         needs.add("pwl")
         reasons.append(
