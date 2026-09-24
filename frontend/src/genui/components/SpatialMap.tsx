@@ -10,6 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client";
 import { getRunMap, type Id, type RunMapFeature } from "../../api/v1";
+import { NO_BASEMAP, useBasemaps } from "../../hooks/useBasemaps";
+import { fitView, tileUrl, type Basemap, type View } from "../../lib/tiles";
 import { Card, SkeletonCard, formatNumber, type GenUIProps } from "./shared";
 
 /** Twelve categorical colours, each at least 3:1 against white. */
@@ -35,7 +37,14 @@ function polygons(feature: RunMapFeature): Ring[][] {
  * the cosine of the middle latitude. A projected CRS (metres) has no such
  * shrink and its y is far from ±90, so the cosine is used only when the
  * numbers look like degrees. */
-function projector(features: RunMapFeature[]) {
+/**
+ * How the cells are drawn: the projection from their coordinates to the
+ * frame and, over a basemap, the tiles under them. With a basemap the frame
+ * is Web Mercator, so the cells sit on the imagery; without one (or when
+ * the coordinates are not degrees -- a projected CRS), a plain projection
+ * that corrects a degree of longitude for latitude.
+ */
+function frameOf(features: RunMapFeature[], basemap: Basemap | null): { at: (p: number[]) => number[]; tiles: View["tiles"] } {
   let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
   for (const feature of features)
     for (const rings of polygons(feature))
@@ -47,9 +56,13 @@ function projector(features: RunMapFeature[]) {
           maxY = Math.max(maxY, y);
         }
   const degrees = Math.abs(minX) <= 180 && Math.abs(maxX) <= 180 && Math.abs(minY) <= 90 && Math.abs(maxY) <= 90;
+  if (basemap && degrees) {
+    const view = fitView({ west: minX, south: minY, east: maxX, north: maxY }, WIDTH, HEIGHT, basemap);
+    return { at: ([x, y]: number[]) => view.project(x, y), tiles: view.tiles };
+  }
   const k = degrees ? Math.cos((((minY + maxY) / 2) * Math.PI) / 180) : 1;
   const scale = Math.min(WIDTH / ((maxX - minX) * k || 1), HEIGHT / (maxY - minY || 1));
-  return ([x, y]: number[]) => [(x - minX) * k * scale, HEIGHT - (y - minY) * scale];
+  return { at: ([x, y]: number[]) => [(x - minX) * k * scale, HEIGHT - (y - minY) * scale], tiles: [] };
 }
 
 function pathOf(feature: RunMapFeature, at: (p: number[]) => number[]): string {
@@ -91,6 +104,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
     enabled: cells.isSuccess,
   });
   const canvas = useRef<HTMLCanvasElement>(null);
+  const { basemaps, chosen, choose } = useBasemaps();
   const [exportFailed, setExportFailed] = useState(false);
   const features = cells.data?.features ?? [];
   const groups = [...new Set(features.map((f) => String(f.properties.group)))].sort();
@@ -110,7 +124,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
     if (!onCanvas || !canvas.current) return;
     const context = canvas.current.getContext("2d");
     if (!context) return;
-    const at = projector(features);
+    const { at } = frameOf(features, chosen);
     context.clearRect(0, 0, WIDTH, HEIGHT);
     for (const feature of features) {
       context.fillStyle = colour(feature.properties.group);
@@ -137,7 +151,9 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
       </Card>
     );
   }
-  const at = features.length ? projector(features) : null;
+  const frame = features.length ? frameOf(features, chosen) : null;
+  const at = frame?.at ?? null;
+  const onImagery = (frame?.tiles.length ?? 0) > 0;
   const totals = zones.data?.features ?? [];
   const columns = [...new Set(totals.flatMap((z) => Object.keys(z.properties)))].filter((k) => !HIDDEN.has(k));
   const label = `${features.length} cells in ${groups.length} ${groups.length === 1 ? "group" : "groups"}`;
@@ -153,17 +169,50 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
 
   return (
     <Card title={title}>
+      {basemaps.length > 0 && (
+        <label className="mb-1 flex items-center gap-2 text-xs text-slate-600">
+          Background
+          <select
+            className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+            value={chosen?.id ?? NO_BASEMAP}
+            onChange={(event) => choose(event.target.value)}
+          >
+            <option value={NO_BASEMAP}>none</option>
+            {basemaps.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="relative w-full max-w-xl" style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}>
+      {onImagery && chosen && frame && (
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="absolute inset-0 h-full w-full" aria-hidden="true" data-testid="basemap">
+          {frame.tiles.map((tile) => (
+            <image
+              key={`${tile.z}/${tile.x}/${tile.y}/${tile.left}`}
+              href={tileUrl(chosen.url, tile)}
+              x={tile.left}
+              y={tile.top}
+              width={tile.size + 0.5}
+              height={tile.size + 0.5}
+              preserveAspectRatio="none"
+            />
+          ))}
+        </svg>
+      )}
       {onCanvas ? (
-        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="h-auto w-full max-w-xl" role="img" aria-label={label} />
+        <canvas ref={canvas} width={WIDTH} height={HEIGHT} className="absolute inset-0 h-full w-full" role="img" aria-label={label} />
       ) : (
-        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full max-w-xl" role="img" aria-label={label}>
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="absolute inset-0 h-full w-full" role="img" aria-label={label}>
           {at &&
             features.map((f) => (
               <path
                 key={String(f.properties.key)}
                 d={pathOf(f, at)}
                 fill={colour(f.properties.group)}
-                fillOpacity={shade(f)}
+                fillOpacity={onImagery ? shade(f) * 0.7 : shade(f)}
                 fillRule="evenodd"
                 stroke="white"
                 strokeWidth={0.6}
@@ -176,6 +225,8 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
             ))}
         </svg>
       )}
+      </div>
+      {onImagery && chosen?.attribution && <p className="mt-1 text-[10px] text-slate-500">{chosen.attribution}</p>}
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-xs">
           <caption className="sr-only">Totals by group</caption>

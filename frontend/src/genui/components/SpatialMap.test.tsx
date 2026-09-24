@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunMapFeature } from "../../api/v1";
 import SpatialMap, { RunMapView, SVG_LIMIT } from "./SpatialMap";
 import type { ComponentRecord } from "../runtime/store";
@@ -32,9 +32,13 @@ const ZONES = [
   { ...square(31.2, 30.01, "", "west"), properties: { group: "west", subgroup: null, cells: 2, population: 7 } },
 ];
 
+let TILES_INDEX = "";
+
 function serve(cells: RunMapFeature[] = CELLS) {
   (apiFetch as any).mockImplementation((path: string) =>
-    Promise.resolve({ type: "FeatureCollection", features: path.includes("dissolve=true") ? ZONES : cells })
+    path.startsWith("/api/v1/settings")
+      ? Promise.resolve({ items: [{ key: "spatial.tiles_index", value: TILES_INDEX, source: "platform", value_type: "string", description: "" }], total: 1 })
+      : Promise.resolve({ type: "FeatureCollection", features: path.includes("dissolve=true") ? ZONES : cells })
   );
 }
 
@@ -125,5 +129,62 @@ describe("SpatialMap", () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
     wrap(<SpatialMap record={RECORD} variant="expanded" />);
     expect(await screen.findByText("This run has no map to draw.")).toBeInTheDocument();
+  });
+});
+
+describe("SpatialMap over a basemap", () => {
+  const INDEX = [
+    { tiles: ["http://tiles.test/data/egypt_topo/{z}/{x}/{y}.jpg"], name: "Egypt Topo", id: "egypt_topo", minzoom: 1, maxzoom: 12, attribution: "Copernicus DEM GLO-30 (ESA)" },
+    { tiles: ["http://tiles.test/data/egypt_satellite/{z}/{x}/{y}.jpg"], name: "Egypt Satellite Imagery", id: "egypt_satellite", minzoom: 1, maxzoom: 11,
+      attribution: "Tiles Â© Esri â€” Source: Esri" },
+    { tiles: ["http://tiles.test/data/egypt_terrain/{z}/{x}/{y}.png"], name: "Egypt Terrain RGB", id: "egypt_terrain", encoding: "mapbox" },
+  ];
+
+  beforeEach(() => {
+    (apiFetch as any).mockReset();
+    localStorage.clear();
+    TILES_INDEX = "http://tiles.test/index.json";
+    serve();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify(INDEX)))));
+  });
+  afterEach(() => {
+    TILES_INDEX = "";
+    vi.unstubAllGlobals();
+  });
+
+  it("draws the first picture tileset under the cells, with its credit, and leaves the terrain data out", async () => {
+    wrap(<SpatialMap record={RECORD} variant="expanded" />);
+    const background = await screen.findByLabelText("Background");
+    expect([...(background as HTMLSelectElement).options].map((o) => o.value)).toEqual(["none", "egypt_topo", "egypt_satellite"]);
+    const images = (await screen.findByTestId("basemap")).querySelectorAll("image");
+    expect(images.length).toBeGreaterThan(0);
+    expect(images[0].getAttribute("href")).toMatch(/^http:\/\/tiles\.test\/data\/egypt_topo\/\d+\/\d+\/\d+\.jpg$/);
+    fireEvent.change(background, { target: { value: "egypt_satellite" } });
+    expect(await screen.findByText("Tiles © Esri — Source: Esri")).toBeInTheDocument();
+    expect(localStorage.getItem("solver_map_basemap")).toBe("egypt_satellite");
+  });
+
+  it("lets the viewer turn the background off", async () => {
+    wrap(<SpatialMap record={RECORD} variant="expanded" />);
+    fireEvent.change(await screen.findByLabelText("Background"), { target: { value: "none" } });
+    await waitFor(() => expect(screen.queryByTestId("basemap")).toBeNull());
+    expect(screen.getByRole("img", { name: "4 cells in 2 groups" })).toBeInTheDocument();
+  });
+
+  it("fetches nothing for an address that is not http(s), and draws the plain map", async () => {
+    TILES_INDEX = "file:///etc/passwd";
+    serve();
+    wrap(<SpatialMap record={RECORD} variant="expanded" />);
+    await screen.findByRole("img", { name: "4 cells in 2 groups" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Background")).toBeNull();
+  });
+
+  it("draws the plain map when the index cannot be reached", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+    wrap(<SpatialMap record={RECORD} variant="expanded" />);
+    await screen.findByRole("img", { name: "4 cells in 2 groups" });
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByTestId("basemap")).toBeNull();
   });
 });
