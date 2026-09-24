@@ -107,7 +107,7 @@ Spec `docs/superpowers/specs/2026-09-24-spatial-region-partitioning-design.md`, 
 `docs/superpowers/plans/2026-09-24-spatial-region-partitioning.md` -- one item per plan task.
 
 - [x] (GIS 1) The geometry attribute type -- plan Task 1. *(`465989e`, migration 0049 (rehearsed up/down/up; the enum value stays on downgrade, which is refused while any geometry exists): GeoJSON Point/Polygon/MultiPolygon, 10,000 positions at most, judged coarsely by the shared `attr_value_matches_type` (now also used by `entity_validate`) and fully by the API, naming the ring or position; no filter operator, not arithmetic; setting `spatial.crs` (4326). The demo units gain an optional `site` point so the seed exercises every type. Live in a browser: an unclosed ring refused with "ring 0 is not closed: it starts at [31.2, 30] and ends at [31.2, 30.05]", a closed one drawn as typed and saved.)*
-- [ ] (GIS 2) Projection and the pure grid -- plan Task 2.
+- [x] (GIS 2) Projection and the pure grid -- plan Task 2. *(`a21a054`: Shapely 2.0.6 + pyproj 3.7.0; `app.spatial.project` (UTM zone of the centroid; antimeridian and wider-than-a-zone refused) and `app.spatial.grid` (square/hex, keep by centre or overlap with coverage, adjacency only through a side on land, point sums with what fell outside). Fixed while building: neighbouring hexes overlapped in a float sliver that counted a shared side twice -- corners rounded to the micrometre, sides measured on the outlines. 11 hand-worked tests. Live image: a 2 x 1 km box over Cairo is 8 hexes and 13 adjacencies in UTM 36N.)*
 - [ ] (GIS 3) The grid generator endpoint and form -- plan Task 3.
 - [ ] (GIS 4) The `connected` rule in the contract -- plan Task 4.
 - [ ] (GIS 5) `connected` compiled to an exact flow -- plan Task 5.
