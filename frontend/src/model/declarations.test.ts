@@ -194,3 +194,24 @@ describe("strandedBy", () => {
     expect(strandedBy({ kind: "variable", name: "unused" }, constraints, objective)).toEqual([]);
   });
 });
+
+describe("a connected rule and what it reads", () => {
+  const rule = {
+    id: "c_zones",
+    connected: {
+      assign: { var: "assign", index: ["u", "z"] },
+      units: { index: "u", set: "cell" },
+      groups: { index: "z", set: "zone" },
+      via: "adjacent",
+    },
+    severity: "hard",
+  } as Constraint;
+
+  it("is broken by removing its variable or either of its sets, and by nothing else", () => {
+    expect(strandedBy({ kind: "variable", name: "assign" }, [rule], [])).toEqual(["c_zones"]);
+    expect(strandedBy({ kind: "set", name: "cell" }, [rule], [])).toEqual(["c_zones"]);
+    expect(strandedBy({ kind: "set", name: "zone" }, [rule], [])).toEqual(["c_zones"]);
+    expect(strandedBy({ kind: "variable", name: "other" }, [rule], [])).toEqual([]);
+    expect(strandedBy({ kind: "set", name: "employee" }, [rule], [])).toEqual([]);
+  });
+});

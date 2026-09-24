@@ -367,6 +367,85 @@ describe("ModelEditor", () => {
     ]);
   });
 
+  const GRID_TYPES = {
+    items: [
+      { id: 7, domain_id: 1, name: "cell", role: "location", colour: null, attributes: [] },
+      { id: 8, domain_id: 1, name: "zone", role: "org", colour: null, attributes: [] },
+    ],
+    total: 2,
+  };
+  const ADJACENT = {
+    items: [{ id: 3, domain_id: 1, name: "adjacent", from_type_id: 7, to_type_id: 7, cardinality: "many_to_many", is_hierarchy: false }],
+    total: 1,
+  };
+  const ZONES = {
+    version: 2,
+    sets: ["cell", "zone"],
+    parameters: {},
+    variables: { assign: { index: ["cell", "zone"], domain: "binary" } },
+    constraints: [] as unknown[],
+  };
+
+  it("opens a connected rule and publishes it unchanged, relationship declared", async () => {
+    const rule = {
+      id: "c_zones",
+      connected: {
+        assign: { var: "assign", index: ["u", "z"] },
+        units: { index: "u", set: "cell" },
+        groups: { index: "z", set: "zone" },
+        via: "adjacent",
+        empty: "allowed",
+      },
+      severity: "hard",
+    };
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write, entityTypes: GRID_TYPES, relationshipTypes: ADJACENT, ir: { ...ZONES, relationships: ["adjacent"], constraints: [rule] } });
+    renderPage();
+
+    expect(await screen.findByText("each zone is one connected piece of cell (or empty) over adjacent")).toBeInTheDocument();
+    expect(screen.queryByText(/named but not expressed/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Strength")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.constraints).toEqual([rule]);
+    expect(sent.relationships).toEqual(["adjacent"]);
+  });
+
+  it("builds a connected rule from the admissible choices, and publishes it", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write, entityTypes: GRID_TYPES, relationshipTypes: ADJACENT, ir: ZONES });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /add a connected rule/i }));
+    expect(screen.getByText("each zone is one connected piece of cell over adjacent")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const sent = JSON.parse(write.mock.calls[0][1].body).ir;
+    expect(sent.relationships).toEqual(["adjacent"]);
+    expect(sent.constraints).toEqual([
+      {
+        id: "c_1",
+        connected: {
+          assign: { var: "assign", index: ["c", "z"] },
+          units: { index: "c", set: "cell" },
+          groups: { index: "z", set: "zone" },
+          via: "adjacent",
+          empty: "forbidden",
+        },
+        severity: "hard",
+      },
+    ]);
+  });
+
+  it("offers no connected rule when nothing could be one", async () => {
+    renderPage();
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add a connected rule/i })).not.toBeInTheDocument();
+  });
+
   it("makes a rule conditional on a yes-or-no decision, and publishes the switch", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({

@@ -56,7 +56,66 @@ export type Constraint = {
    * and shown by the editor, not yet built in it. */
   no_overlap?: SchedulingBody;
   cumulative?: SchedulingBody & { demand: Term; capacity: Term };
+  /** Each group's units one connected piece (version 2), in place of
+   * left/relation/right. */
+  connected?: ConnectedBody;
 };
+
+export type ConnectedBody = {
+  assign: { var: string; index: string[] };
+  units: { index: string; set: string };
+  groups: { index: string; set: string };
+  via: string;
+  empty?: "forbidden" | "allowed";
+};
+
+/** `each zone is one connected piece of cell over adjacent`, or null for
+ * any other rule. */
+export function describeConnected(rule: { connected?: unknown }): string | null {
+  const c = rule.connected as Partial<ConnectedBody> | undefined;
+  if (!c) return null;
+  const empty = c.empty === "allowed" ? " (or empty)" : "";
+  return `each ${c.groups?.set || "group"} is one connected piece of ${c.units?.set || "units"}${empty} over ${c.via || "?"}`;
+}
+
+/** The binary variables a connected rule can read -- indexed by exactly two
+ * sets, the first joined to itself by a relationship -- with those
+ * relationships. */
+export function connectedChoices(context: ModelContext): { variable: string; units: string; groups: string; vias: string[] }[] {
+  return Object.entries(context.variables)
+    .filter(([, v]) => v.domain === "binary" && v.index.length === 2 && v.index[0] !== v.index[1])
+    .map(([variable, v]) => ({
+      variable,
+      units: v.index[0],
+      groups: v.index[1],
+      vias: context.relationships.filter((r) => r.from === v.index[0] && r.to === v.index[0]).map((r) => r.name),
+    }));
+}
+
+/** The body for one choice: the indices named after their sets, never the same name twice. */
+export function connectedBody(
+  choice: { variable: string; units: string; groups: string },
+  via: string,
+  empty: "forbidden" | "allowed" = "forbidden"
+): ConnectedBody {
+  const u = seedForSet(choice.units);
+  let z = seedForSet(choice.groups);
+  if (z === u) z = `${z}2`;
+  return {
+    assign: { var: choice.variable, index: [u, z] },
+    units: { index: u, set: choice.units },
+    groups: { index: z, set: choice.groups },
+    via,
+    empty,
+  };
+}
+
+/** A new connected rule over the first admissible variable and relationship, or null when there is none. */
+export function newConnectedRule(id: string, context: ModelContext): Constraint | null {
+  const choice = connectedChoices(context).find((c) => c.vias.length > 0);
+  if (!choice) return null;
+  return { id, connected: connectedBody(choice, choice.vias[0]), severity: "hard" } as Constraint;
+}
 
 export type When = { var: string; index: string[]; is?: 0 | 1 };
 
@@ -372,6 +431,9 @@ export function declaredRelationships(
     fromBindings(constraint.forall);
     fromTerm(constraint.left);
     fromTerm(constraint.right);
+    fromBindings(constraint.no_overlap?.over);
+    fromBindings(constraint.cumulative?.over);
+    if (constraint.connected?.via) found.add(constraint.connected.via);
   }
   for (const term of objectiveTerms) fromTerm(term.expression);
 

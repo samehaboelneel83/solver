@@ -137,6 +137,33 @@ describe("buildModelView on models that are not tidy", () => {
     expect(details).toContainEqual(["Note", "never expressed"]);
   });
 
+  it("draws a connected rule in words, joined to its variable and both its sets", () => {
+    const { graph: built } = buildModelView(
+      {
+        sets: ["cell", "zone"],
+        parameters: {},
+        variables: { assign: { index: ["cell", "zone"], domain: "binary" } },
+        constraints: [
+          {
+            id: "c_zones",
+            connected: {
+              assign: { var: "assign", index: ["u", "z"] },
+              units: { index: "u", set: "cell" },
+              groups: { index: "z", set: "zone" },
+              via: "adjacent",
+            },
+            severity: "hard",
+          },
+        ],
+      },
+      []
+    );
+    const details = modelDetails(built.nodes.find((node) => node.id === "model-con-c_zones"));
+    expect(details?.find(([label]) => label === "Rule")?.[1]).toBe("each zone is one connected piece of cell over adjacent");
+    const into = built.edges.filter((edge) => edge.target === "model-con-c_zones").map((edge) => edge.source).sort();
+    expect(into).toEqual(["model-set-cell", "model-set-zone", "model-var-assign"]);
+  });
+
   it("draws a set that names no entity type, rather than dropping it", () => {
     const { graph: built } = buildModelView({ sets: ["ghost"], parameters: {}, variables: {}, constraints: [] }, []);
     expect(built.nodes.map((node) => node.id)).toEqual(["model-set-ghost"]);

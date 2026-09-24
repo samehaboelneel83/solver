@@ -196,6 +196,9 @@ export function strandedBy(
       // The switch of a conditional rule, and a scheduling rule's intervals,
       // the sets it ranges over, and what it counts.
       isNamed(constraint.when?.var) ||
+      (constraint.connected !== undefined &&
+        (isNamed(constraint.connected.assign.var) ||
+          ranges([constraint.connected.units, constraint.connected.groups]))) ||
       (schedule !== undefined &&
         (isNamed(schedule.interval.var) ||
           ranges(schedule.over) ||

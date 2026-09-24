@@ -29,7 +29,7 @@
 
 import type { EntityType } from "../api/v1";
 import type { GraphResponse } from "../types/graph";
-import { describeBinding, describeSchedule, describeTerm, describeWhen } from "../model/terms";
+import { describeBinding, describeConnected, describeSchedule, describeTerm, describeWhen } from "../model/terms";
 import type { Term, Binding } from "../model/terms";
 import { describeUncertainty, type Uncertainty } from "../model/declarations";
 import { labelForeground, typeColour } from "./colour";
@@ -66,6 +66,7 @@ type IrConstraint = {
   when?: { var?: string; index?: string[]; is?: number };
   no_overlap?: { interval?: { var?: string }; over?: Binding[] };
   cumulative?: { interval?: { var?: string }; over?: Binding[]; demand?: Term; capacity?: Term };
+  connected?: { assign?: { var?: string }; units?: Binding; groups?: Binding; via?: string };
 };
 
 /** One row of the side panel: a label and what it says. */
@@ -243,7 +244,7 @@ export function buildModelView(
         (rule.when?.var ? ` · while ${rule.when.var}` : ""),
     ];
     const expressed = rule.left !== undefined && rule.right !== undefined;
-    const schedule = describeSchedule(rule);
+    const schedule = describeSchedule(rule) ?? describeConnected(rule);
     const details: Detail[] = [
       [
         "Kind",
@@ -283,6 +284,7 @@ export function buildModelView(
         collect(rule.cumulative.capacity, found, bound);
       }
     }
+    if (rule.connected?.assign?.var) found.vars.add(rule.connected.assign.var);
     found.vars.forEach((name) => addEdge(`${MODEL_NODE_PREFIX}var-${name}`, id));
     // The switch that turns the rule on, labelled so it reads as one.
     if (switched && !found.vars.has(switched)) addEdge(`${MODEL_NODE_PREFIX}var-${switched}`, id, "switch");
@@ -290,7 +292,12 @@ export function buildModelView(
     // The sets it holds for every one of, labelled with any attribute of
     // theirs it reads as a number -- hours_per_week flowing into the hours
     // rule is exactly what this view is for.
-    const reached = new Set<string>([...(rule.forall ?? []).map((b) => b.set), ...found.attrs.keys()]);
+    const reached = new Set<string>([
+      ...(rule.forall ?? []).map((b) => b.set),
+      ...found.attrs.keys(),
+      // A connected rule holds for every group, over its units.
+      ...[rule.connected?.groups?.set, rule.connected?.units?.set].filter((s): s is string => !!s),
+    ]);
     for (const set of reached) {
       const from = setOf(set);
       if (from) addEdge(from, id, [...(found.attrs.get(set) ?? [])].join(", "), "ranges");

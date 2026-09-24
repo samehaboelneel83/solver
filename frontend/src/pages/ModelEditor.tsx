@@ -24,6 +24,7 @@ import {
 import { checkIrShape } from "../ir";
 import { IR_VERSION, isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import WhenEditor from "../model/WhenEditor";
+import ConnectedEditor from "../model/ConnectedEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
@@ -39,6 +40,7 @@ import {
   cleanTerm,
   declaredRelationships,
   describeSchedule,
+  newConnectedRule,
   describeTerm,
   describeWhen,
   freeNumberedId,
@@ -572,6 +574,24 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             Add a scheduling rule
           </button>
         )}
+        {newConnectedRule("c_", context) !== null && (
+          <button
+            type="button"
+            className="ml-2 mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            onClick={() =>
+              setDraft((current) => {
+                if (!current) return current;
+                const rule = newConnectedRule(
+                  freeNumberedId("c_", current.constraints.map((constraint) => constraint.id)),
+                  context
+                );
+                return rule ? { ...current, constraints: [...current.constraints, rule] } : current;
+              })
+            }
+          >
+            Add a connected rule
+          </button>
+        )}
       </section>
 
       <section aria-labelledby="objective-heading" className="mb-6">
@@ -729,6 +749,8 @@ function ConstraintCard({
     >
       {describeSchedule(constraint) !== null ? (
         <SchedulingEditor constraint={constraint} context={context} onChange={onChange} />
+      ) : constraint.connected !== undefined ? (
+        <ConnectedEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.left == null || constraint.right == null ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>

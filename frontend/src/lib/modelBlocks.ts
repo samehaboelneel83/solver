@@ -18,7 +18,7 @@
  */
 
 import type { Binding, Term } from "../model/terms";
-import { describeBinding, describeWhen, schedulingKind } from "../model/terms";
+import { describeBinding, describeConnected, describeWhen, schedulingKind } from "../model/terms";
 import type { GraphResponse } from "../types/graph";
 import { MODEL_NODE_PREFIX, OBJECTIVE_NODE_ID } from "./modelGraph";
 
@@ -184,6 +184,7 @@ type Ir = {
     when?: { var?: string; index?: string[]; is?: number };
     no_overlap?: { interval: { var: string; index: string[] }; over?: Binding[] };
     cumulative?: { interval: { var: string; index: string[] }; over?: Binding[]; demand?: Term; capacity?: Term };
+    connected?: { assign: { var: string; index: string[] }; units: Binding; groups: Binding; via: string; empty?: string };
   }[];
   objective?: { sense?: string; terms?: { weight?: number; expression?: Term }[] };
 };
@@ -273,6 +274,23 @@ export function modelToBlocks(irInput: Record<string, unknown> | null | undefine
   const rules: SerialBlock[] = (ir.constraints ?? []).map((rule) => {
     const soft = rule.severity === "soft";
     const expressed = rule.left !== undefined && rule.right !== undefined;
+    if (rule.connected) {
+      // No connected block yet: each group, its assignment, and the
+      // relationship it is one piece over.
+      const body = rule.connected;
+      return fixed({
+        type: "ir_rule_hard",
+        id: `${MODEL_NODE_PREFIX}con-${rule.id}`,
+        fields: {
+          ID: rule.id,
+          FORALL: describeBinding(body.groups),
+          RELATION: describeConnected(rule) ?? "one connected piece",
+        },
+        inputs: {
+          LEFT: { block: termBlock({ sum: { var: body.assign.var, index: body.assign.index }, over: [body.units] } as Term) },
+        },
+      });
+    }
     const kind = schedulingKind(rule);
     if (kind !== null) {
       // No scheduling block yet (the editor slice): the rule's intervals on

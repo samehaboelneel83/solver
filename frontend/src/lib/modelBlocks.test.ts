@@ -52,3 +52,30 @@ describe("modelToBlocks and a conditional rule", () => {
     expect(json).toContain("nothing: it holds once, only while open[] is no");
   });
 });
+
+describe("modelToBlocks and a connected rule", () => {
+  it("draws each group as one piece over its relationship, not as an unexpressed rule", async () => {
+    const { modelToBlocks } = await import("./modelBlocks");
+    const ir = {
+      sets: ["cell", "zone"],
+      parameters: {},
+      variables: { assign: { index: ["cell", "zone"], domain: "binary" } },
+      constraints: [
+        {
+          id: "c_zones",
+          connected: {
+            assign: { var: "assign", index: ["u", "z"] },
+            units: { index: "u", set: "cell" },
+            groups: { index: "z", set: "zone" },
+            via: "adjacent",
+          },
+          severity: "hard",
+        },
+      ],
+    };
+    const json = JSON.stringify(modelToBlocks(ir, { nodes: [], edges: [], entity_types: [] } as never));
+    expect(json).toContain("each zone is one connected piece of cell over adjacent");
+    expect(json).toContain('"FORALL":"z in zone"');
+    expect(json).not.toContain("(no expression)");
+  });
+});
