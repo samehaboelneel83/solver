@@ -66,6 +66,17 @@ describe("SpatialMap", () => {
     expect(apiFetch).toHaveBeenCalledWith("/api/v1/runs/5/map");
   });
 
+  it("shades a zone's sub-zones apart, within the zone's colour", async () => {
+    const nested = CELLS.map((cell, i) => ({ ...cell, properties: { ...cell.properties, subgroup: `${cell.properties.group}${i % 2 ? "b" : "a"}` } }));
+    serve(nested);
+    wrap(<SpatialMap record={RECORD} variant="expanded" />);
+    const paths = [...(await screen.findByRole("img", { name: "4 cells in 2 groups" })).querySelectorAll("path")];
+    const east = paths.slice(0, 2).map((p) => [p.getAttribute("fill"), p.getAttribute("fill-opacity")]);
+    expect(east[0][0]).toBe(east[1][0]);
+    expect(east[0][1]).not.toBe(east[1][1]);
+    expect(paths[1].querySelector("title")?.textContent).toBe("b: east / eastb");
+  });
+
   it("keeps the drawing inside its frame and the right way up", async () => {
     wrap(<SpatialMap record={RECORD} variant="expanded" />);
     const map = await screen.findByRole("img", { name: "4 cells in 2 groups" });

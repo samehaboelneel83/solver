@@ -95,6 +95,15 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
   const features = cells.data?.features ?? [];
   const groups = [...new Set(features.map((f) => String(f.properties.group)))].sort();
   const colour = (group: unknown) => ZONE_COLOURS[groups.indexOf(String(group)) % ZONE_COLOURS.length];
+  // A nested partition: within a zone's colour, its sub-zones take turns
+  // at full and lighter shade, so each sub-zone reads as its own piece.
+  const subgroups = [...new Set(features.map((f) => `${String(f.properties.group)}|${String(f.properties.subgroup)}`))].sort();
+  const shade = (f: { properties: Record<string, unknown> }) => {
+    if (f.properties.subgroup == null) return 0.8;
+    const mine = `${String(f.properties.group)}|${String(f.properties.subgroup)}`;
+    const siblings = subgroups.filter((key) => key.startsWith(`${String(f.properties.group)}|`));
+    return siblings.indexOf(mine) % 2 === 0 ? 0.9 : 0.5;
+  };
   const onCanvas = features.length > SVG_LIMIT;
 
   useEffect(() => {
@@ -105,6 +114,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
     context.clearRect(0, 0, WIDTH, HEIGHT);
     for (const feature of features) {
       context.fillStyle = colour(feature.properties.group);
+      context.globalAlpha = shade(feature);
       for (const rings of polygons(feature)) {
         context.beginPath();
         for (const ring of rings)
@@ -153,7 +163,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
                 key={String(f.properties.key)}
                 d={pathOf(f, at)}
                 fill={colour(f.properties.group)}
-                fillOpacity={0.8}
+                fillOpacity={shade(f)}
                 fillRule="evenodd"
                 stroke="white"
                 strokeWidth={0.6}
@@ -187,7 +197,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
                   <span
                     aria-hidden="true"
                     className="mr-1 inline-block h-2 w-2 rounded-sm"
-                    style={{ background: colour(z.properties.group) }}
+                    style={{ background: colour(z.properties.group), opacity: shade(z) }}
                   />
                   {String(z.properties.group ?? "no group")}
                   {z.properties.subgroup ? ` / ${String(z.properties.subgroup)}` : ""}
