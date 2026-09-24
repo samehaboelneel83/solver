@@ -34,7 +34,7 @@ type Json = Record<string, unknown>;
 
 const VARIABLE_KEYS = new Set(["index", "domain", "lower", "upper", "stage"]);
 const INTERVAL_VARIABLE_KEYS = new Set(["index", "domain", "start", "end", "size", "presence"]);
-const RULE_KEYS = new Set(["id", "note", "forall", "left", "relation", "right", "severity", "weight", "when"]);
+const RULE_KEYS = new Set(["id", "note", "forall", "left", "relation", "right", "severity", "weight", "when", "chance"]);
 /** The most terms an `add` block holds; a longer sum is carried opaque rather than nested (nesting would not round-trip). */
 export const MAX_ADD_TERMS = 16;
 /** The most points a curve block holds (`MAX_POINTS` in vocabulary.ts). */
@@ -300,7 +300,9 @@ export function irToBlocks(
       rule.left !== undefined && rule.right !== undefined && rule.relation !== undefined &&
       Object.keys(rule).every((k) => RULE_KEYS.has(k));
     const condition = when(rule.when, [...loc, "when"]);
-    if (!plain || condition === null) return kept();
+    const chance = rule.chance;
+    const chanceFits = chance === undefined || (shaped(chance, ["epsilon"]) && typeof chance.epsilon === "number");
+    if (!plain || condition === null || !chanceFits) return kept();
     return block(loc, {
       type: "ir_rule",
       fields: {
@@ -309,6 +311,7 @@ export function irToBlocks(
         SEVERITY: String(rule.severity ?? "hard"),
         WEIGHT: String(rule.weight ?? 1),
         RELATION: String(rule.relation),
+        CHANCE: chance === undefined ? "" : String((chance as { epsilon: number }).epsilon),
       },
       inputs: inputs({
         FORALL: bindings(rule.forall as Binding[], [...loc, "forall"]),

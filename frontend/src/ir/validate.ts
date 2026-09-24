@@ -599,6 +599,10 @@ class ShapeChecker {
         scope = bound as Map<string, string>;
       }
 
+      if ("chance" in constraint && ("connected" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
+        const problem = this.checkChance(constraint, at, identifier);
+        if (problem) return problem;
+      }
       if ("no_overlap" in constraint || "cumulative" in constraint) {
         const problem = this.checkScheduling(constraint, at, scope, identifier);
         if (problem) return problem;
@@ -646,6 +650,46 @@ class ShapeChecker {
       }
       const when = this.checkWhen(constraint, at, scope, identifier);
       if (when) return when;
+      const chance = this.checkChance(constraint, at, identifier);
+      if (chance) return chance;
+    }
+    return null;
+  }
+
+  /** `_check_chance` in `app/ir/validate.py`, in the same order. */
+  private checkChance(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
+    if (!("chance" in constraint)) return null;
+    const loc: IrLoc = [...at, "chance"];
+    if (this.ir.version === 1) {
+      return refusal(
+        "chance_needs_version_2",
+        loc,
+        `the constraint ${show(identifier)} carries a chance, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const chance = constraint.chance;
+    const epsilon = chance && typeof chance === "object" && !Array.isArray(chance) ? (chance as Json).epsilon : undefined;
+    if (
+      !chance || typeof chance !== "object" || Array.isArray(chance) ||
+      Object.keys(chance).length !== 1 || !isFiniteNumber(epsilon) || !(epsilon > 0 && epsilon < 1)
+    ) {
+      return refusal(
+        "chance_malformed",
+        loc,
+        'a chance is the share of futures the rule may fail in, strictly between 0 and 1: {"epsilon": 0.1} holds it in 90% of them'
+      );
+    }
+    if ("connected" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling or connected rule; a chance is on an expression rule`);
+    }
+    if (constraint.severity === "soft") {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is soft; a rule that may bend at a cost needs no chance -- make it hard`);
+    }
+    if ("when" in constraint) {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} already has a when; a chance switches the rule itself`);
+    }
+    if (degree(constraint.left) > 1 || degree(constraint.right) > 1) {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} multiplies decisions; a chance rule is linear`);
     }
     return null;
   }

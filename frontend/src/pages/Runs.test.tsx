@@ -901,3 +901,13 @@ describe("a stochastic plan (queue R7)", () => {
     expect(note).not.toMatch(/^Optimal|proven/);
   });
 });
+
+describe("a chance rule's record (queue R8)", () => {
+  it("says how often each chance rule held beside what was asked", async () => {
+    const { stochasticOutlook } = await import("./Runs");
+    expect(
+      stochasticOutlook({ samples: 20, stage_two: [], expected: 140, out_of_sample: { futures: 20, mean: 140, ci95: 0, unmet: 0 },
+        chance: { c_cover: { asked: 0.9, held: 0.95 } } })
+    ).toBe("On 20 fresh futures it averages 140, give or take 0 (95%). c_cover held in 95% of them (asked: 90%).");
+  });
+});

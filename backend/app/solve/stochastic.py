@@ -23,6 +23,15 @@ the average of the futures' goals. Its optimum is the best plan **for these
 futures** -- an estimate of the true one, so the run claims `approximate`,
 never proven best.
 
+**Chance rules** (queue R8). A rule with `chance: {epsilon}` may fail in at
+most that share of the futures: in the extensive form each of its instances
+gets one switch per future (the rule holds while it is off -- a `when`, so a
+backend without indicators writes it as a big-M from the declared bounds),
+and at most `floor(epsilon * N)` of an instance's switches may be on. A chance
+rule makes a model two-stage by itself: the plan must keep it in enough of
+the futures, even with nothing decided later. Out of sample, how often each
+chance rule actually held is recorded beside what was asked.
+
 **Out of sample.** The plan is then held fixed and costed on fresh futures
 (each solved for its best recourse): the mean and a 95% confidence interval
 say what it is likely to cost, and how many futures it cannot meet at all.
@@ -38,7 +47,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable
 
-from app.solve.compile import Compiled, Constraint, Linear, VarKey, compile_model
+from app.solve.compile import Compiled, Constraint, Linear, Variable, VarKey, compile_model
 
 #: Futures in the extensive form when a run asks for none in particular; the roadmap's ceiling.
 MAX_SAMPLES = 50
@@ -47,6 +56,7 @@ OUT_OF_SAMPLE_MIN = 20
 #: The share of the time the extensive form gets; the rest costs the plan out of sample.
 EXTENSIVE_SHARE = 0.6
 _SAMPLE = "#s"
+_SWITCH = "__chance"
 
 
 class NotStochastic(ValueError):
@@ -57,6 +67,17 @@ def second_stage(ir: dict[str, Any]) -> set[str]:
     return {name for name, spec in (ir.get("variables") or {}).items() if isinstance(spec, dict) and spec.get("stage") == 2}
 
 
+def chance_rules(ir: dict[str, Any]) -> dict[str, float]:
+    """rule id -> epsilon, for every rule with a chance."""
+    return {c["id"]: float(c["chance"]["epsilon"]) for c in (ir.get("constraints") or [])
+            if isinstance(c, dict) and isinstance(c.get("chance"), dict)}
+
+
+def wanted(ir: dict[str, Any]) -> bool:
+    """A two-stage question is asked: a decision waits for the data, or a rule may fail by chance."""
+    return bool(second_stage(ir)) or bool(chance_rules(ir))
+
+
 def uncertain(ir: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {name: spec["uncertainty"] for name, spec in (ir.get("parameters") or {}).items()
             if isinstance(spec, dict) and isinstance(spec.get("uncertainty"), dict)}
@@ -64,8 +85,8 @@ def uncertain(ir: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def refusal(ir: dict[str, Any], compiled: Compiled) -> str | None:
     """None when the model is a two-stage program this solves, else why not."""
-    if not second_stage(ir):
-        return "no decision waits for the data: mark the recourse decisions stage 2"
+    if not wanted(ir):
+        return "no decision waits for the data: mark the recourse decisions stage 2, or give a rule a chance"
     kinds = uncertain(ir)
     if not kinds:
         return "no data is uncertain: declare a parameter's range (uncertainty within a range)"
@@ -78,6 +99,14 @@ def refusal(ir: dict[str, Any], compiled: Compiled) -> str | None:
         return "the stochastic solve takes linear models: no products, curves, functions or intervals"
     if compiled.penalty_of or compiled.violations:
         return "soft rules in a stochastic model are not supported yet"
+    for rule in compiled.constraints:
+        if rule.chance is None:
+            continue
+        for key in (*rule.left.coeffs, *rule.right.coeffs):
+            var = compiled.variables.get(key)
+            if var is not None and var.default_upper:
+                return (f"the chance rule {rule.id!r} reads {key[0]}, which has no declared upper bound: a rule "
+                        "switched off by chance needs one, to know how far it may be broken")
     return None
 
 
@@ -113,6 +142,7 @@ def extensive(samples: list[Compiled], recourse: set[str]) -> tuple[Compiled, se
     variables: dict[VarKey, Any] = {key: first.variables[key] for key in shared}
     constraints: list[Constraint] = []
     seen: set[tuple] = set()
+    switches: dict[tuple, list[VarKey]] = {}
     coeffs: dict[VarKey, Decimal] = {}
     const = Decimal(0)
     for k, future in enumerate(samples):
@@ -124,6 +154,15 @@ def extensive(samples: list[Compiled], recourse: set[str]) -> tuple[Compiled, se
                 variables[rename(key)] = replace(var, key=rename(key))
         for rule in future.constraints:
             keys = {*rule.left.coeffs, *rule.right.coeffs}
+            if rule.chance is not None:
+                # One switch per instance per future: the rule holds while it is off.
+                instance = (rule.id, tuple(sorted(rule.index.items())))
+                switch: VarKey = (_SWITCH, (rule.id, *(v for _, v in instance[1]), f"{_SAMPLE}{k}"))
+                variables[switch] = Variable(switch, "binary", Decimal(0), Decimal(1))
+                switches.setdefault(instance, []).append(switch)
+                constraints.append(replace(rule, left=_renamed(rule.left, rename), right=_renamed(rule.right, rename),
+                                           index={**rule.index, "future": str(k)}, when=(switch, 0)))
+                continue
             if keys <= shared:
                 # The same in every future: kept once.
                 signature = (rule.id, tuple(sorted(rule.index.items())), rule.relation,
@@ -138,9 +177,20 @@ def extensive(samples: list[Compiled], recourse: set[str]) -> tuple[Compiled, se
         for key, c in goal.coeffs.items():
             coeffs[key] = coeffs.get(key, Decimal(0)) + c
         const += goal.const
+    for (rule_id, index), keys in switches.items():
+        epsilon = next(c.chance for c in first.constraints if c.id == rule_id)
+        allowed = Decimal(math.floor(float(epsilon) * len(samples) + 1e-9))
+        constraints.append(Constraint(f"_chance_{rule_id}", dict(index), Linear(coeffs={key: Decimal(1) for key in keys}),
+                                      "<=", Linear(const=allowed)))
     objective = Linear(coeffs=coeffs, const=const)
     return replace(first, variables=variables, constraints=constraints, objective=objective,
                    objective_terms=[objective], symmetry=[], empty_ranges=[]), shared
+
+
+def _holds(rule: Constraint, values: dict[VarKey, Any]) -> bool:
+    gap = float(rule.left.evaluated_at(values) - rule.right.evaluated_at(values))
+    slack = 1e-6 * max(1.0, abs(float(rule.right.evaluated_at(values))))
+    return {"<=": gap <= slack, ">=": gap >= -slack}.get(rule.relation, abs(gap) <= slack)
 
 
 def fixed(future: Compiled, plan: dict[VarKey, Any], shared: set[VarKey]) -> Compiled:
@@ -181,14 +231,22 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     fresh = futures(ir, data, max(OUT_OF_SAMPLE_MIN, count), f"out-{base}")
     each = max(0.2, (1 - EXTENSIVE_SHARE) * time_limit / len(fresh))
     costs, unmet = [], 0
+    held: dict[str, int] = {rule_id: 0 for rule_id in chance_rules(ir)}
     for future in fresh:
         if should_stop and should_stop():
             break
-        answer = run(fixed(future, plan, shared), each)
+        # A chance rule is what the plan is judged by here, not what it must meet.
+        loose = replace(future, constraints=[c for c in future.constraints if c.chance is None])
+        answer = run(fixed(loose, plan, shared), each)
         if answer.objective is None:
             unmet += 1
-        else:
-            costs.append(float(answer.objective))
+            continue
+        costs.append(float(answer.objective))
+        values = {**plan, **answer.assignments}
+        for rule_id in held:
+            rows = [c for c in future.constraints if c.id == rule_id]
+            if all(_holds(c, values) for c in rows):
+                held[rule_id] += 1
     if costs:
         mean = sum(costs) / len(costs)
         sd = math.sqrt(sum((c - mean) ** 2 for c in costs) / (len(costs) - 1)) if len(costs) > 1 else 0.0
@@ -197,6 +255,10 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     else:
         record["out_of_sample"] = {"futures": unmet, "mean": None, "ci95": None, "unmet": unmet}
     # The plan is the answer: what to decide now. Recourse is decided later, per future.
+    if held:
+        judged = max(1, len(costs))
+        record["chance"] = {rule_id: {"asked": round(1 - epsilon, 6), "held": round(held[rule_id] / judged, 6)}
+                            for rule_id, epsilon in chance_rules(ir).items()}
     # The run's time is the whole of it: the extensive form and the plan costed out of sample.
     return Stochastic(replace(solved, assignments=plan, best_bound=None,
                               wall_seconds=round(time.monotonic() - started, 3)), record)

@@ -629,8 +629,16 @@ def _execute(
         local_record = None
         # A two-stage stochastic solve (setting `solve.stochastic_samples`,
         # app.solve.stochastic, queue R7): asked for, and a decision waits for the data.
-        stochastic_wanted = bool(params.get("stochastic_samples")) and bool(stochastic_rows.second_stage(ir))
+        stochastic_wanted = bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir)
         stochastic_record, record_model = None, None
+        if stochastic_wanted and stochastic_rows.chance_rules(ir):
+            # A chance rule is switched per future (queue R8): the extensive form has
+            # binaries, held by a big-M from declared bounds where there is no indicator.
+            found = replace(
+                found,
+                needs=found.needs | {"integral", "indicator-bounded"},
+                model_class="MILP" if "continuous" in found.needs else "IP",
+            )
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))

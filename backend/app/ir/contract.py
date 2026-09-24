@@ -83,6 +83,8 @@ DOMAIN_RULES: frozenset[str] = frozenset(c for c, r in RULES.items() if r["where
 CONSTRAINT_KEYS: frozenset[str] = frozenset(
     {
         "id", "note", "forall", "left", "relation", "right", "severity", "weight", "when",
+        # A chance rule (version 2): may fail in at most a share of the futures.
+        "chance",
         # Scheduling rules (version 2), in place of left/relation/right.
         "no_overlap", "cumulative",
         # The connectivity rule (version 2), likewise.

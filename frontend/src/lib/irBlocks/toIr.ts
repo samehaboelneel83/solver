@@ -247,6 +247,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       ...(note ? { note } : {}),
       ...(forall.length ? { forall } : {}),
       ...(w ? { when: { ...ref(w, "VAR"), ...(isGiven || fieldOf(w, "IS") === "0" ? { is: Number(fieldOf(w, "IS") || 1) } : {}) } } : {}),
+      ...(fieldOf(r, "CHANCE") !== "" ? { chance: { epsilon: numberOr(fieldOf(r, "CHANCE"), null) } } : {}),
       left: term(r.inputs?.LEFT, [...loc, "left"]),
       relation: fieldOf(r, "RELATION"),
       right: term(r.inputs?.RIGHT, [...loc, "right"]),

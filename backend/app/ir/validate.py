@@ -584,6 +584,12 @@ class _ShapeChecker:
                     return result
                 scope = result
 
+            if "chance" in constraint and (
+                "connected" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS)
+            ):
+                problem = self._check_chance(constraint, at, identifier)
+                if problem:
+                    return problem
             if any(kind in constraint for kind in SCHEDULING_KEYS):
                 problem = self._check_scheduling(constraint, at, scope, identifier)
                 if problem:
@@ -627,6 +633,9 @@ class _ShapeChecker:
                 if problem:
                     return problem
             problem = self._check_when(constraint, at, scope, identifier)
+            if problem:
+                return problem
+            problem = self._check_chance(constraint, at, identifier)
             if problem:
                 return problem
         return None
@@ -803,6 +812,40 @@ class _ShapeChecker:
                 f"{json.dumps(body['via'])} is not a relationship this model declares in "
                 "relationships, so no dataset would carry its edges",
             )
+        return None
+
+    def _check_chance(self, constraint: dict[str, Any], at: Loc, identifier: str):
+        """`chance` (version 2): the rule must hold in all but `epsilon` of the
+        futures a stochastic solve samples -- one switch per future, at most
+        that share switched off. Only a hard, linear expression rule with no
+        `when` of its own: its switch is the chance's."""
+        if "chance" not in constraint:
+            return None
+        loc: Loc = [*at, "chance"]
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "chance_needs_version_2",
+                loc,
+                f"the constraint {identifier!r} carries a chance, which version 1 does not have; "
+                "publish it as version 2",
+            )
+        chance = constraint["chance"]
+        epsilon = chance.get("epsilon") if isinstance(chance, dict) else None
+        if not isinstance(chance, dict) or set(chance) != {"epsilon"} or not _is_number(epsilon) or not 0 < epsilon < 1:
+            return Refusal(
+                "chance_malformed",
+                loc,
+                "a chance is the share of futures the rule may fail in, strictly between 0 and 1: "
+                '{"epsilon": 0.1} holds it in 90% of them',
+            )
+        if "connected" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS):
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling or connected rule; a chance is on an expression rule")
+        if constraint.get("severity") == "soft":
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is soft; a rule that may bend at a cost needs no chance -- make it hard")
+        if "when" in constraint:
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} already has a when; a chance switches the rule itself")
+        if _degree(constraint["left"]) > 1 or _degree(constraint["right"]) > 1:
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} multiplies decisions; a chance rule is linear")
         return None
 
     def _check_when(self, constraint: dict[str, Any], at: Loc, scope: dict[str, str], identifier: str):

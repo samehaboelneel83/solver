@@ -516,6 +516,21 @@ export const IR_RULES: readonly IrRule[] = [
     text: "a variable's `stage` is 1 (decided now) or 2 (decided once the uncertain data is known), and an interval has none",
   },
   {
+    code: "chance_needs_version_2",
+    where: "shape",
+    text: "a constraint's `chance` appears only in a version 2 document",
+  },
+  {
+    code: "chance_malformed",
+    where: "shape",
+    text: "a `chance` is `{epsilon}`, the share of futures the rule may fail in, strictly between 0 and 1",
+  },
+  {
+    code: "chance_misplaced",
+    where: "shape",
+    text: "a `chance` is on a hard, linear expression rule with no `when` -- not a soft, conditional, scheduling or connected one",
+  },
+  {
     code: "connected_needs_version_2",
     where: "shape",
     text: "a `connected` rule appears only in a version 2 document",
@@ -573,6 +588,8 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "severity",
   "weight",
   "when",
+  // A chance rule (version 2): may fail in at most a share of the futures.
+  "chance",
   // Scheduling rules (version 2), in place of left/relation/right.
   "no_overlap",
   "cumulative",

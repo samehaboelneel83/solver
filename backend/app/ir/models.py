@@ -219,6 +219,13 @@ class When(_Model):
     is_: Annotated[StrictInt, AfterValidator(_zero_or_one)] = Field(default=1, alias="is")
 
 
+class Chance(_Model):
+    """A chance rule (version 2): it may fail in at most `epsilon` of the
+    futures a stochastic solve samples -- strictly between 0 and 1."""
+
+    epsilon: Annotated[Number, Field(gt=0, lt=1)]
+
+
 class NoOverlap(_Model):
     """The intervals `over` ranges across never run at once (version 2)."""
 
@@ -263,6 +270,7 @@ class Constraint(_Model):
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
+    chance: Optional[Chance] = None
 
     @model_validator(mode="after")
     def _one_kind(self) -> "Constraint":

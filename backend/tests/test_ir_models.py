@@ -48,6 +48,8 @@ STRUCTURAL = frozenset({
     "uncertainty_malformed", "connected_malformed",
     # A stage is 1 or 2, and an interval has none: facts of the declaration itself.
     "stage_invalid",
+    # A chance is {epsilon} with 0 < epsilon < 1: a fact of the object itself.
+    "chance_malformed",
 })
 
 #: Rules that need the whole document, the limits or the domain: validate.py's.
@@ -75,6 +77,8 @@ SEMANTIC = frozenset({
     "interval_read_as_number", "scheduling_needs_version_2", "scheduling_not_interval",
     "scheduling_rule_hard", "scheduling_amount_not_constant",
     "uncertainty_needs_version_2", "stage_needs_version_2",
+    # Where a chance may be is a fact about the rest of the rule.
+    "chance_needs_version_2", "chance_misplaced",
     # A connected rule's variable, its order, the relationship and its ends
     # are facts about the declarations and the domain.
     "connected_needs_version_2", "connected_not_binary", "connected_index_mismatch",

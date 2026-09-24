@@ -128,3 +128,84 @@ def test_a_run_solves_the_plan_and_never_calls_it_proven(db, empty_queue):  # no
     assignments = db.execute(text("SELECT assignments FROM solution WHERE run_id = :r"), {"r": run_id}).scalar_one()
     # The plan is decided now; how much to sell waits for each future's demand.
     assert assignments["order"] == [["p1"]] and assignments["sell"] == []
+
+
+# -- chance rules (queue R8) -------------------------------------------------------------------------------
+
+
+def covered(epsilon: float) -> dict:
+    """Order as little as possible, yet enough for demand in all but `epsilon` of the futures.
+    Worked by hand: the order is demand's (1 - epsilon) quantile -- 50 + 100 * 0.9 = 140 at 0.1."""
+    return {
+        "version": 2, "sets": [],
+        "parameters": {"demand": {"index": [], "uncertainty": {"kind": "interval", "deviation": 0.5}}},
+        "variables": {"order": {"index": [], "domain": "continuous", "lower": 0, "upper": 300}},
+        "constraints": [{"id": "c_cover", "left": Q, "relation": ">=", "right": {"par": "demand", "index": []},
+                         "severity": "hard", "chance": {"epsilon": epsilon}}],
+        "objective": {"sense": "minimize", "terms": [{"id": "o_cost", "weight": 1, "expression": Q}]},
+    }
+
+
+def test_a_chance_rule_alone_asks_for_a_stochastic_solve_and_orders_the_quantile():
+    ir = covered(0.1)
+    assert stochastic.wanted(ir) and not stochastic.second_stage(ir)
+    solved = stochastic.solve(ir, DATA, compile_model(ir, DATA), _run, samples=50, time_limit=20, seed=1)
+    order = solved.solution.assignments[("order", ())]
+    assert 125 < order < 151  # the 90% quantile, 140, within the sampling error of 50 futures
+    held = solved.record["chance"]["c_cover"]
+    assert held["asked"] == pytest.approx(0.9) and 0.7 <= held["held"] <= 1.0
+
+
+def test_at_most_epsilon_times_n_futures_may_break_it():
+    ir = covered(0.1)
+    model, _ = stochastic.extensive(stochastic.futures(ir, DATA, 20, "t"), set())
+    switches = [k for k in model.variables if k[0] == "__chance"]
+    assert len(switches) == 20 and all(model.variables[k].domain == "binary" for k in switches)
+    budget = [c for c in model.constraints if c.id == "_chance_c_cover"]
+    assert len(budget) == 1 and float(budget[0].right.const) == 2  # floor(0.1 * 20)
+    assert all(c.when is not None for c in model.constraints if c.id == "c_cover")
+
+
+def test_a_looser_chance_orders_less():
+    ir_tight, ir_loose = covered(0.05), covered(0.3)
+    tight = stochastic.solve(ir_tight, DATA, compile_model(ir_tight, DATA), _run, samples=40, time_limit=15, seed=2)
+    loose = stochastic.solve(ir_loose, DATA, compile_model(ir_loose, DATA), _run, samples=40, time_limit=15, seed=2)
+    assert loose.solution.assignments[("order", ())] < tight.solution.assignments[("order", ())]
+
+
+def test_a_chance_rule_over_an_unbounded_decision_is_refused_by_name():
+    ir = covered(0.1)
+    del ir["variables"]["order"]["upper"]
+    with pytest.raises(stochastic.NotStochastic, match="no declared upper bound"):
+        stochastic.solve(ir, DATA, compile_model(ir, DATA), _run, samples=5, time_limit=5)
+
+
+def test_a_run_with_a_chance_rule_goes_to_an_integer_solver_and_records_how_often_it_held(db, empty_queue):  # noqa: F811
+    domain = make_domain(db, "chance")
+    product = make_entity_type(db, domain, "product")
+    make_entity(db, product, "p1")
+    make_parameter_def(db, domain, "demand", [product], default_value=100)
+    problem = make_problem(db, domain)
+    each = [{"index": "i", "set": "product"}]
+    order = {"var": "order", "index": ["i"]}
+    ir = {
+        "version": 2, "sets": ["product"],
+        "parameters": {"demand": {"index": ["product"], "uncertainty": {"kind": "interval", "deviation": 0.5}}},
+        "variables": {"order": {"index": ["product"], "domain": "continuous", "lower": 0, "upper": 300}},
+        "constraints": [{"id": "c_cover", "forall": each, "left": order, "relation": ">=",
+                         "right": {"par": "demand", "index": ["i"]}, "severity": "hard", "chance": {"epsilon": 0.1}}],
+        "objective": {"sense": "minimize", "terms": [{"id": "o_cost", "weight": 1, "expression": {"sum": order, "over": each}}]},
+    }
+    version = make_model_version(db, problem, ir)
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+                          {"p": problem, "v": version}).scalar_one()
+    db.execute(text("INSERT INTO setting (scope, scope_id, key, value) VALUES ('problem', :p, 'solve.stochastic_samples', CAST('20' AS jsonb))"),
+               {"p": problem})
+    db.commit()
+    run_id = enqueue_run(db, scenario, time_limit=20.0, reuse=False)
+    claim_next(db)
+    outcome = execute_run(db, run_id)
+    row = db.execute(text("SELECT solver, optimality, params FROM run WHERE id = :r"), {"r": run_id}).mappings().one()
+    assert outcome.status == "optimal" and row["optimality"] == "approximate", row
+    assert row["params"]["chosen_solver"] != "glop"  # the switches are binaries: not a linear-programming solver
+    assert row["params"]["stochastic"]["chance"]["c_cover"]["asked"] == pytest.approx(0.9)

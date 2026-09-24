@@ -182,6 +182,10 @@ class Constraint:
     # left and right are empty and say nothing. Only a backend that provides
     # `scheduling` is offered one.
     schedule: Schedule | None = None
+    # A chance rule (version 2): it may fail in at most this share of the
+    # futures a stochastic solve samples (`app.solve.stochastic`); every other
+    # solve holds it always.
+    chance: Decimal | None = None
 
     def is_active(self, assignments: dict[VarKey, Any]) -> bool:
         """Whether the rule binds at an assignment: always, unless its switch
@@ -659,8 +663,10 @@ class _Compiler:
                     )
                     continue
 
+            chance = spec.get("chance")
             self.constraints.append(
-                Constraint(spec["id"], index, left, spec["relation"], right, square, when)
+                Constraint(spec["id"], index, left, spec["relation"], right, square, when,
+                           chance=Decimal(str(chance["epsilon"])) if isinstance(chance, dict) else None)
             )
         self._current_id = None
 

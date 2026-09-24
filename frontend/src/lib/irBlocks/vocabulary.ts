@@ -506,6 +506,11 @@ export function defineIrBlocks(): void {
         .appendField(numberText("1"), "WEIGHT")
         .appendField(new Blockly.FieldLabel("per unit"), "PER_UNIT");
       this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
+      // A chance (version 2): the share of sampled futures it may fail in; empty for always.
+      this.appendDummyInput("CHANCE_ROW")
+        .appendField("may fail in")
+        .appendField(numberText(""), "CHANCE")
+        .appendField("of futures (a share; empty: never)");
       this.appendStatementInput("FORALL").setCheck("binding").appendField("for every");
       this.appendStatementInput("WHEN").setCheck("when").appendField("only when");
       this.appendValueInput("LEFT").setCheck("Number");

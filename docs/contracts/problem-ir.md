@@ -311,6 +311,7 @@ decimals exist. `3` does not become `3.000000`.
 | `left`, `relation`, `right` | yes | The constraint itself. `relation` is `<=`, `=` or `>=`. |
 | `severity` | yes | `hard` or `soft`. |
 | `weight` | iff soft | A positive integer penalty. A hard constraint carries none. |
+| `chance` | no | Version 2. `{"epsilon": 0.1}`: the rule may fail in at most that share of the futures a two-stage stochastic solve samples (`solve.stochastic_samples`, queue R8) -- strictly between 0 and 1. Only on a hard, linear expression rule with no `when` (the chance is its switch), and every decision it reads needs a declared upper bound. Every other solve holds the rule always. Refused: `chance_needs_version_2`, `chance_malformed`, `chance_misplaced`. |
 
 **`weight` is the only name for a penalty.** A scenario's `soften` verb sets
 this key, and the compiler reads this key. They used not to: `soften` wrote a

@@ -87,6 +87,8 @@ export type StochasticRecord = {
   stage_two: string[];
   expected: number | null;
   out_of_sample?: { futures: number; mean: number | null; ci95: number | null; unmet: number };
+  /** Per chance rule (queue R8): the share of futures asked for, and the share it held in out of sample. */
+  chance?: Record<string, { asked: number; held: number }>;
 };
 
 /** What the plan is likely to be worth on futures it was not chosen for. */
@@ -94,7 +96,11 @@ export function stochasticOutlook(record: StochasticRecord): string {
   const out = record.out_of_sample;
   if (!out || out.mean === null) return "It could not be costed on fresh futures.";
   const unmet = out.unmet > 0 ? ` It cannot meet ${out.unmet} of them at all.` : "";
-  return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}`;
+  const percent = (share: number) => `${Number((share * 100).toPrecision(3))}%`;
+  const chances = Object.entries(record.chance ?? {})
+    .map(([rule, c]) => ` ${rule} held in ${percent(c.held)} of them (asked: ${percent(c.asked)}).`)
+    .join("");
+  return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}${chances}`;
 }
 
 /** A run's model structure (queue R4) in a few words: the input to a decomposition. */
@@ -133,8 +139,10 @@ export function statusNote(run: {
   const stochastic = (run.params as { stochastic?: StochasticRecord } | undefined)?.stochastic;
   if (run.status === "optimal" && run.optimality === "approximate" && stochastic) {
     return (
-      `The best plan for ${stochastic.samples} sampled futures -- what to decide now; ` +
-      `${stochastic.stage_two.join(", ")} ${stochastic.stage_two.length === 1 ? "waits" : "wait"} for the data. ` +
+      `The best plan for ${stochastic.samples} sampled futures -- what to decide now` +
+      (stochastic.stage_two.length
+        ? `; ${stochastic.stage_two.join(", ")} ${stochastic.stage_two.length === 1 ? "waits" : "wait"} for the data. `
+        : ". ") +
       stochasticOutlook(stochastic)
     );
   }
