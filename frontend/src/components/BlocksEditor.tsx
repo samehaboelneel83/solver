@@ -65,10 +65,13 @@ export default function BlocksEditor({
   ir,
   catalogue,
   onChange,
+  fill = false,
 }: {
   ir: Record<string, unknown>;
   catalogue: BlockCatalogue;
   onChange: BlocksChange;
+  /** Fill the parent's height (the optimization view) rather than take most of the window's. */
+  fill?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const workspace = useRef<Blockly.WorkspaceSvg | null>(null);
@@ -131,7 +134,7 @@ export default function BlocksEditor({
   return (
     <div
       ref={host}
-      className="h-[70vh] min-h-[420px] w-full rounded-md border border-slate-200"
+      className={`${fill ? "h-full" : "h-[70vh] min-h-[420px]"} w-full rounded-md border border-slate-200`}
       data-testid="blocks-editor"
     />
   );

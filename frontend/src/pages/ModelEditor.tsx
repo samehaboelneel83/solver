@@ -31,7 +31,7 @@ import DeclarationsEditor from "../model/DeclarationsEditor";
 import DraftBar, { DraftConflict } from "../model/DraftBar";
 import BlocksEditor from "../components/BlocksEditor";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
-import { formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
+import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
@@ -75,18 +75,6 @@ import { parseRouteId } from "../lib/routeId";
  * job from writing a rule.
  */
 
-/** A model with nothing in it: what "start from scratch" means. The keys are
- * all present because the contract requires every top-level key, including
- * the empty ones -- a missing `constraints` is a different document from an
- * empty one, and only one of them is valid. */
-const EMPTY_MODEL = {
-  version: 2,
-  sets: [],
-  parameters: {},
-  variables: {},
-  constraints: [],
-  objective: { sense: "minimize", mode: "weighted", terms: [] },
-} as const;
 
 type Draft = FormDraft;
 

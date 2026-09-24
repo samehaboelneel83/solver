@@ -138,3 +138,16 @@ export function publishable(ir: Record<string, unknown>): Record<string, unknown
       : {}),
   };
 }
+
+/** A model with nothing in it: what "start from scratch" means. The keys are
+ * all present because the contract requires every top-level key, including
+ * the empty ones -- a missing `constraints` is a different document from an
+ * empty one, and only one of them is valid. */
+export const EMPTY_MODEL = {
+  version: 2,
+  sets: [],
+  parameters: {},
+  variables: {},
+  constraints: [],
+  objective: { sense: "minimize", mode: "weighted", terms: [] },
+} as const;

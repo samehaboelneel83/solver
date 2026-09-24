@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import ModelStyleView from "./modelStyles/ModelStyleView";
 import { MODEL_STYLES, MODEL_STYLE_NAME, MODEL_STYLE_TITLE, type ModelStyle } from "./modelStyles/types";
 import { Link } from "react-router-dom";
@@ -40,6 +40,9 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useToast } from "./ToastProvider";
 import type { GraphEdge, GraphNode, GraphResponse, RelationshipTypeOption } from "../types/graph";
 import type { FilterCriteria } from "./FilterBar";
+
+// Edit mode's own chunk: Blockly plus the draft's editor, fetched on the first Edit.
+const BlocklyEdit = lazy(() => import("./modelStyles/BlocklyEdit"));
 
 cytoscape.use(elk);
 cytoscape.use(edgehandles);
@@ -787,6 +790,11 @@ export default function GraphEditor({
     setLiveMessage(`Optimization view drawn as ${MODEL_STYLE_NAME[style]}`);
   };
   const otherStyle = isModel && modelStyle !== "graph" ? modelStyle : null;
+  // Edit mode (Blockly edit mode spec §6): the Blockly style, editable, over
+  // the shared draft. Only for someone who may publish, and only with a problem.
+  const [blocksEditing, setBlocksEditing] = useState(false);
+  const canEditBlocks = otherStyle === "blockly" && can("model.publish") && modelTarget?.problemId != null;
+  const editingBlocks = canEditBlocks && blocksEditing;
   // H-7: the create-node toggle is the trigger for the form below -- Escape inside the form
   // closes it and returns focus here, rather than dropping focus back to the document body.
   const createNodeToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -1805,6 +1813,20 @@ export default function GraphEditor({
             ))}
           </div>
         )}
+        {canEditBlocks && (
+          <button
+            type="button"
+            onClick={() => setBlocksEditing((on) => !on)}
+            aria-pressed={blocksEditing}
+            title="Edit this model as blocks; the Model editor's forms are the keyboard-accessible way"
+            className={`rounded-md border px-2 py-1 text-sm ${
+              blocksEditing ? "border-blue-700 bg-blue-700 text-white" : "border-slate-300 bg-white text-slate-700"
+            }`}
+            data-testid="model-style-edit"
+          >
+            Edit
+          </button>
+        )}
         {!otherStyle && (
         <>
         <button
@@ -2178,7 +2200,27 @@ export default function GraphEditor({
         </div>
         {/* The other styles draw over the canvas rather than replacing it:
             Cytoscape keeps its state, so switching back is instant. */}
-        {otherStyle && data && data.nodes.length > 0 && (
+        {editingBlocks && modelTarget?.problemId != null && (
+          <div className="absolute inset-0 z-20 bg-white" data-testid="model-style-view">
+            <Suspense
+              fallback={
+                <p role="status" className="p-4 text-sm text-slate-500">
+                  Loading the block editor…
+                </p>
+              }
+            >
+              <BlocklyEdit
+                domainId={domainId}
+                problemId={modelTarget.problemId}
+                versionId={modelTarget.versionId}
+                versionNumber={modelTarget.versions.find((row) => row.id === modelTarget.versionId)?.version ?? null}
+                ir={modelTarget.versionId === null ? null : modelIr}
+                onVersion={(versionId) => onModelTargetChange?.({ problemId: modelTarget.problemId, versionId })}
+              />
+            </Suspense>
+          </div>
+        )}
+        {!editingBlocks && otherStyle && data && data.nodes.length > 0 && (
           <div className="absolute inset-0 z-10 bg-white" data-testid="model-style-view">
             <ModelStyleView
               style={otherStyle}
