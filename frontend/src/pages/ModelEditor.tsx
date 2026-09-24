@@ -22,23 +22,20 @@ import {
   type Id,
 } from "../api/v1";
 import { checkIrShape } from "../ir";
-import { IR_VERSION, isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
+import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
+import DraftBar, { DraftConflict } from "../model/DraftBar";
+import { formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
+import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
   parameterOptions,
-  cleanVariable,
-  type VariableSpec,
-  type ParameterSpec,
 } from "../model/declarations";
 import {
-  cleanBinding,
-  cleanTerm,
-  declaredRelationships,
   describeSchedule,
   newConnectedRule,
   describeTerm,
@@ -89,13 +86,7 @@ const EMPTY_MODEL = {
   objective: { sense: "minimize", mode: "weighted", terms: [] },
 } as const;
 
-type Draft = {
-  sets: string[];
-  parameters: Record<string, ParameterSpec>;
-  variables: Record<string, VariableSpec>;
-  constraints: Constraint[];
-  objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
-};
+type Draft = FormDraft;
 
 function emptyRangeWhere(item: EmptyRange): string {
   const keys = Object.values(item.index);
@@ -206,43 +197,46 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const createVersion = useCreateVersion();
   const toast = useToast();
 
-  const [draft, setDraft] = useState<Draft | null>(null);
-  // What the draft was seeded from: a version id, or "scratch". The draft is
-  // re-seeded exactly when this stops matching what the page shows.
-  //
-  // It used to be "seed when the draft is empty", with every change of
-  // starting point clearing the draft and moving the URL in one handler. If
-  // the URL move landed a render after the clear -- it can -- the effect saw
-  // an empty draft beside the OLD version and seeded from it; by the time the
-  // URL caught up the draft was no longer empty, so it was never re-seeded.
-  // The page then said "starting from version 1" over version 2's rules, and
-  // publishing would have built on the wrong one.
-  const [seededFrom, setSeededFrom] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const ir = (scratch ? EMPTY_MODEL : latest.data?.ir) as Record<string, unknown> | undefined;
-  const seedKey = scratch ? "scratch" : baseId === null ? null : `version-${baseId}`;
+  const seedKey: DraftBase | null = scratch ? "scratch" : baseId === null ? null : `version-${Number(baseId)}`;
 
+  // The shared draft (Blockly edit mode spec §2): the Model editor's forms,
+  // its Blocks tab and the optimization view's Edit mode all edit this one.
+  // There is none until something is edited, so opening the page changes
+  // nothing. A draft started from another version than the one shown is
+  // never swapped silently: the page asks (`DraftConflict`).
+  const stored = useModelDraft(Number(problemId));
+  const conflict = stored !== null && seedKey !== null && stored.base !== seedKey;
+  const workingIr = !conflict && stored ? stored.ir : ir;
+  const draft: Draft | null = useMemo(() => (workingIr ? formDraftOf(workingIr) : null), [workingIr]);
+
+  // A draft started from scratch resumes as one: without this, a reload of a
+  // problem with no version would offer "Start a model" over the draft.
   useEffect(() => {
-    if (!ir || seedKey === null || (draft && seededFrom === seedKey)) return;
-    setSeededFrom(seedKey);
-    setDraft({
-      sets: [...((ir.sets as string[]) ?? [])],
-      parameters: { ...((ir.parameters as Draft["parameters"]) ?? {}) },
-      variables: { ...((ir.variables as Draft["variables"]) ?? {}) },
-      constraints: ((ir.constraints as Constraint[]) ?? []).map((c) => ({ ...c })),
-      objective: {
-        sense: ((ir.objective as { sense?: string })?.sense as string) ?? "minimize",
-        mode: ((ir.objective as { mode?: string })?.mode as string) === "lex" ? "lex" : "weighted",
-        terms: (((ir.objective as { terms?: ObjectiveTerm[] })?.terms ?? []) as ObjectiveTerm[]).map(
-          (t) => ({ ...t })
-        ),
-      },
+    if (stored?.base === "scratch" && !scratch && baseId === null && !versions.isLoading) setScratch(true);
+  }, [stored?.base, scratch, baseId, versions.isLoading]);
+
+  /** Every edit, through the store: from its current value when a draft exists, else seeding one. */
+  function setDraft(update: (current: Draft | null) => Draft | null) {
+    if (!workingIr || seedKey === null) return;
+    if (readDraft(Number(problemId))) {
+      updateDraftIr(Number(problemId), (current) => {
+        const next = update(formDraftOf(current));
+        return next ? withFormDraft(current, next) : current;
+      });
+      return;
+    }
+    const next = update(formDraftOf(workingIr));
+    if (!next) return;
+    writeDraft({
+      problemId: Number(problemId),
+      base: seedKey,
+      baseVersion: seedKey === "scratch" ? null : base?.version ?? null,
+      ir: withFormDraft(workingIr, next),
     });
-    // `draft` is read only to ask "is there one yet"; listing it would re-run
-    // this on every keystroke for nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ir, seedKey, seededFrom]);
+  }
 
   const context: ModelContext | null = useMemo(() => {
     if (!ir || !draft) return null;
@@ -282,97 +276,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     };
   }, [ir, draft, entityTypes.data, relationshipTypes.data]);
 
-  const nextIr = useMemo(() => {
-    if (!ir || !draft) return null;
-    // An objective with no terms is refused by the contract -- "omit the
-    // objective otherwise" -- because an empty one and an absent one would
-    // otherwise be two spellings of "optimise nothing". A model with only
-    // rules is legitimate: it asks for any answer that satisfies them.
-    const { objective: _previous, relationships: _edges, ...withoutObjective } = ir;
-    const walked = declaredRelationships(draft.constraints, draft.objective.terms);
-    return {
-      ...withoutObjective,
-      // The editor always writes the current version: version 2 is version 1
-      // plus what it adds, so a model started as 1 is still valid as 2, and
-      // a condition or a curve added to it is refused in 1 with no control
-      // on this screen to change that.
-      version: IR_VERSION,
-      sets: draft.sets,
-      // Derived from the walks, not declared by hand. `sets` is declared
-      // because a set may legitimately be carried and never used -- for
-      // display, or for a later version (contract 3.1). A relationship has no
-      // such use: you declare one to walk it. Deriving it removes the only
-      // way this screen could build a `binding_via_rel_not_declared`.
-      ...(walked.length > 0 ? { relationships: walked } : {}),
-      parameters: draft.parameters,
-      variables: Object.fromEntries(
-        Object.entries(draft.variables).map(([name, spec]) => [name, cleanVariable(spec)])
-      ),
-      constraints: draft.constraints.map((constraint) => {
-        // A hard rule must not carry a weight (contract §3.4); a soft one
-        // must. The Strength control keeps the draft honest, and this
-        // strips a leftover weight so Publish is not blocked by a key
-        // the person can no longer see.
-        let next: Constraint =
-          constraint.severity === "soft"
-            ? {
-                ...constraint,
-                weight: constraint.weight && constraint.weight >= 1 ? constraint.weight : 1,
-              }
-            : (() => {
-                const { weight: _dropped, ...rest } = constraint;
-                return rest;
-              })();
-        // A blank "What it means" is not prose — omit the key rather than
-        // publish an empty string.
-        if (!next.note?.trim()) {
-          const { note: _blank, ...rest } = next;
-          next = rest;
-        }
-        // An empty forall is refused; omit it the same way the editor does
-        // when the last index is removed.
-        if (Array.isArray(next.forall) && next.forall.length === 0) {
-          const { forall: _empty, ...rest } = next;
-          next = rest;
-        }
-        // Drop empty where arrays and any UI-only `problems` left on a
-        // binding after a filter was refused then fixed.
-        if (next.forall) {
-          next = { ...next, forall: next.forall.map(cleanBinding) };
-        }
-        if (next.left) next = { ...next, left: cleanTerm(next.left) };
-        if (next.right) next = { ...next, right: cleanTerm(next.right) };
-        if (next.no_overlap) {
-          next = { ...next, no_overlap: { ...next.no_overlap, over: next.no_overlap.over.map(cleanBinding) } };
-        }
-        if (next.cumulative) {
-          const body = next.cumulative;
-          next = {
-            ...next,
-            cumulative: {
-              ...body,
-              over: body.over.map(cleanBinding),
-              demand: cleanTerm(body.demand),
-              capacity: cleanTerm(body.capacity),
-            },
-          };
-        }
-        return next;
-      }),
-      ...(draft.objective.terms.length > 0
-        ? {
-            objective: {
-              sense: draft.objective.sense,
-              ...(draft.objective.mode === "lex" ? { mode: "lex" } : {}),
-              terms: draft.objective.terms.map((term) => ({
-                ...term,
-                expression: term.expression ? cleanTerm(term.expression) : term.expression,
-              })),
-            },
-          }
-        : {}),
-    };
-  }, [ir, draft]);
+  const nextIr = useMemo(() => (workingIr && draft ? publishable(withFormDraft(workingIr, draft)) : null), [workingIr, draft]);
   // `checkIrShape` answers with the refusal itself, or null when the
   // document is shaped right. The server judges it again -- this is the
   // half that can be answered without the domain.
@@ -398,14 +302,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           className="mt-3 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
           onClick={() => {
             setScratch(true);
-            setSeededFrom("scratch");
-            setDraft({
-              sets: [],
-              parameters: {},
-              variables: {},
-              constraints: [],
-              objective: { sense: "minimize", mode: "weighted", terms: [] },
-            });
+            writeDraft({ problemId: Number(problemId), base: "scratch", baseVersion: null, ir: { ...EMPTY_MODEL } });
           }}
         >
           Start a model
@@ -420,6 +317,23 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       </Note>
     );
   }
+  if (conflict && stored) {
+    return (
+      <DraftConflict
+        draft={stored}
+        shownVersion={scratch ? null : base?.version ?? null}
+        onContinue={() => {
+          if (stored.base === "scratch") {
+            setScratch(true);
+            return;
+          }
+          setScratch(false);
+          setSearchParams({ problem: String(problemId), version: stored.base.slice("version-".length) }, { replace: true });
+        }}
+        onStartAgain={() => clearDraft(Number(problemId))}
+      />
+    );
+  }
   if (!draft || !context || !ir || nextIr === null) return <Skeleton rows={4} cols={3} />;
   const toPublish = nextIr as Record<string, unknown>;
 
@@ -430,6 +344,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       {
         onSuccess: (created: { id: Id; version: number }) => {
           toast.success(`Published version ${created.version}`);
+          clearDraft(Number(problemId));
           setScratch(false);
           setSearchParams(
             { problem: String(problemId), version: String(created.id) },
@@ -663,19 +578,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={publish}
-          disabled={createVersion.isPending || refusal !== null}
-          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          {createVersion.isPending ? "Publishing…" : "Publish a new version"}
-        </button>
-        <span className="text-sm text-slate-500">
-          The version you started from is untouched, and any run of it keeps its answer.
-        </span>
-      </div>
+      <DraftBar
+        draft={stored}
+        publishing={createVersion.isPending}
+        blocked={refusal ? refusal.message : null}
+        onPublish={publish}
+        onDiscard={() => clearDraft(Number(problemId))}
+      />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelEditor from "./ModelEditor";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
+import { clearDraft } from "../model/draftStore";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -146,6 +147,12 @@ function renderPage(entry = "/model") {
 
 beforeEach(() => {
   mockFetch.mockReset();
+  // Drafts persist (the shared draft store): one test's edit must not be
+  // the next test's starting point. `clearDraft` also empties the store's
+  // in-memory fallback, which a storage-refusing test fills.
+  localStorage.clear();
+  clearDraft(1);
+  vi.restoreAllMocks();
   localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
   stub();
 });
@@ -944,5 +951,49 @@ describe("ModelEditor", () => {
       index: ["employee", "day"],
       domain: "binary",
     });
+  });
+});
+
+describe("ModelEditor and the shared draft", () => {
+  it("keeps an edit across a reload, with the badge", async () => {
+    const first = renderPage();
+    const note = await screen.findByDisplayValue("each day is staffed");
+    fireEvent.change(note, { target: { value: "each day has enough people" } });
+    expect(screen.getByText(/^Unpublished changes · edited \d{2}:\d{2}$/)).toBeInTheDocument();
+    first.unmount();
+    renderPage();
+    expect(await screen.findByDisplayValue("each day has enough people")).toBeInTheDocument();
+  });
+
+  it("never swaps a draft from another version silently", async () => {
+    localStorage.setItem("solver_model_draft_1", JSON.stringify({
+      problemId: 1, base: "version-21", baseVersion: 1, editedAt: "2026-09-24T12:00:00Z", persisted: true,
+      ir: { ...IR_V2, constraints: [] },
+    }));
+    renderPage();
+    expect(await screen.findByText(/unpublished changes started from version 1/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /start again from version 2/i }));
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+    expect(localStorage.getItem("solver_model_draft_1")).toBeNull();
+  });
+
+  it("clears the draft on publish, and on a confirmed discard only", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(localStorage.getItem("solver_model_draft_1")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    await waitFor(() => expect(localStorage.getItem("solver_model_draft_1")).toBeNull());
+  });
+
+  it("says when changes cannot outlive the page", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+    renderPage();
+    fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "y" } });
+    expect(screen.getByText(/not saved in this browser: they are lost on reload/i)).toBeInTheDocument();
   });
 });
