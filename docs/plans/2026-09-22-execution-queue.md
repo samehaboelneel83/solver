@@ -119,7 +119,7 @@ Spec `docs/superpowers/specs/2026-09-24-spatial-region-partitioning-design.md`, 
 
 Spec `docs/superpowers/specs/2026-09-24-blockly-edit-mode-design.md`.
 
-- [ ] (Blocks 0) Implementation plan for the spec, written and committed.
+- [x] (Blocks 0) Implementation plan for the spec, written and committed. *(`docs/superpowers/plans/2026-09-24-blockly-edit-mode.md`, 9 tasks mapped onto Blocks 1-4. Spiked first: custom Blockly blocks with dynamic dropdown slots saved as `extraState` load, edit, connect and save headless in vitest, so the round trip and a block-by-block feed-blend build run in the ordinary suite. Deviations stated in the plan: `blocksToIr` returns the block-to-IR-location map (refusals need no preserved ids); Blocks 2 carries not-yet-built constructs in opaque blocks so the round trip is exact from the first release; the feed-blend build is proven headless, the live check drags a smaller model by mouse.)*
 - [ ] (Blocks 1) Shared draft store; the Model editor moved onto it.
 - [ ] (Blocks 2) Editable blocks for declarations and plain rules and goal terms, `blocksToIr`, the round trip, the Blocks tab.
 - [ ] (Blocks 3) The advanced constructs' blocks; the round trip over every fixture and template.
