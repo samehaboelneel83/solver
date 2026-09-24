@@ -54,6 +54,16 @@ class OpenDropdown extends Blockly.FieldDropdown {
   protected override doClassValidation_(newValue?: string): string | null {
     return typeof newValue === "string" ? newValue : null;
   }
+
+  /**
+   * Never from Blockly's cache. The cache is filled when the block is made,
+   * before its value is loaded -- with no catalogue (the read-only view) it
+   * then lacks the value, and the field shows "(choose)" over a set that is
+   * there. Recomputed, the list always holds the current value; it is small.
+   */
+  override getOptions(_useCache?: boolean): Blockly.MenuOption[] {
+    return super.getOptions(false);
+  }
 }
 
 /** Options recomputed each time the menu opens, from the block's surroundings. */

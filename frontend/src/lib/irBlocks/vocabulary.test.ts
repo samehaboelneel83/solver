@@ -112,3 +112,17 @@ describe("a new block from the toolbox", () => {
     expect(ws.newBlock("ir_model").getFieldValue("SENSE")).toBe("minimize");
   });
 });
+
+describe("what a dropdown shows", () => {
+  it("shows the value it holds even when nothing offers it (the read-only view has no catalogue)", () => {
+    const ws = load([
+      { type: "ir_set", id: "set", fields: { SET: "feed" } },
+      { type: "ir_parameter", id: "par", fields: { NAME: "cost" }, extraState: { index: ["feed"] } },
+      { type: "ir_variable", id: "var", extraState: { arity: 1 }, fields: { NAME: "use", ARITY: "1", SET0: "feed", DOMAIN: "continuous" } },
+    ]);
+    setCatalogue(ws, EMPTY_CATALOGUE);
+    expect(ws.getBlockById("set")!.getField("SET")!.getText()).toBe("feed");
+    expect(ws.getBlockById("par")!.getField("NAME")!.getText()).toBe("cost");
+    expect(ws.getBlockById("var")!.getField("SET0")!.getText()).toBe("feed");
+  });
+});
