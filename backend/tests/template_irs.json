@@ -1,0 +1,1381 @@
+{
+ "feed_blend": {
+  "constraints": [
+   {
+    "id": "c_batch",
+    "left": {
+     "over": [
+      {
+       "index": "f",
+       "set": "feed"
+      }
+     ],
+     "sum": {
+      "index": [
+       "f"
+      ],
+      "var": "use"
+     }
+    },
+    "note": "the batch is exactly 100 kg",
+    "relation": "=",
+    "right": {
+     "const": 100
+    },
+    "severity": "hard"
+   },
+   {
+    "id": "c_protein",
+    "left": {
+     "over": [
+      {
+       "index": "f",
+       "set": "feed"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "protein",
+         "of": "f"
+        }
+       },
+       {
+        "index": [
+         "f"
+        ],
+        "var": "use"
+       }
+      ]
+     }
+    },
+    "note": "at least 20 kg of protein in the batch",
+    "relation": ">=",
+    "right": {
+     "const": 20
+    },
+    "severity": "hard"
+   },
+   {
+    "id": "c_fibre",
+    "left": {
+     "over": [
+      {
+       "index": "f",
+       "set": "feed"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "fibre",
+         "of": "f"
+        }
+       },
+       {
+        "index": [
+         "f"
+        ],
+        "var": "use"
+       }
+      ]
+     }
+    },
+    "note": "at most 5 kg of fibre in the batch",
+    "relation": "<=",
+    "right": {
+     "const": 5
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "f",
+        "set": "feed"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "index": [
+          "f"
+         ],
+         "par": "cost"
+        },
+        {
+         "index": [
+          "f"
+         ],
+         "var": "use"
+        }
+       ]
+      }
+     },
+     "id": "o_cost",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "cost": {
+    "index": [
+     "feed"
+    ]
+   }
+  },
+  "sets": [
+   "feed"
+  ],
+  "variables": {
+   "use": {
+    "domain": "continuous",
+    "index": [
+     "feed"
+    ],
+    "lower": 0,
+    "upper": 100
+   }
+  },
+  "version": 1
+ },
+ "load_balance": {
+  "constraints": [
+   {
+    "id": "c_total",
+    "left": {
+     "over": [
+      {
+       "index": "p",
+       "set": "person"
+      }
+     ],
+     "sum": {
+      "index": [
+       "p"
+      ],
+      "var": "hours"
+     }
+    },
+    "note": "all 120 hours of work are covered",
+    "relation": "=",
+    "right": {
+     "const": 120
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "person"
+     }
+    ],
+    "id": "c_capacity",
+    "left": {
+     "index": [
+      "p"
+     ],
+     "var": "hours"
+    },
+    "note": "nobody works past their capacity",
+    "relation": "<=",
+    "right": {
+     "attr": {
+      "name": "capacity",
+      "of": "p"
+     }
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "p",
+        "set": "person"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "index": [
+          "p"
+         ],
+         "var": "hours"
+        },
+        {
+         "index": [
+          "p"
+         ],
+         "var": "hours"
+        }
+       ]
+      }
+     },
+     "id": "o_evenness",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {},
+  "sets": [
+   "person"
+  ],
+  "variables": {
+   "hours": {
+    "domain": "continuous",
+    "index": [
+     "person"
+    ],
+    "lower": 0,
+    "upper": 60
+   }
+  },
+  "version": 1
+ },
+ "region_partitioning": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "u",
+      "set": "cell"
+     }
+    ],
+    "id": "c_one_zone",
+    "left": {
+     "over": [
+      {
+       "index": "z",
+       "set": "zone"
+      }
+     ],
+     "sum": {
+      "index": [
+       "u",
+       "z"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "every cell is in exactly one zone",
+    "relation": "=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "z",
+      "set": "zone"
+     }
+    ],
+    "id": "c_zone_enough",
+    "left": {
+     "over": [
+      {
+       "index": "u",
+       "set": "cell"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "population",
+         "of": "u"
+        }
+       },
+       {
+        "index": [
+         "u",
+         "z"
+        ],
+        "var": "assign"
+       }
+      ]
+     }
+    },
+    "note": "each zone holds at least its share of the people, less 10%",
+    "relation": ">=",
+    "right": {
+     "const": 19567
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "z",
+      "set": "zone"
+     }
+    ],
+    "id": "c_zone_not_too_many",
+    "left": {
+     "over": [
+      {
+       "index": "u",
+       "set": "cell"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "population",
+         "of": "u"
+        }
+       },
+       {
+        "index": [
+         "u",
+         "z"
+        ],
+        "var": "assign"
+       }
+      ]
+     }
+    },
+    "note": "and at most its share, plus 10%",
+    "relation": "<=",
+    "right": {
+     "const": 23916
+    },
+    "severity": "hard"
+   },
+   {
+    "connected": {
+     "assign": {
+      "index": [
+       "u",
+       "z"
+      ],
+      "var": "assign"
+     },
+     "groups": {
+      "index": "z",
+      "set": "zone"
+     },
+     "units": {
+      "index": "u",
+      "set": "cell"
+     },
+     "via": "adjacent"
+    },
+    "id": "c_zone_connected",
+    "note": "every zone is one connected piece",
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "u",
+      "set": "cell"
+     }
+    ],
+    "id": "c_one_subzone",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "subzone"
+      }
+     ],
+     "sum": {
+      "index": [
+       "u",
+       "s"
+      ],
+      "var": "sub"
+     }
+    },
+    "note": "every cell is in exactly one sub-zone",
+    "relation": "=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "u",
+      "set": "cell"
+     },
+     {
+      "index": "s",
+      "set": "subzone"
+     },
+     {
+      "index": "z",
+      "set": "zone",
+      "via": {
+       "from": "s",
+       "rel": "belongs_to"
+      }
+     }
+    ],
+    "id": "c_inside_its_zone",
+    "left": {
+     "index": [
+      "u",
+      "s"
+     ],
+     "var": "sub"
+    },
+    "note": "a sub-zone's cells are in the zone it belongs to",
+    "relation": "<=",
+    "right": {
+     "index": [
+      "u",
+      "z"
+     ],
+     "var": "assign"
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "subzone"
+     }
+    ],
+    "id": "c_subzone_enough",
+    "left": {
+     "over": [
+      {
+       "index": "u",
+       "set": "cell"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "population",
+         "of": "u"
+        }
+       },
+       {
+        "index": [
+         "u",
+         "s"
+        ],
+        "var": "sub"
+       }
+      ]
+     }
+    },
+    "note": "each sub-zone holds at least its share of the people, less 15%",
+    "relation": ">=",
+    "right": {
+     "const": 9240
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "subzone"
+     }
+    ],
+    "id": "c_subzone_not_too_many",
+    "left": {
+     "over": [
+      {
+       "index": "u",
+       "set": "cell"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "population",
+         "of": "u"
+        }
+       },
+       {
+        "index": [
+         "u",
+         "s"
+        ],
+        "var": "sub"
+       }
+      ]
+     }
+    },
+    "note": "and at most its share, plus 15%",
+    "relation": "<=",
+    "right": {
+     "const": 12502
+    },
+    "severity": "hard"
+   },
+   {
+    "connected": {
+     "assign": {
+      "index": [
+       "u",
+       "s"
+      ],
+      "var": "sub"
+     },
+     "groups": {
+      "index": "s",
+      "set": "subzone"
+     },
+     "units": {
+      "index": "u",
+      "set": "cell"
+     },
+     "via": "adjacent"
+    },
+    "id": "c_subzone_connected",
+    "note": "every sub-zone is one connected piece",
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "u",
+        "set": "cell"
+       },
+       {
+        "index": "z",
+        "set": "zone"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "add": [
+          {
+           "mul": [
+            {
+             "add": [
+              {
+               "mul": [
+                {
+                 "const": 2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "u"
+                 }
+                }
+               ]
+              },
+              {
+               "attr": {
+                "name": "row",
+                "of": "u"
+               }
+              },
+              {
+               "mul": [
+                {
+                 "const": -2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "z"
+                 }
+                }
+               ]
+              },
+              {
+               "mul": [
+                {
+                 "const": -1
+                },
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "z"
+                 }
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "add": [
+              {
+               "mul": [
+                {
+                 "const": 2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "u"
+                 }
+                }
+               ]
+              },
+              {
+               "attr": {
+                "name": "row",
+                "of": "u"
+               }
+              },
+              {
+               "mul": [
+                {
+                 "const": -2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "z"
+                 }
+                }
+               ]
+              },
+              {
+               "mul": [
+                {
+                 "const": -1
+                },
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "z"
+                 }
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "mul": [
+            {
+             "const": 3
+            },
+            {
+             "mul": [
+              {
+               "add": [
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "u"
+                 }
+                },
+                {
+                 "mul": [
+                  {
+                   "const": -1
+                  },
+                  {
+                   "attr": {
+                    "name": "row",
+                    "of": "z"
+                   }
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "add": [
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "u"
+                 }
+                },
+                {
+                 "mul": [
+                  {
+                   "const": -1
+                  },
+                  {
+                   "attr": {
+                    "name": "row",
+                    "of": "z"
+                   }
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "index": [
+          "u",
+          "z"
+         ],
+         "var": "assign"
+        }
+       ]
+      }
+     },
+     "id": "o_zones_compact",
+     "weight": 1
+    },
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "u",
+        "set": "cell"
+       },
+       {
+        "index": "s",
+        "set": "subzone"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "add": [
+          {
+           "mul": [
+            {
+             "add": [
+              {
+               "mul": [
+                {
+                 "const": 2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "u"
+                 }
+                }
+               ]
+              },
+              {
+               "attr": {
+                "name": "row",
+                "of": "u"
+               }
+              },
+              {
+               "mul": [
+                {
+                 "const": -2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "s"
+                 }
+                }
+               ]
+              },
+              {
+               "mul": [
+                {
+                 "const": -1
+                },
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "s"
+                 }
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "add": [
+              {
+               "mul": [
+                {
+                 "const": 2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "u"
+                 }
+                }
+               ]
+              },
+              {
+               "attr": {
+                "name": "row",
+                "of": "u"
+               }
+              },
+              {
+               "mul": [
+                {
+                 "const": -2
+                },
+                {
+                 "attr": {
+                  "name": "col",
+                  "of": "s"
+                 }
+                }
+               ]
+              },
+              {
+               "mul": [
+                {
+                 "const": -1
+                },
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "s"
+                 }
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "mul": [
+            {
+             "const": 3
+            },
+            {
+             "mul": [
+              {
+               "add": [
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "u"
+                 }
+                },
+                {
+                 "mul": [
+                  {
+                   "const": -1
+                  },
+                  {
+                   "attr": {
+                    "name": "row",
+                    "of": "s"
+                   }
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "add": [
+                {
+                 "attr": {
+                  "name": "row",
+                  "of": "u"
+                 }
+                },
+                {
+                 "mul": [
+                  {
+                   "const": -1
+                  },
+                  {
+                   "attr": {
+                    "name": "row",
+                    "of": "s"
+                   }
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "index": [
+          "u",
+          "s"
+         ],
+         "var": "sub"
+        }
+       ]
+      }
+     },
+     "id": "o_subzones_compact",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {},
+  "relationships": [
+   "adjacent",
+   "belongs_to"
+  ],
+  "sets": [
+   "cell",
+   "zone",
+   "subzone"
+  ],
+  "variables": {
+   "assign": {
+    "domain": "binary",
+    "index": [
+     "cell",
+     "zone"
+    ]
+   },
+   "sub": {
+    "domain": "binary",
+    "index": [
+     "cell",
+     "subzone"
+    ]
+   }
+  },
+  "version": 2
+ },
+ "weekly_rota": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "d",
+      "set": "day"
+     },
+     {
+      "index": "s",
+      "set": "shift"
+     }
+    ],
+    "id": "c_cover_demand",
+    "left": {
+     "over": [
+      {
+       "index": "e",
+       "set": "employee"
+      }
+     ],
+     "sum": {
+      "index": [
+       "e",
+       "d",
+       "s"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "each day/shift is staffed to at least demand[day, shift]",
+    "relation": ">=",
+    "right": {
+     "index": [
+      "d",
+      "s"
+     ],
+     "par": "demand"
+    },
+    "severity": "soft",
+    "weight": 100
+   },
+   {
+    "forall": [
+     {
+      "index": "e",
+      "set": "employee"
+     },
+     {
+      "index": "d",
+      "set": "day"
+     }
+    ],
+    "id": "c_one_shift_per_day",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "shift"
+      }
+     ],
+     "sum": {
+      "index": [
+       "e",
+       "d",
+       "s"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "nobody works two shifts in a day",
+    "relation": "<=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "e",
+      "set": "employee"
+     }
+    ],
+    "id": "c_max_hours",
+    "left": {
+     "mul": [
+      {
+       "const": 8
+      },
+      {
+       "over": [
+        {
+         "index": "d",
+         "set": "day"
+        },
+        {
+         "index": "s",
+         "set": "shift"
+        }
+       ],
+       "sum": {
+        "index": [
+         "e",
+         "d",
+         "s"
+        ],
+        "var": "assign"
+       }
+      }
+     ]
+    },
+    "note": "weekly hours stay within hours_per_week; every seeded shift is eight hours long",
+    "relation": "<=",
+    "right": {
+     "attr": {
+      "name": "hours_per_week",
+      "of": "e"
+     }
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "d",
+      "set": "day"
+     },
+     {
+      "index": "r",
+      "set": "unit",
+      "where": [
+       {
+        "attr": "cost_centre",
+        "op": "=",
+        "value": "OPS-100"
+       }
+      ]
+     },
+     {
+      "index": "late",
+      "set": "shift",
+      "where": [
+       {
+        "attr": "starts_at",
+        "op": "=",
+        "value": "14:00"
+       }
+      ]
+     }
+    ],
+    "id": "c_north_region_lates",
+    "left": {
+     "over": [
+      {
+       "index": "sub",
+       "set": "unit",
+       "via": {
+        "depth": "any_or_self",
+        "from": "r",
+        "rel": "reports_to"
+       }
+      },
+      {
+       "index": "e",
+       "set": "employee",
+       "via": {
+        "rel": "works_in",
+        "to": "sub"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "e",
+       "d",
+       "late"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "North Region puts three people on the late shift every day, counting the depots under it",
+    "relation": ">=",
+    "right": {
+     "const": 3
+    },
+    "severity": "soft",
+    "weight": 4
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "e",
+        "set": "employee"
+       },
+       {
+        "index": "d",
+        "set": "day"
+       },
+       {
+        "index": "s",
+        "set": "shift"
+       }
+      ],
+      "sum": {
+       "index": [
+        "e",
+        "d",
+        "s"
+       ],
+       "var": "assign"
+      }
+     },
+     "id": "o_shifts_worked",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "demand": {
+    "index": [
+     "day",
+     "shift"
+    ]
+   }
+  },
+  "relationships": [
+   "reports_to",
+   "works_in"
+  ],
+  "sets": [
+   "employee",
+   "unit",
+   "day",
+   "shift"
+  ],
+  "variables": {
+   "assign": {
+    "domain": "binary",
+    "index": [
+     "employee",
+     "day",
+     "shift"
+    ]
+   }
+  },
+  "version": 1
+ },
+ "workshop": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "m",
+      "set": "machine"
+     }
+    ],
+    "id": "c_one_at_a_time",
+    "no_overlap": {
+     "interval": {
+      "index": [
+       "j",
+       "m"
+      ],
+      "var": "op"
+     },
+     "over": [
+      {
+       "index": "j",
+       "set": "job"
+      }
+     ]
+    },
+    "note": "each machine works on one job at a time",
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "j",
+      "set": "job"
+     },
+     {
+      "index": "m",
+      "set": "machine"
+     },
+     {
+      "index": "n",
+      "set": "machine",
+      "via": {
+       "from": "m",
+       "rel": "feeds"
+      }
+     }
+    ],
+    "id": "c_route",
+    "left": {
+     "index": [
+      "j",
+      "m"
+     ],
+     "var": "finish"
+    },
+    "note": "a job reaches the next machine only once this one is done with it",
+    "relation": "<=",
+    "right": {
+     "index": [
+      "j",
+      "n"
+     ],
+     "var": "begin"
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "j",
+      "set": "job"
+     },
+     {
+      "index": "m",
+      "set": "machine"
+     }
+    ],
+    "id": "c_makespan",
+    "left": {
+     "index": [
+      "j",
+      "m"
+     ],
+     "var": "finish"
+    },
+    "note": "the makespan is when the last operation ends",
+    "relation": "<=",
+    "right": {
+     "index": [],
+     "var": "makespan"
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "index": [],
+      "var": "makespan"
+     },
+     "id": "o_makespan",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "duration": {
+    "index": [
+     "job",
+     "machine"
+    ]
+   }
+  },
+  "relationships": [
+   "feeds"
+  ],
+  "sets": [
+   "job",
+   "machine"
+  ],
+  "variables": {
+   "begin": {
+    "domain": "integer",
+    "index": [
+     "job",
+     "machine"
+    ],
+    "lower": 0,
+    "upper": 40
+   },
+   "finish": {
+    "domain": "integer",
+    "index": [
+     "job",
+     "machine"
+    ],
+    "lower": 0,
+    "upper": 40
+   },
+   "makespan": {
+    "domain": "integer",
+    "index": [],
+    "lower": 0,
+    "upper": 40
+   },
+   "op": {
+    "domain": "interval",
+    "end": "finish",
+    "index": [
+     "job",
+     "machine"
+    ],
+    "size": "duration",
+    "start": "begin"
+   }
+  },
+  "version": 2
+ }
+}
