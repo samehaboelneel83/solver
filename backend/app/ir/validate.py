@@ -1627,7 +1627,7 @@ class _DomainChecker:
             return Refusal(
                 "connected_via_not_self",
                 [*loc, "via"],
-                f"{body['via']!r} joins {ends[0]} to {ends[1]}; the {units} cells are one piece "
+                f"{body['via']!r} joins {ends[0]} to {ends[1]}; a group of {units} is one piece "
                 f"only over a relationship from {units} to {units}",
             )
         return None
