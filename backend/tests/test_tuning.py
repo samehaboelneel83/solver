@@ -21,7 +21,7 @@ def test_the_setting_reads_options_per_backend_each_whitelisted():
 
 @pytest.mark.parametrize("text, why", [
     ("cp-sat.symmetry_level=7", "not a whitelisted value"),
-    ("cp-sat.threads=4", "not a whitelisted value"),
+    ("cp-sat.threads=4", "'threads' is not a whitelisted option for cp-sat: linearization_level, symmetry_level"),
     ("gurobi.presolve=1", "has no whitelisted options"),
     ("symmetry_level", "is not backend.option=value"),
 ])

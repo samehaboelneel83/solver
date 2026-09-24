@@ -62,6 +62,9 @@ def check(backend: str, params: dict[str, Any] | None) -> dict[str, Any]:
 
 def parse(backend: str, name: str, text: str) -> Any:
     """A value as the bench's command line gives it, cast like the whitelist."""
+    if name not in WHITELIST.get(backend, {}):
+        raise ValueError(f"{name!r} is not a whitelisted option for {backend}: "
+                         f"{', '.join(sorted(WHITELIST.get(backend, {}))) or 'it has none'}")
     for value in WHITELIST.get(backend, {}).get(name, ()):
         if str(value) == text:
             return value
