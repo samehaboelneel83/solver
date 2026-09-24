@@ -182,17 +182,9 @@ def _looks_like_memory(exc: BaseException) -> bool:
 
 
 def _no_core_dump() -> None:  # pragma: no cover -- in the child
-    """No core dump when a limit kills the child. A solver's address space
-    is gigabytes, and under Docker Desktop the kernel pipes each dump to the
-    host's disk (%TEMP%/wsl-crashes) -- ten filled 13.8 GB of C: on
-    2026-09-23. A piped dump ignores `RLIMIT_CORE` 0; a process that is not
-    dumpable (`PR_SET_DUMPABLE` 0) is never dumped at all."""
-    try:
-        import ctypes
+    from app.solve.nodump import forbid
 
-        ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE, 0
-    except (OSError, AttributeError):
-        pass
+    forbid()
 
 
 def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # pragma: no cover -- in the child

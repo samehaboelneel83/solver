@@ -10,6 +10,11 @@ from __future__ import annotations
 import pickle
 import sys
 
+from app.solve.nodump import forbid
+
+# A new program: the sandbox's no-dump flag did not survive the exec.
+forbid()
+
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv

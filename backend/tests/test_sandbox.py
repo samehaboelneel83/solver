@@ -132,3 +132,16 @@ def test_a_killed_solve_leaves_no_core_file():
     """Under Docker Desktop a core dump lands on the host's disk: ten of a
     solver's filled 13.8 GB of C: on 2026-09-23."""
     assert sandbox.run(f"{HERE}:dumpable", {}, time_limit=5) == 0
+
+
+def test_the_highs_worker_is_not_dumpable_either():
+    """It is started as a new program, and `exec` resets the flag: a HiGHS
+    worker killed at its CPU limit left a 0.9 GB dump on 2026-09-24."""
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-c", "import ctypes, app.solve.highs_worker; print(ctypes.CDLL(None).prctl(3, 0, 0, 0, 0))"],
+        capture_output=True, text=True, check=True,
+    )
+    assert out.stdout.strip() == "0"
