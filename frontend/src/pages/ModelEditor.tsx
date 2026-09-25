@@ -793,8 +793,8 @@ function ConstraintCard({
               onChange={(severity) => {
                 const next = severity as Constraint["severity"];
                 if (next === "soft") {
-                  // A preferred rule takes no condition (contract: when_on_soft).
-                  const { when: _unswitched, ...rest } = constraint;
+                  // A preferred rule takes no condition and no chance (contract: when_on_soft, chance_misplaced).
+                  const { when: _unswitched, chance: _unchanced, ...rest } = constraint;
                   onChange({
                     ...rest,
                     severity: next,
@@ -855,13 +855,73 @@ function ConstraintCard({
                 onChange(rest);
                 return;
               }
-              onChange({ ...constraint, when });
+              // A conditional rule takes no chance: the chance is its own switch (contract: chance_misplaced).
+              const { chance: _dropped, ...rest } = constraint;
+              onChange({ ...rest, when });
             }}
           />
+          {constraint.severity !== "soft" && !constraint.when && (
+            <ChanceField
+              id={`${idField}-chance`}
+              chance={constraint.chance}
+              onChange={(chance) => {
+                const { chance: _previous, ...rest } = constraint;
+                onChange(chance === undefined ? rest : { ...rest, chance });
+              }}
+            />
+          )}
         </TreeView>
       )}
     </TreeItem>
     </article>
+  );
+}
+
+/**
+ * A rule's chance (version 2, queue R8): the share of a stochastic solve's
+ * sampled futures it may fail in, typed as a percentage. Empty is never --
+ * every other solve holds the rule always, whatever this says.
+ */
+function ChanceField({
+  id,
+  chance,
+  onChange,
+}: {
+  id: string;
+  chance: { epsilon: number } | undefined;
+  onChange: (chance: { epsilon: number } | undefined) => void;
+}) {
+  const [text, setText] = useState(chance ? String(Number((chance.epsilon * 100).toPrecision(6))) : "");
+  const percent = text === "" ? null : Number(text);
+  const valid = percent === null || (Number.isFinite(percent) && percent > 0 && percent < 100);
+  return (
+    <div className="mt-2">
+      <label className="block text-xs text-slate-600" htmlFor={id}>
+        May fail in at most this % of sampled futures (a stochastic solve; empty: never)
+      </label>
+      <input
+        id={id}
+        inputMode="decimal"
+        className={`${INPUT_CLASS} w-28 text-sm`}
+        value={text}
+        aria-invalid={!valid}
+        onChange={(event) => {
+          const raw = event.target.value.trim();
+          setText(raw);
+          if (raw === "") {
+            onChange(undefined);
+            return;
+          }
+          const next = Number(raw);
+          if (Number.isFinite(next) && next > 0 && next < 100) onChange({ epsilon: next / 100 });
+        }}
+      />
+      {!valid && (
+        <p role="alert" className="mt-1 text-xs text-red-600">
+          A share of futures is more than 0% and less than 100%.
+        </p>
+      )}
+    </div>
   );
 }
 

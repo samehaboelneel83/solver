@@ -52,6 +52,8 @@ export type Constraint = {
   weight?: number;
   /** The rule holds only while this yes-or-no decision is `is` (version 2). */
   when?: When;
+  /** It may fail in at most this share of a stochastic solve's sampled futures (version 2, queue R8). */
+  chance?: { epsilon: number };
   /** A scheduling rule (version 2) in place of left/relation/right. Kept
    * and shown by the editor, not yet built in it. */
   no_overlap?: SchedulingBody;

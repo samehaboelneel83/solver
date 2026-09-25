@@ -1064,3 +1064,23 @@ describe("the domain's check of the draft (Blocks 4)", () => {
     );
   });
 });
+
+describe("a rule's chance in the forms (queue R8)", () => {
+  it("writes the percentage as an epsilon, and a preferred rule drops it", async () => {
+    renderPage();
+    const field = await screen.findByLabelText(/May fail in at most this % of sampled futures/i);
+    fireEvent.change(field, { target: { value: "10" } });
+    await waitFor(() => {
+      const draft = JSON.parse(localStorage.getItem("solver_model_draft_1") ?? "{}");
+      expect(draft.ir.constraints[0].chance).toEqual({ epsilon: 0.1 });
+    });
+    fireEvent.change(field, { target: { value: "100" } });
+    expect(screen.getByText("A share of futures is more than 0% and less than 100%.")).toBeInTheDocument();
+    const strength = screen.getAllByLabelText("Strength")[0];
+    fireEvent.change(strength, { target: { value: "soft" } });
+    await waitFor(() => {
+      const draft = JSON.parse(localStorage.getItem("solver_model_draft_1") ?? "{}");
+      expect(draft.ir.constraints[0]).not.toHaveProperty("chance");
+    });
+  });
+});
