@@ -1118,6 +1118,9 @@ def _execute(
         extra["decomposition"] = decomposition_record
     if network_record is not None:
         extra["network_run"] = network_record
+    computed = _computed_sources(db, run_id, ir)
+    if computed:
+        extra["computed_inputs"] = computed
     if start_record is not None:
         extra[start_key] = start_record
     if search_record is not None:
@@ -1445,6 +1448,31 @@ class SettingUnusable(ValueError):
     def __init__(self, key: str, message: str) -> None:
         super().__init__(message)
         self.key = key
+
+
+def _computed_sources(db: Session, run_id: int, ir: dict[str, Any]) -> list[dict[str, Any]]:
+    """Where the parameters and relationships this model reads came from, when the platform computed
+    them from the map (queue R16a): each one's name and `source`. Typed-in data says nothing."""
+    parameters = sorted((ir.get("parameters") or {}).keys())
+    relationships = sorted(ir.get("relationships") or [])
+    if not parameters and not relationships:
+        return []
+    rows = db.execute(
+        text(
+            "SELECT 'parameter' AS kind, pd.name, pd.source FROM parameter_def pd"
+            "  JOIN problem p ON p.domain_id = pd.domain_id JOIN scenario s ON s.problem_id = p.id"
+            "  JOIN run r ON r.scenario_id = s.id"
+            " WHERE r.id = :r AND pd.source IS NOT NULL AND pd.name = ANY(:params)"
+            " UNION ALL "
+            "SELECT 'relationship', rt.name, rt.source FROM relationship_type rt"
+            "  JOIN problem p ON p.domain_id = rt.domain_id JOIN scenario s ON s.problem_id = p.id"
+            "  JOIN run r ON r.scenario_id = s.id"
+            " WHERE r.id = :r AND rt.source IS NOT NULL AND rt.name = ANY(:rels)"
+            " ORDER BY 1, 2"
+        ),
+        {"r": run_id, "params": parameters, "rels": relationships},
+    ).all()
+    return [{**source, "input": kind, "name": name} for kind, name, source in rows]
 
 
 def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:

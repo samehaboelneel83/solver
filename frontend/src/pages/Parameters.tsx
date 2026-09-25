@@ -1,5 +1,6 @@
 import { FormEvent, useId, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import MeasureFromMap from "../components/MeasureFromMap";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
 import {
   ErrorSummary,
@@ -140,11 +141,14 @@ function ForDomain({ domainId }: { domainId: Id }) {
         </div>
       ) : (
         canEdit && (
+        <>
+        <MeasureFromMap domainId={domainId} entityTypes={entityTypes} />
         <CreateParameterForm
           domainId={domainId}
           entityTypes={entityTypes}
           onCreated={(id) => setSearchParams({ parameter: String(id) }, { replace: true })}
         />
+        </>
         )
       )}
     </>

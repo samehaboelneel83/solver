@@ -46,6 +46,9 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.v1_problem import Template
+from app.facilities import FACILITY_COVERAGE
+from app.facilities import build_ir as facility_ir
+from app.facilities import build_seed as facility_seed
 from app.regions import REGION_PARTITIONING, build_ir, build_seed
 
 FEED_BLEND = "feed_blend"
@@ -278,6 +281,7 @@ SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     LOAD_BALANCE: (LOAD_BALANCE_SEED, LOAD_BALANCE_IR),
     WORKSHOP: (WORKSHOP_SEED, WORKSHOP_IR),
     REGION_PARTITIONING: (build_seed(), build_ir()),
+    FACILITY_COVERAGE: (facility_seed(), facility_ir()),
 }
 
 

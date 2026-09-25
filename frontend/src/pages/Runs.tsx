@@ -22,6 +22,7 @@ useScenario,
   type Id,
   type Run,
   type RunStatus,
+  type ComputedSource,
 } from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
@@ -136,6 +137,17 @@ export function metaheuristicText(record: MetaheuristicRecord): string {
   return record.kept
     ? `${method} for ${record.seconds}s after ${record.after} ended with no answer`
     : `${method} for ${record.seconds}s after ${record.after}: nothing that keeps every rule`;
+}
+
+/** What the platform computed from the map for this run (queue R16a), in a line per input. */
+export function computedText(inputs: (ComputedSource & { input: string; name: string })[]): string {
+  return inputs
+    .map((i) =>
+      i.kind === "within"
+        ? `${i.name}: ${i.from} to ${i.to} within ${Number(((i.max_m ?? 0) / 1000).toPrecision(3))} km, straight line, ${i.computed_at.slice(0, 10)}`
+        : `${i.name}: ${i.from} to ${i.to} in ${i.unit ?? "m"}, straight line${i.nearest ? `, nearest ${i.nearest} kept` : ""}, ${i.computed_at.slice(0, 10)}`
+    )
+    .join("; ");
 }
 
 /** What `solve.routing_start` (queue R15b) did: the routes the exact solver started from, or why none. */
@@ -808,6 +820,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     selector?: SelectorRecord;
     connected_start_run?: ConnectedStartRecord;
     routing_start_run?: RoutingStartRecord;
+    computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
@@ -1001,6 +1014,9 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.computed_inputs && params.computed_inputs.length > 0 && (
+            <Fact label="Computed from the map" value={computedText(params.computed_inputs)} />
+          )}
           {params.metaheuristic_run && <Fact label="Searched by" value={metaheuristicText(params.metaheuristic_run)} />}
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
           {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (

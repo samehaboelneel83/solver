@@ -1,4 +1,261 @@
 {
+ "facility_coverage": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "c",
+      "set": "customer"
+     }
+    ],
+    "id": "c_served_once",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site"
+      }
+     ],
+     "sum": {
+      "index": [
+       "s",
+       "c"
+      ],
+      "var": "serve"
+     }
+    },
+    "note": "every customer is served by exactly one site",
+    "relation": "=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "site"
+     },
+     {
+      "index": "c",
+      "set": "customer"
+     }
+    ],
+    "id": "c_only_open",
+    "left": {
+     "index": [
+      "s",
+      "c"
+     ],
+     "var": "serve"
+    },
+    "note": "only an open site serves",
+    "relation": "<=",
+    "right": {
+     "index": [
+      "s"
+     ],
+     "var": "open"
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "site"
+     }
+    ],
+    "id": "c_capacity",
+    "left": {
+     "over": [
+      {
+       "index": "c",
+       "set": "customer"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "demand",
+         "of": "c"
+        }
+       },
+       {
+        "index": [
+         "s",
+         "c"
+        ],
+        "var": "serve"
+       }
+      ]
+     }
+    },
+    "note": "a site serves no more demand than its capacity",
+    "relation": "<=",
+    "right": {
+     "mul": [
+      {
+       "attr": {
+        "name": "capacity",
+        "of": "s"
+       }
+      },
+      {
+       "index": [
+        "s"
+       ],
+       "var": "open"
+      }
+     ]
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "c",
+      "set": "customer"
+     }
+    ],
+    "id": "c_covered",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site",
+       "via": {
+        "rel": "reaches",
+        "to": "c"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "s"
+      ],
+      "var": "open"
+     }
+    },
+    "note": "every customer has an open site within 4 km",
+    "relation": ">=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "s",
+        "set": "site"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "attr": {
+          "name": "fixed_cost",
+          "of": "s"
+         }
+        },
+        {
+         "index": [
+          "s"
+         ],
+         "var": "open"
+        }
+       ]
+      }
+     },
+     "id": "o_fixed",
+     "weight": 1
+    },
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "s",
+        "set": "site"
+       },
+       {
+        "index": "c",
+        "set": "customer"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "mul": [
+          {
+           "attr": {
+            "name": "demand",
+            "of": "c"
+           }
+          },
+          {
+           "index": [
+            "s",
+            "c"
+           ],
+           "par": "distance"
+          }
+         ]
+        },
+        {
+         "index": [
+          "s",
+          "c"
+         ],
+         "var": "serve"
+        }
+       ]
+      }
+     },
+     "id": "o_travel",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "distance": {
+    "index": [
+     "site",
+     "customer"
+    ]
+   }
+  },
+  "relationships": [
+   "reaches"
+  ],
+  "sets": [
+   "site",
+   "customer"
+  ],
+  "variables": {
+   "open": {
+    "domain": "binary",
+    "index": [
+     "site"
+    ]
+   },
+   "serve": {
+    "domain": "binary",
+    "index": [
+     "site",
+     "customer"
+    ]
+   }
+  },
+  "version": 2
+ },
  "feed_blend": {
   "constraints": [
    {

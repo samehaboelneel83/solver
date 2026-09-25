@@ -1057,6 +1057,32 @@ export function useParameterValues(id: Id | null | undefined) {
   });
 }
 export const useCreateParameter = () => useV1Mutation(createParameter);
+
+/** Distances and nearness from the map (queue R16a): what the platform computed, and how. */
+export type ComputedSource = {
+  kind: "distance" | "within";
+  metric: string;
+  from: string;
+  to: string;
+  unit?: "m" | "km";
+  nearest?: number;
+  far?: number;
+  max_m?: number;
+  pairs?: number;
+  edges?: number;
+  missing?: string[];
+  computed_at: string;
+};
+export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; unit: "m" | "km"; nearest?: number };
+export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; max_m: number };
+export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>
+  send<{ parameter_id: Id; pairs: number; missing: string[]; source: ComputedSource }>(
+    "POST", `/api/v1/domains/${domainId}/distances`, body);
+export const computeWithin = ({ domainId, ...body }: WithinBody & { domainId: Id }) =>
+  send<{ relationship_type_id: Id; edges: number; missing: string[]; source: ComputedSource }>(
+    "POST", `/api/v1/domains/${domainId}/within`, body);
+export const useComputeDistances = () => useV1Mutation(computeDistances);
+export const useComputeWithin = () => useV1Mutation(computeWithin);
 export const useUpdateParameter = () =>
   useV1Mutation(({ id, body }: { id: Id; body: ParameterDefUpdate }) => updateParameter(id, body));
 export const useDeleteParameter = () => useV1Mutation(deleteParameter);

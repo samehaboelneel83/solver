@@ -240,6 +240,9 @@ class RelationshipType(Base):
     # Migration 0009: lowercase '#rrggbb' (CHECK relationship_type_colour_hex);
     # NULL means "not chosen", and the UI assigns a fallback.
     colour: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0064 (queue R16a): how the edges were made when the platform
+    # made them from the map ("within 5 km"), else NULL -- typed in.
+    source: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Migration 0010 -- see EntityType.updated_at.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
@@ -290,6 +293,9 @@ class ParameterDef(Base):
         Numeric(15, 6), nullable=False, server_default="0"
     )
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0064 (queue R16a): how the values were made when the platform
+    # computed them from the map (metric, unit, date), else NULL -- typed in.
+    source: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ParameterValue(Base):

@@ -802,6 +802,34 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
 
     for spec in seed.get("grids") or []:
         _plant_grid(db, domain_id, spec, entities)
+    # Distances and nearness from the places' shapes (queue R16a), once the places exist.
+    _measure(db, domain_id, seed, types)
+
+
+def _measure(db: Session, domain_id: int, seed: dict[str, Any], types: dict[str, EntityType]) -> None:
+    """A seed's `distances` ({name, from, to, unit?, nearest?}) and `within` ({name, from, to, max_m}),
+    computed as `POST .../distances` and `.../within` do. A name the domain already has is left alone,
+    as every other name in a seed is."""
+    from app.api.distances import DistanceRequest, WithinRequest, write_distances, write_within
+
+    for spec in seed.get("distances") or []:
+        if not isinstance(spec, dict) or spec.get("from") not in types or spec.get("to") not in types:
+            continue
+        if db.execute(select(ParameterDef.id).where(ParameterDef.domain_id == domain_id,
+                                                    ParameterDef.name == spec.get("name"))).scalar_one_or_none():
+            continue
+        write_distances(db, domain_id, DistanceRequest(
+            name=spec["name"], from_type_id=types[spec["from"]].id, to_type_id=types[spec["to"]].id,
+            unit=spec.get("unit", "m"), nearest=spec.get("nearest")), commit=False)
+    for spec in seed.get("within") or []:
+        if not isinstance(spec, dict) or spec.get("from") not in types or spec.get("to") not in types:
+            continue
+        if db.execute(select(RelationshipType.id).where(RelationshipType.domain_id == domain_id,
+                                                        RelationshipType.name == spec.get("name"))).scalar_one_or_none():
+            continue
+        write_within(db, domain_id, WithinRequest(
+            name=spec["name"], from_type_id=types[spec["from"]].id, to_type_id=types[spec["to"]].id,
+            max_m=spec["max_m"]), commit=False)
 
 
 def _plant_grid(db: Session, domain_id: int, spec: Any, entities: dict[tuple[str, str], Entity]) -> None:

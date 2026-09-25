@@ -985,3 +985,15 @@ describe("a chance rule that fell short (queue R8c)", () => {
       "20 futures are few to promise that from: asking for more (up to 50) makes the plan firmer.");
   });
 });
+
+describe("what was computed from the map (queue R16a)", () => {
+  it("names each input, its types, its unit or reach, and its date", async () => {
+    const { computedText } = await import("./Runs");
+    expect(computedText([
+      { input: "parameter", name: "distance", kind: "distance", metric: "straight line (geodesic, WGS84)", from: "site", to: "customer",
+        unit: "m", nearest: 5, computed_at: "2026-09-25T12:00:00+00:00" },
+      { input: "relationship", name: "reaches", kind: "within", metric: "straight line (geodesic, WGS84)", from: "site", to: "customer",
+        max_m: 5000, computed_at: "2026-09-25T12:00:00+00:00" },
+    ])).toBe("distance: site to customer in m, straight line, nearest 5 kept, 2026-09-25; reaches: site to customer within 5 km, straight line, 2026-09-25");
+  });
+});
