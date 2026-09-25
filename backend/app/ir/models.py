@@ -102,12 +102,13 @@ class Const(_Model):
 
 class ParRef(_Model):
     par: Name
-    index: list[Name] = Field(default_factory=list)
+    # Queue R20b: a position may be an entity-valued parameter's cell.
+    index: list[Union[Name, "ParRef"]] = Field(default_factory=list)
 
 
 class VarRef(_Model):
     var: Name
-    index: list[Name] = Field(default_factory=list)
+    index: list[Union[Name, ParRef]] = Field(default_factory=list)
 
 
 class AttrPath(_Model):
@@ -173,6 +174,8 @@ class ScenarioUncertainty(_Model):
 
 class Parameter(_Model):
     index: list[Name]
+    # Queue R20b: its values are entities of this set.
+    entity: Optional[Name] = None
     # How the values may be wrong (version 2): what a robust solve reads.
     uncertainty: Optional[Annotated[Union[IntervalUncertainty, ScenarioUncertainty], Field(discriminator="kind")]] = None
 

@@ -63,15 +63,19 @@ def live_data(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]
                          THEN jsonb_object_agg(t.name, e.key)
                          ELSE jsonb_object_agg((u.ord - 1)::text, e.key)
                        END
-                       || jsonb_build_object('value', trim_scale(pv.value)) AS row_json
+                       || jsonb_build_object('value', CASE WHEN pv.value_entity_id IS NULL
+                                                           THEN to_jsonb(trim_scale(pv.value))
+                                                           ELSE to_jsonb(ev.key) END) AS row_json
                   FROM parameter_def pd
                   JOIN parameter_value pv ON pv.parameter_def_id = pd.id
                   CROSS JOIN LATERAL unnest(pv.entity_ids) WITH ORDINALITY AS u(eid, ord)
                   JOIN entity e ON e.id = u.eid
-                  JOIN entity_type t ON t.id = e.entity_type_id
+                  JOIN entity_type t ON t.id = pd.index_type_ids[u.ord]
+                  LEFT JOIN entity ev ON ev.id = pv.value_entity_id
                  WHERE pd.domain_id = :d AND pd.name = :n
-                 GROUP BY pv.parameter_def_id, pv.entity_ids, pv.value, pd.index_type_ids
-                HAVING bool_and(e.active)
+                 GROUP BY pv.parameter_def_id, pv.entity_ids, pv.value, pd.index_type_ids,
+                          pv.value_entity_id, ev.key, ev.active
+                HAVING bool_and(e.active) AND coalesce(ev.active, true)
               ) q
             """,
             domain_id,
@@ -81,7 +85,8 @@ def live_data(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]
         default = db.execute(
             text(
                 """
-                SELECT (jsonb_build_object('v', trim_scale(pd.default_value))) -> 'v'
+                SELECT CASE WHEN pd.value_type_id IS NULL
+                            THEN (jsonb_build_object('v', trim_scale(pd.default_value))) -> 'v' END
                   FROM parameter_def pd
                  WHERE pd.domain_id = :d AND pd.name = :n
                 """

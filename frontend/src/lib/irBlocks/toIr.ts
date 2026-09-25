@@ -14,6 +14,7 @@
  * name at that place.
  */
 import type { IrLoc, SerialBlock } from "./toBlocks";
+import { parseCell } from "./catalogue";
 
 type Json = Record<string, unknown>;
 type SavedWorkspace = { blocks?: { blocks?: SerialBlock[] } };
@@ -99,7 +100,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
         const arity = Number(state.arity ?? 0);
         return {
           [b.type === "ir_var" ? "var" : "par"]: fieldOf(b, "NAME"),
-          index: Array.from({ length: arity }, (_, i) => fieldOf(b, `IDX${i}`)),
+          index: Array.from({ length: arity }, (_, i) => parseCell(fieldOf(b, `IDX${i}`))),
         };
       }
       case "ir_attr": {
@@ -181,6 +182,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       const gamma = fieldOf(d, "GAMMA");
       parameters[name] = {
         index: [...((((d.extraState ?? {}) as Json).index as string[]) ?? [])],
+        ...(fieldOf(d, "ENTITY") ? { entity: fieldOf(d, "ENTITY") } : {}),
         ...(kind === "interval"
           ? { uncertainty: { kind, deviation: numberOr(fieldOf(d, "DEVIATION"), null), ...(gamma !== "" ? { gamma: numberOr(gamma, null) } : {}) } }
           : kind === "scenarios"

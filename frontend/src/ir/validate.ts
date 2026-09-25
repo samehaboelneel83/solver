@@ -70,7 +70,7 @@ const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth", "as
 const isEdge = (bound: string | undefined): boolean => typeof bound === "string" && bound.startsWith(EDGE_MARK);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", "stage", ...INTERVAL_KEYS]);
-const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty"]);
+const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty", "entity"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
 const TERM_KEYS: Record<string, readonly string[]> = {
@@ -139,6 +139,8 @@ class ShapeChecker {
   readonly sets = new Set<string>();
   readonly relationships = new Set<string>();
   readonly parameters = new Map<string, string[]>();
+  /** Queue R20b: parameter name -> the set its values are entities of. */
+  readonly entityParameters = new Map<string, string>();
   readonly variables = new Map<string, string[]>();
   terms = 0;
 
@@ -267,6 +269,19 @@ class ShapeChecker {
       }
       const uncertainty = this.checkUncertainty(name, declaration, at);
       if (uncertainty) return uncertainty;
+      if ("entity" in declaration) {
+        const of = declaration.entity;
+        const v1 = this.ir.version === 1;
+        if (v1 || typeof of !== "string" || !this.sets.has(of) || "uncertainty" in declaration) {
+          return refusal(
+            "parameter_entity_invalid",
+            [...at, "entity"],
+            `'${name}''s values are entities of ${show(of)}, which ` +
+              (v1 ? "needs version 2" : "uncertainty" in declaration ? "has no uncertainty" : "this model does not declare in sets")
+          );
+        }
+        this.entityParameters.set(name, of);
+      }
       this.parameters.set(name, index as string[]);
     }
     return null;
@@ -1163,7 +1178,7 @@ class ShapeChecker {
       scope.set(index, setName);
       const edge = this.checkEdge(binding, at, scope);
       if (edge) return edge;
-      const where = this.checkWhere(binding, at);
+      const where = this.checkWhere(binding, at, new Map([...scope].filter(([k]) => k !== index)));
       if (where) return where;
     }
     return scope;
@@ -1256,7 +1271,7 @@ class ShapeChecker {
     return null;
   }
 
-  private checkWhere(binding: Json, at: IrLoc): IrRefusal | null {
+  private checkWhere(binding: Json, at: IrLoc, scope: Map<string, string> = new Map()): IrRefusal | null {
     if (!("where" in binding)) return null;
     const filters = binding.where;
     if (!Array.isArray(filters)) {
@@ -1303,6 +1318,27 @@ class ShapeChecker {
         return refusal("where_filter_malformed", [...here, "value"], "a filter carries a value");
       }
       const value = entry.value;
+      if (isObject(value)) {
+        // Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
+        const fits =
+          entry.attr === "id" &&
+          (operator === "=" || operator === "!=") &&
+          Object.keys(value).length === 2 &&
+          "par" in value &&
+          "index" in value &&
+          this.entityParameters.get(value.par as string) === binding.set;
+        if (!fits) {
+          return refusal(
+            "where_parameter_invalid",
+            [...here, "value"],
+            "a filter compares with a parameter only as id = or != a parameter whose values are entities of " +
+              `'${String(binding.set)}'`
+          );
+        }
+        const problem = this.reference(value, [...here, "value"], scope, "par", this.parameters);
+        if (problem) return problem;
+        continue;
+      }
       const ok = LIST_OPERATORS.has(operator)
         ? Array.isArray(value) && value.length > 0 && value.every(isScalar)
         : isScalar(value);
@@ -1375,6 +1411,14 @@ class ShapeChecker {
       case "const":
         return this.termConst(term, loc);
       case "par":
+        if (this.entityParameters.has(term.par as string)) {
+          return refusal(
+            "entity_parameter_read_as_number",
+            [...loc, "par"],
+            `'${String(term.par)}''s values are entities of ${this.entityParameters.get(term.par as string)}, not ` +
+              "numbers; use it as an index, or in a filter (id = ...)"
+          );
+        }
         return this.reference(term, loc, scope, "par", this.parameters);
       case "var": {
         const problem = this.reference(term, loc, scope, "var", this.variables);
@@ -1411,6 +1455,28 @@ class ShapeChecker {
     return null;
   }
 
+  /** `{par, index}` standing for an entity: an entity-valued parameter, of the set wanted, read here. */
+  private entityIndex(ref: Json, loc: IrLoc, scope: Map<string, string>, wanted: string | undefined): IrRefusal | null {
+    const keys = Object.keys(ref);
+    if (keys.length !== 2 || !("par" in ref) || !("index" in ref) || !this.entityParameters.has(ref.par as string)) {
+      return refusal(
+        "index_entry_invalid",
+        loc,
+        'an index position is an index name, or {"par": <parameter>, "index": [...]} naming a parameter whose ' +
+          "values are entities"
+      );
+    }
+    const of = this.entityParameters.get(ref.par as string);
+    if (wanted !== undefined && of !== wanted) {
+      return refusal(
+        "index_entry_invalid",
+        [...loc, "par"],
+        `'${String(ref.par)}' gives an entity of ${of}, but this position takes one of ${wanted}`
+      );
+    }
+    return this.reference(ref, loc, scope, "par", this.parameters);
+  }
+
   private reference(
     term: Json,
     loc: IrLoc,
@@ -1440,6 +1506,12 @@ class ShapeChecker {
     }
     for (let j = 0; j < subscript.length; j += 1) {
       const index = subscript[j];
+      if (isObject(index)) {
+        // Queue R20b: `preferred_shift[e, d]` in a position -- the entity that cell holds.
+        const problem = this.entityIndex(index, [...loc, "index", j], scope, indexTypes[j]);
+        if (problem) return problem;
+        continue;
+      }
       if (typeof index === "string" && isEdge(scope.get(index))) {
         return refusal(
           "edge_not_an_index",

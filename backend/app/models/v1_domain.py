@@ -307,6 +307,9 @@ class ParameterDef(Base):
         Numeric(15, 6), nullable=False, server_default="0"
     )
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0068 (queue R20b): the entity type this parameter's values
+    # are -- `preferred_shift[employee, day] = shift`. NULL: a number.
+    value_type_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Migration 0064 (queue R16a): how the values were made when the platform
     # computed them from the map (metric, unit, date), else NULL -- typed in.
     source: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -323,7 +326,12 @@ class ParameterValue(Base):
     # keys, so the `parameter_value_validate` trigger checks them instead, and
     # `parameter_value_cleanup` deletes rows whose entities are deleted.
     entity_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
-    value: Mapped[Decimal] = mapped_column(Numeric(15, 6), nullable=False)
+    # A number, or -- for a parameter with a value type (migration 0068,
+    # queue R20b) -- NULL, the cell's value being `value_entity_id`.
+    value: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    value_entity_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True
+    )
     # Migration 0022 -- see EntityType.updated_at. The grid sends only dirty
     # cells, so two people editing different cells do not collide; the same
     # cell still needs a timestamp so a concurrent overwrite is refused.

@@ -28,6 +28,7 @@ import {
   type Term,
 } from "./terms";
 import { fromIrWhere, toIrWhere } from "./whereFilter";
+import { cellText, parseCell } from "../lib/irBlocks/catalogue";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 
 /**
@@ -416,7 +417,10 @@ export function BindingsEditor({
         {bindings.map((binding, position) => {
           const setId = context.setIds[binding.set];
           const attributes = context.attributes[binding.set] ?? [];
-          const hasFilter = setId !== undefined && attributes.length > 0;
+          // A filter on the row's own key (queue R20b: `id = preferred_shift[e, d]`) is not
+          // an attribute the builder offers; it is shown as written and kept as it is.
+          const keyed = (binding.where ?? []).some((f) => f.attr === "id");
+          const hasFilter = setId !== undefined && attributes.length > 0 && !keyed;
           const overName = `Over ${binding.index} in ${binding.set}`;
           return (
             <TreeItem
@@ -486,6 +490,15 @@ export function BindingsEditor({
                   onChange={(next) => replace(position, next)}
                 />
               </div>
+              {keyed && (
+                <p className="text-xs text-slate-600">
+                  Only where{" "}
+                  {(binding.where ?? [])
+                    .map((f) => `${f.attr} ${f.op} ${typeof f.value === "object" && f.value !== null && !Array.isArray(f.value) ? cellText(f.value) : JSON.stringify(f.value)}`)
+                    .join(" and ")}{" "}
+                  (kept as written; edit it in the block view)
+                </p>
+              )}
               {hasFilter ? (
                 <div>
                   <p className="mb-1 text-xs text-slate-600">
@@ -755,9 +768,20 @@ export function ReferencePicker<T extends Reference>({
   const declarations: Record<string, { index: string[]; domain?: string }> = isVar
     ? context.variables
     : context.parameters;
-  const names = Object.keys(declarations).filter(
-    (n) => !isVar || !allow || allow(declarations[n].domain ?? "")
+  const names = Object.keys(declarations).filter((n) =>
+    // An entity-valued parameter (queue R20b) is an index, never a number read.
+    isVar ? !allow || allow(declarations[n].domain ?? "") : !(declarations[n] as { entity?: string }).entity
   );
+  // Its cells stand where a set's index would: `preferred_shift[e, d]`, read at the first
+  // index bound to each of its own sets.
+  const cellsOf = (set: string) =>
+    Object.entries(context.parameters as Record<string, { index: string[]; entity?: string }>)
+      .filter(([, spec]) => spec.entity === set)
+      .map(([parameter, spec]) => {
+        const at = spec.index.map((s) => bound.find((b) => b.set === s)?.index);
+        return at.every((x) => x !== undefined) ? `${parameter}[${at.join(", ")}]` : null;
+      })
+      .filter((x): x is string => x !== null);
   const wantedSets = declarations[name]?.index ?? [];
   const emit = (nextName: string, index: string[]) =>
     onChange((keyed ? { var: nextName, index } : { name: nextName, index }) as T);
@@ -784,15 +808,18 @@ export function ReferencePicker<T extends Reference>({
         <Select
           key={`${name}-${position}`}
           label={`${set} index`}
-          value={value.index[position] ?? ""}
-          options={uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => ({
-            value: b.index,
-            label: `${b.index} in ${b.set}`,
-          }))}
+          value={cellText(value.index[position] ?? "")}
+          options={[
+            ...uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => ({
+              value: b.index,
+              label: `${b.index} in ${b.set}`,
+            })),
+            ...cellsOf(set).map((cell) => ({ value: cell, label: `${cell}, a ${set}` })),
+          ]}
           emptyLabel={`no index over ${set}`}
           onChange={(next) => {
             const indices = [...value.index];
-            indices[position] = next;
+            indices[position] = parseCell(next) as string;
             emit(name, indices);
           }}
         />

@@ -126,6 +126,8 @@ class ParameterDefRead(BaseModel):
     index_type_ids: list[int]
     default_value: QuantityOut
     unit: str | None
+    # Migration 0068 (queue R20b): its values are entities of this type.
+    value_type_id: int | None = None
 
 
 class ParameterDefCreate(BaseModel):
@@ -135,6 +137,7 @@ class ParameterDefCreate(BaseModel):
     # Mirrors the column's server default, so the field can be omitted.
     default_value: Quantity = Decimal(0)
     unit: str | None = None
+    value_type_id: BigintId | None = None
 
     _check_name = field_validator("name")(validate_name)
 
@@ -147,6 +150,7 @@ class ParameterDefUpdate(BaseModel):
     index_type_ids: list[BigintId] | None = Field(default=None, min_length=1)
     default_value: Quantity | None = None
     unit: str | None = None
+    value_type_id: BigintId | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_not_null = field_validator("name", "index_type_ids", "default_value")(reject_null)
@@ -166,7 +170,12 @@ class IndexType(BaseModel):
 
 class Cell(BaseModel):
     entity_ids: list[BigintId]
-    value: Quantity
+    # A number parameter's cell carries `value`; an entity-valued one's
+    # (migration 0068) carries `value_entity_id`, and a null there clears it.
+    value: Quantity | None = None
+    value_entity_id: BigintId | None = None
+    # Read only: the entity's key, for showing an entity cell.
+    value_key: str | None = None
     # Present on a stored cell's GET. Optional on PUT: send the value the
     # form last read to opt in to the stale check, omit it to keep the
     # pre-0022 last-save-wins behaviour (a first write into an empty cell,
@@ -282,10 +291,13 @@ def _grid(db: Session, parameter: ParameterDef) -> ParameterValues:
     # primary keys, and this table's key contains an array (a list).
     rows = db.execute(
         select(
-            ParameterValue.entity_ids, ParameterValue.value, ParameterValue.updated_at
+            ParameterValue.entity_ids, ParameterValue.value, ParameterValue.value_entity_id,
+            ParameterValue.updated_at,
         ).where(ParameterValue.parameter_def_id == parameter.id)
     ).all()
-    entity_ids = {eid for row in rows for eid in row.entity_ids}
+    entity_ids = {eid for row in rows for eid in row.entity_ids} | {
+        row.value_entity_id for row in rows if row.value_entity_id is not None
+    }
     entities = (
         {e.id: e for e in db.query(Entity).filter(Entity.id.in_(entity_ids)).all()}
         if entity_ids
@@ -300,7 +312,13 @@ def _grid(db: Session, parameter: ParameterDef) -> ParameterValues:
             for type_id in parameter.index_type_ids
         ],
         cells=[
-            Cell(entity_ids=list(row.entity_ids), value=row.value, updated_at=row.updated_at)
+            Cell(
+                entity_ids=list(row.entity_ids),
+                value=row.value,
+                value_entity_id=row.value_entity_id,
+                value_key=entities[row.value_entity_id].key if row.value_entity_id in entities else None,
+                updated_at=row.updated_at,
+            )
             for row in rows
         ],
         default_value=parameter.default_value,
@@ -378,6 +396,8 @@ def create_parameter(
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> ParameterDefRead:
     _check_index_types(db, payload.domain_id, payload.index_type_ids)
+    if payload.value_type_id is not None:
+        _check_index_types(db, payload.domain_id, [payload.value_type_id])
     row = ParameterDef(**payload.model_dump())
     db.add(row)
     _commit(db, "parameter_def")
@@ -404,6 +424,15 @@ def update_parameter(
     row = _get_parameter(db, parameter_id, lock="update")
     changes = payload.model_dump(exclude_unset=True)
     new_index = changes.get("index_type_ids")
+    if "value_type_id" in changes and changes["value_type_id"] != row.value_type_id:
+        # A cell holds a number or an entity; changing which would orphan them all.
+        if changes["value_type_id"] is not None:
+            _check_index_types(db, row.domain_id, [changes["value_type_id"]])
+        if db.scalar(select(func.count()).select_from(ParameterValue).where(ParameterValue.parameter_def_id == row.id)):
+            raise HTTPException(
+                status_code=409,
+                detail="cannot change what a parameter's values are while it has stored values; clear them first",
+            )
     if new_index is not None and list(new_index) != list(row.index_type_ids):
         _check_index_types(db, row.domain_id, new_index)
         stored = db.scalar(
@@ -474,23 +503,39 @@ def put_parameter_values(
 
     _check_cells_not_stale(db, parameter.id, payload.cells)
 
+    entity_valued = parameter.value_type_id is not None
+    for index, cell in enumerate(payload.cells):
+        if not entity_valued and cell.value is None:
+            raise field_error(["cells", index, "value"], "a number parameter's cell needs a value", None)
+        if entity_valued and cell.value is not None:
+            raise field_error(
+                ["cells", index, "value"],
+                "this parameter's values are entities: send value_entity_id (null to clear the cell)",
+                cell.value,
+            )
+
     for index, cell in enumerate(payload.cells):
         key = (
             (ParameterValue.parameter_def_id == parameter.id)
             & (ParameterValue.entity_ids == cell.entity_ids)
         )
+        if entity_valued and cell.value_entity_id is None:
+            # No default for an entity: an empty cell is no value.
+            db.execute(delete(ParameterValue).where(key))
+            continue
         upsert = insert(ParameterValue).values(
-            parameter_def_id=parameter.id, entity_ids=cell.entity_ids, value=cell.value
+            parameter_def_id=parameter.id, entity_ids=cell.entity_ids, value=cell.value,
+            value_entity_id=cell.value_entity_id if entity_valued else None,
         )
         upsert = upsert.on_conflict_do_update(
             index_elements=[ParameterValue.parameter_def_id, ParameterValue.entity_ids],
-            set_={"value": upsert.excluded.value},
+            set_={"value": upsert.excluded.value, "value_entity_id": upsert.excluded.value_entity_id},
         )
         try:
             # Written even when it equals the default, so the trigger judges
             # it; then removed, so the grid stays sparse.
             db.execute(upsert)
-            if cell.value == parameter.default_value:
+            if not entity_valued and cell.value == parameter.default_value:
                 db.execute(delete(ParameterValue).where(key))
         except DBAPIError as exc:
             db.rollback()

@@ -541,6 +541,31 @@ matrix over every pair.
 
 ---
 
+#### An entity as a parameter's value (version 2, queue R20b)
+
+```json
+"parameters": { "preferred_shift": { "index": ["employee", "day"], "entity": "shift" } }
+```
+
+A parameter whose definition declares a value type (migration 0068) holds an
+entity of that set in each cell, frozen as the entity's key, with no default.
+The model says so with `entity`; declaring it on a number parameter, or leaving
+it off an entity one, is `parameter_entity_mismatch`. Such a parameter is never
+read as a number (`entity_parameter_read_as_number`); it is used two ways:
+
+- **As an index.** A position of a `var` or `par` may be the cell itself:
+  `{"var": "assign", "index": ["e", "d", {"par": "preferred_shift", "index": ["e", "d"]}]}`.
+  It must give an entity of that position's set (`index_entry_invalid`). A cell
+  with no value leaves the position undefined, and the compiler refuses by
+  name (`preferred_shift[ana, tue] has no value`) rather than guess.
+- **In a filter.** `{"attr": "id", "op": "=", "value": {"par": "preferred_shift", "index": ["e", "d"]}}`
+  keeps the row that cell holds (`!=` the others), read at indices already
+  bound; an empty cell keeps none -- the safe form for sparse preferences.
+  `id` also compares with a plain key: `{"attr": "id", "op": "in", "value": ["mon", "tue"]}`.
+  Anything else is `where_parameter_invalid`.
+
+---
+
 ### 4.3 `fn` — a function from the catalogue (version 2)
 
 `{"fn": "log", "of": <term>}` is a function of one argument, named from a

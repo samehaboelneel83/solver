@@ -11,6 +11,7 @@
  */
 import { CONNECTED_KEYS, ROUTE_KEYS, SCHEDULING_KEYS } from "../../ir/contract";
 import type { Binding, Term } from "../../model/terms";
+import { cellText } from "./catalogue";
 
 export type IrLoc = (string | number)[];
 
@@ -112,7 +113,8 @@ export function irToBlocks(
     if ("const" in x) return block(loc, { type: "ir_const", fields: { VALUE: x.const === null ? "" : String(x.const) } });
     if ("var" in x || "par" in x) {
       const kind = "var" in x ? "var" : "par";
-      const index = (x.index as string[]) ?? [];
+      // A cell of an entity-valued parameter (queue R20b) is written into its slot as text.
+      const index = ((x.index as unknown[]) ?? []).map(cellText);
       return block(loc, {
         type: `ir_${kind}`,
         fields: { NAME: String(x[kind]), ...Object.fromEntries(index.map((idx, i) => [`IDX${i}`, idx])) },
@@ -211,7 +213,7 @@ export function irToBlocks(
           : (shaped(u, ["kind", "deviation"], ["gamma"]) && u.kind === "interval" && typeof u.deviation === "number" &&
               (u.gamma === undefined || typeof u.gamma === "number")) ||
             (shaped(u, ["kind"]) && u.kind === "scenarios");
-      if (Object.keys(spec).some((k) => k !== "index" && k !== "uncertainty") || !uncertainty) {
+      if (Object.keys(spec).some((k) => k !== "index" && k !== "uncertainty" && k !== "entity") || !uncertainty) {
         return opaque("declaration", loc, { kind: "parameter", name, spec }, `data ${name} (kept as it is)`);
       }
       const index = (spec.index as string[]) ?? [];
@@ -224,6 +226,7 @@ export function irToBlocks(
           UNCERTAINTY: given.kind ?? "exact",
           DEVIATION: given.deviation === undefined ? "0.1" : String(given.deviation),
           GAMMA: given.gamma === undefined ? "" : String(given.gamma),
+          ENTITY: typeof spec.entity === "string" ? spec.entity : "",
         },
         extraState: { index },
       });

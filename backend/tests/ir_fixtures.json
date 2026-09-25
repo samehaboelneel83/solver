@@ -169,6 +169,15 @@
           "shift"
         ],
         "default_value": 1
+      },
+      {
+        "name": "preferred_shift",
+        "index": [
+          "employee",
+          "day"
+        ],
+        "default_value": 0,
+        "value_type": "shift"
       }
     ],
     "relationshipTypes": [
@@ -3330,6 +3339,153 @@
             "relation": "<=",
             "right": {
               "const": 100
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "name": "entity_parameter_as_an_index",
+      "why": "queue R20b: preferred_shift[e, d] is a shift, so it can stand where a shift index would",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "shift"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_liked",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    {
+                      "par": "preferred_shift",
+                      "index": [
+                        "e",
+                        "d"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "entity_parameter_in_a_filter",
+      "why": "queue R20b: the shifts that are this person's preference that day -- none when the cell is empty",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "shift"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_liked",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift",
+                  "where": [
+                    {
+                      "attr": "id",
+                      "op": "=",
+                      "value": {
+                        "par": "preferred_shift",
+                        "index": [
+                          "e",
+                          "d"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
             },
             "severity": "hard"
           }
@@ -14724,6 +14880,412 @@
             "severity": "hard"
           }
         ]
+      }
+    },
+    {
+      "code": "parameter_entity_invalid",
+      "loc": [
+        "parameters",
+        "preferred_shift",
+        "entity"
+      ],
+      "why": "the values are entities of a set the model does not declare, so no dataset carries them",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "unit"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "entity_parameter_read_as_number",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "sum",
+        "mul",
+        0,
+        "par"
+      ],
+      "why": "a shift is not a number to multiply by",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "shift"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "preferred_shift",
+                      "index": [
+                        "e",
+                        "d"
+                      ]
+                    },
+                    {
+                      "var": "assign",
+                      "index": [
+                        "e",
+                        "d",
+                        {
+                          "par": "preferred_shift",
+                          "index": [
+                            "e",
+                            "d"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "index_entry_invalid",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "sum",
+        "index",
+        2
+      ],
+      "why": "demand holds numbers, so it names no shift to stand in a shift's place",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "shift"
+          },
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ]
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    {
+                      "par": "demand",
+                      "index": [
+                        "d",
+                        {
+                          "par": "preferred_shift",
+                          "index": [
+                            "e",
+                            "d"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "where_parameter_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "where",
+        0,
+        "value"
+      ],
+      "why": "a shift is equal to a preference or not; it is not less than one",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "preferred_shift": {
+            "index": [
+              "employee",
+              "day"
+            ],
+            "entity": "shift"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_liked",
+            "forall": [
+              {
+                "index": "e",
+                "set": "employee"
+              },
+              {
+                "index": "d",
+                "set": "day"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "assign",
+                "index": [
+                  "e",
+                  "d",
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "shift",
+                  "where": [
+                    {
+                      "attr": "id",
+                      "op": "<",
+                      "value": {
+                        "par": "preferred_shift",
+                        "index": [
+                          "e",
+                          "d"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "parameter_entity_mismatch",
+      "loc": [
+        "parameters",
+        "demand",
+        "entity"
+      ],
+      "why": "demand holds numbers in this domain; declaring it a shift would read numbers as keys",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day",
+          "shift"
+        ],
+        "parameters": {
+          "demand": {
+            "index": [
+              "day",
+              "shift"
+            ],
+            "entity": "shift"
+          }
+        },
+        "variables": {
+          "assign": {
+            "index": [
+              "employee",
+              "day",
+              "shift"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_x",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "assign",
+                  "index": [
+                    "e",
+                    "d",
+                    "s"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "e",
+                    "set": "employee"
+                  },
+                  {
+                    "index": "d",
+                    "set": "day"
+                  },
+                  {
+                    "index": "s",
+                    "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
       }
     }
   ]

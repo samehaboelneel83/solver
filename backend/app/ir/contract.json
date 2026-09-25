@@ -738,6 +738,31 @@
       "code": "attr_along_invalid",
       "where": "shape",
       "text": "an `attr` of an edge walked more than once says how the path combines it in `along`; any other `attr` has no `along`"
+    },
+    {
+      "code": "parameter_entity_invalid",
+      "where": "shape",
+      "text": "a parameter's `entity` names a declared set, in a version 2 document, and such a parameter has no uncertainty"
+    },
+    {
+      "code": "entity_parameter_read_as_number",
+      "where": "shape",
+      "text": "a parameter whose values are entities is used as an index or in a filter, never read as a number"
+    },
+    {
+      "code": "index_entry_invalid",
+      "where": "shape",
+      "text": "an index position is an index name, or `{par, index}` naming a parameter whose values are entities of that position's set"
+    },
+    {
+      "code": "where_parameter_invalid",
+      "where": "shape",
+      "text": "a filter compares with a parameter only as `id` `=` or `!=` a parameter whose values are entities of the binding's set, read at indices already bound"
+    },
+    {
+      "code": "parameter_entity_mismatch",
+      "where": "domain",
+      "text": "a parameter's `entity` is the value type its parameter definition declares, and a number parameter declares none"
     }
   ],
   "uncertaintyKinds": [

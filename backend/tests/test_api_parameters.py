@@ -278,6 +278,7 @@ def test_create_parameter_def(client, auth_headers, domain_id, grid):
         "index_type_ids": [grid["shift"], grid["day"]],
         "default_value": 0,  # the column default
         "unit": None,
+        "value_type_id": None,  # numbers (migration 0068)
     }
 
 

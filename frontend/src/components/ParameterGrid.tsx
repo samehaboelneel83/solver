@@ -225,7 +225,7 @@ function Editor({
 
   const flat = axes.length > 2;
   const stored = useMemo(
-    () => new Map(values.cells.map((cell) => [coordKey(cell.entity_ids), cell.value])),
+    () => new Map(values.cells.map((cell) => [coordKey(cell.entity_ids), cell.value ?? 0])),
     [values.cells]
   );
   const timestamps = useMemo(
@@ -339,7 +339,7 @@ function Editor({
     try {
       const fresh = await reload();
       if (!fresh) return;
-      const freshStored = new Map(fresh.cells.map((cell) => [coordKey(cell.entity_ids), cell.value]));
+      const freshStored = new Map(fresh.cells.map((cell) => [coordKey(cell.entity_ids), cell.value ?? 0]));
       const keys = new Set([...cellSpecs.map((spec) => spec.key), ...fresh.cells.map((cell) => coordKey(cell.entity_ids))]);
       const baseline: Record<string, string> = {};
       const current: Record<string, string> = {};

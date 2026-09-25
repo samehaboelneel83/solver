@@ -11,7 +11,8 @@ export const NONE = "";
 
 export type BlockCatalogue = {
   entityTypes: { name: string; attributes: { name: string; data_type: string }[] }[];
-  parameters: { name: string; index: string[] }[];
+  /** `entity`: the set a parameter's values are entities of (queue R20b); absent for numbers. */
+  parameters: { name: string; index: string[]; entity?: string }[];
   /** `attributes` are what the type declares for its edges (queue R19): what `attr of` an edge offers. */
   relationships: { name: string; from: string; to: string; attributes?: { name: string; data_type: string }[] }[];
 };
@@ -110,7 +111,7 @@ export function scopeAt(block: Blockly.Block): Map<string, string> {
 
 export function declared(workspace: Blockly.Workspace) {
   const variables = new Map<string, { index: string[]; domain: string }>();
-  const parameters = new Map<string, { index: string[] }>();
+  const parameters = new Map<string, { index: string[]; entity?: string }>();
   const sets: string[] = [];
   const root = workspace.getBlockById("model-root");
   for (let b = root?.getInputTargetBlock("DECLARE") ?? null; b; b = b.getNextBlock()) {
@@ -122,7 +123,11 @@ export function declared(workspace: Blockly.Workspace) {
         domain: b.getFieldValue("DOMAIN"),
       });
     }
-    if (b.type === "ir_parameter") parameters.set(b.getFieldValue("NAME"), { index: (b as unknown as { index: string[] }).index ?? [] });
+    if (b.type === "ir_parameter")
+      parameters.set(b.getFieldValue("NAME"), {
+        index: (b as unknown as { index: string[] }).index ?? [],
+        entity: b.getFieldValue("ENTITY") || undefined,
+      });
   }
   return { variables, parameters, sets };
 }
@@ -140,7 +145,7 @@ export function partOfBlock(id: string | null, parentOf: (id: string) => string 
  * attributes, parameter defs (index as type ids) and relationship types. */
 export function catalogueFrom(
   entityTypes: readonly { id: number | string; name: string; attributes?: readonly { name: string; data_type: string }[] }[],
-  parameterDefs: readonly { name: string; index_type_ids: readonly (number | string)[] }[],
+  parameterDefs: readonly { name: string; index_type_ids: readonly (number | string)[]; value_type_id?: number | string | null }[],
   relationshipTypes: readonly {
     name: string;
     from_type_id: number | string;
@@ -151,7 +156,11 @@ export function catalogueFrom(
   const nameOf = (id: number | string) => entityTypes.find((t) => String(t.id) === String(id))?.name ?? `#${id}`;
   return {
     entityTypes: entityTypes.map((t) => ({ name: t.name, attributes: (t.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })) })),
-    parameters: parameterDefs.map((p) => ({ name: p.name, index: p.index_type_ids.map(nameOf) })),
+    parameters: parameterDefs.map((p) => ({
+      name: p.name,
+      index: p.index_type_ids.map(nameOf),
+      ...(p.value_type_id != null ? { entity: nameOf(p.value_type_id) } : {}),
+    })),
     relationships: relationshipTypes.map((r) => ({
       name: r.name,
       from: nameOf(r.from_type_id),
@@ -159,4 +168,31 @@ export function catalogueFrom(
       attributes: (r.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
     })),
   };
+}
+
+/** An index position as a slot's text: an index name, or an entity-valued
+ * parameter's cell (queue R20b) written `preferred_shift[e, d]`. */
+export function cellText(entry: unknown): string {
+  if (typeof entry === "string") return entry;
+  const ref = entry as { par: string; index: unknown[] };
+  return `${ref.par}[${ref.index.map(cellText).join(", ")}]`;
+}
+
+/** `cellText` read back: `name[a, b]` is a cell, anything else an index name. */
+export function parseCell(text: string): string | { par: string; index: unknown[] } {
+  const match = /^([a-z][a-z0-9_]*)\[(.*)\]$/.exec(text.trim());
+  if (!match) return text;
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of match[2]) {
+    if (ch === "[") depth += 1;
+    if (ch === "]") depth -= 1;
+    if (ch === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+    } else current += ch;
+  }
+  if (current.trim() !== "") parts.push(current.trim());
+  return { par: match[1], index: parts.map(parseCell) };
 }

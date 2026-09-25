@@ -499,8 +499,10 @@ class _Compiler:
         for name, spec in self.ir.get("parameters", {}).items():
             order = spec["index"]
             table: dict[tuple[str, ...], Decimal] = {}
+            # An entity-valued parameter (queue R20b) holds entity keys.
+            read = str if spec.get("entity") else number
             for row in self.params_raw.get(name, []):
-                table[parameter_index(row, order)] = number(row["value"])
+                table[parameter_index(row, order)] = read(row["value"])
             self._params[name] = table
 
     def _declare_variables(self) -> None:
@@ -721,13 +723,31 @@ class _Compiler:
             )
         return int(value)
 
+    def _key(self, index: Any, env: dict[str, tuple[str, dict]]) -> str:
+        """The key an index position stands for: the entity its index is
+        bound to, or -- written as an entity-valued parameter (queue R20b),
+        `preferred_shift[e, d]` -- the entity that cell holds, from the
+        frozen data. A cell with no value leaves the position undefined:
+        refused by name, never guessed."""
+        if isinstance(index, str):
+            return env[index][1]["id"]
+        name = index["par"]
+        keys = tuple(self._key(i, env) for i in index["index"])
+        value = self._params.get(name, {}).get(keys)
+        if value is None:
+            raise Unsupported(
+                f"{name}[{', '.join(keys)}] has no value, so the index it gives is undefined; give it one, "
+                f"or keep only the cells that have one with a filter (id = {name}[...])"
+            )
+        return value
+
     def _when(self, spec: dict[str, Any] | None, env) -> tuple[VarKey, int] | None:
         """This instance's switch: the binary variable at these indices, and
         the value that turns the rule on. The validator has made sure the
         variable is binary and the rule is hard and linear."""
         if spec is None:
             return None
-        keys = tuple(env[i][1]["id"] for i in spec["index"])
+        keys = tuple(self._key(i, env) for i in spec["index"])
         key: VarKey = (spec["var"], keys)
         if key not in self.variables:  # pragma: no cover -- validator pins arity
             raise Unsupported(f"no variable {key}")
@@ -737,7 +757,7 @@ class _Compiler:
         """The auxiliary variable a `pwl` term stands for -- one per (x, curve),
         so the same curve of the same x written twice is one variable."""
         argument = term["pwl"]
-        x: VarKey = (argument["var"], tuple(env[i][1]["id"] for i in argument["index"]))
+        x: VarKey = (argument["var"], tuple(self._key(i, env) for i in argument["index"]))
         if x not in self.variables:  # pragma: no cover -- validator pins arity
             raise Unsupported(f"no variable {x}")
         points = tuple((number(px), number(py)) for px, py in term["points"])
@@ -829,10 +849,20 @@ class _Compiler:
         envs: list[dict[str, tuple[str, dict]]] = [dict(outer) if outer else {}]
         for binding in bindings:
             set_name = binding["set"]
-            rows = [r for r in self.sets.get(set_name, []) if _passes(r, binding.get("where", []))]
+            # A filter comparing the row with an entity-valued parameter
+            # (queue R20b) depends on the indices around it, so it is judged
+            # per environment; every other filter once, before the product.
+            where = binding.get("where", [])
+            fixed = [f for f in where if not isinstance(f.get("value"), dict)]
+            varying = [f for f in where if isinstance(f.get("value"), dict)]
+            rows = [r for r in self.sets.get(set_name, []) if _passes(r, fixed)]
+
+            def kept(env, rows=rows, varying=varying):
+                return [r for r in rows if all(self._holds(r, f, env) for f in varying)] if varying else rows
+
             if "via" not in binding:
                 envs = [
-                    dict(env, **{binding["index"]: (set_name, row)}) for env in envs for row in rows
+                    dict(env, **{binding["index"]: (set_name, row)}) for env in envs for row in kept(env)
                 ]
                 continue
             # A traversal narrows the pool per environment rather than
@@ -849,7 +879,7 @@ class _Compiler:
                 if "as" not in via:
                     grown.extend(
                         dict(env, **{binding["index"]: (set_name, row)})
-                        for row in rows
+                        for row in kept(env)
                         if row["id"] in reachable
                     )
                     continue
@@ -862,11 +892,21 @@ class _Compiler:
                         via["as"]: (EDGE, {"id": f"{anchor}~{row['id']}", "rel": via["rel"],
                                            "edges": paths[row["id"]]}),
                     })
-                    for row in rows
+                    for row in kept(env)
                     if row["id"] in reachable
                 )
             envs = grown
         return envs
+
+    def _holds(self, row: dict[str, Any], f: dict[str, Any], env) -> bool:
+        """`id = preferred_shift[e, d]`: the row is the entity that cell
+        holds. A cell with no value holds no entity -- nothing is equal to
+        it and everything differs from it."""
+        ref = f["value"]
+        keys = tuple(self._key(i, env) for i in ref["index"])
+        held = self._params.get(ref["par"], {}).get(keys)
+        same = held is not None and row.get(f["attr"]) == held
+        return same if f["op"] in ("=", "==") else not same
 
     def _paths(self, via: dict[str, Any], anchor_end: str, anchor: str) -> dict[str, list[dict[str, Any]]]:
         """The edges from `anchor` to each key the walk lands on. One edge on
@@ -958,7 +998,7 @@ class _Compiler:
 
         if "par" in term:
             name = term["par"]
-            keys = tuple(env[i][1]["id"] for i in term["index"])
+            keys = tuple(self._key(i, env) for i in term["index"])
             table = self._params[name]
             return Linear(const=number(table.get(keys, self.defaults.get(name, 0))))
 
@@ -976,7 +1016,7 @@ class _Compiler:
             return Linear(const=number(row[attr_name]))
 
         if "var" in term:
-            keys = tuple(env[i][1]["id"] for i in term["index"])
+            keys = tuple(self._key(i, env) for i in term["index"])
             key: VarKey = (term["var"], keys)
             if key not in self.variables:  # pragma: no cover -- validator pins arity
                 raise Unsupported(f"no variable {key}")

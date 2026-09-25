@@ -97,7 +97,7 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 _VIA_KEYS = frozenset({"rel", "from", "to", "depth", "as"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INTERVAL_KEYS
-_PARAMETER_KEYS = frozenset({"index", "uncertainty"})
+_PARAMETER_KEYS = frozenset({"index", "uncertainty", "entity"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
 
@@ -166,6 +166,8 @@ class _ShapeChecker:
         self.sets: set[str] = set()
         self.relationships: set[str] = set()
         self.parameters: dict[str, list[str]] = {}
+        #: Queue R20b: parameter name -> the set its values are entities of.
+        self.entity_parameters: dict[str, str] = {}
         self.variables: dict[str, list[str]] = {}
         self.terms = 0
 
@@ -279,6 +281,19 @@ class _ShapeChecker:
             problem = self._check_uncertainty(name, declaration, at)
             if problem:
                 return problem
+            if "entity" in declaration:
+                # Queue R20b: a parameter whose values are entities of a set.
+                of = declaration["entity"]
+                if self.ir.get("version") == 1 or of not in self.sets or "uncertainty" in declaration:
+                    return Refusal(
+                        "parameter_entity_invalid",
+                        [*at, "entity"],
+                        f"{name!r}'s values are entities of {json.dumps(of)}, which "
+                        + ("needs version 2" if self.ir.get("version") == 1
+                           else "has no uncertainty" if "uncertainty" in declaration
+                           else "this model does not declare in sets"),
+                    )
+                self.entity_parameters[name] = of
             self.parameters[name] = list(index)
         return None
 
@@ -1091,7 +1106,7 @@ class _ShapeChecker:
             problem = self._check_edge(binding, at, scope)
             if problem:
                 return problem
-            problem = self._check_where(binding, at)
+            problem = self._check_where(binding, at, {k: v for k, v in scope.items() if k != index})
             if problem:
                 return problem
         return scope
@@ -1175,7 +1190,7 @@ class _ShapeChecker:
         scope[name] = f"{EDGE_MARK}{via['rel']}/{via.get('depth', 'one')}"
         return None
 
-    def _check_where(self, binding: dict[str, Any], at: Loc):
+    def _check_where(self, binding: dict[str, Any], at: Loc, scope: dict[str, str] | None = None):
         if "where" not in binding:
             return None
         filters = binding["where"]
@@ -1220,6 +1235,24 @@ class _ShapeChecker:
                     "where_filter_malformed", [*here, "value"], "a filter carries a value"
                 )
             value = entry["value"]
+            if isinstance(value, dict):
+                # Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
+                ok = (
+                    entry["attr"] == "id" and operator in ("=", "!=")
+                    and set(value) == {"par", "index"} and value.get("par") in self.entity_parameters
+                    and self.entity_parameters[value["par"]] == binding.get("set")
+                )
+                if not ok:
+                    return Refusal(
+                        "where_parameter_invalid",
+                        [*here, "value"],
+                        "a filter compares with a parameter only as id = or != a parameter whose values "
+                        f"are entities of {binding.get('set')!r}",
+                    )
+                problem = self._reference(value, [*here, "value"], scope or {}, "par", self.parameters)
+                if problem:
+                    return problem
+                continue
             if operator in _LIST_OPERATORS:
                 ok = isinstance(value, list) and value and all(_is_scalar(v) for v in value)
             else:
@@ -1290,6 +1323,13 @@ class _ShapeChecker:
         return None
 
     def _term_par(self, term, loc, scope, depth):
+        if term.get("par") in self.entity_parameters:
+            return Refusal(
+                "entity_parameter_read_as_number",
+                [*loc, "par"],
+                f"{term['par']!r}'s values are entities of {self.entity_parameters[term['par']]}, not "
+                "numbers; use it as an index, or in a filter (id = ...)",
+            )
         return self._reference(term, loc, scope, "par", self.parameters)
 
     def _term_var(self, term, loc, scope, depth):
@@ -1326,6 +1366,12 @@ class _ShapeChecker:
                 "indices",
             )
         for j, index in enumerate(subscript):
+            if isinstance(index, dict):
+                # Queue R20b: `preferred_shift[e, d]` in a position -- the entity that cell holds.
+                problem = self._entity_index(index, [*loc, "index", j], scope, index_types[j])
+                if problem:
+                    return problem
+                continue
             if isinstance(index, str) and _is_edge(scope.get(index)):
                 return Refusal(
                     "edge_not_an_index",
@@ -1348,6 +1394,25 @@ class _ShapeChecker:
                     f"{index!r} ranges over {scope[index]!r}",
                 )
         return None
+
+    def _entity_index(self, ref: Any, loc: Loc, scope: dict[str, str], wanted: str | None):
+        """`{par, index}` standing for an entity: an entity-valued parameter,
+        of the set wanted there, read at indices bound here."""
+        if not isinstance(ref, dict) or set(ref) != {"par", "index"} or ref.get("par") not in self.entity_parameters:
+            return Refusal(
+                "index_entry_invalid",
+                loc,
+                "an index position is an index name, or {\"par\": <parameter>, \"index\": [...]} naming "
+                "a parameter whose values are entities",
+            )
+        of = self.entity_parameters[ref["par"]]
+        if wanted is not None and of != wanted:
+            return Refusal(
+                "index_entry_invalid",
+                [*loc, "par"],
+                f"{ref['par']!r} gives an entity of {of}, but this position takes one of {wanted}",
+            )
+        return self._reference(ref, loc, scope, "par", self.parameters)
 
     def _term_attr(self, term, loc, scope, depth):
         reference = term["attr"]
@@ -1757,11 +1822,15 @@ class _DomainWorld:
                     if owner == ancestor:
                         self.attributes.setdefault((name, attribute), declared)
         self.parameter_index: dict[str, list[str]] = {}
-        for name, index_type_ids in db.execute(
-            select(ParameterDef.name, ParameterDef.index_type_ids).where(
+        #: Queue R20b: parameter name -> the entity type its values are, if any.
+        self.parameter_value_type: dict[str, str] = {}
+        for name, index_type_ids, value_type_id in db.execute(
+            select(ParameterDef.name, ParameterDef.index_type_ids, ParameterDef.value_type_id).where(
                 ParameterDef.domain_id == domain_id
             )
         ).all():
+            if value_type_id is not None:
+                self.parameter_value_type[name] = self.type_name_by_id.get(value_type_id, f"#{value_type_id}")
             self.parameter_index[name] = [
                 self.type_name_by_id.get(type_id, f"#{type_id}") for type_id in index_type_ids
             ]
@@ -1843,6 +1912,16 @@ class _DomainChecker:
                     "snapshot_dataset() could not freeze it",
                 )
             declared = self.world.parameter_index[name]
+            of = self.world.parameter_value_type.get(name)
+            if declaration.get("entity") != of:
+                return Refusal(
+                    "parameter_entity_mismatch",
+                    ["parameters", name, "entity"],
+                    f"{name!r} holds "
+                    + (f"entities of {of}" if of else "numbers")
+                    + " in this domain, so the model declares "
+                    + (f'"entity": "{of}"' if of else "no entity"),
+                )
             if list(declaration["index"]) != declared:
                 return Refusal(
                     "parameter_index_mismatch",
@@ -1929,6 +2008,9 @@ class _DomainChecker:
             for k, entry in enumerate(binding.get("where", [])):
                 here: Loc = [*loc, j, "where", k]
                 declared = self.world.attributes.get((binding["set"], entry["attr"]))
+                if entry["attr"] == "id":
+                    # Every row's key (queue R20b): compared like a reference.
+                    declared = {"data_type": "reference", "required": True, "enum_values": []}
                 if declared is None:
                     return Refusal(
                         "attribute_not_declared",
@@ -1951,6 +2033,8 @@ class _DomainChecker:
                         f"a {declared['data_type']} attribute offers "
                         f"{', '.join(offered)}, not {entry['op']!r}",
                     )
+                if isinstance(entry["value"], dict):
+                    continue  # a parameter's cell, judged by its declaration (queue R20b)
                 values = entry["value"] if isinstance(entry["value"], list) else [entry["value"]]
                 for value in values:
                     if not _value_is_of_type(value, declared):

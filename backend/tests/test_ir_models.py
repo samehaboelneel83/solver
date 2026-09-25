@@ -80,6 +80,10 @@ SEMANTIC = frozenset({
     # Whether an `as` or an index names an edge, and whether that edge is a
     # path, are facts about the scope around it (queue R19).
     "edge_needs_version_2", "binding_via_as_invalid", "edge_not_an_index", "attr_along_invalid",
+    # Which parameters hold entities, and of which set, is a fact of the
+    # declarations around a term (queue R20b).
+    "parameter_entity_invalid", "entity_parameter_read_as_number", "index_entry_invalid",
+    "where_parameter_invalid", "parameter_entity_mismatch",
     # Where a chance may be is a fact about the rest of the rule.
     "chance_needs_version_2", "chance_misplaced",
     # A connected rule's variable, its order, the relationship and its ends

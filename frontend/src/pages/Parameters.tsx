@@ -2,6 +2,7 @@ import { FormEvent, useId, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import MeasureFromMap from "../components/MeasureFromMap";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
+import EntityParameterGrid from "../components/EntityParameterGrid";
 import {
   ErrorSummary,
   FieldError,
@@ -121,7 +122,11 @@ function ForDomain({ domainId }: { domainId: Id }) {
             <span className="font-mono">{selected.name}</span> values
           </h2>
           <ParameterSettings key={`settings-${selected.id}`} parameter={selected} entityTypes={entityTypes} />
-          <ParameterGrid key={selected.id} parameter={selected} />
+          {selected.value_type_id != null ? (
+            <EntityParameterGrid key={selected.id} parameter={selected} entityTypes={entityTypes} />
+          ) : (
+            <ParameterGrid key={selected.id} parameter={selected} />
+          )}
         </section>
       ) : (
         items.length > 0 && (
@@ -249,7 +254,11 @@ function ParameterTable({
                 </button>
               </th>
               <td className="px-3 py-2 font-mono text-slate-700">{indexNames(parameter, entityTypes)}</td>
-              <td className="px-3 py-2 text-slate-700">{parameter.default_value}</td>
+              <td className="px-3 py-2 text-slate-700">
+                {parameter.value_type_id != null
+                  ? `a ${entityTypes.find((t) => t.id === parameter.value_type_id)?.name ?? "entity"}`
+                  : parameter.default_value}
+              </td>
               <td className="px-3 py-2 text-slate-700">{parameter.unit ?? "—"}</td>
               <td className="whitespace-nowrap px-3 py-1 text-right">
                 {canEdit && (
@@ -375,6 +384,7 @@ function CreateParameterForm({
   const create = useCreateParameter();
   const toast = useToast();
 
+  const [valueType, setValueType] = useState<Id | "">("");
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setGeneral(null);
@@ -394,6 +404,7 @@ function CreateParameterForm({
         name,
         index_type_ids: indexes,
         default_value: parsed.ok ? parsed.value : 0,
+        ...(valueType !== "" ? { value_type_id: valueType } : {}),
         unit: unit.trim() === "" ? null : unit.trim(),
       });
       toast.success(`Parameter "${created.name}" created`);
@@ -401,6 +412,7 @@ function CreateParameterForm({
       setUnit("");
       setDefaultValue("0");
       setIndexes([entityTypes[0].id]);
+      setValueType("");
       onCreated(created.id);
     } catch (err) {
       const result = serverFieldErrors(err, FIELDS, "parameter");
@@ -434,6 +446,27 @@ function CreateParameterForm({
           onChange={setIndexes}
           error={errors.index_type_ids}
         />
+        <div>
+          <label htmlFor={`${baseId}-value-type`} className="block text-sm font-medium text-slate-700">
+            Its values are
+          </label>
+          <select
+            id={`${baseId}-value-type`}
+            className="mt-1 block w-full max-w-xs rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+            value={valueType === "" ? "" : String(valueType)}
+            onChange={(e) => setValueType(e.target.value === "" ? "" : (Number(e.target.value) as Id))}
+          >
+            <option value="">numbers</option>
+            {entityTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                a {t.name} (one per cell)
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            A {"preferred shift"} per person and day, say: a model reads it as an index or in a filter.
+          </p>
+        </div>
         <button
           type="submit"
           disabled={create.isPending}

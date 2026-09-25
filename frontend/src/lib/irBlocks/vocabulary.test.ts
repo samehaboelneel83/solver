@@ -230,3 +230,13 @@ describe("the advanced constructs' blocks (Blocks 3)", () => {
     expect(options(ws.getBlockById("v")!, "NAME")).not.toContain("shift");
   });
 });
+
+describe("an entity-valued parameter's cell as slot text (queue R20b)", () => {
+  it("writes and reads back a cell, nested or not, and leaves an index name alone", async () => {
+    const { cellText, parseCell } = await import("./catalogue");
+    const cell = { par: "preferred_shift", index: ["e", { par: "home_day", index: ["e"] }] };
+    expect(cellText(cell)).toBe("preferred_shift[e, home_day[e]]");
+    expect(parseCell(cellText(cell))).toEqual(cell);
+    expect(parseCell("d")).toBe("d");
+  });
+});

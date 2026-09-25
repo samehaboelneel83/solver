@@ -150,9 +150,20 @@ function refSlots(
         .appendDummyInput(`SLOT${i}`)
         .appendField(i === 0 ? "[" : ",")
         .appendField(
-          dynamic((b) =>
-            [...scope(b)].filter(([, set]) => expected(i) === undefined || set === expected(i)).map(([index]) => index)
-          ),
+          dynamic((b) => {
+            const inScope = [...scope(b)];
+            const names = inScope.filter(([, set]) => expected(i) === undefined || set === expected(i)).map(([index]) => index);
+            // Queue R20b: an entity-valued parameter's cell stands where its set is wanted,
+            // read at the first index bound to each of its own sets.
+            const cells = [...declared(b.workspace).parameters]
+              .filter(([, spec]) => spec.entity !== undefined && spec.entity === expected(i))
+              .map(([name, spec]) => {
+                const at = spec.index.map((set) => inScope.find(([, s]) => s === set)?.[0]);
+                return at.every((x) => x !== undefined) ? `${name}[${at.join(", ")}]` : null;
+              })
+              .filter((x): x is string => x !== null);
+            return [...names, ...cells];
+          }),
           `IDX${i}`
         ),
     "SLOT",
@@ -207,6 +218,8 @@ function referenceBlock(kind: "variables" | "parameters", word: string, colour: 
           (b) =>
             [...declared(b.workspace)[kind]]
               .filter(([, spec]) => kind !== "variables" || (spec as { domain: string }).domain !== "interval")
+              // An entity-valued parameter is an index, never a number (queue R20b).
+              .filter(([, spec]) => kind !== "parameters" || !(spec as { entity?: string }).entity)
               .map(([name]) => name),
           choose,
           (name: string) => {
@@ -451,13 +464,16 @@ export function defineIrBlocks(): void {
                 const def = catalogueOf(this.workspace).parameters.find((p) => p.name === name);
                 this.index = def ? [...def.index] : [];
                 this.setFieldValue(this.index.length ? `[${this.index.join(", ")}]` : "", "INDEX");
+                this.setFieldValue(def?.entity ?? "", "ENTITY");
               }
               return name;
             }
           ),
           "NAME"
         )
-        .appendField(new Blockly.FieldLabelSerializable(""), "INDEX");
+        .appendField(new Blockly.FieldLabelSerializable(""), "INDEX")
+        // Queue R20b: what the values are, as the domain says -- a set's entities, or numbers ("").
+        .appendField(new Blockly.FieldLabelSerializable(""), "ENTITY");
       const deviates = (kind: string) => {
         for (const name of ["DEVIATION", "GAMMA_LABEL", "GAMMA", "CELLS"]) this.getField(name)?.setVisible(kind === "interval");
         rerender(this);

@@ -142,7 +142,10 @@ export default function DeclarationsEditor({
                         });
                       } else {
                         apply({
-                          parameters: { ...parameters, [option.name]: { index: option.index } },
+                          parameters: {
+                            ...parameters,
+                            [option.name]: { index: option.index, ...(option.entity ? { entity: option.entity } : {}) },
+                          },
                         });
                       }
                     }}

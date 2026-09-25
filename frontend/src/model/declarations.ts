@@ -26,9 +26,16 @@ import type { Constraint, ObjectiveTerm, Term } from "./terms";
 import { termKind } from "./terms";
 
 export type EntityTypeRef = { id: number | string; name: string };
-export type ParameterDefRef = { id: number | string; name: string; index_type_ids: (number | string)[] };
+export type ParameterDefRef = {
+  id: number | string;
+  name: string;
+  index_type_ids: (number | string)[];
+  /** Queue R20b: its values are entities of this type. */
+  value_type_id?: number | string | null;
+};
 
-export type ParameterDeclaration = { name: string; index: string[] };
+/** `entity`: the set its values are entities of (queue R20b), declared with it. */
+export type ParameterDeclaration = { name: string; index: string[]; entity?: string };
 /** How a parameter's values may be wrong (IR version 2): each within a
  * fraction of itself, at most `gamma` of a rule's cells at once (all when
  * absent) -- or one value per scenario. What a robust solve reads. */
@@ -103,6 +110,7 @@ export function parameterOptions(
   return parameters.map((parameter) => ({
     name: parameter.name,
     index: parameter.index_type_ids.map((id) => nameOf.get(String(id)) ?? ""),
+    ...(parameter.value_type_id != null ? { entity: nameOf.get(String(parameter.value_type_id)) ?? "" } : {}),
   }));
 }
 
@@ -112,7 +120,9 @@ export function parameterIsUsable(
   parameter: ParameterDeclaration,
   sets: readonly string[]
 ): { usable: boolean; reason?: string } {
-  const missing = parameter.index.filter((set) => set === "" || !sets.includes(set));
+  const missing = [...parameter.index, ...(parameter.entity !== undefined ? [parameter.entity] : [])].filter(
+    (set) => set === "" || !sets.includes(set)
+  );
   if (missing.length === 0) return { usable: true };
   const named = missing.filter(Boolean);
   return {

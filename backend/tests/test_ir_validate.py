@@ -145,14 +145,16 @@ def world():
         for parameter in FIXTURES["domain"]["parameters"]:
             db.execute(
                 text(
-                    "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value) "
-                    "VALUES (:d, :n, :i, :v)"
+                    "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value, value_type_id) "
+                    "VALUES (:d, :n, :i, :v, :t)"
                 ),
                 {
                     "d": domain_id,
                     "n": parameter["name"],
                     "i": [type_ids[s] for s in parameter["index"]],
                     "v": parameter["default_value"],
+                    # Queue R20b: a parameter whose values are entities of a type.
+                    "t": type_ids.get(parameter.get("value_type")),
                 },
             )
         for relationship in FIXTURES["domain"]["relationshipTypes"]:

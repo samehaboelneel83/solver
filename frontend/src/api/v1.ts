@@ -418,6 +418,8 @@ export type ParameterDef = {
   /** int4. Values are integer-only throughout. */
   default_value: number;
   unit: string | null;
+  /** Migration 0068 (queue R20b): its values are entities of this type; absent or null: numbers. */
+  value_type_id?: Id | null;
 };
 
 export type ParameterDefCreate = {
@@ -427,6 +429,7 @@ export type ParameterDefCreate = {
   index_type_ids: Id[];
   default_value?: number;
   unit?: string | null;
+  value_type_id?: Id | null;
 };
 
 /** `domain_id` is not patchable; `name`, `index_type_ids` and
@@ -434,7 +437,15 @@ export type ParameterDefCreate = {
  * has stored cells is a 409. */
 export type ParameterDefUpdate = Partial<Omit<ParameterDefCreate, "domain_id">>;
 
-export type ParameterCell = { entity_ids: Id[]; value: number; updated_at?: string };
+/** A number cell carries `value`; an entity-valued parameter's (queue R20b) `value_entity_id`,
+ * null to clear it, and reads back its `value_key`. */
+export type ParameterCell = {
+  entity_ids: Id[];
+  value?: number | null;
+  value_entity_id?: Id | null;
+  value_key?: string | null;
+  updated_at?: string;
+};
 
 export type ParameterValues = {
   /** `name` is null when the index type was deleted after the parameter was defined. */

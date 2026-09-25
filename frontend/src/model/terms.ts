@@ -16,6 +16,7 @@
  */
 
 import { ARITHMETIC_ATTR_TYPES } from "../ir";
+import { cellText } from "../lib/irBlocks/catalogue";
 import type { PathCombination, Relation, Severity, TermKind, TraversalDepth } from "../ir";
 
 export type IrFilter = { attr: string; op: string; value: unknown };
@@ -522,11 +523,11 @@ export function describeTerm(term: Term | undefined | null): string {
       return String((term as { const: number }).const);
     case "par": {
       const t = term as { par: string; index: string[] };
-      return `${t.par}[${t.index.join(", ")}]`;
+      return `${t.par}[${t.index.map(cellText).join(", ")}]`;
     }
     case "var": {
       const t = term as { var: string; index: string[] };
-      return `${t.var}[${t.index.join(", ")}]`;
+      return `${t.var}[${t.index.map(cellText).join(", ")}]`;
     }
     case "attr": {
       const t = term as { attr: { of: string; name: string; along?: string } };
