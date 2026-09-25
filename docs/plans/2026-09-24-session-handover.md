@@ -77,6 +77,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 | 25 | **R1** PDLP for very large LPs; `approximate` optimality | roadmap Phase 14 | migration 0051, `app/solve/pdlp.py`, `lp.py`, `backends.py`, `service.py`, `genui/translate.py`, `api/runs.py`, `pages/Runs.tsx`, `bench/pdlp.py` | `fc88049` + read-back fix; `solve.pdlp` off by the bench; live 43.5317 shown "optimal to within a tolerance" |
 | 26 | Symmetry detection made linear | found by the R1 bench | `app/solve/symmetry.py` (`_by_member`) | `716b0b5`; 250k-decision compile 213 s → 4.7 s |
 | 27 | **Blocks 3** every construct as its own block | Blockly plan Task 6 | `lib/irBlocks/{vocabulary,toBlocks,toIr,catalogue}.ts` | `3feccaa`, `4762dc0`; no opaque block for any fixture/template; live workshop makespan 9 → 8 after a size edit by mouse |
+| 42 | **R15a** network lane: whole-number networks by min-cost flow | queue R15a | migration 0062, `app/solve/network.py`, `service.py`, `bench/network.py` | `6ae302b`; `solve.network` on (whole-number networks); proven |
 | 41 | **R14** metaheuristic lane: CMA-ES, particle swarm, genetic algorithm | queue R14 | migration 0061, `app/solve/evolve.py`, `backends.py` (`SEARCHES`), `service.py` (`_metaheuristic_fallback`), `bench/evolve.py`, `pages/Runs.tsx` | `c8f3995`, `488d6f3`; by name only, `solve.metaheuristic` off; HiGHS warm starts fixed |
 | 40 | **R13** connectivity at scale: a connected, balanced start | queue R13 | migration 0060, `app/solve/partition.py`, `service.py`, `bench/connected_start.py`, `pages/Runs.tsx` | `6265edf`; `solve.connected_start` on; live: 400 cells answered in 30 s |
 | 39 | **R12** decomposition gate; exact allocation decomposition; convexity by blocks | roadmap Phase 14 | migration 0059, `app/solve/allocation.py`, `convexity.py`, `service.py`, `bench/decompose_gate.py` | `ccad0ae`; `solve.decompose` on; live: 1,000 people proven in 16 ms |
@@ -94,7 +95,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 
 ## 4. Current project state
 
-**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0061** (R14).
+**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0062** (R15a).
 
 ### ✅ Completed
 - Everything in §3.
@@ -106,7 +107,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 - Nothing mid-item. (An opaque block remains only for a shape the blocks could not write back exactly -- e.g. a `connected` rule whose decision is indexed [group, unit], a curve of more than 12 points, an `add` of one term.)
 
 ### ❌ Not completed
-- Queued: **R15** graph optimization (a network lane on OR-Tools flow/assignment algorithms, proven; a vehicle-routing template, approximate), both asked for by the user 2026-09-25. Done since R12: R8b, R8c, R13 (a connected, balanced start for districting, `solve.connected_start` on), R14 (CMA-ES, particle swarm, GA by name; fallback off). Waiting on the user: the Model Editor design import (`/design-login` or the design files); where per-scenario data values would be stored (a data-model choice).
+- Queued: **R15b** vehicle routing, **R16** distances from the map, **R17** views for every input and answer; (was R15) graph optimization (a network lane on OR-Tools flow/assignment algorithms, proven; a vehicle-routing template, approximate), both asked for by the user 2026-09-25. Done since R12: R8b, R8c, R13 (a connected, balanced start for districting, `solve.connected_start` on), R14 (CMA-ES, particle swarm, GA by name; fallback off), R15a (network lane, on for whole-number networks). Known: ~60 concurrent API writes exhaust the DB pool (500 after 30 s). Waiting on the user: the Model Editor design import (`/design-login` or the design files); where per-scenario data values would be stored (a data-model choice).
 - Connectivity at scale ("approach C": cuts or a heuristic warm start) — not queued as an item yet; recorded as the bench's conclusion.
 - Vector tiles (`egypt_osm`, `pbf`) — not rendered anywhere.
 - GeometryPreview thumbnails have no basemap (deliberately, 64–96 px).
