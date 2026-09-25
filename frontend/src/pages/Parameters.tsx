@@ -291,7 +291,10 @@ function DefinitionFields({
   onName,
   onDefault,
   onUnit,
+  entityValued = false,
 }: {
+  /** Queue R20b: an entity's parameter has no default -- an empty cell is none. */
+  entityValued?: boolean;
   baseId: string;
   name: string;
   defaultValue: string;
@@ -325,6 +328,7 @@ function DefinitionFields({
         </p>
         <FieldError id={errorId("name")} message={errors.name} />
       </div>
+      {!entityValued && (
       <div>
         <FieldLabel htmlFor={id("default_value")}>Default value</FieldLabel>
         <input
@@ -343,6 +347,7 @@ function DefinitionFields({
         </p>
         <FieldError id={errorId("default_value")} message={errors.default_value} />
       </div>
+      )}
       <div>
         <FieldLabel htmlFor={id("unit")}>Unit</FieldLabel>
         <input
@@ -430,6 +435,7 @@ function CreateParameterForm({
         <ErrorSummary errors={errors} order={FIELDS} summaryRef={summaryRef} />
         {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
         <DefinitionFields
+          entityValued={valueType !== ""}
           baseId={baseId}
           name={name}
           defaultValue={defaultValue}
@@ -623,6 +629,7 @@ function ParameterSettings({
       <ErrorSummary errors={errors} order={FIELDS} summaryRef={summaryRef} />
       {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
       <DefinitionFields
+        entityValued={parameter.value_type_id != null}
         baseId={baseId}
         name={name}
         defaultValue={defaultValue}
