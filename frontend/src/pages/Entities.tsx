@@ -1,4 +1,5 @@
-import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+import EntityPicture from "../components/EntityPicture";
 import { Link, useSearchParams } from "react-router-dom";
 import { formatAttrValue } from "../components/AttrsForm";
 import { INPUT_CLASS } from "../components/attrTypes";
@@ -146,6 +147,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
           relationshipTypes={relationshipTypes.data?.items ?? []}
         />
       )}
+      {/* Queue R17b: the type's numbers and places as a picture. */}
+      {selected && <EntityPicture key={`picture-${selected.id}`} type={selected} />}
     </>
   );
 }

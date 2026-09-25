@@ -4,6 +4,7 @@ import MeasureFromMap from "../components/MeasureFromMap";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
 import EntityParameterGrid from "../components/EntityParameterGrid";
 import BulkPanel from "../components/BulkPanel";
+import ParameterPicture from "../components/ParameterPicture";
 import {
   ErrorSummary,
   FieldError,
@@ -126,7 +127,13 @@ function ForDomain({ domainId }: { domainId: Id }) {
           {selected.value_type_id != null ? (
             <EntityParameterGrid key={selected.id} parameter={selected} entityTypes={entityTypes} />
           ) : (
-            <ParameterGrid key={selected.id} parameter={selected} />
+            <>
+              <ParameterGrid key={selected.id} parameter={selected} />
+              {/* Queue R17b: the same numbers as a picture, drawn like an answer. */}
+              <div className="mt-4">
+                <ParameterPicture key={`picture-${selected.id}`} parameter={selected} entityTypes={entityTypes} />
+              </div>
+            </>
           )}
           <div className="mt-4">
             <BulkPanel base={`/api/v1/parameters/${selected.id}`} what={`${selected.name} cells`} exportRows={false} />

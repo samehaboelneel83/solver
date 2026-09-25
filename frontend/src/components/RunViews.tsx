@@ -27,7 +27,7 @@ function colourOf(key: string): string {
   return PALETTE[h % PALETTE.length];
 }
 
-type Entry = { index: string[]; value: number | null };
+export type Entry = { index: string[]; value: number | null };
 
 /**
  * Every decision of a run, each drawn the way its shape reads (queue R17): a
@@ -57,7 +57,6 @@ export default function RunViews({ run }: { run: Run }) {
 }
 
 function DecisionView({ run, variable, places }: { run: Run; variable: string; places: RunPlaces }) {
-  const id = useId();
   const sets = run.index_sets.variables[variable] ?? [];
   const kind = run.variable_kinds?.[variable] ?? "binary";
   const amounts = run.amounts?.[variable];
@@ -65,10 +64,6 @@ function DecisionView({ run, variable, places }: { run: Run; variable: string; p
   const parts = kind === "interval" ? run.intervals?.[variable] : undefined;
   const hasAmounts = parts ? Boolean(parts.start && parts.end && run.amounts) : amounts !== undefined && run.amounts !== null;
   const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts, located: Object.keys(places) };
-  const views = viewsFor(shape);
-  const [chosenView, setView] = useState<ViewKind | null>(null);
-  // The places arrive after the first draw; the default is recomputed until a view is picked.
-  const view = chosenView && views.includes(chosenView) ? chosenView : views[0];
   const bars: Bar[] = useMemo(() => {
     if (!parts?.start || !parts.end) return [];
     const read = (name: string) => (run.amounts?.[name] ?? []).map((a) => ({ index: a.index, value: Number(a.value) }));
@@ -85,21 +80,55 @@ function DecisionView({ run, variable, places }: { run: Run; variable: string; p
           : amounts.map((a) => ({ index: a.index, value: Number(a.value) })),
     [amounts, bars, kind, run.assignments, variable],
   );
-  const name = (set: string | undefined, key: string) => (set ? run.labels[set]?.[key] : undefined) ?? key;
-  const order = run.set_order ?? {};
+  return (
+    <ShapedView
+      name={variable}
+      shape={shape}
+      entries={entries}
+      bars={bars}
+      order={run.set_order ?? {}}
+      labels={run.labels}
+      places={places}
+      count={kind === "binary" ? `${entries.length} chosen` : `${entries.length} non-zero`}
+    />
+  );
+}
+
+/**
+ * One table of numbers or choices, drawn the way its shape reads -- an answer's decision, or
+ * (queue R17b) an input: a parameter's cells, over the same sets. The view is chosen from the
+ * shape, every other that fits is one tab away.
+ */
+export function ShapedView({ name: title, shape, entries, bars = [], order, labels, places, count, empty = "Nothing chosen." }: {
+  name: string;
+  shape: Shape;
+  entries: Entry[];
+  bars?: Bar[];
+  order: Record<string, string[]>;
+  labels: Record<string, Record<string, string>>;
+  places: RunPlaces;
+  count: string;
+  empty?: string;
+}) {
+  const id = useId();
+  const sets = shape.sets;
+  const views = viewsFor(shape);
+  const [chosenView, setView] = useState<ViewKind | null>(null);
+  // The places arrive after the first draw; the default is recomputed until a view is picked.
+  const view = chosenView && views.includes(chosenView) ? chosenView : views[0];
+  const name = (set: string | undefined, key: string) => (set ? labels[set]?.[key] : undefined) ?? key;
   const members = (position: number) => membersOf(sets[position], order, entries.map((e) => e.index[position]));
-  const count = kind === "binary" ? `${entries.length} chosen` : `${entries.length} non-zero`;
 
   return (
     <section aria-labelledby={`${id}-title`} className="rounded-md border border-slate-200 bg-white">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
         <h3 id={`${id}-title`} className="text-sm font-semibold text-slate-900">
-          <span className="font-mono">{variable}</span>
+          <span className="font-mono">{title}</span>
           {sets.length > 0 && <span className="font-normal text-slate-500"> [{sets.join(", ")}]</span>}
           <span className="ml-2 font-normal text-slate-500">{count}</span>
         </h3>
         {views.length > 1 && (
-          <div role="tablist" aria-label={`How to draw ${variable}`} className="inline-flex overflow-hidden rounded border border-slate-300 text-xs">
+          <div role="tablist" aria-label={`How to draw ${title}`} className="inline-flex overflow-hidden rounded border border-slate-300 text-xs">
             {views.map((v) => (
               <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
                       className={view === v ? "bg-slate-900 px-2 py-1 text-white" : "px-2 py-1 text-slate-600 hover:bg-slate-100"}>
@@ -111,7 +140,7 @@ function DecisionView({ run, variable, places }: { run: Run; variable: string; p
       </header>
       <div className="overflow-x-auto p-3">
         {entries.length === 0 ? (
-          <p className="text-sm text-slate-500">Nothing chosen.</p>
+          <p className="text-sm text-slate-500">{empty}</p>
         ) : view === "map" ? (
           <MapView marks={mapMarks(sets, entries, places)} name={name} />
         ) : view === "gantt" ? (
