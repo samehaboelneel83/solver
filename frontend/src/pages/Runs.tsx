@@ -103,6 +103,17 @@ export function stochasticOutlook(record: StochasticRecord): string {
   return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}${chances}`;
 }
 
+/** The learned selector's record on a run (queue R11): its pick beside the solver that ran. */
+export type SelectorRecord = { pick: string; confidence: number; confident: boolean; like: string[]; chosen: string; agree: boolean };
+
+/** In a few words -- it records, it never chooses. */
+export function selectorText(record: SelectorRecord): string {
+  const vote = `${Math.round(record.confidence * 100)}% of its nearest models`;
+  return record.agree
+    ? `would also pick ${record.pick} (${vote}, like ${record.like.join(", ")})`
+    : `would pick ${record.pick} instead of ${record.chosen} (${vote}, like ${record.like.join(", ")})`;
+}
+
 /** A run's model structure (queue R4) in a few words: the input to a decomposition. */
 export function structureText(found: ModelStructure): string {
   if (found.linking_rules === 0) return `${found.blocks} independent parts`;
@@ -723,6 +734,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     objective_mode?: string;
     objective_terms?: { id: string; value: number }[];
     structure?: ModelStructure;
+    selector?: SelectorRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
@@ -909,6 +921,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
           <Fact label="Solver" value={data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
+          {params.selector && <Fact label="Learned selector (not acting)" value={selectorText(params.selector)} />}
           {params.structure && params.structure.blocks > 1 && (
             <Fact label="How it splits" value={structureText(params.structure)} />
           )}

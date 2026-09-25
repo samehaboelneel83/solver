@@ -921,3 +921,13 @@ describe("a relax-and-fix answer (queue R9)", () => {
     );
   });
 });
+
+describe("the learned selector's record (queue R11)", () => {
+  it("says what it would pick, how sure, and what it resembles -- never that it chose", async () => {
+    const { selectorText } = await import("./Runs");
+    expect(selectorText({ pick: "scip", confidence: 0.8, confident: true, like: ["rota", "rota_teams"], chosen: "cp-sat", agree: false }))
+      .toBe("would pick scip instead of cp-sat (80% of its nearest models, like rota, rota_teams)");
+    expect(selectorText({ pick: "highs", confidence: 0.6, confident: false, like: ["facility"], chosen: "highs", agree: true }))
+      .toBe("would also pick highs (60% of its nearest models, like facility)");
+  });
+});

@@ -47,6 +47,7 @@ from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
 from app.solve import horizon as horizon_rows
+from app.solve import selector as selector_rows
 from app.solve import lagrange as lagrange_rows
 from app.solve import stochastic as stochastic_rows
 from app.solve import lns as lns_rows
@@ -634,6 +635,7 @@ def _execute(
             **({"fingerprint": numbers} if numbers else {}),
         )
         race_candidates, race_record, race_skipped = None, None, None
+        shadow = None
         # A tuning's options for this problem or domain (setting `solve.solver_params`, queue R10).
         tuned = solver_param_table.parse_setting(params.get("solver_params_setting"))
         # How the model splits (app.solve.blocks.structure, queue R4): recorded, not acted on.
@@ -658,6 +660,9 @@ def _execute(
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"))
+                # The learned selector's pick, recorded beside the rules' and acting on
+                # nothing (shadow mode, app.solve.selector, queue R11).
+                shadow = selector_rows.predict(numbers, sorted(_admissible(found)))
                 recalled = None
                 if params.get("memory") and not params.get("requested_solver"):
                     # The problem's own history, among what the rules admit
@@ -1010,6 +1015,8 @@ def _execute(
         extra["stochastic"] = stochastic_record
     if horizon_record is not None:
         extra["rolling_horizon_run"] = horizon_record
+    if shadow is not None:
+        extra["selector"] = {**shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
     applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
     if applied:
         # The benchmark's winners, applied to every solve of this backend, and a tuning's for this problem.
