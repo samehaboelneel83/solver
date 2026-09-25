@@ -67,6 +67,8 @@ export const OPERATORS_BY_TYPE: Record<AttrType, readonly string[]> = {
   // A shape is not compared; it is drawn (GeometryPreview) and read by the
   // spatial operations, never filtered on.
   geometry: [],
+  // An entity of another type, by key (migration 0067): which one, or which of several.
+  reference: ["=", "!=", "in", "notIn"],
 };
 
 /** Offered on any field that can be absent. */

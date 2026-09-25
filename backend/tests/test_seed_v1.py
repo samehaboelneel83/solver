@@ -172,6 +172,7 @@ def test_seeded_attribute_definitions_are_pinned(seeded):
         ("employee", "hired_on", "date", False, None, None, None),
         ("employee", "hourly_rate", "number", False, "EUR/h", None, 20.0),
         ("employee", "hours_per_week", "integer", False, "h/week", None, 40),
+        ("employee", "mentor", "reference", False, None, None, None),
         ("employee", "on_call", "boolean", False, None, None, False),
         ("shift", "ends_at", "time", True, None, None, None),
         ("shift", "starts_at", "time", True, None, None, None),

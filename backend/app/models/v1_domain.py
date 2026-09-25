@@ -35,10 +35,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
 from app.core.db import Base
 
@@ -65,6 +66,8 @@ ATTR_TYPE = ENUM(
     "time",
     "date",
     "geometry",
+    # Migration 0067 (queue R20a): an entity of another type, by key.
+    "reference",
     name="attr_type",
     create_type=False,
 )
@@ -174,6 +177,12 @@ class AttributeDef(Base):
     # `name` breaking ties. Numbered per owner; every list of attributes in
     # the platform reads it through `ATTRIBUTE_ORDER`.
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Migration 0067 (queue R20a): a `reference` attribute's mirror -- the
+    # many-to-one relationship type named after it, from its owner to the
+    # type it refers to. NULL for every other data type.
+    references_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("relationship_type.id", ondelete="CASCADE"), nullable=True
+    )
 
 
 # The one ordering every attribute list uses. Kept here, beside the column,
@@ -321,6 +330,15 @@ class ParameterValue(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )
+
+
+# The type a reference attribute refers to: its mirror relationship's `to` end.
+AttributeDef.target_type_id = column_property(
+    select(RelationshipType.to_type_id)
+    .where(RelationshipType.id == AttributeDef.references_id)
+    .correlate_except(RelationshipType)
+    .scalar_subquery()
+)
 
 
 __all__ = [

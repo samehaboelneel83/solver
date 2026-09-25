@@ -115,7 +115,7 @@ _EMPLOYEES = [
     }),
     ("bilal", "Bilal Haddad", "depot_north", {
         "full_name": "Bilal Haddad", "hours_per_week": 32, "hourly_rate": 19.0,
-        "grade": "mid", "hired_on": "2023-06-15",
+        "grade": "mid", "hired_on": "2023-06-15", "mentor": "ahmed",
     }),
     ("carla", "Carla Mendes", "depot_south", {
         "full_name": "Carla Mendes", "hours_per_week": 40, "hourly_rate": 21.75,
@@ -123,7 +123,7 @@ _EMPLOYEES = [
     }),
     ("dina", "Dina Farouk", "depot_south", {
         "full_name": "Dina Farouk", "hours_per_week": 20, "hourly_rate": 16.0,
-        "grade": "junior", "hired_on": "2025-01-20",
+        "grade": "junior", "hired_on": "2025-01-20", "mentor": "carla",
     }),
     ("elias", "Elias Novak", "support", {
         "full_name": "Elias Novak", "hours_per_week": 40, "hourly_rate": 28.0,
@@ -409,6 +409,9 @@ def _weekly_rota_domain_seed() -> dict[str, Any]:
                         "default_value": "mid",
                     },
                     {"name": "hired_on", "data_type": "date"},
+                    # Queue R20a: an entity as a value -- and the seed's one
+                    # reference, so it still exercises every attribute type.
+                    {"name": "mentor", "data_type": "reference", "target": "employee", "colour": "#0891b2"},
                 ],
             },
             {
@@ -572,6 +575,8 @@ def _attribute(
     enum_values: list[str] | None = None,
     default_value: Any = None,
     sort_order: int | None = None,
+    target: EntityType | None = None,
+    colour: str | None = None,
 ) -> AttributeDef:
     if sort_order is None:
         # After the type's existing attributes, so a seed or a template lists
@@ -583,8 +588,17 @@ def _attribute(
             )
         ).scalar()
         sort_order = 1 if last is None else last + 1
+    references_id = None
+    if target is not None:
+        # A reference's mirror, as the API makes it (migration 0067).
+        mirror = RelationshipType(domain_id=entity_type.domain_id, name=name, from_type_id=entity_type.id,
+                                  to_type_id=target.id, cardinality="many_to_one", colour=colour)
+        db.add(mirror)
+        db.flush()
+        references_id = mirror.id
     row = AttributeDef(
         entity_type_id=entity_type.id,
+        references_id=references_id,
         name=name,
         data_type=data_type,
         required=required,
@@ -618,7 +632,9 @@ def _entity(
     return row
 
 
-def _ensure_attribute(db: Session, entity_type: EntityType, spec: dict[str, Any]) -> AttributeDef:
+def _ensure_attribute(
+    db: Session, entity_type: EntityType, spec: dict[str, Any], types: dict[str, EntityType] | None = None
+) -> AttributeDef | None:
     found = db.execute(
         select(AttributeDef).where(
             AttributeDef.entity_type_id == entity_type.id,
@@ -627,6 +643,11 @@ def _ensure_attribute(db: Session, entity_type: EntityType, spec: dict[str, Any]
     ).scalar_one_or_none()
     if found is not None:
         return found
+    target = None
+    if spec["data_type"] == "reference":
+        target = (types or {}).get(spec.get("target"))
+        if target is None:
+            return None  # a reference to a type the seed does not make
     return _attribute(
         db,
         entity_type,
@@ -637,6 +658,8 @@ def _ensure_attribute(db: Session, entity_type: EntityType, spec: dict[str, Any]
         enum_values=spec.get("enum_values"),
         default_value=spec.get("default_value"),
         sort_order=spec.get("sort_order") if isinstance(spec.get("sort_order"), int) else None,
+        target=target,
+        colour=spec.get("colour") if target is not None else None,
     )
 
 
@@ -670,7 +693,7 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
             )
         for attr in spec.get("attributes") or []:
             if isinstance(attr, dict) and attr.get("name") and attr.get("data_type"):
-                _ensure_attribute(db, types[name], attr)
+                _ensure_attribute(db, types[name], attr, types)
 
     rel_types: dict[str, RelationshipType] = {
         row.name: row

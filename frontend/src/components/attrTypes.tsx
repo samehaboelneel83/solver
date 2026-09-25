@@ -47,6 +47,7 @@ export const DATA_TYPES: { value: AttrType; label: string }[] = [
   { value: "time", label: "Time of day" },
   { value: "date", label: "Date" },
   { value: "geometry", label: "Shape (GeoJSON)" },
+  { value: "reference", label: "Reference to another entity" },
 ];
 
 export function roleLabel(role: string): string {

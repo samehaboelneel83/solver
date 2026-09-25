@@ -480,3 +480,26 @@ describe("serverFieldErrors", () => {
     });
   });
 });
+
+describe("AttributeDefEditor: a reference (queue R20a)", () => {
+  const TARGETS = [{ id: 7, name: "unit" }, { id: 8, name: "site" }];
+
+  it("is offered only where the targets are given, asks which type, and sends no default", () => {
+    const { onSubmit } = renderEditor({ referenceTargets: TARGETS });
+    setName("home_unit");
+    setType("reference");
+    expect(screen.queryByLabelText(/^Default value/)).toBeNull();
+    submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/Refers to: choose the entity type/).length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText(/^Refers to/), { target: { value: "7" } });
+    submit();
+    expect(lastBody(onSubmit)).toMatchObject({ name: "home_unit", data_type: "reference", target_type_id: 7, default_value: null });
+  });
+
+  it("is not a type an edge's own attribute can take", () => {
+    renderEditor();
+    const options = [...(screen.getByLabelText(/^Data type/) as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).not.toContain("reference");
+  });
+});

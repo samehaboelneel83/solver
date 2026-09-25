@@ -9,7 +9,7 @@ import {
   parseAttrValue,
   type FieldErrors,
 } from "./attrTypes";
-import type { AttrType, AttributeDef } from "../api/v1";
+import { useEntities, type AttrType, type AttributeDef, type Id } from "../api/v1";
 
 /**
  * The typed part of an entity form: one control per `attribute_def` row of
@@ -139,6 +139,7 @@ const TYPE_HINT: Record<AttrType, string> = {
   date: "",
   time: "",
   geometry: 'GeoJSON: a Point, Polygon or MultiPolygon, such as {"type": "Point", "coordinates": [31.2, 30.0]}.',
+  reference: "",
 };
 
 function hintFor(attribute: AttributeDef): string {
@@ -238,6 +239,9 @@ function Control({ attribute, draft, common }: { attribute: AttributeDef; draft:
       </div>
     );
   }
+  if (attribute.data_type === "reference") {
+    return <ReferenceControl attribute={attribute} draft={draft} common={common} />;
+  }
   if (attribute.data_type === "boolean" || attribute.data_type === "enum") {
     const options =
       attribute.data_type === "boolean"
@@ -275,4 +279,22 @@ function Control({ attribute, draft, common }: { attribute: AttributeDef; draft:
             ? { type: "time" }
             : { type: "text" };
   return <input {...common} {...typeProps} autoComplete="off" />;
+}
+
+/** A reference (queue R20a): one entity of the target type or a type inheriting from it, by key. */
+function ReferenceControl({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
+  const targets = useEntities((attribute.target_type_id as Id | null) ?? null, { family: true, limit: 500 });
+  const options = (targets.data?.items ?? []).map((e) => ({ value: e.key, label: e.label ? `${e.key} — ${e.label}` : e.key }));
+  const stale = draft !== "" && targets.isSuccess && !options.some((o) => o.value === draft);
+  return (
+    <select {...common}>
+      <option value="">No value</option>
+      {stale && <option value={draft}>{draft} (not found)</option>}
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
 }

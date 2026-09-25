@@ -74,7 +74,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -84,7 +84,7 @@ from app.api.validation import field_error, validate_colour, validate_icon, vali
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
-from app.models.v1_domain import ATTRIBUTE_ORDER, AttributeDef, EntityType
+from app.models.v1_domain import ATTRIBUTE_ORDER, AttributeDef, EntityType, RelationshipType
 
 router = APIRouter(prefix="/api/v1", tags=["entity types"])
 
@@ -94,7 +94,7 @@ router = APIRouter(prefix="/api/v1", tags=["entity types"])
 # `translate_db_error` re-raises untouched -- i.e. a 500. A Literal turns it
 # into a 422 naming the field, like every other bad value here.
 EntityRole = Literal["agent", "resource", "time", "location", "task", "org", "other"]
-AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date", "geometry"]
+AttrType = Literal["integer", "number", "text", "boolean", "enum", "time", "date", "geometry", "reference"]
 
 
 def _validate_attribute_name(value: str | None) -> str | None:
@@ -169,6 +169,9 @@ def _default_value_matches(data_type: str, enum_values: list[str] | None, value:
         from app.spatial.geometry import validate_geometry
 
         return validate_geometry(value) is None
+    if data_type == "reference":
+        # Migration 0067: a reference has no default -- which entity would it be?
+        return False
     # text, time and date are all `jsonb_typeof(value) = 'string'` in the
     # SQL function's ELSE branch. It does not parse a time or a date, and
     # neither does this: shadowing a CHECK more strictly than the CHECK
@@ -216,6 +219,7 @@ _DEFAULT_SHAPE = {
     "time": "string",
     "date": "string",
     "geometry": "GeoJSON Point, Polygon or MultiPolygon",
+    "reference": "nothing: a reference has no default",
 }
 
 
@@ -239,6 +243,10 @@ class AttributeDefRead(BaseModel):
     # already return attributes in this order; it is here so a client that
     # re-sorts, or a form that edits it, has the number.
     sort_order: int
+    # Migration 0067 (queue R20a): a `reference` attribute's mirror
+    # relationship type, and the entity type it refers to.
+    references_id: int | None = None
+    target_type_id: int | None = None
 
 
 # `integer` in the database. A client that sends more reaches the driver as
@@ -257,6 +265,8 @@ class AttributeDefCreate(BaseModel):
     # the form, where the person adding it is looking, rather than wherever
     # its name happens to sort.
     sort_order: SortOrder | None = None
+    # A `reference` attribute's target: an entity type of the same domain.
+    target_type_id: int | None = None
 
     _check_name = field_validator("name")(_validate_attribute_name)
 
@@ -626,14 +636,39 @@ def create_attribute(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> AttributeDefRead:
-    _get_entity_type(db, entity_type_id)
+    owner = _get_entity_type(db, entity_type_id)
     _check_enum_pairing(payload.data_type, payload.enum_values)
     _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
     fields = payload.model_dump()
+    target_type_id = fields.pop("target_type_id")
     if fields["sort_order"] is None:
         fields["sort_order"] = next_attribute_position(
             db, AttributeDef.entity_type_id, entity_type_id
         )
+    if (payload.data_type == "reference") != (target_type_id is not None):
+        raise field_error(
+            "target_type_id",
+            "a reference attribute names the entity type it refers to, and only a reference does",
+            target_type_id,
+        )
+    if target_type_id is not None:
+        # Queue R20a: the mirror relationship, many-to-one and named after the
+        # attribute, so `via` and edge reads apply to it (migration 0067).
+        target = db.get(EntityType, target_type_id)
+        if target is None or target.domain_id != owner.domain_id:
+            raise field_error("target_type_id", "not an entity type of this domain", target_type_id)
+        mirror = RelationshipType(domain_id=owner.domain_id, name=payload.name, from_type_id=owner.id,
+                                  to_type_id=target.id, cardinality="many_to_one")
+        db.add(mirror)
+        try:
+            db.flush()
+        except DBAPIError as exc:
+            db.rollback()
+            raise HTTPException(
+                409, f"a relationship type called {payload.name!r} already exists; a reference attribute "
+                "makes one of its own name"
+            ) from exc
+        fields["references_id"] = mirror.id
     attribute = AttributeDef(entity_type_id=entity_type_id, **fields)
     db.add(attribute)
     _commit(db, "attribute_def")
@@ -675,6 +710,15 @@ def update_attribute(
         merged_enum_values,
         changes["default_value"] if "default_value" in changes else attribute.default_value,
     )
+    if (merged_data_type == "reference") != (attribute.data_type == "reference"):
+        raise field_error(
+            "data_type",
+            "a reference cannot become another type, nor another type a reference; add a new attribute",
+            merged_data_type,
+        )
+    if attribute.references_id is not None and "name" in changes:
+        # Its mirror relationship keeps its name.
+        db.get(RelationshipType, attribute.references_id).name = changes["name"]
     for field, value in changes.items():
         setattr(attribute, field, value)
     _commit(db, "attribute_def")
@@ -688,5 +732,15 @@ def delete_attribute(
     db: Session = Depends(get_db),
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
-    db.delete(_get_attribute(db, attribute_id))
+    attribute = _get_attribute(db, attribute_id)
+    if attribute.references_id is not None:
+        # Clear the values first -- which takes the mirror edges with them --
+        # then the mirror relationship type, whose delete takes the attribute.
+        db.execute(
+            text("UPDATE entity SET attrs = attrs - :name WHERE entity_type_id = ANY (entity_type_family(:owner))"),
+            {"name": attribute.name, "owner": attribute.entity_type_id},
+        )
+        db.delete(db.get(RelationshipType, attribute.references_id))
+    else:
+        db.delete(attribute)
     _commit(db, "attribute_def")

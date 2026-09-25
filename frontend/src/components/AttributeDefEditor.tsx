@@ -32,7 +32,7 @@ function parseEnumValues(text: string): string[] {
     .filter((line) => line !== "");
 }
 
-const FIELD_ORDER = ["name", "data_type", "required", "unit", "sort_order", "enum_values", "default_value"];
+const FIELD_ORDER = ["name", "data_type", "required", "unit", "sort_order", "enum_values", "target_type_id", "default_value"];
 export const ATTRIBUTE_FIELDS = FIELD_ORDER;
 
 const MATERIALISED_NOTE =
@@ -51,6 +51,9 @@ type AttributeDefEditorProps = {
   serverErrors?: FieldErrors | null;
   /** Move focus to the name field on mount (when opened by the user). */
   autoFocus?: boolean;
+  /** The entity types a reference may point at (queue R20a); absent where
+   * an attribute cannot be one -- an edge's own attribute. */
+  referenceTargets?: { id: number; name: string }[];
 };
 
 export default function AttributeDefEditor({
@@ -62,6 +65,7 @@ export default function AttributeDefEditor({
   isSubmitting = false,
   serverErrors,
   autoFocus = false,
+  referenceTargets,
 }: AttributeDefEditorProps) {
   const isEdit = Boolean(initial);
   const [name, setName] = useState(initial?.name ?? "");
@@ -73,6 +77,12 @@ export default function AttributeDefEditor({
   const [sortOrder, setSortOrder] = useState(initial ? String(initial.sort_order) : "");
   const [enumText, setEnumText] = useState((initial?.enum_values ?? []).join("\n"));
   const [defaultDraft, setDefaultDraft] = useState(draftFromValue(initial?.default_value));
+  const [targetTypeId, setTargetTypeId] = useState<number | null>((initial?.target_type_id as number | null) ?? null);
+  const isReference = dataType === "reference";
+  // A reference is fixed once made: it cannot become another type, nor another type one.
+  const dataTypes = DATA_TYPES.filter((t) =>
+    isEdit ? (t.value === "reference") === (initial?.data_type === "reference") : t.value !== "reference" || referenceTargets
+  );
   const { errors, replace, summaryRef } = useFieldErrors(serverErrors);
 
   const baseId = useId();
@@ -124,8 +134,9 @@ export default function AttributeDefEditor({
       }
     }
 
-    const parsed = parseDefaultValue(dataType, defaultDraft, enumValues);
+    const parsed = isReference ? ({ ok: true, value: null } as const) : parseDefaultValue(dataType, defaultDraft, enumValues);
     if (!parsed.ok) next.default_value = parsed.message;
+    if (isReference && targetTypeId === null) next.target_type_id = "Refers to: choose the entity type.";
 
     const trimmedOrder = sortOrder.trim();
     const order = trimmedOrder === "" ? null : Number(trimmedOrder);
@@ -148,6 +159,7 @@ export default function AttributeDefEditor({
       // "after the others" on create and "unchanged" on edit, and refuses a
       // null for a column that is never empty.
       ...(order === null ? {} : { sort_order: order }),
+      ...(isReference && !isEdit ? { target_type_id: targetTypeId } : {}),
     });
   }
 
@@ -226,6 +238,7 @@ export default function AttributeDefEditor({
     time: "Leave empty for no default.",
     date: "Leave empty for no default.",
     geometry: "GeoJSON; usually left empty -- each record draws its own shape.",
+    reference: "",
   };
 
   return (
@@ -275,7 +288,7 @@ export default function AttributeDefEditor({
             aria-describedby={describedBy(errors.data_type && errorId("data_type"))}
             onChange={(e) => changeType(e.target.value as AttrType)}
           >
-            {DATA_TYPES.map((t) => (
+            {dataTypes.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
@@ -367,6 +380,39 @@ export default function AttributeDefEditor({
         </div>
       )}
 
+      {isReference && (
+        <div>
+          <FieldLabel htmlFor={id("target_type_id")} required>
+            Refers to
+          </FieldLabel>
+          <select
+            id={id("target_type_id")}
+            className={INPUT_CLASS}
+            value={targetTypeId ?? ""}
+            disabled={isEdit}
+            aria-invalid={errors.target_type_id ? "true" : undefined}
+            aria-describedby={describedBy(id("target_type_id-hint"), errors.target_type_id && errorId("target_type_id"))}
+            onChange={(e) => {
+              setTargetTypeId(e.target.value === "" ? null : Number(e.target.value));
+              clearError("target_type_id");
+            }}
+          >
+            <option value="">choose…</option>
+            {(referenceTargets ?? []).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <p id={id("target_type_id-hint")} className="mt-1 text-xs text-slate-500">
+            Each entity names one entity of that type. It is also a many-to-one relationship of this attribute&apos;s
+            name, so a rule can walk it.
+          </p>
+          <FieldError id={errorId("target_type_id")} message={errors.target_type_id} />
+        </div>
+      )}
+
+      {!isReference && (
       <div>
         <FieldLabel htmlFor={id("default_value")}>Default value</FieldLabel>
         {renderDefaultControl()}
@@ -380,6 +426,7 @@ export default function AttributeDefEditor({
         </p>
         <FieldError id={errorId("default_value")} message={errors.default_value} />
       </div>
+      )}
 
       {isEdit && (
         <p className="text-xs text-slate-600">

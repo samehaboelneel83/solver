@@ -307,6 +307,12 @@ function Attributes({ type }: { type: EntityType }) {
   const inherited = (type.own_attributes ? type.attributes.slice(type.own_attributes.length) : []);
   const types = useEntityTypes(type.domain_id, { limit: 500 });
   const typeName = (id: Id | null | undefined) => types.data?.items.find((t) => t.id === id)?.name ?? "an ancestor";
+  const referenceTargets = (types.data?.items ?? []).map((t) => ({ id: Number(t.id), name: t.name }));
+  // A reference says what it refers to (queue R20a): "Reference to unit".
+  const typeLabel = (attribute: AttributeDef) =>
+    attribute.data_type === "reference"
+      ? `Reference to ${types.data?.items.find((t) => t.id === attribute.target_type_id)?.name ?? "an entity type"}`
+      : dataTypeLabel(attribute.data_type);
   const canEdit = can("domain.edit");
   const [editing, setEditing] = useState<Editing>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
@@ -427,7 +433,7 @@ function Attributes({ type }: { type: EntityType }) {
                   <th scope="row" className="px-2 py-2 font-mono font-normal text-slate-900">
                     {attribute.name}
                   </th>
-                  <td className="px-2 py-2 text-slate-700">{dataTypeLabel(attribute.data_type)}</td>
+                  <td className="px-2 py-2 text-slate-700">{typeLabel(attribute)}</td>
                   <td className="px-2 py-2 text-slate-700">{attribute.required ? "Yes" : "No"}</td>
                   <td className="px-2 py-2 text-slate-700">{attribute.unit ?? "—"}</td>
                   <td className="px-2 py-2 text-slate-700">
@@ -488,6 +494,7 @@ function Attributes({ type }: { type: EntityType }) {
               isSubmitting={createAttribute.isPending}
               serverErrors={serverErrors}
               autoFocus
+              referenceTargets={referenceTargets}
             />
           ) : editingAttribute ? (
             <AttributeDefEditor
@@ -499,6 +506,7 @@ function Attributes({ type }: { type: EntityType }) {
               isSubmitting={updateAttribute.isPending}
               serverErrors={serverErrors}
               autoFocus
+              referenceTargets={referenceTargets}
             />
           ) : (
             <p className="text-sm text-slate-600">This attribute no longer exists.</p>
@@ -513,7 +521,7 @@ function Attributes({ type }: { type: EntityType }) {
             {inherited.map((attribute) => (
               <li key={attribute.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
                 <span className="font-mono text-slate-900">{attribute.name}</span>
-                <span className="text-slate-600">{dataTypeLabel(attribute.data_type)}</span>
+                <span className="text-slate-600">{typeLabel(attribute)}</span>
                 <span className="ms-auto text-xs text-slate-500">
                   from{" "}
                   <Link to={`/entity-types/${attribute.entity_type_id}`} className="text-blue-700 underline">

@@ -111,7 +111,7 @@ export function listDomains(): Promise<Page<Domain>> {
 // --- entity types and attribute definitions (Task 5) ----------------------
 
 export type EntityRole = "agent" | "resource" | "time" | "location" | "task" | "org" | "other";
-export type AttrType = "integer" | "number" | "text" | "boolean" | "enum" | "time" | "date" | "geometry";
+export type AttrType = "integer" | "number" | "text" | "boolean" | "enum" | "time" | "date" | "geometry" | "reference";
 
 export type AttributeDef = {
   id: Id;
@@ -126,6 +126,9 @@ export type AttributeDef = {
   /** Lower first, name breaking ties (migration 0027). The API already
    * returns attributes in this order, so screens render them as given. */
   sort_order: number;
+  /** Migration 0067 (queue R20a): a reference's mirror relationship type and the type it refers to. */
+  references_id?: Id | null;
+  target_type_id?: Id | null;
 };
 
 export type AttributeDefCreate = {
@@ -137,6 +140,8 @@ export type AttributeDefCreate = {
   default_value?: unknown;
   /** Omitted means "after the others". */
   sort_order?: number;
+  /** A `reference` attribute's target entity type (queue R20a). */
+  target_type_id?: Id | null;
 };
 
 /** An explicit `null` is meaningful (it clears `enum_values`, `unit`,
@@ -280,12 +285,13 @@ export type EntityUpdate = Partial<Omit<EntityCreate, "entity_type_id">> & { upd
  * `loc: ["query", "expr", ...]` pointing at the rule it could not use.
  */
 export function listEntities(
-  params: { entityTypeId?: Id | null; q?: string; expression?: ExpressionDocument | null } & PageParams = {}
+  params: { entityTypeId?: Id | null; q?: string; expression?: ExpressionDocument | null; family?: boolean } & PageParams = {}
 ): Promise<Page<Entity>> {
-  const { entityTypeId, q, expression, limit, offset } = params;
+  const { entityTypeId, q, expression, limit, offset, family } = params;
   return apiFetch(
     `/api/v1/entities${query({
       entity_type_id: entityTypeId,
+      family: family ? "true" : undefined,
       q,
       expr: expression ? JSON.stringify(expression) : undefined,
       limit,
@@ -933,7 +939,7 @@ export const useOrderRelationshipAttributes = () =>
 // entities
 export function useEntities(
   entityTypeId: Id | null,
-  params: { q?: string; expression?: ExpressionDocument | null } & PageParams = {}
+  params: { q?: string; expression?: ExpressionDocument | null; family?: boolean } & PageParams = {}
 ) {
   return useQuery({
     // The document goes into the key by value, so two different

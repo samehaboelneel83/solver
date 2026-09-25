@@ -400,6 +400,8 @@ def update_relationship_type(
     expected = changes.pop("updated_at", None)
     row = _get_relationship_type(db, relationship_type_id, for_update=expected is not None)
     check_not_stale("relationship type", row.updated_at, expected)
+    if set(changes) - {"colour"}:
+        _refuse_if_mirror(db, row, "changed")
     _check_hierarchy_rules(
         changes.get("from_type_id", row.from_type_id),
         changes.get("to_type_id", row.to_type_id),
@@ -420,8 +422,20 @@ def delete_relationship_type(
     _: UserAccount = Depends(requires("domain.edit")),
 ) -> None:
     # `relationship` rows cascade in the database (ON DELETE CASCADE).
-    db.delete(_get_relationship_type(db, relationship_type_id))
+    row = _get_relationship_type(db, relationship_type_id)
+    _refuse_if_mirror(db, row, "deleted")
+    db.delete(row)
     _commit(db, "relationship_type")
+
+
+def _refuse_if_mirror(db: Session, row: RelationshipType, how: str) -> None:
+    """A reference attribute's relationship (migration 0067) follows the
+    attribute: its name, ends and edges are the attribute's to change."""
+    owner = db.query(AttributeDef.name).filter(AttributeDef.references_id == row.id).first()
+    if owner is not None:
+        raise HTTPException(
+            409, f"{row.name!r} is the reference attribute {owner.name!r}; it is {how} through that attribute"
+        )
 
 
 @router.get("/relationship-types/{relationship_type_id}/attributes")
@@ -450,6 +464,10 @@ def create_relationship_attribute(
     _check_enum_pairing(payload.data_type, payload.enum_values)
     _check_default_value(payload.data_type, payload.enum_values, payload.default_value)
     fields = payload.model_dump()
+    # An edge refers to no entity of its own (migration 0067): its two ends are that.
+    if payload.data_type == "reference" or fields.pop("target_type_id") is not None:
+        raise field_error("data_type", "an edge attribute cannot be a reference; its ends are its entities",
+                          payload.data_type)
     if fields["sort_order"] is None:
         fields["sort_order"] = next_attribute_position(
             db, AttributeDef.relationship_type_id, relationship_type_id

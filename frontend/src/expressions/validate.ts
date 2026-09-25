@@ -144,6 +144,7 @@ const TYPE_MESSAGE: Record<AttrType, string> = {
   date: "must be a date (YYYY-MM-DD).",
   time: "must be a time of day (HH:MM).",
   geometry: "is a shape, which is not compared.",
+  reference: "must be the key of an entity.",
 };
 
 /** Whether one value fits `field`'s data type, or why not. */
@@ -174,6 +175,8 @@ function scalarProblem(field: ExpressionField, value: unknown): string | null {
       const parsed = parseAttrValue(type, value, [], "value");
       return parsed.ok ? null : TYPE_MESSAGE[type];
     }
+    case "reference":
+      return typeof value === "string" && value !== "" ? null : TYPE_MESSAGE.reference;
     case "geometry":
       // No operator is offered on a shape (OPERATORS_BY_TYPE), so no value
       // can reach here from the builder; a hand-written one is refused.

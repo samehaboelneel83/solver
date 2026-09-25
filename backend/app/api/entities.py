@@ -87,7 +87,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -217,6 +217,7 @@ def _expression_filter(db: Session, expr: str):
 @router.get("/entities")
 def list_entities(
     entity_type_id: int | None = Query(None),
+    family: bool = Query(False, description="with entity_type_id: its descendants' entities too (queue R18)"),
     q: str | None = Query(None, description="matches key or label, case-insensitively"),
     expr: str | None = Query(
         None,
@@ -231,7 +232,12 @@ def list_entities(
     _: UserAccount = Depends(get_current_user),
 ) -> EntityList:
     query = db.query(Entity)
-    if entity_type_id is not None:
+    if entity_type_id is not None and family:
+        # What a reference to this type may name (migration 0067).
+        query = query.filter(
+            Entity.entity_type_id == func.any(func.entity_type_family(entity_type_id))
+        )
+    elif entity_type_id is not None:
         query = query.filter(Entity.entity_type_id == entity_type_id)
     # The expression is one more `filter()` on the query the route had
     # already built, which is what makes "it cannot widen what a caller

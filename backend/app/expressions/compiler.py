@@ -130,7 +130,7 @@ def _attribute_value(name: str, data_type: str) -> ColumnElement[Any]:
     stored = Entity.attrs[name]
     text = stored.astext
     kind = sa.func.jsonb_typeof(stored)
-    if data_type in ("text", "enum", "date"):
+    if data_type in ("text", "enum", "date", "reference"):
         # `date` deliberately stays text; see the module docstring.
         return sa.case((kind == "string", text), else_=_null_like(text))
     if data_type in ("integer", "number"):
@@ -418,6 +418,12 @@ def _scalar(value: Any, resolved: _Resolved, path: Path) -> Any:
         # comparison is `time` too, which is what makes 09:30 equal
         # 09:30:00 (Ruling 36) rather than differ by three characters.
         return dt.time(int(match[1]), int(match[2]), int(match[3] or 0))
+    if data_type == "reference":
+        # An entity's key (migration 0067): any non-empty text; one naming no
+        # entity simply matches nothing.
+        if not isinstance(value, str) or value == "":
+            raise _bad_value(path, "must be the key of an entity.")
+        return value
     raise AssertionError(f"no value rule for {data_type!r}")  # pragma: no cover
 
 

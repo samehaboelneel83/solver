@@ -177,7 +177,13 @@
       "in",
       "notIn"
     ],
-    "geometry": []
+    "geometry": [],
+    "reference": [
+      "=",
+      "!=",
+      "in",
+      "notIn"
+    ]
   },
   "nullOperators": [
     "null",
