@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { EntityType, ParameterDef } from "../api/v1";
-import EntityPicture, { placeOf } from "./EntityPicture";
+import EntityPicture, { CalendarView, placeOf } from "./EntityPicture";
 import ParameterPicture from "./ParameterPicture";
 
 const days = [{ id: 1, entity_type_id: 10, key: "mon", label: "Monday" }, { id: 2, entity_type_id: 10, key: "tue", label: null }];
@@ -43,5 +43,14 @@ describe("input views (queue R17b)", () => {
     expect(placeOf({ type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]] })).toEqual([1, 2]);
     expect(placeOf({ type: "Point", coordinates: [3, 4] })).toEqual([3, 4]);
     expect(placeOf("nowhere")).toBeNull();
+  });
+});
+
+describe("a time set on a calendar (queue R17c)", () => {
+  it("marks each dated member on its month, Monday first", () => {
+    render(<CalendarView days={[{ date: "2026-09-28", key: "mon", label: "Monday" }, { date: "2026-10-01", key: "thu", label: "Thursday" }]} by="on" />);
+    expect(screen.getByRole("table", { name: "Calendar 2026-09" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Calendar 2026-10" })).toBeInTheDocument();
+    expect(screen.getByTitle("Monday")).toHaveTextContent("28");
   });
 });

@@ -1,5 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { NO_BASEMAP, useBasemaps } from "../hooks/useBasemaps";
+import { fitView, tileUrl } from "../lib/tiles";
 import { getRunPlaces, type Run, type RunPlaces } from "../api/v1";
 import {
   cellKey,
@@ -473,6 +475,8 @@ function niceTicks(low: number, high: number): number[] {
  * a degree of longitude shortened by the cosine of the latitude.
  */
 export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; name: Namer }) {
+  // The domain's basemaps (spatial.tiles_index), the same choice the districting map offers.
+  const { basemaps, chosen: basemap, choose } = useBasemaps();
   const all = [...marks.points.map((p) => p.at), ...marks.lines.flatMap((l) => [l.from, l.to])];
   if (all.length === 0) return <p className="text-sm text-slate-500">Nothing here has a place to draw.</p>;
   const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
@@ -482,10 +486,20 @@ export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; n
   const W = 640, H = 420, pad = 24;
   const spanX = Math.max((maxX - minX) * squash, 1e-9), spanY = Math.max(maxY - minY, 1e-9);
   const k = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
-  const at = (p: [number, number]): [number, number] => [
-    pad + (p[0] - minX) * squash * k + (W - 2 * pad - spanX * k) / 2,
-    H - pad - (p[1] - minY) * k - (H - 2 * pad - spanY * k) / 2,
-  ];
+  // Over a basemap the frame is Web Mercator, so the marks sit on the imagery; else a plain frame.
+  const view = basemap && degrees
+    ? fitView({ west: minX - 1e-4, south: minY - 1e-4, east: maxX + 1e-4, north: maxY + 1e-4 }, W - 2 * pad, H - 2 * pad, basemap)
+    : null;
+  const at = (p: [number, number]): [number, number] => {
+    if (view) {
+      const [x, y] = view.project(p[0], p[1]);
+      return [x + pad, y + pad];
+    }
+    return [
+      pad + (p[0] - minX) * squash * k + (W - 2 * pad - spanX * k) / 2,
+      H - pad - (p[1] - minY) * k - (H - 2 * pad - spanY * k) / 2,
+    ];
+  };
   const biggest = Math.max(1, ...marks.lines.map((l) => Math.abs(l.value ?? 1)), ...marks.points.map((p) => Math.abs(p.value ?? 1)));
   const chosen = marks.points.filter((p) => p.chosen).length;
   // Each located set its own colour, so a site and the customers it serves read apart.
@@ -494,6 +508,16 @@ export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; n
   const fillOf = (set: string) => SET_FILL[setsDrawn.indexOf(set) % SET_FILL.length];
   return (
     <figure>
+    {basemaps.length > 0 && degrees && (
+      <label className="mb-1 flex items-center gap-2 text-xs text-slate-600">
+        Background
+        <select className="rounded border border-slate-300 px-1 py-0.5 text-xs" value={basemap?.id ?? NO_BASEMAP}
+                onChange={(event) => choose(event.target.value)}>
+          <option value={NO_BASEMAP}>none</option>
+          {basemaps.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </label>
+    )}
     {setsDrawn.length > 1 && (
       <figcaption className="mb-1 flex gap-3 text-xs text-slate-600">
         {setsDrawn.map((set) => (
@@ -506,6 +530,10 @@ export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; n
     )}
     <svg role="img" aria-label={`Map of ${chosen} chosen of ${marks.points.length} places and ${marks.lines.length} lines`}
          width={W} height={H} className="rounded bg-slate-50">
+      {view && basemap && view.tiles.map((tile) => (
+        <image key={`${tile.z}/${tile.x}/${tile.y}/${tile.left}`} href={tileUrl(basemap.url, tile)} x={tile.left + pad} y={tile.top + pad}
+               width={tile.size + 0.5} height={tile.size + 0.5} preserveAspectRatio="none" />
+      ))}
       {marks.lines.map((l, i) => {
         const [x1, y1] = at(l.from), [x2, y2] = at(l.to);
         return (

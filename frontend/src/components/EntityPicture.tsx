@@ -29,13 +29,21 @@ export default function EntityPicture({ type }: { type: EntityType }) {
   if (items.length === 0) return null;
   const numbers = type.attributes.filter((a) => a.data_type === "integer" || a.data_type === "number");
   const shapes = type.attributes.filter((a) => a.data_type === "geometry");
+  // A time set with dates (queue R17c): its members on a calendar.
+  const dated = type.role === "time" ? type.attributes.find((a) => a.data_type === "date") : undefined;
+  const days = dated
+    ? items.flatMap((e) => {
+        const d = e.attrs?.[dated.name];
+        return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? [{ date: d, key: e.key, label: e.label ?? e.key }] : [];
+      })
+    : [];
   const points = shapes.length
     ? items.flatMap((e) => {
         const at = placeOf(e.attrs?.[shapes[0].name]);
         return at ? [{ set: type.name, key: e.key, at, chosen: true, value: null }] : [];
       })
     : [];
-  if (numbers.length === 0 && points.length === 0) return null;
+  if (numbers.length === 0 && points.length === 0 && days.length === 0) return null;
   return (
     <section aria-label={`${type.name} at a glance`} className="mt-6 rounded-md border border-slate-200 bg-white p-3">
       <h3 className="mb-2 text-sm font-semibold text-slate-900">
@@ -50,6 +58,7 @@ export default function EntityPicture({ type }: { type: EntityType }) {
           return <Histogram key={a.name} name={a.name} unit={a.unit} values={values} of={items.length} />;
         })}
       </div>
+      {days.length > 0 && <CalendarView days={days} by={dated!.name} />}
       {points.length > 0 && (
         <div className="mt-3">
           <p className="mb-1 text-xs text-slate-600">Where they are ({points.length} placed, by {shapes[0].name})</p>
@@ -90,5 +99,52 @@ function Histogram({ name, unit, values, of }: { name: string; unit: string | nu
         </svg>
       )}
     </figure>
+  );
+}
+
+/** Each month the dates fall in, Monday first, the dated members marked with their key. */
+export function CalendarView({ days, by }: { days: { date: string; key: string; label: string }[]; by: string }) {
+  const onDate = new Map<string, { key: string; label: string }[]>();
+  for (const d of days) onDate.set(d.date, [...(onDate.get(d.date) ?? []), d]);
+  const months = [...new Set(days.map((d) => d.date.slice(0, 7)))].sort().slice(0, 12);
+  return (
+    <div className="mt-3">
+      <p className="mb-1 text-xs text-slate-600">On the calendar ({days.length} dated, by {by})</p>
+      <div className="flex flex-wrap gap-4">
+        {months.map((month) => {
+          const [y, m] = month.split("-").map(Number);
+          const first = new Date(Date.UTC(y, m - 1, 1));
+          const length = new Date(Date.UTC(y, m, 0)).getUTCDate();
+          const lead = (first.getUTCDay() + 6) % 7;
+          const cells = [...Array(lead).fill(null), ...Array.from({ length }, (_, i) => i + 1)];
+          return (
+            <table key={month} aria-label={`Calendar ${month}`} className="text-center text-[11px]">
+              <caption className="text-left text-xs font-medium text-slate-700">
+                {first.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}
+              </caption>
+              <thead>
+                <tr>{["M", "T", "W", "T", "F", "S", "S"].map((d, i) => <th key={i} scope="col" className="w-7 font-normal text-slate-400">{d}</th>)}</tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: Math.ceil(cells.length / 7) }, (_, w) => (
+                  <tr key={w}>
+                    {cells.slice(w * 7, w * 7 + 7).map((day, i) => {
+                      const date = day ? `${month}-${String(day).padStart(2, "0")}` : "";
+                      const here = day ? onDate.get(date) : undefined;
+                      return (
+                        <td key={i} className={here ? "rounded bg-emerald-600 font-semibold text-white" : "text-slate-500"}
+                            title={here ? here.map((h) => h.label).join(", ") : undefined}>
+                          {day ?? ""}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })}
+      </div>
+    </div>
   );
 }
