@@ -14,9 +14,8 @@
  *   so a self-referencing hierarchy is a diamond with both lines on one
  *   rectangle;
  * - an attribute is an **ellipse** around its owner, in the owner's chosen
- *   sort order (migration 0027), and the entity's `key` -- what model
- *   expressions address an entity by -- is the underlined one, as a primary
- *   key is in the notation.
+ *   sort order (migration 0027). The entity's `key` and `name` are columns
+ *   every type has, so neither is drawn.
  *
  * It needs **no new endpoint** -- `useEntityTypes` and
  * `useRelationshipTypes` already return every field it draws, including
@@ -33,9 +32,8 @@
  * Two things are worth knowing about the shape it builds:
  *
  * **Ids are namespaced.** An entity type is `type-<id>`, a relationship
- * type's diamond `reltype-<id>`, an attribute `attr-<id>` and a key
- * `typekey-<id>`, because an entity and an entity type can perfectly well
- * share the number 3. Without the prefixes a mode switch would look to
+ * type's diamond `reltype-<id>` and an attribute `attr-<id>`, because an
+ * entity and an entity type can perfectly well share the number 3. Without the prefixes a mode switch would look to
  * `applyGraphToCy` like an *update* of the same elements (wrong labels,
  * stale positions, no relayout), and a `?focus=<entityId>` deep link could
  * match a type node. With them, switching modes is a clean
@@ -128,7 +126,7 @@ export type ErData = {
   hierarchy?: "yes" | "no";
   /** A rule that may bend draws a dashed border (optimization view). */
   soft?: "yes" | "no";
-  /** An ellipse's place among its owner's, from 0 (the key). The layout
+  /** An ellipse's place among its owner's, from 0. The layout
    * reads this rather than trusting collection order. */
   seq?: number;
   /** What a tap on this element selects, when it is not the element itself. */
@@ -140,7 +138,6 @@ export const EMPTY_PALETTE: GraphPalette = { nodeFill: {}, nodeLabel: {}, edgeCo
 
 /** The attribute-ellipse ids. Namespaced like the rest. */
 export const ATTRIBUTE_NODE_PREFIX = "attr-";
-export const KEY_NODE_PREFIX = "typekey-";
 
 export const TYPE_NODE_PREFIX = "type-";
 export const TYPE_EDGE_PREFIX = "reltype-";
@@ -249,12 +246,6 @@ export const CARDINALITY_ENDS: Record<Cardinality, { from: string; to: string }>
   many_to_many: { from: "m", to: "n" },
 };
 
-/** Combining low line after every character: the only underline a canvas
- * label can have, and the notation's mark for a key. */
-export function underlined(text: string): string {
-  return [...text].map((char) => `${char}̲`).join("");
-}
-
 /** A label's drawn width, estimated. Cytoscape needs a number before it has
  * drawn anything, and an estimate that is a little generous is what keeps
  * the text inside its shape. */
@@ -331,10 +322,9 @@ export function buildTypesView(
     });
     nodeData[nodeId] = { er: "entity", w: Math.max(100, textWidth(type.name, 10.2) + 40) };
 
-    // Every entity has a key -- a column, not an attribute_def -- and it is
-    // how a model addresses the entity, so it is drawn first and underlined,
-    // the way the notation marks a primary key.
-    addAttribute(`${KEY_NODE_PREFIX}${type.id}`, underlined("key"), nodeId, type.role, "node");
+    // Every entity has a key and a name -- columns, not attribute_defs --
+    // and neither is drawn: every type has both, so an ellipse for each
+    // would repeat on every box and say nothing about the type.
     // The API already returns them in their chosen order (0027); sorting
     // again keeps the drawing right if a caller hands over another order.
     // The type's own attributes: an inherited one is drawn once, on the type that declares it.

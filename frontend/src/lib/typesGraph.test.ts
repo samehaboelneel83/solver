@@ -4,7 +4,6 @@ import {
   CARDINALITY_LABEL,
   buildTypesView,
   erKind,
-  underlined,
   withErDependents,
   entityTypeIdFromNodeId,
   objectsPalette,
@@ -206,18 +205,15 @@ describe("buildTypesView", () => {
     expect(palette.nodeData?.["reltype-6"]?.hierarchy).toBe("no");
   });
 
-  it("draws each attribute as an ellipse joined to its owner, after the underlined key", () => {
+  it("draws each attribute as an ellipse joined to its owner, and no key or name", () => {
     const ofEmployee = graph.nodes
       .filter((node) => erKind(node) === "attribute" && node.attributes?.owner === "type-11")
       .map((node) => [node.id, node.label, palette.nodeData?.[node.id]?.seq]);
     expect(ofEmployee).toEqual([
-      ["typekey-11", underlined("key"), 0],
-      ["attr-1", "grade", 1],
+      ["attr-1", "grade", 0],
     ]);
-    // A type with no attributes of its own still has its key.
-    expect(graph.nodes.filter((node) => node.attributes?.owner === "type-22").map((node) => node.id)).toEqual([
-      "typekey-22",
-    ]);
+    // A type with no attributes of its own has no ellipses: its key and name are not drawn.
+    expect(graph.nodes.filter((node) => node.attributes?.owner === "type-22").map((node) => node.id)).toEqual([]);
     const link = graph.edges.find((edge) => edge.id === "attrlink-attr-1");
     expect([link?.source, link?.target]).toEqual(["type-11", "attr-1"]);
   });
@@ -239,7 +235,7 @@ describe("buildTypesView", () => {
       .filter((node) => erKind(node) === "attribute")
       .sort((a, b) => (drawn.nodeData?.[a.id]?.seq ?? 0) - (drawn.nodeData?.[b.id]?.seq ?? 0))
       .map((node) => node.label);
-    expect(names).toEqual([underlined("key"), "zeta", "mid", "alpha"]);
+    expect(names).toEqual(["zeta", "mid", "alpha"]);
   });
 
   it("selects the owner when an ellipse or its line is tapped", () => {
@@ -327,21 +323,13 @@ describe("CARDINALITY_ENDS", () => {
   });
 });
 
-describe("underlined", () => {
-  it("puts a combining low line after every character", () => {
-    expect(underlined("key")).toBe("k̲e̲y̲");
-    expect(underlined("")).toBe("");
-  });
-});
-
 describe("withErDependents", () => {
   const { graph } = buildTypesView([EMPLOYEE, UNIT], [REPORTS_TO, WORKS_FOR]);
 
   it("shows an ellipse exactly when its owner shows", () => {
     const shown = withErDependents(graph.nodes, (node) => node.id === "type-11");
     expect(shown.has("attr-1")).toBe(true);
-    expect(shown.has("typekey-11")).toBe(true);
-    expect(shown.has("typekey-22")).toBe(false);
+    expect(shown.has("attr-1")).toBe(true);
   });
 
   it("shows a diamond only when both of its types show", () => {

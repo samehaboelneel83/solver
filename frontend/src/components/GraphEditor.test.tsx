@@ -1797,7 +1797,7 @@ describe("GraphEditor", () => {
       expect(elementStore.get("reltype-6")?.data.hierarchy).toBe("no");
     });
 
-    it("draws each type's attributes as ellipses, the key first and underlined", async () => {
+    it("draws each type's attributes as ellipses, and no key ellipse", async () => {
       renderWithProviders({ mode: "types" });
       await waitFor(() => expect(elementStore.size).toBeGreaterThan(0));
 
@@ -1805,9 +1805,9 @@ describe("GraphEditor", () => {
         .filter((entry) => entry.data.er === "attribute" && entry.data.selectId === "type-1")
         .sort((a, b) => a.data.seq - b.data.seq)
         .map((entry) => entry.data.label);
-      // The key is a column every entity has; the notation underlines it.
+      // The key and name are columns every entity has, so neither is drawn.
       // The fixture's attributes carry no sort order, so the name decides.
-      expect(ofEmployee).toEqual(["k\u0332e\u0332y\u0332", "code", "grade", "status"]);
+      expect(ofEmployee).toEqual(["code", "grade", "status"]);
       expect(elementStore.get(cyEdgeId("attrlink-attr-11"))?.data.source).toBe("type-1");
     });
 
