@@ -613,6 +613,8 @@ export type Run = RunSummary & {
   variable_kinds?: Record<string, string>;
   set_roles?: Record<string, string>;
   set_order?: Record<string, string[]>;
+  /** Each interval decision's start, end and presence decisions (queue R17b: what a Gantt draws). */
+  intervals?: Record<string, { start?: string; end?: string; presence?: string }>;
   /** How much each whole-number or continuous decision took (migration 0065). Null for older runs. */
   amounts?: Record<string, { index: string[]; value: number }[]> | null;
   constraints: ConstraintOutcome[];

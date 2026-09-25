@@ -65,3 +65,34 @@ def test_a_run_carries_its_amounts_and_the_shape_of_its_sets(tenants, db, empty_
         work_once(db)
     reused = client.get(f"/api/v1/runs/{again['id']}", headers=headers).json()
     assert reused["amounts"] == run["amounts"]
+
+
+def test_an_interval_run_names_the_start_and_end_its_gantt_draws(tenants, db, empty_queue):  # noqa: F811
+    """Queue R17b: an interval decision reports its start, end (and presence) decisions."""
+    from tests.test_scheduling import NO_OVERLAP, _ir
+
+    client, headers, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code in (200, 201), response.text
+        return response.json()
+
+    job = post("/api/v1/entity-types", {"domain_id": domain, "name": "job", "role": "task"})
+    ids = [post("/api/v1/entities", {"entity_type_id": job["id"], "key": key})["id"] for key in ("j1", "j2")]
+    duration = post("/api/v1/parameters", {"domain_id": domain, "name": "duration", "index_type_ids": [job["id"]]})
+    client.put(f"/api/v1/parameters/{duration['id']}/values", headers=headers,
+               json={"cells": [{"entity_ids": [ids[0]], "value": 3}, {"entity_ids": [ids[1]], "value": 4}]})
+    problem = post("/api/problem/", {"domain_id": domain, "name": "gantt"})
+    version = post(f"/api/v1/problems/{problem['id']}/versions", {"ir": _ir(NO_OVERLAP, horizon=20)})
+    scenario = post("/api/v1/scenarios", {"problem_id": problem["id"], "model_version_id": version["id"], "name": "base"})
+    run_id = post(f"/api/v1/scenarios/{scenario['id']}/runs", {"reuse": False, "time_limit_s": 10})["id"]
+    for _ in range(5):
+        if db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one() not in ("queued", "running"):
+            break
+        work_once(db)
+    run = client.get(f"/api/v1/runs/{run_id}", headers=headers).json()
+    assert run["status"] == "optimal" and run["objective"] == 7
+    assert run["intervals"] == {"task": {"start": "begin", "end": "finish"}}
+    ends = {tuple(a["index"]): a["value"] for a in run["amounts"]["finish"]}
+    assert sorted(ends.values()) in ([3, 7], [4, 7])

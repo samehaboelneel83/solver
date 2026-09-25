@@ -175,6 +175,8 @@ class RunRead(RunSummary):
     variable_kinds: dict[str, str] = {}
     set_roles: dict[str, str] = {}
     set_order: dict[str, list[str]] = {}
+    # Each interval decision's start, end and presence decisions, by name (queue R17b's Gantt).
+    intervals: dict[str, dict[str, str]] = {}
     # How much each whole-number or continuous decision took, where it took any (migration 0065).
     # Null for runs recorded before it, and when there is no answer.
     amounts: dict[str, list[dict[str, Any]]] | None = None
@@ -550,8 +552,9 @@ def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any
     return row["labels"] or {}, {"variables": variables, "constraints": constraints}, notes
 
 
-def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]]]:
-    """Each decision's kind, each set's role and each set's members in order (queue R17)."""
+def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]], dict[str, dict[str, str]]]:
+    """Each decision's kind, each set's role, each set's members in order (queue R17), and each
+    interval's start, end and presence decisions -- what a Gantt draws (queue R17b)."""
     row = db.execute(
         text(
             "SELECT mv.ir AS ir, d.data -> 'sets' AS sets, p.domain_id AS domain"
@@ -571,7 +574,12 @@ def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], d
     ).all()) if names else {}
     sets = row["sets"] or {}
     order = {name: [str(r["id"]) for r in sets.get(name, []) if isinstance(r, dict) and "id" in r] for name in names}
-    return kinds, roles, order
+    intervals = {
+        name: {part: spec[part] for part in ("start", "end", "presence") if isinstance(spec.get(part), str)}
+        for name, spec in (ir.get("variables") or {}).items()
+        if isinstance(spec, dict) and spec.get("domain") == "interval"
+    }
+    return kinds, roles, order, intervals
 
 
 def _front(db: Session, run: Run) -> dict[str, Any]:
@@ -596,7 +604,7 @@ def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
     labels, index_sets, rule_notes = _vocabulary(db, run_id)
-    kinds, roles, order = _shapes(db, run_id)
+    kinds, roles, order, intervals = _shapes(db, run_id)
     constraints = db.scalars(
         select(ConstraintResult)
         .where(ConstraintResult.run_id == run_id)
@@ -612,6 +620,7 @@ def _read(db: Session, run_id: int) -> RunRead:
         variable_kinds=kinds,
         set_roles=roles,
         set_order=order,
+        intervals=intervals,
         amounts=solution.amounts if solution else None,
         **_front(db, run),
         conflict=run.conflict,

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { cellKey, defaultAxes, formatAmount, gridOf, membersOf, shade, viewsFor, type Shape } from "./runViews";
+import {
+  cellKey,
+  defaultAxes,
+  formatAmount,
+  ganttBars,
+  gridOf,
+  membersOf,
+  rowPosition,
+  shade,
+  timelineBars,
+  viewsFor,
+  type Shape,
+} from "./runViews";
 
 const shape = (sets: string[], kind: string, roles: Record<string, string> = {}, hasAmounts = true): Shape =>
   ({ sets, kind, roles, hasAmounts });
@@ -7,7 +19,7 @@ const shape = (sets: string[], kind: string, roles: Record<string, string> = {},
 describe("which view draws a decision (queue R17)", () => {
   it("draws a weekly rota as a grid: time across, the slot down, the people inside", () => {
     const rota = shape(["employee", "day", "shift"], "binary", { employee: "agent", day: "time", shift: "time" });
-    expect(viewsFor(rota)).toEqual(["grid", "list"]);
+    expect(viewsFor(rota)).toEqual(["grid", "timeline", "list"]);
     // day is the first time set: across; shift down; employees inside each cell.
     expect(defaultAxes(rota)).toEqual({ rows: 2, cols: 1, inside: [0] });
   });
@@ -24,7 +36,7 @@ describe("which view draws a decision (queue R17)", () => {
 
   it("falls back to the list where nothing better can be drawn", () => {
     expect(viewsFor(shape(["plant", "day"], "integer", {}, false))).toEqual(["list"]);
-    expect(viewsFor(shape(["job", "machine"], "interval"))).toEqual(["list"]);
+    expect(viewsFor(shape(["job", "machine"], "interval", {}, false))).toEqual(["list"]);
   });
 
   it("puts the second set across and the first down when no role says otherwise", () => {
@@ -58,5 +70,39 @@ describe("laying out a grid", () => {
     expect(shade(null, 10)).toBe(0);
     expect(formatAmount(1200)).toBe("1,200");
     expect(formatAmount(3.14159)).toBe("3.14");
+  });
+});
+
+describe("Gantt and timeline (queue R17b)", () => {
+  it("draws an interval from its start and end amounts, one row per machine", () => {
+    const jobs = shape(["job", "machine"], "interval", { machine: "resource" });
+    expect(viewsFor(jobs)).toEqual(["gantt", "list"]);
+    expect(rowPosition(jobs)).toBe(1);
+    const bars = ganttBars(
+      [{ index: ["j2", "m1"], value: 3 }],
+      [{ index: ["j1", "m1"], value: 3 }, { index: ["j2", "m1"], value: 7 }],
+      null,
+      1,
+    );
+    // j1 starts at 0: an amount the answer does not list is 0.
+    expect(bars).toEqual([
+      { row: "m1", label: ["j1"], start: 0, end: 3 },
+      { row: "m1", label: ["j2"], start: 3, end: 7 },
+    ]);
+  });
+
+  it("keeps only the present instances of an optional interval", () => {
+    const bars = ganttBars([], [{ index: ["a"], value: 2 }, { index: ["b"], value: 5 }], [["b"]], 0);
+    expect(bars.map((b) => b.row)).toEqual(["b"]);
+  });
+
+  it("merges consecutive chosen days into one bar per person, in the week's own order", () => {
+    const week = ["mon", "tue", "wed", "thu", "fri"];
+    const bars = timelineBars([["ana", "mon"], ["ana", "tue"], ["ana", "thu"], ["ben", "wed"]], 1, 0, week);
+    expect(bars).toEqual([
+      { row: "ana", label: [], start: 0, end: 2 },
+      { row: "ana", label: [], start: 3, end: 4 },
+      { row: "ben", label: [], start: 2, end: 3 },
+    ]);
   });
 });

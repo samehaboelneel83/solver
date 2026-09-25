@@ -4,8 +4,12 @@ import {
   cellKey,
   defaultAxes,
   formatAmount,
+  ganttBars,
   gridOf,
   membersOf,
+  rowPosition,
+  timelineBars,
+  type Bar,
   shade,
   VIEW_LABELS,
   viewsFor,
@@ -30,7 +34,8 @@ type Entry = { index: string[]; value: number | null };
  * marked -- the plain list one click away. Nothing to configure.
  */
 export default function RunViews({ run }: { run: Run }) {
-  const names = Object.keys(run.assignments ?? {});
+  // An interval is never in `assignments` (its start and end are): it is drawn beside them.
+  const names = [...new Set([...Object.keys(run.assignments ?? {}), ...Object.keys(run.intervals ?? {})])];
   if (names.length === 0) return null;
   return (
     <div className="space-y-6">
@@ -46,15 +51,27 @@ function DecisionView({ run, variable }: { run: Run; variable: string }) {
   const sets = run.index_sets.variables[variable] ?? [];
   const kind = run.variable_kinds?.[variable] ?? "binary";
   const amounts = run.amounts?.[variable];
-  const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts: amounts !== undefined && run.amounts !== null };
+  // An interval has no amounts of its own: its start and end decisions carry them (queue R17b).
+  const parts = kind === "interval" ? run.intervals?.[variable] : undefined;
+  const hasAmounts = parts ? Boolean(parts.start && parts.end && run.amounts) : amounts !== undefined && run.amounts !== null;
+  const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts };
   const views = viewsFor(shape);
   const [view, setView] = useState<ViewKind>(views[0]);
+  const bars: Bar[] = useMemo(() => {
+    if (!parts?.start || !parts.end) return [];
+    const read = (name: string) => (run.amounts?.[name] ?? []).map((a) => ({ index: a.index, value: Number(a.value) }));
+    const present = parts.presence ? (run.assignments?.[parts.presence] ?? []) : null;
+    return ganttBars(read(parts.start), read(parts.end), present, rowPosition(shape));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parts, run.amounts, run.assignments]);
   const entries: Entry[] = useMemo(
     () =>
-      kind === "binary" || !amounts
-        ? (run.assignments?.[variable] ?? []).map((index) => ({ index, value: null }))
-        : amounts.map((a) => ({ index: a.index, value: Number(a.value) })),
-    [amounts, kind, run.assignments, variable],
+      kind === "interval"
+        ? bars.map((b) => ({ index: [b.row, ...b.label], value: b.end - b.start }))
+        : kind === "binary" || !amounts
+          ? (run.assignments?.[variable] ?? []).map((index) => ({ index, value: null }))
+          : amounts.map((a) => ({ index: a.index, value: Number(a.value) })),
+    [amounts, bars, kind, run.assignments, variable],
   );
   const name = (set: string | undefined, key: string) => (set ? run.labels[set]?.[key] : undefined) ?? key;
   const order = run.set_order ?? {};
@@ -83,6 +100,10 @@ function DecisionView({ run, variable }: { run: Run; variable: string }) {
       <div className="overflow-x-auto p-3">
         {entries.length === 0 ? (
           <p className="text-sm text-slate-500">Nothing chosen.</p>
+        ) : view === "gantt" ? (
+          <GanttView bars={bars} rowSet={sets[rowPosition(shape)]} labelSets={sets.filter((_, i) => i !== rowPosition(shape))} name={name} unit="" />
+        ) : view === "timeline" ? (
+          <TimelineView shape={shape} entries={entries} members={members} name={name} />
         ) : view === "grid" ? (
           <GridView shape={shape} entries={entries} members={members} name={name} />
         ) : view === "heat" ? (
@@ -326,4 +347,78 @@ function ListView({ sets, entries, name }: { sets: string[]; entries: Entry[]; n
       ))}
     </ul>
   );
+}
+
+/**
+ * A Gantt chart (queue R17b): one row per member of the row set, each bar from its start to its
+ * end on a shared axis, labelled with the rest of its index. Plain SVG.
+ */
+export function GanttView({ bars, rowSet, labelSets, name, unit, slots }: {
+  bars: Bar[]; rowSet: string | undefined; labelSets: string[]; name: Namer; unit: string;
+  /** For a timeline: the time set's members, one per unit of the axis. */
+  slots?: { set: string; members: string[] };
+}) {
+  const rows = [...new Set(bars.map((b) => b.row))];
+  const low = slots ? 0 : Math.min(0, ...bars.map((b) => b.start));
+  const high = slots ? slots.members.length : Math.max(1, ...bars.map((b) => b.end));
+  const left = 120, right = 16, band = 26, top = 22;
+  const width = Math.max(480, left + right + (slots ? slots.members.length * 56 : 480));
+  const x = (v: number) => left + ((v - low) / (high - low || 1)) * (width - left - right);
+  const ticks = slots
+    ? slots.members.map((m, i) => ({ at: i + 0.5, text: name(slots.set, m) }))
+    : niceTicks(low, high).map((t) => ({ at: t, text: formatAmount(t) }));
+  return (
+    <svg role="img" aria-label={`Gantt chart of ${bars.length} bars over ${rows.length} rows`} width={width}
+         height={top + rows.length * band + 8} className="text-slate-500">
+      {ticks.map((t) => (
+        <g key={`${t.at}`}>
+          <line x1={x(t.at)} x2={x(t.at)} y1={top - 4} y2={top + rows.length * band} stroke="currentColor" strokeOpacity={0.15} />
+          <text x={x(t.at)} y={12} textAnchor="middle" fontSize={10} fill="currentColor">{t.text}{unit}</text>
+        </g>
+      ))}
+      {rows.map((row, r) => (
+        <g key={row}>
+          <text x={left - 8} y={top + r * band + band / 2 + 4} textAnchor="end" fontSize={11} className="fill-slate-700">
+            {name(rowSet, row)}
+          </text>
+          {bars.filter((b) => b.row === row).map((b, k) => {
+            const label = b.label.map((key, j) => name(labelSets[j], key)).join(" · ");
+            const w = Math.max(2, x(b.end) - x(b.start));
+            return (
+              <g key={k}>
+                <rect x={x(b.start)} y={top + r * band + 4} width={w} height={band - 8} rx={3}
+                      fill={colourOf(b.label.join("\u0001") || row)}>
+                  <title>{`${name(rowSet, row)}${label ? ` · ${label}` : ""}: ${slots ? `${slots.members[b.start]} to ${slots.members[b.end - 1]}` : `${formatAmount(b.start)} to ${formatAmount(b.end)}`}`}</title>
+                </rect>
+                {w > 36 && label && (
+                  <text x={x(b.start) + 4} y={top + r * band + band / 2 + 4} fontSize={10} fill="white">{label}</text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/** A yes/no answer over a time set as a timeline: the chosen slots of each row member, runs of
+ * consecutive slots as one bar. */
+function TimelineView({ shape, entries, members, name }: { shape: Shape; entries: Entry[]; members: (p: number) => string[]; name: Namer }) {
+  const time = shape.sets.findIndex((s) => shape.roles[s] === "time");
+  const row = rowPosition(shape) === time ? (time === 0 ? 1 : 0) : rowPosition(shape);
+  const slots = members(time);
+  const bars = timelineBars(entries.map((e) => e.index), time, row, slots);
+  const labelSets = shape.sets.filter((_, i) => i !== time && i !== row);
+  return <GanttView bars={bars} rowSet={shape.sets[row]} labelSets={labelSets} name={name} unit="" slots={{ set: shape.sets[time], members: slots }} />;
+}
+
+/** About six round ticks between low and high. */
+function niceTicks(low: number, high: number): number[] {
+  const span = high - low || 1;
+  const raw = span / 6;
+  const step = [1, 2, 5, 10].map((m) => m * 10 ** Math.floor(Math.log10(raw))).find((s) => s >= raw) ?? raw;
+  const out: number[] = [];
+  for (let t = Math.ceil(low / step) * step; t <= high + 1e-9; t += step) out.push(Number(t.toPrecision(12)));
+  return out;
 }

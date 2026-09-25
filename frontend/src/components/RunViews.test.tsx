@@ -76,3 +76,27 @@ describe("a run drawn by the shape of each decision (queue R17)", () => {
     expect(screen.getByRole("listitem")).toHaveTextContent("n · c1");
   });
 });
+
+describe("Gantt and timeline views (queue R17b)", () => {
+  it("draws an interval decision as a Gantt from its start and end amounts", () => {
+    render(<RunViews run={run({
+      index_sets: { variables: { task: ["employee"], begin: ["employee"], finish: ["employee"] }, constraints: {} },
+      variable_kinds: { task: "interval", begin: "integer", finish: "integer" },
+      intervals: { task: { start: "begin", end: "finish" } },
+      amounts: { begin: [{ index: ["mona"], value: 3 }], finish: [{ index: ["ahmed"], value: 3 }, { index: ["mona"], value: 7 }] },
+    })} />);
+    expect(screen.getByRole("img", { name: "Gantt chart of 2 bars over 2 rows" })).toBeInTheDocument();
+    expect(screen.getByText("Mona: 3 to 7")).toBeInTheDocument();
+  });
+
+  it("offers a roster as a timeline: each person's run of days as one bar", () => {
+    render(<RunViews run={run({
+      index_sets: { variables: { works: ["employee", "day"] }, constraints: {} },
+      variable_kinds: { works: "binary" },
+      assignments: { works: [["ahmed", "mon"], ["ahmed", "tue"], ["mona", "tue"]] },
+    })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Timeline" }));
+    expect(screen.getByRole("img", { name: "Gantt chart of 2 bars over 2 rows" })).toBeInTheDocument();
+    expect(screen.getByText("Ahmed: mon to tue")).toBeInTheDocument();
+  });
+});
