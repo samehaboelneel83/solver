@@ -6,7 +6,24 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+# As many connections as the request thread pool has threads (anyio's 40). A
+# request takes its connection in one threadpool call (`get_db`'s entry) and
+# gives it back in another (its `finally`); with fewer connections than
+# threads, a burst fills every thread with a request waiting to connect, none
+# is left to run a `finally`, and all wait out the pool timeout -- 60
+# concurrent writes answered 40 of them with a 500 after 30 s. At 40 the
+# burst queues for a thread instead. Postgres allows 100; the worker's own
+# pool is lazy and holds a few.
+POOL_SIZE, POOL_OVERFLOW, POOL_TIMEOUT_S = 20, 20, 10
+
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=POOL_SIZE,
+    max_overflow=POOL_OVERFLOW,
+    # Genuine overload fails fast, as a 503 (`app.main`), not after 30 s.
+    pool_timeout=POOL_TIMEOUT_S,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # The role API requests act as (migration 0032): row-level security applies

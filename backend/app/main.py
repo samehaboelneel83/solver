@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from app.api.api_keys import router as api_keys_router
 from app.api.auth import router as auth_router
@@ -131,6 +132,18 @@ def _log_request(request: Request, status: int, started: float) -> None:
 # one edge-level guard rather than a rule per field -- see the module
 # docstring for why `translate_db_error` cannot cover this case.
 app.add_middleware(NulByteGuard)
+
+
+@app.exception_handler(PoolTimeout)
+async def pool_exhausted(_request: Request, _exc: PoolTimeout):
+    """Every database connection is busy and none came back in time: the
+    platform is overloaded, not the request wrong -- a 503 to retry, never a
+    500 traceback (`app.core.db` sizes the pool so a burst queues instead)."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "the platform is busy; try again in a moment"},
+        headers={"Retry-After": "5"},
+    )
 
 
 @app.exception_handler(DBAPIError)
