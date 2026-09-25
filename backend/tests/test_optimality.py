@@ -70,14 +70,16 @@ def test_every_backend_declares_what_its_optimum_proves():
     assert field.default is dataclasses.MISSING
 
 
-def test_every_backend_proves_the_global_optimum_but_pdlp_and_ipopt():
+def test_every_backend_proves_the_global_optimum_but_pdlp_ipopt_and_the_searches():
     """They solve convex models exactly, so the optimum each proves is the
     global one -- except PDLP, whose optimum holds to a tolerance (migration
     0051), and IPOPT, the local nonlinear lane (queue R6): the best answer
-    near where it starts. A solver joining the registry changes this test on
-    purpose."""
+    near where it starts -- and the searches (queue R14), registered `local` so
+    the rules never choose them. A solver joining the registry changes this
+    test on purpose."""
     assert {backend.name: backend.proves for backend in REGISTRY} == {
-        **{backend.name: "global" for backend in REGISTRY}, "pdlp": "approximate", "ipopt": "local"
+        **{backend.name: "global" for backend in REGISTRY}, "pdlp": "approximate", "ipopt": "local",
+        "cma-es": "local", "pso": "local", "ga": "local",
     }
 
 

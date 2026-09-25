@@ -486,7 +486,61 @@ IPOPT = Backend(
     planner_choice="A local nonlinear solver will take this; its answer is the best nearby, not proven the best.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT)
+def _evolve(method: str):
+    def run(compiled: Compiled, *, time_limit: float, workers: int, should_stop: ShouldStop | None = None,
+            seed: int | None = None, gap_rel: float = 0.0, on_progress=None, hint: dict | None = None,
+            solver_params: dict | None = None) -> Solution:
+        from app.solve import evolve
+
+        return evolve.solve(compiled, method=method, time_limit=time_limit, workers=workers, should_stop=should_stop,
+                            seed=seed, on_progress=on_progress, hint=hint)
+
+    return run
+
+
+# What a search over whole answers can be handed: every row it can evaluate.
+_SEARCHED = frozenset({"linear", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints",
+                       "quadratic", "quadratic-constraints", "nonconvex", "functions"})
+_CONTINUOUS_CLASSES = frozenset({"LP", "QP", "QCQP", "NLP"})
+#: The metaheuristic lane (queue R14): registered `local` like IPOPT, so the
+#: rules never choose them and memory, the race and the portfolio (which
+#: compare proofs) never enter them. Asked for by name, or after an exact
+#: solver ended with nothing (setting `solve.metaheuristic`). They never say
+#: `optimal`: an answer is `feasible`, with no bound.
+CMA_ES = Backend(
+    name="cma-es",
+    classes=_CONTINUOUS_CLASSES,
+    provides=_SEARCHED,
+    rank=5,
+    solve=_evolve("cma-es"),
+    proves="local",
+    note="CMA-ES (evolution strategy); searches continuous decisions without slopes -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+PSO = Backend(
+    name="pso",
+    classes=_CONTINUOUS_CLASSES,
+    provides=_SEARCHED,
+    rank=6,
+    solve=_evolve("pso"),
+    proves="local",
+    note="particle swarm; searches continuous decisions -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+GA = Backend(
+    name="ga",
+    classes=_CONTINUOUS_CLASSES | {"IP", "MILP", "MIQP", "MIQCQP", "MINLP"},
+    provides=_SEARCHED | {"integral", "connected", "bilinear-binary"},
+    rank=7,
+    solve=_evolve("ga"),
+    proves="local",
+    note="genetic algorithm; breeds whole answers, whole-number or continuous -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+
+REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA)
+#: The searches: they never say `optimal`, `infeasible` or `unbounded` -- an answer, or none.
+SEARCHES = frozenset({CMA_ES.name, PSO.name, GA.name})
 
 
 class NoBackend(Exception):

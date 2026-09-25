@@ -171,6 +171,8 @@ def enqueue_run(
     decompose = bool(settings["solve.decompose"].value)
     from_settings["decompose"] = settings["solve.decompose"].source
     connected_start = bool(settings["solve.connected_start"].value)
+    metaheuristic = bool(settings["solve.metaheuristic"].value)
+    from_settings["metaheuristic"] = settings["solve.metaheuristic"].source
     from_settings["connected_start"] = settings["solve.connected_start"].source
     # A tuning search's result (queue R10), checked against the whitelist before the run is queued.
     tuned_params = str(settings["solve.solver_params"].value or "")
@@ -243,6 +245,7 @@ def enqueue_run(
         "rolling_horizon": rolling_horizon,
         "decompose": decompose,
         "connected_start": connected_start,
+        "metaheuristic": metaheuristic,
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -659,6 +662,8 @@ def _execute(
         horizon_record = None
         decomposition_record = None
         start_record = None
+        search_record = None
+        exact_failed = None
         if stochastic_wanted and stochastic_rows.chance_rules(ir):
             # A chance rule is switched per future (queue R8): the extensive form has
             # binaries, held by a big-M from declared bounds where there is no indicator.
@@ -965,11 +970,14 @@ def _execute(
                             should_stop=stop.is_set,
                         )
                     except sandbox.SandboxFailed as exc:
-                        if not (start_record or {}).get("feasible"):
+                        if not ((start_record or {}).get("feasible") or params.get("metaheuristic")):
                             raise
-                        # The solver crashed, but the start keeps every rule: it is the answer.
+                        # The solver crashed, but the start keeps every rule (it is the
+                        # answer), or a search may still find one; if not, the crash stands.
                         result, reason = Solution("unknown", False, None, {}, 0.0, backend.name), None
-                        start_record["solver_failed"] = str(exc)
+                        exact_failed = exc
+                        if start_record is not None:
+                            start_record["solver_failed"] = str(exc)
                     if (start_record or {}).get("feasible") and not result.assignments:
                         # The solver ended with nothing: the start is the answer (queue R13).
                         result = partition_rows.as_answer(solving_model, hint, backend.name,
@@ -987,6 +995,19 @@ def _execute(
                                                                 time_limit=time_limit, seed=seed, workers=workers,
                                                                 should_stop=stop.is_set)
                 bind_log(solver=backend.name)
+            if (params.get("metaheuristic") and result.status == "unknown" and not result.assignments
+                    and not stop.is_set()):
+                # The exact solver ended with nothing: a search over whole answers, which
+                # proves nothing but may find one (setting `solve.metaheuristic`,
+                # app.solve.evolve, queue R14).
+                result, backend, search_record = _metaheuristic_fallback(
+                    solving_model, found, backend, result, hint=hint, time_limit=time_limit, seed=seed,
+                    workers=workers, should_stop=stop.is_set)
+                bind_log(solver=backend.name)
+            if exact_failed is not None and not result.assignments:
+                raise exact_failed
+            if exact_failed is not None and search_record is not None:
+                search_record["exact_failed"] = str(exact_failed)
             if params.get("lagrangian") and result.status == "feasible" and result.objective is not None:
                 # An answer without a proof: a bound from relaxing the few rules
                 # that tie the model's blocks (setting `solve.lagrangian`,
@@ -1062,6 +1083,8 @@ def _execute(
         extra["decomposition"] = decomposition_record
     if start_record is not None:
         extra["connected_start_run"] = start_record
+    if search_record is not None:
+        extra["metaheuristic_run"] = search_record
     if shadow is not None:
         extra["selector"] = {**shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
     applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
@@ -1406,6 +1429,38 @@ def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:
 
 #: The share of the time given to IPOPT after SCIP ends without a proof (queue R6).
 LOCAL_SHARE = 0.25
+#: The metaheuristic's share of the run's time after an exact solver ended with nothing (queue R14).
+SEARCH_SHARE = 0.25
+#: Which search, by what the model decides: set by bench/results/2026-09-25-metaheuristics.md.
+SEARCH_CONTINUOUS, SEARCH_WHOLE = "ga", "ga"
+
+
+def _metaheuristic_fallback(compiled, found, backend, result, *, hint, time_limit: float, seed, workers: int,
+                            should_stop):
+    """After an exact solver ended with no answer: a metaheuristic's, which keeps every rule and claims
+    nothing -- `feasible`, no bound. Nothing found, or a model it cannot search, leaves the run as it was."""
+    from app.solve.backends import by_name
+
+    whole = any(v.is_integral for v in compiled.variables.values())
+    method = SEARCH_WHOLE if whole else SEARCH_CONTINUOUS
+    searcher = by_name(method)
+    if found.model_class not in searcher.classes or (found.needs - searcher.provides):
+        return result, backend, {"used": False, "why": f"{method} cannot take a {found.model_class} model like this"}
+    seconds = max(1.0, SEARCH_SHARE * time_limit)
+    try:
+        searched, _ = sandbox.run(
+            "app.solve.sandbox:solve_in_child",
+            {"backend": method, "compiled": compiled, "time_limit": seconds, "seed": seed, "workers": workers,
+             "gap_rel": 0.0, "hint": hint},
+            time_limit=seconds, workers=workers, should_stop=should_stop,
+        )
+    except (Unsupported, NotContinuous, sandbox.SandboxFailed) as exc:
+        return result, backend, {"used": False, "why": str(exc)}
+    record = {"used": True, "method": method, "after": backend.name, "seconds": seconds, "status": searched.status,
+              "objective": searched.objective}
+    if not searched.assignments:
+        return result, backend, {**record, "kept": False}
+    return searched, searcher, {**record, "kept": True}
 
 
 def _local_fallback(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):

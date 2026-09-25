@@ -125,7 +125,7 @@ def run(
     workers: int = 8,
     mps_dir: str | None = None,
 ) -> list[dict[str, Any]]:
-    from app.solve.backends import REGISTRY, NoBackend, choose
+    from app.solve.backends import REGISTRY, SEARCHES, NoBackend, choose
     from app.solve.service import gap_of, solve_compiled
 
     technique = technique or Technique(None, [None])
@@ -147,6 +147,9 @@ def run(
             if only is not None and backend.name not in only:
                 continue
             if not backend.is_available():
+                continue
+            if backend.name in SEARCHES and backend.name not in (backends or ()):
+                # A search proves nothing, so it cannot "agree": measured only when named (bench.evolve).
                 continue
             try:
                 choose(found, backend.name)

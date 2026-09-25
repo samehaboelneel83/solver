@@ -932,6 +932,26 @@ describe("the learned selector's record (queue R11)", () => {
   });
 });
 
+describe("the metaheuristic lane (queue R14)", () => {
+  it("says a searched answer keeps the rules and claims nothing", async () => {
+    const { statusNote, metaheuristicText } = await import("./Runs");
+    const record = { used: true as const, method: "ga", after: "cp-sat", seconds: 15, status: "feasible", objective: 12, kept: true };
+    expect(statusNote({ status: "feasible", optimality: "none", params: { metaheuristic_run: record } }))
+      .toBe("Found by a genetic algorithm, after cp-sat ended with no answer: an answer that keeps every rule, but nothing says how far it is from the best.");
+    expect(statusNote({ status: "feasible", optimality: "none", params: { chosen_solver: "cma-es" } }))
+      .toBe("Found by an evolution strategy (CMA-ES): an answer that keeps every rule, but nothing says how far it is from the best.");
+    expect(metaheuristicText(record)).toBe("a genetic algorithm for 15s after cp-sat ended with no answer");
+    expect(metaheuristicText({ ...record, kept: false })).toBe("a genetic algorithm for 15s after cp-sat: nothing that keeps every rule");
+    expect(metaheuristicText({ used: false, why: "ga cannot take a IP model like this" })).toBe("not searched: ga cannot take a IP model like this");
+  });
+
+  it("says when the connected start is the answer", async () => {
+    const { statusNote } = await import("./Runs");
+    expect(statusNote({ status: "feasible", optimality: "none", params: { connected_start_run: { answer: true } } }))
+      .toMatch(/^The connected, balanced start the solver was given/);
+  });
+});
+
 describe("the connected start's record (queue R13)", () => {
   it("says what the solver started from, or why it started from nothing", async () => {
     const { connectedStartText } = await import("./Runs");

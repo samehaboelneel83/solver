@@ -118,6 +118,26 @@ export function selectorText(record: SelectorRecord): string {
     : `would pick ${record.pick} instead of ${record.chosen} (${vote}, like ${record.like.join(", ")})`;
 }
 
+/** The metaheuristic lane (queue R14), in words. */
+const SEARCH_NAMES: Record<string, string> = {
+  ga: "a genetic algorithm",
+  "cma-es": "an evolution strategy (CMA-ES)",
+  pso: "a particle swarm",
+};
+
+/** What `solve.metaheuristic` (queue R14) did after the exact solver ended with nothing. */
+export type MetaheuristicRecord =
+  | { used: true; method: string; after: string; seconds: number; status: string; objective: number | null; kept: boolean; exact_failed?: string }
+  | { used: false; why: string };
+
+export function metaheuristicText(record: MetaheuristicRecord): string {
+  if (!record.used) return `not searched: ${record.why}`;
+  const method = SEARCH_NAMES[record.method] ?? record.method;
+  return record.kept
+    ? `${method} for ${record.seconds}s after ${record.after} ended with no answer`
+    : `${method} for ${record.seconds}s after ${record.after}: nothing that keeps every rule`;
+}
+
 /** What `solve.connected_start` (queue R13) did: the start the solver was handed, or why none. */
 export type ConnectedStartRecord =
   | { used: true; groups: number; units: number; feasible: boolean; objective: number; breach: number; seconds: number }
@@ -159,6 +179,23 @@ export function statusNote(run: {
     return typeof run.gap === "number"
       ? `Stopped on request. The best answer found by then -- at most ${formatGap(run.gap)} worse than the best possible.`
       : "Stopped on request. The best answer found by then -- not proven best.";
+  }
+  const searched = (run.params as { metaheuristic_run?: MetaheuristicRecord } | undefined)?.metaheuristic_run;
+  const chosen = (run.params as { chosen_solver?: string } | undefined)?.chosen_solver;
+  if (run.status === "feasible" && ((searched?.used && searched.kept) || (chosen && chosen in SEARCH_NAMES))) {
+    const method = SEARCH_NAMES[searched?.used ? searched.method : (chosen as string)] ?? "a search";
+    return (
+      `Found by ${method}` +
+      (searched?.used ? `, after ${searched.after} ended with no answer` : "") +
+      ": an answer that keeps every rule, but nothing says how far it is from the best."
+    );
+  }
+  const started = (run.params as { connected_start_run?: { answer?: boolean } } | undefined)?.connected_start_run;
+  if (run.status === "feasible" && started?.answer) {
+    return (
+      "The connected, balanced start the solver was given: it ended with nothing better. " +
+      "An answer that keeps every rule, but not proven the best -- a longer time limit may improve it."
+    );
   }
   if (run.status === "feasible" && typeof run.gap === "number") {
     return `An answer, found before the time limit -- at most ${formatGap(run.gap)} worse than the best possible.`;
@@ -752,6 +789,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     structure?: ModelStructure;
     selector?: SelectorRecord;
     connected_start_run?: ConnectedStartRecord;
+    metaheuristic_run?: MetaheuristicRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
@@ -943,6 +981,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
             <Fact label="How it splits" value={structureText(params.structure)} />
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
+          {params.metaheuristic_run && <Fact label="Searched by" value={metaheuristicText(params.metaheuristic_run)} />}
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
           {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (
             <Fact

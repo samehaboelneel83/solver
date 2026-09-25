@@ -20,9 +20,10 @@ from typing import Any
 
 import pytest
 
-from app.solve import compile_model
-from app.solve.backends import REGISTRY, NoBackend, choose
+from app.solve import compile_model, evolve
+from app.solve.backends import REGISTRY, SEARCHES, NoBackend, choose
 from app.solve.classify import classify
+from app.solve.compile import Unsupported
 from app.solve.convexity import refine
 from app.solve.scaling import admit
 from app.solve.service import solve_compiled
@@ -360,6 +361,9 @@ def _takes(backend, found) -> bool:
 
 @pytest.mark.parametrize("ir, backend, status, objective", list(_cases()))
 def test_golden(ir, backend, status, objective):
+    if backend.name in SEARCHES:
+        _search_golden(ir, backend, status, objective)
+        return
     result, reason = solve_compiled(backend, compile_model(ir, NO_DATA), time_limit=20, seed=1)
 
     assert result.status == status, reason
@@ -377,6 +381,33 @@ def test_golden(ir, backend, status, objective):
     if status == "unbounded":
         assert reason and "without limit" in reason
         assert result.assignments == {}
+
+
+def _search_golden(ir, backend, status, objective):
+    """A search (queue R14) proves nothing: on a model with a known optimum it answers with one that keeps
+    every rule and is never better, or with none; it never says infeasible, and a model with no finite
+    bound on a decision is refused, since there is no box to search."""
+    compiled = compile_model(ir, NO_DATA)
+    if status == "unbounded":
+        with pytest.raises(Unsupported, match="no finite bound"):
+            solve_compiled(backend, compiled, time_limit=2, seed=1)
+        return
+    try:
+        result, _ = solve_compiled(backend, compiled, time_limit=2, seed=1)
+    except Unsupported as exc:
+        assert "no finite bound" in str(exc), exc
+        return
+    assert result.status in ("feasible", "unknown") and not result.optimal and result.best_bound is None
+    if status != "optimal" or result.status == "unknown":
+        assert result.status == "unknown" and result.objective is None
+        return
+    assert evolve.holds(compiled, result.assignments)
+    if objective is not None:
+        got = Decimal(str(result.objective))
+        # A search holds a rule to 1e-6 of its size (`evolve.TOLERANCE`), as the solvers do, and an equality
+        # held that closely moves a goal by more: 49.9999 against 50 on `qp_convex`.
+        slack = Decimal("1e-4") * max(Decimal(1), abs(objective))
+        assert (got >= objective - slack) if ir["objective"]["sense"] == "minimize" else (got <= objective + slack), got
 
 
 def test_scaling_admits_only_what_it_can_make_whole():
