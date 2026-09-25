@@ -1,0 +1,22 @@
+<!-- @dsCard group="Colors" viewport="700x200" name="Product Accents" subtitle="One accent hue per product — applied via data-product attribute" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; background: var(--mc-canvas); padding: 20px 24px; font-family: var(--font-sans); }
+  .grid { display: flex; gap: 10px; flex-wrap: wrap; }
+  .product { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .strip { width: 80px; height: 32px; border-radius: 8px; }
+  .pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .name { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--mc-ink); }
+</style>
+</head><body>
+  <div class="grid">
+    <div class="product" data-product="cowork"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Cowork</div></div>
+    <div class="product" data-product="drive"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Drive</div></div>
+    <div class="product" data-product="calendar"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Calendar</div></div>
+    <div class="product" data-product="meet"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Meet</div></div>
+    <div class="product" data-product="notebook"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Notebook</div></div>
+    <div class="product" data-product="mail"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Mail</div></div>
+    <div class="product" data-product="aura"><div class="strip" style="background:var(--mc-accent)"></div><div class="pill" style="background:var(--mc-accent-soft);color:var(--mc-accent-ink);border:1px solid var(--mc-accent-line)">Aura</div></div>
+  </div>
+</body></html>

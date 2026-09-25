@@ -1,0 +1,112 @@
+<!-- @dsCard group="Components" viewport="700x520" name="Core Components" subtitle="Button · Badge · Avatar · Input · Switch · Alert · Card · Tabs" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>body{margin:0;background:var(--mc-canvas);padding:20px;font-family:var(--font-sans);}
+.section{margin-bottom:20px;}.label{font-size:10px;font-family:var(--font-mono);color:var(--mc-faint);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}</style>
+</head><body>
+<script type="text/babel">
+const { Button, Badge, Avatar, Input, Switch, Alert, Card, CardHeader, CardTitle, CardFooter, Tabs } = window.MCAITDesignSystem_6bac07;
+
+function Demo() {
+  const [sw1, setSw1] = React.useState(true);
+  const [sw2, setSw2] = React.useState(false);
+  const [tab, setTab] = React.useState(0);
+
+  return (
+    <div>
+      {/* Buttons */}
+      <div className="section">
+        <div className="label">Button · variants</div>
+        <div className="row">
+          <Button variant="primary">New folder</Button>
+          <Button variant="secondary">Cancel</Button>
+          <Button variant="ghost">More</Button>
+          <Button variant="destructive">Delete</Button>
+          <Button variant="brand">Ask Cowork</Button>
+        </div>
+      </div>
+      <div className="section">
+        <div className="label">Button · sizes + states</div>
+        <div className="row">
+          <Button size="sm">Small</Button>
+          <Button size="md">Medium</Button>
+          <Button size="lg">Large</Button>
+          <Button disabled>Disabled</Button>
+          <Button loading>Saving…</Button>
+        </div>
+      </div>
+
+      {/* Badges */}
+      <div className="section">
+        <div className="label">Badge · variants</div>
+        <div className="row">
+          <Badge>Default</Badge>
+          <Badge variant="primary" dot>Active</Badge>
+          <Badge variant="success" dot>Synced</Badge>
+          <Badge variant="warning" dot>Pending</Badge>
+          <Badge variant="danger" dot>Failed</Badge>
+          <Badge variant="info">Indexing</Badge>
+          <Badge variant="gold">MCAIT</Badge>
+          <Badge variant="solid">New</Badge>
+        </div>
+      </div>
+
+      {/* Avatars */}
+      <div className="section">
+        <div className="label">Avatar · sizes</div>
+        <div className="row" style={{alignItems:'flex-end'}}>
+          <Avatar name="Omar Farouk" size="xs" />
+          <Avatar name="Sara Khalil" size="sm" />
+          <Avatar name="Mohamed Ahmed" size="md" />
+          <Avatar name="Leila Nassar" size="lg" />
+          <Avatar name="Amir Tawfik" size="xl" />
+        </div>
+      </div>
+
+      {/* Input */}
+      <div className="section">
+        <div className="label">Input · states</div>
+        <div className="row" style={{alignItems:'flex-start'}}>
+          <Input label="Folder name" placeholder="Untitled folder" style={{width:180}} />
+          <Input label="Email" placeholder="you@mcait.com" error="Required field" style={{width:200}} />
+          <Input label="Search" placeholder="Search files…" hint="Press ↵ to search" style={{width:200}} />
+        </div>
+      </div>
+
+      {/* Switch */}
+      <div className="section">
+        <div className="label">Switch</div>
+        <div className="row">
+          <Switch checked={sw1} onChange={setSw1} label="Sync enabled" />
+          <Switch checked={sw2} onChange={setSw2} label="Offline access" />
+          <Switch checked disabled label="Locked by admin" />
+        </div>
+      </div>
+
+      {/* Alert */}
+      <div className="section">
+        <div className="label">Alert · variants</div>
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          <Alert variant="success" title="Upload complete">3 files added to Drive successfully.</Alert>
+          <Alert variant="warning" title="Storage at 80%">Upgrade your plan to continue uploading.</Alert>
+          <Alert variant="danger" title="Sync failed">Could not reach the server. Check your connection.</Alert>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="section">
+        <div className="label">Tabs</div>
+        <Tabs tabs={['All files', 'Shared with me', 'Recent', 'Starred']} activeIndex={tab} onChange={setTab} />
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.body).render(<Demo />);
+</script>
+</body></html>

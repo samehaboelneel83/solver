@@ -1,0 +1,33 @@
+/* ============================================================
+   MCAIT — Spacing, radii, shadows, motion
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale ---- */
+  --space-1: 4px;  /* @kind spacing */
+  --space-2: 8px;  /* @kind spacing */
+  --space-3: 12px; /* @kind spacing */
+  --space-4: 16px; /* @kind spacing */
+  --space-5: 24px; /* @kind spacing */
+  --space-6: 32px; /* @kind spacing */
+  --space-7: 48px; /* @kind spacing */
+  --space-8: 64px; /* @kind spacing */
+
+  /* ---- Radii ---- */
+  --radius-sm:  8px;   /* @kind radius */
+  --radius-md:  12px;  /* @kind radius */
+  --radius-lg:  16px;  /* @kind radius */
+  --radius-xl:  20px;  /* @kind radius */
+  --radius-pill: 999px; /* @kind radius */
+
+  /* ---- Shadows (subtle, cool-tinted) ---- */
+  --shadow-sm: 0 1px 2px oklch(0.22 0.02 265 / 0.04), 0 1px 3px oklch(0.22 0.02 265 / 0.06); /* @kind shadow */
+  --shadow-md: 0 4px 12px oklch(0.22 0.02 265 / 0.06), 0 2px 4px oklch(0.22 0.02 265 / 0.04); /* @kind shadow */
+  --shadow-lg: 0 12px 40px oklch(0.22 0.02 265 / 0.08), 0 4px 12px oklch(0.22 0.02 265 / 0.04); /* @kind shadow */
+  --shadow-focus: 0 0 0 3px var(--mc-accent-soft); /* @kind shadow */
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* @kind other */
+  --dur-fast: 0.16s; /* @kind other */
+  --dur-med:  0.24s; /* @kind other */
+}

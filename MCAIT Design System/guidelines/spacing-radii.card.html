@@ -1,0 +1,17 @@
+<!-- @dsCard group="Spacing" viewport="700x160" name="Radii & Shadows" subtitle="Corner radii and shadow tiers" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; background: var(--mc-canvas); padding: 24px; display: flex; gap: 16px; align-items: center; font-family: var(--font-sans); }
+  .block { width: 72px; height: 72px; background: var(--mc-surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  .token { font-size: 9px; font-family: var(--font-mono); color: var(--mc-muted); text-align: center; }
+  .val { font-size: 10px; font-weight: 600; color: var(--mc-ink-soft); }
+  .divider { width: 1px; height: 60px; background: var(--mc-border); }
+</style>
+</head><body>
+  <div class="block" style="border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);"><div class="val">8px</div><div class="token">--radius-sm<br>--shadow-sm</div></div>
+  <div class="block" style="border-radius:var(--radius-md);box-shadow:var(--shadow-sm);"><div class="val">12px</div><div class="token">--radius-md</div></div>
+  <div class="block" style="border-radius:var(--radius-lg);box-shadow:var(--shadow-md);"><div class="val">16px</div><div class="token">--radius-lg<br>--shadow-md</div></div>
+  <div class="block" style="border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);"><div class="val">20px</div><div class="token">--radius-xl<br>--shadow-lg</div></div>
+  <div class="block" style="border-radius:var(--radius-pill);box-shadow:var(--shadow-sm);width:100px;height:40px;"><div class="val">999px</div><div class="token">--radius-pill</div></div>
+</body></html>

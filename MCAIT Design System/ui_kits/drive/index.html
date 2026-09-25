@@ -1,0 +1,380 @@
+<!-- @dsCard group="Drive" viewport="1280x800" name="Drive" subtitle="MCAIT Drive — file manager with sidebar, toolbar, table and grid views" -->
+<!-- @startingPoint section="UI Kits" subtitle="MCAIT Drive — file storage & sharing" viewport="1280x800" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drive — MCAIT</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body,#root{height:100%;width:100%;}
+body{font-family:var(--font-sans);background:var(--mc-canvas);color:var(--mc-ink);}
+button,input{font-family:inherit;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--mc-border-strong);border-radius:99px;}
+</style>
+</head><body data-product="drive">
+<div id="root"></div>
+<script type="text/babel">
+
+/* ── icons (Lucide-style inline SVG paths) ── */
+function Icon({ name, size=16, color='currentColor', strokeWidth=1.5 }) {
+  const paths = {
+    folder:      'M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z',
+    file:        'M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9l-7-7z M13 2v7h7',
+    pdf:         'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z M9 13h6 M9 17h4 M14 2v6h6',
+    image:       'M21 15l-5-5L5 21 M3 3h18v18H3z M8.5 8.5a1 1 0 110-2 1 1 0 010 2',
+    video:       'M15 10l4.55-2.55A1 1 0 0121 8.4v7.2a1 1 0 01-1.45.9L15 14v-4z M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z',
+    grid:        'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+    sparkle:     'M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2z',
+    calendar:    'M8 2v4 M16 2v4 M3 8h18 M5 4h14a2 2 0 012 2v13a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z',
+    mail:        'M3 5h18v14H3z M3 6l9 7 9-7',
+    notebook:    'M4 4a2 2 0 012-2h12a2 2 0 012 2v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z M9 2v20',
+    globe:       'M12 2a10 10 0 100 20 10 10 0 000-20z M2 12h20 M12 2a15 15 0 010 20 15 15 0 010-20z',
+    x:           'M18 6L6 18 M6 6l12 12',
+    info:        'M12 2a10 10 0 100 20 10 10 0 000-20z M12 16v-4 M12 8h.01',
+    logout:      'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4 M16 17l5-5-5-5 M21 12H9',
+    list:        'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
+    upload:      'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4 M17 8l-5-5-5 5 M12 3v12',
+    search:      'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+    more:        'M12 5h.01 M12 12h.01 M12 19h.01',
+    star:        'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    share:       'M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8 M16 6l-4-4-4 4 M12 2v13',
+    trash:       'M3 6h18 M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6 M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2',
+    lock:        'M19 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2z M17 11V7a5 5 0 00-10 0v4',
+    check:       'M20 6L9 17l-5-5',
+    users:       'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2 M23 21v-2a4 4 0 00-3-3.87 M16 3.13a4 4 0 010 7.75',
+    clock:       'M12 2a10 10 0 110 20A10 10 0 0112 2zm0 4v6l4 2',
+    chevronRight:'M9 18l6-6-6-6',
+    plus:        'M12 5v14 M5 12h14',
+    settings:    'M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
+  };
+  const d = paths[name] || paths.file;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      {d.split(' M').map((seg,i) => <path key={i} d={i===0?seg:'M'+seg} />)}
+    </svg>
+  );
+}
+
+/* ── MCAIT suite + identity widget (shared across products) ── */
+const MCAIT_APPS = [
+  { id:'cowork',   name:'Cowork',   color:'var(--mc-gold)',       icon:'sparkle', iconColor:'oklch(0.20 0.04 80)' },
+  { id:'drive',    name:'Drive',    color:'oklch(0.52 0.17 255)', icon:'folder' },
+  { id:'calendar', name:'Calendar', color:'oklch(0.52 0.13 150)', icon:'calendar' },
+  { id:'meet',     name:'Meet',     color:'oklch(0.55 0.11 200)', icon:'video' },
+  { id:'notebook', name:'Notebook', color:'oklch(0.52 0.16 295)', icon:'notebook' },
+  { id:'mail',     name:'Mail',     color:'oklch(0.55 0.17 25)',  icon:'mail' },
+  { id:'aura',     name:'Aura',     color:'oklch(0.56 0.18 345)', icon:'globe' },
+];
+
+function MiniAvatar({ name='', size=28 }) {
+  const initials = name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('');
+  return <span style={{ width:size, height:size, borderRadius:'50%', background:'oklch(0.88 0.09 80)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:size*0.4, fontWeight:700, color:'oklch(0.32 0.08 80)', userSelect:'none' }}>{initials}</span>;
+}
+
+function MCAITWidget({ activeApp='drive' }) {
+  const [open, setOpen] = React.useState(null);
+  const toggle = k => setOpen(o => o===k ? null : k);
+  const close = () => setOpen(null);
+  const user = { name:'Omar Al-Amin', email:'omar@mcait.com' };
+  const iconBtn = (key, child, title, activeBg) => (
+    <button title={title} onClick={()=>toggle(key)} style={{ width:32, height:32, borderRadius:8, border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', background: open===key ? (activeBg||'var(--mc-canvas-2)') : 'none' }}
+      onMouseEnter={e=>{ if(open!==key) e.currentTarget.style.background = activeBg||'var(--mc-canvas-2)'; }} onMouseLeave={e=>{ if(open!==key) e.currentTarget.style.background='none'; }}>{child}</button>
+  );
+  return (
+    <div style={{ position:'relative', display:'flex', alignItems:'center', gap:2, background:'var(--mc-canvas)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-md)', padding:'4px 6px', flexShrink:0, boxShadow:'var(--shadow-sm)' }}>
+      {open && <div style={{ position:'fixed', inset:0, zIndex:299 }} onClick={close} />}
+      <div style={{ width:29, height:32, borderRadius:8, background:'var(--mc-gold)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <span style={{ fontFamily:'var(--font-display)', fontWeight:800, color:'oklch(0.20 0.04 80)', letterSpacing:'0.5px', lineHeight:1.05, display:'flex', flexDirection:'column', alignItems:'center' }}><span style={{ fontSize:8 }}>Mc</span><span style={{ fontSize:10 }}>8</span></span>
+      </div>
+      <div style={{ width:1, height:18, background:'var(--mc-border)', margin:'0 2px', flexShrink:0 }} />
+      {iconBtn('cowork', <Icon name="sparkle" size={17} color="var(--mc-gold)" />, 'Cowork', 'var(--mc-gold-soft)')}
+      {open==='cowork' && (
+        <div style={{ position:'absolute', top:'100%', right:0, marginTop:8, zIndex:300, width:320, background:'var(--mc-surface)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-xl)', boxShadow:'var(--shadow-lg)', overflow:'hidden' }}>
+          <div style={{ padding:'14px 16px', borderBottom:'1px solid var(--mc-border)', display:'flex', alignItems:'center', gap:10, background:'var(--mc-gold-soft)' }}>
+            <div style={{ width:28, height:28, borderRadius:7, background:'var(--mc-gold)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}><Icon name="sparkle" size={14} color="oklch(0.20 0.04 80)" /></div>
+            <div style={{ flex:1 }}><div style={{ fontFamily:'var(--font-display)', fontWeight:700, fontSize:14, color:'var(--mc-gold-ink)' }}>Cowork</div><div style={{ fontSize:10, color:'var(--mc-muted)' }}>Your agentic workspace assistant</div></div>
+            <button onClick={close} style={{ background:'none', border:'none', cursor:'pointer', padding:4, display:'flex' }}><Icon name="x" size={14} color="var(--mc-faint)" /></button>
+          </div>
+          <div style={{ padding:'10px 12px', display:'flex', gap:8, alignItems:'center' }}>
+            <input placeholder="Ask Cowork anything\u2026" style={{ flex:1, border:'1px solid var(--mc-border)', borderRadius:'var(--radius-sm)', padding:'8px 12px', fontSize:13, fontFamily:'var(--font-sans)', outline:'none', background:'var(--mc-canvas-2)', caretColor:'var(--mc-gold)' }} />
+            <button style={{ width:34, height:34, borderRadius:'var(--radius-sm)', background:'var(--mc-gold)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}><Icon name="chevronRight" size={15} color="oklch(0.20 0.04 80)" strokeWidth={2} /></button>
+          </div>
+        </div>
+      )}
+      {iconBtn('apps', <Icon name="grid" size={17} color="var(--mc-faint)" />, 'MCAIT apps')}
+      {open==='apps' && (
+        <div style={{ position:'absolute', top:'100%', right:0, marginTop:8, zIndex:300, width:276, background:'var(--mc-surface)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-xl)', boxShadow:'var(--shadow-lg)', padding:16 }}>
+          <div style={{ fontSize:10, fontWeight:600, color:'var(--mc-muted)', letterSpacing:'0.06em', textTransform:'uppercase', marginBottom:12 }}>MCAIT workspace</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:2 }}>
+            {MCAIT_APPS.map(app => (
+              <button key={app.id} onClick={close} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:5, padding:'8px 4px', borderRadius:'var(--radius-md)', background:'none', border:'none', cursor:'pointer' }}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--mc-canvas-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+                <div style={{ width:36, height:36, borderRadius:9, background:app.color, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'var(--shadow-sm)' }}><Icon name={app.icon} size={18} color={app.iconColor||'#fff'} strokeWidth={1.5} /></div>
+                <span style={{ fontSize:11, fontWeight: app.id===activeApp ? 600 : 400, color: app.id===activeApp ? 'var(--mc-accent)' : 'var(--mc-ink-soft)' }}>{app.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <button onClick={()=>toggle('user')} style={{ background:'none', border:'none', cursor:'pointer', borderRadius:'50%', padding:2, display:'flex' }}><MiniAvatar name={user.name} size={28} /></button>
+      {open==='user' && (
+        <div style={{ position:'absolute', top:'100%', right:0, marginTop:8, zIndex:300, width:264, background:'var(--mc-surface)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-xl)', boxShadow:'var(--shadow-lg)', overflow:'hidden' }}>
+          <div style={{ padding:20, display:'flex', flexDirection:'column', alignItems:'center', gap:10, borderBottom:'1px solid var(--mc-border)', background:'var(--mc-canvas)' }}>
+            <MiniAvatar name={user.name} size={60} />
+            <div style={{ textAlign:'center' }}><div style={{ fontSize:15, fontWeight:600, color:'var(--mc-ink)' }}>{user.name}</div><div style={{ fontSize:12, color:'var(--mc-muted)', fontFamily:'var(--font-mono)', marginTop:2 }}>{user.email}</div></div>
+          </div>
+          {[{label:'Manage your account',icon:'settings'},{label:'Settings & preferences',icon:'settings'},{label:'Privacy & terms',icon:'info'}].map(({label,icon})=>(
+            <button key={label} style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 16px', background:'none', border:'none', cursor:'pointer', fontSize:13, fontFamily:'var(--font-sans)', color:'var(--mc-ink-soft)', textAlign:'left' }}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--mc-canvas-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Icon name={icon} size={15} color="var(--mc-faint)" />{label}</button>
+          ))}
+          <div style={{ height:1, background:'var(--mc-border)' }} />
+          <button style={{ width:'100%', display:'flex', alignItems:'center', gap:10, padding:'10px 16px', background:'none', border:'none', cursor:'pointer', fontSize:13, fontFamily:'var(--font-sans)', color:'var(--mc-ink-soft)', textAlign:'left' }}
+            onMouseEnter={e=>e.currentTarget.style.background='var(--mc-canvas-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Icon name="logout" size={15} color="var(--mc-faint)" />Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── mock data ── */
+const ITEMS = [
+  { id:1, name:'Q3 Reports',       type:'folder', modified:'Jun 18, 2026', size:'—',      owner:'Omar A.',  shared:true,  starred:true  },
+  { id:2, name:'Product Roadmap',  type:'folder', modified:'Jun 15, 2026', size:'—',      owner:'Sara K.',  shared:true,  starred:false },
+  { id:3, name:'Brand Assets',     type:'folder', modified:'Jun 10, 2026', size:'—',      owner:'Omar A.',  shared:false, starred:false },
+  { id:4, name:'Budget 2026.xlsx', type:'file',   modified:'Jun 19, 2026', size:'284 KB', owner:'Omar A.',  shared:false, starred:true  },
+  { id:5, name:'PRD v3.pdf',       type:'pdf',    modified:'Jun 17, 2026', size:'1.2 MB', owner:'Mohamed A.',shared:true, starred:false },
+  { id:6, name:'Demo recording',   type:'video',  modified:'Jun 12, 2026', size:'248 MB', owner:'Leila N.', shared:true,  starred:false },
+  { id:7, name:'Hero image.png',   type:'image',  modified:'Jun 9, 2026',  size:'3.4 MB', owner:'Omar A.',  shared:false, starred:false },
+  { id:8, name:'Contract draft.pdf',type:'pdf',   modified:'Jun 6, 2026',  size:'890 KB', owner:'Omar A.',  shared:false, starred:false },
+  { id:9, name:'Team photo.jpg',   type:'image',  modified:'May 30, 2026', size:'6.1 MB', owner:'Amir T.',  shared:true,  starred:false },
+];
+
+const FILE_COLORS = {
+  folder:'oklch(0.62 0.13 80)',
+  file:  'oklch(0.52 0.17 255)',
+  pdf:   'oklch(0.55 0.17 25)',
+  image: 'oklch(0.52 0.13 150)',
+  video: 'oklch(0.52 0.16 295)',
+};
+
+const NAV_ITEMS = [
+  { label:'Shared with me', icon:'users', id:'shared' },
+  { label:'Recent',         icon:'clock', id:'recent' },
+  { label:'Starred',        icon:'star',  id:'starred' },
+  { label:'Trash',          icon:'trash', id:'trash' },
+];
+const DRIVE_VOLUME = { id:'my-drive', name:'My Drive', icon:'folder', badge:'default', pct:22, usage:'368.9 KB used' };
+
+/* ── sidebar (from MCAIT design system) ── */
+const { Sidebar } = window.MCAITDesignSystem_6bac07;
+
+/* ── top header (brand · search · identity) ── */
+function HeaderBar({ search, setSearch }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:16, padding:'10px 20px', background:'var(--mc-surface)', flexShrink:0 }}>
+      {/* Brand */}
+      <div style={{ display:'flex', alignItems:'center', gap:9, flexShrink:0 }}>
+        <div style={{ width:30, height:30, borderRadius:8, background:'var(--mc-accent)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+          <Icon name="folder" size={16} color="#fff" strokeWidth={1.75} />
+        </div>
+        <span style={{ fontFamily:'var(--font-display)', fontWeight:700, fontSize:18, letterSpacing:'-0.02em', color:'var(--mc-accent)' }}>Drive</span>
+      </div>
+
+      {/* Search */}
+      <div style={{ flex:'1 1 auto', minWidth:0, maxWidth:560, display:'flex', alignItems:'center', gap:8, background:'var(--mc-canvas-2)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-md)', padding:'0 14px', height:38 }}>
+        <Icon name="search" size={15} color="var(--mc-faint)" />
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="What do you want to find?"
+          style={{ flex:1, minWidth:0, border:'none', outline:'none', background:'transparent', fontSize:14, color:'var(--mc-ink)', caretColor:'var(--mc-accent)' }} />
+      </div>
+
+      <div style={{ marginLeft:'auto', flexShrink:0 }}>
+        <MCAITWidget activeApp="drive" />
+      </div>
+    </div>
+  );
+}
+
+/* ── toolbar ── */
+function Toolbar({ view, setView }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--mc-border)', background:'oklch(1 0 0 / 0.8)', backdropFilter:'blur(8px)', flexShrink:0 }}>
+      {/* Breadcrumb */}
+      <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:13, color:'var(--mc-muted)', fontWeight:500, flex:'0 1 auto', minWidth:0, overflow:'hidden' }}>
+        <span style={{ color:'var(--mc-ink)', fontWeight:600, flexShrink:0 }}>My Drive</span>
+        <Icon name="chevronRight" size={12} color="var(--mc-faint)" />
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>Q3 Reports</span>
+      </div>
+
+      <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+        {/* Sort */}
+        <button style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:'var(--radius-sm)', background:'var(--mc-canvas-2)', border:'1px solid var(--mc-border)', cursor:'pointer', fontSize:12, color:'var(--mc-muted)', fontFamily:'var(--font-sans)', fontWeight:500 }}>
+          <Icon name="list" size={12} color="var(--mc-faint)" />
+          Name
+          <Icon name="chevronRight" size={10} color="var(--mc-faint)" strokeWidth={2} />
+        </button>
+
+        {/* View toggle */}
+        <div style={{ display:'flex', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-sm)', overflow:'hidden' }}>
+          {['list','grid'].map(v => (
+            <button key={v} onClick={() => setView(v)}
+              style={{ width:30, height:30, display:'flex', alignItems:'center', justifyContent:'center', border:'none', cursor:'pointer', background: view===v ? 'var(--mc-accent-soft)' : 'var(--mc-canvas-2)', transition:'background .13s' }}>
+              <Icon name={v} size={13} color={view===v ? 'var(--mc-accent)' : 'var(--mc-faint)'} />
+            </button>
+          ))}
+        </div>
+
+        {/* Upload */}
+        <button style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:'var(--radius-md)', background:'var(--mc-accent)', border:'none', cursor:'pointer', fontSize:12, fontFamily:'var(--font-sans)', fontWeight:600, color:'#fff' }}>
+          <Icon name="upload" size={12} color="#fff" />
+          Upload
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── file row ── */
+function FileRow({ item, selected, onSelect }) {
+  const [hovered, setHovered] = React.useState(false);
+  const iconColor = FILE_COLORS[item.type] || 'var(--mc-faint)';
+  const iconName = item.type === 'folder' ? 'folder' : item.type;
+  const bg = selected ? 'var(--mc-accent-soft)' : hovered ? 'var(--mc-canvas-2)' : 'transparent';
+
+  return (
+    <tr onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      style={{ background:bg, cursor:'pointer', transition:'background .1s', borderBottom:'1px solid var(--mc-border-2)' }}>
+      <td style={{ width:36, padding:'8px 0 8px 14px' }}>
+        <div onClick={onSelect} style={{ width:16, height:16, borderRadius:4, border:`1.5px solid ${selected ? 'var(--mc-accent)' : 'var(--mc-border-strong)'}`, background: selected ? 'var(--mc-accent)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', transition:'all .12s' }}>
+          {selected && <Icon name="check" size={10} color="#fff" strokeWidth={2.5} />}
+        </div>
+      </td>
+      <td style={{ padding:'8px 10px 8px 4px', display:'flex', alignItems:'center', gap:9 }}>
+        <Icon name={iconName} size={16} color={iconColor} strokeWidth={item.type==='folder'?1.75:1.4} />
+        <span style={{ fontSize:13, fontWeight:500, color:'var(--mc-ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:260 }}>{item.name}</span>
+        {item.starred && <Icon name="star" size={12} color="var(--mc-gold)" strokeWidth={1.5} />}
+        {item.shared && <Icon name="users" size={12} color="var(--mc-faint)" strokeWidth={1.5} />}
+      </td>
+      <td style={{ padding:'8px 12px', fontSize:12, color:'var(--mc-muted)', fontFamily:'var(--font-mono)', whiteSpace:'nowrap' }}>{item.modified}</td>
+      <td style={{ padding:'8px 12px', fontSize:12, color:'var(--mc-muted)', fontFamily:'var(--font-mono)' }}>{item.size}</td>
+      <td style={{ padding:'8px 12px', fontSize:12, color:'var(--mc-muted)' }}>{item.owner}</td>
+      <td style={{ padding:'8px 12px 8px 0', width:32 }}>
+        {(hovered || selected) && (
+          <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--mc-muted)', padding:'2px', display:'flex', alignItems:'center', borderRadius:4 }}>
+            <Icon name="more" size={14} color="var(--mc-faint)" strokeWidth={2} />
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/* ── file card (grid view) ── */
+function FileCard({ item, selected, onSelect }) {
+  const [hovered, setHovered] = React.useState(false);
+  const iconColor = FILE_COLORS[item.type] || 'var(--mc-faint)';
+  const iconName = item.type === 'folder' ? 'folder' : item.type;
+
+  return (
+    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      style={{ background:'var(--mc-surface)', border:`1px solid ${selected ? 'var(--mc-accent-line)' : hovered ? 'var(--mc-border-strong)' : 'var(--mc-border)'}`, borderRadius:'var(--radius-lg)', padding:'14px', cursor:'pointer', transition:'all .15s', boxShadow: hovered ? 'var(--shadow-md)' : 'var(--shadow-sm)', transform: hovered ? 'translateY(-1px)' : 'none', display:'flex', flexDirection:'column', gap:10, position:'relative' }}>
+      {/* Checkbox */}
+      <div onClick={e => { e.stopPropagation(); onSelect(); }}
+        style={{ position:'absolute', top:10, left:10, width:16, height:16, borderRadius:4, border:`1.5px solid ${selected ? 'var(--mc-accent)' : 'var(--mc-border-strong)'}`, background: selected ? 'var(--mc-accent)' : 'white', display: selected || hovered ? 'flex' : 'none', alignItems:'center', justifyContent:'center', zIndex:1 }}>
+        {selected && <Icon name="check" size={10} color="#fff" strokeWidth={2.5} />}
+      </div>
+
+      {/* Thumbnail */}
+      <div style={{ height:80, borderRadius:'var(--radius-sm)', background: item.type==='folder' ? 'var(--mc-gold-soft)' : 'var(--mc-canvas-2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <Icon name={iconName} size={32} color={iconColor} strokeWidth={1.2} />
+      </div>
+
+      {/* Info */}
+      <div>
+        <div style={{ fontSize:12, fontWeight:600, color:'var(--mc-ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:2 }}>{item.name}</div>
+        <div style={{ fontSize:10, color:'var(--mc-muted)', fontFamily:'var(--font-mono)' }}>{item.modified}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── main app ── */
+function App() {
+  const [navActive, setNavActive] = React.useState('my-drive');
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [view, setView] = React.useState('list');
+  const [search, setSearch] = React.useState('');
+  const [selected, setSelected] = React.useState(new Set());
+
+  const toggle = id => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const filtered = ITEMS.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden', background:'var(--mc-surface)' }}>
+      <HeaderBar search={search} setSearch={setSearch} />
+      <div style={{ display:'flex', flex:1, overflow:'hidden', background:'var(--mc-surface)' }}>
+        <Sidebar
+          items={NAV_ITEMS}
+          volume={DRIVE_VOLUME}
+          active={navActive}
+          onNavigate={setNavActive}
+          collapsed={collapsed}
+          onToggle={setCollapsed}
+          roundedCorner="none"
+          style={{ borderTop:'none', borderRight:'none' }}
+        />
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--mc-canvas)', borderTop:'1px solid var(--mc-border)', borderLeft:'1px solid var(--mc-border)', borderTopLeftRadius:'var(--radius-lg)' }}>
+          <Toolbar view={view} setView={setView} />
+
+        {/* Selection bar */}
+        {selected.size > 0 && (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 20px', background:'var(--mc-accent-soft)', borderBottom:'1px solid var(--mc-accent-line)', fontSize:12, color:'var(--mc-accent-ink)', fontWeight:600 }}>
+            <span>{selected.size} selected</span>
+            {[['share','Share'],['trash','Move to trash'],['star','Star']].map(([ico,lbl]) => (
+              <button key={ico} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:'var(--radius-sm)', background:'var(--mc-surface)', border:'1px solid var(--mc-accent-line)', cursor:'pointer', fontSize:11, color:'var(--mc-accent-ink)', fontFamily:'var(--font-sans)', fontWeight:500 }}>
+                <Icon name={ico} size={11} color="var(--mc-accent)" />
+                {lbl}
+              </button>
+            ))}
+            <button onClick={() => setSelected(new Set())} style={{ marginLeft:'auto', background:'none', border:'none', cursor:'pointer', color:'var(--mc-muted)', fontSize:18, lineHeight:1 }}>×</button>
+          </div>
+        )}
+
+        {/* Content */}
+        <div style={{ flex:1, overflowY:'auto', padding: view==='grid' ? '20px' : '0 20px 20px' }}>
+          {view === 'list' ? (
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom:'1px solid var(--mc-border)' }}>
+                  {['','Name','Modified','Size','Owner',''].map((h,i) => (
+                    <th key={i} style={{ padding: i===1 ? '8px 10px 8px 4px' : '8px 12px', textAlign:'left', fontSize:11, fontWeight:600, color:'var(--mc-muted)', letterSpacing:'.04em', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(item => (
+                  <FileRow key={item.id} item={item} selected={selected.has(item.id)} onSelect={() => toggle(item.id)} />
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:12 }}>
+              {filtered.map(item => (
+                <FileCard key={item.id} item={item} selected={selected.has(item.id)} onSelect={() => toggle(item.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>

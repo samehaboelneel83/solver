@@ -1,0 +1,46 @@
+<!-- @dsCard group="Components" viewport="720x600" name="Sidebar" subtitle="Collapsible product nav rail — volume card, items, collapse/expand" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>body{margin:0;background:var(--mc-canvas);font-family:var(--font-sans);}</style>
+</head><body data-product="drive">
+<div id="root"></div>
+<script type="text/babel">
+const { Sidebar } = window.MCAITDesignSystem_6bac07;
+
+const ITEMS = [
+  { id:'shared',  label:'Shared with me', icon:'users' },
+  { id:'recent',  label:'Recent',         icon:'clock' },
+  { id:'starred', label:'Starred',        icon:'star'  },
+  { id:'trash',   label:'Trash',          icon:'trash' },
+];
+const VOLUME = { id:'my-drive', name:'My Drive', icon:'folder', badge:'default', pct:22, usage:'368.9 KB used' };
+
+function Demo() {
+  const [active, setActive] = React.useState('my-drive');
+  return (
+    <div style={{ display:'flex', gap:32, padding:'28px 24px', alignItems:'flex-start', height:'100vh', boxSizing:'border-box' }}>
+      <div style={{ height:520, display:'flex', flexDirection:'column' }}>
+        <div style={{ fontSize:11, fontFamily:'var(--font-mono)', color:'var(--mc-faint)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:8 }}>Expanded</div>
+        <div style={{ flex:1, border:'1px solid var(--mc-border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+          <Sidebar items={ITEMS} volume={VOLUME} active={active} onNavigate={setActive} defaultCollapsed={false} />
+        </div>
+      </div>
+      <div style={{ height:520, display:'flex', flexDirection:'column' }}>
+        <div style={{ fontSize:11, fontFamily:'var(--font-mono)', color:'var(--mc-faint)', letterSpacing:'.06em', textTransform:'uppercase', marginBottom:8 }}>Collapsed</div>
+        <div style={{ flex:1, border:'1px solid var(--mc-border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+          <Sidebar items={ITEMS} volume={VOLUME} active={active} onNavigate={setActive} defaultCollapsed={true} />
+        </div>
+      </div>
+      <div style={{ fontSize:13, color:'var(--mc-muted)', maxWidth:220, lineHeight:1.6, paddingTop:26 }}>
+        Click the chevron at the bottom of either rail to collapse or expand it. The top-right corner is rounded so it tucks under the AppBar.
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body></html>

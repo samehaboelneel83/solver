@@ -1,0 +1,11 @@
+/* ============================================================
+   MCAIT — Webfonts
+   Loaded from Google Fonts (no binaries shipped in the source
+   repos). To self-host, replace these @import URLs with local
+   @font-face rules pointing at woff2 files in /assets/fonts.
+   - Syne        → display / brand voice
+   - Manrope     → body / UI
+   - JetBrains Mono → technical metadata, IDs, code
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');

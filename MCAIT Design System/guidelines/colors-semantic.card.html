@@ -1,0 +1,20 @@
+<!-- @dsCard group="Colors" viewport="700x180" name="Semantic Colors" subtitle="Status colors shared across all products" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; background: var(--mc-canvas); display: flex; align-items: center; padding: 20px 24px; gap: 16px; font-family: var(--font-sans); }
+  .group { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .swatch { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
+  .soft { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; border: 1px solid; }
+  .label { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--mc-ink); min-width: 56px; }
+  .token { font-size: 10px; font-family: var(--font-mono); color: var(--mc-muted); }
+</style>
+</head><body>
+  <div class="group">
+    <div class="row"><div class="swatch" style="background:var(--mc-success)"></div><div class="soft" style="background:var(--mc-success-soft);border-color:var(--mc-success-line)"></div><div class="label">Success</div><div class="token">--mc-success</div></div>
+    <div class="row"><div class="swatch" style="background:var(--mc-warning)"></div><div class="soft" style="background:var(--mc-warning-soft);border-color:var(--mc-warning-line)"></div><div class="label">Warning</div><div class="token">--mc-warning</div></div>
+    <div class="row"><div class="swatch" style="background:var(--mc-danger)"></div><div class="soft" style="background:var(--mc-danger-soft);border-color:var(--mc-danger-line)"></div><div class="label">Danger</div><div class="token">--mc-danger</div></div>
+    <div class="row"><div class="swatch" style="background:var(--mc-info)"></div><div class="soft" style="background:var(--mc-info-soft);border-color:var(--mc-info-line)"></div><div class="label">Info</div><div class="token">--mc-info</div></div>
+  </div>
+</body></html>

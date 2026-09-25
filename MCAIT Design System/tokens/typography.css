@@ -1,0 +1,33 @@
+/* ============================================================
+   MCAIT — Typography tokens
+   Syne (display) · Manrope (body/UI) · JetBrains Mono (technical)
+   ============================================================ */
+
+:root {
+  /* ---- Families ---- */
+  --font-display: 'Syne', 'Manrope', ui-sans-serif, system-ui, sans-serif; /* @kind font */
+  --font-sans:    'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; /* @kind font */
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; /* @kind font */
+
+  /* ---- Type scale (px) ---- */
+  --text-xs:   12px; /* @kind font */
+  --text-sm:   13px; /* @kind font */
+  --text-base: 14px; /* @kind font */
+  --text-md:   15px; /* @kind font */
+  --text-lg:   18px; /* @kind font */
+  --text-xl:   22px; /* @kind font */
+  --text-2xl:  28px; /* @kind font */
+  --text-3xl:  36px; /* @kind font */
+  --text-4xl:  48px; /* @kind font */
+
+  /* ---- Weights ---- */
+  --weight-regular:  400; /* @kind font */
+  --weight-medium:   500; /* @kind font */
+  --weight-semibold: 600; /* @kind font */
+  --weight-bold:     700; /* @kind font */
+
+  /* ---- Tracking ---- */
+  --tracking-display: -0.03em; /* @kind font */
+  --tracking-tight:   -0.011em; /* @kind font */
+  --tracking-caps:    0.07em; /* @kind font */
+}

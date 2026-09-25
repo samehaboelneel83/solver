@@ -1,0 +1,62 @@
+/* ============================================================
+   MCAIT — Color tokens
+   Two-tier system:
+   1. Universal cool-slate NEUTRALS — shared by every product.
+   2. GOLD = the constant brand signature (logo, hub, primary).
+   3. Per-product ACCENT hues live in tokens/products.css and
+      override --mc-accent* within a [data-product] scope.
+   All values in oklch for perceptual consistency.
+   ============================================================ */
+
+:root {
+  /* ---- Neutrals (cool, hue 265) ---- */
+  --mc-ink:        oklch(0.24 0.02 265); /* @kind color */
+  --mc-ink-soft:   oklch(0.32 0.03 265); /* @kind color */
+  --mc-muted:      oklch(0.52 0.02 265); /* @kind color */
+  --mc-faint:      oklch(0.62 0.02 265); /* @kind color */
+  --mc-canvas:     oklch(0.975 0.006 265); /* @kind color */
+  --mc-canvas-2:   oklch(0.955 0.006 265); /* @kind color */
+  --mc-surface:    oklch(1 0 0); /* @kind color */
+  --mc-border:     oklch(0.91 0.008 265); /* @kind color */
+  --mc-border-2:   oklch(0.94 0.006 265); /* @kind color */
+  --mc-border-strong: oklch(0.86 0.01 265); /* @kind color */
+
+  /* ---- Brand: MCAIT Gold (hue 75-85 amber) ---- */
+  --mc-gold:        oklch(0.62 0.13 80); /* @kind color */  /* ≈ #b8860b */
+  --mc-gold-hover:  oklch(0.56 0.13 78); /* @kind color */
+  --mc-gold-ink:    oklch(0.40 0.10 78); /* @kind color */  /* text on gold-soft */
+  --mc-gold-soft:   oklch(0.96 0.05 85); /* @kind color */
+  --mc-gold-line:   oklch(0.86 0.09 85); /* @kind color */
+  --mc-gold-fg:     oklch(0.20 0.04 80); /* @kind color */  /* text ON gold */
+
+  /* ---- Default interactive accent = brand gold ----
+     Products override these three within [data-product="…"]. */
+  --mc-accent:      var(--mc-gold); /* @kind color */
+  --mc-accent-hover: var(--mc-gold-hover); /* @kind color */
+  --mc-accent-soft: var(--mc-gold-soft); /* @kind color */
+  --mc-accent-line: var(--mc-gold-line); /* @kind color */
+  --mc-accent-ink:  var(--mc-gold-ink); /* @kind color */
+  --mc-accent-fg:   #ffffff; /* @kind color */
+
+  /* ---- Semantic ---- */
+  --mc-success:      oklch(0.40 0.12 145); /* @kind color */
+  --mc-success-soft: oklch(0.97 0.03 145); /* @kind color */
+  --mc-success-line: oklch(0.88 0.06 145); /* @kind color */
+  --mc-warning:      oklch(0.55 0.11 70); /* @kind color */
+  --mc-warning-soft: oklch(0.97 0.04 75); /* @kind color */
+  --mc-warning-line: oklch(0.88 0.07 75); /* @kind color */
+  --mc-danger:       oklch(0.48 0.16 25); /* @kind color */
+  --mc-danger-soft:  oklch(0.97 0.02 25); /* @kind color */
+  --mc-danger-line:  oklch(0.88 0.07 25); /* @kind color */
+  --mc-info:         oklch(0.50 0.13 255); /* @kind color */
+  --mc-info-soft:    oklch(0.97 0.03 255); /* @kind color */
+  --mc-info-line:    oklch(0.87 0.06 255); /* @kind color */
+
+  /* ---- Semantic aliases (use these in product code) ---- */
+  --text-strong:   var(--mc-ink); /* @kind color */
+  --text-body:     var(--mc-ink-soft); /* @kind color */
+  --text-muted:    var(--mc-muted); /* @kind color */
+  --surface-canvas: var(--mc-canvas); /* @kind color */
+  --surface-card:  var(--mc-surface); /* @kind color */
+  --border-default: var(--mc-border); /* @kind color */
+}

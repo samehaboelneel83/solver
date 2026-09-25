@@ -1,0 +1,215 @@
+<!-- @dsCard group="Cowork" viewport="1280x800" name="Cowork Hub" subtitle="MCAIT agentic chatbot — conversations, product switcher, sidebar" -->
+<!-- @startingPoint section="UI Kits" subtitle="MCAIT Cowork agentic hub — full shell" viewport="1280x800" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cowork — MCAIT</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body,#root{height:100%;width:100%;}
+body{font-family:var(--font-sans);background:var(--mc-canvas);color:var(--mc-ink);}
+button,input{font-family:inherit;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--mc-border-strong);border-radius:99px;}
+</style>
+</head><body data-product="cowork">
+<div id="root"></div>
+<script type="text/babel">
+const { AppBar } = window.MCAITDesignSystem_6bac07;
+const PRODUCTS = [
+  { id:'cowork',   label:'Cowork',   color:'var(--mc-gold)',                    fg:'#2a1800', initial:'C' },
+  { id:'drive',    label:'Drive',    color:'oklch(0.52 0.17 255)',              fg:'#fff',    initial:'D' },
+  { id:'calendar', label:'Calendar', color:'oklch(0.52 0.13 150)',              fg:'#fff',    initial:'Ca' },
+  { id:'meet',     label:'Meet',     color:'oklch(0.55 0.11 200)',              fg:'#fff',    initial:'M' },
+  { id:'notebook', label:'Notebook', color:'oklch(0.52 0.16 295)',              fg:'#fff',    initial:'N' },
+  { id:'mail',     label:'Mail',     color:'oklch(0.55 0.17 25)',               fg:'#fff',    initial:'Ma' },
+  { id:'aura',     label:'Aura',     color:'oklch(0.56 0.18 345)',              fg:'#fff',    initial:'Au' },
+];
+
+const CONVOS = [
+  { id:1, title:'Q3 budget analysis', time:'2h ago', preview:'Summarize the attached spreadsheet…' },
+  { id:2, title:'Marketing strategy deck', time:'Yesterday', preview:'Create a 10-slide deck for…' },
+  { id:3, title:'Drive file search', time:'Mon', preview:'Find all files tagged procurement…' },
+  { id:4, title:'Meeting prep — CEO sync', time:'Mon', preview:'Pull key points from last week…' },
+  { id:5, title:'Contract review', time:'Jun 15', preview:'Highlight any clauses that require…' },
+];
+
+const SAMPLE_MESSAGES = [
+  { role:'user',  text:'Summarize the Q3 budget report and highlight any areas of concern.' },
+  { role:'agent', text:`I found the Q3 Budget Report in your Drive. Here's a summary:\n\n**Total budget:** $4.2M allocated, $3.8M spent (90% utilization)\n\n**Areas of concern:**\n• Infrastructure costs exceeded projections by 18% — primarily cloud compute.\n• Headcount under-budget by $240K due to delayed hires in Q3.\n• Marketing overspent by $112K on the product launch campaign.\n\nWould you like me to draft a brief for leadership, or pull the underlying data?` },
+  { role:'user',  text:'Yes, draft a brief for leadership. Keep it under one page.' },
+  { role:'agent', text:`On it — drafting now. I'll format it as a structured memo with an exec summary, three key findings, and recommended actions. I'll also add it to your Drive under /Docs/Q3 Reporting. Give me a moment…` },
+];
+
+function Seal({ size=32, radius=8 }) {
+  return (
+    <div style={{ width:size, height:size, borderRadius:radius, background:'var(--mc-gold)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+      <span style={{ fontFamily:'var(--font-display)', fontSize:size*0.36, fontWeight:800, color:'oklch(0.20 0.04 80)', letterSpacing:'-0.04em' }}>M8</span>
+    </div>
+  );
+}
+
+function ProductIcon({ product, size=24 }) {
+  return (
+    <div style={{ width:size, height:size, borderRadius:size*0.25, background:product.color, display:'flex', alignItems:'center', justifyContent:'center', fontSize:size*0.38, fontWeight:700, color:product.fg, fontFamily:'var(--font-display)', flexShrink:0 }}>
+      {product.initial}
+    </div>
+  );
+}
+
+function Sidebar({ activeConvo, setActiveConvo, showEmpty, setShowEmpty }) {
+  const [hovered, setHovered] = React.useState(null);
+
+  return (
+    <div style={{ width:260, background:'var(--mc-surface)', display:'flex', flexDirection:'column', height:'100%', flexShrink:0 }}>
+      {/* New conversation button */}
+      <div style={{ padding:'14px 12px 8px' }}>
+        <button onClick={() => setShowEmpty(true)}
+          style={{ width:'100%', display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:'var(--radius-md)', background:'var(--mc-gold)', border:'none', cursor:'pointer', fontFamily:'var(--font-sans)', fontWeight:600, fontSize:13, color:'oklch(0.20 0.04 80)' }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          New conversation
+        </button>
+      </div>
+
+      {/* Conversation list */}
+      <div style={{ flex:1, overflowY:'auto', padding:'4px 8px' }}>
+        <div style={{ fontSize:10, fontFamily:'var(--font-mono)', color:'var(--mc-faint)', letterSpacing:'.06em', textTransform:'uppercase', padding:'8px 8px 4px' }}>Recent</div>
+        {CONVOS.map(c => {
+          const active = !showEmpty && activeConvo === c.id;
+          return (
+            <div key={c.id} onClick={() => { setActiveConvo(c.id); setShowEmpty(false); }}
+              onMouseEnter={() => setHovered(c.id)} onMouseLeave={() => setHovered(null)}
+              style={{ padding:'9px 10px', borderRadius:'var(--radius-sm)', cursor:'pointer', marginBottom:1,
+                background: active ? 'var(--mc-gold-soft)' : hovered===c.id ? 'var(--mc-canvas-2)' : 'transparent',
+                borderLeft: active ? '2px solid var(--mc-gold)' : '2px solid transparent',
+                transition:'background .15s' }}>
+              <div style={{ fontSize:13, fontWeight:active?600:500, color: active ? 'var(--mc-gold-ink)' : 'var(--mc-ink)', marginBottom:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.title}</div>
+              <div style={{ fontSize:11, color:'var(--mc-faint)', fontFamily:'var(--font-mono)' }}>{c.time}</div>
+            </div>
+          );
+        })}
+      </div>
+
+    </div>
+  );
+}
+
+function EmptyState() {
+  const SUGGESTIONS = [
+    'Summarize my Drive files from this week',
+    'Draft a status update for the leadership team',
+    'Find all contracts expiring in Q3',
+    'Prepare talking points for tomorrow\'s meeting',
+  ];
+  const [inp, setInp] = React.useState('');
+
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:'40px 48px', gap:32 }}>
+      <div style={{ textAlign:'center' }}>
+        <div style={{ display:'flex', justifyContent:'center', marginBottom:20 }}>
+          <Seal size={64} radius={16} />
+        </div>
+        <h1 style={{ fontFamily:'var(--font-display)', fontSize:32, fontWeight:700, letterSpacing:'-0.03em', color:'var(--mc-ink)', marginBottom:8 }}>Good morning, Omar.</h1>
+        <p style={{ fontSize:15, color:'var(--mc-muted)', lineHeight:1.6 }}>Ask me anything — I can search your files, summarize documents,<br/>draft messages, and coordinate across your workspace.</p>
+      </div>
+
+      {/* Suggestions */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10, width:'100%', maxWidth:640 }}>
+        {SUGGESTIONS.map((s,i) => (
+          <div key={i} onClick={() => setInp(s)}
+            style={{ padding:'14px 16px', borderRadius:'var(--radius-md)', border:'1px solid var(--mc-border)', background:'var(--mc-surface)', cursor:'pointer', fontSize:13, color:'var(--mc-ink-soft)', lineHeight:1.45, transition:'border-color .15s, box-shadow .15s', boxShadow:'var(--shadow-sm)' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor='var(--mc-gold-line)'; e.currentTarget.style.boxShadow='var(--shadow-md)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor='var(--mc-border)'; e.currentTarget.style.boxShadow='var(--shadow-sm)'; }}>
+            {s}
+          </div>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div style={{ width:'100%', maxWidth:640 }}>
+        <InputBar value={inp} onChange={setInp} />
+      </div>
+    </div>
+  );
+}
+
+function InputBar({ value, onChange }) {
+  return (
+    <div style={{ display:'flex', alignItems:'flex-end', gap:8, background:'var(--mc-surface)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-lg)', padding:'10px 12px', boxShadow:'var(--shadow-md)' }}>
+      <textarea value={value} onChange={e => onChange(e.target.value)} placeholder="Ask Cowork anything…" rows={1}
+        style={{ flex:1, border:'none', outline:'none', resize:'none', fontFamily:'var(--font-sans)', fontSize:14, color:'var(--mc-ink)', background:'transparent', lineHeight:1.5 }} />
+      <div style={{ display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
+        <button title="Attach from Drive" style={{ width:30, height:30, borderRadius:'var(--radius-sm)', background:'var(--mc-canvas-2)', border:'1px solid var(--mc-border)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2v10M2 7h10" stroke="var(--mc-muted)" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </button>
+        <button style={{ width:30, height:30, borderRadius:'var(--radius-sm)', background:'var(--mc-gold)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M8 3l4 4-4 4" stroke="oklch(0.20 0.04 80)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ msg }) {
+  const isUser = msg.role === 'user';
+  return (
+    <div style={{ display:'flex', gap:10, flexDirection: isUser ? 'row-reverse' : 'row', maxWidth:680, alignSelf: isUser ? 'flex-end' : 'flex-start' }}>
+      {!isUser && <Seal size={28} radius={7} />}
+      {isUser && <div style={{ width:28, height:28, borderRadius:'50%', background:'oklch(0.88 0.09 80)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, color:'oklch(0.32 0.08 80)', flexShrink:0 }}>OA</div>}
+      <div style={{ padding:'11px 15px', borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+        background: isUser ? 'var(--mc-gold-soft)' : 'var(--mc-surface)',
+        border: `1px solid ${isUser ? 'var(--mc-gold-line)' : 'var(--mc-border)'}`,
+        fontSize:14, lineHeight:1.6, color:'var(--mc-ink)', maxWidth:560,
+        boxShadow:'var(--shadow-sm)', whiteSpace:'pre-wrap' }}>
+        {msg.text}
+      </div>
+    </div>
+  );
+}
+
+function ConversationView({ convo }) {
+  const [inp, setInp] = React.useState('');
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+      {/* Header */}
+      <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--mc-border)', display:'flex', alignItems:'center', gap:12, background:'oklch(1 0 0 / 0.7)', backdropFilter:'blur(8px)', flexShrink:0 }}>
+        <h2 style={{ fontFamily:'var(--font-sans)', fontSize:15, fontWeight:600, color:'var(--mc-ink)', flex:1 }}>{convo.title}</h2>
+        <button style={{ fontSize:11, color:'var(--mc-muted)', background:'var(--mc-canvas-2)', border:'1px solid var(--mc-border)', borderRadius:'var(--radius-sm)', padding:'4px 10px', cursor:'pointer', fontFamily:'var(--font-sans)' }}>Share</button>
+      </div>
+      {/* Messages */}
+      <div style={{ flex:1, overflowY:'auto', padding:'24px', display:'flex', flexDirection:'column', gap:16 }}>
+        {SAMPLE_MESSAGES.map((m,i) => <MessageBubble key={i} msg={m} />)}
+      </div>
+      {/* Input */}
+      <div style={{ padding:'16px 24px', borderTop:'1px solid var(--mc-border)', flexShrink:0 }}>
+        <InputBar value={inp} onChange={setInp} />
+        <p style={{ fontSize:11, color:'var(--mc-faint)', textAlign:'center', marginTop:8 }}>Cowork can make mistakes. Verify important information.</p>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [activeConvo, setActiveConvo] = React.useState(1);
+  const [showEmpty, setShowEmpty] = React.useState(false);
+  const convo = CONVOS.find(c => c.id === activeConvo);
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden', background:'var(--mc-surface)' }}>
+      <AppBar product={{ id:'cowork', name:'Cowork', icon:'sparkle' }} onNavigate={()=>{}} divider={false} />
+      <div style={{ flex:1, display:'flex', overflow:'hidden', background:'var(--mc-surface)' }}>
+        <Sidebar activeConvo={activeConvo} setActiveConvo={setActiveConvo} showEmpty={showEmpty} setShowEmpty={setShowEmpty} />
+        <div style={{ flex:1, display:'flex', overflow:'hidden', background:'var(--mc-canvas)', borderTop:'1px solid var(--mc-border)', borderLeft:'1px solid var(--mc-border)', borderTopLeftRadius:'var(--radius-lg)' }}>
+          {showEmpty ? <EmptyState /> : <ConversationView convo={convo} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>
