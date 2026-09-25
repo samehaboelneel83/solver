@@ -34,6 +34,7 @@ import {
   type Id,
 } from "../api/v1";
 import InheritanceFields from "../components/InheritanceFields";
+import BulkPanel from "../components/BulkPanel";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { typeColour } from "../lib/colour";
@@ -115,6 +116,8 @@ function Editor({ type, reload }: { type: EntityType; reload: () => Promise<Enti
       </div>
       <TypeForm type={type} reload={reload} />
       <Attributes type={type} />
+      {/* Queue R21: a template out, a filled file in. */}
+      {!type.is_abstract && <BulkPanel base={`/api/v1/entity-types/${type.id}`} what={`${type.name} entities`} />}
       <DeleteType type={type} />
     </div>
   );

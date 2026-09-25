@@ -36,7 +36,8 @@ export class ApiError extends Error {
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(options.headers);
-  if (!(options.body instanceof URLSearchParams)) {
+  // A form body (a file upload) sets its own multipart boundary.
+  if (!(options.body instanceof URLSearchParams) && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (token) {
@@ -65,6 +66,18 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   }
 
   return response.json() as Promise<T>;
+}
+
+/** A file from the API, with the signed-in token: a template to download (queue R21). */
+export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const token = getToken();
+  const response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!response.ok) {
+    throw new ApiError(response.status, (await response.text()) || response.statusText);
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "download";
+  return { blob: await response.blob(), filename };
 }
 
 export async function login(username: string, password: string): Promise<string> {

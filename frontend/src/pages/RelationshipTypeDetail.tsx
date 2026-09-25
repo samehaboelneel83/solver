@@ -1,5 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import BulkPanel from "../components/BulkPanel";
 import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
 import AttributeOrderCell, { refocusMoved, swapped } from "../components/AttributeOrderCell";
 import RelationshipTypeFields, {
@@ -121,6 +122,7 @@ function Editor({
       </div>
       <TypeForm type={type} reload={reload} />
       <Attributes type={type} />
+      <BulkPanel base={`/api/v1/relationship-types/${type.id}`} what={`${type.name} links`} />
       <DeleteType type={type} />
     </div>
   );

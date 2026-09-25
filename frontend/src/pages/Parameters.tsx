@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import MeasureFromMap from "../components/MeasureFromMap";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
 import EntityParameterGrid from "../components/EntityParameterGrid";
+import BulkPanel from "../components/BulkPanel";
 import {
   ErrorSummary,
   FieldError,
@@ -127,6 +128,9 @@ function ForDomain({ domainId }: { domainId: Id }) {
           ) : (
             <ParameterGrid key={selected.id} parameter={selected} />
           )}
+          <div className="mt-4">
+            <BulkPanel base={`/api/v1/parameters/${selected.id}`} what={`${selected.name} cells`} exportRows={false} />
+          </div>
         </section>
       ) : (
         items.length > 0 && (
