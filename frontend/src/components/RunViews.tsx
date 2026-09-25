@@ -459,7 +459,22 @@ export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; n
   ];
   const biggest = Math.max(1, ...marks.lines.map((l) => Math.abs(l.value ?? 1)), ...marks.points.map((p) => Math.abs(p.value ?? 1)));
   const chosen = marks.points.filter((p) => p.chosen).length;
+  // Each located set its own colour, so a site and the customers it serves read apart.
+  const setsDrawn = [...new Set(marks.points.map((p) => p.set))];
+  const SET_FILL = [["#059669", "#065f46"], ["#d97706", "#92400e"], ["#7c3aed", "#5b21b6"]];
+  const fillOf = (set: string) => SET_FILL[setsDrawn.indexOf(set) % SET_FILL.length];
   return (
+    <figure>
+    {setsDrawn.length > 1 && (
+      <figcaption className="mb-1 flex gap-3 text-xs text-slate-600">
+        {setsDrawn.map((set) => (
+          <span key={set} className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: fillOf(set)[0] }} />
+            {set}
+          </span>
+        ))}
+      </figcaption>
+    )}
     <svg role="img" aria-label={`Map of ${chosen} chosen of ${marks.points.length} places and ${marks.lines.length} lines`}
          width={W} height={H} className="rounded bg-slate-50">
       {marks.lines.map((l, i) => {
@@ -475,12 +490,13 @@ export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; n
         const [x, y] = at(p.at);
         const r = p.chosen ? 4 + (p.value === null ? 2 : (5 * Math.abs(p.value)) / biggest) : 3;
         return (
-          <circle key={`${p.set}-${p.key}`} cx={x} cy={y} r={r} fill={p.chosen ? "#059669" : "white"}
-                  stroke={p.chosen ? "#065f46" : "#94a3b8"} strokeWidth={1.2}>
+          <circle key={`${p.set}-${p.key}`} cx={x} cy={y} r={r} fill={p.chosen ? fillOf(p.set)[0] : "white"}
+                  stroke={p.chosen ? fillOf(p.set)[1] : "#94a3b8"} strokeWidth={1.2}>
             <title>{`${name(p.set, p.key)}${p.chosen ? " (chosen)" : ""}${p.value === null ? "" : `: ${formatAmount(p.value)}`}`}</title>
           </circle>
         );
       })}
     </svg>
+    </figure>
   );
 }
