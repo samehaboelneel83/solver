@@ -47,6 +47,7 @@ from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
 from app.solve import allocation as allocation_rows
+from app.solve import network as network_rows
 from app.solve import partition as partition_rows
 from app.solve import horizon as horizon_rows
 from app.solve import selector as selector_rows
@@ -171,6 +172,8 @@ def enqueue_run(
     decompose = bool(settings["solve.decompose"].value)
     from_settings["decompose"] = settings["solve.decompose"].source
     connected_start = bool(settings["solve.connected_start"].value)
+    network = bool(settings["solve.network"].value)
+    from_settings["network"] = settings["solve.network"].source
     metaheuristic = bool(settings["solve.metaheuristic"].value)
     from_settings["metaheuristic"] = settings["solve.metaheuristic"].source
     from_settings["connected_start"] = settings["solve.connected_start"].source
@@ -246,6 +249,7 @@ def enqueue_run(
         "decompose": decompose,
         "connected_start": connected_start,
         "metaheuristic": metaheuristic,
+        "network": network,
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -661,6 +665,7 @@ def _execute(
         stochastic_record, record_model = None, None
         horizon_record = None
         decomposition_record = None
+        network_record = None
         start_record = None
         search_record = None
         exact_failed = None
@@ -849,8 +854,15 @@ def _execute(
             # `solve.decompose`, app.solve.allocation, queue R12).
             allocate = (bool(params.get("decompose")) and not stochastic_wanted
                         and allocation_rows.applies(solving_model) is None)
+            # A model that is a network, solved as one: proven, by min-cost flow (setting
+            # `solve.network`, app.solve.network, queue R15a).
+            # Whole-number networks only: on a continuous one an LP solver is nearly as quick and
+            # also gives shadow prices, which min-cost flow does not (bench/results/2026-09-25-network.md).
+            networked = (bool(params.get("network")) and not stochastic_wanted and not allocate
+                         and any(v.is_integral for v in solving_model.variables.values())
+                         and network_rows.applies(solving_model) is None)
             horizon_plan = None
-            if params.get("rolling_horizon") and not stochastic_wanted:
+            if params.get("rolling_horizon") and not stochastic_wanted and not networked:
                 # Relax-and-fix over the model's time set (setting
                 # `solve.rolling_horizon`, app.solve.horizon, queue R9).
                 time_set = _time_set(db, run_id, solving_model)
@@ -860,7 +872,8 @@ def _execute(
                     horizon_plan = (time_set, periods)
                 else:
                     horizon_record = {"used": False, "why": why_not}
-            if params.get("separable") and not stochastic_wanted and horizon_plan is None and not allocate:
+            if (params.get("separable") and not stochastic_wanted and horizon_plan is None and not allocate
+                    and not networked):
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -877,6 +890,9 @@ def _execute(
                 if allocate:
                     allocated = allocation_rows.solve(solving_model)
                     result, reason, decomposition_record = allocated.solution, None, allocated.record
+                elif networked:
+                    networked_run = network_rows.solve(solving_model)
+                    result, reason, network_record = networked_run.solution, None, networked_run.record
                 elif stochastic_wanted:
                     result, stochastic_record = sandbox.run(
                         "app.solve.sandbox:stochastic_in_child",
@@ -1081,6 +1097,8 @@ def _execute(
         extra["rolling_horizon_run"] = horizon_record
     if decomposition_record is not None:
         extra["decomposition"] = decomposition_record
+    if network_record is not None:
+        extra["network_run"] = network_record
     if start_record is not None:
         extra["connected_start_run"] = start_record
     if search_record is not None:
