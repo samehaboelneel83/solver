@@ -54,6 +54,12 @@ export const RELATIONS = ["<=", "=", ">="] as const;
  * everything beneath it") and the one a planner means by "counting its
  * sub-units". */
 export const TRAVERSAL_DEPTHS = ["one", "any", "any_or_self"] as const;
+/** How an edge attribute read along a repeated walk (queue R19) combines the
+ * path's edges: `sum` (a distance up a chain), `min` / `max` (the tightest
+ * capacity), `product` (a yield), `count` (the edges carrying it). */
+export const PATH_COMBINATIONS = ["count", "max", "min", "product", "sum"] as const;
+/** A scope entry for an edge a `via` names with `as`: `EDGE_MARK + rel + "/" + depth`. */
+export const EDGE_MARK = "@";
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const OBJECTIVE_MODES = ["weighted", "lex"] as const;
@@ -91,6 +97,7 @@ export type Sense = (typeof SENSES)[number];
 export type ObjectiveMode = (typeof OBJECTIVE_MODES)[number];
 export type TermKind = (typeof TERM_KINDS)[number];
 export type TraversalDepth = (typeof TRAVERSAL_DEPTHS)[number];
+export type PathCombination = (typeof PATH_COMBINATIONS)[number];
 
 /** Where a rule can be decided. `shape` rules are the ones this half of
  * the platform can judge; `domain` rules need the domain's own rows and
@@ -588,6 +595,26 @@ export const IR_RULES: readonly IrRule[] = [
     code: "route_on_soft",
     where: "shape",
     text: "a `route` rule is hard and unconditional",
+  },
+  {
+    code: "edge_needs_version_2",
+    where: "shape",
+    text: "a `via` names the edge it walks with `as` in a version 2 document only",
+  },
+  {
+    code: "binding_via_as_invalid",
+    where: "shape",
+    text: "a `via`'s `as` is a name not already bound, and not the binding's own index",
+  },
+  {
+    code: "edge_not_an_index",
+    where: "shape",
+    text: "an edge named by `as` is read with `attr` only, never used as an index or an anchor",
+  },
+  {
+    code: "attr_along_invalid",
+    where: "shape",
+    text: "an `attr` of an edge walked more than once says how the path combines it in `along`; any other `attr` has no `along`",
   },
 ];
 

@@ -328,6 +328,13 @@ def _fractional(ir: dict[str, Any], data: dict[str, Any] | None) -> str | None:
             for attribute in wanted:
                 if attribute in row and not _whole(row[attribute]):
                     return f"{set_name}.{attribute} ({row[attribute]})"
+    # An edge's attributes (queue R19) are read the same way.
+    for rel, edges in (data.get("relationships") or {}).items():
+        for edge in edges:
+            attrs = edge.get("attrs") or {}
+            for attribute in wanted:
+                if isinstance(attrs.get(attribute), (int, float)) and not _whole(attrs[attribute]):
+                    return f"{rel}.{attribute} ({attrs[attribute]})"
     return None
 
 

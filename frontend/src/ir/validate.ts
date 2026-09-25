@@ -20,6 +20,8 @@
 
 import {
   ALL_KEYS,
+  EDGE_MARK,
+  PATH_COMBINATIONS,
   CONSTRAINT_KEYS,
   INTERVAL_KEYS,
   UNCERTAINTY_KINDS,
@@ -62,7 +64,10 @@ const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via
  * the other one -- which is why exactly one of them appears and neither is
  * the new index's own name.
  */
-const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth"]);
+const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth", "as"]);
+
+/** A scope entry that is an edge a `via` names (queue R19), not a set. */
+const isEdge = (bound: string | undefined): boolean => typeof bound === "string" && bound.startsWith(EDGE_MARK);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", "stage", ...INTERVAL_KEYS]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty"]);
@@ -1156,10 +1161,39 @@ class ShapeChecker {
       const via = this.checkVia(binding, at, scope);
       if (via) return via;
       scope.set(index, setName);
+      const edge = this.checkEdge(binding, at, scope);
+      if (edge) return edge;
       const where = this.checkWhere(binding, at);
       if (where) return where;
     }
     return scope;
+  }
+
+  /** A `via` may name the edge it walks (queue R19), so a term can read the
+   * edge's own attributes. The name joins the scope after the binding's
+   * index, marked as an edge. */
+  private checkEdge(binding: Json, at: IrLoc, scope: Map<string, string>): IrRefusal | null {
+    const via = binding.via;
+    if (!isObject(via) || !("as" in via)) return null;
+    const here: IrLoc = [...at, "via", "as"];
+    if (this.ir.version === 1) {
+      return refusal(
+        "edge_needs_version_2",
+        here,
+        "reading an edge's attributes is version 2; write version 2 to name the edge"
+      );
+    }
+    const name = via.as;
+    if (!isName(name) || scope.has(name as string)) {
+      return refusal(
+        "binding_via_as_invalid",
+        here,
+        `${show(name)} cannot name this edge: it is ` +
+          (isName(name) ? "already bound here" : "not a name (^[a-z][a-z0-9_]*$)")
+      );
+    }
+    scope.set(name as string, `${EDGE_MARK}${String(via.rel)}/${String(via.depth ?? "one")}`);
+    return null;
   }
 
   private checkVia(binding: Json, at: IrLoc, scope: Map<string, string>): IrRefusal | null {
@@ -1196,6 +1230,13 @@ class ShapeChecker {
       );
     }
     const anchor = via[ends[0]] as string;
+    if (isEdge(scope.get(anchor))) {
+      return refusal(
+        "edge_not_an_index",
+        [...here, ends[0]],
+        `'${anchor}' is an edge a via names with as; a walk starts at an entity index`
+      );
+    }
     if (!scope.has(anchor)) {
       return refusal(
         "binding_via_anchor_not_bound",
@@ -1399,6 +1440,14 @@ class ShapeChecker {
     }
     for (let j = 0; j < subscript.length; j += 1) {
       const index = subscript[j];
+      if (typeof index === "string" && isEdge(scope.get(index))) {
+        return refusal(
+          "edge_not_an_index",
+          [...loc, "index", j],
+          `'${index}' is an edge a via names with as; read its attributes with attr, and ` +
+            "subscript with the entity index the walk lands on"
+        );
+      }
       if (typeof index !== "string" || !scope.has(index)) {
         return refusal(
           "index_not_bound",
@@ -1422,14 +1471,15 @@ class ShapeChecker {
     const reference = term.attr;
     if (
       !isObject(reference) ||
-      Object.keys(reference).length !== 2 ||
       !("of" in reference) ||
-      !("name" in reference)
+      !("name" in reference) ||
+      Object.keys(reference).some((key) => !["of", "name", "along"].includes(key))
     ) {
       return refusal(
         "term_not_object",
         [...loc, "attr"],
-        'an attr term is {"of": <index>, "name": <attribute>}'
+        'an attr term is {"of": <index>, "name": <attribute>}, and an edge\'s read along a ' +
+          'path adds "along"'
       );
     }
     if (typeof reference.of !== "string" || !scope.has(reference.of)) {
@@ -1445,6 +1495,25 @@ class ShapeChecker {
         [...loc, "attr", "name"],
         `${show(reference.name)} is not an attribute name; attribute_def.name is ` +
           "^[a-z][a-z0-9_]*$"
+      );
+    }
+    const bound = scope.get(reference.of);
+    const path = isEdge(bound) && !(bound as string).endsWith("/one");
+    const along = reference.along;
+    if (path && !(PATH_COMBINATIONS as readonly unknown[]).includes(along)) {
+      return refusal(
+        "attr_along_invalid",
+        [...loc, "attr", "along" in reference ? "along" : "name"],
+        `'${reference.of}' is the path of a walk that repeats, so its '${String(reference.name)}' ` +
+          `is one value per edge; say how they combine: along ${[...PATH_COMBINATIONS].join(", ")}`
+      );
+    }
+    if (!path && "along" in reference) {
+      return refusal(
+        "attr_along_invalid",
+        [...loc, "attr", "along"],
+        `'${reference.of}' is ${isEdge(bound) ? "one edge" : "an entity"}, so its attribute has ` +
+          "one value and nothing to combine"
       );
     }
     return null;

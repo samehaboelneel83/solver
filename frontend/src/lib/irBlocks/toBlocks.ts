@@ -81,7 +81,7 @@ export function irToBlocks(
     block(loc, { type: `ir_opaque_${kind}`, fields: { LABEL: label }, extraState: { json } });
 
   function binding(b: Binding, loc: IrLoc): SerialBlock {
-    const via = b.via as { rel: string; from?: string; to?: string; depth?: string } | undefined;
+    const via = b.via as { rel: string; from?: string; to?: string; depth?: string; as?: string } | undefined;
     const where = (b.where ?? []) as { attr: string; op: string; value: unknown }[];
     return block(loc, {
       type: "ir_binding",
@@ -92,6 +92,7 @@ export function irToBlocks(
         VIA_END: via?.to !== undefined ? "to" : "from",
         VIA_ANCHOR: via?.from ?? via?.to ?? "",
         VIA_DEPTH: via?.depth ?? "",
+        VIA_AS: via?.as ?? "",
       },
       inputs: inputs({
         WHERE: stack(
@@ -119,8 +120,8 @@ export function irToBlocks(
       });
     }
     if ("attr" in x) {
-      const attr = x.attr as { of: string; name: string };
-      return block(loc, { type: "ir_attr", fields: { OF: attr.of, NAME: attr.name } });
+      const attr = x.attr as { of: string; name: string; along?: string };
+      return block(loc, { type: "ir_attr", fields: { OF: attr.of, NAME: attr.name, ALONG: attr.along ?? "" } });
     }
     if ("sum" in x) {
       return block(loc, {

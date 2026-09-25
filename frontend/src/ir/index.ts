@@ -31,6 +31,7 @@ export {
   SHAPE_RULES,
   TERM_KINDS,
   TRAVERSAL_DEPTHS,
+  PATH_COMBINATIONS,
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
@@ -43,6 +44,7 @@ export type {
   Severity,
   TermKind,
   TraversalDepth,
+  PathCombination,
   VariableDomain,
 } from "./contract";
 

@@ -3199,6 +3199,142 @@
           ]
         }
       }
+    },
+    {
+      "name": "edge_attribute_on_one_hop",
+      "why": "queue R19: a via names the edge it walks and attr reads the edge's own length -- a coefficient per arc",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_near",
+            "forall": [
+              {
+                "index": "c",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "e",
+                      "name": "length"
+                    }
+                  },
+                  {
+                    "var": "open",
+                    "index": [
+                      "n"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "n",
+                  "set": "cell",
+                  "via": {
+                    "rel": "adjacent",
+                    "from": "c",
+                    "as": "e"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "name": "edge_attribute_along_a_hierarchy",
+      "why": "queue R19: on a repeated walk the path's edges combine as along says -- the total weight up the chain",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_reach",
+            "forall": [
+              {
+                "index": "top",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "e",
+                      "name": "weight",
+                      "along": "sum"
+                    }
+                  },
+                  {
+                    "var": "pick",
+                    "index": [
+                      "u"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "u",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "top",
+                    "depth": "any",
+                    "as": "e"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 100
+            },
+            "severity": "hard"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -14281,6 +14417,313 @@
             }
           ]
         }
+      }
+    },
+    {
+      "code": "edge_needs_version_2",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "as"
+      ],
+      "why": "a version 1 document has no edges to name; writing version 2 is what says so",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "cell"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_near",
+            "forall": [
+              {
+                "index": "c",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "n",
+                      "name": "area_m2"
+                    }
+                  },
+                  {
+                    "var": "open",
+                    "index": [
+                      "n"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "n",
+                  "set": "cell",
+                  "via": {
+                    "rel": "adjacent",
+                    "from": "c",
+                    "as": "e"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_as_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "as"
+      ],
+      "why": "the edge takes a name the rule already gave its cell, so which one a term meant would be left to guesswork",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_near",
+            "forall": [
+              {
+                "index": "c",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "n",
+                      "name": "area_m2"
+                    }
+                  },
+                  {
+                    "var": "open",
+                    "index": [
+                      "n"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "n",
+                  "set": "cell",
+                  "via": {
+                    "rel": "adjacent",
+                    "from": "c",
+                    "as": "c"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "edge_not_an_index",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "sum",
+        "mul",
+        1,
+        "index",
+        0
+      ],
+      "why": "an edge is read, not subscripted: the variable is indexed by the cell the walk lands on",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_near",
+            "forall": [
+              {
+                "index": "c",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "n",
+                      "name": "area_m2"
+                    }
+                  },
+                  {
+                    "var": "open",
+                    "index": [
+                      "e"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "n",
+                  "set": "cell",
+                  "via": {
+                    "rel": "adjacent",
+                    "from": "c",
+                    "as": "e"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "attr_along_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "sum",
+        "mul",
+        0,
+        "attr",
+        "name"
+      ],
+      "why": "a path has one weight per edge; without along there is no single number to use",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_reach",
+            "forall": [
+              {
+                "index": "top",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "e",
+                      "name": "weight"
+                    }
+                  },
+                  {
+                    "var": "pick",
+                    "index": [
+                      "u"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "u",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "top",
+                    "depth": "any",
+                    "as": "e"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 100
+            },
+            "severity": "hard"
+          }
+        ]
       }
     }
   ]

@@ -19,8 +19,8 @@
  * plan's Task 3 table lists them.
  */
 import * as Blockly from "blockly";
-import { FILTER_OPERATORS, FUNCTIONS, OBJECTIVE_MODES, RELATIONS, SENSES, SEVERITIES, TRAVERSAL_DEPTHS, UNCERTAINTY_KINDS } from "../../ir/contract";
-import { NONE, bindingsOf, catalogueOf, declared, menu, scopeAt } from "./catalogue";
+import { FILTER_OPERATORS, FUNCTIONS, OBJECTIVE_MODES, PATH_COMBINATIONS, RELATIONS, SENSES, SEVERITIES, TRAVERSAL_DEPTHS, UNCERTAINTY_KINDS } from "../../ir/contract";
+import { NONE, bindingsOf, catalogueOf, declared, edgeOf, menu, scopeAt } from "./catalogue";
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const MAX_ARITY = 4;
@@ -535,7 +535,7 @@ export function defineIrBlocks(): void {
         .appendField("in")
         .appendField(dynamic((b) => declared(b.workspace).sets, choose), "SET");
       const walks = (value: string) => {
-        for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH"]) this.getField(name)?.setVisible(value !== NONE);
+        for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH", "VIA_AS"]) this.getField(name)?.setVisible(value !== NONE);
         rerender(this);
         return value;
       };
@@ -560,9 +560,14 @@ export function defineIrBlocks(): void {
           }, choose),
           "VIA_ANCHOR"
         )
-        .appendField(fixed([NONE, ...TRAVERSAL_DEPTHS], (d) => ({ "": "one step", one: "exactly one step", any: "any number of steps", any_or_self: "any steps, or itself" })[d] ?? d), "VIA_DEPTH");
+        .appendField(fixed([NONE, ...TRAVERSAL_DEPTHS], (d) => ({ "": "one step", one: "exactly one step", any: "any number of steps", any_or_self: "any steps, or itself" })[d] ?? d), "VIA_DEPTH")
+        // Queue R19: the edge taken, so a value can read its own attributes; empty names none.
+        .appendField(
+          new Blockly.FieldTextInput("", (text: string) => (loading || text === "" || NAME.test(text) ? text : null)),
+          "VIA_AS"
+        );
       this.appendStatementInput("WHERE").setCheck("filter").appendField("only where");
-      for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH"]) this.getField(name)!.setVisible(false);
+      for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH", "VIA_AS"]) this.getField(name)!.setVisible(false);
       this.setPreviousStatement(true, "binding");
       this.setNextStatement(true, "binding");
       this.setColour(COLOUR.binding);
@@ -631,17 +636,36 @@ export function defineIrBlocks(): void {
         .appendField(
           dynamic((b) => {
             const set = scopeAt(b).get(b.getFieldValue("OF"));
-            return (catalogueOf(b.workspace).entityTypes.find((t) => t.name === set)?.attributes ?? [])
-              .filter((a) => a.data_type === "integer" || a.data_type === "number")
-              .map((a) => a.name);
+            const edge = edgeOf(set);
+            // An edge (queue R19) offers what its relationship type declares for its edges.
+            const attributes = edge
+              ? (catalogueOf(b.workspace).relationships.find((r) => r.name === edge.rel)?.attributes ?? [])
+              : (catalogueOf(b.workspace).entityTypes.find((t) => t.name === set)?.attributes ?? []);
+            return attributes.filter((a) => a.data_type === "integer" || a.data_type === "number").map((a) => a.name);
           }, choose),
           "NAME"
         )
         .appendField("of")
-        .appendField(dynamic((b) => [...scopeAt(b).keys()], choose), "OF");
+        .appendField(dynamic((b) => [...scopeAt(b).keys()], choose), "OF")
+        .appendField(
+          fixed([NONE, ...PATH_COMBINATIONS], (c) => ({ "": "(one value)", sum: "summed along the path", min: "least along the path", max: "most along the path", product: "multiplied along the path", count: "edges carrying it" })[c] ?? c),
+          "ALONG"
+        );
+      this.getField("ALONG")!.setVisible(false);
       this.setOutput(true, "Number");
       this.setInputsInline(true);
       this.setColour(COLOUR.attribute);
+      this.setTooltip("A number an entity carries, or an edge a via named -- along a path, combined as chosen");
+    },
+    // The path choice shows only where there is a path to combine along (or one is already chosen).
+    onchange(this: B) {
+      const field = this.getField("ALONG");
+      if (!field) return;
+      const wanted = Boolean(edgeOf(scopeAt(this).get(this.getFieldValue("OF")))?.path) || this.getFieldValue("ALONG") !== NONE;
+      if (field.isVisible() !== wanted) {
+        field.setVisible(wanted);
+        rerender(this);
+      }
     },
   };
 

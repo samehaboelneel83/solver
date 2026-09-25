@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
-from app.models.v1_domain import EntityType, ParameterDef, ParameterValue, Relationship, RelationshipType
+from app.models.v1_domain import AttributeDef, EntityType, ParameterDef, ParameterValue, Relationship, RelationshipType
 import numpy as np
 
 from app.spatial import distance
@@ -193,11 +193,12 @@ def write_within(db: Session, domain_id: int, body: WithinRequest, *, commit: bo
     for i, origin in enumerate(origins):
         for j in np.flatnonzero(values[i] <= limit):  # NaN (no road) compares false: never linked
             if targets[j].entity_id != origin.entity_id:
-                edges.append((origin.entity_id, targets[int(j)].entity_id))
+                edges.append((origin.entity_id, targets[int(j)].entity_id, float(values[i][j])))
         if len(edges) > MAX_EDGES:
             raise HTTPException(422, f"more than {MAX_EDGES:,} pairs are within {limit:g}; choose a shorter reach")
     source = {"kind": "within", **how, **({"max_min": body.max_min} if body.metric == "time" else {"max_m": body.max_m}),
               "from": origin_type.name, "to": target_type.name, "edges": len(edges),
+              "attribute": "minutes" if body.metric == "time" else "metres",
               **({"missing": missing_o + missing_t} if missing_o or missing_t else {}),
               "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     if rel is None:
@@ -208,10 +209,21 @@ def write_within(db: Session, domain_id: int, body: WithinRequest, *, commit: bo
     else:
         rel.source = source
         db.execute(delete(Relationship).where(Relationship.relationship_type_id == rel.id))
+    # Declared on the type, so a rule offers it and checks it as a number.
+    if db.execute(select(AttributeDef.id).where(AttributeDef.relationship_type_id == rel.id,
+                                                AttributeDef.name == source["attribute"])).first() is None:
+        db.add(AttributeDef(relationship_type_id=rel.id, name=source["attribute"], data_type="number",
+                            unit="min" if body.metric == "time" else "m"))
+        db.flush()
+    # Each edge keeps its own measure (queue R19), so a rule reads it as
+    # `attr of e` on the edge it walks: metres, or minutes for a time reach.
+    unit = source["attribute"]
+    places = 1 if body.metric == "time" else 0
     for start in range(0, len(edges), 20_000):
         db.execute(pg_insert(Relationship).values([
-            {"relationship_type_id": rel.id, "from_entity_id": a, "to_entity_id": b}
-            for a, b in edges[start:start + 20_000]]))
+            {"relationship_type_id": rel.id, "from_entity_id": a, "to_entity_id": b,
+             "attrs": {unit: round(value, places) if places else int(round(value))}}
+            for a, b, value in edges[start:start + 20_000]]))
     if commit:
         db.commit()
     return WithinReport(relationship_type_id=rel.id, edges=len(edges), missing=missing_o + missing_t, source=source)

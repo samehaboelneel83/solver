@@ -9,7 +9,8 @@ const CATALOGUE = {
     { name: "day", attributes: [] },
   ],
   parameters: [{ name: "demand", index: ["day"] }],
-  relationships: [{ name: "works_with", from: "employee", to: "employee" }],
+  relationships: [{ name: "works_with", from: "employee", to: "employee",
+    attributes: [{ name: "overlap", data_type: "number" }, { name: "note", data_type: "text" }] }],
 };
 
 function options(block: Blockly.Block, field: string): string[] {
@@ -55,6 +56,24 @@ describe("what a block offers", () => {
     expect(options(ws.getBlockById("a")!, "OF")).toEqual(["e"]);
     expect(options(ws.getBlockById("a")!, "NAME")).toEqual(["hours"]); // a number: text attributes are not offered
     expect(options(ws.getBlockById("b")!, "OF")).toEqual([""]);
+  });
+
+  it("offers an edge a via names, its declared numbers, and a path's combination (queue R19)", () => {
+    const walk = (depth: string) => load([MODEL({ type: "ir_rule", fields: { ID: "c", SEVERITY: "hard", RELATION: "<=" },
+      inputs: {
+        FORALL: { block: { type: "ir_binding", fields: { INDEX: "a", SET: "employee" } } },
+        LEFT: { block: { type: "ir_sum", id: "s",
+          inputs: { OVER: { block: { type: "ir_binding", fields: { INDEX: "b", SET: "employee", VIA_REL: "works_with",
+            VIA_END: "from", VIA_ANCHOR: "a", VIA_DEPTH: depth, VIA_AS: "w" } } },
+                    BODY: { block: { type: "ir_attr", id: "x", fields: { OF: "w", NAME: "overlap" } } } } } } } })]);
+    const one = walk("").getBlockById("x")!;
+    expect([...scopeAt(one)]).toEqual([["a", "employee"], ["b", "employee"], ["w", "@works_with/one"]]);
+    expect(options(one, "NAME")).toEqual(["overlap"]); // a number the type declares for its edges
+    one.onchange?.(new Blockly.Events.BlockChange(one, "field", "OF", "w", "w"));
+    expect(one.getField("ALONG")!.isVisible()).toBe(false); // one edge, one value
+    const path = walk("any").getBlockById("x")!;
+    path.onchange?.(new Blockly.Events.BlockChange(path, "field", "OF", "w", "w"));
+    expect(path.getField("ALONG")!.isVisible()).toBe(true);
   });
 
   it("keeps a value that is no longer offered, rather than blanking it (Review Focus 2, 5)", () => {

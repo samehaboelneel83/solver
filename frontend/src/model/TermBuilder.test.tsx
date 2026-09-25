@@ -23,7 +23,7 @@ const CONTEXT: ModelContext = {
   variables: { assign: { index: ["employee", "day", "shift"], domain: "binary" } },
   parameters: { demand: { index: ["day", "shift"] } },
   relationships: [
-    { name: "reports_to", from: "unit", to: "unit" },
+    { name: "reports_to", from: "unit", to: "unit", attributes: [{ name: "weight", data_type: "number" }] },
     { name: "works_in", from: "employee", to: "unit" },
   ],
 };
@@ -52,6 +52,18 @@ describe("TermBuilder", () => {
     } as Term);
 
     expect(screen.getAllByText(/8 × sum\(assign\[e, d, s\] over d in day\)/)[0]).toBeInTheDocument();
+  });
+
+  it("reads an edge a via names, and asks how a path combines it (queue R19)", () => {
+    const walk: Binding[] = [
+      { index: "top", set: "unit" },
+      { index: "u", set: "unit", via: { rel: "reports_to", from: "top", depth: "any", as: "p" } },
+    ];
+    const onChange = renderTerm({ attr: { of: "p", name: "weight", along: "sum" } } as Term, walk);
+    expect(screen.getByRole("option", { name: "p: the reports_to path" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "weight" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Along the path"), { target: { value: "min" } });
+    expect(onChange).toHaveBeenCalledWith({ attr: { of: "p", name: "weight", along: "min" } });
   });
 
   it("offers a variable's subscripts only from indices bound to the right set", () => {

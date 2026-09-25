@@ -16,7 +16,7 @@
  */
 
 import { ARITHMETIC_ATTR_TYPES } from "../ir";
-import type { Relation, Severity, TermKind, TraversalDepth } from "../ir";
+import type { PathCombination, Relation, Severity, TermKind, TraversalDepth } from "../ir";
 
 export type IrFilter = { attr: string; op: string; value: unknown };
 
@@ -25,14 +25,14 @@ export type IrFilter = { attr: string; op: string; value: unknown };
  * index being bound takes the other one -- which is why exactly one of
  * them is ever present.
  */
-export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth };
+export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth; as?: string };
 export type Binding = { index: string; set: string; where?: IrFilter[]; via?: Via };
 
 export type Term =
   | { const: number }
   | { par: string; index: string[] }
   | { var: string; index: string[] }
-  | { attr: { of: string; name: string } }
+  | { attr: { of: string; name: string; along?: PathCombination } }
   | { sum: Term; over: Binding[] }
   | { add: Term[] }
   | { mul: [Term, Term] }
@@ -216,7 +216,7 @@ export type ModelContext = {
   parameters: Record<string, { index: string[] }>;
   /** The relationship types the IR declares, with the entity types each
    * joins -- which is what decides whether a walk is offered at all. */
-  relationships: { name: string; from: string; to: string }[];
+  relationships: { name: string; from: string; to: string; attributes?: { name: string; data_type: string }[] }[];
 };
 
 export const TERM_LABELS: Record<TermKind, string> = {
@@ -304,6 +304,21 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
  * since migration 0015 (contract §7). Reading a `number` is how a model
  * becomes continuous, and that is now a decision the platform records
  * rather than one it refuses. */
+/** The edges the bindings in scope name with `as` (queue R19), each with the
+ * walk it belongs to -- what an `attr of` an edge may read. */
+export function edgesInScope(bound: Binding[]): { name: string; rel: string; path: boolean }[] {
+  return bound
+    .filter((b) => b.via?.as)
+    .map((b) => ({ name: b.via!.as as string, rel: b.via!.rel, path: (b.via!.depth ?? "one") !== "one" }));
+}
+
+/** The numbers a relationship type declares for its edges. */
+export function edgeAttributes(context: ModelContext, rel: string) {
+  return (context.relationships.find((r) => r.name === rel)?.attributes ?? []).filter((a) =>
+    (ARITHMETIC_ATTR_TYPES as readonly string[]).includes(a.data_type)
+  );
+}
+
 export function arithmeticAttributes(context: ModelContext, set: string) {
   return (context.attributes[set] ?? []).filter((a) =>
     (ARITHMETIC_ATTR_TYPES as readonly string[]).includes(a.data_type)
@@ -514,8 +529,8 @@ export function describeTerm(term: Term | undefined | null): string {
       return `${t.var}[${t.index.join(", ")}]`;
     }
     case "attr": {
-      const t = term as { attr: { of: string; name: string } };
-      return `${t.attr.name}[${t.attr.of}]`;
+      const t = term as { attr: { of: string; name: string; along?: string } };
+      return t.attr.along ? `${t.attr.along} of ${t.attr.name} along ${t.attr.of}` : `${t.attr.name}[${t.attr.of}]`;
     }
     case "sum": {
       const t = term as { sum: Term; over: Binding[] };

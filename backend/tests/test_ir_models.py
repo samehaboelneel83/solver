@@ -77,6 +77,9 @@ SEMANTIC = frozenset({
     "interval_read_as_number", "scheduling_needs_version_2", "scheduling_not_interval",
     "scheduling_rule_hard", "scheduling_amount_not_constant",
     "uncertainty_needs_version_2", "stage_needs_version_2",
+    # Whether an `as` or an index names an edge, and whether that edge is a
+    # path, are facts about the scope around it (queue R19).
+    "edge_needs_version_2", "binding_via_as_invalid", "edge_not_an_index", "attr_along_invalid",
     # Where a chance may be is a fact about the rest of the rule.
     "chance_needs_version_2", "chance_misplaced",
     # A connected rule's variable, its order, the relationship and its ends

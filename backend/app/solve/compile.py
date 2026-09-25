@@ -422,6 +422,7 @@ class _Compiler:
         #: reproducibility guarantee the whole RUN half is built on.
         self.edges: dict[str, list[dict[str, Any]]] = data.get("relationships", {})
         self._reach: dict[tuple[str, str, str, str], set[str]] = {}
+        self._path_cache: dict[tuple[str, str, str, str], dict[str, list[dict[str, Any]]]] = {}
         self.variables: dict[VarKey, Variable] = {}
         self.constraints: list[Constraint] = []
         self._params: dict[str, dict[tuple[str, ...], int]] = {}
@@ -843,14 +844,73 @@ class _Compiler:
             anchor_end = "from" if "from" in via else "to"
             grown: list[dict[str, tuple[str, dict]]] = []
             for env in envs:
-                reachable = self._reachable(via, anchor_end, env[via[anchor_end]][1]["id"])
+                anchor = env[via[anchor_end]][1]["id"]
+                reachable = self._reachable(via, anchor_end, anchor)
+                if "as" not in via:
+                    grown.extend(
+                        dict(env, **{binding["index"]: (set_name, row)})
+                        for row in rows
+                        if row["id"] in reachable
+                    )
+                    continue
+                # The walk names its edge (queue R19): each landing carries the
+                # edges it took, which an `attr of` the edge reads.
+                paths = self._paths(via, anchor_end, anchor)
                 grown.extend(
-                    dict(env, **{binding["index"]: (set_name, row)})
+                    dict(env, **{
+                        binding["index"]: (set_name, row),
+                        via["as"]: (EDGE, {"id": f"{anchor}~{row['id']}", "rel": via["rel"],
+                                           "edges": paths[row["id"]]}),
+                    })
                     for row in rows
                     if row["id"] in reachable
                 )
             envs = grown
         return envs
+
+    def _paths(self, via: dict[str, Any], anchor_end: str, anchor: str) -> dict[str, list[dict[str, Any]]]:
+        """The edges from `anchor` to each key the walk lands on. One edge on
+        a one-step walk; on a repeated walk, the one path there -- which is a
+        path only when there is exactly one. A relationship with a cycle or
+        a diamond below the anchor reaches a key more than one way, and an
+        edge attribute "along the path" then has no single value: refused,
+        with the key reached twice, rather than one path picked in silence.
+        """
+        rel = via["rel"]
+        depth = via.get("depth", "one")
+        far_end = "to" if anchor_end == "from" else "from"
+        cache_key = (rel, anchor_end, depth, anchor)
+        cached = self._path_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        steps: dict[str, list[dict[str, Any]]] = {}
+        for edge in self.edges.get(rel, []):
+            steps.setdefault(edge[anchor_end], []).append(edge)
+        found: dict[str, list[dict[str, Any]]] = {}
+        if depth == "one":
+            for edge in steps.get(anchor, ()):
+                found[edge[far_end]] = [edge]
+        else:
+            if depth == "any_or_self":
+                found[anchor] = []
+            frontier = [(anchor, [])]
+            while frontier:
+                nxt = []
+                for key, path in frontier:
+                    for edge in steps.get(key, ()):
+                        other = edge[far_end]
+                        if other in found or other == anchor:
+                            raise Unsupported(
+                                f"{rel!r} reaches {other!r} from {anchor!r} more than one way (a cycle "
+                                "or two routes), so an edge attribute along the path has no single "
+                                "value; read it one step at a time (depth one), or keep the "
+                                "relationship a hierarchy"
+                            )
+                        found[other] = [*path, edge]
+                        nxt.append((other, found[other]))
+                frontier = nxt
+        self._path_cache[cache_key] = found
+        return found
 
     def _reachable(self, via: dict[str, Any], anchor_end: str, anchor: str) -> set[str]:
         """The keys a walk from `anchor` lands on, over the frozen edges.
@@ -904,6 +964,8 @@ class _Compiler:
 
         if "attr" in term:
             of, attr_name = term["attr"]["of"], term["attr"]["name"]
+            if env[of][0] == EDGE:
+                return Linear(const=_along(env[of][1], attr_name, term["attr"].get("along")))
             row = env[of][1]
             if attr_name not in row:
                 # Absent because the attribute has no default and this entity
@@ -1088,7 +1150,44 @@ def _scaled(quadratic: Quadratic, factor: Decimal | int) -> Quadratic:
 
 
 def env_keys(env: dict[str, tuple[str, dict]]) -> list[tuple[str, str]]:
-    return [(index, bound[1]["id"]) for index, bound in env.items()]
+    return [(index, bound[1]["id"]) for index, bound in env.items() if bound[0] != EDGE]
+
+
+#: The set slot of an environment entry that is an edge a `via` names with
+#: `as` (queue R19) rather than an entity; its row is {id, rel, edges}.
+EDGE = "@edge"
+
+
+def _along(walk: dict[str, Any], name: str, along: str | None) -> Decimal:
+    """An edge attribute as one number: the edge's own value on a one-step
+    walk; on a repeated walk, the path's edges combined as `along` says."""
+    edges = walk["edges"]
+    if along == "count":
+        return Decimal(sum(1 for edge in edges if (edge.get("attrs") or {}).get(name) is not None))
+    values = []
+    for edge in edges:
+        value = (edge.get("attrs") or {}).get(name)
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise Unsupported(
+                f"the {walk['rel']!r} edge {edge['from']!r} -> {edge['to']!r} carries no number "
+                f"{name!r}, so the term has no value"
+            )
+        values.append(number(value))
+    if along is None:
+        return values[0]
+    if along == "sum":
+        return sum(values, Decimal(0))
+    if along == "product":
+        total = Decimal(1)
+        for value in values:
+            total *= value
+        return total
+    if not values:
+        raise Unsupported(
+            f"the path from {walk['id'].split('~')[0]!r} to itself has no edges, so its {along} "
+            f"{name!r} has no value; walk depth any rather than any_or_self"
+        )
+    return min(values) if along == "min" else max(values)
 
 
 def _passes(row: dict[str, Any], filters: list[dict[str, Any]]) -> bool:

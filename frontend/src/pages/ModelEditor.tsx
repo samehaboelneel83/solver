@@ -291,6 +291,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           name: rel.name,
           from: types.find((t) => t.id === rel.from_type_id)?.name ?? "",
           to: types.find((t) => t.id === rel.to_type_id)?.name ?? "",
+          attributes: (rel.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
         }))
         .filter((rel) => sets.includes(rel.from) && sets.includes(rel.to)),
     };

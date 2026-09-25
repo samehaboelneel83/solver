@@ -42,6 +42,7 @@ Bindings = Annotated[list["Binding"], Field(min_length=1, max_length=MAX_INDICES
 VariableDomain = Literal["binary", "integer", "continuous", "interval"]
 Relation = Literal["<=", "=", ">="]
 TraversalDepth = Literal["one", "any", "any_or_self"]
+PathCombination = Literal["count", "max", "min", "product", "sum"]
 Severity = Literal["hard", "soft"]
 Sense = Literal["minimize", "maximize"]
 ObjectiveMode = Literal["weighted", "lex"]
@@ -78,6 +79,8 @@ class Via(_Model):
     from_: Optional[Name] = Field(default=None, alias="from")
     to: Optional[Name] = None
     depth: Optional[TraversalDepth] = None
+    # Queue R19: the edge this walk takes, read with `attr of <as>`.
+    as_: Optional[Name] = Field(default=None, alias="as")
 
     @model_validator(mode="after")
     def _one_anchor(self) -> "Via":
@@ -110,6 +113,8 @@ class VarRef(_Model):
 class AttrPath(_Model):
     of: Name
     name: Name
+    # Queue R19: how an edge attribute combines along a repeated walk.
+    along: Optional[PathCombination] = None
 
 
 class AttrRef(_Model):

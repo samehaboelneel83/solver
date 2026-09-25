@@ -462,6 +462,7 @@ A binding with a `via` ranges not over its whole set but over the members
 | `rel` | yes | A relationship type named in `relationships`. |
 | `from` *or* `to` | exactly one | The index the walk starts at, and **which end of the edge that index sits at**. The binding takes the other end. |
 | `depth` | no | `one` (the default), `any`, or `any_or_self`. |
+| `as` | no | Version 2 (queue R19): a name for **the edge the walk takes**, so a term can read the edge's own attributes. |
 
 `from: "r"` therefore reads *"r is at the from end; bind the to end"*. Naming
 the anchor's end rather than a direction means there is nothing to get
@@ -500,6 +501,43 @@ Rules on top of the table:
 `entity_descendants()` against live rows — a run answers the question as it
 was asked, and an org chart that changed after the snapshot must not change
 what that snapshot solves.
+
+#### Reading an edge: `as` and `along` (version 2, queue R19)
+
+```json
+{ "sum": { "mul": [ { "attr": { "of": "e", "name": "cost" } }, { "var": "ship", "index": ["p", "m"] } ] },
+  "over": [ { "index": "p", "set": "plant" },
+            { "index": "m", "set": "market", "via": { "rel": "lane", "from": "p", "as": "e" } } ] }
+```
+
+A `via` with `as` binds a second name beside its index: the edge it walked.
+`{"attr": {"of": "e", "name": "cost"}}` then reads that edge's own attribute
+-- a cost or capacity per arc, a skill level on `can_work`, the metres on a
+`within` link. An edge attribute is a coefficient like any other `attr`, so no
+solver changes; large pair data becomes sparse edges rather than a parameter
+matrix over every pair.
+
+- **An edge is read, never an index.** It cannot subscript a `par` or `var`
+  and a walk cannot start from it (`edge_not_an_index`). Its name is new in
+  its scope (`binding_via_as_invalid`), and only version 2 has it
+  (`edge_needs_version_2`).
+- **On a repeated walk the edge is the path**, one value per edge, so the
+  read says how they combine: `"along": "sum"` (total distance up a chain),
+  `"min"` / `"max"` (the tightest capacity), `"product"` (a yield), `"count"`
+  (the edges on the path carrying the attribute -- its levels). A path read
+  without `along`, or a one-edge or entity read with one, is
+  `attr_along_invalid`.
+- **One path, or a refusal.** The path is exact on a hierarchy. On a
+  self-relationship with a cycle, or two routes to the same member, "the
+  path" is more than one; the compiler refuses with the member reached twice
+  rather than picking one in silence. With `any_or_self` the anchor's own
+  path is empty: `sum` 0, `product` 1, `count` 0, and `min` / `max` refused.
+- **What an edge may carry.** When the relationship type declares attributes
+  for its edges (migration 0024), the read is checked against them like an
+  entity's (`attribute_not_declared`, `attribute_not_arithmetic`). A type that
+  declares none takes free-form edges, and the compiler names any edge that
+  lacks the number. A `within` link declares and records its measure:
+  `metres`, or `minutes` for a time reach.
 
 ---
 

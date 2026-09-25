@@ -79,6 +79,13 @@
     "any",
     "any_or_self"
   ],
+  "pathCombinations": [
+    "count",
+    "max",
+    "min",
+    "product",
+    "sum"
+  ],
   "severities": [
     "hard",
     "soft"
@@ -711,6 +718,26 @@
       "code": "route_on_soft",
       "where": "shape",
       "text": "a `route` rule is hard and unconditional"
+    },
+    {
+      "code": "edge_needs_version_2",
+      "where": "shape",
+      "text": "a `via` names the edge it walks with `as` in a version 2 document only"
+    },
+    {
+      "code": "binding_via_as_invalid",
+      "where": "shape",
+      "text": "a `via`'s `as` is a name not already bound, and not the binding's own index"
+    },
+    {
+      "code": "edge_not_an_index",
+      "where": "shape",
+      "text": "an edge named by `as` is read with `attr` only, never used as an index or an anchor"
+    },
+    {
+      "code": "attr_along_invalid",
+      "where": "shape",
+      "text": "an `attr` of an edge walked more than once says how the path combines it in `along`; any other `attr` has no `along`"
     }
   ],
   "uncertaintyKinds": [

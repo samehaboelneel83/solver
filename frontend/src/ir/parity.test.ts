@@ -23,6 +23,7 @@ import {
   SHAPE_RULES,
   TERM_KINDS,
   TRAVERSAL_DEPTHS,
+  PATH_COMBINATIONS,
   UNCERTAINTY_KINDS,
   FUNCTIONS,
   FUNCTION_CONVEXITIES,
@@ -103,6 +104,7 @@ function fromTypeScript(): Record<string, unknown> {
     objectiveModes: [...OBJECTIVE_MODES],
     termKinds: [...TERM_KINDS],
     traversalDepths: [...TRAVERSAL_DEPTHS],
+    pathCombinations: [...PATH_COMBINATIONS],
     filterOperators: [...FILTER_OPERATORS],
     arithmeticAttrTypes: [...ARITHMETIC_ATTR_TYPES],
     rules: IR_RULES.map((rule) => ({ code: rule.code, where: rule.where, text: rule.text })),
@@ -153,6 +155,7 @@ describe("the IR contract", () => {
     expect(theirs.objectiveModes).toEqual([...OBJECTIVE_MODES]);
     expect(theirs.termKinds).toEqual([...TERM_KINDS]);
     expect(theirs.traversalDepths).toEqual([...TRAVERSAL_DEPTHS]);
+    expect(theirs.pathCombinations).toEqual([...PATH_COMBINATIONS]);
     expect(theirs.filterOperators).toEqual([...FILTER_OPERATORS]);
     expect(theirs.arithmeticAttrTypes).toEqual([...ARITHMETIC_ATTR_TYPES]);
   });

@@ -3,7 +3,7 @@ import ExpressionBuilder from "../expressions/ExpressionBuilder";
 import { buildFieldCatalogue } from "../expressions";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { FUNCTIONS, TERM_KINDS, isName } from "../ir/contract";
-import type { TermKind, TraversalDepth } from "../ir";
+import type { PathCombination, TermKind, TraversalDepth } from "../ir";
 import {
   boundIndices,
   cleanBinding,
@@ -15,6 +15,8 @@ import {
   isGeneratedIndex,
   seedForSet,
   arithmeticAttributes,
+  edgeAttributes,
+  edgesInScope,
   degree,
   TERM_LABELS,
   termKind,
@@ -219,28 +221,49 @@ function Body({
   }
 
   if (kind === "attr") {
-    const term = value as { attr: { of: string; name: string } };
+    const term = value as { attr: { of: string; name: string; along?: PathCombination } };
     const binding = bound.find((b) => b.index === term.attr.of);
-    const attributes = binding ? arithmeticAttributes(context, binding.set) : [];
+    // Queue R19: an edge a via names is read like an entity, from what its type declares.
+    const edges = edgesInScope(bound);
+    const edge = edges.find((e) => e.name === term.attr.of);
+    const attributes = edge ? edgeAttributes(context, edge.rel) : binding ? arithmeticAttributes(context, binding.set) : [];
+    const read = (of: string, name: string, along?: PathCombination) =>
+      onChange({ attr: { of, name, ...(along ? { along } : {}) } });
     return (
       <div className="flex flex-wrap items-end gap-2">
         <Select
           label="Of"
           value={term.attr.of}
-          options={uniqueByIndex(bound).map((b) => ({
-            value: b.index,
-            label: `${b.index} in ${b.set}`,
-          }))}
+          options={[
+            ...uniqueByIndex(bound).map((b) => ({ value: b.index, label: `${b.index} in ${b.set}` })),
+            ...edges.map((e) => ({ value: e.name, label: `${e.name}: the ${e.rel} ${e.path ? "path" : "edge"}` })),
+          ]}
           emptyLabel="nothing is bound here"
-          onChange={(next) => onChange({ attr: { of: next, name: "" } })}
+          onChange={(next) => read(next, "", edges.find((e) => e.name === next)?.path ? "sum" : undefined)}
         />
         <Select
           label="Attribute"
           value={term.attr.name}
           options={attributes.map((a) => ({ value: a.name, label: a.name }))}
-          emptyLabel={binding ? `${binding.set} has no numeric attribute` : "choose an index first"}
-          onChange={(next) => onChange({ attr: { of: term.attr.of, name: next } })}
+          emptyLabel={
+            edge ? `${edge.rel} declares no numeric edge attribute` : binding ? `${binding.set} has no numeric attribute` : "choose an index first"
+          }
+          onChange={(next) => read(term.attr.of, next, term.attr.along)}
         />
+        {edge?.path && (
+          <Select
+            label="Along the path"
+            value={term.attr.along ?? "sum"}
+            options={[
+              { value: "sum", label: "summed" },
+              { value: "min", label: "the least" },
+              { value: "max", label: "the most" },
+              { value: "product", label: "multiplied" },
+              { value: "count", label: "edges carrying it" },
+            ]}
+            onChange={(next) => read(term.attr.of, term.attr.name, next as PathCombination)}
+          />
+        )}
         {binding && attributes.length === 0 && (
           <p className="text-xs text-slate-500">
             Arithmetic reads numeric attributes, so text, dates and times cannot appear here.
@@ -603,12 +626,18 @@ function WalkPicker({
 
   function anchor(index: string) {
     if (!current) return;
-    onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: index, ...depthPart() } });
+    onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: index, ...depthPart(), ...edgePart() } });
   }
 
   function depthPart() {
     const depth = binding.via?.depth;
     return depth ? { depth } : {};
+  }
+
+  /** The edge's name (queue R19) survives a change of anchor or depth. */
+  function edgePart() {
+    const edge = binding.via?.as;
+    return edge ? { as: edge } : {};
   }
 
   return (
@@ -662,9 +691,27 @@ function WalkPicker({
                 rel: current.rel,
                 [current.anchorEnd]: current.anchor,
                 ...(depth === "one" ? {} : { depth: depth as TraversalDepth }),
+                ...edgePart(),
               },
             })
           }
+        />
+      )}
+      {current && (
+        <TextField
+          label="Edge name (to read its attributes)"
+          value={binding.via?.as ?? ""}
+          problem={
+            binding.via?.as && !/^[a-z][a-z0-9_]*$/.test(binding.via.as)
+              ? "a name: lower-case letters, digits and _"
+              : binding.via?.as && [...earlier.map((b) => b.index), binding.index].includes(binding.via.as)
+                ? "already bound here"
+                : null
+          }
+          onChange={(next) => {
+            const { as: _old, ...rest } = binding.via as NonNullable<Binding["via"]>;
+            onChange({ ...binding, via: { ...rest, ...(next ? { as: next } : {}) } });
+          }}
         />
       )}
     </>

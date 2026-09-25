@@ -42,6 +42,8 @@ from app.ir.contract import (
     ALL_KEYS,
     ARITHMETIC_ATTR_TYPES,
     CONNECTED_KEYS,
+    EDGE_MARK,
+    PATH_COMBINATIONS,
     ROUTE_KEYS,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
@@ -92,7 +94,7 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 #: walk. `from` and `to` are the anchor's end, so the index being bound takes
 #: the other one -- which is why exactly one of them appears and neither is
 #: the new index's own name.
-_VIA_KEYS = frozenset({"rel", "from", "to", "depth"})
+_VIA_KEYS = frozenset({"rel", "from", "to", "depth", "as"})
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INTERVAL_KEYS
 _PARAMETER_KEYS = frozenset({"index", "uncertainty"})
@@ -132,6 +134,11 @@ def _is_number(value: Any) -> bool:
     if isinstance(value, int):
         return True
     return isinstance(value, float) and math.isfinite(value)
+
+
+def _is_edge(bound: Any) -> bool:
+    """A scope entry that is an edge a `via` names (queue R19), not a set."""
+    return isinstance(bound, str) and bound.startswith(EDGE_MARK)
 
 
 def _is_name(value: Any) -> bool:
@@ -1081,6 +1088,9 @@ class _ShapeChecker:
             if problem:
                 return problem
             scope[index] = set_name
+            problem = self._check_edge(binding, at, scope)
+            if problem:
+                return problem
             problem = self._check_where(binding, at)
             if problem:
                 return problem
@@ -1118,6 +1128,12 @@ class _ShapeChecker:
                 "at; the end named is where that index sits, so this binding takes the other",
             )
         anchor = via[ends[0]]
+        if _is_edge(scope.get(anchor)):
+            return Refusal(
+                "edge_not_an_index",
+                [*here, ends[0]],
+                f"{anchor!r} is an edge a via names with as; a walk starts at an entity index",
+            )
         if anchor not in scope:
             return Refusal(
                 "binding_via_anchor_not_bound",
@@ -1132,6 +1148,31 @@ class _ShapeChecker:
                 f"{json.dumps(via['depth'])} is not a depth version {IR_VERSION} walks; it "
                 f"has {', '.join(sorted(TRAVERSAL_DEPTHS))}",
             )
+        return None
+
+    def _check_edge(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]):
+        """A `via` may name the edge it walks (queue R19), so a term can read
+        the edge's own attributes -- a distance, a capacity, a skill level.
+        The name joins the scope after the binding's index, marked as an edge."""
+        via = binding.get("via")
+        if not isinstance(via, dict) or "as" not in via:
+            return None
+        here: Loc = [*at, "via", "as"]
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "edge_needs_version_2",
+                here,
+                "reading an edge's attributes is version 2; write version 2 to name the edge",
+            )
+        name = via["as"]
+        if not _is_name(name) or name in scope:
+            return Refusal(
+                "binding_via_as_invalid",
+                here,
+                f"{json.dumps(name)} cannot name this edge: it is "
+                + ("already bound here" if _is_name(name) else "not a name (^[a-z][a-z0-9_]*$)"),
+            )
+        scope[name] = f"{EDGE_MARK}{via['rel']}/{via.get('depth', 'one')}"
         return None
 
     def _check_where(self, binding: dict[str, Any], at: Loc):
@@ -1285,6 +1326,13 @@ class _ShapeChecker:
                 "indices",
             )
         for j, index in enumerate(subscript):
+            if isinstance(index, str) and _is_edge(scope.get(index)):
+                return Refusal(
+                    "edge_not_an_index",
+                    [*loc, "index", j],
+                    f"{index!r} is an edge a via names with as; read its attributes with attr, "
+                    "and subscript with the entity index the walk lands on",
+                )
             if not isinstance(index, str) or index not in scope:
                 return Refusal(
                     "index_not_bound",
@@ -1303,11 +1351,12 @@ class _ShapeChecker:
 
     def _term_attr(self, term, loc, scope, depth):
         reference = term["attr"]
-        if not isinstance(reference, dict) or set(reference) != {"of", "name"}:
+        if not isinstance(reference, dict) or not {"of", "name"} <= set(reference) <= {"of", "name", "along"}:
             return Refusal(
                 "term_not_object",
                 [*loc, "attr"],
-                "an attr term is {\"of\": <index>, \"name\": <attribute>}",
+                "an attr term is {\"of\": <index>, \"name\": <attribute>}, and an edge's read "
+                "along a path adds \"along\"",
             )
         if not isinstance(reference["of"], str) or reference["of"] not in scope:
             return Refusal(
@@ -1321,6 +1370,25 @@ class _ShapeChecker:
                 [*loc, "attr", "name"],
                 f"{json.dumps(reference['name'])} is not an attribute name; "
                 "attribute_def.name is ^[a-z][a-z0-9_]*$",
+            )
+        bound = scope[reference["of"]]
+        path = _is_edge(bound) and not bound.endswith("/one")
+        along = reference.get("along")
+        if path and along not in PATH_COMBINATIONS:
+            return Refusal(
+                "attr_along_invalid",
+                [*loc, "attr", "along" if "along" in reference else "name"],
+                f"{reference['of']!r} is the path of a walk that repeats, so its "
+                f"{reference['name']!r} is one value per edge; say how they combine: "
+                f"along {', '.join(sorted(PATH_COMBINATIONS))}",
+            )
+        if not path and "along" in reference:
+            return Refusal(
+                "attr_along_invalid",
+                [*loc, "attr", "along"],
+                f"{reference['of']!r} is "
+                + ("one edge" if _is_edge(bound) else "an entity")
+                + ", so its attribute has one value and nothing to combine",
             )
         return None
 
@@ -1712,6 +1780,16 @@ class _DomainWorld:
                 self.type_name_by_id.get(from_id, f"#{from_id}"),
                 self.type_name_by_id.get(to_id, f"#{to_id}"),
             )
+        #: Queue R19: the attributes a relationship type declares for its
+        #: edges, by type name. A type that declares none takes free-form
+        #: attrs, and then only the frozen edges can say what they carry.
+        self.edge_attributes: dict[str, dict[str, dict[str, Any]]] = {}
+        for rel_name, name, data_type in db.execute(
+            select(RelationshipType.name, AttributeDef.name, AttributeDef.data_type)
+            .join(AttributeDef, AttributeDef.relationship_type_id == RelationshipType.id)
+            .where(RelationshipType.domain_id == domain_id)
+        ).all():
+            self.edge_attributes.setdefault(rel_name, {})[name] = {"data_type": data_type}
 
 
     def is_a(self, set_name: str | None, ancestor: str) -> bool:
@@ -1845,6 +1923,9 @@ class _DomainChecker:
             if problem:
                 return problem
             scope[binding["index"]] = binding["set"]
+            via = binding.get("via") or {}
+            if "as" in via:
+                scope[via["as"]] = f"{EDGE_MARK}{via['rel']}/{via.get('depth', 'one')}"
             for k, entry in enumerate(binding.get("where", [])):
                 here: Loc = [*loc, j, "where", k]
                 declared = self.world.attributes.get((binding["set"], entry["attr"]))
@@ -1927,6 +2008,29 @@ class _DomainChecker:
         if "attr" in term:
             set_name = scope[term["attr"]["of"]]
             name = term["attr"]["name"]
+            if _is_edge(set_name):
+                rel = set_name[len(EDGE_MARK):].rsplit("/", 1)[0]
+                declared_edges = self.world.edge_attributes.get(rel)
+                if not declared_edges:
+                    # Free-form attrs: the compiler names the edge that lacks it.
+                    return None
+                declared = declared_edges.get(name)
+                if declared is None:
+                    return Refusal(
+                        "attribute_not_declared",
+                        [*loc, "attr", "name"],
+                        f"{rel!r} declares no edge attribute {name!r}; it declares "
+                        f"{', '.join(sorted(declared_edges))}",
+                    )
+                if declared["data_type"] not in ARITHMETIC_ATTR_TYPES:
+                    return Refusal(
+                        "attribute_not_arithmetic",
+                        [*loc, "attr", "name"],
+                        f"{rel}.{name} is {declared['data_type']}; only "
+                        f"{', '.join(sorted(ARITHMETIC_ATTR_TYPES))} attributes are numbers a "
+                        f"version {IR_VERSION} model computes with",
+                    )
+                return None
             declared = self.world.attributes.get((set_name, name))
             if declared is None:
                 return Refusal(

@@ -60,6 +60,13 @@ RELATIONS: frozenset[str] = frozenset(CONTRACT["relations"])
 #: the shape `entity_descendants()` has always returned ("node + everything
 #: beneath it") and the one a planner means by "counting its sub-units".
 TRAVERSAL_DEPTHS: frozenset[str] = frozenset(CONTRACT["traversalDepths"])
+#: How an edge attribute read along a repeated walk (queue R19) combines the
+#: edges of the path: `sum` (a distance up a chain), `min` / `max` (the
+#: tightest capacity), `product` (a yield), `count` (the edges carrying it).
+PATH_COMBINATIONS: frozenset[str] = frozenset(CONTRACT["pathCombinations"])
+#: A scope entry for an edge a `via` names with `as`, beside the set name an
+#: index maps to: `EDGE_MARK + rel + "/" + depth`. A set name never starts with it.
+EDGE_MARK = "@"
 SEVERITIES: frozenset[str] = frozenset(CONTRACT["severities"])
 SENSES: frozenset[str] = frozenset(CONTRACT["senses"])
 OBJECTIVE_MODES: frozenset[str] = frozenset(CONTRACT["objectiveModes"])

@@ -118,6 +118,11 @@ def test_within_links_places_closer_than_the_distance(placed, db):  # noqa: F811
         " WHERE r.relationship_type_id = :t"), {"t": report["relationship_type_id"]}).all()
     assert sorted(edges) == [("s0", "c0"), ("s0", "c1"), ("s1", "c1"), ("s1", "c2")]
     assert report["source"]["kind"] == "within" and report["source"]["max_m"] == pytest.approx(0.6 * DEGREE_M)
+    # Each edge keeps its own measure (queue R19): a rule reads it as `attr of e`.
+    assert report["source"]["attribute"] == "metres"
+    metres = db.execute(text("SELECT (attrs->>'metres')::int FROM relationship WHERE relationship_type_id = :t"),
+                        {"t": report["relationship_type_id"]}).scalars().all()
+    assert len(metres) == 4 and all(0 <= m <= 0.6 * DEGREE_M for m in metres)
 
 
 def test_a_run_says_which_computed_data_it_read(placed, db, empty_queue):  # noqa: F811
@@ -188,3 +193,41 @@ def test_road_distances_through_the_endpoint_never_guess_a_missing_road(tenants,
     refused = client.post(f"/api/v1/domains/{domain}/distances", headers=headers,
                           json={"name": "x", "from_type_id": depot["id"], "to_type_id": shop["id"], "metric": "time", "unit": "m"})
     assert refused.status_code == 422 and "time measure is in s or min" in refused.text
+
+
+def test_a_rule_reads_the_distance_on_each_within_edge(placed, db, empty_queue):  # noqa: F811
+    """Queue R19: sparse pairs, each with its own metres -- no parameter matrix."""
+    from app.worker import work_once
+
+    post, domain, client, headers = placed["post"], placed["domain"], placed["client"], placed["headers"]
+    post(f"/api/v1/domains/{domain}/within", {"name": "reaches", "from_type_id": placed["site"]["id"],
+                                              "to_type_id": placed["customer"]["id"], "max_m": 0.6 * DEGREE_M})
+    serve = {"var": "serve", "index": ["s", "c"]}
+    near = {"index": "s", "set": "site", "via": {"rel": "reaches", "to": "c", "as": "e"}}
+
+    def model(name):
+        return {"version": 2, "sets": ["site", "customer"], "parameters": {}, "relationships": ["reaches"],
+                "variables": {"serve": {"index": ["site", "customer"], "domain": "binary"}},
+                "constraints": [{"id": "c_once", "forall": [{"index": "c", "set": "customer"}],
+                                 "left": {"sum": serve, "over": [near]}, "relation": "<=", "right": {"const": 1},
+                                 "severity": "hard"}],
+                # Serving is worth 100 km, less the metres on the edge taken.
+                "objective": {"sense": "minimize", "terms": [{"id": "o_metres", "weight": 1, "expression": {
+                    "sum": {"mul": [{"add": [{"attr": {"of": "e", "name": name}}, {"const": -100000}]}, serve]},
+                    "over": [{"index": "c", "set": "customer"}, near]}}]}}
+
+    problem = post("/api/problem/", {"domain_id": domain, "name": "nearest reachable site"})
+    # The type declares its measure, so a misspelt one is refused before any run.
+    refused = client.post(f"/api/v1/problems/{problem['id']}/versions", json={"ir": model("meters")}, headers=headers)
+    assert refused.status_code == 422 and "declares no edge attribute 'meters'" in refused.text
+    version = post(f"/api/v1/problems/{problem['id']}/versions", {"ir": model("metres")})
+    scenario = post("/api/v1/scenarios", {"problem_id": problem["id"], "model_version_id": version["id"], "name": "base"})
+    run_id = post(f"/api/v1/scenarios/{scenario['id']}/runs", {"reuse": False, "time_limit_s": 10})["id"]
+    for _ in range(5):
+        if db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one() not in ("queued", "running"):
+            break
+        work_once(db)
+    run = client.get(f"/api/v1/runs/{run_id}", headers=headers).json()
+    # c0 is at s0 (0 m), c1 half a degree from either, c2 at s1 (0 m); c3 and nowhere reach no site.
+    assert run["status"] == "optimal", run.get("error")
+    assert run["objective"] == pytest.approx(0.5 * DEGREE_M - 3 * 100000, abs=2)

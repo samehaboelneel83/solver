@@ -72,12 +72,13 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
     });
     const rel = fieldOf(b, "VIA_REL");
     const depth = fieldOf(b, "VIA_DEPTH");
+    const edge = fieldOf(b, "VIA_AS");
     return {
       index: fieldOf(b, "INDEX"),
       set: fieldOf(b, "SET"),
       ...(where.length ? { where } : {}),
       ...(rel
-        ? { via: { rel, [fieldOf(b, "VIA_END") === "to" ? "to" : "from"]: fieldOf(b, "VIA_ANCHOR"), ...(depth ? { depth } : {}) } }
+        ? { via: { rel, [fieldOf(b, "VIA_END") === "to" ? "to" : "from"]: fieldOf(b, "VIA_ANCHOR"), ...(depth ? { depth } : {}), ...(edge ? { as: edge } : {}) } }
         : {}),
     };
   }
@@ -101,8 +102,10 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
           index: Array.from({ length: arity }, (_, i) => fieldOf(b, `IDX${i}`)),
         };
       }
-      case "ir_attr":
-        return { attr: { of: fieldOf(b, "OF"), name: fieldOf(b, "NAME") } };
+      case "ir_attr": {
+        const along = fieldOf(b, "ALONG");
+        return { attr: { of: fieldOf(b, "OF"), name: fieldOf(b, "NAME"), ...(along ? { along } : {}) } };
+      }
       case "ir_sum":
         return { sum: term(b.inputs?.BODY, [...loc, "sum"]), over: bindings(b.inputs?.OVER, [...loc, "over"]) };
       case "ir_mul":

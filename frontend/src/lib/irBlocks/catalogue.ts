@@ -12,7 +12,8 @@ export const NONE = "";
 export type BlockCatalogue = {
   entityTypes: { name: string; attributes: { name: string; data_type: string }[] }[];
   parameters: { name: string; index: string[] }[];
-  relationships: { name: string; from: string; to: string }[];
+  /** `attributes` are what the type declares for its edges (queue R19): what `attr of` an edge offers. */
+  relationships: { name: string; from: string; to: string; attributes?: { name: string; data_type: string }[] }[];
 };
 export const EMPTY_CATALOGUE: BlockCatalogue = { entityTypes: [], parameters: [], relationships: [] };
 
@@ -36,9 +37,26 @@ export function menu(values: string[], current: string | null | undefined, label
 export function bindingsOf(first: Blockly.Block | null): [string, string][] {
   const out: [string, string][] = [];
   for (let b = first; b; b = b.getNextBlock()) {
-    if (b.type === "ir_binding") out.push([b.getFieldValue("INDEX"), b.getFieldValue("SET")]);
+    if (b.type === "ir_binding") out.push(...bound(b));
   }
   return out;
+}
+
+/** What one binding adds to the scope: its index, then the edge it names (queue R19) as
+ * `@rel/depth` -- the validator's own mark, so `scopeAt` tells an edge from a set. */
+function bound(b: Blockly.Block): [string, string][] {
+  const out: [string, string][] = [[b.getFieldValue("INDEX"), b.getFieldValue("SET")]];
+  const rel = b.getFieldValue("VIA_REL");
+  const edge = b.getFieldValue("VIA_AS");
+  if (rel && edge) out.push([edge, `@${rel}/${b.getFieldValue("VIA_DEPTH") || "one"}`]);
+  return out;
+}
+
+/** The relationship an edge scope entry (`@rel/depth`) walks, and whether it is a path. */
+export function edgeOf(bound: string | undefined): { rel: string; path: boolean } | null {
+  if (!bound?.startsWith("@")) return null;
+  const [rel, depth] = bound.slice(1).split("/");
+  return { rel, path: depth !== "one" };
 }
 
 /** The statement input of `parent` that `child` sits in (directly or down its stack). */
@@ -69,7 +87,7 @@ export function scopeAt(block: Blockly.Block): Map<string, string> {
     const before: [string, string][] = [];
     let came: Blockly.Block = block;
     for (let b = block.getPreviousBlock(); b && b.type === "ir_binding" && b.getNextBlock() === came; came = b, b = b.getPreviousBlock()) {
-      before.unshift([b.getFieldValue("INDEX"), b.getFieldValue("SET")]);
+      before.unshift(...bound(b));
     }
     layers.push(before);
   }
@@ -123,12 +141,22 @@ export function partOfBlock(id: string | null, parentOf: (id: string) => string 
 export function catalogueFrom(
   entityTypes: readonly { id: number | string; name: string; attributes?: readonly { name: string; data_type: string }[] }[],
   parameterDefs: readonly { name: string; index_type_ids: readonly (number | string)[] }[],
-  relationshipTypes: readonly { name: string; from_type_id: number | string; to_type_id: number | string }[]
+  relationshipTypes: readonly {
+    name: string;
+    from_type_id: number | string;
+    to_type_id: number | string;
+    attributes?: readonly { name: string; data_type: string }[];
+  }[]
 ): BlockCatalogue {
   const nameOf = (id: number | string) => entityTypes.find((t) => String(t.id) === String(id))?.name ?? `#${id}`;
   return {
     entityTypes: entityTypes.map((t) => ({ name: t.name, attributes: (t.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })) })),
     parameters: parameterDefs.map((p) => ({ name: p.name, index: p.index_type_ids.map(nameOf) })),
-    relationships: relationshipTypes.map((r) => ({ name: r.name, from: nameOf(r.from_type_id), to: nameOf(r.to_type_id) })),
+    relationships: relationshipTypes.map((r) => ({
+      name: r.name,
+      from: nameOf(r.from_type_id),
+      to: nameOf(r.to_type_id),
+      attributes: (r.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
+    })),
   };
 }
