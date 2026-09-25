@@ -145,6 +145,8 @@ function GridView({ shape, entries, members, name }: { shape: Shape; entries: En
   const rows = members(axes.rows);
   const cols = axes.cols >= 0 ? members(axes.cols) : [""];
   const insideSets = axes.inside.map((i) => shape.sets[i]);
+  // One colour per member in the set's own order, so the first eight people never share one.
+  const colours = new Map((axes.inside.length > 0 ? members(axes.inside[0]) : []).map((m, k) => [m, PALETTE[k % PALETTE.length]]));
   return (
     <div>
       <AxisPicker shape={shape} axes={axes} choose={choose} />
@@ -170,7 +172,7 @@ function GridView({ shape, entries, members, name }: { shape: Shape; entries: En
                           const label = keys.map((k, j) => name(insideSets[j], k)).join(" · ");
                           return (
                             <span key={keys.join("\u0001")} className="rounded px-1 py-0.5 text-[11px] font-medium text-white"
-                                  style={{ background: colourOf(keys.join("\u0001")) }}>{label}</span>
+                                  style={{ background: colours.get(keys[0]) ?? colourOf(keys.join("\u0001")) }}>{label}</span>
                           );
                         })}
                       </div>
