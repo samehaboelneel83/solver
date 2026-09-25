@@ -1,4 +1,4 @@
-# Development session handover — 2026-09-24 (updated after R11)
+# Development session handover — 2026-09-24 (updated after R12 -- the roadmap queue is complete)
 
 For an AI coding assistant continuing this project with no memory of the session. **The code is the authority; this document is a map.** Where it says "uncertain", verify before relying on it.
 
@@ -35,10 +35,10 @@ Companion documents in the repo (read in this order after this one):
 
 The session ran the execution queue autonomously under the user's standing instruction **"go with your recommendations"** (a `/loop`): one queue item at a time, each built with tests, full check green, deployed from a clean worktree, verified live in a browser, ticked in the queue and handover.
 
-At the moment of handover (after R11) the next items are, in queue order:
+At the moment of handover (after R12) the execution queue has no open item. What remains, in the order I would take it: the next items are, in queue order:
 
-- **R12 — the optimization target roadmap's last open item** (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap". **R12 (decomposition per template: column generation for shift scheduling first) is next.** The GPU lane and LLM/NL→IR stay out (standing defaults).
-- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane) R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon), R10 (tuning search) and R11 (learned selector, shadow mode) are done; R2, R3, R5, R6's fallback and R9 are off by the bench; R7/R8 are opt-in per problem. Blocks 3–4 were moved ahead of R2 when the user asked to "create and edit well using blocks" (with a screenshot of the optimization view's read-only blocks showing "(choose)"), and are done.
+- **Connectivity at scale** (districting past ~200 cells) -- the one family the decomposition gate flagged that nothing here closes; a column generation over connected districts, or cuts / a heuristic warm start (`docs/plans/2026-09-22-optimization-target-roadmap.md`), queued (`3712016`) on the user's "go ahead on the roadmap". Needs its own queue item and a bench gate. The GPU lane and LLM/NL→IR stay out (standing defaults).
+- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane) R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon), R10 (tuning search), R11 (learned selector, shadow mode) and R12 (the decomposition gate, and an exact allocation decomposition) are done -- the whole roadmap queue; R2, R3, R5, R6's fallback and R9 are off by the bench; R7/R8 are opt-in per problem. Blocks 3–4 were moved ahead of R2 when the user asked to "create and edit well using blocks" (with a screenshot of the optimization view's read-only blocks showing "(choose)"), and are done.
 
 Acceptance criteria for everything in the queue: full check green (`bash scripts/check.sh`), migration rehearsed up/down/up on a copy of the live database, deployed, verified live in Chrome (API and UI), test data cleaned up, queue + handover updated, committed by path.
 
@@ -77,6 +77,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 | 25 | **R1** PDLP for very large LPs; `approximate` optimality | roadmap Phase 14 | migration 0051, `app/solve/pdlp.py`, `lp.py`, `backends.py`, `service.py`, `genui/translate.py`, `api/runs.py`, `pages/Runs.tsx`, `bench/pdlp.py` | `fc88049` + read-back fix; `solve.pdlp` off by the bench; live 43.5317 shown "optimal to within a tolerance" |
 | 26 | Symmetry detection made linear | found by the R1 bench | `app/solve/symmetry.py` (`_by_member`) | `716b0b5`; 250k-decision compile 213 s → 4.7 s |
 | 27 | **Blocks 3** every construct as its own block | Blockly plan Task 6 | `lib/irBlocks/{vocabulary,toBlocks,toIr,catalogue}.ts` | `3feccaa`, `4762dc0`; no opaque block for any fixture/template; live workshop makespan 9 → 8 after a size edit by mouse |
+| 39 | **R12** decomposition gate; exact allocation decomposition; convexity by blocks | roadmap Phase 14 | migration 0059, `app/solve/allocation.py`, `convexity.py`, `service.py`, `bench/decompose_gate.py` | `ccad0ae`; `solve.decompose` on; live: 1,000 people proven in 16 ms |
 | 38 | **R11** learned selector, shadow mode | roadmap Phase 17 | `app/solve/selector.py`, `selector_data.json`, `service.py`, `bench/selector.py`, `pages/Runs.tsx` | `2753b0b`; records its pick, acts on nothing |
 | 37 | **R10** tuning search; tuned options per domain/problem | roadmap Phase 13 | migration 0058, `app/solve/params.py` (`parse_setting`), `service.py` (`SettingUnusable`), `api/runs.py` (422), `sandbox.py`, `bench/tune.py` | `f18b8ea`; one family tuned (rota/CP-SAT); nothing set live |
 | 36 | **R9** relax-and-fix over time | roadmap Phase 13 | migration 0057, `app/solve/horizon.py`, `service.py` (`_time_set`), `sandbox.py`, `bench/horizon.py`, `pages/Runs.tsx` | `093a03e`; `solve.rolling_horizon` off by the bench; live: weekly_rota in 3 stretches, 3669 |
@@ -91,19 +92,19 @@ Every item below was tested (unit + full check) and verified live unless it says
 
 ## 4. Current project state
 
-**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0058** (R10).
+**Deployed:** code at the Blocks 4 commits (see the standing handover's **State:** line for the exact commit); database at **migration 0059** (R12).
 
 ### ✅ Completed
 - Everything in §3.
 - The whole spatial region-partitioning plan (GIS 1–8), GIS 9 (basemaps) and GIS 10 (elevation and slope per cell).
 - Blocks 0–4 of the Blockly edit mode: the whole plan.
-- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane), R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon), R10 (tuning search), R11 (learned selector, shadow mode).
+- R1 (PDLP), R2 (portfolio racing), R3 (LNS), R4 (near-separable detection), R5 (Lagrangian bound), R6 (IPOPT local lane), R7 (two-stage stochastic), R8 (chance constraints), R9 (rolling horizon), R10 (tuning search), R11 (learned selector, shadow mode), R12 (decomposition gate and allocation decomposition).
 
 ### 🟡 Partially completed
 - Nothing mid-item. (An opaque block remains only for a shape the blocks could not write back exactly -- e.g. a `connected` rule whose decision is indexed [group, unit], a curve of more than 12 points, an `add` of one term.)
 
 ### ❌ Not completed
-- R12 (decomposition per template) — queued, the roadmap's last item.
+- Nothing queued. Open, unqueued: connectivity at scale; the Model Editor design import (waits on the user's `/design-login` or the design files); the forms have no control for a rule's `chance` (the blocks do).
 - Connectivity at scale ("approach C": cuts or a heuristic warm start) — not queued as an item yet; recorded as the bench's conclusion.
 - Vector tiles (`egypt_osm`, `pbf`) — not rendered anywhere.
 - GeometryPreview thumbnails have no basemap (deliberately, 64–96 px).
@@ -281,7 +282,7 @@ Still needs testing:
 
 **High priority**
 
-1. **R12** (the last):  near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition.
+1. **Connectivity at scale** (not yet a queue item):  near-separable detection, Lagrangian bounds, IPOPT local lane, two-stage stochastic, chance constraints, rolling horizon, tuning search, learned selector in shadow mode, per-template decomposition.
 
 **Medium priority**
 
@@ -295,7 +296,7 @@ Still needs testing:
 
 ## 14. Recommended next step
 
-Start **R12 (decomposition per template)**: read the R12 line in the queue and the roadmap's Phase 14 bullet ("Benders / column generation / branch-and-price: implemented per template, not automatically ... first target: shift-scheduling column generation, pricing = per-employee shortest path / CP-SAT, price-and-branch heuristic first"). R4's `blocks.structure` already names the rota's blocks (per person) and linking rule (cover): the restricted master over per-person schedules, pricing per person with the duals of cover. Test-first against the rota family's proven optima; bench-gated setting.
+The roadmap queue is complete (R1-R12). Ask the user what comes next before starting anything new; the candidates, with evidence: (1) **connectivity at scale** -- districting past ~200 cells, flagged again by R12's gate; (2) the **Model Editor design** they sent from claude.ai/design -- needs `/design-login` in an interactive session, or the files saved into the repo; (3) small gaps left on purpose: the forms have no control for a rule's `chance`, and `{kind: scenarios}` uncertainty has nowhere to store per-scenario values.
 
 ## 15. Continuation instructions
 
@@ -314,7 +315,7 @@ You are continuing an existing development session on the "Problem Solver" optim
 
 Handover: docs/plans/2026-09-24-session-handover.md (then docs/plans/2026-09-22-execution-queue.md and docs/plans/2026-09-22-handover.md).
 
-State: deployed, database at migration 0058. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), elevation and slope per grid cell from its terrain tiles (GIS 10), the whole Blockly edit mode (Blocks 0-4: shared draft, Blocks tab, every construct as a block, refusals on blocks, Edit mode in the optimization view) R1 (PDLP, answers shown as approximate), R2 (portfolio racing) and R3 (LNS), both off by the bench, R4 (near-separable detection, reported in the Model editor and on runs), R5 (Lagrangian bound, off by the bench) R6 (IPOPT, a local lane recorded `local`; its fallback off by the bench) R7 (two-stage stochastic programming: a decision's `stage`, sampled futures, opt-in) R8 (chance constraints: a rule's `chance`) R9 (relax-and-fix over a time set, off by the bench) R10 (tuning search: one family tuned; `solve.solver_params` per domain/problem) and R11 (a learned selector recording its pick, in shadow mode). Next: the optimization target roadmap's last item, R12 (decomposition per template).
+State: deployed, database at migration 0059. Done this session: spatial region partitioning (GIS 1-8), basemaps from my tile server at http://localhost:8080 (GIS 9), elevation and slope per grid cell from its terrain tiles (GIS 10), the whole Blockly edit mode (Blocks 0-4: shared draft, Blocks tab, every construct as a block, refusals on blocks, Edit mode in the optimization view) R1 (PDLP, answers shown as approximate), R2 (portfolio racing) and R3 (LNS), both off by the bench, R4 (near-separable detection, reported in the Model editor and on runs), R5 (Lagrangian bound, off by the bench) R6 (IPOPT, a local lane recorded `local`; its fallback off by the bench) R7 (two-stage stochastic programming: a decision's `stage`, sampled futures, opt-in) R8 (chance constraints: a rule's `chance`) R9 (relax-and-fix over a time set, off by the bench) R10 (tuning search: one family tuned; `solve.solver_params` per domain/problem) R11 (a learned selector recording its pick, in shadow mode) and R12 (the decomposition gate; an exact allocation decomposition, on by default). The roadmap queue is complete; ask me what is next (connectivity at scale, or the Model Editor design).
 
 Rules: go with your recommendations; ask me only if a choice is irreversible, costs money, or contradicts the plan. Full check (bash scripts/check.sh) green before commit; commit by path, never git add -A; rehearse migrations up/down/up on a copy of the live DB; deploy from a clean worktree and prune Docker images (C: is nearly full); verify live in a browser; never read .env.
 ```
