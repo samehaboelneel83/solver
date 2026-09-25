@@ -264,7 +264,9 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
         mean = sum(costs) / len(costs)
         sd = math.sqrt(sum((c - mean) ** 2 for c in costs) / (len(costs) - 1)) if len(costs) > 1 else 0.0
         record["out_of_sample"] = {"futures": len(costs) + unmet, "mean": round(mean, 6),
-                                   "ci95": round(1.96 * sd / math.sqrt(len(costs)), 6), "unmet": unmet}
+                                   "ci95": round(1.96 * sd / math.sqrt(len(costs)), 6), "unmet": unmet,
+                                   # Each fresh future's cost, so the spread can be drawn (queue R17b).
+                                   "costs": sorted(round(c, 6) for c in costs)[:1000]}
     else:
         record["out_of_sample"] = {"futures": unmet, "mean": None, "ci95": None, "unmet": unmet}
     # The plan is the answer: what to decide now. Recourse is decided later, per future.

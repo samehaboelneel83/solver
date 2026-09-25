@@ -31,6 +31,7 @@ import { parseRouteId } from "../lib/routeId";
 import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
 import RunViews from "../components/RunViews";
+import SpreadView from "../components/SpreadView";
 import { RunMapView } from "../genui/components/SpatialMap";
 
 /**
@@ -88,7 +89,8 @@ export type StochasticRecord = {
   samples: number;
   stage_two: string[];
   expected: number | null;
-  out_of_sample?: { futures: number; mean: number | null; ci95: number | null; unmet: number };
+  /** `costs`: each fresh future's cost, sorted (queue R17b), for the spread. */
+  out_of_sample?: { futures: number; mean: number | null; ci95: number | null; unmet: number; costs?: number[] };
   /** Per chance rule (queue R8): the share of futures asked for, and the share it held in out of sample. */
   chance?: Record<string, { asked: number; held: number; held_in_sample?: number }>;
 };
@@ -960,6 +962,13 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         </>
       )}
 
+      {(() => {
+        // A stochastic plan's cost on each fresh future (queue R17b).
+        const out = (data.params as { stochastic?: StochasticRecord } | undefined)?.stochastic?.out_of_sample;
+        return out?.costs?.length && out.mean !== null ? (
+          <SpreadView costs={out.costs} mean={out.mean} ci95={out.ci95 ?? 0} unmet={out.unmet} />
+        ) : null;
+      })()}
       {Object.keys(roster).length > 0 && <RunViews run={data} />}
 
       {data.reduced_costs &&

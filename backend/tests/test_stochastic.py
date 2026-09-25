@@ -60,6 +60,9 @@ def test_the_plan_is_the_newsvendor_quantile_not_the_order_for_the_average_deman
     out = solved.record["out_of_sample"]
     assert out["unmet"] == 0 and out["futures"] == 50
     assert abs(out["mean"] - 166.67) <= out["ci95"] + 5  # the true expected profit, within the interval
+    # Each future's cost is kept, so its spread can be drawn (queue R17b): they average to the mean.
+    assert len(out["costs"]) == 50 and out["costs"] == sorted(out["costs"])
+    assert abs(sum(out["costs"]) / 50 - out["mean"]) < 1e-3
 
 
 def test_the_extensive_form_shares_the_plan_and_copies_the_recourse():
