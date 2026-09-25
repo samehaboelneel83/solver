@@ -9,6 +9,8 @@ demand (100) is worth 3 * E[min(100, D)] - 100 = 162.5: less.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from sqlalchemy import text
 
@@ -151,7 +153,7 @@ def test_a_chance_rule_alone_asks_for_a_stochastic_solve_and_orders_the_quantile
     assert stochastic.wanted(ir) and not stochastic.second_stage(ir)
     solved = stochastic.solve(ir, DATA, compile_model(ir, DATA), _run, samples=50, time_limit=20, seed=1)
     order = solved.solution.assignments[("order", ())]
-    assert 125 < order < 151  # the 90% quantile, 140, within the sampling error of 50 futures
+    assert 135 < order < 156  # above the 90% quantile (140): held to 97% in sample so 90% holds out of it
     held = solved.record["chance"]["c_cover"]
     assert held["asked"] == pytest.approx(0.9) and 0.7 <= held["held"] <= 1.0
 
@@ -162,7 +164,8 @@ def test_at_most_epsilon_times_n_futures_may_break_it():
     switches = [k for k in model.variables if k[0] == "__chance"]
     assert len(switches) == 20 and all(model.variables[k].domain == "binary" for k in switches)
     budget = [c for c in model.constraints if c.id == "_chance_c_cover"]
-    assert len(budget) == 1 and float(budget[0].right.const) == 2  # floor(0.1 * 20)
+    # Held below the asked 10% so it holds out of sample: at 20 futures, in every one of them.
+    assert len(budget) == 1 and float(budget[0].right.const) == math.floor(stochastic.in_sample(0.1, 20) * 20) == 0
     assert all(c.when is not None for c in model.constraints if c.id == "c_cover")
 
 
@@ -209,3 +212,9 @@ def test_a_run_with_a_chance_rule_goes_to_an_integer_solver_and_records_how_ofte
     assert outcome.status == "optimal" and row["optimality"] == "approximate", row
     assert row["params"]["chosen_solver"] != "glop"  # the switches are binaries: not a linear-programming solver
     assert row["params"]["stochastic"]["chance"]["c_cover"]["asked"] == pytest.approx(0.9)
+
+
+def test_the_in_sample_share_is_held_below_the_asked_one_and_the_gap_closes_with_more_futures():
+    assert stochastic.in_sample(0.1, 20) == 0.0
+    assert 0.02 < stochastic.in_sample(0.1, 50) < 0.04
+    assert stochastic.in_sample(0.1, 50) < stochastic.in_sample(0.1, 5000) < 0.1

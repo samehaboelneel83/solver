@@ -27,7 +27,9 @@ never proven best.
 most that share of the futures: in the extensive form each of its instances
 gets one switch per future (the rule holds while it is off -- a `when`, so a
 backend without indicators writes it as a big-M from the declared bounds),
-and at most `floor(epsilon * N)` of an instance's switches may be on. A chance
+and at most `floor(in_sample(epsilon, N) * N)` of an instance's switches may
+be on -- a share held below the asked one, so the plan keeps its promise on
+fresh futures rather than only on the sampled ones (queue R8c). A chance
 rule makes a model two-stage by itself: the plan must keep it in enough of
 the futures, even with nothing decided later. Out of sample, how often each
 chance rule actually held is recorded beside what was asked.
@@ -57,6 +59,17 @@ OUT_OF_SAMPLE_MIN = 20
 EXTENSIVE_SHARE = 0.6
 _SAMPLE = "#s"
 _SWITCH = "__chance"
+#: How many standard errors the in-sample share is held below the asked one (one-sided 95%).
+CHANCE_MARGIN = 1.645
+
+
+def in_sample(epsilon: float, futures: int) -> float:
+    """The share a chance rule may fail in *among the sampled futures*, so that it fails in no more than
+    `epsilon` of fresh ones: the asked share less CHANCE_MARGIN standard errors of a share estimated from
+    `futures` draws (queue R8c). Solving at `epsilon` itself missed it: at 20 or 50 futures the rule held
+    in 86-88% of fresh futures against 90% asked, and met it in 4 of 12 samples; held below, 96% and 12 of
+    12 at 50 futures."""
+    return max(0.0, epsilon - CHANCE_MARGIN * math.sqrt(epsilon * (1 - epsilon) / futures))
 
 
 class NotStochastic(ValueError):
@@ -179,7 +192,7 @@ def extensive(samples: list[Compiled], recourse: set[str]) -> tuple[Compiled, se
         const += goal.const
     for (rule_id, index), keys in switches.items():
         epsilon = next(c.chance for c in first.constraints if c.id == rule_id)
-        allowed = Decimal(math.floor(float(epsilon) * len(samples) + 1e-9))
+        allowed = Decimal(math.floor(in_sample(float(epsilon), len(samples)) * len(samples) + 1e-9))
         constraints.append(Constraint(f"_chance_{rule_id}", dict(index), Linear(coeffs={key: Decimal(1) for key in keys}),
                                       "<=", Linear(const=allowed)))
     objective = Linear(coeffs=coeffs, const=const)
@@ -257,7 +270,8 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     # The plan is the answer: what to decide now. Recourse is decided later, per future.
     if held:
         judged = max(1, len(costs))
-        record["chance"] = {rule_id: {"asked": round(1 - epsilon, 6), "held": round(held[rule_id] / judged, 6)}
+        record["chance"] = {rule_id: {"asked": round(1 - epsilon, 6), "held": round(held[rule_id] / judged, 6),
+                                      "held_in_sample": round(1 - in_sample(epsilon, count), 6)}
                             for rule_id, epsilon in chance_rules(ir).items()}
     # The run's time is the whole of it: the extensive form and the plan costed out of sample.
     return Stochastic(replace(solved, assignments=plan, best_bound=None,
