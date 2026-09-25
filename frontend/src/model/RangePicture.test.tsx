@@ -16,6 +16,6 @@ describe("an uncertain parameter as ranges (queue R17d)", () => {
     render(<RangePicture parameterId={3} deviation={0.1} name="demand" />);
     expect(screen.getByRole("img", { name: "demand as ranges: 2 rows" })).toBeInTheDocument();
     expect(screen.getByText("mon: 10, from 9 to 11")).toBeInTheDocument();
-    expect(screen.getByText("every other cell (the default): 2, from 1.8 to 2.2")).toBeInTheDocument();
+    expect(screen.getByText("all others (default): 2, from 1.8 to 2.2")).toBeInTheDocument();
   });
 });

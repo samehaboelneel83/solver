@@ -21,12 +21,12 @@ export default function RangePicture({ parameterId, deviation, name }: { paramet
     .map((c) => ({ label: c.entity_ids.map((id) => keyOf.get(id) ?? String(id)).join(", "), value: Number(c.value) }));
   const rows = [
     ...cells.slice(0, RANGE_ROWS),
-    { label: "every other cell (the default)", value: Number(values.data.default_value ?? 0) },
+    { label: "all others (default)", value: Number(values.data.default_value ?? 0) },
   ];
   const reach = (v: number) => [v - Math.abs(v) * deviation, v + Math.abs(v) * deviation] as const;
   const low = Math.min(0, ...rows.map((r) => reach(r.value)[0]));
   const high = Math.max(1e-9, ...rows.map((r) => reach(r.value)[1]));
-  const W = 420, left = 150, band = 16;
+  const W = 320, left = 96, band = 20;
   const x = (v: number) => left + ((v - low) / (high - low || 1)) * (W - left - 12);
   return (
     <figure className="mt-1">
@@ -36,13 +36,13 @@ export default function RangePicture({ parameterId, deviation, name }: { paramet
       </figcaption>
       {/* Scales to its column: the Model editor's parameter card is narrower than the drawing. */}
       <svg role="img" aria-label={`${name} as ranges: ${rows.length} rows`} viewBox={`0 0 ${W} ${rows.length * band + 20}`}
-           className="h-auto w-full max-w-[420px]">
+           className="h-auto w-full max-w-[320px]">
         {rows.map((r, i) => {
           const [a, b] = reach(r.value);
           const y = 8 + i * band + band / 2;
           return (
             <g key={i}>
-              <text x={left - 6} y={y + 3} textAnchor="end" fontSize={10} className="fill-slate-600">{r.label}</text>
+              <text x={left - 6} y={y + 4} textAnchor="end" fontSize={12} className="fill-slate-600">{r.label}</text>
               <line x1={x(a)} x2={x(b)} y1={y} y2={y} stroke="#d97706" strokeWidth={4} strokeLinecap="round" strokeOpacity={0.55}>
                 <title>{`${r.label}: ${formatAmount(r.value)}, from ${formatAmount(a)} to ${formatAmount(b)}`}</title>
               </line>
@@ -50,8 +50,8 @@ export default function RangePicture({ parameterId, deviation, name }: { paramet
             </g>
           );
         })}
-        <text x={left} y={rows.length * band + 18} fontSize={10} className="fill-slate-500">{formatAmount(low)}</text>
-        <text x={W - 12} y={rows.length * band + 18} fontSize={10} textAnchor="end" className="fill-slate-500">{formatAmount(high)}</text>
+        <text x={left} y={rows.length * band + 18} fontSize={11} className="fill-slate-500">{formatAmount(low)}</text>
+        <text x={W - 12} y={rows.length * band + 18} fontSize={11} textAnchor="end" className="fill-slate-500">{formatAmount(high)}</text>
       </svg>
     </figure>
   );
