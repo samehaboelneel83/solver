@@ -265,6 +265,8 @@ class Solution(Base):
     # Reduced costs from a linear solver, grouped like the roster.
     # Null when the backend has none or the run predates migration 0020.
     reduced_costs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Migration 0065 (queue R17): how much each whole-number or continuous decision took.
+    amounts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ConstraintResult(Base):

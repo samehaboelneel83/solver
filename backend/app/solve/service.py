@@ -1298,12 +1298,13 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
 
     db.execute(
         text(
-            "INSERT INTO solution (run_id, assignments, reduced_costs)"
-            " VALUES (:r, :a, CAST(:rc AS jsonb))"
+            "INSERT INTO solution (run_id, assignments, reduced_costs, amounts)"
+            " VALUES (:r, :a, CAST(:rc AS jsonb), CAST(:am AS jsonb))"
         ),
         {
             "r": run_id,
             "a": _json(_assignments(compiled, result)),
+            "am": _json(_amounts(compiled, result)),
             "rc": None if (packed := _reduced_costs(result)) is None else _json(packed),
         },
     )
@@ -2044,6 +2045,19 @@ def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[st
         # anyone made; `__` names are the compiler's own.
         if not name.startswith("__") and value:
             out.setdefault(name, []).append(list(index))
+    return out
+
+
+def _amounts(compiled: Compiled, result: Solution) -> dict[str, list[dict[str, Any]]]:
+    """How much each whole-number or continuous decision took, where it took any (queue R17):
+    what a heat matrix, bars or a line are drawn from. A yes-or-no decision says all it has
+    to say in `_assignments`."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for (name, index), value in sorted(result.assignments.items()):
+        variable = compiled.variables.get((name, index))
+        if name.startswith("__") or not value or variable is None or variable.domain == "binary":
+            continue
+        out.setdefault(name, []).append({"index": list(index), "value": _json_number(value)})
     return out
 
 

@@ -1,0 +1,327 @@
+import { useId, useMemo, useState } from "react";
+import type { Run } from "../api/v1";
+import {
+  cellKey,
+  defaultAxes,
+  formatAmount,
+  gridOf,
+  membersOf,
+  shade,
+  VIEW_LABELS,
+  viewsFor,
+  type Shape,
+  type ViewKind,
+} from "../lib/runViews";
+
+/** Colours for the members drawn inside a grid's cells (people in a roster): one each, the same on every run. */
+const PALETTE = ["#2563eb", "#d97706", "#059669", "#9333ea", "#ca8a04", "#dc2626", "#0891b2", "#64748b"];
+function colourOf(key: string): string {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+type Entry = { index: string[]; value: number | null };
+
+/**
+ * Every decision of a run, each drawn the way its shape reads (queue R17): a
+ * roster as a grid with people inside the cells, amounts as a heat matrix,
+ * bars or a line, a yes/no over one set as the set with its chosen members
+ * marked -- the plain list one click away. Nothing to configure.
+ */
+export default function RunViews({ run }: { run: Run }) {
+  const names = Object.keys(run.assignments ?? {});
+  if (names.length === 0) return null;
+  return (
+    <div className="space-y-6">
+      {names.map((variable) => (
+        <DecisionView key={variable} run={run} variable={variable} />
+      ))}
+    </div>
+  );
+}
+
+function DecisionView({ run, variable }: { run: Run; variable: string }) {
+  const id = useId();
+  const sets = run.index_sets.variables[variable] ?? [];
+  const kind = run.variable_kinds?.[variable] ?? "binary";
+  const amounts = run.amounts?.[variable];
+  const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts: amounts !== undefined && run.amounts !== null };
+  const views = viewsFor(shape);
+  const [view, setView] = useState<ViewKind>(views[0]);
+  const entries: Entry[] = useMemo(
+    () =>
+      kind === "binary" || !amounts
+        ? (run.assignments?.[variable] ?? []).map((index) => ({ index, value: null }))
+        : amounts.map((a) => ({ index: a.index, value: Number(a.value) })),
+    [amounts, kind, run.assignments, variable],
+  );
+  const name = (set: string | undefined, key: string) => (set ? run.labels[set]?.[key] : undefined) ?? key;
+  const order = run.set_order ?? {};
+  const members = (position: number) => membersOf(sets[position], order, entries.map((e) => e.index[position]));
+  const count = kind === "binary" ? `${entries.length} chosen` : `${entries.length} non-zero`;
+
+  return (
+    <section aria-labelledby={`${id}-title`} className="rounded-md border border-slate-200 bg-white">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+        <h3 id={`${id}-title`} className="text-sm font-semibold text-slate-900">
+          <span className="font-mono">{variable}</span>
+          {sets.length > 0 && <span className="font-normal text-slate-500"> [{sets.join(", ")}]</span>}
+          <span className="ml-2 font-normal text-slate-500">{count}</span>
+        </h3>
+        {views.length > 1 && (
+          <div role="tablist" aria-label={`How to draw ${variable}`} className="inline-flex overflow-hidden rounded border border-slate-300 text-xs">
+            {views.map((v) => (
+              <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
+                      className={view === v ? "bg-slate-900 px-2 py-1 text-white" : "px-2 py-1 text-slate-600 hover:bg-slate-100"}>
+                {VIEW_LABELS[v]}
+              </button>
+            ))}
+          </div>
+        )}
+      </header>
+      <div className="overflow-x-auto p-3">
+        {entries.length === 0 ? (
+          <p className="text-sm text-slate-500">Nothing chosen.</p>
+        ) : view === "grid" ? (
+          <GridView shape={shape} entries={entries} members={members} name={name} />
+        ) : view === "heat" ? (
+          <HeatView shape={shape} entries={entries} members={members} name={name} />
+        ) : view === "panels" ? (
+          <PanelsView shape={shape} entries={entries} members={members} name={name} />
+        ) : view === "bars" ? (
+          <BarsView sets={sets} entries={entries} members={members(0)} name={name} />
+        ) : view === "line" ? (
+          <LineView sets={sets} entries={entries} members={members(0)} name={name} />
+        ) : view === "chosen" ? (
+          <ChosenView set={sets[0]} entries={entries} members={members(0)} name={name} />
+        ) : view === "value" ? (
+          <p className="text-2xl font-semibold tabular-nums text-slate-900">{formatAmount(entries[0].value ?? 1)}</p>
+        ) : (
+          <ListView sets={sets} entries={entries} name={name} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+type Namer = (set: string | undefined, key: string) => string;
+
+/** Rows, columns and what is inside chosen by the reader; the defaults read a roster as a roster. */
+function useAxes(shape: Shape) {
+  const [axes, setAxes] = useState(() => defaultAxes(shape));
+  const n = shape.sets.length;
+  const choose = (which: "rows" | "cols", position: number) => {
+    const other = which === "rows" ? axes.cols : axes.rows;
+    const next = which === "rows" ? { rows: position, cols: other === position ? axes.rows : other } : { rows: other === position ? axes.cols : other, cols: position };
+    setAxes({ ...next, inside: [...Array(n).keys()].filter((i) => i !== next.rows && i !== next.cols) });
+  };
+  return { axes, choose };
+}
+
+function AxisPicker({ shape, axes, choose }: { shape: Shape; axes: { rows: number; cols: number }; choose: (w: "rows" | "cols", p: number) => void }) {
+  const id = useId();
+  if (shape.sets.length < 2) return null;
+  const select = (which: "rows" | "cols", label: string) => (
+    <label htmlFor={`${id}-${which}`} className="flex items-center gap-1">
+      {label}
+      <select id={`${id}-${which}`} className="rounded border border-slate-300 px-1 py-0.5" value={which === "rows" ? axes.rows : axes.cols}
+              onChange={(event) => choose(which, Number(event.target.value))}>
+        {shape.sets.map((set, i) => <option key={`${set}-${i}`} value={i}>{set}{shape.sets.indexOf(set) !== i ? ` (${i + 1})` : ""}</option>)}
+      </select>
+    </label>
+  );
+  return (
+    <div className="mb-2 flex flex-wrap gap-3 text-xs text-slate-600">
+      {select("rows", "Down")}
+      {select("cols", "Across")}
+    </div>
+  );
+}
+
+function GridView({ shape, entries, members, name }: { shape: Shape; entries: Entry[]; members: (p: number) => string[]; name: Namer }) {
+  const { axes, choose } = useAxes(shape);
+  const cells = gridOf(entries, axes);
+  const rows = members(axes.rows);
+  const cols = axes.cols >= 0 ? members(axes.cols) : [""];
+  const insideSets = axes.inside.map((i) => shape.sets[i]);
+  return (
+    <div>
+      <AxisPicker shape={shape} axes={axes} choose={choose} />
+      <table className="border-separate border-spacing-1 text-xs">
+        <thead>
+          <tr>
+            <th />
+            {cols.map((c) => <th key={c} scope="col" className="px-1 text-left font-medium text-slate-500">{name(shape.sets[axes.cols], c)}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r}>
+              <th scope="row" className="whitespace-nowrap pr-2 text-left font-medium text-slate-600">{name(shape.sets[axes.rows], r)}</th>
+              {cols.map((c) => {
+                const cell = cells.get(cellKey(r, c));
+                return (
+                  <td key={c} className="min-w-[4.5rem] rounded bg-slate-50 p-1 align-top">
+                    {cell && insideSets.length === 0 && <span aria-label="chosen" className="font-semibold text-emerald-700">✓</span>}
+                    {cell && insideSets.length > 0 && (
+                      <div className="flex flex-wrap gap-0.5">
+                        {cell.inside.map((keys) => {
+                          const label = keys.map((k, j) => name(insideSets[j], k)).join(" · ");
+                          return (
+                            <span key={keys.join("\u0001")} className="rounded px-1 py-0.5 text-[11px] font-medium text-white"
+                                  style={{ background: colourOf(keys.join("\u0001")) }}>{label}</span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {cell && insideSets.length > 0 && <div className="mt-0.5 text-right text-[10px] text-slate-400">{cell.inside.length}</div>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HeatTable({ shape, axes, entries, members, name, largest }: {
+  shape: Shape; axes: { rows: number; cols: number; inside: number[] }; entries: Entry[]; members: (p: number) => string[]; name: Namer; largest: number;
+}) {
+  const cells = gridOf(entries, axes);
+  const rows = members(axes.rows);
+  const cols = members(axes.cols);
+  return (
+    <table className="border-separate border-spacing-0.5 text-xs tabular-nums">
+      <thead>
+        <tr>
+          <th />
+          {cols.map((c) => <th key={c} scope="col" className="px-1 font-medium text-slate-500">{name(shape.sets[axes.cols], c)}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r}>
+            <th scope="row" className="whitespace-nowrap pr-2 text-left font-medium text-slate-600">{name(shape.sets[axes.rows], r)}</th>
+            {cols.map((c) => {
+              const value = cells.get(cellKey(r, c))?.value ?? null;
+              const s = shade(value, largest);
+              return (
+                <td key={c} className="min-w-[3rem] rounded px-1 py-1 text-center"
+                    style={{ background: value === null ? "rgb(248 250 252)" : `rgba(234, 88, 12, ${0.12 + s * 0.78})`, color: s > 0.55 ? "white" : "rgb(15 23 42)" }}>
+                  {value === null ? "" : formatAmount(value)}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function HeatView({ shape, entries, members, name }: { shape: Shape; entries: Entry[]; members: (p: number) => string[]; name: Namer }) {
+  const { axes, choose } = useAxes(shape);
+  const largest = Math.max(0, ...[...gridOf(entries, axes).values()].map((c) => Math.abs(c.value ?? 0)));
+  return (
+    <div>
+      <AxisPicker shape={shape} axes={axes} choose={choose} />
+      <HeatTable shape={shape} axes={axes} entries={entries} members={members} name={name} largest={largest} />
+      {axes.inside.length > 0 && <p className="mt-1 text-xs text-slate-500">Each cell sums over {axes.inside.map((i) => shape.sets[i]).join(", ")}.</p>}
+    </div>
+  );
+}
+
+/** One heat matrix per member of the remaining set, all on one scale. */
+function PanelsView({ shape, entries, members, name }: { shape: Shape; entries: Entry[]; members: (p: number) => string[]; name: Namer }) {
+  const { axes, choose } = useAxes(shape);
+  const panel = axes.inside[0];
+  const largest = Math.max(0, ...entries.map((e) => Math.abs(e.value ?? 0)));
+  const rest = { ...axes, inside: axes.inside.slice(1) };
+  return (
+    <div>
+      <AxisPicker shape={shape} axes={axes} choose={choose} />
+      <div className="flex flex-wrap gap-4">
+        {members(panel).map((m) => (
+          <figure key={m}>
+            <figcaption className="mb-1 text-xs font-semibold text-slate-700">{shape.sets[panel]}: {name(shape.sets[panel], m)}</figcaption>
+            <HeatTable shape={shape} axes={rest} entries={entries.filter((e) => e.index[panel] === m)} members={members} name={name} largest={largest} />
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BarsView({ sets, entries, members, name }: { sets: string[]; entries: Entry[]; members: string[]; name: Namer }) {
+  const value = new Map(entries.map((e) => [e.index[0], e.value ?? 0]));
+  const largest = Math.max(1e-9, ...[...value.values()].map(Math.abs));
+  return (
+    <ul className="space-y-1 text-xs tabular-nums">
+      {members.map((m) => {
+        const v = value.get(m) ?? 0;
+        return (
+          <li key={m} className="flex items-center gap-2">
+            <span className="w-32 shrink-0 truncate text-slate-600">{name(sets[0], m)}</span>
+            <span className="h-3 rounded bg-blue-600" style={{ width: `${(Math.abs(v) / largest) * 60}%`, minWidth: v ? 2 : 0 }} />
+            <span className="text-slate-700">{formatAmount(v)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function LineView({ sets, entries, members, name }: { sets: string[]; entries: Entry[]; members: string[]; name: Namer }) {
+  const value = new Map(entries.map((e) => [e.index[0], e.value ?? 0]));
+  const points = members.map((m) => value.get(m) ?? 0);
+  const W = Math.max(240, members.length * 36), H = 140, left = 44, bottom = 22;
+  const top = Math.max(1e-9, ...points), low = Math.min(0, ...points);
+  const x = (i: number) => left + (members.length === 1 ? 0 : (i * (W - left - 8)) / (members.length - 1));
+  const y = (v: number) => 8 + (1 - (v - low) / (top - low || 1)) * (H - bottom - 8);
+  const every = Math.ceil(members.length / 12);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} role="img" aria-label={`${sets[0]} over time`} className="text-slate-500">
+      {[low, top].map((v) => (
+        <g key={v}>
+          <line x1={left} x2={W - 8} y1={y(v)} y2={y(v)} stroke="rgb(226 232 240)" />
+          <text x={left - 4} y={y(v) + 3} textAnchor="end" fontSize="10" fill="currentColor">{formatAmount(v)}</text>
+        </g>
+      ))}
+      <polyline points={points.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="#2563eb" strokeWidth="2" />
+      {points.map((v, i) => <circle key={members[i]} cx={x(i)} cy={y(v)} r="2.5" fill="#2563eb"><title>{`${name(sets[0], members[i])}: ${formatAmount(v)}`}</title></circle>)}
+      {members.map((m, i) => i % every === 0 && (
+        <text key={m} x={x(i)} y={H - 6} textAnchor="middle" fontSize="10" fill="currentColor">{name(sets[0], m)}</text>
+      ))}
+    </svg>
+  );
+}
+
+function ChosenView({ set, entries, members, name }: { set: string; entries: Entry[]; members: string[]; name: Namer }) {
+  const chosen = new Set(entries.map((e) => e.index[0]));
+  return (
+    <ul className="flex flex-wrap gap-1.5 text-xs">
+      {members.map((m) => (
+        <li key={m} className={chosen.has(m) ? "rounded bg-emerald-600 px-2 py-1 font-medium text-white" : "rounded border border-slate-200 px-2 py-1 text-slate-400"}
+            aria-label={chosen.has(m) ? `${name(set, m)} (chosen)` : name(set, m)}>
+          {name(set, m)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ListView({ sets, entries, name }: { sets: string[]; entries: Entry[]; name: Namer }) {
+  return (
+    <ul className="flex flex-wrap gap-2">
+      {entries.map((e) => (
+        <li key={e.index.join("\u0001")} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+          {e.index.map((k, i) => name(sets[i], k)).join(" · ")}
+          {e.value !== null && <span className="ml-1 font-semibold tabular-nums">= {formatAmount(e.value)}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}

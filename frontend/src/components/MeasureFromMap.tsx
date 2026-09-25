@@ -39,13 +39,13 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         const k = nearest.trim() === "" ? undefined : Number(nearest);
         if (k !== undefined && !(Number.isInteger(k) && k >= 1)) return setError("Keep the nearest: a whole number, 1 or more, or blank for all.");
         const done = await distances.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, metric, unit, ...(k ? { nearest: k } : {}) });
-        toast.success(`${name}: ${done.pairs.toLocaleString()} distances computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
+        toast.success(`${name}: ${done.pairs.toLocaleString("en-US")} distances computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
       } else {
         const max = Number(metric === "time" ? minutes : km);
         if (!(max > 0)) return setError(metric === "time" ? "Within: a time above 0 minutes." : "Within: a distance above 0 km.");
         const reach = metric === "time" ? { max_min: max } : { max_m: max * 1000 };
         const done = await within.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, metric, ...reach });
-        toast.success(`${name}: ${done.edges.toLocaleString()} pairs within ${max} ${metric === "time" ? "min" : "km"} linked`);
+        toast.success(`${name}: ${done.edges.toLocaleString("en-US")} pairs within ${max} ${metric === "time" ? "min" : "km"} linked`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

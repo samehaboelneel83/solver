@@ -30,6 +30,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
+import RunViews from "../components/RunViews";
 import { RunMapView } from "../genui/components/SpatialMap";
 
 /**
@@ -959,26 +960,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         </>
       )}
 
-      {Object.entries(roster).map(([variable, tuples]) => {
-        const name = naming(data.labels, data.index_sets.variables[variable]);
-        return (
-          <div key={variable}>
-            <h3 className="mb-2 text-sm font-semibold text-slate-900">
-              {variable} &mdash; {tuples.length} chosen
-            </h3>
-            <ul className="flex flex-wrap gap-2">
-              {tuples.map((tuple) => (
-                <li
-                  key={tuple.join("\u0001")}
-                  className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
-                >
-                  {name(tuple).join(" · ")}
-                </li>
-              ))}
-            </ul>
-          </div>
-        );
-      })}
+      {Object.keys(roster).length > 0 && <RunViews run={data} />}
 
       {data.reduced_costs &&
         Object.values(data.reduced_costs).some((entries) => entries.length > 0) && (

@@ -354,10 +354,17 @@ describe("Runs", () => {
     stub();
     renderPage();
 
-    expect(await screen.findByText(/Ahmed Salah . Monday . morning/)).toBeInTheDocument();
+    // The roster is drawn as a grid (queue R17): names inside the cells and on the axes.
+    expect(await screen.findByText("Ahmed Salah")).toBeInTheDocument();
+    expect(screen.getAllByText("Monday").length).toBeGreaterThan(0);
     // `shift` has no labels in the frozen data, so that position stays as the
     // key rather than going blank.
-    expect(screen.queryByText(/ahmed . mon . morning/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("morning").length).toBeGreaterThan(0);
+    expect(screen.queryByText("ahmed")).not.toBeInTheDocument();
+    expect(screen.queryByText("mon")).not.toBeInTheDocument();
+    // And the plain list, one click away, reads the whole tuple in names.
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    expect(screen.getByText(/Ahmed Salah . Monday . morning/)).toBeInTheDocument();
   });
 
   it("falls back to the key for a run made before names were frozen", async () => {
@@ -367,7 +374,8 @@ describe("Runs", () => {
     stub({ run: { ...RUN_DETAIL, labels: {} } });
     renderPage();
 
-    expect(await screen.findByText(/ahmed . mon . morning/)).toBeInTheDocument();
+    expect(await screen.findByText("ahmed")).toBeInTheDocument();
+    expect(screen.getAllByText("mon").length).toBeGreaterThan(0);
   });
 
   it("names the rules that cannot hold together when there is no answer", async () => {

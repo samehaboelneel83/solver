@@ -169,6 +169,15 @@ class RunRead(RunSummary):
     # model version the run solved): what a conflict is read in, rather than
     # rule ids. Only rules that carry one.
     rule_notes: dict[str, str] = {}
+    # What a view is chosen from (queue R17): each decision's kind (binary, integer, continuous,
+    # interval), each set's role in the domain (time, agent, location...), and each set's members
+    # in the order the dataset froze them -- Monday to Sunday, not alphabetically.
+    variable_kinds: dict[str, str] = {}
+    set_roles: dict[str, str] = {}
+    set_order: dict[str, list[str]] = {}
+    # How much each whole-number or continuous decision took, where it took any (migration 0065).
+    # Null for runs recorded before it, and when there is no answer.
+    amounts: dict[str, list[dict[str, Any]]] | None = None
     # The trade-off front, when one was asked for (migration 0045): its
     # points in order of the first term, each linked to its own run, and
     # the two terms' ids. Null otherwise.
@@ -541,6 +550,30 @@ def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any
     return row["labels"] or {}, {"variables": variables, "constraints": constraints}, notes
 
 
+def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]]]:
+    """Each decision's kind, each set's role and each set's members in order (queue R17)."""
+    row = db.execute(
+        text(
+            "SELECT mv.ir AS ir, d.data -> 'sets' AS sets, p.domain_id AS domain"
+            "  FROM run r JOIN dataset d ON d.id = r.dataset_id JOIN scenario s ON s.id = r.scenario_id"
+            "  JOIN problem p ON p.id = s.problem_id JOIN model_version mv ON mv.id = s.model_version_id"
+            " WHERE r.id = :r"
+        ),
+        {"r": run_id},
+    ).mappings().one()
+    ir = row["ir"] or {}
+    kinds = {name: str(spec.get("domain", "binary")) for name, spec in (ir.get("variables") or {}).items()
+             if isinstance(spec, dict)}
+    names = [s for s in ir.get("sets") or [] if isinstance(s, str)]
+    roles = dict(db.execute(
+        text("SELECT name, role::text FROM entity_type WHERE domain_id = :d AND name = ANY(:n)"),
+        {"d": row["domain"], "n": names},
+    ).all()) if names else {}
+    sets = row["sets"] or {}
+    order = {name: [str(r["id"]) for r in sets.get(name, []) if isinstance(r, dict) and "id" in r] for name in names}
+    return kinds, roles, order
+
+
 def _front(db: Session, run: Run) -> dict[str, Any]:
     rows = db.execute(
         text(
@@ -563,6 +596,7 @@ def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
     labels, index_sets, rule_notes = _vocabulary(db, run_id)
+    kinds, roles, order = _shapes(db, run_id)
     constraints = db.scalars(
         select(ConstraintResult)
         .where(ConstraintResult.run_id == run_id)
@@ -575,6 +609,10 @@ def _read(db: Session, run_id: int) -> RunRead:
         labels=labels,
         index_sets=index_sets,
         rule_notes=rule_notes,
+        variable_kinds=kinds,
+        set_roles=roles,
+        set_order=order,
+        amounts=solution.amounts if solution else None,
         **_front(db, run),
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,

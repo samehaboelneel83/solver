@@ -568,6 +568,13 @@ export type Run = RunSummary & {
   assignments: Record<string, string[][]> | null;
   /** Reduced costs from a linear solver. Null when the backend has none. */
   reduced_costs: Record<string, { index: string[]; value: number }[]> | null;
+  /** What a view is chosen from (queue R17): each decision's kind, each set's role, each set's
+   * members in the dataset's order. Absent from servers before them. */
+  variable_kinds?: Record<string, string>;
+  set_roles?: Record<string, string>;
+  set_order?: Record<string, string[]>;
+  /** How much each whole-number or continuous decision took (migration 0065). Null for older runs. */
+  amounts?: Record<string, { index: string[]; value: number }[]> | null;
   constraints: ConstraintOutcome[];
 };
 

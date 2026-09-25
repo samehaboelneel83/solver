@@ -83,8 +83,8 @@ def reuse(db: Session, *, key: str, scenario_id: int, dataset_id: int, params: d
     ).scalar_one()
     db.execute(
         text(
-            "INSERT INTO solution (run_id, assignments, reduced_costs)"
-            " SELECT :r, assignments, reduced_costs FROM solution WHERE run_id = :o"
+            "INSERT INTO solution (run_id, assignments, reduced_costs, amounts)"
+            " SELECT :r, assignments, reduced_costs, amounts FROM solution WHERE run_id = :o"
         ),
         {"r": run_id, "o": original},
     )
