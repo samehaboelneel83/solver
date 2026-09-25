@@ -104,7 +104,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 - Nothing mid-item. (An opaque block remains only for a shape the blocks could not write back exactly -- e.g. a `connected` rule whose decision is indexed [group, unit], a curve of more than 12 points, an `add` of one term.)
 
 ### ❌ Not completed
-- Nothing queued. Open, unqueued: connectivity at scale; the Model Editor design import (waits on the user's `/design-login` or the design files); the forms have no control for a rule's `chance` (the blocks do).
+- Queued: **R13 connectivity at scale** (districting past ~200 cells). Done since R12: R8b (a rule's chance in the forms), R8c (chance rules held below their asked share in sample so they keep it out of sample). Waiting on the user: the Model Editor design import (`/design-login` or the design files); where per-scenario data values would be stored (a data-model choice).
 - Connectivity at scale ("approach C": cuts or a heuristic warm start) — not queued as an item yet; recorded as the bench's conclusion.
 - Vector tiles (`egypt_osm`, `pbf`) — not rendered anywhere.
 - GeometryPreview thumbnails have no basemap (deliberately, 64–96 px).
