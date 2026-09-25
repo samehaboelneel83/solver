@@ -486,3 +486,20 @@ describe("objectsPalette", () => {
     expect(palette.nodeData?.["2"]?.er).toBe("object");
   });
 });
+
+
+describe("inheritance in the schema drawing (queue R18)", () => {
+  it("draws an 'is a' edge from each type to its parent, and inherited attributes only on the type that declares them", async () => {
+    const { buildTypesView } = await import("./typesGraph");
+    const capacity = { id: 11, name: "capacity", data_type: "integer", entity_type_id: 1, sort_order: 1 };
+    const types = [
+      { id: 1, domain_id: 1, name: "vehicle", role: "resource", colour: null, icon: null, updated_at: "", attributes: [capacity], own_attributes: [capacity], is_abstract: true, inherited_from: null },
+      { id: 2, domain_id: 1, name: "truck", role: "resource", colour: null, icon: null, updated_at: "", attributes: [capacity], own_attributes: [], is_abstract: false, inherited_from: 1 },
+    ];
+    const { graph, palette } = buildTypesView(types as never, []);
+    const isa = graph.edges.filter((e) => e.type === "inherits");
+    expect(isa).toEqual([expect.objectContaining({ source: "type-2", target: "type-1", label: "is a" })]);
+    expect(palette.edgeData?.[isa[0].id]).toMatchObject({ er: "inherits" });
+    expect(graph.nodes.filter((n) => n.label === "capacity")).toHaveLength(1);
+  });
+});

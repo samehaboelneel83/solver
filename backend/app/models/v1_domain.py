@@ -112,6 +112,11 @@ class EntityType(Base):
     # `server_onupdate` would only describe what the database does, and
     # the ORM must re-read it rather than predict it, which is why every
     # write path calls `db.refresh()` already.
+    # Migration 0066 (queue R18): a type may inherit from another of its domain -- its
+    # ancestors' attributes, and a place wherever an ancestor is expected -- and an abstract
+    # type holds no entities of its own, only its descendants do.
+    is_abstract: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    inherited_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )

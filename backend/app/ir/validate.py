@@ -1651,11 +1651,21 @@ class _DomainWorld:
     """What one domain declares, in the shape the rules ask about."""
 
     def __init__(self, db: Session, domain_id: int) -> None:
-        rows = db.execute(
-            select(EntityType.id, EntityType.name).where(EntityType.domain_id == domain_id)
+        typed = db.execute(
+            select(EntityType.id, EntityType.name, EntityType.inherited_from).where(EntityType.domain_id == domain_id)
         ).all()
+        rows = [(type_id, name) for type_id, name, _ in typed]
         self.entity_type_ids = {name: type_id for type_id, name in rows}
         self.type_name_by_id = {type_id: name for type_id, name in rows}
+        #: Migration 0066 (queue R18): each type's ancestors, nearest first.
+        parent = {type_id: inherited for type_id, _, inherited in typed}
+        self.ancestors: dict[str, list[str]] = {}
+        for type_id, name in rows:
+            chain, up = [], parent.get(type_id)
+            while up is not None and up in self.type_name_by_id and len(chain) < 64:
+                chain.append(self.type_name_by_id[up])
+                up = parent.get(up)
+            self.ancestors[name] = chain
         self.attributes: dict[tuple[str, str], dict[str, Any]] = {}
         if rows:
             for type_id, name, data_type, required, enum_values in db.execute(
@@ -1672,6 +1682,12 @@ class _DomainWorld:
                     "required": required,
                     "enum_values": list(enum_values) if enum_values else [],
                 }
+        # An entity of a type has its ancestors' attributes too.
+        for name, chain in self.ancestors.items():
+            for ancestor in chain:
+                for (owner, attribute), declared in list(self.attributes.items()):
+                    if owner == ancestor:
+                        self.attributes.setdefault((name, attribute), declared)
         self.parameter_index: dict[str, list[str]] = {}
         for name, index_type_ids in db.execute(
             select(ParameterDef.name, ParameterDef.index_type_ids).where(
@@ -1696,6 +1712,11 @@ class _DomainWorld:
                 self.type_name_by_id.get(from_id, f"#{from_id}"),
                 self.type_name_by_id.get(to_id, f"#{to_id}"),
             )
+
+
+    def is_a(self, set_name: str | None, ancestor: str) -> bool:
+        """`set_name` is `ancestor` or inherits from it (queue R18)."""
+        return set_name == ancestor or ancestor in self.ancestors.get(set_name or "", [])
 
 
 def _value_is_of_type(value: Any, declared: dict[str, Any]) -> bool:
@@ -1806,7 +1827,7 @@ class _DomainChecker:
                 return Refusal(problem.code, [*loc, part, *problem.loc[len(loc) + 2 :]], problem.message)
         units = body["units"]["set"]
         ends = self.world.relationship_ends[body["via"]]
-        if ends != (units, units):
+        if not (self.world.is_a(units, ends[0]) and self.world.is_a(units, ends[1])):
             return Refusal(
                 "connected_via_not_self",
                 [*loc, "via"],
@@ -1882,7 +1903,8 @@ class _DomainChecker:
         anchor_end, bound_end = ("from", to_set) if "from" in via else ("to", from_set)
         anchor_set = from_set if anchor_end == "from" else to_set
         actual_anchor = scope.get(via[anchor_end])
-        if actual_anchor != anchor_set or binding["set"] != bound_end:
+        # A type that inherits from an end's type stands in for it (queue R18).
+        if not self.world.is_a(actual_anchor, anchor_set) or not self.world.is_a(binding["set"], bound_end):
             return Refusal(
                 "binding_via_endpoint_mismatch",
                 here,

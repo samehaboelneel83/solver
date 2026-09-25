@@ -24,13 +24,16 @@ import {
   useOrderAttributes,
   useDeleteEntityType,
   useEntityType,
+  useEntityTypes,
   useUpdateAttribute,
   useUpdateEntityType,
   type AttributeDef,
   type AttributeDefCreate,
   type EntityRole,
   type EntityType,
+  type Id,
 } from "../api/v1";
+import InheritanceFields from "../components/InheritanceFields";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { typeColour } from "../lib/colour";
@@ -120,13 +123,18 @@ function Editor({ type, reload }: { type: EntityType; reload: () => Promise<Enti
 /** The three controls this form holds, as the reload merge compares
  * them. The attributes below are edited through their own routes and are
  * not part of the type's own row -- see `test_api_concurrency.py`. */
-type TypeDrafts = { name: string; role: EntityRole; colour: string | null; icon: string | null };
+type TypeDrafts = {
+  name: string; role: EntityRole; colour: string | null; icon: string | null;
+  inherited_from: Id | null; is_abstract: boolean;
+};
 
 const typeDraftsOf = (type: EntityType): TypeDrafts => ({
   name: type.name,
   role: type.role,
   colour: type.colour,
   icon: type.icon ?? null,
+  inherited_from: type.inherited_from ?? null,
+  is_abstract: type.is_abstract ?? false,
 });
 
 function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<EntityType | null> }) {
@@ -135,6 +143,9 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
   const [role, setRole] = useState<EntityRole>(type.role);
   const [colour, setColour] = useState<string | null>(type.colour);
   const [icon, setIcon] = useState<string | null>(type.icon ?? null);
+  const [inheritedFrom, setInheritedFrom] = useState<Id | null>(type.inherited_from ?? null);
+  const [isAbstract, setIsAbstract] = useState<boolean>(type.is_abstract ?? false);
+  const siblings = useEntityTypes(type.domain_id, { limit: 500 });
   // See `EntityTypes.CreateTypeForm`: an unparseable entry has no value to
   // hold, so the reason it has none is held instead.
   const [colourProblem, setColourProblem] = useState<string | null>(null);
@@ -157,12 +168,14 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
       const fresh = await reload();
       if (!fresh) return;
       const freshDrafts = typeDraftsOf(fresh);
-      const current: TypeDrafts = { name, role, colour, icon };
+      const current: TypeDrafts = { name, role, colour, icon, inherited_from: inheritedFrom, is_abstract: isAbstract };
       const merged = mergeReload(seeded.current, current, freshDrafts);
       setName(merged.name);
       setRole(merged.role);
       setColour(merged.colour);
       setIcon(merged.icon);
+      setInheritedFrom(merged.inherited_from);
+      setIsAbstract(merged.is_abstract);
       const brought = reloadedKeys(seeded.current, current, freshDrafts);
       setUpdatedAt(fresh.updated_at);
       setStale(null);
@@ -190,7 +203,12 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
     try {
       const saved = await updateType.mutateAsync({
         id: type.id,
-        body: { name, role, colour, icon, updated_at: updatedAt },
+        body: {
+          name, role, colour, icon, updated_at: updatedAt,
+          // Sent only when changed: a form that never touched inheritance leaves it alone.
+          ...(inheritedFrom !== (type.inherited_from ?? null) ? { inherited_from: inheritedFrom } : {}),
+          ...(isAbstract !== (type.is_abstract ?? false) ? { is_abstract: isAbstract } : {}),
+        },
       });
       setUpdatedAt(saved.updated_at);
       seeded.current = typeDraftsOf(saved);
@@ -240,6 +258,15 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
             }
           }}
         />
+        <InheritanceFields
+          types={siblings.data?.items ?? []}
+          selfId={type.id}
+          inheritedFrom={inheritedFrom}
+          isAbstract={isAbstract}
+          onInheritedFrom={setInheritedFrom}
+          onAbstract={setIsAbstract}
+          errors={errors}
+        />
         <IconField
           value={icon}
           typeName={name || type.name}
@@ -274,6 +301,12 @@ type Editing = null | "new" | number;
 
 function Attributes({ type }: { type: EntityType }) {
   const { can } = useCapabilities();
+  // The type's own definitions are what this section adds, edits and orders; inherited ones
+  // (queue R18) are its ancestors' to change, and are listed below the table.
+  const ownAttributes = type.own_attributes ?? type.attributes;
+  const inherited = (type.own_attributes ? type.attributes.slice(type.own_attributes.length) : []);
+  const types = useEntityTypes(type.domain_id, { limit: 500 });
+  const typeName = (id: Id | null | undefined) => types.data?.items.find((t) => t.id === id)?.name ?? "an ancestor";
   const canEdit = can("domain.edit");
   const [editing, setEditing] = useState<Editing>(null);
   const [serverErrors, setServerErrors] = useState<FieldErrors | null>(null);
@@ -285,12 +318,12 @@ function Attributes({ type }: { type: EntityType }) {
   const orderAttributes = useOrderAttributes();
   const toast = useToast();
 
-  const editingAttribute = typeof editing === "number" ? type.attributes.find((a) => a.id === editing) : undefined;
+  const editingAttribute = typeof editing === "number" ? ownAttributes.find((a) => a.id === editing) : undefined;
 
   async function move(index: number, by: -1 | 1) {
-    const ids = swapped(type.attributes, index, by);
+    const ids = swapped(ownAttributes, index, by);
     if (!ids) return;
-    const moved = type.attributes[index];
+    const moved = ownAttributes[index];
     try {
       await orderAttributes.mutateAsync({ entityTypeId: type.id, attributeIds: ids });
       toast.success(`"${moved.name}" moved ${by < 0 ? "up" : "down"}`);
@@ -361,7 +394,7 @@ function Attributes({ type }: { type: EntityType }) {
         Attributes
       </h2>
 
-      {type.attributes.length === 0 ? (
+      {ownAttributes.length === 0 ? (
         <p className="mb-4 text-sm text-slate-600">No attributes yet. Every entity of this type will have only a key and a label until you add some.</p>
       ) : (
         <div className="mb-4 overflow-x-auto">
@@ -381,12 +414,12 @@ function Attributes({ type }: { type: EntityType }) {
               </tr>
             </thead>
             <tbody>
-              {type.attributes.map((attribute, index) => (
+              {ownAttributes.map((attribute, index) => (
                 <tr key={attribute.id} className="border-b border-slate-100 last:border-0 align-top">
                   <AttributeOrderCell
                     attribute={attribute}
                     index={index}
-                    count={type.attributes.length}
+                    count={ownAttributes.length}
                     canEdit={canEdit}
                     busy={orderAttributes.isPending}
                     onMove={move}
@@ -472,6 +505,26 @@ function Attributes({ type }: { type: EntityType }) {
           )}
         </div>
       )}
+      {inherited.length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">Inherited</h3>
+          <p className="mb-2 text-xs text-slate-500">Every entity of this type has these too. They are changed on the type that declares them.</p>
+          <ul className="divide-y divide-slate-100 rounded border border-slate-200 text-sm" aria-label="Inherited attributes">
+            {inherited.map((attribute) => (
+              <li key={attribute.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                <span className="font-mono text-slate-900">{attribute.name}</span>
+                <span className="text-slate-600">{dataTypeLabel(attribute.data_type)}</span>
+                <span className="ms-auto text-xs text-slate-500">
+                  from{" "}
+                  <Link to={`/entity-types/${attribute.entity_type_id}`} className="text-blue-700 underline">
+                    {typeName(attribute.entity_type_id)}
+                  </Link>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -483,7 +536,7 @@ function DeleteType({ type }: { type: EntityType }) {
   const navigate = useNavigate();
 
   async function handleDelete() {
-    const count = type.attributes.length;
+    const count = (type.own_attributes ?? type.attributes).length;
     const attributes = count === 1 ? "its 1 attribute definition" : `its ${count} attribute definitions`;
     // What goes with it is the database's ON DELETE CASCADE chain
     // (migration 0006): attribute_def and entity reference entity_type;

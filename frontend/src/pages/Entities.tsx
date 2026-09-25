@@ -180,7 +180,12 @@ function TypeChooser({
           ))}
         </select>
       </div>
-      {selected && can("domain.edit") && (
+      {selected?.is_abstract && (
+        <p className="text-sm text-slate-600">
+          <span className="font-mono">{selected.name}</span> is abstract: its entities are those of the types that inherit from it.
+        </p>
+      )}
+      {selected && !selected.is_abstract && can("domain.edit") && (
         <Link
           to={`/entities/new?type=${selected.id}`}
           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"

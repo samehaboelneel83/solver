@@ -284,6 +284,24 @@ export function graphStylesheet() {
         "target-text-offset": 26,
       },
     },
+    {
+      // "is a" (queue R18): dashed, child to parent, an open triangle at the parent -- the
+      // generalization arrow of the notation.
+      selector: 'edge[er = "inherits"]',
+      style: {
+        width: 1.5,
+        "line-style": "dashed",
+        "curve-style": "bezier",
+        "target-arrow-shape": "triangle",
+        "target-arrow-fill": "hollow",
+        "arrow-scale": 1.6,
+        label: "is a",
+        "font-size": "11px",
+        color: "#64748b",
+        "text-background-color": "#ffffff",
+        "text-background-opacity": 1,
+      },
+    },
     // -- the optimization view (lib/modelGraph.ts) --
     // Two-line labels: a name, then what the part is (domain and index, or
     // whether the rule may bend). Sizes come from the label, estimated where

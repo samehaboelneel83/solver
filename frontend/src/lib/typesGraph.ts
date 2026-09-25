@@ -97,6 +97,8 @@ export type ErData = {
     | "attribute"
     | "connector"
     | "attribute-link"
+    // A type inheriting from another (queue R18): child -> parent, the notation's open triangle.
+    | "inherits"
     // The optimization view (lib/modelGraph.ts).
     | "set"
     | "variable"
@@ -325,7 +327,7 @@ export function buildTypesView(
       type: type.role,
       label: type.name,
       parent: null,
-      attributes: { er: "entity", role: type.role, attributes: type.attributes.length },
+      attributes: { er: "entity", role: type.role, attributes: (type.own_attributes ?? type.attributes).length },
     });
     nodeData[nodeId] = { er: "entity", w: Math.max(100, textWidth(type.name, 10.2) + 40) };
 
@@ -335,9 +337,19 @@ export function buildTypesView(
     addAttribute(`${KEY_NODE_PREFIX}${type.id}`, underlined("key"), nodeId, type.role, "node");
     // The API already returns them in their chosen order (0027); sorting
     // again keeps the drawing right if a caller hands over another order.
-    for (const attribute of [...type.attributes].sort(byChosenOrder)) {
+    // The type's own attributes: an inherited one is drawn once, on the type that declares it.
+    for (const attribute of [...(type.own_attributes ?? type.attributes)].sort(byChosenOrder)) {
       addAttribute(`${ATTRIBUTE_NODE_PREFIX}${attribute.id}`, attribute.name, nodeId, type.role, "node");
     }
+  }
+
+  // "is a": each type to the type it inherits from (queue R18).
+  for (const type of entityTypes) {
+    if (type.inherited_from == null || !known.has(String(type.inherited_from))) continue;
+    const id = `isa-${type.id}`;
+    edges.push({ id, source: typeNodeId(type.id), target: typeNodeId(type.inherited_from), type: "inherits", label: "is a", attributes: {} });
+    palette.edgeColour[id] = "#64748b";
+    edgeData[id] = { er: "inherits", selectKind: "node", selectId: typeNodeId(type.id) };
   }
 
   const drawable = relationshipTypes.filter(

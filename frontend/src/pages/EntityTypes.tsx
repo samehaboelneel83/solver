@@ -21,6 +21,7 @@ import { useToast } from "../components/ToastProvider";
 import { formatApiError } from "../api/errors";
 import GridGeneratorForm from "../components/GridGeneratorForm";
 import { useCreateEntityType, useEntityTypes, type EntityRole, type Id } from "../api/v1";
+import InheritanceFields from "../components/InheritanceFields";
 import { typeColour } from "../lib/colour";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
@@ -137,7 +138,10 @@ function TypeList({ domainId }: { domainId: Id }) {
                   <span className="font-mono text-xs">{type.colour ?? "automatic"}</span>
                 </span>
               </td>
-              <td className="px-3 py-2 text-slate-700">{roleLabel(type.role)}</td>
+              <td className="px-3 py-2 text-slate-700">
+                {roleLabel(type.role)}
+                {type.is_abstract && <span className="ms-2 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">abstract</span>}
+              </td>
               <td className="px-3 py-2 text-slate-700">{type.attributes.length}</td>
             </tr>
           ))}
@@ -147,7 +151,7 @@ function TypeList({ domainId }: { domainId: Id }) {
   );
 }
 
-const TYPE_FIELDS = ["name", "role", "colour", "icon"];
+const TYPE_FIELDS = ["name", "role", "colour", "icon", "inherited_from", "is_abstract"];
 
 /** The name + role + colour form shared by "new type" (here) and the type
  * editor. `colour` is optional: null means the graph picks a stable one
@@ -250,6 +254,9 @@ export const ENTITY_TYPE_FIELDS = TYPE_FIELDS;
 function CreateTypeForm({ domainId }: { domainId: Id }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<EntityRole>("other");
+  const [inheritedFrom, setInheritedFrom] = useState<Id | null>(null);
+  const [isAbstract, setIsAbstract] = useState(false);
+  const siblings = useEntityTypes(domainId, { limit: 500 });
   const [colour, setColour] = useState<string | null>(null);
   // What the colour box holds but cannot commit. Held here rather than in
   // `colour`, because a value that cannot be parsed is not a colour.
@@ -272,7 +279,11 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
     replace(problems);
     if (Object.keys(problems).length > 0) return;
     try {
-      const created = await createType.mutateAsync({ domain_id: domainId, name, role, colour });
+      const created = await createType.mutateAsync({
+        domain_id: domainId, name, role, colour,
+        ...(isAbstract ? { is_abstract: true } : {}),
+        ...(inheritedFrom !== null ? { inherited_from: inheritedFrom } : {}),
+      });
       toast.success(`Entity type "${created.name}" created`);
       navigate(`/entity-types/${created.id}`);
     } catch (err) {
@@ -306,6 +317,14 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
           onRole={setRole}
           onColour={setColour}
           onColourProblem={setColourProblem}
+        />
+        <InheritanceFields
+          types={siblings.data?.items ?? []}
+          inheritedFrom={inheritedFrom}
+          isAbstract={isAbstract}
+          onInheritedFrom={setInheritedFrom}
+          onAbstract={setIsAbstract}
+          errors={errors}
         />
         <button
           type="submit"

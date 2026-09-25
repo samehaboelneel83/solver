@@ -156,8 +156,15 @@ export type EntityType = {
    * image's `data:` URI, or null for "not chosen" -- the Graph View then
    * picks a default from the name and role. */
   icon: string | null;
-  /** Ordered by name. Carried on the list route too. */
+  /** Every attribute an entity of this type has: its own, then its ancestors' (queue R18), each
+   * carrying the `entity_type_id` it is declared on. Carried on the list route too. */
   attributes: AttributeDef[];
+  /** The type's own attribute definitions -- what its attribute editor adds, edits and orders. */
+  own_attributes?: AttributeDef[];
+  /** Migration 0066 (queue R18): an abstract type holds no entities of its own. */
+  is_abstract?: boolean;
+  /** The type this one inherits from, or null. */
+  inherited_from?: Id | null;
   /** Migration 0010, Ruling 42. An opaque token, never parsed here: it is
    * sent back verbatim on PATCH and the server refuses a save built on a
    * superseded read with a 409. Parsing it into a `Date` would lose the
@@ -171,6 +178,8 @@ export type EntityTypeCreate = {
   role?: EntityRole;
   colour?: string | null;
   icon?: string | null;
+  is_abstract?: boolean;
+  inherited_from?: Id | null;
 };
 /** An explicit `null` clears the colour (or the icon); an omitted key leaves it alone.
  * `updated_at` is the value the form last read -- it is compared, never
@@ -180,17 +189,31 @@ export type EntityTypeUpdate = {
   role?: EntityRole;
   colour?: string | null;
   icon?: string | null;
+  is_abstract?: boolean;
+  /** An explicit null takes the type out of its lineage. */
+  inherited_from?: Id | null;
   updated_at?: string;
 };
 
-export function listEntityTypes(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<EntityType>> {
-  const { domainId, limit, offset } = params;
-  return apiFetch(`/api/v1/entity-types${query({ domain_id: domainId, limit, offset })}`);
+/** The server sends a type's own attributes and its ancestors' apart (queue R18); every screen
+ * that asks "what does an entity of this type have" reads `attributes`, so they are joined here,
+ * once -- own first, then nearest ancestor's -- and the own ones kept for the attribute editor. */
+export function withInherited(type: EntityType & { inherited_attributes?: AttributeDef[] }): EntityType {
+  if (!type || type.own_attributes || !Array.isArray(type.attributes)) return type;
+  const { inherited_attributes: inherited, ...rest } = type;
+  return { ...rest, own_attributes: type.attributes, attributes: [...type.attributes, ...(inherited ?? [])] };
 }
-export const getEntityType = (id: Id) => apiFetch<EntityType>(`/api/v1/entity-types/${id}`);
-export const createEntityType = (body: EntityTypeCreate) => send<EntityType>("POST", "/api/v1/entity-types", body);
-export const updateEntityType = (id: Id, body: EntityTypeUpdate) =>
-  send<EntityType>("PATCH", `/api/v1/entity-types/${id}`, body);
+
+export async function listEntityTypes(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<EntityType>> {
+  const { domainId, limit, offset } = params;
+  const page = await apiFetch<Page<EntityType>>(`/api/v1/entity-types${query({ domain_id: domainId, limit, offset })}`);
+  return page && Array.isArray(page.items) ? { ...page, items: page.items.map(withInherited) } : page;
+}
+export const getEntityType = async (id: Id) => withInherited(await apiFetch<EntityType>(`/api/v1/entity-types/${id}`));
+export const createEntityType = async (body: EntityTypeCreate) =>
+  withInherited(await send<EntityType>("POST", "/api/v1/entity-types", body));
+export const updateEntityType = async (id: Id, body: EntityTypeUpdate) =>
+  withInherited(await send<EntityType>("PATCH", `/api/v1/entity-types/${id}`, body));
 export const deleteEntityType = (id: Id) => remove(`/api/v1/entity-types/${id}`);
 
 export const listAttributes = (entityTypeId: Id) =>

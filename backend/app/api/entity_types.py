@@ -314,6 +314,12 @@ class EntityTypeRead(BaseModel):
     # carries both -- on the list route too, which is what lets the UI show
     # "employee (3 attributes)" without an N+1 of follow-up requests.
     attributes: list[AttributeDefRead]
+    # Migration 0066 (queue R18): inheritance. `attributes` stays the type's own (what its
+    # attribute routes edit); `inherited_attributes` are its ancestors', nearest first, each
+    # carrying the `entity_type_id` it is declared on -- an entity of this type has both.
+    is_abstract: bool = False
+    inherited_from: int | None = None
+    inherited_attributes: list[AttributeDefRead] = []
     # Migration 0010, Ruling 42. The type's OWN row only: an attribute
     # definition is created, edited and deleted through its own routes,
     # each of which is a single-field write the form issues immediately,
@@ -328,6 +334,8 @@ class EntityTypeCreate(BaseModel):
     role: EntityRole = "other"
     colour: str | None = None
     icon: str | None = None
+    is_abstract: bool = False
+    inherited_from: int | None = None
 
     _check_name = field_validator("name")(validate_name)
     _check_colour = field_validator("colour")(validate_colour)
@@ -343,6 +351,9 @@ class EntityTypeUpdate(BaseModel):
     role: EntityRole | None = None
     colour: str | None = None
     icon: str | None = None
+    is_abstract: bool | None = None
+    # An explicit null takes a type out of its lineage.
+    inherited_from: int | None = None
     # Ruling 42 -- the `updated_at` the client last read, popped before
     # the rest are assigned. See `app/api/concurrency.py`.
     updated_at: datetime | None = None
@@ -428,7 +439,33 @@ def reorder_attributes(db: Session, owner_column, owner_id: int, ids: list[int])
     return [by_id[attribute_id] for attribute_id in ids]
 
 
-def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityTypeRead:
+def _ancestors(db: Session, types: list[EntityType]) -> dict[int, list[int]]:
+    """Each type's ancestors, nearest first -- one query per level of the deepest lineage."""
+    known: dict[int, int | None] = {t.id: t.inherited_from for t in types}
+    missing = {p for p in known.values() if p is not None and p not in known}
+    while missing:
+        rows = db.query(EntityType.id, EntityType.inherited_from).filter(EntityType.id.in_(missing)).all()
+        for row in rows:
+            known[row.id] = row.inherited_from
+        missing = {p for _, p in rows if p is not None and p not in known}
+    out: dict[int, list[int]] = {}
+    for t in types:
+        chain, parent = [], known.get(t.id)
+        while parent is not None and parent not in chain and len(chain) < 64:
+            chain.append(parent)
+            parent = known.get(parent)
+        out[t.id] = chain
+    return out
+
+
+def _read_many(db: Session, types: list[EntityType]) -> list[EntityTypeRead]:
+    lineage = _ancestors(db, types)
+    grouped = _attributes_for(db, sorted({t.id for t in types} | {a for chain in lineage.values() for a in chain}))
+    return [_read(t, grouped.get(t.id, []), [a for ancestor in lineage[t.id] for a in grouped.get(ancestor, [])])
+            for t in types]
+
+
+def _read(entity_type: EntityType, attributes: list[AttributeDef], inherited: list[AttributeDef] | None = None) -> EntityTypeRead:
     return EntityTypeRead(
         id=entity_type.id,
         domain_id=entity_type.domain_id,
@@ -438,11 +475,14 @@ def _read(entity_type: EntityType, attributes: list[AttributeDef]) -> EntityType
         icon=entity_type.icon,
         updated_at=entity_type.updated_at,
         attributes=[AttributeDefRead.model_validate(a) for a in attributes],
+        is_abstract=bool(entity_type.is_abstract),
+        inherited_from=entity_type.inherited_from,
+        inherited_attributes=[AttributeDefRead.model_validate(a) for a in inherited or []],
     )
 
 
 def _read_one(db: Session, entity_type: EntityType) -> EntityTypeRead:
-    return _read(entity_type, _attributes_for(db, [entity_type.id]).get(entity_type.id, []))
+    return _read_many(db, [entity_type])[0]
 
 
 def _get_entity_type(db: Session, entity_type_id: int, *, for_update: bool = False) -> EntityType:
@@ -496,9 +536,8 @@ def list_entity_types(
         .limit(limit)
         .all()
     )
-    grouped = _attributes_for(db, [row.id for row in rows])
     return EntityTypeList(
-        items=[_read(row, grouped.get(row.id, [])) for row in rows], total=total
+        items=_read_many(db, rows), total=total
     )
 
 
@@ -512,7 +551,7 @@ def create_entity_type(
     db.add(entity_type)
     _commit(db, "entity_type")
     db.refresh(entity_type)
-    return _read(entity_type, [])
+    return _read_one(db, entity_type)
 
 
 @router.get("/entity-types/{entity_type_id}")
