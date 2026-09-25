@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from shapely.geometry import mapping, shape
+from shapely import normalize
 from shapely.ops import unary_union
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -116,7 +117,9 @@ def dissolve(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # The points where two cells met stay on the outline, a hair off the
         # straight line after reprojection; a tolerance of 1e-9 CRS units (a
         # tenth of a millimetre in degrees) drops them and moves nothing else.
-        union = unary_union([shape(member["geometry"]).buffer(0) for member in members]).simplify(1e-9)
+        # Normalized first: simplifying never drops a ring's first point, and a
+        # union of two stacked cells can start its outline on such a point.
+        union = normalize(unary_union([shape(member["geometry"]).buffer(0) for member in members])).simplify(1e-9)
         out.append(
             {
                 "type": "Feature",

@@ -54,6 +54,26 @@ as a run: from nothing, and from `app.solve.partition`'s start (built in
 | XL | XL-1 | highs | no | -- | unknown | -- | -- |
 | XL | XL-1 | highs | yes | 171093 | unknown | -- | -- |
 
+**HiGHS rerun (same day), after two fixes.** The HiGHS rows above ended
+`unknown` even with the start: HiGHS was handed it before its objective,
+and setting the objective drops a start given earlier -- so no HiGHS warm
+start had ever been tried (the same bug cost `solve.warm_start`). Given
+after the objective, HiGHS takes it at every size; it then proves a bound
+but does not improve the start in 120 s. The start was also not the same
+from run to run (ties broken by set order, and string hashing differs per
+process): ties are now broken by name, pinned by a test.
+
+| size | instance | backend | start | start objective | status | objective | gap |
+|---|---|---|---|---|---|---|---|
+| L | L-0 | highs | no | -- | unknown | -- | -- |
+| L | L-0 | highs | yes | 18710 | feasible | 18710 | 64.9% |
+| L | L-1 | highs | no | -- | unknown | -- | -- |
+| L | L-1 | highs | yes | 16915 | feasible | 16915 | 56.2% |
+| XL | XL-0 | highs | no | -- | unknown | -- | -- |
+| XL | XL-0 | highs | yes | 217334 | feasible | 217334 | 58.9% |
+| XL | XL-1 | highs | no | -- | unknown | -- | -- |
+| XL | XL-1 | highs | yes | 171093 | feasible | 171093 | 42.8% |
+
 The bench runs call the sandbox directly, so the rows show the solver's own
 status; in a run, the `unknown` and crashed rows with a start end `feasible`
 at the start's objective.

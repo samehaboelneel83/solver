@@ -240,19 +240,6 @@ def solve_in_process(
     position = {key: i for i, key in enumerate(keys)}
     _add_columns(highspy, solver, compiled, keys)
     added_ids = _add_rows(highspy, solver, compiled.constraints, position)
-    if hint:
-        # A partial starting point (`app.solve.warm`): HiGHS completes and
-        # checks it, and uses it as an incumbent if it holds.
-        import numpy as np
-
-        known = [(position[key], float(value)) for key, value in hint.items() if key in position]
-        if known:
-            solver.setSolution(
-                len(known),
-                np.array([i for i, _ in known], dtype=np.int32),
-                np.array([v for _, v in known], dtype=np.float64),
-            )
-
     has_objective = bool(
         compiled.objective.coeffs or compiled.objective.const or compiled.objective_quadratic
     )
@@ -263,6 +250,21 @@ def solve_in_process(
         _set_objective(highspy, solver, compiled, position, sign)
         if compiled.objective_quadratic:
             solver.passHessian(_hessian(highspy, len(keys), position, compiled.objective_quadratic, sign))
+
+    if hint:
+        # A partial starting point (`app.solve.warm`): HiGHS completes and
+        # checks it, and uses it as an incumbent if it holds. Given after the
+        # objective: setting the objective drops a start given before it, so
+        # HiGHS never tried one (found by queue R13's bench).
+        import numpy as np
+
+        known = [(position[key], float(value)) for key, value in hint.items() if key in position]
+        if known:
+            solver.setSolution(
+                len(known),
+                np.array([i for i, _ in known], dtype=np.int32),
+                np.array([v for _, v in known], dtype=np.float64),
+            )
 
     if progress:
         _subscribe_progress(solver, sign)

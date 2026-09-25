@@ -122,3 +122,26 @@ def test_the_start_as_an_answer_keeps_every_rule_and_claims_nothing():
     assert answer.status == "feasible" and not answer.optimal and answer.best_bound is None
     assert answer.objective == pytest.approx(record["objective"])
     assert all(_holds(c, answer.assignments) for c in compiled.constraints)
+
+
+def test_highs_takes_the_start():
+    """HiGHS dropped a start given before its objective and ended with nothing at 400 cells (found by R13's bench)."""
+    case, compiled = _case("L", 0)
+    hint, record = partition.start(case.ir, case.data, compiled, seconds=10)
+    result = by_name("highs").solve(compiled, time_limit=5, seed=1, workers=4, gap_rel=0.0, hint=hint)
+    assert result.status == "feasible"
+    assert float(result.objective) <= record["objective"]
+
+
+def test_the_start_is_the_same_in_every_process():
+    """Ties broken by name, not by set order: string hashing differs per process (R13's bench saw two starts)."""
+    import os
+    import subprocess
+    import sys
+
+    script = ("from bench.families import generate\nfrom app.solve import compile_model, partition\n"
+              "c = generate('districting', 'M', 0)\n"
+              "print(partition.start(c.ir, c.data, compile_model(c.ir, c.data), seconds=10)[1]['objective'])")
+    seen = {subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True,
+                           env={**os.environ, "PYTHONHASHSEED": seed}).stdout.strip() for seed in ("1", "2", "3")}
+    assert len(seen) == 1, seen

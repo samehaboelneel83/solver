@@ -121,3 +121,18 @@ def test_another_organization_cannot_read_the_map(tenants, db, empty_queue):  # 
     client = TestClient(app)
     run_id = _solved_grid_run(client, tenants, db)
     assert client.get(f"/api/v1/runs/{run_id}/map", headers=tenants["b"]).status_code == 404
+
+
+def test_two_stacked_cells_dissolve_to_a_rectangle():
+    """A union of cells one above the other started its outline where they met, and simplifying never drops a
+    ring's first point: a sixth corner in a straight edge (found when queue R13's start paired the cells that way)."""
+    from app.api.run_map import dissolve
+
+    def cell(key, x0, y0, x1, y1):
+        return {"type": "Feature", "properties": {"key": key, "group": "d0", "subgroup": None},
+                "geometry": {"type": "Polygon", "coordinates": [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]}}
+
+    below = cell("a", 3.0000000000000004, 0.0, 3.004493373765469, 0.004523656847896722)
+    above = cell("b", 3.0000000000000004, 0.004523656847896722, 3.0044933738211133, 0.009047313695227132)
+    [zone] = dissolve([below, above])
+    assert zone["geometry"]["type"] == "Polygon" and len(shape(zone["geometry"]).exterior.coords) == 5

@@ -193,7 +193,7 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
                     break
                 a = group_of[u]
                 best = None
-                for b in {group_of[v] for v in neighbours[u]} - {a}:
+                for b in sorted({group_of[v] for v in neighbours[u]} - {a}):
                     d_breach, d_goal = delta(u, a, b)
                     if d_breach < -1e-9 or (abs(d_breach) <= 1e-9 and d_goal < -1e-9):
                         if best is None or (d_breach, d_goal) < best[0]:
@@ -214,7 +214,7 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
     def shift(src: str, dst: str) -> str | None:
         """Move the best edge unit of `src` into `dst`, keeping `src` whole."""
         options = [u for u in members[src] if any(group_of[v] == dst for v in neighbours[u])]
-        options.sort(key=lambda u: delta(u, src, dst))
+        options.sort(key=lambda u: (delta(u, src, dst), u))  # ties by name: the same start every time
         for u in options:
             if stays_connected(src, u):
                 move(u, dst)
@@ -276,7 +276,7 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
         inside = members[z]
         if not inside:
             continue
-        root = min(inside, key=lambda u: cost[(u, z)])
+        root = min(inside, key=lambda u: (cost[(u, z)], u))
         hint[(ROOT, (rule_id, root, z))] = 1
         parent: dict[str, str | None] = {root: None}
         order, queue = [root], deque([root])
