@@ -760,6 +760,8 @@ def _execute(
                     ir, data, compiled, seconds=min(starter.CEILING, starter.SHARE * time_limit))
                 start_record = {"used": True, **start_record}
                 hint = hint or None
+                # The start's time is the run's: the solver gets what is left, so the run keeps its limit.
+                time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
 
         points: list = []
         parts, blocks_record = None, None

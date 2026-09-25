@@ -211,7 +211,11 @@ def merge(pieces: list[Compiled], results: list[Any], *, optimal_gap: float) -> 
         return float(number) if number is not None else float(piece.objective.const)
 
     objective = sum(value(r.objective, p) for r, p in zip(results, pieces, strict=True))
-    bounds = [r.best_bound for r in results]
+    # A piece proven optimal is its own bound, given or not: a piece with nothing in the goal (a
+    # decision fixed by its own rule) comes back without one, and used to leave the whole model
+    # without a bound (queue R15b's live check: 156 pieces, one unproven, no gap shown).
+    bounds = [r.best_bound if r.best_bound is not None or r.status != "optimal" else value(r.objective, p)
+              for r, p in zip(results, pieces, strict=True)]
     bound = sum(float(b) for b in bounds) if all(b is not None for b in bounds) else None
     status = "optimal" if all(s == "optimal" for s in statuses) else "feasible"
     if status == "optimal" and bound is not None:

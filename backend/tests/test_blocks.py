@@ -277,7 +277,11 @@ def test_goal_and_bound_add_up_and_the_bound_only_when_every_piece_has_one():
     merged = merge([EMPTY, EMPTY], [a, b], optimal_gap=1e-6)
     assert (merged.status, merged.objective, merged.best_bound, merged.wall_seconds) == ("feasible", 7, 9, 5.0)
     assert merged.assignments == {("x", ()): 1, ("y", ()): 2}
-    assert merge([EMPTY, EMPTY], [a, _answer("optimal", 4, None)], optimal_gap=1e-6).best_bound is None
+    # A piece found but not proven, with no bound of its own, leaves the whole without one ...
+    assert merge([EMPTY, EMPTY], [a, _answer("feasible", 4, None)], optimal_gap=1e-6).best_bound is None
+    # ... while a piece proven optimal is its own bound, given or not (a decision fixed by its own
+    # rule has nothing in the goal and comes back without one: queue R15b's 156-piece route model).
+    assert merge([EMPTY, EMPTY], [b, _answer("optimal", 4, None)], optimal_gap=1e-6).best_bound == 10
 
 
 def test_a_piece_whose_goal_is_only_its_constant_counts_its_constant():
