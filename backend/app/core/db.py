@@ -1,3 +1,4 @@
+import anyio
 import clickhouse_connect
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -6,14 +7,12 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-# As many connections as the request thread pool has threads (anyio's 40). A
-# request takes its connection in one threadpool call (`get_db`'s entry) and
-# gives it back in another (its `finally`); with fewer connections than
-# threads, a burst fills every thread with a request waiting to connect, none
-# is left to run a `finally`, and all wait out the pool timeout -- 60
-# concurrent writes answered 40 of them with a 500 after 30 s. At 40 the
-# burst queues for a thread instead. Postgres allows 100; the worker's own
-# pool is lazy and holds a few.
+# A request's connection is taken and given back off the handlers' thread pool
+# (`get_db`, below). When both ran on it, a burst larger than the pool filled
+# every one of its 40 threads with a request waiting to connect, and the
+# requests holding connections had no thread left to finish on: all waited
+# out the pool timeout (60 concurrent writes: 40 of them a 500 after 30 s).
+# Postgres allows 100; the worker's own pool is lazy and holds a few.
 POOL_SIZE, POOL_OVERFLOW, POOL_TIMEOUT_S = 20, 20, 10
 
 engine = create_engine(
@@ -50,7 +49,20 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db() -> Session:
+# Taking a connection and giving it back each have their own threads. A connect
+# waiting on an empty pool holds a connect thread -- never a thread a handler
+# needs to finish, nor one a finished request needs to give its connection
+# back (sharing either one was the same deadlock again, one pool over).
+_CONNECT_LIMITER = anyio.CapacityLimiter(POOL_SIZE + POOL_OVERFLOW)
+_RELEASE_LIMITER = anyio.CapacityLimiter(POOL_SIZE + POOL_OVERFLOW)
+
+
+def _release(db: Session, connection) -> None:
+    db.close()
+    connection.close()
+
+
+async def get_db():
     """A request's session, on ONE connection for the whole request.
 
     A plain session hands its connection back to the pool at every commit
@@ -60,13 +72,12 @@ def get_db() -> Session:
     statement would run as the superuser, seeing every tenant. Binding the
     session to one connection is what makes the tenant last.
     """
-    connection = engine.connect()
+    connection = await anyio.to_thread.run_sync(engine.connect, limiter=_CONNECT_LIMITER)
     db = Session(bind=connection, autoflush=False)
     try:
         yield db
     finally:
-        db.close()
-        connection.close()
+        await anyio.to_thread.run_sync(_release, db, connection, limiter=_RELEASE_LIMITER)
 
 
 def enter_tenant(db: Session, organization_id) -> None:
