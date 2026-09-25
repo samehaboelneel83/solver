@@ -34,7 +34,9 @@ export default function RangePicture({ parameterId, deviation, name }: { paramet
         What a robust solve protects against: each {name} value may be off by up to {Number((deviation * 100).toPrecision(4))}%
         {cells.length > RANGE_ROWS ? ` (the first ${RANGE_ROWS} of ${cells.length} stored cells)` : ""}.
       </figcaption>
-      <svg role="img" aria-label={`${name} as ranges: ${rows.length} rows`} width={W} height={rows.length * band + 20}>
+      {/* Scales to its column: the Model editor's parameter card is narrower than the drawing. */}
+      <svg role="img" aria-label={`${name} as ranges: ${rows.length} rows`} viewBox={`0 0 ${W} ${rows.length * band + 20}`}
+           className="h-auto w-full max-w-[420px]">
         {rows.map((r, i) => {
           const [a, b] = reach(r.value);
           const y = 8 + i * band + band / 2;
