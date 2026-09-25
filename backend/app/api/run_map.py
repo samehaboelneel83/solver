@@ -141,3 +141,42 @@ def run_map(
         raise HTTPException(404, "run not found")
     features = run_features(db, run_id)
     return {"type": "FeatureCollection", "features": dissolve(features) if dissolve_groups else features}
+
+
+def _is_shape(value: Any) -> bool:
+    return (isinstance(value, dict) and value.get("type") in ("Point", "Polygon", "MultiPolygon")
+            and isinstance(value.get("coordinates"), list))
+
+
+@router.get("/runs/{run_id}/places")
+def run_places(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> dict[str, dict[str, list[float]]]:
+    """Where each member of each located set stood when the run was made (queue R17b's answer
+    maps): `{set: {key: [x, y]}}`, a point as given and a shape at its centroid, from the frozen
+    dataset. Sets with no shape are left out; an empty object means nothing to map."""
+    if db.get(Run, run_id) is None:
+        raise HTTPException(404, "run not found")
+    data = db.execute(
+        text("SELECT d.data -> 'sets' FROM run r JOIN dataset d ON d.id = r.dataset_id WHERE r.id = :r"),
+        {"r": run_id},
+    ).scalar() or {}
+    places: dict[str, dict[str, list[float]]] = {}
+    for set_name, rows in data.items():
+        found: dict[str, list[float]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            geometry = next((v for v in row.values() if _is_shape(v)), None)
+            if geometry is None:
+                continue
+            try:
+                point = shape(geometry).centroid if geometry["type"] != "Point" else shape(geometry)
+            except Exception:  # noqa: BLE001 -- a shape the run cannot read is simply not placed
+                continue
+            found[str(row.get("id"))] = [round(point.x, 7), round(point.y, 7)]
+        if found:
+            places[set_name] = found
+    return places

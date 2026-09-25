@@ -1,7 +1,17 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render as mount, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 import type { Run } from "../api/v1";
 import RunViews from "./RunViews";
+
+vi.mock("../api/v1", async () => {
+  const actual = await vi.importActual<typeof import("../api/v1")>("../api/v1");
+  return { ...actual, getRunPlaces: vi.fn(async () => ({})) };
+});
+
+/** The views ask where the located sets' members stood (queue R17b), so they need a query client. */
+const render = (ui: ReactElement) => mount(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
 
 const base = {
   labels: { employee: { ahmed: "Ahmed", mona: "Mona" }, day: { mon: "Monday", tue: "Tuesday" } },
@@ -98,5 +108,20 @@ describe("Gantt and timeline views (queue R17b)", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Timeline" }));
     expect(screen.getByRole("img", { name: "Gantt chart of 2 bars over 2 rows" })).toBeInTheDocument();
     expect(screen.getByText("Ahmed: mon to tue")).toBeInTheDocument();
+  });
+});
+
+describe("the map view (queue R17b)", () => {
+  it("draws the chosen sites of a located set on a map, one tab away", async () => {
+    const { getRunPlaces } = await import("../api/v1");
+    vi.mocked(getRunPlaces).mockResolvedValueOnce({ plant: { n: [31, 30], s: [31, 29] } });
+    render(<RunViews run={run({
+      id: 7,
+      index_sets: { variables: { open: ["plant"] }, constraints: {} },
+      variable_kinds: { open: "binary" },
+      assignments: { open: [["n"]] },
+    } as Partial<Run>)} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Map" }));
+    expect(screen.getByRole("img", { name: "Map of 1 chosen of 2 places and 0 lines" })).toBeInTheDocument();
   });
 });

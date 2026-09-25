@@ -4,6 +4,7 @@ import {
   defaultAxes,
   formatAmount,
   ganttBars,
+  mapMarks,
   gridOf,
   membersOf,
   rowPosition,
@@ -104,5 +105,28 @@ describe("Gantt and timeline (queue R17b)", () => {
       { row: "ana", label: [], start: 3, end: 4 },
       { row: "ben", label: [], start: 2, end: 3 },
     ]);
+  });
+});
+
+describe("an answer on a map (queue R17b)", () => {
+  const places = { site: { n: [31, 30] as [number, number], s: [31, 29] as [number, number] },
+                   customer: { c1: [32, 30] as [number, number] } };
+
+  it("offers the map second over any located set", () => {
+    expect(viewsFor({ sets: ["site"], kind: "binary", roles: {}, hasAmounts: true, located: ["site"] })).toEqual(["chosen", "map", "list"]);
+    expect(viewsFor({ sets: ["site"], kind: "binary", roles: {}, hasAmounts: true, located: [] })).toEqual(["chosen", "list"]);
+  });
+
+  it("marks the chosen sites and draws a line for each site serving a customer", () => {
+    const one = mapMarks(["site"], [{ index: ["n"], value: null }], places);
+    expect(one.points.map((p) => [p.key, p.chosen])).toEqual([["n", true], ["s", false]]);
+    const two = mapMarks(["site", "customer"], [{ index: ["s", "c1"], value: 4 }], places);
+    expect(two.lines).toEqual([{ from: [31, 29], to: [32, 30], value: 4, group: "", label: "s → c1" }]);
+  });
+
+  it("colours a route's legs by vehicle: the rest of the index is the group", () => {
+    const stops = { stop: { a: [0, 0] as [number, number], b: [1, 0] as [number, number] } };
+    const legs = mapMarks(["vehicle", "stop", "stop"], [{ index: ["v1", "a", "b"], value: null }], stops);
+    expect(legs.lines.map((l) => [l.group, l.label])).toEqual([["v1", "a → b"]]);
   });
 });

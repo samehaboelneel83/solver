@@ -773,6 +773,10 @@ export type RunMapFeature = {
   properties: Record<string, unknown> & { group?: string | null; subgroup?: string | null };
 };
 export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[] };
+/** Where each member of each located set stood when a run was made (queue R17b): `{set: {key: [x, y]}}`. */
+export type RunPlaces = Record<string, Record<string, [number, number]>>;
+export const getRunPlaces = (id: Id) => apiFetch<RunPlaces>(`/api/v1/runs/${id}/places`);
+
 export const getRunMap = (id: Id, dissolve = false) =>
   apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : ""}`);
 

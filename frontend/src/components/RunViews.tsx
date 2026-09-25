@@ -1,11 +1,13 @@
 import { useId, useMemo, useState } from "react";
-import type { Run } from "../api/v1";
+import { useQuery } from "@tanstack/react-query";
+import { getRunPlaces, type Run, type RunPlaces } from "../api/v1";
 import {
   cellKey,
   defaultAxes,
   formatAmount,
   ganttBars,
   gridOf,
+  mapMarks,
   membersOf,
   rowPosition,
   timelineBars,
@@ -36,17 +38,25 @@ type Entry = { index: string[]; value: number | null };
 export default function RunViews({ run }: { run: Run }) {
   // An interval is never in `assignments` (its start and end are): it is drawn beside them.
   const names = [...new Set([...Object.keys(run.assignments ?? {}), ...Object.keys(run.intervals ?? {})])];
+  // Where the located sets' members stood (queue R17b), once per run; nothing to map is `{}`.
+  const places = useQuery({
+    queryKey: ["run-places", run.id],
+    queryFn: () => getRunPlaces(run.id),
+    enabled: names.length > 0 && run.id !== undefined,
+    retry: false,
+    staleTime: Infinity,
+  });
   if (names.length === 0) return null;
   return (
     <div className="space-y-6">
       {names.map((variable) => (
-        <DecisionView key={variable} run={run} variable={variable} />
+        <DecisionView key={variable} run={run} variable={variable} places={places.data ?? {}} />
       ))}
     </div>
   );
 }
 
-function DecisionView({ run, variable }: { run: Run; variable: string }) {
+function DecisionView({ run, variable, places }: { run: Run; variable: string; places: RunPlaces }) {
   const id = useId();
   const sets = run.index_sets.variables[variable] ?? [];
   const kind = run.variable_kinds?.[variable] ?? "binary";
@@ -54,9 +64,11 @@ function DecisionView({ run, variable }: { run: Run; variable: string }) {
   // An interval has no amounts of its own: its start and end decisions carry them (queue R17b).
   const parts = kind === "interval" ? run.intervals?.[variable] : undefined;
   const hasAmounts = parts ? Boolean(parts.start && parts.end && run.amounts) : amounts !== undefined && run.amounts !== null;
-  const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts };
+  const shape: Shape = { sets, kind, roles: run.set_roles ?? {}, hasAmounts, located: Object.keys(places) };
   const views = viewsFor(shape);
-  const [view, setView] = useState<ViewKind>(views[0]);
+  const [chosenView, setView] = useState<ViewKind | null>(null);
+  // The places arrive after the first draw; the default is recomputed until a view is picked.
+  const view = chosenView && views.includes(chosenView) ? chosenView : views[0];
   const bars: Bar[] = useMemo(() => {
     if (!parts?.start || !parts.end) return [];
     const read = (name: string) => (run.amounts?.[name] ?? []).map((a) => ({ index: a.index, value: Number(a.value) }));
@@ -100,6 +112,8 @@ function DecisionView({ run, variable }: { run: Run; variable: string }) {
       <div className="overflow-x-auto p-3">
         {entries.length === 0 ? (
           <p className="text-sm text-slate-500">Nothing chosen.</p>
+        ) : view === "map" ? (
+          <MapView marks={mapMarks(sets, entries, places)} name={name} />
         ) : view === "gantt" ? (
           <GanttView bars={bars} rowSet={sets[rowPosition(shape)]} labelSets={sets.filter((_, i) => i !== rowPosition(shape))} name={name} unit="" />
         ) : view === "timeline" ? (
@@ -421,4 +435,52 @@ function niceTicks(low: number, high: number): number[] {
   const out: number[] = [];
   for (let t = Math.ceil(low / step) * step; t <= high + 1e-9; t += step) out.push(Number(t.toPrecision(12)));
   return out;
+}
+
+/**
+ * An answer on a map (queue R17b): every placed member as a point, the chosen ones filled and
+ * sized by amount; a line for each tuple between two located sets -- a site serving a customer,
+ * a flow, a route's leg -- coloured by what the rest of its index says (the vehicle). Plain SVG,
+ * a degree of longitude shortened by the cosine of the latitude.
+ */
+export function MapView({ marks, name }: { marks: ReturnType<typeof mapMarks>; name: Namer }) {
+  const all = [...marks.points.map((p) => p.at), ...marks.lines.flatMap((l) => [l.from, l.to])];
+  if (all.length === 0) return <p className="text-sm text-slate-500">Nothing here has a place to draw.</p>;
+  const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const degrees = Math.abs(minY) <= 90 && Math.abs(maxY) <= 90 && Math.abs(minX) <= 180 && Math.abs(maxX) <= 180;
+  const squash = degrees ? Math.cos((((minY + maxY) / 2) * Math.PI) / 180) : 1;
+  const W = 640, H = 420, pad = 24;
+  const spanX = Math.max((maxX - minX) * squash, 1e-9), spanY = Math.max(maxY - minY, 1e-9);
+  const k = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
+  const at = (p: [number, number]): [number, number] => [
+    pad + (p[0] - minX) * squash * k + (W - 2 * pad - spanX * k) / 2,
+    H - pad - (p[1] - minY) * k - (H - 2 * pad - spanY * k) / 2,
+  ];
+  const biggest = Math.max(1, ...marks.lines.map((l) => Math.abs(l.value ?? 1)), ...marks.points.map((p) => Math.abs(p.value ?? 1)));
+  const chosen = marks.points.filter((p) => p.chosen).length;
+  return (
+    <svg role="img" aria-label={`Map of ${chosen} chosen of ${marks.points.length} places and ${marks.lines.length} lines`}
+         width={W} height={H} className="rounded bg-slate-50">
+      {marks.lines.map((l, i) => {
+        const [x1, y1] = at(l.from), [x2, y2] = at(l.to);
+        return (
+          <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={l.group ? colourOf(l.group) : "#2563eb"} strokeOpacity={0.75}
+                strokeWidth={l.value === null ? 1.5 : 1 + (4 * Math.abs(l.value)) / biggest}>
+            <title>{`${l.label}${l.group ? ` (${l.group})` : ""}${l.value === null ? "" : `: ${formatAmount(l.value)}`}`}</title>
+          </line>
+        );
+      })}
+      {marks.points.map((p) => {
+        const [x, y] = at(p.at);
+        const r = p.chosen ? 4 + (p.value === null ? 2 : (5 * Math.abs(p.value)) / biggest) : 3;
+        return (
+          <circle key={`${p.set}-${p.key}`} cx={x} cy={y} r={r} fill={p.chosen ? "#059669" : "white"}
+                  stroke={p.chosen ? "#065f46" : "#94a3b8"} strokeWidth={1.2}>
+            <title>{`${name(p.set, p.key)}${p.chosen ? " (chosen)" : ""}${p.value === null ? "" : `: ${formatAmount(p.value)}`}`}</title>
+          </circle>
+        );
+      })}
+    </svg>
+  );
 }

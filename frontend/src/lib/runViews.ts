@@ -8,7 +8,7 @@
  * plain list is always there. Pure functions: the components only draw.
  */
 
-export type ViewKind = "grid" | "heat" | "panels" | "bars" | "line" | "chosen" | "value" | "list" | "gantt" | "timeline";
+export type ViewKind = "grid" | "heat" | "panels" | "bars" | "line" | "chosen" | "value" | "list" | "gantt" | "timeline" | "map";
 
 export type Shape = {
   /** The set each index position names, in order. */
@@ -19,6 +19,8 @@ export type Shape = {
   roles: Record<string, string>;
   /** False for runs recorded before amounts were kept: an amount then has no value to draw. */
   hasAmounts: boolean;
+  /** The sets whose members have a place (queue R17b): a decision over one is offered as a map. */
+  located?: string[];
 };
 
 export const VIEW_LABELS: Record<ViewKind, string> = {
@@ -32,10 +34,18 @@ export const VIEW_LABELS: Record<ViewKind, string> = {
   list: "List",
   gantt: "Gantt",
   timeline: "Timeline",
+  map: "Map",
 };
 
-/** The default view first, then the others that fit. */
+/** The default view first, then the others that fit -- and a map, second, over any located set. */
 export function viewsFor(shape: Shape): ViewKind[] {
+  const views = viewsByShape(shape);
+  const mappable = shape.kind !== "interval" && (shape.kind === "binary" || shape.hasAmounts) &&
+    shape.sets.some((s) => shape.located?.includes(s));
+  return mappable ? [views[0], "map", ...views.slice(1)] : views;
+}
+
+function viewsByShape(shape: Shape): ViewKind[] {
   const n = shape.sets.length;
   const yesNo = shape.kind === "binary";
   // An interval is drawn from its start and end amounts (queue R17b).
@@ -187,4 +197,50 @@ export function timelineBars(tuples: string[][], time: number, row: number, slot
     }
   }
   return bars.sort((a, b) => a.row.localeCompare(b.row) || a.start - b.start);
+}
+
+export type MapMarks = {
+  /** Every placed member of the decision's located sets; `chosen` when the answer names it. */
+  points: { set: string; key: string; at: [number, number]; chosen: boolean; value: number | null }[];
+  /** Between two located positions: a service line, a flow or a route's leg. `group` is what
+   * the rest of the index says -- the vehicle of a route. */
+  lines: { from: [number, number]; to: [number, number]; value: number | null; group: string; label: string }[];
+};
+
+/**
+ * An answer as marks on a map (queue R17b): over one located set, its chosen members (sized by
+ * amount); over two, a line from the first to the second for each tuple taken. Members with no
+ * place are left out.
+ */
+export function mapMarks(
+  sets: string[],
+  entries: { index: string[]; value: number | null }[],
+  places: Record<string, Record<string, [number, number]>>,
+): MapMarks {
+  const located = sets.map((s, i) => (places[s] ? i : -1)).filter((i) => i >= 0);
+  const chosen = new Map<string, number | null>();
+  const lines: MapMarks["lines"] = [];
+  for (const e of entries) {
+    if (located.length >= 2) {
+      const [a, b] = located;
+      const from = places[sets[a]][e.index[a]];
+      const to = places[sets[b]][e.index[b]];
+      const rest = e.index.filter((_, i) => i !== a && i !== b);
+      if (from && to && (from[0] !== to[0] || from[1] !== to[1]))
+        lines.push({ from, to, value: e.value, group: rest.join(" · "), label: `${e.index[a]} → ${e.index[b]}` });
+    }
+    for (const i of located) {
+      const key = `${sets[i]}\u0001${e.index[i]}`;
+      const before = chosen.get(key);
+      chosen.set(key, e.value === null ? (before ?? null) : (before ?? 0) + e.value);
+    }
+  }
+  const points: MapMarks["points"] = [];
+  for (const set of new Set(located.map((i) => sets[i]))) {
+    for (const [key, at] of Object.entries(places[set])) {
+      const k = `${set}\u0001${key}`;
+      points.push({ set, key, at, chosen: chosen.has(k), value: chosen.get(k) ?? null });
+    }
+  }
+  return { points, lines };
 }

@@ -96,3 +96,34 @@ def test_an_interval_run_names_the_start_and_end_its_gantt_draws(tenants, db, em
     assert run["intervals"] == {"task": {"start": "begin", "end": "finish"}}
     ends = {tuple(a["index"]): a["value"] for a in run["amounts"]["finish"]}
     assert sorted(ends.values()) in ([3, 7], [4, 7])
+
+
+def test_a_run_says_where_each_located_member_stood(tenants, db, empty_queue):  # noqa: F811
+    """Queue R17b's answer maps: a point per member of each located set, a shape at its centroid."""
+    client, headers, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code in (200, 201), response.text
+        return response.json()
+
+    site = post("/api/v1/entity-types", {"domain_id": domain, "name": "site", "role": "location"})
+    post(f"/api/v1/entity-types/{site['id']}/attributes", {"name": "place", "data_type": "geometry"})
+    post("/api/v1/entities", {"entity_type_id": site["id"], "key": "a", "attrs": {"place": {"type": "Point", "coordinates": [31.2, 30.0]}}})
+    square = {"type": "Polygon", "coordinates": [[[31, 29], [32, 29], [32, 30], [31, 30], [31, 29]]]}
+    post("/api/v1/entities", {"entity_type_id": site["id"], "key": "b", "attrs": {"place": square}})
+    post("/api/v1/entities", {"entity_type_id": site["id"], "key": "c"})  # nowhere: not placed
+    ir = {"version": 2, "sets": ["site"], "parameters": {},
+          "variables": {"open": {"index": ["site"], "domain": "binary"}}, "constraints": [],
+          "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+              "sum": {"var": "open", "index": ["s"]}, "over": [{"index": "s", "set": "site"}]}}]}}
+    problem = post("/api/problem/", {"domain_id": domain, "name": "where"})
+    version = post(f"/api/v1/problems/{problem['id']}/versions", {"ir": ir})
+    scenario = post("/api/v1/scenarios", {"problem_id": problem["id"], "model_version_id": version["id"], "name": "base"})
+    run_id = post(f"/api/v1/scenarios/{scenario['id']}/runs", {"reuse": False, "time_limit_s": 10})["id"]
+    for _ in range(5):
+        if db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one() not in ("queued", "running"):
+            break
+        work_once(db)
+    places = client.get(f"/api/v1/runs/{run_id}/places", headers=headers).json()
+    assert places == {"site": {"a": [31.2, 30.0], "b": [31.5, 29.5]}}
