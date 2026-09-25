@@ -1943,7 +1943,7 @@ export default function GraphEditor({
         {isModel
           ? "This is the problem's optimization model, read left to right: the sets it ranges over, the variables it decides and the parameters it reads, the rules that constrain them, and the objective. A dark hexagon must hold; an amber, dashed one may bend at the price shown. Click any part to see it written out."
           : isTypes
-          ? "This is the domain's schema as an entity-relationship diagram: a rectangle per entity type, a diamond per relationship type with its cardinality at each end (1, n, m), and an ellipse per attribute in its chosen order. The underlined key is what a model addresses an entity by; a double-bordered diamond is a hierarchy. Click a rectangle or diamond to see and colour it."
+          ? "This is the domain's schema as an entity-relationship diagram: a rectangle per entity type, a diamond per relationship type with its cardinality at each end (1, n, m), and an ellipse per attribute in its chosen order. A double-bordered diamond is a hierarchy. Click a rectangle or diamond to see and colour it."
           : connecting
             ? "Drag from one node to another to connect them, or with a node focused press C then Enter on the other node."
             : canEdit
