@@ -23,6 +23,8 @@ from decimal import Decimal
 from typing import Any
 
 LOAD = "__load"
+#: A stop's arrival time on a route with time windows (queue R15c).
+ARRIVE = "__arrive"
 
 
 def expand(compiler: Any, spec: dict[str, Any]) -> None:
@@ -108,5 +110,71 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
             balance.add(Linear(coeffs={load[(j, k)]: one for k in stops if k != j}), factor=-1)
             balance.add(Linear(coeffs={x[(v, i, j)]: demand[j] for i in stops if i != j}), factor=-1)
             row({v_name: v, s_name: j}, balance, "=", Linear())
+    if "travel" in body:
+        _windows(compiler, spec, stop_rows, x, vehicles, row)
     compiler.connectivity.append(rule)
     compiler.routes.append(rule)
+
+
+def _windows(compiler: Any, spec: dict[str, Any], stop_rows: list[dict[str, Any]], x: dict, vehicles: list,
+             row) -> None:
+    """Time windows (queue R15c): an arrival time per stop within its window, and on every arc in use
+    the next stop's arrival at least this one's plus the time spent here plus the travel between.
+
+    A stop with no `earliest` opens at 0 and one with no `latest` never closes (the horizon: long
+    enough for one vehicle to serve every stop after the latest opening, and past every window). The depot's arrival is when
+    the vehicles set out; nothing waits on their return. The rows are exact: on an arc not in use
+    the big-M lets the arrivals be anything, and M is as small as a route can make it. They also
+    rule out a loop that misses the depot -- time cannot go round a circle."""
+    from app.solve.compile import Linear, Unsupported, Variable, number
+
+    body, rule = spec["route"], spec["id"]
+    stops = [r["id"] for r in stop_rows]
+    depot = body["depot"]
+    one, zero = Decimal(1), Decimal(0)
+
+    def attribute(r: dict[str, Any], name: str | None) -> Decimal | None:
+        if not name or r.get(name) is None:
+            return None
+        value = r[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float, str, Decimal)):
+            raise Unsupported(f"{rule}: the stop {r['id']!r} has {name!r} {value!r}, not a number")
+        return number(value)
+
+    table = compiler._params.get(body["travel"], {})
+    fallback = number(compiler.defaults.get(body["travel"], 0) or 0)
+    travel = {(i, j): number(table.get((i, j), fallback)) for i in stops for j in stops if i != j}
+    if any(t < 0 for t in travel.values()):
+        raise Unsupported(f"{rule}: a travel time in {body['travel']!r} is negative")
+    service = {r["id"]: (attribute(r, body.get("service")) or zero) for r in stop_rows}
+    earliest = {r["id"]: attribute(r, body.get("earliest")) for r in stop_rows}
+    latest = {r["id"]: attribute(r, body.get("latest")) for r in stop_rows}
+    # Long enough for any one vehicle to serve every stop, taking the longest leg out of each,
+    # starting at the latest opening -- and no earlier than the latest window closes.
+    tour = sum(service.values(), zero) + sum(
+        (max((travel[(i, j)] for j in stops if j != i), default=zero) for i in stops), zero)
+    horizon = max([v for v in latest.values() if v is not None]
+                  + [max((v for v in earliest.values() if v is not None), default=zero) + tour])
+    opens = {s: earliest[s] if earliest[s] is not None else zero for s in stops}
+    closes = {s: latest[s] if latest[s] is not None else horizon for s in stops}
+    for s in stops:
+        if opens[s] > closes[s]:
+            raise Unsupported(f"{rule}: the stop {s!r} opens at {opens[s]} after it closes at {closes[s]}")
+    whole = all(v == v.to_integral_value() for v in [*travel.values(), *service.values(), *opens.values(), *closes.values()])
+    arrive = {}
+    for s in stops:
+        key = (ARRIVE, (rule, s))
+        compiler.variables[key] = Variable(key, "integer" if whole else "continuous", opens[s], closes[s])
+        arrive[s] = key
+    v_name, s_name, to_name = body["vehicles"]["index"], body["stops"]["index"], body["visit"]["index"][2]
+    for i in stops:
+        for j in stops:
+            if i == j or j == depot:
+                continue
+            # The smallest M that frees the row when the arc is not used.
+            big = closes[i] + service[i] + travel[(i, j)] - opens[j]
+            if big <= 0:
+                continue  # the window alone keeps this row
+            used = {x[(v["id"], i, j)]: -big for v in vehicles}
+            left = Linear(coeffs={arrive[j]: one, arrive[i]: -one, **used})
+            row({s_name: i, to_name: j}, left, ">=", Linear(const=service[i] + travel[(i, j)] - big))

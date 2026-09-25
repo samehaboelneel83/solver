@@ -273,6 +273,17 @@ class RouteBody(_Model):
     depot: Name
     demand: Optional[Name] = None
     capacity: Optional[Name] = None
+    # Time windows (queue R15c): the travel-time parameter, and stop attributes.
+    travel: Optional[Name] = None
+    earliest: Optional[Name] = None
+    latest: Optional[Name] = None
+    service: Optional[Name] = None
+
+    @model_validator(mode="after")
+    def _windows_need_travel(self) -> "RouteBody":
+        if self.travel is None and any(x is not None for x in (self.earliest, self.latest, self.service)):
+            raise ValueError("a route's earliest, latest and service need travel: the time from stop to stop")
+        return self
 
     @model_validator(mode="after")
     def _both_or_neither(self) -> "RouteBody":

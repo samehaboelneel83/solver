@@ -845,7 +845,11 @@ class ShapeChecker {
       );
     }
     if (!isObject(body)) {
-      return refusal("route_malformed", loc, "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity");
+      return refusal(
+        "route_malformed",
+        loc,
+        "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity and time windows (travel, earliest, latest, service)"
+      );
     }
     let odd: string | undefined;
     let what = "";
@@ -856,12 +860,19 @@ class ShapeChecker {
       what = "not one of them";
     }
     if (odd === undefined) {
-      odd = ["depot", "demand", "capacity"].find((key) => key in body && !(typeof body[key] === "string" && body[key] !== ""));
+      odd = ["depot", "demand", "capacity", "travel", "earliest", "latest", "service"].find(
+        (key) => key in body && !(typeof body[key] === "string" && body[key] !== "")
+      );
       what = "not a name";
     }
     if (odd === undefined && ("demand" in body) !== ("capacity" in body)) {
       odd = "demand" in body ? "capacity" : "demand";
       what = "missing: demand and capacity come together";
+    }
+    if (odd === undefined && !("travel" in body)) {
+      // Queue R15c: a window is kept in time, and time needs the travel between stops.
+      odd = ["earliest", "latest", "service"].find((key) => key in body);
+      what = "given without travel, the time from stop to stop";
     }
     if (odd !== undefined) {
       return refusal(
@@ -924,6 +935,17 @@ class ShapeChecker {
         [...loc, "visit", "var"],
         `'${String(visit.var)}' must be binary: a vehicle goes from one stop to the next or it does not`
       );
+    }
+    if ("travel" in body) {
+      const stops = (body.stops as Json).set as string;
+      const index = this.parameters.get(body.travel as string);
+      if (!index || index.length !== 2 || index[0] !== stops || index[1] !== stops || this.entityParameters.has(body.travel as string)) {
+        return refusal(
+          "route_travel_invalid",
+          [...loc, "travel"],
+          `${show(body.travel)} must be a parameter this model declares over [${stops}, ${stops}]: the time from each stop to the next`
+        );
+      }
     }
     return null;
   }

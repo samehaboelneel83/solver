@@ -21,6 +21,10 @@ export default function RouteEditor({
   const depotId = useId();
   const demandId = useId();
   const capacityId = useId();
+  const travelId = useId();
+  const earliestId = useId();
+  const latestId = useId();
+  const serviceId = useId();
   const body = constraint.route as RouteBody;
   const choices = routeChoices(context);
   const chosen = choices.find((c) => c.variable === body.visit.var);
@@ -29,6 +33,13 @@ export default function RouteEditor({
   const stopNumbers = numbers(body.stops.set);
   const vehicleNumbers = numbers(body.vehicles.set);
   const loaded = body.demand !== undefined && body.capacity !== undefined;
+  // Queue R15c: the parameters that can be a travel time -- over [stop, stop].
+  const travels = Object.entries(context.parameters)
+    .filter(([, p]) => p.index.length === 2 && p.index[0] === body.stops.set && p.index[1] === body.stops.set)
+    .map(([name]) => name);
+  const timed = body.travel !== undefined;
+  const timing = { travel: body.travel, earliest: body.earliest, latest: body.latest, service: body.service };
+  const keep = Object.fromEntries(Object.entries(timing).filter(([, v]) => v !== undefined));
 
   function write(next: RouteBody) {
     const { severity: _s, weight: _w, when: _when, ...rest } = constraint;
@@ -49,7 +60,8 @@ export default function RouteEditor({
             value={body.visit.var}
             onChange={(event) => {
               const next = choices.find((c) => c.variable === event.target.value);
-              if (next) write(routeBody(next, body.depot, loaded ? { demand: body.demand!, capacity: body.capacity! } : undefined));
+              if (next)
+                write({ ...routeBody(next, body.depot, loaded ? { demand: body.demand!, capacity: body.capacity! } : undefined), ...keep });
             }}
           >
             {!chosen && <option value={body.visit.var}>{body.visit.var} (not a yes-or-no over vehicle × stop × stop)</option>}
@@ -107,6 +119,53 @@ export default function RouteEditor({
               {vehicleNumbers.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </div>
+        </div>
+      )}
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={timed}
+          disabled={!timed && travels.length === 0}
+          onChange={(event) => {
+            const { travel: _t, earliest: _e, latest: _l, service: _s, ...plain } = body;
+            write(event.target.checked
+              ? { ...plain, travel: travels[0], ...(stopNumbers.length ? { earliest: stopNumbers[0], latest: stopNumbers[stopNumbers.length > 1 ? 1 : 0] } : {}) }
+              : plain);
+          }}
+        />
+        Each {body.stops.set || "stop"} has a time window
+        {!timed && travels.length === 0 && (
+          <span className="text-xs text-slate-500">
+            (needs a data table over [{body.stops.set || "stop"}, {body.stops.set || "stop"}] for the travel time)
+          </span>
+        )}
+      </label>
+      {timed && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label htmlFor={travelId} className="block text-xs text-slate-600">Travel time</label>
+            <select id={travelId} className="rounded border px-2 py-1" value={body.travel}
+                    onChange={(event) => write({ ...body, travel: event.target.value })}>
+              {!travels.includes(body.travel!) && <option value={body.travel}>{body.travel}</option>}
+              {travels.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
+          {([["earliest", earliestId, "Open from"], ["latest", latestId, "Open until"], ["service", serviceId, "Time spent there"]] as const).map(
+            ([key, id, label]) => (
+              <div key={key}>
+                <label htmlFor={id} className="block text-xs text-slate-600">{label}</label>
+                <select id={id} className="rounded border px-2 py-1" value={body[key] ?? ""}
+                        onChange={(event) => {
+                          const { [key]: _old, ...rest } = body;
+                          write(event.target.value ? { ...rest, [key]: event.target.value } : rest);
+                        }}>
+                  <option value="">{key === "service" ? "nothing" : key === "earliest" ? "0" : "any time"}</option>
+                  {body[key] && !stopNumbers.includes(body[key]!) && <option value={body[key]}>{body[key]}</option>}
+                  {stopNumbers.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </div>
+            )
+          )}
         </div>
       )}
       <p className="text-xs text-slate-500">

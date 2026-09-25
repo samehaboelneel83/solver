@@ -292,7 +292,9 @@ export function irToBlocks(
       shaped(r, ["visit", "vehicles", "stops", "depot"], ROUTE_KEYS) && isRef(r.visit) && isName(r.depot) &&
       shaped(r.vehicles, ["index", "set"]) && shaped(r.stops, ["index", "set"]) &&
       (r.demand === undefined) === (r.capacity === undefined) &&
-      (r.demand === undefined || (isName(r.demand) && isName(r.capacity)));
+      (r.demand === undefined || (isName(r.demand) && isName(r.capacity))) &&
+      ["travel", "earliest", "latest", "service"].every((k) => r[k] === undefined || isName(r[k])) &&
+      (r.travel !== undefined || ["earliest", "latest", "service"].every((k) => r[k] === undefined));
     if (!fits) return null;
     const vehicles = r.vehicles as { index: string; set: string };
     const stops = r.stops as { index: string; set: string };
@@ -313,6 +315,10 @@ export function irToBlocks(
         DEPOT: r.depot as string,
         DEMAND: (r.demand as string) ?? "",
         CAPACITY: (r.capacity as string) ?? "",
+        TRAVEL: (r.travel as string) ?? "",
+        EARLIEST: (r.earliest as string) ?? "",
+        LATEST: (r.latest as string) ?? "",
+        SERVICE: (r.service as string) ?? "",
       },
     });
   }

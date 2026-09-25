@@ -597,6 +597,11 @@ export const IR_RULES: readonly IrRule[] = [
     text: "a `route` rule is hard and unconditional",
   },
   {
+    code: "route_travel_invalid",
+    where: "shape",
+    text: "a `route` rule's `travel` is a parameter declared over its stops' set twice, [stop, stop]",
+  },
+  {
     code: "edge_needs_version_2",
     where: "shape",
     text: "a `via` names the edge it walks with `as` in a version 2 document only",
@@ -686,7 +691,11 @@ export const SCHEDULING_KEYS: Readonly<Record<"no_overlap" | "cumulative", reado
 export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "via", "empty"];
 
 /** What a `route` rule names; `demand` and `capacity` are optional, both or neither (`ROUTE_KEYS`). */
-export const ROUTE_KEYS: readonly string[] = ["visit", "vehicles", "stops", "depot", "demand", "capacity"];
+export const ROUTE_KEYS: readonly string[] = [
+  "visit", "vehicles", "stops", "depot", "demand", "capacity",
+  // Time windows (queue R15c): a travel-time parameter and stop attributes.
+  "travel", "earliest", "latest", "service",
+];
 
 /** What an interval declaration names beyond `index` and `domain`. */
 export const INTERVAL_KEYS = ["start", "end", "size", "presence"] as const;

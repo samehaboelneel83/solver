@@ -53,3 +53,38 @@ describe("the route rule's choices (queue R15b)", () => {
     expect(shown().route!.demand).toBeUndefined();
   });
 });
+
+describe("time windows on the route rule (queue R15c)", () => {
+  const timed: ModelContext = {
+    ...CONTEXT,
+    attributes: { ...CONTEXT.attributes, stop: [{ name: "open", data_type: "integer" }, { name: "close", data_type: "integer" }] },
+    parameters: { minutes: { index: ["stop", "stop"] }, cost: { index: ["truck"] } },
+  };
+  function TimedHarness({ start }: { start: Constraint }) {
+    const [rule, setRule] = useState(start);
+    return (
+      <>
+        <RouteEditor constraint={rule} context={timed} onChange={setRule} />
+        <pre data-testid="rule">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+
+  it("names the travel time from a stop-to-stop table and the window from the stops' numbers", () => {
+    render(<TimedHarness start={newRouteRule("c_1", timed)!} />);
+    fireEvent.click(screen.getByLabelText(/has a time window/));
+    expect(shown().route).toMatchObject({ travel: "minutes", earliest: "open", latest: "close" });
+    // Only a table over [stop, stop] is a travel time.
+    expect([...(screen.getByLabelText("Travel time") as HTMLSelectElement).options].map((o) => o.value)).toEqual(["minutes"]);
+    fireEvent.change(screen.getByLabelText("Open until"), { target: { value: "" } });
+    expect(shown().route).not.toHaveProperty("latest");
+    expect(describeRoute(shown())).toMatch(/arriving between open and any time after minutes$/);
+    fireEvent.click(screen.getByLabelText(/has a time window/));
+    expect(shown().route).not.toHaveProperty("travel");
+  });
+
+  it("cannot be switched on without a stop-to-stop table", () => {
+    render(<Harness start={newRouteRule("c_1", CONTEXT)!} />);
+    expect(screen.getByLabelText(/has a time window/)).toBeDisabled();
+  });
+});

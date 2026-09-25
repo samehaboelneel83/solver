@@ -178,6 +178,14 @@
         ],
         "default_value": 0,
         "value_type": "shift"
+      },
+      {
+        "name": "travel",
+        "index": [
+          "stop",
+          "stop"
+        ],
+        "default_value": 0
       }
     ],
     "relationshipTypes": [
@@ -3490,6 +3498,98 @@
             "severity": "hard"
           }
         ]
+      }
+    },
+    {
+      "name": "vehicle_routes_with_windows",
+      "why": "queue R15c: travel times between stops and a window at each (here read from the demand attribute, which is only a number the fixture world has); the compiler keeps each arrival inside it",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "travel": {
+            "index": [
+              "stop",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity",
+              "travel": "travel",
+              "earliest": "demand",
+              "latest": "demand"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
       }
     }
   ],
@@ -15280,6 +15380,102 @@
                   {
                     "index": "s",
                     "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_travel_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "travel"
+      ],
+      "why": "travel over vehicle and stop says nothing about the time from one stop to the next",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "travel": {
+            "index": [
+              "vehicle",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity",
+              "travel": "travel"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
                   }
                 ]
               }

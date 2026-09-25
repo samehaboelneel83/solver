@@ -108,7 +108,9 @@ SCHEDULING_KEYS: dict[str, frozenset[str]] = {
 #: What a `connected` rule names; `empty` is optional.
 CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", "empty"})
 #: What a `route` rule names; `demand` and `capacity` are optional, both or neither.
-ROUTE_KEYS: frozenset[str] = frozenset({"visit", "vehicles", "stops", "depot", "demand", "capacity"})
+ROUTE_KEYS: frozenset[str] = frozenset({"visit", "vehicles", "stops", "depot", "demand", "capacity",
+                                        # Time windows (queue R15c): a travel-time parameter and stop attributes.
+                                        "travel", "earliest", "latest", "service"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 

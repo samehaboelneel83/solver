@@ -869,7 +869,8 @@ class _ShapeChecker:
             )
         if not isinstance(body, dict):
             return Refusal("route_malformed", loc,
-                           "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity")
+                           "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity "
+                           "and time windows (travel, earliest, latest, service)")
         odd, what = None, ""
         for key in ("visit", "vehicles", "stops", "depot"):
             if key not in body:
@@ -879,12 +880,16 @@ class _ShapeChecker:
             odd = next((key for key in body if key not in ROUTE_KEYS), None)
             what = "not one of them"
         if odd is None:
-            odd = next((key for key in ("depot", "demand", "capacity")
+            odd = next((key for key in ("depot", "demand", "capacity", "travel", "earliest", "latest", "service")
                         if key in body and not (isinstance(body[key], str) and body[key])), None)
             what = "not a name"
         if odd is None and ("demand" in body) != ("capacity" in body):
             odd = "capacity" if "demand" in body else "demand"
             what = "missing: demand and capacity come together"
+        if odd is None and "travel" not in body:
+            # Queue R15c: a window is kept in time, and time needs the travel between stops.
+            odd = next((key for key in ("earliest", "latest", "service") if key in body), None)
+            what = "given without travel, the time from stop to stop"
         if odd is not None:
             return Refusal(
                 "route_malformed",
@@ -938,6 +943,15 @@ class _ShapeChecker:
                 [*loc, "visit", "var"],
                 f"{visit['var']!r} must be binary: a vehicle goes from one stop to the next or it does not",
             )
+        if "travel" in body:
+            stops = body["stops"]["set"]
+            if self.parameters.get(body["travel"]) != [stops, stops] or body["travel"] in self.entity_parameters:
+                return Refusal(
+                    "route_travel_invalid",
+                    [*loc, "travel"],
+                    f"{json.dumps(body['travel'])} must be a parameter this model declares over [{stops}, {stops}]: "
+                    "the time from each stop to the next",
+                )
         return None
 
     def _check_chance(self, constraint: dict[str, Any], at: Loc, identifier: str):

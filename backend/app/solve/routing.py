@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.solve.compile import Compiled, VarKey
-from app.solve.route import LOAD
+from app.solve.route import ARRIVE, LOAD
 
 #: The share of the run's time the search takes, and its ceiling in seconds.
 SHARE, CEILING = 0.2, 30.0
@@ -85,6 +85,31 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
         model.SetArcCostEvaluatorOfVehicle(callback, k)
     load = model.RegisterUnaryTransitCallback(lambda i: demand[manager.IndexToNode(i)])
     model.AddDimensionWithVehicleCapacity(load, 0, capacity, True, "load")
+    times = None
+    if "travel" in body:
+        # Queue R15c: the windows as a time dimension, from the compiled arrivals' own bounds.
+        leg = {(a, b): 0 for a in stops for b in stops}
+        # Indexed [stop, stop], a type twice: the dataset keys its cells by position.
+        table = {(r["0"], r["1"]): r["value"] for r in (data.get("parameters") or {}).get(body["travel"], [])}
+        fallback = (data.get("parameter_defaults") or {}).get(body["travel"], 0) or 0
+        serve = {s: int(Decimal(str(row.get(body["service"], 0) or 0))) if body.get("service") else 0
+                 for s, row in zip(stops, stop_rows)}
+        for a in stops:
+            for b in stops:
+                if a != b:
+                    leg[(a, b)] = serve[a] + int(Decimal(str(table.get((a, b), fallback))))
+        bounds = {s: compiled.variables[(ARRIVE, (rule_id, s))] for s in stops}
+        horizon = int(max(b.upper for b in bounds.values()))
+        transit = model.RegisterTransitCallback(
+            lambda i, j: leg[(stops[manager.IndexToNode(i)], stops[manager.IndexToNode(j)])])
+        model.AddDimension(transit, horizon, horizon + max(leg.values(), default=0) + 1, False, "time")
+        times = model.GetDimensionOrDie("time")
+        for n, s in enumerate(stops):
+            if n == depot:
+                for k in range(len(vehicles)):
+                    times.CumulVar(model.Start(k)).SetRange(int(bounds[s].lower), int(bounds[s].upper))
+            else:
+                times.CumulVar(manager.NodeToIndex(n)).SetRange(int(bounds[s].lower), int(bounds[s].upper))
     params = pywrapcp.DefaultRoutingSearchParameters()
     params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
@@ -106,10 +131,19 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
                 if a != b:
                     hint[(LOAD, (rule_id, v, a, b))] = 0
     used = 0
+    departure = None
     for k, v in enumerate(vehicles):
         index, path = model.Start(k), []
         while not model.IsEnd(index):
             path.append(manager.IndexToNode(index))
+            if times is not None:
+                at = solution.Value(times.CumulVar(index))
+                node = manager.IndexToNode(index)
+                if node == depot:
+                    # One departure time for every vehicle: the earliest any leaves, so no arrival is early.
+                    departure = at if departure is None else min(departure, at)
+                else:
+                    hint[(ARRIVE, (rule_id, stops[node]))] = at
             index = solution.Value(model.NextVar(index))
         path.append(manager.IndexToNode(index))
         if len(path) <= 2:
@@ -121,6 +155,9 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
             hint[(LOAD, (rule_id, v, stops[a], stops[b]))] = carried - demand[a] if a != depot else carried
             if a != depot:
                 carried -= demand[a]
+    if times is not None:
+        hint[(ARRIVE, (rule_id, body["depot"]))] = departure if departure is not None else int(
+            compiled.variables[(ARRIVE, (rule_id, body["depot"]))].lower)
     hint = {k: val for k, val in hint.items() if k in compiled.variables}
     from app.solve.evolve import holds, objective_at
 

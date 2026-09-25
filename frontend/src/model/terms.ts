@@ -74,6 +74,11 @@ export type RouteBody = {
   depot: string;
   demand?: string;
   capacity?: string;
+  /** Time windows (queue R15c): a parameter over [stop, stop], and stop attributes. */
+  travel?: string;
+  earliest?: string;
+  latest?: string;
+  service?: string;
 };
 
 /** `every stop visited once by vehicle from depot, stop demand within vehicle capacity`, or null for any other rule. */
@@ -81,7 +86,10 @@ export function describeRoute(rule: { route?: unknown }): string | null {
   const r = rule.route as Partial<RouteBody> | undefined;
   if (!r) return null;
   const load = r.demand && r.capacity ? `, ${r.demand} within ${r.vehicles?.set || "vehicle"} ${r.capacity}` : "";
-  return `every ${r.stops?.set || "stop"} but ${r.depot || "?"} visited once by a ${r.vehicles?.set || "vehicle"} from ${r.depot || "?"} and back${load}`;
+  const windows = r.travel
+    ? `, arriving between ${r.earliest || "0"} and ${r.latest || "any time"} after ${r.travel}${r.service ? ` and ${r.service} at each` : ""}`
+    : "";
+  return `every ${r.stops?.set || "stop"} but ${r.depot || "?"} visited once by a ${r.vehicles?.set || "vehicle"} from ${r.depot || "?"} and back${load}${windows}`;
 }
 
 /** The binary variables a route rule can read: indexed [vehicles, stops, stops]. */

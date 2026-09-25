@@ -901,6 +901,16 @@ export function defineIrBlocks(): void {
         .appendField("within each vehicle's")
         .appendField(text(), "CAPACITY")
         .appendField("(both blank: no loads)");
+      // Queue R15c: time windows -- blank travel, no windows.
+      this.appendDummyInput()
+        .appendField("travel time")
+        .appendField(text(), "TRAVEL")
+        .appendField("each stop open from")
+        .appendField(text(), "EARLIEST")
+        .appendField("to")
+        .appendField(text(), "LATEST")
+        .appendField("staying")
+        .appendField(text(), "SERVICE");
       this.setPreviousStatement(true, "rule");
       this.setNextStatement(true, "rule");
       this.setColour(COLOUR.rule);

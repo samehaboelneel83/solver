@@ -228,6 +228,12 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       const i = fieldOf(r, "S_INDEX");
       const demand = fieldOf(r, "DEMAND");
       const capacity = fieldOf(r, "CAPACITY");
+      // Queue R15c: the time windows, each named only when given.
+      const timing = Object.fromEntries(
+        (["travel", "earliest", "latest", "service"] as const)
+          .map((k) => [k, fieldOf(r, k.toUpperCase())] as const)
+          .filter(([, v]) => v !== "")
+      );
       constraints.push({
         id: fieldOf(r, "ID"),
         ...(note ? { note } : {}),
@@ -237,6 +243,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
           stops: { index: i, set: fieldOf(r, "S_SET") },
           depot: fieldOf(r, "DEPOT"),
           ...(demand || capacity ? { demand, capacity } : {}),
+          ...timing,
         },
         severity: "hard",
       });

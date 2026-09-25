@@ -84,6 +84,8 @@ SEMANTIC = frozenset({
     # declarations around a term (queue R20b).
     "parameter_entity_invalid", "entity_parameter_read_as_number", "index_entry_invalid",
     "where_parameter_invalid", "parameter_entity_mismatch",
+    # Which parameter travel names, and over what, is a fact of the declarations (queue R15c).
+    "route_travel_invalid",
     # Where a chance may be is a fact about the rest of the rule.
     "chance_needs_version_2", "chance_misplaced",
     # A connected rule's variable, its order, the relationship and its ends

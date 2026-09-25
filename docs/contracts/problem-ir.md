@@ -669,6 +669,21 @@ Refusals, all `shape`:
 | `route_index_mismatch` | the variable is not read `[vehicles' index, stops' index, a new name]` |
 | `route_not_binary` | the variable is not binary |
 
+#### Time windows (queue R15c)
+
+```json
+"route": { "...": "...", "travel": "minutes", "earliest": "open", "latest": "close", "service": "stay" }
+```
+
+`travel` names a parameter over `[stop, stop]` -- the time from each stop to the next
+(`route_travel_invalid` otherwise); `earliest` and `latest` are the stops' number attributes
+holding each window, and `service` the time spent at a stop. The last three need `travel`
+(`route_malformed`). A stop with no `earliest` opens at 0, one with no `latest` never closes.
+Compiled exactly: an arrival time per stop inside its window, and on every arc in use the next
+arrival at least this one plus the service here plus the travel -- a big-M row, M as small as the
+windows allow. Arriving early waits; arriving late is not allowed; the depot's arrival is when the
+vehicles set out. The routing search's start carries the same windows as a time dimension.
+
 ## 5. What is deliberately not supported yet
 
 Each of these was considered and left out for a reason, not overlooked.

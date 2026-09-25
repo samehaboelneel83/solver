@@ -720,6 +720,11 @@
       "text": "a `route` rule is hard and unconditional"
     },
     {
+      "code": "route_travel_invalid",
+      "where": "shape",
+      "text": "a `route` rule's `travel` is a parameter declared over its stops' set twice, [stop, stop]"
+    },
+    {
       "code": "edge_needs_version_2",
       "where": "shape",
       "text": "a `via` names the edge it walks with `as` in a version 2 document only"
