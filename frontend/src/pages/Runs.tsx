@@ -88,7 +88,7 @@ export type StochasticRecord = {
   expected: number | null;
   out_of_sample?: { futures: number; mean: number | null; ci95: number | null; unmet: number };
   /** Per chance rule (queue R8): the share of futures asked for, and the share it held in out of sample. */
-  chance?: Record<string, { asked: number; held: number }>;
+  chance?: Record<string, { asked: number; held: number; held_in_sample?: number }>;
 };
 
 /** What the plan is likely to be worth on futures it was not chosen for. */
@@ -100,7 +100,11 @@ export function stochasticOutlook(record: StochasticRecord): string {
   const chances = Object.entries(record.chance ?? {})
     .map(([rule, c]) => ` ${rule} held in ${percent(c.held)} of them (asked: ${percent(c.asked)}).`)
     .join("");
-  return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}${chances}`;
+  const short = Object.values(record.chance ?? {}).some((c) => c.held < c.asked);
+  const advice = short && record.samples < 50
+    ? ` ${record.samples} futures are few to promise that from: asking for more (up to 50) makes the plan firmer.`
+    : "";
+  return `On ${out.futures} fresh futures it averages ${Number(out.mean.toPrecision(6))}, give or take ${Number((out.ci95 ?? 0).toPrecision(3))} (95%).${unmet}${chances}${advice}`;
 }
 
 /** The learned selector's record on a run (queue R11): its pick beside the solver that ran. */

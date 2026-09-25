@@ -931,3 +931,14 @@ describe("the learned selector's record (queue R11)", () => {
       .toBe("would also pick highs (60% of its nearest models, like facility)");
   });
 });
+
+describe("a chance rule that fell short (queue R8c)", () => {
+  it("says few futures were sampled and that more make the plan firmer", async () => {
+    const { stochasticOutlook } = await import("./Runs");
+    expect(
+      stochasticOutlook({ samples: 20, stage_two: [], expected: 136, out_of_sample: { futures: 20, mean: 136, ci95: 0, unmet: 0 },
+        chance: { c_cover: { asked: 0.9, held: 0.75, held_in_sample: 1 } } })
+    ).toBe("On 20 fresh futures it averages 136, give or take 0 (95%). c_cover held in 75% of them (asked: 90%). " +
+      "20 futures are few to promise that from: asking for more (up to 50) makes the plan firmer.");
+  });
+});
