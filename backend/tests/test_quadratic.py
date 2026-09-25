@@ -390,3 +390,46 @@ def test_the_editor_names_no_solver_for_a_model_the_run_would_refuse(db, without
         ).scalar_one()
         db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
     db.commit()
+
+
+# -- the convexity check, block by block (queue R12's gate) --------------------------------------------------
+
+
+def _squares(n: int, sense: str = "minimize", cross: bool = False):
+    from bench.families import generate
+
+    case = generate("load_balance", "XL" if n > 2000 else "L", 0)
+    compiled = compile_model(case.ir, case.data)
+    if cross:
+        keys = sorted(compiled.variables)
+        compiled.objective_quadratic[(keys[0], keys[1])] = Decimal(-3)  # ties two, and bends the wrong way
+    return compiled
+
+
+def test_a_sum_of_thousands_of_squares_is_proven_convex_block_by_block():
+    compiled = _squares(5000)
+    assert len(compiled.variables) == 5000
+    found = objective_convexity(compiled)
+    assert found.convex is True, found.reason
+    # So the rules give it to a convex quadratic solver, not the global nonlinear one.
+    from app.solve.convexity import refine
+    from bench.families import generate
+
+    case = generate("load_balance", "XL", 0)
+    assert choose(refine(classify(case.ir, case.data), compiled))[0].name == "highs"
+
+
+def test_one_bad_block_among_many_still_makes_it_nonconvex():
+    assert objective_convexity(_squares(5000, cross=True)).convex is False
+
+
+def test_only_a_single_block_past_the_limit_goes_unchecked(monkeypatch):
+    from app.solve import convexity
+
+    compiled = _squares(1000)
+    keys = sorted(compiled.variables)
+    for a, b in zip(keys, keys[1:]):  # a chain ties every variable into one block
+        compiled.objective_quadratic[(a, b)] = Decimal("0.001")
+    monkeypatch.setattr(convexity, "MAX_CHECKED_VARIABLES", 500)
+    found = objective_convexity(compiled)
+    assert found.convex is None and "ties 1000 variables together" in found.reason

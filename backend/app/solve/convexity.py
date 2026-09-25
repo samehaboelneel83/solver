@@ -45,35 +45,60 @@ def objective_convexity(compiled: Compiled) -> Convexity:
     if not quadratic:
         return Convexity(True, "the objective is linear")
 
-    keys = sorted({key for pair in quadratic for key in pair})
-    if len(keys) > MAX_CHECKED_VARIABLES:
+    # A symmetric matrix is positive semidefinite exactly when each of its
+    # blocks is -- the connected pieces of "these two variables share a
+    # term". Checked block by block (queue R12's gate found a sum of 5,000
+    # squares refused as one 5,000-wide matrix), so only a single block past
+    # the limit goes unchecked.
+    parent: dict = {}
+
+    def root(key):
+        parent.setdefault(key, key)
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for a, b in quadratic:
+        parent[root(a)] = root(b)
+    blocks: dict = {}
+    for key in {key for pair in quadratic for key in pair}:
+        blocks.setdefault(root(key), []).append(key)
+    largest = max(len(keys) for keys in blocks.values())
+    if largest > MAX_CHECKED_VARIABLES:
         return Convexity(
             None,
-            f"its quadratic part involves {len(keys)} variables, more than the "
+            f"its quadratic part ties {largest} variables together, more than the "
             f"{MAX_CHECKED_VARIABLES} the convexity check covers, so it is not proven convex",
         )
 
     import numpy as np
 
-    position = {key: i for i, key in enumerate(keys)}
-    # f(x) = sum c_ij x_i x_j = x'Mx with M symmetric: the diagonal holds c_ii
-    # and each off-diagonal pair shares c_ij half and half. f is convex
-    # exactly when M is positive semidefinite.
-    matrix = np.zeros((len(keys), len(keys)))
+    lowest, scale = 0.0, 1.0
+    by_block: dict = {}
     for (a, b), coeff in quadratic.items():
-        i, j = position[a], position[b]
-        if i == j:
-            matrix[i, i] += float(coeff)
-        else:
-            matrix[i, j] += float(coeff) / 2
-            matrix[j, i] += float(coeff) / 2
-    if compiled.sense != "minimize":
-        # Maximising f is minimising -f.
-        matrix = -matrix
+        by_block.setdefault(root(a), []).append(((a, b), coeff))
+    for block_root, members in blocks.items():
+        keys = sorted(members)
+        position = {key: i for i, key in enumerate(keys)}
+        # f(x) = sum c_ij x_i x_j = x'Mx with M symmetric: the diagonal holds c_ii
+        # and each off-diagonal pair shares c_ij half and half. f is convex
+        # exactly when M is positive semidefinite.
+        matrix = np.zeros((len(keys), len(keys)))
+        for (a, b), coeff in by_block[block_root]:
+            i, j = position[a], position[b]
+            if i == j:
+                matrix[i, i] += float(coeff)
+            else:
+                matrix[i, j] += float(coeff) / 2
+                matrix[j, i] += float(coeff) / 2
+        if compiled.sense != "minimize":
+            # Maximising f is minimising -f.
+            matrix = -matrix
+        eigenvalues = np.linalg.eigvalsh(matrix)
+        scale = max(scale, float(np.max(np.abs(eigenvalues))))
+        lowest = min(lowest, float(eigenvalues.min()))
 
-    eigenvalues = np.linalg.eigvalsh(matrix)
-    scale = max(1.0, float(np.max(np.abs(eigenvalues))))
-    lowest = float(eigenvalues.min())
     if lowest >= -_TOLERANCE * scale:
         return Convexity(
             True,

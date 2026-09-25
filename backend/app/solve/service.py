@@ -46,6 +46,7 @@ from app.solve.result import Solution
 from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
+from app.solve import allocation as allocation_rows
 from app.solve import horizon as horizon_rows
 from app.solve import selector as selector_rows
 from app.solve import lagrange as lagrange_rows
@@ -166,6 +167,8 @@ def enqueue_run(
     from_settings["stochastic_samples"] = settings["solve.stochastic_samples"].source
     rolling_horizon = bool(settings["solve.rolling_horizon"].value)
     from_settings["rolling_horizon"] = settings["solve.rolling_horizon"].source
+    decompose = bool(settings["solve.decompose"].value)
+    from_settings["decompose"] = settings["solve.decompose"].source
     # A tuning search's result (queue R10), checked against the whitelist before the run is queued.
     tuned_params = str(settings["solve.solver_params"].value or "")
     from_settings["solver_params"] = settings["solve.solver_params"].source
@@ -235,6 +238,7 @@ def enqueue_run(
         "local_fallback": local_fallback,
         "stochastic_samples": stochastic_samples,
         "rolling_horizon": rolling_horizon,
+        "decompose": decompose,
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -649,6 +653,7 @@ def _execute(
         stochastic_wanted = bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir)
         stochastic_record, record_model = None, None
         horizon_record = None
+        decomposition_record = None
         if stochastic_wanted and stochastic_rows.chance_rules(ir):
             # A chance rule is switched per future (queue R8): the extensive form has
             # binaries, held by a big-M from declared bounds where there is no indicator.
@@ -817,6 +822,10 @@ def _execute(
                     workers=workers,
                     should_stop=stop.is_set,
                 )
+            # A template decomposition that is exact where it applies (setting
+            # `solve.decompose`, app.solve.allocation, queue R12).
+            allocate = (bool(params.get("decompose")) and not stochastic_wanted
+                        and allocation_rows.applies(solving_model) is None)
             horizon_plan = None
             if params.get("rolling_horizon") and not stochastic_wanted:
                 # Relax-and-fix over the model's time set (setting
@@ -828,7 +837,7 @@ def _execute(
                     horizon_plan = (time_set, periods)
                 else:
                     horizon_record = {"used": False, "why": why_not}
-            if params.get("separable") and not stochastic_wanted and horizon_plan is None:
+            if params.get("separable") and not stochastic_wanted and horizon_plan is None and not allocate:
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -842,7 +851,10 @@ def _execute(
                     blocks_record = {"solved_whole": refused or "the model is one block"}
                     parts = None
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
-                if stochastic_wanted:
+                if allocate:
+                    allocated = allocation_rows.solve(solving_model)
+                    result, reason, decomposition_record = allocated.solution, None, allocated.record
+                elif stochastic_wanted:
                     result, stochastic_record = sandbox.run(
                         "app.solve.sandbox:stochastic_in_child",
                         {"backend": backend.name, "ir": ir, "data": data, "compiled": solving_model,
@@ -1015,6 +1027,8 @@ def _execute(
         extra["stochastic"] = stochastic_record
     if horizon_record is not None:
         extra["rolling_horizon_run"] = horizon_record
+    if decomposition_record is not None:
+        extra["decomposition"] = decomposition_record
     if shadow is not None:
         extra["selector"] = {**shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
     applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
