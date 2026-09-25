@@ -47,6 +47,7 @@ from app.solve.scaling import admit as admit_scaled
 from app.solve import blocks as block_rows
 from app.solve import mccormick, pareto
 from app.solve import allocation as allocation_rows
+from app.solve import partition as partition_rows
 from app.solve import horizon as horizon_rows
 from app.solve import selector as selector_rows
 from app.solve import lagrange as lagrange_rows
@@ -169,6 +170,8 @@ def enqueue_run(
     from_settings["rolling_horizon"] = settings["solve.rolling_horizon"].source
     decompose = bool(settings["solve.decompose"].value)
     from_settings["decompose"] = settings["solve.decompose"].source
+    connected_start = bool(settings["solve.connected_start"].value)
+    from_settings["connected_start"] = settings["solve.connected_start"].source
     # A tuning search's result (queue R10), checked against the whitelist before the run is queued.
     tuned_params = str(settings["solve.solver_params"].value or "")
     from_settings["solver_params"] = settings["solve.solver_params"].source
@@ -239,6 +242,7 @@ def enqueue_run(
         "stochastic_samples": stochastic_samples,
         "rolling_horizon": rolling_horizon,
         "decompose": decompose,
+        "connected_start": connected_start,
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -654,6 +658,7 @@ def _execute(
         stochastic_record, record_model = None, None
         horizon_record = None
         decomposition_record = None
+        start_record = None
         if stochastic_wanted and stochastic_rows.chance_rules(ir):
             # A chance rule is switched per future (queue R8): the extensive form has
             # binaries, held by a big-M from declared bounds where there is no indicator.
@@ -716,6 +721,18 @@ def _execute(
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
                 db.commit()  # not held through the solve: see `_record_fingerprint`
+        if params.get("connected_start") and backend.name in warm.HINTED:
+            # A connected, balanced partition to start from (setting
+            # `solve.connected_start`, app.solve.partition, queue R13).
+            why_not = partition_rows.applies(ir)
+            if why_not is not None:
+                start_record = {"used": False, "why": why_not}
+            elif hint:
+                start_record = {"used": False, "why": "an earlier answer is the start"}
+            else:
+                hint, start_record = partition_rows.start(
+                    ir, data, compiled, seconds=min(partition_rows.CEILING, partition_rows.SHARE * time_limit))
+                start_record = {"used": True, **start_record}
 
         points: list = []
         parts, blocks_record = None, None
@@ -765,7 +782,8 @@ def _execute(
                         return sandbox.run(
                             "app.solve.sandbox:solve_in_child",
                             {"backend": name, "compiled": solving_model, "time_limit": seconds, "seed": seed,
-                             "workers": share, "gap_rel": gap_rel, "symmetry": bool(params.get("symmetry"))},
+                             "workers": share, "gap_rel": gap_rel, "symmetry": bool(params.get("symmetry")),
+                             "hint": hint if name in warm.HINTED else None},
                             time_limit=seconds,
                             workers=share,
                             should_stop=stop.is_set,
@@ -926,24 +944,37 @@ def _execute(
                     # In a child process with a memory ceiling, a CPU allowance
                     # and a deadline (app.solve.sandbox, Phase 9): a model that
                     # outgrows them fails with a reason, not the worker.
-                    result, reason = sandbox.run(
-                        "app.solve.sandbox:solve_in_child",
-                        {
-                            "backend": backend.name,
-                            "compiled": solving_model,
-                            "time_limit": time_limit,
-                            "seed": seed,
-                            "workers": workers,
-                            "gap_rel": gap_rel,
-                            "hint": hint,
-                            "symmetry": bool(params.get("symmetry")),
-                            "solver_params": tuned.get(backend.name),
-                        },
-                        time_limit=time_limit,
-                        workers=workers,
-                        on_progress=events.progress,
-                        should_stop=stop.is_set,
-                    )
+                    began_solve = time.monotonic()
+                    try:
+                        result, reason = sandbox.run(
+                            "app.solve.sandbox:solve_in_child",
+                            {
+                                "backend": backend.name,
+                                "compiled": solving_model,
+                                "time_limit": time_limit,
+                                "seed": seed,
+                                "workers": workers,
+                                "gap_rel": gap_rel,
+                                "hint": hint,
+                                "symmetry": bool(params.get("symmetry")),
+                                "solver_params": tuned.get(backend.name),
+                            },
+                            time_limit=time_limit,
+                            workers=workers,
+                            on_progress=events.progress,
+                            should_stop=stop.is_set,
+                        )
+                    except sandbox.SandboxFailed as exc:
+                        if not (start_record or {}).get("feasible"):
+                            raise
+                        # The solver crashed, but the start keeps every rule: it is the answer.
+                        result, reason = Solution("unknown", False, None, {}, 0.0, backend.name), None
+                        start_record["solver_failed"] = str(exc)
+                    if (start_record or {}).get("feasible") and not result.assignments:
+                        # The solver ended with nothing: the start is the answer (queue R13).
+                        result = partition_rows.as_answer(solving_model, hint, backend.name,
+                                                          time.monotonic() - began_solve)
+                        start_record["answer"] = True
                 solving.set_attribute("status", result.status)
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
@@ -1029,6 +1060,8 @@ def _execute(
         extra["rolling_horizon_run"] = horizon_record
     if decomposition_record is not None:
         extra["decomposition"] = decomposition_record
+    if start_record is not None:
+        extra["connected_start_run"] = start_record
     if shadow is not None:
         extra["selector"] = {**shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
     applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}

@@ -118,6 +118,18 @@ export function selectorText(record: SelectorRecord): string {
     : `would pick ${record.pick} instead of ${record.chosen} (${vote}, like ${record.like.join(", ")})`;
 }
 
+/** What `solve.connected_start` (queue R13) did: the start the solver was handed, or why none. */
+export type ConnectedStartRecord =
+  | { used: true; groups: number; units: number; feasible: boolean; objective: number; breach: number; seconds: number }
+  | { used: false; why: string };
+
+export function connectedStartText(record: ConnectedStartRecord): string {
+  if (!record.used) return `none: ${record.why}`;
+  return record.feasible
+    ? `${record.groups} connected, balanced groups of ${record.units} built in ${record.seconds}s (goal ${record.objective})`
+    : `${record.groups} connected groups of ${record.units}, short of the rules by ${record.breach} -- the solver repaired from there`;
+}
+
 /** A run's model structure (queue R4) in a few words: the input to a decomposition. */
 export function structureText(found: ModelStructure): string {
   if (found.linking_rules === 0) return `${found.blocks} independent parts`;
@@ -739,6 +751,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     objective_terms?: { id: string; value: number }[];
     structure?: ModelStructure;
     selector?: SelectorRecord;
+    connected_start_run?: ConnectedStartRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
@@ -929,6 +942,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
           {params.structure && params.structure.blocks > 1 && (
             <Fact label="How it splits" value={structureText(params.structure)} />
           )}
+          {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
           {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (
             <Fact

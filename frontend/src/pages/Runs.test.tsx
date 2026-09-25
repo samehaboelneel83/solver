@@ -932,6 +932,17 @@ describe("the learned selector's record (queue R11)", () => {
   });
 });
 
+describe("the connected start's record (queue R13)", () => {
+  it("says what the solver started from, or why it started from nothing", async () => {
+    const { connectedStartText } = await import("./Runs");
+    expect(connectedStartText({ used: true, groups: 8, units: 400, feasible: true, objective: 18710, breach: 0, seconds: 0.05 }))
+      .toBe("8 connected, balanced groups of 400 built in 0.05s (goal 18710)");
+    expect(connectedStartText({ used: true, groups: 12, units: 1600, feasible: false, objective: 1, breach: 70, seconds: 1 }))
+      .toBe("12 connected groups of 1600, short of the rules by 70 -- the solver repaired from there");
+    expect(connectedStartText({ used: false, why: "an earlier answer is the start" })).toBe("none: an earlier answer is the start");
+  });
+});
+
 describe("a chance rule that fell short (queue R8c)", () => {
   it("says few futures were sampled and that more make the plan firmer", async () => {
     const { stochasticOutlook } = await import("./Runs");
