@@ -292,8 +292,8 @@ function LineView({ sets, entries, members, name }: { sets: string[]; entries: E
           <text x={left - 4} y={y(v) + 3} textAnchor="end" fontSize="10" fill="currentColor">{formatAmount(v)}</text>
         </g>
       ))}
-      <polyline points={points.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="#2563eb" strokeWidth="2" />
-      {points.map((v, i) => <circle key={members[i]} cx={x(i)} cy={y(v)} r="2.5" fill="#2563eb"><title>{`${name(sets[0], members[i])}: ${formatAmount(v)}`}</title></circle>)}
+      <polyline points={points.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="rgb(var(--accent-600))" strokeWidth="2" />
+      {points.map((v, i) => <circle key={members[i]} cx={x(i)} cy={y(v)} r="2.5" fill="rgb(var(--accent-600))"><title>{`${name(sets[0], members[i])}: ${formatAmount(v)}`}</title></circle>)}
       {members.map((m, i) => i % every === 0 && (
         <text key={m} x={x(i)} y={H - 6} textAnchor="middle" fontSize="10" fill="currentColor">{name(sets[0], m)}</text>
       ))}

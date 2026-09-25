@@ -2,6 +2,116 @@
 @tailwind components;
 @tailwind utilities;
 
+/* R22: the palette, as variables Tailwind's `slate` and `blue` read (see
+   tailwind.config.js). Light first; `.dark` (set on <html> by lib/theme.ts)
+   inverts the neutral scale and the accent, so every page's classes read
+   right in both. `--surface` is what a card sits on. */
+:root {
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+  --accent-50: 236 253 245;
+  --accent-100: 209 250 229;
+  --accent-200: 167 243 208;
+  --accent-300: 110 231 183;
+  --accent-400: 52 211 153;
+  --accent-500: 16 185 129;
+  --accent-600: 5 150 105;
+  --accent-700: 4 120 87;
+  --accent-800: 6 95 70;
+  --accent-900: 6 78 59;
+  --accent-950: 2 44 34;
+  --surface: 255 255 255;
+}
+
+.dark {
+  --slate-50: 2 6 23;
+  --slate-100: 15 23 42;
+  --slate-200: 30 41 59;
+  --slate-300: 51 65 85;
+  --slate-400: 71 85 105;
+  --slate-500: 100 116 139;
+  --slate-600: 148 163 184;
+  --slate-700: 203 213 225;
+  --slate-800: 226 232 240;
+  --slate-900: 241 245 249;
+  --slate-950: 248 250 252;
+  --accent-50: 2 44 34;
+  --accent-100: 6 78 59;
+  --accent-200: 6 95 70;
+  --accent-300: 4 120 87;
+  --accent-400: 5 150 105;
+  --accent-500: 16 185 129;
+  --accent-600: 52 211 153;
+  --accent-700: 110 231 183;
+  --accent-800: 167 243 208;
+  --accent-900: 209 250 229;
+  --accent-950: 236 253 245;
+  --surface: 15 23 42;
+}
+
+/* `white` is not a variable (text on a coloured button stays white in light
+   mode), so the two places it means "the page" are turned in dark mode here. */
+.dark .bg-white {
+  background-color: rgb(var(--surface));
+}
+.dark .text-white {
+  color: rgb(2 6 23);
+}
+/* Status colours (green chips, red errors...) are Tailwind's own, not the palette's variables:
+   in dark their soft backgrounds go deep and translucent, their text and borders light. */
+.dark .bg-green-50, .dark .bg-green-100 { background-color: rgb(20 83 45 / 0.45); }
+.dark .text-green-600, .dark .text-green-700, .dark .text-green-800, .dark .text-green-900 { color: rgb(134 239 172); }
+.dark .border-green-100, .dark .border-green-200, .dark .border-green-300 { border-color: rgb(22 101 52); }
+.dark .bg-emerald-50, .dark .bg-emerald-100 { background-color: rgb(6 78 59 / 0.45); }
+.dark .text-emerald-600, .dark .text-emerald-700, .dark .text-emerald-800, .dark .text-emerald-900 { color: rgb(110 231 183); }
+.dark .border-emerald-100, .dark .border-emerald-200, .dark .border-emerald-300 { border-color: rgb(6 95 70); }
+.dark .bg-red-50, .dark .bg-red-100 { background-color: rgb(127 29 29 / 0.45); }
+.dark .text-red-600, .dark .text-red-700, .dark .text-red-800, .dark .text-red-900 { color: rgb(252 165 165); }
+.dark .border-red-100, .dark .border-red-200, .dark .border-red-300 { border-color: rgb(153 27 27); }
+.dark .bg-amber-50, .dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.45); }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900 { color: rgb(252 211 77); }
+.dark .border-amber-100, .dark .border-amber-200, .dark .border-amber-300 { border-color: rgb(146 64 14); }
+.dark .bg-yellow-50, .dark .bg-yellow-100 { background-color: rgb(113 63 18 / 0.45); }
+.dark .text-yellow-600, .dark .text-yellow-700, .dark .text-yellow-800, .dark .text-yellow-900 { color: rgb(253 224 71); }
+.dark .border-yellow-100, .dark .border-yellow-200, .dark .border-yellow-300 { border-color: rgb(133 77 14); }
+.dark .bg-orange-50, .dark .bg-orange-100 { background-color: rgb(124 45 18 / 0.45); }
+.dark .text-orange-600, .dark .text-orange-700, .dark .text-orange-800, .dark .text-orange-900 { color: rgb(253 186 116); }
+.dark .border-orange-100, .dark .border-orange-200, .dark .border-orange-300 { border-color: rgb(154 52 18); }
+.dark .bg-rose-50, .dark .bg-rose-100 { background-color: rgb(136 19 55 / 0.45); }
+.dark .text-rose-600, .dark .text-rose-700, .dark .text-rose-800, .dark .text-rose-900 { color: rgb(253 164 175); }
+.dark .border-rose-100, .dark .border-rose-200, .dark .border-rose-300 { border-color: rgb(159 18 57); }
+.dark .bg-purple-50, .dark .bg-purple-100 { background-color: rgb(88 28 135 / 0.45); }
+.dark .text-purple-600, .dark .text-purple-700, .dark .text-purple-800, .dark .text-purple-900 { color: rgb(216 180 254); }
+.dark .border-purple-100, .dark .border-purple-200, .dark .border-purple-300 { border-color: rgb(107 33 168); }
+.dark .bg-violet-50, .dark .bg-violet-100 { background-color: rgb(76 29 149 / 0.45); }
+.dark .text-violet-600, .dark .text-violet-700, .dark .text-violet-800, .dark .text-violet-900 { color: rgb(196 181 253); }
+.dark .border-violet-100, .dark .border-violet-200, .dark .border-violet-300 { border-color: rgb(91 33 182); }
+.dark .bg-indigo-50, .dark .bg-indigo-100 { background-color: rgb(49 46 129 / 0.45); }
+.dark .text-indigo-600, .dark .text-indigo-700, .dark .text-indigo-800, .dark .text-indigo-900 { color: rgb(165 180 252); }
+.dark .border-indigo-100, .dark .border-indigo-200, .dark .border-indigo-300 { border-color: rgb(55 48 163); }
+.dark .bg-sky-50, .dark .bg-sky-100 { background-color: rgb(12 74 110 / 0.45); }
+.dark .text-sky-600, .dark .text-sky-700, .dark .text-sky-800, .dark .text-sky-900 { color: rgb(125 211 252); }
+.dark .border-sky-100, .dark .border-sky-200, .dark .border-sky-300 { border-color: rgb(7 89 133); }
+.dark .bg-teal-50, .dark .bg-teal-100 { background-color: rgb(19 78 74 / 0.45); }
+.dark .text-teal-600, .dark .text-teal-700, .dark .text-teal-800, .dark .text-teal-900 { color: rgb(94 234 212); }
+.dark .border-teal-100, .dark .border-teal-200, .dark .border-teal-300 { border-color: rgb(17 94 89); }
+.dark .bg-cyan-50, .dark .bg-cyan-100 { background-color: rgb(22 78 99 / 0.45); }
+.dark .text-cyan-600, .dark .text-cyan-700, .dark .text-cyan-800, .dark .text-cyan-900 { color: rgb(103 232 249); }
+.dark .border-cyan-100, .dark .border-cyan-200, .dark .border-cyan-300 { border-color: rgb(21 94 117); }
+.dark body {
+  background-color: rgb(var(--slate-50));
+  color: rgb(var(--slate-900));
+}
+
 /* G-4/WCAG 1.4.10 Reflow, fix round 1: a defensive backstop against
    page-level horizontal scroll, on top of `contain-layout` on <main>
    (AppShell.tsx), which is the real fix for the specific bug this round

@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  darkMode: "class",
   theme: {
     // G-4/WCAG 1.4.10 Reflow, fix round 1: Tailwind's default breakpoints are
     // viewport-px media queries, which a larger root font size never crosses
@@ -28,7 +29,19 @@ export default {
       xl: "80em",
       "2xl": "96em",
     },
-    extend: {},
+    // R22: the greys and the accent are CSS variables (src/index.css), so dark
+    // mode and the accent change every page without touching its classes:
+    // `slate` is the neutral scale, inverted in dark; `blue` -- the platform's
+    // accent from the start -- is now the green of the look.
+    extend: {
+      colors: {
+        slate: { 50: "rgb(var(--slate-50) / <alpha-value>)", 100: "rgb(var(--slate-100) / <alpha-value>)", 200: "rgb(var(--slate-200) / <alpha-value>)", 300: "rgb(var(--slate-300) / <alpha-value>)", 400: "rgb(var(--slate-400) / <alpha-value>)", 500: "rgb(var(--slate-500) / <alpha-value>)", 600: "rgb(var(--slate-600) / <alpha-value>)", 700: "rgb(var(--slate-700) / <alpha-value>)", 800: "rgb(var(--slate-800) / <alpha-value>)", 900: "rgb(var(--slate-900) / <alpha-value>)", 950: "rgb(var(--slate-950) / <alpha-value>)" },
+        blue: { 50: "rgb(var(--accent-50) / <alpha-value>)", 100: "rgb(var(--accent-100) / <alpha-value>)", 200: "rgb(var(--accent-200) / <alpha-value>)", 300: "rgb(var(--accent-300) / <alpha-value>)", 400: "rgb(var(--accent-400) / <alpha-value>)", 500: "rgb(var(--accent-500) / <alpha-value>)", 600: "rgb(var(--accent-600) / <alpha-value>)", 700: "rgb(var(--accent-700) / <alpha-value>)", 800: "rgb(var(--accent-800) / <alpha-value>)", 900: "rgb(var(--accent-900) / <alpha-value>)", 950: "rgb(var(--accent-950) / <alpha-value>)" },
+      },
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+      },
+    },
   },
   plugins: [],
 };
