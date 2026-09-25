@@ -38,7 +38,7 @@ describe("computing distances from the map (queue R16a)", () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(/\/api\/v1\/domains\/7\/distances$/);
-    expect(JSON.parse(init.body as string)).toEqual({ name: "distance", from_type_id: 1, to_type_id: 2, unit: "m", nearest: 5 });
+    expect(JSON.parse(init.body as string)).toEqual({ name: "distance", from_type_id: 1, to_type_id: 2, metric: "straight", unit: "m", nearest: 5 });
   });
 
   it("links pairs within a distance given in km", async () => {
@@ -52,6 +52,20 @@ describe("computing distances from the map (queue R16a)", () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(/\/within$/);
-    expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, max_m: 2500 });
+    expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, metric: "straight", max_m: 2500 });
+  });
+
+  it("measures a reach in road travel time, in minutes", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ relationship_type_id: 4, edges: 3, missing: [], source: {} }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    renderForm([shaped(1, "site"), shaped(2, "customer")]);
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "within" } });
+    fireEvent.change(screen.getByLabelText("Measured"), { target: { value: "time" } });
+    fireEvent.change(screen.getByLabelText(/Within \(minutes\)/), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, metric: "time", max_min: 12 });
   });
 });

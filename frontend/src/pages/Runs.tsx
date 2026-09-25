@@ -142,11 +142,14 @@ export function metaheuristicText(record: MetaheuristicRecord): string {
 /** What the platform computed from the map for this run (queue R16a), in a line per input. */
 export function computedText(inputs: (ComputedSource & { input: string; name: string })[]): string {
   return inputs
-    .map((i) =>
-      i.kind === "within"
-        ? `${i.name}: ${i.from} to ${i.to} within ${Number(((i.max_m ?? 0) / 1000).toPrecision(3))} km, straight line, ${i.computed_at.slice(0, 10)}`
-        : `${i.name}: ${i.from} to ${i.to} in ${i.unit ?? "m"}, straight line${i.nearest ? `, nearest ${i.nearest} kept` : ""}, ${i.computed_at.slice(0, 10)}`
-    )
+    .map((i) => {
+      const timed = i.max_min !== undefined || i.unit === "s" || i.unit === "min";
+      const how = i.metric.startsWith("road") ? (timed ? "road travel time" : "along the roads") : "straight line";
+      const gaps = i.no_road ? `, ${i.no_road} pairs with no road left far` : "";
+      return i.kind === "within"
+        ? `${i.name}: ${i.from} to ${i.to} within ${i.max_min !== undefined ? `${i.max_min} min` : `${Number(((i.max_m ?? 0) / 1000).toPrecision(3))} km`}, ${how}, ${i.computed_at.slice(0, 10)}`
+        : `${i.name}: ${i.from} to ${i.to} in ${i.unit ?? "m"}, ${how}${i.nearest ? `, nearest ${i.nearest} kept` : ""}${gaps}, ${i.computed_at.slice(0, 10)}`;
+    })
     .join("; ");
 }
 

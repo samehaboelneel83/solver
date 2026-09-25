@@ -26,6 +26,8 @@ from app.api.deps import requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
 from app.models.v1_domain import EntityType, ParameterDef, ParameterValue, Relationship, RelationshipType
+import numpy as np
+
 from app.spatial import distance
 
 router = APIRouter(prefix="/api/v1", tags=["spatial"])
@@ -43,8 +45,11 @@ class DistanceRequest(BaseModel):
     name: str = Field(pattern=NAME, max_length=63)
     from_type_id: int
     to_type_id: int
-    #: Whole metres (what CP-SAT and the network lane take), or kilometres to three places.
-    unit: Literal["m", "km"] = "m"
+    #: A straight line, the road, or the time the road takes (queue R16b).
+    metric: Literal["straight", "road", "time"] = "straight"
+    #: Distance in whole metres (what CP-SAT and the network lane take) or km to three places;
+    #: time in whole seconds or minutes to one place.
+    unit: Literal["m", "km", "s", "min"] = "m"
     #: Keep each place's nearest this many; the rest take a recorded "far" default, never 0.
     nearest: int | None = Field(default=None, ge=1, le=10_000)
 
@@ -60,7 +65,10 @@ class WithinRequest(BaseModel):
     name: str = Field(pattern=NAME, max_length=63)
     from_type_id: int
     to_type_id: int
-    max_m: float = Field(gt=0, le=20_000_000)
+    metric: Literal["straight", "road", "time"] = "straight"
+    #: For a straight line or the road: metres. For time: minutes.
+    max_m: float | None = Field(default=None, gt=0, le=20_000_000)
+    max_min: float | None = Field(default=None, gt=0, le=100_000)
 
 
 class WithinReport(BaseModel):
@@ -68,6 +76,29 @@ class WithinReport(BaseModel):
     edges: int
     missing: list[str]
     source: dict
+
+
+_UNITS = {"straight": ("m", "km"), "road": ("m", "km"), "time": ("s", "min")}
+#: Each unit's divisor from the base (metres or minutes) and its decimal places.
+_SCALE = {"m": (1.0, 0), "km": (1000.0, 3), "s": (1 / 60.0, 0), "min": (1.0, 1)}
+
+
+def _measure(db: Session, domain_id: int, metric: str, origins, targets) -> tuple[np.ndarray, dict]:
+    """Metres (straight or road) or minutes (time) from each origin to each target, NaN where no road
+    joins them, and what the source should say about how."""
+    if metric == "straight":
+        return distance.matrix(origins, targets), {"metric": "straight line (geodesic, WGS84)"}
+    from app.settings_resolve import resolve
+    from app.spatial import roads
+
+    try:
+        template = roads.vector_source(str(resolve(db, domain_id=domain_id)["spatial.tiles_index"].value or "").strip())
+        net = roads.network([*origins, *targets], template)
+        values, info = roads.matrix(net, origins, targets, minutes=metric == "time")
+    except roads.RoadsError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return values, {"metric": roads.describe(template), **info}
+
 
 
 def _types(db: Session, domain_id: int, from_id: int, to_id: int) -> tuple[EntityType, EntityType]:
@@ -88,36 +119,43 @@ def _places(db: Session, entity_type: EntityType):
 
 def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commit: bool = True) -> DistanceReport:
     origin_type, target_type = _types(db, domain_id, body.from_type_id, body.to_type_id)
+    if body.unit not in _UNITS[body.metric]:
+        raise HTTPException(422, f"a {body.metric} measure is in {' or '.join(_UNITS[body.metric])}, not {body.unit}")
     origins, missing_o = _places(db, origin_type)
     targets, missing_t = _places(db, target_type)
     pairs = len(origins) * len(targets)
     if pairs > MAX_PAIRS and body.nearest is None:
         raise HTTPException(422, f"{len(origins)} x {len(targets)} is {pairs:,} pairs, more than {MAX_PAIRS:,}: "
                                  "keep each place's nearest few (`nearest`) instead")
-    scale, places_ = (1.0, 0) if body.unit == "m" else (1000.0, 3)
     parameter = db.execute(select(ParameterDef).where(ParameterDef.domain_id == domain_id,
                                                       ParameterDef.name == body.name)).scalar_one_or_none()
     index = [origin_type.id, target_type.id]
     if parameter is not None and list(parameter.index_type_ids) != index:
         raise HTTPException(409, f"{body.name!r} is already a parameter over other types; choose another name")
-    cells, longest = [], 0.0
+    values, how = _measure(db, domain_id, body.metric, origins, targets)
+    scale, places_ = _SCALE[body.unit]
+    reached = values[~np.isnan(values)]
+    longest = float(reached.max(initial=0.0))
     keep = body.nearest if body.nearest is not None else len(targets)
-    for origin in origins:
-        metres = distance.row(origin, targets)
-        longest = max(longest, float(metres.max(initial=0.0)))
-        chosen = range(len(targets)) if keep >= len(targets) else metres.argsort(kind="stable")[:keep]
-        for j in chosen:
-            if origin.entity_id == targets[j].entity_id:
-                value = 0
-            else:
-                value = round(float(metres[j]) / scale, places_)
-            cells.append({"entity_ids": [origin.entity_id, targets[j].entity_id], "value": value})
+    cells, left_out = [], 0
+    for i, origin in enumerate(origins):
+        row = values[i]
+        order = np.argsort(np.where(np.isnan(row), np.inf, row), kind="stable")
+        for j in order[:keep]:
+            if np.isnan(row[j]):
+                left_out += 1  # no road joins them: left to the far default, never guessed
+                continue
+            value = 0 if origin.entity_id == targets[j].entity_id else round(float(row[j]) / scale, places_)
+            if places_ == 0:
+                value = int(value)
+            cells.append({"entity_ids": [origin.entity_id, targets[int(j)].entity_id], "value": value})
     far = None
-    if keep < len(targets):
-        # Pairs left out are far, not free: ten times the longest distance measured.
-        far = math.ceil(longest * 10 / scale) if body.unit == "m" else round(longest * 10 / scale, 3)
-    source = {**distance.describe(body.unit, body.nearest), "from": origin_type.name, "to": target_type.name,
-              "pairs": len(cells), **({"far": far} if far is not None else {}),
+    if keep < len(targets) or left_out:
+        # Pairs left out are far, not free: ten times the longest measured.
+        far = math.ceil(longest * 10 / scale) if places_ == 0 else round(longest * 10 / scale, places_)
+    source = {"kind": "distance", "unit": body.unit, **how, **({"nearest": body.nearest} if body.nearest else {}),
+              "from": origin_type.name, "to": target_type.name, "pairs": len(cells),
+              **({"far": far} if far is not None else {}), **({"no_road": left_out} if left_out else {}),
               **({"missing": missing_o + missing_t} if missing_o or missing_t else {}),
               "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     if parameter is None:
@@ -139,6 +177,9 @@ def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commi
 
 def write_within(db: Session, domain_id: int, body: WithinRequest, *, commit: bool = True) -> WithinReport:
     origin_type, target_type = _types(db, domain_id, body.from_type_id, body.to_type_id)
+    limit = body.max_min if body.metric == "time" else body.max_m
+    if limit is None:
+        raise HTTPException(422, "a time reach is max_min (minutes); a straight or road reach is max_m (metres)")
     origins, missing_o = _places(db, origin_type)
     targets, missing_t = _places(db, target_type)
     if len(origins) * len(targets) > 4_000_000:
@@ -147,15 +188,15 @@ def write_within(db: Session, domain_id: int, body: WithinRequest, *, commit: bo
                                                     RelationshipType.name == body.name)).scalar_one_or_none()
     if rel is not None and (rel.from_type_id, rel.to_type_id) != (origin_type.id, target_type.id):
         raise HTTPException(409, f"{body.name!r} is already a relationship between other types; choose another name")
+    values, how = _measure(db, domain_id, body.metric, origins, targets)
     edges = []
-    for origin in origins:
-        metres = distance.row(origin, targets)
-        for j in (metres <= body.max_m).nonzero()[0]:
+    for i, origin in enumerate(origins):
+        for j in np.flatnonzero(values[i] <= limit):  # NaN (no road) compares false: never linked
             if targets[j].entity_id != origin.entity_id:
                 edges.append((origin.entity_id, targets[int(j)].entity_id))
         if len(edges) > MAX_EDGES:
-            raise HTTPException(422, f"more than {MAX_EDGES:,} pairs are within {body.max_m:g} m; choose a shorter distance")
-    source = {"kind": "within", "metric": "straight line (geodesic, WGS84)", "max_m": body.max_m,
+            raise HTTPException(422, f"more than {MAX_EDGES:,} pairs are within {limit:g}; choose a shorter reach")
+    source = {"kind": "within", **how, **({"max_min": body.max_min} if body.metric == "time" else {"max_m": body.max_m}),
               "from": origin_type.name, "to": target_type.name, "edges": len(edges),
               **({"missing": missing_o + missing_t} if missing_o or missing_t else {}),
               "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}

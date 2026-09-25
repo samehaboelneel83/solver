@@ -995,5 +995,11 @@ describe("what was computed from the map (queue R16a)", () => {
       { input: "relationship", name: "reaches", kind: "within", metric: "straight line (geodesic, WGS84)", from: "site", to: "customer",
         max_m: 5000, computed_at: "2026-09-25T12:00:00+00:00" },
     ])).toBe("distance: site to customer in m, straight line, nearest 5 kept, 2026-09-25; reaches: site to customer within 5 km, straight line, 2026-09-25");
+    expect(computedText([
+      { input: "parameter", name: "drive", kind: "distance", metric: "road (OpenMapTiles zoom-12 roads ...)", from: "depot", to: "stop",
+        unit: "min", no_road: 3, computed_at: "2026-09-25T12:00:00+00:00" },
+      { input: "relationship", name: "near", kind: "within", metric: "road (OpenMapTiles zoom-12 roads ...)", from: "site", to: "customer",
+        max_min: 15, computed_at: "2026-09-25T12:00:00+00:00" },
+    ])).toBe("drive: depot to stop in min, road travel time, 3 pairs with no road left far, 2026-09-25; near: site to customer within 15 min, road travel time, 2026-09-25");
   });
 });

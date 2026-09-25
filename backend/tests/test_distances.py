@@ -148,3 +148,43 @@ def test_a_run_says_which_computed_data_it_read(placed, db, empty_queue):  # noq
     [computed] = run["params"]["computed_inputs"]
     assert computed["input"] == "parameter" and computed["kind"] == "distance" and computed["name"] == "distance"
     assert computed["unit"] == "m"
+
+
+def test_road_distances_through_the_endpoint_never_guess_a_missing_road(tenants, db, monkeypatch):  # noqa: F811
+    """`metric: road` on tiles built in the test: a road where there is one, the far default where there is none."""
+    from app.spatial import roads
+    from tests import test_roads as t
+
+    client, headers, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code in (200, 201), response.text
+        return response.json()
+
+    depot = post("/api/v1/entity-types", {"domain_id": domain, "name": "depot", "role": "location"})
+    shop = post("/api/v1/entity-types", {"domain_id": domain, "name": "shop", "role": "location"})
+    for type_ in (depot, shop):
+        post(f"/api/v1/entity-types/{type_['id']}/attributes", {"name": "place", "data_type": "geometry"})
+    at = lambda px, py: {"type": "Point", "coordinates": list(t.lonlat(px, py))}  # noqa: E731
+    post("/api/v1/entities", {"entity_type_id": depot["id"], "key": "d", "attrs": {"place": at(1000, 2000)}})
+    post("/api/v1/entities", {"entity_type_id": shop["id"], "key": "on_road", "attrs": {"place": at(2000, 1000)}})
+    post("/api/v1/entities", {"entity_type_id": shop["id"], "key": "in_the_desert", "attrs": {"place": at(4000, 4000)}})
+    fetch = t.fetch_for([({"class": "primary"}, [(1000, 2000), (3000, 2000)]),
+                         ({"class": "primary"}, [(2000, 1000), (2000, 3000)])])
+    real_network = roads.network
+    monkeypatch.setattr(roads, "vector_source", lambda index, fetch=None: t.TEMPLATE)
+    monkeypatch.setattr(roads, "network", lambda places, template, fetch_=None: real_network(places, template, fetch))
+    report = post(f"/api/v1/domains/{domain}/distances",
+                  {"name": "drive", "from_type_id": depot["id"], "to_type_id": shop["id"], "metric": "road"})
+    values = _values(db, report["parameter_id"])
+    assert values == {("d", "on_road"): pytest.approx(2 * t._units_to_m(1000), rel=0.01)}
+    source = report["source"]
+    assert source["metric"].startswith("road") and source["no_road"] == 1 and source["off_road"] == ["in_the_desert"]
+    assert source["far"] >= 9.99 * values[("d", "on_road")]  # ten times the longest, before rounding
+    timed = post(f"/api/v1/domains/{domain}/distances",
+                 {"name": "drive_time", "from_type_id": depot["id"], "to_type_id": shop["id"], "metric": "time", "unit": "s"})
+    assert timed["source"]["unit"] == "s" and all(v == int(v) for v in _values(db, timed["parameter_id"]).values())
+    refused = client.post(f"/api/v1/domains/{domain}/distances", headers=headers,
+                          json={"name": "x", "from_type_id": depot["id"], "to_type_id": shop["id"], "metric": "time", "unit": "m"})
+    assert refused.status_code == 422 and "time measure is in s or min" in refused.text

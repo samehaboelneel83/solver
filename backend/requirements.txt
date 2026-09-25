@@ -20,6 +20,8 @@ opentelemetry-sdk==1.44.0
 opentelemetry-exporter-otlp-proto-http==1.44.0
 shapely==2.0.6
 pyproj==3.7.0
+# Road distances (queue R16b): Dijkstra and a KD-tree over the road graph read from the vector tiles.
+scipy==1.14.1
 # Terrain-RGB tiles are PNGs: read to sample elevation per grid cell (GIS 10).
 Pillow==11.0.0
 # IPOPT, carried in casadi's wheel: the local nonlinear lane (queue R6).

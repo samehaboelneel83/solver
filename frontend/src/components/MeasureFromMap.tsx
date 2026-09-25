@@ -16,9 +16,11 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const [name, setName] = useState("distance");
   const [from, setFrom] = useState<Id | "">(placed[0]?.id ?? "");
   const [to, setTo] = useState<Id | "">(placed[1]?.id ?? placed[0]?.id ?? "");
-  const [unit, setUnit] = useState<"m" | "km">("m");
+  const [metric, setMetric] = useState<"straight" | "road" | "time">("straight");
+  const [unit, setUnit] = useState<"m" | "km" | "s" | "min">("m");
   const [nearest, setNearest] = useState("");
   const [km, setKm] = useState("5");
+  const [minutes, setMinutes] = useState("15");
   const [error, setError] = useState<string | null>(null);
   const distances = useComputeDistances();
   const within = useComputeWithin();
@@ -36,13 +38,14 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       if (kind === "distances") {
         const k = nearest.trim() === "" ? undefined : Number(nearest);
         if (k !== undefined && !(Number.isInteger(k) && k >= 1)) return setError("Keep the nearest: a whole number, 1 or more, or blank for all.");
-        const done = await distances.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, unit, ...(k ? { nearest: k } : {}) });
+        const done = await distances.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, metric, unit, ...(k ? { nearest: k } : {}) });
         toast.success(`${name}: ${done.pairs.toLocaleString()} distances computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
       } else {
-        const max = Number(km);
-        if (!(max > 0)) return setError("Within: a distance above 0 km.");
-        const done = await within.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, max_m: max * 1000 });
-        toast.success(`${name}: ${done.edges.toLocaleString()} pairs within ${max} km linked`);
+        const max = Number(metric === "time" ? minutes : km);
+        if (!(max > 0)) return setError(metric === "time" ? "Within: a time above 0 minutes." : "Within: a distance above 0 km.");
+        const reach = metric === "time" ? { max_min: max } : { max_m: max * 1000 };
+        const done = await within.mutateAsync({ domainId, name, from_type_id: from, to_type_id: to, metric, ...reach });
+        toast.success(`${name}: ${done.edges.toLocaleString()} pairs within ${max} ${metric === "time" ? "min" : "km"} linked`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -63,7 +66,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
     <section aria-labelledby={`${id}-heading`} className="mb-6 rounded-md border border-slate-200 bg-white p-4">
       <h2 id={`${id}-heading`} className="mb-1 text-base font-semibold text-slate-900">Compute from the map</h2>
       <p className="mb-3 text-sm text-slate-600">
-        Straight-line distances between places with a shape -- a floor on road distance, not an estimate of it.
+        Between places with a shape: a straight line (a floor on road distance), or along the roads the tile server
+        draws -- in distance or free-flow travel time, every road both ways, no traffic.
       </p>
       <form aria-label="Compute from the map" onSubmit={submit} className="flex flex-wrap items-end gap-3">
         <div>
@@ -83,6 +87,19 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
           <input id={`${id}-name`} className="rounded border px-2 py-1 font-mono text-sm" value={name}
                  onChange={(event) => setName(event.target.value)} />
         </div>
+        <div>
+          <label htmlFor={`${id}-metric`} className="block text-xs text-slate-600">Measured</label>
+          <select id={`${id}-metric`} className="rounded border px-2 py-1 text-sm" value={metric}
+                  onChange={(event) => {
+                    const next = event.target.value as "straight" | "road" | "time";
+                    setMetric(next);
+                    setUnit(next === "time" ? "min" : "m");
+                  }}>
+            <option value="straight">in a straight line</option>
+            <option value="road">along the roads</option>
+            <option value="time">as road travel time</option>
+          </select>
+        </div>
         {typeSelect("From", from, setFrom)}
         {typeSelect("To", to, setTo)}
         {kind === "distances" ? (
@@ -90,9 +107,18 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
             <div>
               <label htmlFor={`${id}-unit`} className="block text-xs text-slate-600">In</label>
               <select id={`${id}-unit`} className="rounded border px-2 py-1 text-sm" value={unit}
-                      onChange={(event) => setUnit(event.target.value as "m" | "km")}>
-                <option value="m">whole metres</option>
-                <option value="km">kilometres</option>
+                      onChange={(event) => setUnit(event.target.value as "m" | "km" | "s" | "min")}>
+                {metric === "time" ? (
+                  <>
+                    <option value="min">minutes</option>
+                    <option value="s">whole seconds</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="m">whole metres</option>
+                    <option value="km">kilometres</option>
+                  </>
+                )}
               </select>
             </div>
             <div>
@@ -102,11 +128,19 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
             </div>
           </>
         ) : (
-          <div>
-            <label htmlFor={`${id}-km`} className="block text-xs text-slate-600">Within (km)</label>
-            <input id={`${id}-km`} className="w-24 rounded border px-2 py-1 text-sm" inputMode="decimal" value={km}
-                   onChange={(event) => setKm(event.target.value)} />
-          </div>
+          metric === "time" ? (
+            <div>
+              <label htmlFor={`${id}-min`} className="block text-xs text-slate-600">Within (minutes)</label>
+              <input id={`${id}-min`} className="w-24 rounded border px-2 py-1 text-sm" inputMode="decimal" value={minutes}
+                     onChange={(event) => setMinutes(event.target.value)} />
+            </div>
+          ) : (
+            <div>
+              <label htmlFor={`${id}-km`} className="block text-xs text-slate-600">Within (km)</label>
+              <input id={`${id}-km`} className="w-24 rounded border px-2 py-1 text-sm" inputMode="decimal" value={km}
+                     onChange={(event) => setKm(event.target.value)} />
+            </div>
+          )
         )}
         <button type="submit" disabled={busy}
                 className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60">

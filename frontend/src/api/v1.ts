@@ -1064,7 +1064,10 @@ export type ComputedSource = {
   metric: string;
   from: string;
   to: string;
-  unit?: "m" | "km";
+  unit?: "m" | "km" | "s" | "min";
+  max_min?: number;
+  no_road?: number;
+  off_road?: string[];
   nearest?: number;
   far?: number;
   max_m?: number;
@@ -1073,8 +1076,9 @@ export type ComputedSource = {
   missing?: string[];
   computed_at: string;
 };
-export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; unit: "m" | "km"; nearest?: number };
-export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; max_m: number };
+export type Metric = "straight" | "road" | "time";
+export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number };
+export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number };
 export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>
   send<{ parameter_id: Id; pairs: number; missing: string[]; source: ComputedSource }>(
     "POST", `/api/v1/domains/${domainId}/distances`, body);
