@@ -42,6 +42,7 @@ from app.ir.contract import (
     ALL_KEYS,
     ARITHMETIC_ATTR_TYPES,
     CONNECTED_KEYS,
+    ROUTE_KEYS,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
     UNCERTAINTY_KINDS,
@@ -585,7 +586,8 @@ class _ShapeChecker:
                 scope = result
 
             if "chance" in constraint and (
-                "connected" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS)
+                "connected" in constraint or "route" in constraint
+                or any(kind in constraint for kind in SCHEDULING_KEYS)
             ):
                 problem = self._check_chance(constraint, at, identifier)
                 if problem:
@@ -597,6 +599,11 @@ class _ShapeChecker:
                 continue
             if "connected" in constraint:
                 problem = self._check_connected(constraint, at, identifier)
+                if problem:
+                    return problem
+                continue
+            if "route" in constraint:
+                problem = self._check_route(constraint, at, identifier)
                 if problem:
                     return problem
                 continue
@@ -814,6 +821,103 @@ class _ShapeChecker:
             )
         return None
 
+    def _check_route(self, constraint: dict[str, Any], at: Loc, identifier: str):
+        """`route` (version 2, queue R15b): every stop but the depot visited
+        once, each vehicle leaving the depot at most once and coming back,
+        with each vehicle's load within its capacity when both are named.
+        `visit[vehicle, stop, next stop]` is yes or no. The rule binds its own
+        vehicles and stops, so it stands outside any forall."""
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "route_needs_version_2",
+                at,
+                f"the constraint {identifier!r} is a route rule, which version 1 does not have; "
+                "publish it as version 2",
+            )
+        body = constraint["route"]
+        loc: Loc = [*at, "route"]
+        beside = [key for key in ("left", "relation", "right", "forall", "connected", *SCHEDULING_KEYS)
+                  if key in constraint]
+        if beside:
+            return Refusal(
+                "route_malformed",
+                [*at, beside[0]],
+                f"the constraint {identifier!r} is a route rule and also carries {beside[0]}; a "
+                "route rule is not also an expression, and binds its own indices",
+            )
+        if not isinstance(body, dict):
+            return Refusal("route_malformed", loc,
+                           "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity")
+        odd, what = None, ""
+        for key in ("visit", "vehicles", "stops", "depot"):
+            if key not in body:
+                odd, what = key, "missing"
+                break
+        if odd is None:
+            odd = next((key for key in body if key not in ROUTE_KEYS), None)
+            what = "not one of them"
+        if odd is None:
+            odd = next((key for key in ("depot", "demand", "capacity")
+                        if key in body and not (isinstance(body[key], str) and body[key])), None)
+            what = "not a name"
+        if odd is None and ("demand" in body) != ("capacity" in body):
+            odd = "capacity" if "demand" in body else "demand"
+            what = "missing: demand and capacity come together"
+        if odd is not None:
+            return Refusal(
+                "route_malformed",
+                [*loc, odd],
+                "a route rule names visit, vehicles, stops and depot, and optionally demand and "
+                f"capacity (both or neither); {odd!r} is {what}",
+            )
+        for key in ("severity", "weight", "when"):
+            if key in constraint and (key != "severity" or constraint[key] != "hard"):
+                return Refusal(
+                    "route_on_soft",
+                    [*at, key],
+                    f"the route rule {identifier!r} is hard and unconditional; a stop half visited has no price",
+                )
+        if constraint.get("severity") != "hard":
+            return Refusal(
+                "constraint_severity_unsupported",
+                [*at, "severity"],
+                f"{json.dumps(constraint.get('severity'))} is not a severity; a route rule is hard",
+            )
+        scope: dict[str, str] = {}
+        for part in ("vehicles", "stops"):
+            inner = self.check_bindings([body[part]], [*loc, part], scope)
+            if isinstance(inner, Refusal):
+                return Refusal(inner.code, [*loc, part, *inner.loc[len(loc) + 2 :]], inner.message)
+            scope = inner
+        visit = body["visit"]
+        if not isinstance(visit, dict) or set(visit) != {"var", "index"} or not isinstance(visit["index"], list):
+            return Refusal(
+                "route_malformed",
+                [*loc, "visit"],
+                'a route rule names its variable as {"var": "visit", "index": [vehicle, stop, next stop]}',
+            )
+        vehicle, stop = body["vehicles"]["index"], body["stops"]["index"]
+        index = visit["index"]
+        if (len(index) != 3 or index[:2] != [vehicle, stop] or not isinstance(index[2], str)
+                or index[2] in (vehicle, stop)):
+            return Refusal(
+                "route_index_mismatch",
+                [*loc, "visit", "index"],
+                f"{visit['var']!r} is read as [{vehicle}, {stop}, <next stop>]: the vehicles' index, the "
+                "stops' index, then a third name for the stop it goes to",
+            )
+        problem = self._reference(visit, [*loc, "visit"], {**scope, index[2]: body["stops"]["set"]}, "var",
+                                  self.variables)
+        if problem:
+            return problem
+        if self.ir["variables"][visit["var"]].get("domain") != "binary":
+            return Refusal(
+                "route_not_binary",
+                [*loc, "visit", "var"],
+                f"{visit['var']!r} must be binary: a vehicle goes from one stop to the next or it does not",
+            )
+        return None
+
     def _check_chance(self, constraint: dict[str, Any], at: Loc, identifier: str):
         """`chance` (version 2): the rule must hold in all but `epsilon` of the
         futures a stochastic solve samples -- one switch per future, at most
@@ -838,8 +942,8 @@ class _ShapeChecker:
                 "a chance is the share of futures the rule may fail in, strictly between 0 and 1: "
                 '{"epsilon": 0.1} holds it in 90% of them',
             )
-        if "connected" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS):
-            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling or connected rule; a chance is on an expression rule")
+        if "connected" in constraint or "route" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS):
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling, connected or route rule; a chance is on an expression rule")
         if constraint.get("severity") == "soft":
             return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is soft; a rule that may bend at a cost needs no chance -- make it hard")
         if "when" in constraint:
@@ -1659,6 +1763,13 @@ class _DomainChecker:
                 problem = self._connected(constraint["connected"], [*at, "connected"])
                 if problem:
                     return problem
+                continue
+            if "route" in constraint:
+                inner: dict[str, str] = {}
+                for part in ("vehicles", "stops"):
+                    problem = self._bindings([constraint["route"][part]], [*at, "route", part], inner)
+                    if problem:
+                        return Refusal(problem.code, [*at, "route", part, *problem.loc[len(at) + 3:]], problem.message)
                 continue
             kind = next((k for k in SCHEDULING_KEYS if k in constraint), None)
             if kind is not None:

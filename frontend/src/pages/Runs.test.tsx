@@ -952,6 +952,18 @@ describe("the metaheuristic lane (queue R14)", () => {
   });
 });
 
+describe("the routing start's record (queue R15b)", () => {
+  it("says which routes the solver started from, and when they are the answer", async () => {
+    const { routingStartText, statusNote } = await import("./Runs");
+    expect(routingStartText({ used: true, stops: 31, vehicles: 5, used_vehicles: 4, feasible: true, objective: 554, seconds: 15 }))
+      .toBe("routes for 30 stops on 4 of 5 vehicles from the routing search in 15s (goal 554)");
+    expect(routingStartText({ used: false, why: "the routing search minimises; this goal is maximised" }))
+      .toBe("none: the routing search minimises; this goal is maximised");
+    expect(statusNote({ status: "feasible", optimality: "none", params: { routing_start_run: { answer: true } } }))
+      .toMatch(/^The routes the routing search found: the solver ended with nothing better/);
+  });
+});
+
 describe("the connected start's record (queue R13)", () => {
   it("says what the solver started from, or why it started from nothing", async () => {
     const { connectedStartText } = await import("./Runs");

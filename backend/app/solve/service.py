@@ -49,6 +49,7 @@ from app.solve import mccormick, pareto
 from app.solve import allocation as allocation_rows
 from app.solve import network as network_rows
 from app.solve import partition as partition_rows
+from app.solve import routing as routing_rows
 from app.solve import horizon as horizon_rows
 from app.solve import selector as selector_rows
 from app.solve import lagrange as lagrange_rows
@@ -172,6 +173,8 @@ def enqueue_run(
     decompose = bool(settings["solve.decompose"].value)
     from_settings["decompose"] = settings["solve.decompose"].source
     connected_start = bool(settings["solve.connected_start"].value)
+    routing_start = bool(settings["solve.routing_start"].value)
+    from_settings["routing_start"] = settings["solve.routing_start"].source
     network = bool(settings["solve.network"].value)
     from_settings["network"] = settings["solve.network"].source
     metaheuristic = bool(settings["solve.metaheuristic"].value)
@@ -250,6 +253,7 @@ def enqueue_run(
         "connected_start": connected_start,
         "metaheuristic": metaheuristic,
         "network": network,
+        "routing_start": routing_start,
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -666,7 +670,7 @@ def _execute(
         horizon_record = None
         decomposition_record = None
         network_record = None
-        start_record = None
+        start_record, start_key = None, "connected_start_run"
         search_record = None
         exact_failed = None
         if stochastic_wanted and stochastic_rows.chance_rules(ir):
@@ -731,18 +735,31 @@ def _execute(
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
                 db.commit()  # not held through the solve: see `_record_fingerprint`
-        if params.get("connected_start") and backend.name in warm.HINTED:
+        kinds = {key for c in ir.get("constraints") or [] if isinstance(c, dict) for key in ("connected", "route")
+                 if key in c}
+        starter = None
+        if params.get("connected_start") and "connected" in kinds:
             # A connected, balanced partition to start from (setting
             # `solve.connected_start`, app.solve.partition, queue R13).
+            starter, start_key = partition_rows, "connected_start_run"
             why_not = partition_rows.applies(ir)
-            if why_not is not None:
+        elif params.get("routing_start") and "route" in kinds:
+            # Routes from OR-Tools' routing search to start from (setting
+            # `solve.routing_start`, app.solve.routing, queue R15b).
+            starter, start_key = routing_rows, "routing_start_run"
+            why_not = routing_rows.applies(ir, compiled)
+        if starter is not None:
+            if backend.name not in warm.HINTED:
+                start_record = {"used": False, "why": f"{backend.name} takes no start"}
+            elif why_not is not None:
                 start_record = {"used": False, "why": why_not}
             elif hint:
                 start_record = {"used": False, "why": "an earlier answer is the start"}
             else:
-                hint, start_record = partition_rows.start(
-                    ir, data, compiled, seconds=min(partition_rows.CEILING, partition_rows.SHARE * time_limit))
+                hint, start_record = starter.start(
+                    ir, data, compiled, seconds=min(starter.CEILING, starter.SHARE * time_limit))
                 start_record = {"used": True, **start_record}
+                hint = hint or None
 
         points: list = []
         parts, blocks_record = None, None
@@ -1100,7 +1117,7 @@ def _execute(
     if network_record is not None:
         extra["network_run"] = network_record
     if start_record is not None:
-        extra["connected_start_run"] = start_record
+        extra[start_key] = start_record
     if search_record is not None:
         extra["metaheuristic_run"] = search_record
     if shadow is not None:

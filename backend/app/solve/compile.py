@@ -338,6 +338,8 @@ class Compiled:
     # The ids of `connected` rules (version 2): their rows are a flow over
     # the relationship, counted apart by the fingerprint.
     connectivity: list[str] = field(default_factory=list)
+    # The ids of `route` rules (version 2, queue R15b), a subset of `connectivity`.
+    routes: list[str] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -431,6 +433,8 @@ class _Compiler:
         self._current_id: str | None = None
         #: The ids of `connected` rules, whose rows are a flow (`app.solve.connected`).
         self.connectivity: list[str] = []
+        #: The ids of `route` rules (`app.solve.route`).
+        self.routes: list[str] = []
 
     # -- setup ------------------------------------------------------------
 
@@ -464,6 +468,7 @@ class _Compiler:
             intervals=intervals,
             symmetry=self._symmetry(),
             connectivity=self.connectivity,
+            routes=self.routes,
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -584,6 +589,11 @@ class _Compiler:
             from app.solve.connected import expand
 
             expand(self, spec)
+            return
+        if "route" in spec:
+            from app.solve.route import expand as expand_route
+
+            expand_route(self, spec)
             return
         if "left" not in spec or "right" not in spec:
             # A model version published before the IR contract existed: its

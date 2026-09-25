@@ -255,6 +255,7 @@ CP_SAT = Backend(
         {
             "linear",
             "connected",
+            "route",
             "integral",
             "soft-constraints",
             "quadratic",
@@ -321,6 +322,7 @@ HIGHS = Backend(
         {
             "linear",
             "connected",
+            "route",
             "integral",
             "continuous",
             "fractional-data",
@@ -353,6 +355,7 @@ MILP = Backend(
         {
             "linear",
             "connected",
+            "route",
             "integral",
             "continuous",
             "fractional-data",
@@ -391,6 +394,7 @@ SCIP = Backend(
         {
             "linear",
             "connected",
+            "route",
             "integral",
             "continuous",
             "fractional-data",

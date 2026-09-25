@@ -25,6 +25,7 @@ import {
   UNCERTAINTY_KINDS,
   SCHEDULING_KEYS,
   CONNECTED_KEYS,
+  ROUTE_KEYS,
   FILTER_OPERATORS,
   FUNCTIONS,
   ACCEPTED_VERSIONS,
@@ -599,7 +600,7 @@ class ShapeChecker {
         scope = bound as Map<string, string>;
       }
 
-      if ("chance" in constraint && ("connected" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
+      if ("chance" in constraint && ("connected" in constraint || "route" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
         const problem = this.checkChance(constraint, at, identifier);
         if (problem) return problem;
       }
@@ -610,6 +611,11 @@ class ShapeChecker {
       }
       if ("connected" in constraint) {
         const problem = this.checkConnected(constraint, at, identifier);
+        if (problem) return problem;
+        continue;
+      }
+      if ("route" in constraint) {
+        const problem = this.checkRoute(constraint, at, identifier);
         if (problem) return problem;
         continue;
       }
@@ -679,8 +685,8 @@ class ShapeChecker {
         'a chance is the share of futures the rule may fail in, strictly between 0 and 1: {"epsilon": 0.1} holds it in 90% of them'
       );
     }
-    if ("connected" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
-      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling or connected rule; a chance is on an expression rule`);
+    if ("connected" in constraint || "route" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling, connected or route rule; a chance is on an expression rule`);
     }
     if (constraint.severity === "soft") {
       return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is soft; a rule that may bend at a cost needs no chance -- make it hard`);
@@ -792,6 +798,111 @@ class ShapeChecker {
         "connected_via_invalid",
         [...loc, "via"],
         `${show(body.via)} is not a relationship this model declares in relationships, so no dataset would carry its edges`
+      );
+    }
+    return null;
+  }
+
+  /** `route` (version 2, queue R15b): the same checks, in the same order and
+   * with the same locs, as `_check_route` in `app/ir/validate.py`. */
+  private checkRoute(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
+    if (this.ir.version === 1) {
+      return refusal(
+        "route_needs_version_2",
+        at,
+        `the constraint '${identifier}' is a route rule, which version 1 does not have; publish it as version 2`
+      );
+    }
+    const body = constraint.route;
+    const loc: IrLoc = [...at, "route"];
+    const beside = ["left", "relation", "right", "forall", "connected", "no_overlap", "cumulative"].filter((key) => key in constraint);
+    if (beside.length > 0) {
+      return refusal(
+        "route_malformed",
+        [...at, beside[0]],
+        `the constraint '${identifier}' is a route rule and also carries ${beside[0]}; a route rule is ` +
+          "not also an expression, and binds its own indices"
+      );
+    }
+    if (!isObject(body)) {
+      return refusal("route_malformed", loc, "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity");
+    }
+    let odd: string | undefined;
+    let what = "";
+    odd = ["visit", "vehicles", "stops", "depot"].find((key) => !(key in body));
+    if (odd !== undefined) what = "missing";
+    if (odd === undefined) {
+      odd = Object.keys(body).find((key) => !ROUTE_KEYS.includes(key));
+      what = "not one of them";
+    }
+    if (odd === undefined) {
+      odd = ["depot", "demand", "capacity"].find((key) => key in body && !(typeof body[key] === "string" && body[key] !== ""));
+      what = "not a name";
+    }
+    if (odd === undefined && ("demand" in body) !== ("capacity" in body)) {
+      odd = "demand" in body ? "capacity" : "demand";
+      what = "missing: demand and capacity come together";
+    }
+    if (odd !== undefined) {
+      return refusal(
+        "route_malformed",
+        [...loc, odd],
+        `a route rule names visit, vehicles, stops and depot, and optionally demand and capacity (both or neither); '${odd}' is ${what}`
+      );
+    }
+    for (const key of ["severity", "weight", "when"]) {
+      if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
+        return refusal(
+          "route_on_soft",
+          [...at, key],
+          `the route rule '${identifier}' is hard and unconditional; a stop half visited has no price`
+        );
+      }
+    }
+    if (constraint.severity !== "hard") {
+      return refusal(
+        "constraint_severity_unsupported",
+        [...at, "severity"],
+        `${show(constraint.severity)} is not a severity; a route rule is hard`
+      );
+    }
+    let scope = new Map<string, string>();
+    for (const part of ["vehicles", "stops"] as const) {
+      const inner = this.checkBindings([body[part]], [...loc, part], scope);
+      if ("code" in inner) {
+        const problem = inner as IrRefusal;
+        return { ...problem, loc: [...loc, part, ...problem.loc.slice(loc.length + 2)] };
+      }
+      scope = inner as Map<string, string>;
+    }
+    const visit = body.visit;
+    if (!isObject(visit) || Object.keys(visit).length !== 2 || !("var" in visit) || !("index" in visit) || !Array.isArray(visit.index)) {
+      return refusal(
+        "route_malformed",
+        [...loc, "visit"],
+        'a route rule names its variable as {"var": "visit", "index": [vehicle, stop, next stop]}'
+      );
+    }
+    const vehicle = (body.vehicles as Json).index as string;
+    const stop = (body.stops as Json).index as string;
+    const index = visit.index as unknown[];
+    if (index.length !== 3 || index[0] !== vehicle || index[1] !== stop || typeof index[2] !== "string" || index[2] === vehicle || index[2] === stop) {
+      return refusal(
+        "route_index_mismatch",
+        [...loc, "visit", "index"],
+        `'${String(visit.var)}' is read as [${vehicle}, ${stop}, <next stop>]: the vehicles' index, the stops' index, then a third name for the stop it goes to`
+      );
+    }
+    const withNext = new Map(scope);
+    withNext.set(index[2] as string, (body.stops as Json).set as string);
+    const reference = this.reference(visit, [...loc, "visit"], withNext, "var", this.variables);
+    if (reference) return reference;
+    const declared = (this.ir.variables as Record<string, Json>)[visit.var as string];
+    if (declared.domain !== "binary") {
+      return refusal(
+        "route_not_binary",
+        [...loc, "visit", "var"],
+        `'${String(visit.var)}' must be binary: a vehicle goes from one stop to the next or it does not`
       );
     }
     return null;

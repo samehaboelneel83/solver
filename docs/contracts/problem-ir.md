@@ -571,6 +571,41 @@ Refusals, all `shape` but the last:
 | `connected_via_invalid` | `via` is not in `relationships` |
 | `connected_via_not_self` (domain) | `via` does not join the units' entity type to itself |
 
+### 4.5 `route` — vehicles round the stops (version 2, queue R15b)
+
+```json
+{ "id": "c_routes", "severity": "hard",
+  "route": { "visit": {"var": "visit", "index": ["v", "i", "j"]},
+             "vehicles": {"index": "v", "set": "vehicle"},
+             "stops": {"index": "i", "set": "stop"},
+             "depot": "depot",
+             "demand": "demand", "capacity": "capacity" } }
+```
+
+`visit[v, i, j]` is 1 when vehicle `v` goes from stop `i` straight to stop
+`j`; it is binary and indexed `[vehicles' index, stops' index, a third name
+over the stops]`. The rule holds when every stop but `depot` (a key of the
+stops) is visited once, each vehicle leaves every stop it enters and leaves
+the depot at most once, and no vehicle runs a loop that misses the depot.
+`demand` (an attribute of the stops) and `capacity` (of the vehicles) are
+named together or not at all: with them, no vehicle carries more than its
+capacity, and every stop but the depot must take a positive demand. The
+compiler writes exact rows (`app.solve.route`: visits in and out, and a load
+flow from the depot), so every backend that solves a MILP solves it; a goal
+reading only the visits is started from OR-Tools' routing search
+(`solve.routing_start`). Like `connected`, the rule is hard and stands
+outside any `forall`.
+
+Refusals, all `shape`:
+
+| code | when |
+|---|---|
+| `route_needs_version_2` | the document is version 1 |
+| `route_malformed` | a key missing or unknown, a name that is not one, `demand` without `capacity` or the other way, or the rule also carries an expression, another rule kind or a `forall` -- located at that key |
+| `route_on_soft` | `severity` is not `hard`, or a `weight` or `when` is given |
+| `route_index_mismatch` | the variable is not read `[vehicles' index, stops' index, a new name]` |
+| `route_not_binary` | the variable is not binary |
+
 ## 5. What is deliberately not supported yet
 
 Each of these was considered and left out for a reason, not overlooked.

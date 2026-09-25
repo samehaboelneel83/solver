@@ -180,6 +180,14 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some groups must be one connected piece")
 
+    if any(isinstance(c, dict) and "route" in c for c in ir.get("constraints", [])):
+        needs.add("route")
+        reasons.append(
+            "a rule sends vehicles from a depot round every stop and back, which a solver holds as "
+            "visits in and out of each stop and a load flow that rules out loops missing the depot"
+        )
+        planner.append("vehicles go round the stops from a depot")
+
     if _has_pwl(ir):
         needs.add("pwl")
         reasons.append(

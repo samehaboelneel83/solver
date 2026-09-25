@@ -138,6 +138,17 @@ export function metaheuristicText(record: MetaheuristicRecord): string {
     : `${method} for ${record.seconds}s after ${record.after}: nothing that keeps every rule`;
 }
 
+/** What `solve.routing_start` (queue R15b) did: the routes the exact solver started from, or why none. */
+export type RoutingStartRecord =
+  | { used: true; stops: number; vehicles: number; used_vehicles?: number; feasible: boolean; objective?: number; seconds: number; why?: string }
+  | { used: false; why: string };
+
+export function routingStartText(record: RoutingStartRecord): string {
+  if (!record.used) return `none: ${record.why}`;
+  if (!record.feasible) return `no routes: ${record.why ?? "the routing search found none that keep every rule"}`;
+  return `routes for ${record.stops - 1} stops on ${record.used_vehicles ?? record.vehicles} of ${record.vehicles} vehicles from the routing search in ${record.seconds}s (goal ${record.objective})`;
+}
+
 /** What `solve.connected_start` (queue R13) did: the start the solver was handed, or why none. */
 export type ConnectedStartRecord =
   | { used: true; groups: number; units: number; feasible: boolean; objective: number; breach: number; seconds: number }
@@ -188,6 +199,13 @@ export function statusNote(run: {
       `Found by ${method}` +
       (searched?.used ? `, after ${searched.after} ended with no answer` : "") +
       ": an answer that keeps every rule, but nothing says how far it is from the best."
+    );
+  }
+  const routed = (run.params as { routing_start_run?: { answer?: boolean } } | undefined)?.routing_start_run;
+  if (run.status === "feasible" && routed?.answer) {
+    return (
+      "The routes the routing search found: the solver ended with nothing better. " +
+      "Every stop is visited within each vehicle's load, but the routes are not proven the shortest -- a longer time limit may improve them."
     );
   }
   const started = (run.params as { connected_start_run?: { answer?: boolean } } | undefined)?.connected_start_run;
@@ -789,6 +807,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
     structure?: ModelStructure;
     selector?: SelectorRecord;
     connected_start_run?: ConnectedStartRecord;
+    routing_start_run?: RoutingStartRecord;
     metaheuristic_run?: MetaheuristicRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
@@ -981,6 +1000,7 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
             <Fact label="How it splits" value={structureText(params.structure)} />
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
+          {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
           {params.metaheuristic_run && <Fact label="Searched by" value={metaheuristicText(params.metaheuristic_run)} />}
           <Fact label="Data" value={`dataset ${String(data.dataset_id)}`} />
           {params.objective_mode === "lex" && (params.objective_terms ?? []).length > 0 && (

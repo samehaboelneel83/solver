@@ -528,7 +528,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "chance_misplaced",
     where: "shape",
-    text: "a `chance` is on a hard, linear expression rule with no `when` -- not a soft, conditional, scheduling or connected one",
+    text: "a `chance` is on a hard, linear expression rule with no `when` -- not a soft, conditional, scheduling, connected or route one",
   },
   {
     code: "connected_needs_version_2",
@@ -564,6 +564,30 @@ export const IR_RULES: readonly IrRule[] = [
     code: "connected_via_not_self",
     where: "domain",
     text: "a `connected` rule's `via` joins the units' entity type to itself",
+  },  {
+    code: "route_needs_version_2",
+    where: "shape",
+    text: "a `route` rule appears only in a version 2 document",
+  },
+  {
+    code: "route_malformed",
+    where: "shape",
+    text: "a `route` names `visit`, `vehicles`, `stops` and `depot`, and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`",
+  },
+  {
+    code: "route_not_binary",
+    where: "shape",
+    text: "a `route` rule's variable is declared binary",
+  },
+  {
+    code: "route_index_mismatch",
+    where: "shape",
+    text: "a `route` rule's variable is indexed by its vehicles' index, its stops' index, then a third index over the stops",
+  },
+  {
+    code: "route_on_soft",
+    where: "shape",
+    text: "a `route` rule is hard and unconditional",
   },
 ];
 
@@ -595,6 +619,8 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "cumulative",
   // The connectivity rule (version 2), likewise.
   "connected",
+  // The routing rule (version 2, queue R15b), likewise.
+  "route",
 ]);
 
 /** The two scheduling rules, and the keys each carries (`SCHEDULING_KEYS`
@@ -606,6 +632,9 @@ export const SCHEDULING_KEYS: Readonly<Record<"no_overlap" | "cumulative", reado
 
 /** What a `connected` rule names; `empty` is optional (`CONNECTED_KEYS`). */
 export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "via", "empty"];
+
+/** What a `route` rule names; `demand` and `capacity` are optional, both or neither (`ROUTE_KEYS`). */
+export const ROUTE_KEYS: readonly string[] = ["visit", "vehicles", "stops", "depot", "demand", "capacity"];
 
 /** What an interval declaration names beyond `index` and `domain`. */
 export const INTERVAL_KEYS = ["start", "end", "size", "presence"] as const;

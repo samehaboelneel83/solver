@@ -24,6 +24,7 @@ import {
 import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
+import RouteEditor from "../model/RouteEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
@@ -40,6 +41,8 @@ import {
 import {
   describeSchedule,
   newConnectedRule,
+  newRouteRule,
+  routeChoices,
   describeTerm,
   describeWhen,
   freeNumberedId,
@@ -557,6 +560,24 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             Add a connected rule
           </button>
         )}
+        {routeChoices(context).length > 0 && (
+          <button
+            type="button"
+            className="ml-2 mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            onClick={() =>
+              setDraft((current) => {
+                if (!current) return current;
+                const rule = newRouteRule(
+                  freeNumberedId("c_", current.constraints.map((constraint) => constraint.id)),
+                  context
+                );
+                return rule ? { ...current, constraints: [...current.constraints, rule] } : current;
+              })
+            }
+          >
+            Add a route rule
+          </button>
+        )}
       </section>
 
       <section aria-labelledby="objective-heading" className="mb-6">
@@ -718,6 +739,8 @@ function ConstraintCard({
         <SchedulingEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.connected !== undefined ? (
         <ConnectedEditor constraint={constraint} context={context} onChange={onChange} />
+      ) : constraint.route !== undefined ? (
+        <RouteEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.left == null || constraint.right == null ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>

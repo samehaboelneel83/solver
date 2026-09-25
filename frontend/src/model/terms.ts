@@ -61,7 +61,55 @@ export type Constraint = {
   /** Each group's units one connected piece (version 2), in place of
    * left/relation/right. */
   connected?: ConnectedBody;
+  /** Vehicles round the stops from a depot (version 2, queue R15b), in place
+   * of left/relation/right. */
+  route?: RouteBody;
 };
+
+export type RouteBody = {
+  visit: { var: string; index: string[] };
+  vehicles: { index: string; set: string };
+  stops: { index: string; set: string };
+  depot: string;
+  demand?: string;
+  capacity?: string;
+};
+
+/** `every stop visited once by vehicle from depot, stop demand within vehicle capacity`, or null for any other rule. */
+export function describeRoute(rule: { route?: unknown }): string | null {
+  const r = rule.route as Partial<RouteBody> | undefined;
+  if (!r) return null;
+  const load = r.demand && r.capacity ? `, ${r.demand} within ${r.vehicles?.set || "vehicle"} ${r.capacity}` : "";
+  return `every ${r.stops?.set || "stop"} but ${r.depot || "?"} visited once by a ${r.vehicles?.set || "vehicle"} from ${r.depot || "?"} and back${load}`;
+}
+
+/** The binary variables a route rule can read: indexed [vehicles, stops, stops]. */
+export function routeChoices(context: ModelContext): { variable: string; vehicles: string; stops: string }[] {
+  return Object.entries(context.variables)
+    .filter(([, v]) => v.domain === "binary" && v.index.length === 3 && v.index[1] === v.index[2] && v.index[0] !== v.index[1])
+    .map(([variable, v]) => ({ variable, vehicles: v.index[0], stops: v.index[1] }));
+}
+
+/** The body for one choice: indices named after their sets, the next stop after the stop. */
+export function routeBody(choice: { variable: string; vehicles: string; stops: string }, depot: string, load?: { demand: string; capacity: string }): RouteBody {
+  const v = seedForSet(choice.vehicles);
+  let i = seedForSet(choice.stops);
+  if (i === v) i = `${i}2`;
+  return {
+    visit: { var: choice.variable, index: [v, i, `${i}_next`] },
+    vehicles: { index: v, set: choice.vehicles },
+    stops: { index: i, set: choice.stops },
+    depot,
+    ...(load ? load : {}),
+  };
+}
+
+/** A new route rule over the first admissible variable, or null when there is none. */
+export function newRouteRule(id: string, context: ModelContext): Constraint | null {
+  const choice = routeChoices(context)[0];
+  if (!choice) return null;
+  return { id, route: routeBody(choice, "depot"), severity: "hard" } as Constraint;
+}
 
 export type ConnectedBody = {
   assign: { var: string; index: string[] };

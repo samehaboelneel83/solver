@@ -45,7 +45,7 @@ STRUCTURAL = frozenset({
     "relationships_not_array", "relationship_not_a_name",
     "when_malformed", "pwl_malformed", "fn_unknown", "fn_malformed",
     "interval_malformed", "scheduling_rule_malformed",
-    "uncertainty_malformed", "connected_malformed",
+    "uncertainty_malformed", "connected_malformed", "route_malformed",
     # A stage is 1 or 2, and an interval has none: facts of the declaration itself.
     "stage_invalid",
     # A chance is {epsilon} with 0 < epsilon < 1: a fact of the object itself.
@@ -83,6 +83,8 @@ SEMANTIC = frozenset({
     # are facts about the declarations and the domain.
     "connected_needs_version_2", "connected_not_binary", "connected_index_mismatch",
     "connected_via_invalid", "connected_on_soft", "connected_via_not_self",
+    # Likewise a route rule's variable, its order and its severity.
+    "route_needs_version_2", "route_not_binary", "route_index_mismatch", "route_on_soft",
 })
 
 

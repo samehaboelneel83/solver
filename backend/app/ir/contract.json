@@ -650,7 +650,7 @@
     {
       "code": "chance_misplaced",
       "where": "shape",
-      "text": "a `chance` is on a hard, linear expression rule with no `when` -- not a soft, conditional, scheduling or connected one"
+      "text": "a `chance` is on a hard, linear expression rule with no `when` -- not a soft, conditional, scheduling, connected or route one"
     },
     {
       "code": "connected_needs_version_2",
@@ -686,6 +686,31 @@
       "code": "connected_via_not_self",
       "where": "domain",
       "text": "a `connected` rule's `via` joins the units' entity type to itself"
+    },
+    {
+      "code": "route_needs_version_2",
+      "where": "shape",
+      "text": "a `route` rule appears only in a version 2 document"
+    },
+    {
+      "code": "route_malformed",
+      "where": "shape",
+      "text": "a `route` names `visit`, `vehicles`, `stops` and `depot`, and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`"
+    },
+    {
+      "code": "route_not_binary",
+      "where": "shape",
+      "text": "a `route` rule's variable is declared binary"
+    },
+    {
+      "code": "route_index_mismatch",
+      "where": "shape",
+      "text": "a `route` rule's variable is indexed by its vehicles' index, its stops' index, then a third index over the stops"
+    },
+    {
+      "code": "route_on_soft",
+      "where": "shape",
+      "text": "a `route` rule is hard and unconditional"
     }
   ],
   "uncertaintyKinds": [

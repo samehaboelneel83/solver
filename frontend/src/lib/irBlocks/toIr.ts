@@ -218,6 +218,25 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       });
       continue;
     }
+    if (r.type === "ir_route") {
+      const v = fieldOf(r, "V_INDEX");
+      const i = fieldOf(r, "S_INDEX");
+      const demand = fieldOf(r, "DEMAND");
+      const capacity = fieldOf(r, "CAPACITY");
+      constraints.push({
+        id: fieldOf(r, "ID"),
+        ...(note ? { note } : {}),
+        route: {
+          visit: { var: fieldOf(r, "VAR"), index: [v, i, fieldOf(r, "TO_INDEX")] },
+          vehicles: { index: v, set: fieldOf(r, "V_SET") },
+          stops: { index: i, set: fieldOf(r, "S_SET") },
+          depot: fieldOf(r, "DEPOT"),
+          ...(demand || capacity ? { demand, capacity } : {}),
+        },
+        severity: "hard",
+      });
+      continue;
+    }
     if (r.type === "ir_connected") {
       const u = fieldOf(r, "U_INDEX");
       const z = fieldOf(r, "Z_INDEX");

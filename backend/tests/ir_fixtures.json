@@ -137,6 +137,29 @@
           }
         ]
       }
+,
+      {
+        "name": "vehicle",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "capacity",
+            "data_type": "integer",
+            "default_value": 10
+          }
+        ]
+      },
+      {
+        "name": "stop",
+        "role": "location",
+        "attributes": [
+          {
+            "name": "demand",
+            "data_type": "integer",
+            "default_value": 1
+          }
+        ]
+      }
     ],
     "parameters": [
       {
@@ -3007,6 +3030,168 @@
                   {
                     "index": "s",
                     "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "vehicle_routes",
+      "why": "A route rule (version 2): every stop but the depot visited once, loads within capacity.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "vehicle_routes_no_load",
+      "why": "A route rule without demand and capacity: every stop counts one.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
                   }
                 ]
               }
@@ -13491,6 +13676,605 @@
                   {
                     "index": "s",
                     "set": "shift"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_needs_version_2",
+      "loc": [
+        "constraints",
+        0
+      ],
+      "why": "Version 1 has no route rule.",
+      "ir": {
+        "version": 1,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "const": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "depot"
+      ],
+      "why": "A route without a depot does not say where vehicles start.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "capacity"
+      ],
+      "why": "Demand without capacity holds nothing.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "forall"
+      ],
+      "why": "A route rule binds its own vehicles and stops; it is not inside a forall.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            },
+            "forall": [
+              {
+                "index": "x",
+                "set": "stop"
+              }
+            ]
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_index_mismatch",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "visit",
+        "index"
+      ],
+      "why": "The visit is read as [vehicle, stop, next stop]; the third name must be new.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "i"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "i"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_not_binary",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "visit",
+        "var"
+      ],
+      "why": "A vehicle takes a leg or it does not.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "integer",
+            "lower": 0,
+            "upper": 1
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "route_on_soft",
+      "loc": [
+        "constraints",
+        0,
+        "severity"
+      ],
+      "why": "A stop half visited has no price.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {},
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "soft",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "depot": "depot",
+              "demand": "demand",
+              "capacity": "capacity"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_legs",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "var": "visit",
+                  "index": [
+                    "v",
+                    "i",
+                    "j"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
                   }
                 ]
               }

@@ -808,6 +808,66 @@ export function defineIrBlocks(): void {
     },
   };
 
+  Blockly.Blocks.ir_route = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("rule")
+        .appendField(nameField("c_1", RULE_KINDS, "ID"), "ID")
+        .appendField("sends vehicles round every stop");
+      this.appendDummyInput().appendField("means").appendField(new Blockly.FieldTextInput(""), "NOTE");
+      const seed = (set: string) => set.match(/[a-z]/)?.[0] ?? "i";
+      const indexName = () => new Blockly.FieldTextInput("", (t: string) => (loading || NAME.test(t) ? t : null));
+      const text = () => new Blockly.FieldTextInput("", (t: string) => (loading || t === "" || NAME.test(t) ? t : null));
+      this.appendDummyInput()
+        .appendField("the decision")
+        .appendField(
+          dynamic(
+            (b) => decisions(b, (v) => v.domain === "binary" && v.index.length === 3 && v.index[1] === v.index[2]),
+            choose,
+            (name: string) => {
+              const spec = declared(this.workspace).variables.get(name);
+              if (!loading && spec && spec.index.length === 3) {
+                // Choosing the decision decides the rest: [vehicle, stop, next stop].
+                const [vehicles, stops] = spec.index;
+                const v = seed(vehicles);
+                const i = seed(stops) === v ? `${seed(stops)}2` : seed(stops);
+                this.setFieldValue(vehicles, "V_SET");
+                this.setFieldValue(stops, "S_SET");
+                this.setFieldValue(v, "V_INDEX");
+                this.setFieldValue(i, "S_INDEX");
+                this.setFieldValue(`${i}_next`, "TO_INDEX");
+              }
+              return name;
+            }
+          ),
+          "VAR"
+        )
+        .appendField("takes each")
+        .appendField(indexName(), "V_INDEX")
+        .appendField("in")
+        .appendField(dynamic((b) => declared(b.workspace).sets, choose), "V_SET")
+        .appendField("from")
+        .appendField(indexName(), "S_INDEX")
+        .appendField("to")
+        .appendField(indexName(), "TO_INDEX")
+        .appendField("in")
+        .appendField(dynamic((b) => declared(b.workspace).sets, choose), "S_SET");
+      this.appendDummyInput()
+        .appendField("starting and ending at")
+        .appendField(new Blockly.FieldTextInput("depot", (t: string) => (loading || t !== "" ? t : null)), "DEPOT");
+      this.appendDummyInput()
+        .appendField("each stop's load")
+        .appendField(text(), "DEMAND")
+        .appendField("within each vehicle's")
+        .appendField(text(), "CAPACITY")
+        .appendField("(both blank: no loads)");
+      this.setPreviousStatement(true, "rule");
+      this.setNextStatement(true, "rule");
+      this.setColour(COLOUR.rule);
+      this.setTooltip("Every stop but the depot is visited once, each vehicle leaving the depot at most once and coming back; with loads named, no vehicle carries more than its capacity");
+    },
+  };
+
   Blockly.Blocks.ir_pwl = {
     init(this: B) {
       const spec = (name: string) => declared(this.workspace).variables.get(name);
@@ -887,12 +947,12 @@ export function defineIrBlocks(): void {
 }
 
 /** Rule-like blocks, whose ids share one namespace (constraint ids are unique). */
-export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected"] as const;
+export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route"] as const;
 
 export const IR_BLOCK_TYPES = [
   "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
-  "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_pwl", "ir_fn",
+  "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
 ] as const;
 
@@ -922,7 +982,7 @@ export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
         kind: "category",
         name: "Scheduling and areas",
         colour: "#0f766e",
-        contents: blocks(["ir_no_overlap", "ir_cumulative", hasSelfRelationship && "ir_connected"]),
+        contents: blocks(["ir_no_overlap", "ir_cumulative", hasSelfRelationship && "ir_connected", "ir_route"]),
       },
       { kind: "category", name: "Goal", colour: "#16a34a", contents: blocks(["ir_goal_term"]) },
       { kind: "category", name: "Values", colour: "#3b82f6", contents: blocks(["ir_const", "ir_var", hasParameters && "ir_par", hasNumbers && "ir_attr"]) },

@@ -89,6 +89,8 @@ CONSTRAINT_KEYS: frozenset[str] = frozenset(
         "no_overlap", "cumulative",
         # The connectivity rule (version 2), likewise.
         "connected",
+        # The routing rule (version 2, queue R15b), likewise.
+        "route",
     }
 )
 #: The two scheduling rules, and the keys each carries.
@@ -98,6 +100,8 @@ SCHEDULING_KEYS: dict[str, frozenset[str]] = {
 }
 #: What a `connected` rule names; `empty` is optional.
 CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", "empty"})
+#: What a `route` rule names; `demand` and `capacity` are optional, both or neither.
+ROUTE_KEYS: frozenset[str] = frozenset({"visit", "vehicles", "stops", "depot", "demand", "capacity"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 

@@ -9,7 +9,7 @@
  * back exactly -- travels in an opaque block carrying it verbatim, so
  * nothing is lost and it is visibly not editable here.
  */
-import { CONNECTED_KEYS, SCHEDULING_KEYS } from "../../ir/contract";
+import { CONNECTED_KEYS, ROUTE_KEYS, SCHEDULING_KEYS } from "../../ir/contract";
 import type { Binding, Term } from "../../model/terms";
 
 export type IrLoc = (string | number)[];
@@ -281,6 +281,38 @@ export function irToBlocks(
     });
   }
 
+  function route(rule: Json, loc: IrLoc): SerialBlock | null {
+    const r = rule.route;
+    const fits =
+      Object.keys(rule).every((k) => ["id", "note", "severity", "route"].includes(k)) && rule.severity === "hard" &&
+      shaped(r, ["visit", "vehicles", "stops", "depot"], ROUTE_KEYS) && isRef(r.visit) && isName(r.depot) &&
+      shaped(r.vehicles, ["index", "set"]) && shaped(r.stops, ["index", "set"]) &&
+      (r.demand === undefined) === (r.capacity === undefined) &&
+      (r.demand === undefined || (isName(r.demand) && isName(r.capacity)));
+    if (!fits) return null;
+    const vehicles = r.vehicles as { index: string; set: string };
+    const stops = r.stops as { index: string; set: string };
+    const visit = r.visit as { var: string; index: string[] };
+    // Read as [vehicle, stop, next stop]: the blocks write it that way, so only that shape comes back exactly.
+    if (visit.index.length !== 3 || visit.index[0] !== vehicles.index || visit.index[1] !== stops.index) return null;
+    return block(loc, {
+      type: "ir_route",
+      fields: {
+        ID: String(rule.id),
+        NOTE: (rule.note as string) ?? "",
+        VAR: visit.var,
+        V_INDEX: vehicles.index,
+        V_SET: vehicles.set,
+        S_INDEX: stops.index,
+        S_SET: stops.set,
+        TO_INDEX: visit.index[2],
+        DEPOT: r.depot as string,
+        DEMAND: (r.demand as string) ?? "",
+        CAPACITY: (r.capacity as string) ?? "",
+      },
+    });
+  }
+
   function when(w: unknown, loc: IrLoc): SerialBlock | null | undefined {
     if (w === undefined) return undefined;
     if (!(shaped(w, ["var", "index"], ["is"]) && isName(w.var) && isIndex(w.index) && (w.is === undefined || w.is === 0 || w.is === 1))) return null;
@@ -296,6 +328,7 @@ export function irToBlocks(
     const kept = () => opaque("rule", loc, rule, `rule ${String(rule.id)} (kept as it is)`);
     if ("no_overlap" in rule || "cumulative" in rule) return scheduling(rule, loc, "no_overlap" in rule ? "no_overlap" : "cumulative") ?? kept();
     if ("connected" in rule) return connected(rule, loc) ?? kept();
+    if ("route" in rule) return route(rule, loc) ?? kept();
     const plain =
       rule.left !== undefined && rule.right !== undefined && rule.relation !== undefined &&
       Object.keys(rule).every((k) => RULE_KEYS.has(k));

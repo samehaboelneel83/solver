@@ -254,6 +254,25 @@ class ConnectedBody(_Model):
     empty: Literal["forbidden", "allowed"] = "forbidden"
 
 
+class RouteBody(_Model):
+    """Every stop but the depot visited once, by vehicles leaving the depot
+    and coming back (version 2, queue R15b); `demand` on the stops and
+    `capacity` on the vehicles, both attribute names, hold each vehicle's load."""
+
+    visit: VarRef
+    vehicles: Binding
+    stops: Binding
+    depot: Name
+    demand: Optional[Name] = None
+    capacity: Optional[Name] = None
+
+    @model_validator(mode="after")
+    def _both_or_neither(self) -> "RouteBody":
+        if (self.demand is None) != (self.capacity is None):
+            raise ValueError("a route names demand and capacity together, or neither")
+        return self
+
+
 class Constraint(_Model):
     """An expression -- `left relation right` -- or, in version 2, one
     scheduling rule or one connected rule in its place."""
@@ -267,6 +286,7 @@ class Constraint(_Model):
     no_overlap: Optional[NoOverlap] = None
     cumulative: Optional[Cumulative] = None
     connected: Optional[ConnectedBody] = None
+    route: Optional[RouteBody] = None
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
@@ -276,9 +296,12 @@ class Constraint(_Model):
     def _one_kind(self) -> "Constraint":
         expression = [self.left, self.relation, self.right]
         scheduling = [k for k in (self.no_overlap, self.cumulative) if k is not None]
-        if self.connected is not None:
+        if self.connected is not None and self.route is not None:
+            raise ValueError("a constraint is one connected rule or one route rule")
+        whole = self.connected if self.connected is not None else self.route
+        if whole is not None:
             if scheduling or self.forall is not None or any(part is not None for part in expression):
-                raise ValueError("a connected rule is neither an expression nor inside a forall")
+                raise ValueError("a connected or route rule is neither an expression nor inside a forall")
         elif scheduling:
             if len(scheduling) > 1 or any(part is not None for part in expression):
                 raise ValueError("a constraint is one expression or one scheduling rule")
