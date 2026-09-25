@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import RangePicture from "./RangePicture";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { VARIABLE_DOMAINS, type VariableDomain } from "../ir/contract";
 import {
@@ -158,6 +159,7 @@ export default function DeclarationsEditor({
                 {declared && (
                   <UncertaintyFields
                     name={option.name}
+                    parameterId={option.id}
                     value={parameters[option.name].uncertainty}
                     onChange={(uncertainty) => {
                       const { uncertainty: _was, ...rest } = parameters[option.name];
@@ -460,10 +462,13 @@ function IntervalFields({
  */
 function UncertaintyFields({
   name,
+  parameterId,
   value,
   onChange,
 }: {
   name: string;
+  /** The domain's parameter, so its values can be drawn as ranges (queue R17d). */
+  parameterId?: number | string;
   value: Uncertainty | undefined;
   onChange: (next: Uncertainty | undefined) => void;
 }) {
@@ -536,6 +541,9 @@ function UncertaintyFields({
             />
           </div>
         </div>
+      )}
+      {range && parameterId !== undefined && (
+        <RangePicture parameterId={Number(parameterId)} deviation={range.deviation} name={name} />
       )}
     </div>
   );

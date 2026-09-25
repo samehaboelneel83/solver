@@ -25,7 +25,7 @@ describe("parameterOptions", () => {
       ENTITY_TYPES
     );
 
-    expect(options).toEqual([{ name: "demand", index: ["day", "shift"] }]);
+    expect(options).toEqual([{ id: 1, name: "demand", index: ["day", "shift"] }]);
   });
 
   it("leaves a position blank when the type is unknown rather than guessing", () => {

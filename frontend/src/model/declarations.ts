@@ -35,7 +35,7 @@ export type ParameterDefRef = {
 };
 
 /** `entity`: the set its values are entities of (queue R20b), declared with it. */
-export type ParameterDeclaration = { name: string; index: string[]; entity?: string };
+export type ParameterDeclaration = { name: string; index: string[]; entity?: string; id?: number | string };
 /** How a parameter's values may be wrong (IR version 2): each within a
  * fraction of itself, at most `gamma` of a rule's cells at once (all when
  * absent) -- or one value per scenario. What a robust solve reads. */
@@ -108,6 +108,7 @@ export function parameterOptions(
 ): ParameterDeclaration[] {
   const nameOf = new Map(entityTypes.map((t) => [String(t.id), t.name]));
   return parameters.map((parameter) => ({
+    id: parameter.id,
     name: parameter.name,
     index: parameter.index_type_ids.map((id) => nameOf.get(String(id)) ?? ""),
     ...(parameter.value_type_id != null ? { entity: nameOf.get(String(parameter.value_type_id)) ?? "" } : {}),
