@@ -228,7 +228,7 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
 | R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | `573ab27` | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
-| R33 | **worker scale-out**: per-org `queue_depth` / `runs_running` / `queue_oldest_wait_seconds`; operator `GET /api/v1/metrics`; `--scale worker=N` runbook; fair-share load bench | — | *(this commit)* | operator metrics include the three gauges; `bench.load --check` 200 claims, shares 0.2 each |
+| R33 | **worker scale-out**: per-org `queue_depth` / `runs_running` / `queue_oldest_wait_seconds`; operator `GET /api/v1/metrics`; `--scale worker=N` runbook; fair-share load bench | — | `dad0276` | operator metrics include the three gauges; `bench.load --check` 200 claims, shares 0.2 each |
 
 ---
 
