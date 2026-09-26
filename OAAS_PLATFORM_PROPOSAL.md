@@ -1,7 +1,7 @@
 # Proposal: a professional, fully offline optimization platform
 
 **Date:** 26 September 2026  
-**Status:** Phase 0–5 foundations complete in the working tree (nav, offline, chunks/approvals, scoped URLs, Q01–Q05 verification/phases/family policies). See `docs/plans/2026-09-26-oaas-phase0-baseline.md`.
+**Status:** Phase 0–5 foundations committed (`cff508a`). Scale slice S01–S02 (ClickHouse optional startup, run Idempotency-Key) in progress. See `docs/plans/2026-09-26-oaas-phase0-baseline.md`.
 **Primary priority:** Navigation, readability, and a complete planning workflow  
 **Deployment assumption:** An isolated installation with no public internet. Browsers can reach the platform over localhost or a private network.
 
@@ -556,6 +556,8 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | Q03 | Record per-phase timings on runs | `params.phases` in `service._execute` | Q02 |
 | Q04 | Family policies + equal-budget comparison gate | `docs/contracts/family-policies.md`, `bench/equal_budget.py` | Q01 |
 | Q05 | Offline representative suite path (no MIPLIB required) | `bench.suites`, family generators | O01, Q01 |
+| S01 | ClickHouse optional for API startup (analytics degrade) | `docker-compose.yml`, health | Phase 5 |
+| S02 | Idempotency-Key on run submit | `runs.py`, migration 0083 | Phase 5 |
 
 Do not renumber or overwrite the existing R-series execution history. Link completed work from the new backlog and track new work with distinct identifiers.
 

@@ -24,10 +24,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import capabilities_of, get_current_user, requires
 from app.api.quantity import QuantityOut
@@ -214,9 +215,11 @@ class RunRead(RunSummary):
 @router.post("/scenarios/{scenario_id}/runs", status_code=201)
 def create_run(
     scenario_id: int,
+    response: Response,
     payload: RunRequest | None = None,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("run.submit")),
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> RunRead:
     """Queue a run and return it, `queued`.
 
@@ -231,9 +234,31 @@ def create_run(
     the run with its reason -- not a malformed request. A 4xx would say the
     caller did something wrong, and reading the status is how you learn what
     happened.
+
+    **Idempotency-Key** (optional): the same organization-scoped key returns
+    the existing run with **200** instead of queueing another (OAAS S02).
     """
     if db.get(Scenario, scenario_id) is None:
         raise HTTPException(status_code=404, detail="scenario not found")
+
+    key = None
+    if idempotency_key is not None:
+        key = idempotency_key.strip()
+        if not key or len(key) > 128 or any(ord(c) < 33 or ord(c) > 126 for c in key):
+            raise HTTPException(
+                status_code=422,
+                detail="Idempotency-Key must be 1–128 printable ASCII characters",
+            )
+        prior = db.execute(
+            text(
+                "SELECT r.id FROM run r JOIN scenario s ON s.id = r.scenario_id"
+                " WHERE r.organization_id = :o AND r.idempotency_key = :k"
+            ),
+            {"o": user.organization_id, "k": key},
+        ).scalar_one_or_none()
+        if prior is not None:
+            response.status_code = 200
+            return _read(db, int(prior))
 
     request = payload or RunRequest()
     # Naming a solver is a separate capability from solving. A planner should
@@ -268,7 +293,21 @@ def create_run(
             reuse=request.reuse,
             pareto_steps=request.pareto_steps,
             robust=request.robust,
+            idempotency_key=key,
         )
+    except IntegrityError:
+        # Concurrent retry won the unique index: return that run.
+        db.rollback()
+        prior = db.execute(
+            text(
+                "SELECT id FROM run WHERE organization_id = :o AND idempotency_key = :k"
+            ),
+            {"o": user.organization_id, "k": key},
+        ).scalar_one_or_none()
+        if prior is None:
+            raise
+        response.status_code = 200
+        return _read(db, int(prior))
     except SettingUnusable as exc:
         db.rollback()
         raise HTTPException(

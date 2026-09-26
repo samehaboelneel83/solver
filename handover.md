@@ -281,7 +281,8 @@ Docs: [`docs/runbooks/offline-install.md`](docs/runbooks/offline-install.md),
 
 ## 4. In progress
 
-Nothing in flight. OAAS Phase 0–5 is committed on `master`.
+OAAS S01–S02 (ClickHouse optional API dependency; run `Idempotency-Key`) in the
+working tree after `cff508a`.
 
 ---
 

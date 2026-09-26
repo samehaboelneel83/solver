@@ -103,6 +103,7 @@ def enqueue_run(
     reuse: bool = True,
     pareto_steps: int | None = None,
     robust: bool = False,
+    idempotency_key: str | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -136,6 +137,17 @@ def enqueue_run(
     ).mappings().one_or_none()
     if scenario is None:
         raise LookupError(f"scenario {scenario_id} not found")
+
+    if idempotency_key is not None:
+        existing = db.execute(
+            text(
+                "SELECT id FROM run"
+                " WHERE organization_id = :o AND idempotency_key = :k"
+            ),
+            {"o": scenario["organization_id"], "k": idempotency_key},
+        ).scalar_one_or_none()
+        if existing is not None:
+            return int(existing)
 
     settings = resolve(db, problem_id=scenario["problem_id"])
     from_settings = {}
@@ -302,8 +314,8 @@ def enqueue_run(
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version,"
-            "                 params, seed, cache_key)"
-            " VALUES (:s, :d, 'queued', 'cp-sat', :cv, :params, :seed, :k)"
+            "                 params, seed, cache_key, idempotency_key)"
+            " VALUES (:s, :d, 'queued', 'cp-sat', :cv, :params, :seed, :k, :ik)"
             " RETURNING id"
         ),
         {
@@ -313,6 +325,7 @@ def enqueue_run(
             "params": _json(request_params),
             "seed": seed,
             "k": cache_key,
+            "ik": idempotency_key,
         },
     ).scalar_one()
     if not pareto_steps and not robust:

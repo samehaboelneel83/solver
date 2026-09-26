@@ -91,8 +91,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # ClickHouse is optional for planning (OAAS S01): analytics may degrade
+      # while the API still serves. Health reports clickhouse separately.
       clickhouse:
-        condition: service_healthy
+        condition: service_started
     networks:
       - solver_net
 
