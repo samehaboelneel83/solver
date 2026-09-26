@@ -27,7 +27,7 @@ from types import FrameType
 from sqlalchemy import text
 
 from app.analytics import publish_facts
-from app.retention import prune_run_events
+from app.retention import prune_run_events, prune_runs
 from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal
 from app.solve.service import claim_next, execute_run
@@ -179,6 +179,7 @@ def main() -> None:  # pragma: no cover -- the loop itself
             if time.monotonic() - pruned_at >= PRUNE_EVERY_SECONDS:
                 try:
                     prune_run_events(db)
+                    prune_runs(db)
                 except Exception:
                     db.rollback()
                     logger.warning("could not prune run events", exc_info=True)

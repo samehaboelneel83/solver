@@ -55,8 +55,11 @@ def enabled() -> bool:
     return os.environ.get("SOLVE_SANDBOX", "1") != "0" and sys.platform != "win32"
 
 
-def memory_mb() -> int:
-    return int(os.environ.get("SOLVE_MEMORY_MB", "4096"))
+def memory_mb(*, org_cap: int | None = None) -> int:
+    global_cap = int(os.environ.get("SOLVE_MEMORY_MB", "4096"))
+    if org_cap is None:
+        return global_cap
+    return max(256, min(global_cap, int(org_cap)))
 
 
 def _ctx():
@@ -71,6 +74,19 @@ def _ctx():
 #: The licence this process's solves are to be given (queue R42): set by the worker for the run it
 #: is solving (`licensed`), carried into each sandboxed child, applied there and nowhere else.
 _LICENCE: dict | None = None
+_ORG_MEMORY_MB: int | None = None
+
+
+@contextlib.contextmanager
+def memory_cap(mb: int | None):
+    """Cap this block's sandbox memory at ``mb`` (and the global SOLVE_MEMORY_MB)."""
+    global _ORG_MEMORY_MB
+    previous = _ORG_MEMORY_MB
+    _ORG_MEMORY_MB = mb
+    try:
+        yield
+    finally:
+        _ORG_MEMORY_MB = previous
 
 
 @contextlib.contextmanager
@@ -187,7 +203,7 @@ def run(
             raise clean from None
 
     ctx = _ctx()
-    limits = {"memory_mb": memory_mb(), "cpu_s": int(time_limit * max(1, workers)) + _cpu_slack_s(),
+    limits = {"memory_mb": memory_mb(org_cap=_ORG_MEMORY_MB), "cpu_s": int(time_limit * max(1, workers)) + _cpu_slack_s(),
               "licence": licence}
     parent, child = ctx.Pipe(duplex=False)
     stop = ctx.Event()

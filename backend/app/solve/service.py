@@ -355,7 +355,9 @@ def claim_next(db: Session) -> int | None:
             "  WHERE r.status = 'queued'"
             "    AND (q.max_concurrent_runs IS NULL OR coalesce(c.n, 0) < q.max_concurrent_runs)"
             # Checks (suite, shadow) after every plan and question: they never delay a planner (queue R30).
-            "  ORDER BY (r.purpose IN ('suite', 'shadow')), coalesce(c.n, 0), r.queued_at, r.id"
+            "  ORDER BY (r.purpose IN ('suite', 'shadow')),"
+            "           coalesce(c.n, 0)::float / greatest(coalesce(q.priority_weight, 1), 1),"
+            "           r.queued_at, r.id"
             "  FOR UPDATE OF r SKIP LOCKED LIMIT 1"
         )
     ).scalar_one_or_none()
@@ -390,7 +392,7 @@ def quota_of(db: Session, organization_id) -> dict[str, Any]:
     row = db.execute(
         text(
             "SELECT max_concurrent_runs, max_queued_runs, max_time_limit_s, max_vars,"
-            "       cpu_seconds_month, requests_per_minute"
+            "       cpu_seconds_month, requests_per_minute, tier, priority_weight, max_memory_mb"
             "  FROM iam.quota WHERE organization_id = :o"
         ),
         {"o": organization_id},
@@ -577,7 +579,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     adapters_rows.refresh_verified(db)
     row = db.execute(
         text(
-            "SELECT r.dataset_id, r.params, r.seed, s.patch, s.problem_id, mv.ir, d.data"
+            "SELECT r.dataset_id, r.params, r.seed, r.organization_id, s.patch, s.problem_id, mv.ir, d.data"
             "  FROM run r"
             "  JOIN scenario s ON s.id = r.scenario_id"
             "  JOIN model_version mv ON mv.id = s.model_version_id"
@@ -604,6 +606,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     workers = int(params.get("workers", 8))
     gap_rel = float(params.get("gap_rel", 0.0))
     dataset_id = row["dataset_id"]
+    org_memory = quota_of(db, row["organization_id"]).get("max_memory_mb")
     # Parts of an earlier plan held fixed (queue R24), with what those runs decided -- for a
     # why-not probe (queue R26), the scenario's locks and the asked cells, from `probe_patch`.
     held = params.get("probe_patch") or patch
@@ -618,7 +621,12 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     events = RunEvents(run_id)
     try:
         # The trace the request that queued this run started, continued here.
-        with tracing.continued(params.get("trace")), tracing.span("run", run_id=run_id), sandbox.licensed(None):
+        with (
+            tracing.continued(params.get("trace")),
+            tracing.span("run", run_id=run_id),
+            sandbox.licensed(None),
+            sandbox.memory_cap(org_memory),
+        ):
             try:
                 outcome = _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel,
                                    dataset_id, stop)

@@ -37,6 +37,8 @@ def get_current_user(
         except JWTError:
             raise credentials_exception
         user = db.query(UserAccount).filter(UserAccount.username == username).first()
+        if user is not None and int(payload.get("tv", 0)) != int(getattr(user, "token_version", 0) or 0):
+            raise credentials_exception
     if user is None or not user.is_active:
         raise credentials_exception
 

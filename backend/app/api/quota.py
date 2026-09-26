@@ -31,22 +31,28 @@ LIMITS = (
     "max_vars",
     "cpu_seconds_month",
     "requests_per_minute",
+    "priority_weight",
+    "max_memory_mb",
 )
 
 
 class QuotaWrite(BaseModel):
+    tier: str | None = None
     max_concurrent_runs: int | None = Field(default=None, ge=1)
     max_queued_runs: int | None = Field(default=None, ge=1)
     max_time_limit_s: float | None = Field(default=None, gt=0)
     max_vars: int | None = Field(default=None, ge=1)
     cpu_seconds_month: float | None = Field(default=None, gt=0)
     requests_per_minute: int | None = Field(default=None, ge=1)
+    priority_weight: int | None = Field(default=None, ge=1)
+    max_memory_mb: int | None = Field(default=None, ge=256)
 
 
 def _view(db: Session, organization_id) -> dict[str, Any]:
     quota = quota_of(db, organization_id)
     return {
         "organization_id": str(organization_id),
+        "tier": quota.get("tier"),
         "limits": {name: quota.get(name) for name in LIMITS},
         "this_month": month_usage(db, organization_id),
     }
@@ -72,22 +78,34 @@ def write_quota(
     if db.execute(text("SELECT 1 FROM iam.organization WHERE id = :o"), {"o": organization_id}).first() is None:
         raise HTTPException(status_code=404, detail="organization not found")
     values = payload.model_dump()
-    db.execute(
-        text(
-            "INSERT INTO iam.quota (organization_id, max_concurrent_runs, max_queued_runs,"
-            "  max_time_limit_s, max_vars, cpu_seconds_month, requests_per_minute)"
-            " VALUES (:o, :max_concurrent_runs, :max_queued_runs, :max_time_limit_s, :max_vars,"
-            "  :cpu_seconds_month, :requests_per_minute)"
-            " ON CONFLICT (organization_id) DO UPDATE SET"
-            "  max_concurrent_runs = EXCLUDED.max_concurrent_runs,"
-            "  max_queued_runs = EXCLUDED.max_queued_runs,"
-            "  max_time_limit_s = EXCLUDED.max_time_limit_s,"
-            "  max_vars = EXCLUDED.max_vars,"
-            "  cpu_seconds_month = EXCLUDED.cpu_seconds_month,"
-            "  requests_per_minute = EXCLUDED.requests_per_minute,"
-            "  updated_at = now()"
-        ),
-        {"o": organization_id, **values},
-    )
+    tier = values.pop("tier", None)
+    if tier:
+        from app.tiers import apply_tier
+
+        try:
+            apply_tier(db, organization_id, tier, overrides=values)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        db.execute(
+            text(
+                "INSERT INTO iam.quota (organization_id, max_concurrent_runs, max_queued_runs,"
+                "  max_time_limit_s, max_vars, cpu_seconds_month, requests_per_minute,"
+                "  priority_weight, max_memory_mb)"
+                " VALUES (:o, :max_concurrent_runs, :max_queued_runs, :max_time_limit_s, :max_vars,"
+                "  :cpu_seconds_month, :requests_per_minute, :priority_weight, :max_memory_mb)"
+                " ON CONFLICT (organization_id) DO UPDATE SET"
+                "  max_concurrent_runs = EXCLUDED.max_concurrent_runs,"
+                "  max_queued_runs = EXCLUDED.max_queued_runs,"
+                "  max_time_limit_s = EXCLUDED.max_time_limit_s,"
+                "  max_vars = EXCLUDED.max_vars,"
+                "  cpu_seconds_month = EXCLUDED.cpu_seconds_month,"
+                "  requests_per_minute = EXCLUDED.requests_per_minute,"
+                "  priority_weight = EXCLUDED.priority_weight,"
+                "  max_memory_mb = EXCLUDED.max_memory_mb,"
+                "  updated_at = now()"
+            ),
+            {"o": organization_id, **values},
+        )
     db.commit()
     return _view(db, organization_id)

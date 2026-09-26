@@ -16,10 +16,17 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> dict:
+    from app import sso
+
+    if sso.sso_required_for_user(db, form_data.username):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="this organization requires single sign-on; password login is disabled",
+        )
     user = db.query(UserAccount).filter(UserAccount.username == form_data.username).first()
     if user is None or not user.is_active or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="incorrect username or password")
-    token = create_access_token(subject=user.username)
+    token = create_access_token(subject=user.username, token_version=getattr(user, "token_version", 0) or 0)
     try:
         audit.record(
             db,

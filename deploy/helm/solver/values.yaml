@@ -1,0 +1,71 @@
+# External Postgres is required (managed). No in-cluster database.
+image:
+  api: solver-backend:latest
+  frontend: solver-frontend:latest
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+
+worker:
+  replicas: 1
+  solveMemoryMb: 4096
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "8"
+      memory: 12Gi
+  # Sandbox uses prctl(PR_SET_DUMPABLE) and RLIMIT_*; allow privilege escalation.
+  securityContext:
+    allowPrivilegeEscalation: true
+    capabilities:
+      add: ["SYS_RESOURCE"]
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 8
+    # Prefer custom metric queue_depth when a Prometheus adapter is present.
+    # Until then, scale on CPU.
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  replicas: 1
+  servicePort: 80
+
+postgresql:
+  host: ""
+  port: 5432
+  database: solver
+  user: solver
+  # Set via --set-file or an external Secret; do not commit passwords.
+  existingSecret: solver-db
+  existingSecretPasswordKey: password
+
+clickhouse:
+  enabled: false
+  host: ""
+  database: solver
+  user: default
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+jwt:
+  existingSecret: solver-jwt
+  existingSecretKey: secret
+
+service:
+  apiPort: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  hosts: []

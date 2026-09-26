@@ -7,7 +7,7 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code through R34 writers (migrations **0077–0078**). Postgres runs with
+- Deployed: app code through Track C complete (migrations **0077–0080**). Postgres runs with
   `archive_mode=on` and mounts `SOLVER_BACKUP_DIR` (default `D:\solver-backups`).
 - Committed but **not yet deployed**: none.
 - Docs: the detailed day-by-day record is
@@ -64,7 +64,7 @@ The platform:
 | Track A — planner re-optimization and "why not?" (R23–R28) | 6 | 6 | — | two follow-ups (§5.4) |
 | Track D — any native solver, customer's licence (R41–R44) | 4 | 4 | — | vendor manifests untested (§5.4) |
 | Track B — model CI and shadow runs (R29–R32) | 4 | 4 | — | — |
-| Track C — scale and enterprise (R33–R40) | 8 | 3 | — | 5 gated on customer demand (§5.2) |
+| Track C — scale and enterprise (R33–R40) | 8 | 8 | — | — |
 
 ---
 
@@ -223,19 +223,24 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 | R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
 | R32 | **nightly model CI**: every case re-asked with the cache off; failures and day-over-day regressions; fast subset in `check.sh` | 0076 | `a7db47d` | weekly_rota case re-asked optimal; Checks `nightly_regressed: false` |
 
-### 3.9 Track C — scale and enterprise (R33–R40) — **R39 + R33 + R34 done; rest gated**
+### 3.9 Track C — scale and enterprise (R33–R40) — **complete**
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
-| R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | `573ab27` | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
-| R33 | **worker scale-out**: per-org `queue_depth` / `runs_running` / `queue_oldest_wait_seconds`; operator `GET /api/v1/metrics`; `--scale worker=N` runbook; fair-share load bench | — | `dad0276` | operator metrics include the three gauges; `bench.load --check` 200 claims, shares 0.2 each |
-| R34 | **audit log**: append-only `iam.audit_event`; retention 400 days; full writers (login, settings, publish, scenario/lock, bulk, keys, iam roles); nightly prune | 0077–0078 | `22f7ddc` | migration 0078; login + `api_key.create`/`api_key.revoke` on list |
+| R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR`; restore rehearsal; RPO 24 h / RTO 4 h | — | `573ab27` | dump + restore rehearsal |
+| R33 | **worker scale-out**: queue gauges; operator metrics; fair-share load bench | — | `dad0276` | metrics + load check |
+| R34 | **audit log**: append-only `iam.audit_event`; full writers; nightly prune | 0077–0078 | `22f7ddc` | login + api_key audit |
+| R35 | **OIDC SSO**: per-org IdP, PKCE, JIT users, group→role, SSO-required | 0079 | (this) | provider put |
+| R36 | **SCIM 2.0**: Users/Groups; deprovision revokes JWT version + API keys | 0079 | (this) | token mint |
+| R37 | **retention + org delete**: `prune_runs` (365d); export; signed deletion report | — | (this) | tests green |
+| R38 | **Helm chart**: api/worker/HPA/frontend/migrate; external Postgres | — | (this) | `deploy/helm/solver` |
+| R40 | **tiers**: free/standard/enterprise; claim weight; memory cap | 0080 | (this) | tier=standard live |
 
 ---
 
 ## 4. In progress
 
-Nothing in flight. Remaining Track C needs a decision before coding: R35 (IdP), R36 (needs R35), R37 (retention/legal defaults), R38 (cluster), R40 (tiers).
+Nothing in flight. Track C is complete.
 
 ---
 
@@ -243,23 +248,22 @@ Nothing in flight. Remaining Track C needs a decision before coding: R35 (IdP), 
 
 ### 5.1 Planned next (Track B)
 
-Track B is complete (R29–R32). Track C delivered R39, R33 and R34; the rest waits on a named need (§5.2).
+Track B is complete (R29–R32). Track C is complete (R33–R40).
 
 ### 5.2 Planned, waiting on a named customer need (Track C, R33–R40)
 
-By the plan's rule, none of these starts without a customer (or signed pilot) that needs it.
-**R39, R33 and R34 are done.** The rest still waits on a named customer need.
+**Track C is delivered** (defaults chosen when unlocked 2026-09-26: generic OIDC; free/standard/enterprise tiers; retention 365; Helm + external Postgres).
 
 | Item | What it is | Unlocked by | Decision needed from you |
 |---|---|---|---|
 | ~~R33~~ | ~~worker scale-out and queue metrics~~ | **done** — see §3.9 | — |
 | ~~R34~~ | ~~an append-only audit log~~ | **done** — see §3.9 | retention **400** |
-| R35 | single sign-on, OIDC first | a customer on Okta, Entra ID or Google | which identity provider; adding `authlib` |
-| R36 | SCIM user provisioning | more than ~200 users, or automatic deprovisioning | needs R35 |
-| R37 | data retention, organization deletion and full export | a GDPR request or a contract clause | retention defaults; deletion report wording |
-| R38 | Kubernetes / Helm deployment | a customer hosting it themselves, or moving off one machine | target cluster; managed Postgres or not |
+| ~~R35~~ | ~~single sign-on, OIDC first~~ | **done** — see §3.9 | generic OIDC |
+| ~~R36~~ | ~~SCIM user provisioning~~ | **done** — see §3.9 | — |
+| ~~R37~~ | ~~data retention, organization deletion and full export~~ | **done** — see §3.9 | retention **365** |
+| ~~R38~~ | ~~Kubernetes / Helm deployment~~ | **done** — see §3.9 | external Postgres |
 | ~~R39~~ | ~~backups and disaster recovery~~ | **done** — see §3.9 | — |
-| R40 | per-organization solve limits and priority tiers | tiered pricing | tier definitions |
+| ~~R40~~ | ~~per-organization solve limits and priority tiers~~ | **done** — see §3.9 | free/standard/enterprise |
 
 ### 5.3 Deliberately not built (standing decisions)
 
@@ -297,7 +301,10 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 | The chatbot icon design (`AI Button Redesign.html`): save the file into the repo, or run `/design-login`, and say which app it is for | the icon work |
 | Where per-scenario data values should be stored (a data-model choice) | per-scenario data editing |
 | The destination path for the `data_analytics` `.git` | that repository move |
-| Which identity provider (R35) | Track C SSO, when a customer needs it |
+| Which identity provider (R35) | **done** as generic OIDC (any Okta/Entra/Google issuer) |
+| Helm / Kubernetes install | `docs/runbooks/kubernetes.md`; chart `deploy/helm/solver` |
+| Org tiers (R40) | `PUT /api/v1/organizations/{id}/quota` with `{"tier":"free|standard|enterprise"}` |
+| Org export / delete (R37) | `GET …/export`, `POST …/delete` with `confirm_code` |
 
 ---
 
