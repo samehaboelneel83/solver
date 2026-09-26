@@ -7,9 +7,8 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code at `73c4916`, database at migration **0074**.
-- Committed but **not yet deployed**: `23c02b9` (R31, shadow runs; migration 0075). Its full check
-  was still running when this file was written.
+- Deployed: app code at `23c02b9`, database at migration **0075**.
+- Committed but **not yet deployed**: none. App and database at **`23c02b9` / migration 0075** (R31 shadow runs).
 - Docs: the detailed day-by-day record is
   [`docs/plans/2026-09-24-session-handover.md`](docs/plans/2026-09-24-session-handover.md) (one row per
   delivered item). The ordered work list, with each item's evidence, is
@@ -63,7 +62,7 @@ The platform:
 | Roadmap queue R1–R22 (incl. R8b/c, R15a–c, R16a–b, R17a–d, R20a–b) | 31 | 31 | — | — |
 | Track A — planner re-optimization and "why not?" (R23–R28) | 6 | 6 | — | two follow-ups (§5.4) |
 | Track D — any native solver, customer's licence (R41–R44) | 4 | 4 | — | vendor manifests untested (§5.4) |
-| Track B — model CI and shadow runs (R29–R32) | 4 | 2 | R31 | R32 |
+| Track B — model CI and shadow runs (R29–R32) | 4 | 3 | — | R32 |
 | Track C — scale and enterprise (R33–R40) | 8 | 0 | — | all 8, waiting on customer demand (§5.2) |
 
 ---
@@ -214,34 +213,19 @@ Everything is proved with free solvers standing in for commercial ones.
 The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference adapters are in
 `backend/adapters/reference/`.
 
-### 3.8 Track B — model CI and shadow runs (R29–R30 delivered)
+### 3.8 Track B — model CI and shadow runs (R29–R31 delivered)
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
 | R29 | **acceptance cases**: any answered run becomes a case (its frozen data, patch and answer), asked again of any version, judged with reasons | 0073 | `5894e4d` | the blend case passed on its version; a 25 kg-protein version failed: "the objective is 53.849206, expected 43.531746" |
 | R30 | **the gate**: a new version is put into use only once it passes every case. Checks run after plan runs. A checks panel on the Model versions page | 0074 | `73c4916` | a reworded version refused, checked, passed, accepted; a dearer one failed and stays refused |
+| R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
 
 ---
 
 ## 4. In progress
 
-| Item | State | What remains |
-|---|---|---|
-| **R31 — shadow runs** | built; 6 tests pass (28 with the gate and runs API tests); migration 0075 rehearsed; **committed `23c02b9`, not deployed** | the full check to finish, then migrate, deploy, verify image age and migration, and run the live check |
-
-What R31 does:
-- **The candidate:** a problem names a candidate version (`shadow.version`) and a share
-  (`shadow.rate`, default 0, meaning off).
-- **The twin:** at that share, each real run is also answered by the candidate, on the same frozen
-  data, at the lowest priority, and never shown to the planner. Which runs are shadowed is
-  reproducible (decided by run id).
-- **Guards:**
-  - a candidate that hasn't passed the problem's cases is not shadowed;
-  - a failing candidate is a failed shadow, never a failed real run;
-  - cancelling the real run cancels its twin.
-- **The comparison:** once both have settled, the twin records both statuses, the cost difference
-  and whether the candidate did at least as well, the time ratio, and how many cells differ.
-- **The report:** `GET /problems/{id}/shadow`.
+None. Next in order is **R32** (§5.1).
 
 ---
 
@@ -251,7 +235,7 @@ What R31 does:
 
 | Item | What it is | Why not yet |
 |---|---|---|
-| **R32 — nightly model checks** | every problem's cases re-run nightly with the result cache off, so a solver or library upgrade that changes answers is caught; a fast subset in `check.sh`; red rows on the Checks panel | next in order, after R31 is deployed |
+| **R32 — nightly model checks** | every problem's cases re-run nightly with the result cache off, so a solver or library upgrade that changes answers is caught; a fast subset in `check.sh`; red rows on the Checks panel | next in order, after R31 |
 
 ### 5.2 Planned, waiting on a named customer need (Track C, R33–R40)
 
