@@ -2,7 +2,8 @@ import { MouseEvent, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell, BookOpen, Boxes, ChevronDown, ChevronLeft, ChevronRight, Database, FileStack, FlaskConical, FolderTree,
-  GitBranch, Home, KeyRound, Languages, LayoutTemplate, LogOut, Menu, Moon, Network, Play, Search, Settings,
+  GitBranch, Home, Cpu,
+  KeyRound, Languages, LayoutTemplate, LogOut, Menu, Moon, Network, Play, Search, Settings,
   ShieldCheck, SlidersHorizontal, Sun, Table2, UserCog, Users, Waypoints, Workflow, type LucideIcon,
 } from "lucide-react";
 import { setToken } from "../api/client";
@@ -46,6 +47,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/runs": Play,
   "/workspace": Table2,
   "/settings": Settings,
+  "/solvers": Cpu,
   "/api-keys": KeyRound,
   "/iam/organization": Users,
   "/iam/user_account": UserCog,
@@ -163,7 +165,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     key: "platform",
     label: "Platform",
-    items: [{ to: "/settings", label: "Settings" }],
+    items: [
+      { to: "/settings", label: "Settings" },
+      { to: "/solvers", label: "Solvers" },
+    ],
   },
   {
     // Not one of the three workflow groups -- user and role administration,

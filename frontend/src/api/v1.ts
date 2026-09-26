@@ -642,16 +642,63 @@ export type ParetoPoint = {
   run_id: number | null;
 };
 
+/** An added solver's last conformance report (queue R43). */
+export type SolverConformance = {
+  passed: boolean;
+  version: string;
+  /** Whether it was run on the version installed now: a pass for another counts for nothing. */
+  current: boolean;
+  ran_at: string;
+  ran_by: string | null;
+  failed: string[];
+  notes: string[];
+};
+
 export type SolverInfo = {
   name: string;
   available: boolean;
   classes: string[];
   note: string;
+  /** Queue R41: a built-in, or added from a manifest. */
+  origin?: "built-in" | "adapter";
+  /** Whether the rules may choose it unasked. */
+  automatic?: boolean;
+  /** Queue R42: whether this organization has the licence it needs. */
+  licence?: "not needed" | "set" | "missing";
+  kind?: "ortools-engine" | "command-line" | "python";
+  version?: string;
+  proves?: "global" | "local" | "approximate";
+  conformance?: SolverConformance | null;
 };
+
+export type SkippedAdapter = { folder: string; reason: string };
 
 /** What this build can solve with. Hardcoding the list would offer a solver
  * a different build does not have. */
-export const listSolvers = () => apiFetch<Page<SolverInfo>>("/api/v1/solvers");
+export const listSolvers = () => apiFetch<Page<SolverInfo> & { skipped?: SkippedAdapter[] }>("/api/v1/solvers");
+
+export type SolverLicence = {
+  adapter: string;
+  required: boolean;
+  /** The environment values its manifest takes, by name. */
+  env: string[];
+  /** Whether it takes a licence file. */
+  file: boolean;
+  set: boolean;
+  fingerprint?: string;
+  set_by?: string | null;
+  set_at?: string;
+};
+export type SolverLicenceWrite = { env?: Record<string, string>; file?: string };
+export type ConformanceCheck = { check: string; result: "pass" | "fail" | "skip" | "note"; detail: string };
+export type ConformanceReport = { adapter: string; version: string; passed: boolean; checks: ConformanceCheck[] };
+
+export const listSolverLicences = () => apiFetch<{ items: SolverLicence[] }>("/api/v1/solver-licences");
+export const setSolverLicence = ({ adapter, licence }: { adapter: string; licence: SolverLicenceWrite }) =>
+  send<{ adapter: string; set: boolean; fingerprint: string }>("PUT", `/api/v1/solver-licences/${adapter}`, licence);
+export const removeSolverLicence = (adapter: string) => remove(`/api/v1/solver-licences/${adapter}`);
+export const runConformance = (name: string) =>
+  send<ConformanceReport>("POST", `/api/v1/solvers/${name}/conformance`, undefined);
 
 /** What kind of model this IR is. Posted, not stored: the same function a
  * run records, so the editor cannot disagree with the run about the class.
@@ -1188,6 +1235,13 @@ export const useRevokeApiKey = () => useV1Mutation(revokeApiKey);
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
 }
+
+export function useSolverLicences() {
+  return useQuery({ queryKey: [V1, "solver-licences"], queryFn: listSolverLicences });
+}
+export const useSetSolverLicence = () => useV1Mutation(setSolverLicence);
+export const useRemoveSolverLicence = () => useV1Mutation(removeSolverLicence);
+export const useRunConformance = () => useV1Mutation(runConformance);
 
 /** What publishing `ir` would say, without publishing it (Blocks 4). */
 export const validateVersion = (problemId: Id, ir: Record<string, unknown>) =>

@@ -17,6 +17,7 @@ import ModelVersions from "./pages/ModelVersions";
 import Runs from "./pages/Runs";
 import Workspace from "./pages/Workspace";
 import ApiKeys from "./pages/ApiKeys";
+import Solvers from "./pages/Solvers";
 import Settings from "./pages/Settings";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="workspace" element={<Workspace />} />
         <Route path="settings" element={<Settings />} />
         <Route path="api-keys" element={<ApiKeys />} />
+        <Route path="solvers" element={<Solvers />} />
         <Route path="model" element={<ModelEditor />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
