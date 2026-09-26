@@ -283,7 +283,7 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 | R41 | The **Gurobi, Xpress and CPLEX manifests are untested** here, for want of a licence. They are documented, and a customer runs the conformance kit with theirs. |
 | R43 | CBC (the reference) does not honour a stop request: recorded as a note; the sandbox stops it at its limit. |
 | R29–R30 | Each checked version gets a scenario named "checks: version N", which appears in the Scenarios list. |
-| R30 | An admin cannot override a failed gate with a reason; the setting `suite.required` turns the gate off per problem or domain. The audit trail for an override waits on R34. |
+| R30 | An admin cannot override a failed gate with a reason; the setting `suite.required` turns the gate off per problem or domain. When an override is built, it should write through the R34 audit log. |
 | R31 | Shadow runs do not yet have their own quota bucket; the rate (default 0) is the control. There is no shadow card in the UI yet; the report is API-only. |
 | R24/R25 | Locks and stay-close are refused on a stochastic solve (each sampled future is compiled afresh). |
 | R27 | Ranges exist only for linear models (none for whole-number models, by design); a GLOP answer is ranged by HiGHS only when HiGHS reaches the same plan. |
