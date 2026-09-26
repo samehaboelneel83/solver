@@ -39,6 +39,7 @@
 #   scripts/check.sh              # full: frontend + build + backend (~2 min)
 #   scripts/check.sh --fast       # frontend only, no Docker (~20 s)
 #   scripts/check.sh --backend    # backend suite only
+#   scripts/check.sh --isolated   # full + require stack up and EGRESS_BLOCKED=1
 #   scripts/check.sh --reinstall  # force `npm ci` even if deps look current
 #   scripts/check.sh --help
 #
@@ -49,6 +50,8 @@
 #   SOLVER_BACKEND_IMAGE  default solver-backend
 #   SOLVER_TEST_SUFFIX    default _test -- the test databases' suffix; must
 #                         end in _test (the nightly job uses _nightly_test)
+#   EGRESS_BLOCKED        set by --isolated; fail if the backend can reach
+#                         the public internet
 #
 # Exit status is 0 only if every step that ran passed.
 
@@ -84,11 +87,13 @@ fi
 
 MODE="full"
 FORCE_INSTALL=0
+REQUIRE_ISOLATED=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fast)      MODE="fast" ;;
     --full)      MODE="full" ;;
     --backend)   MODE="backend" ;;
+    --isolated)  MODE="full"; REQUIRE_ISOLATED=1; export EGRESS_BLOCKED=1 ;;
     --reinstall) FORCE_INSTALL=1 ;;
     -h|--help)   sed -n '/^# Usage$/,/^# Exit status/p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
@@ -299,6 +304,8 @@ backend_checks() {
     docker run --rm \
       --network "$DOCKER_NET" \
       -v "$(to_host_path "$REPO_ROOT/backend"):/app" \
+      -v "$(to_host_path "$REPO_ROOT/scripts"):/scripts:ro" \
+      -v "$(to_host_path "$REPO_ROOT/deploy"):/deploy:ro" \
       -w /app \
       --env-file "$(to_host_path "$ENV_FILE")" \
       -e TEST_DATABASE_URL="$test_url" \
@@ -322,18 +329,29 @@ backend_checks() {
 }
 
 # ---------------------------------------------------------------------------
-# Offline / egress (OAAS O02) — only when the live stack is up; never required
-# for --fast. Skips cleanly when ports are down so check.sh stays offline-safe.
+# Offline / egress (OAAS O02 / O05) — when the live stack is up. Default full
+# mode skips cleanly if ports are down. `--isolated` (O05) requires the stack
+# and fails unless EGRESS_BLOCKED probing passes.
 # ---------------------------------------------------------------------------
 
 egress_checks() {
   local api_url="${SMOKE_API_URL:-http://localhost:8010}"
   if ! curl -fsS --connect-timeout 2 "$api_url/api/health" >/dev/null 2>&1; then
+    if [[ "$REQUIRE_ISOLATED" -eq 1 ]]; then
+      record "egress / isolated (O05)" FAIL 0 \
+        "stack not up; start compose before scripts/check.sh --isolated"
+      return 0
+    fi
     record "egress / local smoke" SKIP 0 "stack not up (start compose to exercise)"
     return 0
   fi
-  run_step "egress / local smoke (O02)" "API + frontend reachable; optional EGRESS_BLOCKED=1" \
-    bash "$SCRIPT_DIR/egress-check.sh"
+  local label="egress / local smoke (O02)"
+  local note="API + frontend reachable; optional EGRESS_BLOCKED=1"
+  if [[ "$REQUIRE_ISOLATED" -eq 1 ]]; then
+    label="egress / isolated (O05)"
+    note="stack up and backend must not reach the public internet"
+  fi
+  run_step "$label" "$note" bash "$SCRIPT_DIR/egress-check.sh"
 }
 
 # ---------------------------------------------------------------------------

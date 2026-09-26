@@ -51,6 +51,9 @@ cp "$ROOT/docs/offline-dependency-manifest.md" "$OUT/"
 cp "$ROOT/docs/coverage-acceptance-matrix.md" "$OUT/"
 cp "$ROOT/deploy/compose/docker-compose.digests.example.yml" "$OUT/" 2>/dev/null || true
 
+# OAAS O04: filled digest override for this bundle's images (not REPLACE_ placeholders).
+bash "$ROOT/scripts/render-digest-compose.sh" "$OUT/docker-compose.digests.yml"
+
 (
   cd "$OUT"
   if command -v sha256sum >/dev/null 2>&1; then

@@ -552,6 +552,8 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | O01 | Produce an offline installation contract and dependency manifest | Dockerfiles, Compose, local docs/maps, release process | Baseline |
 | O02 | Validate local reachability behavior and recovery states | `main.tsx`, API client, `OfflineNotice.tsx` | O01 |
 | O03 | Self-host UI fonts (no Google Fonts egress) | `@fontsource/*`, `main.tsx`, `index.html` | O01 |
+| O04 | Render digest-pinned Compose override into offline bundle | `scripts/render-digest-compose.sh`, `offline-bundle.sh` | O01 |
+| O05 | `check.sh --isolated` requires stack up + EGRESS_BLOCKED | `scripts/check.sh`, `egress-check.sh` | O02 |
 | Q01 | Publish coverage and benchmark acceptance matrix | Solver registry, conformance, benchmark suites | Baseline |
 | Q02 | Document and enforce independent result verification | `app/solve/verify.py`, run persist path | Q01 |
 | Q03 | Record per-phase timings on runs | `params.phases` in `service._execute` | Q02 |

@@ -18,8 +18,9 @@ public network are **not** the offline path; they are the development path.
 | Item | Source today | Offline requirement |
 |---|---|---|
 | App images | `solver-backend:latest`, `solver-frontend:latest` (Compose build) | Save/load as digest-pinned archives (`bash scripts/offline-bundle.sh`) |
-| Postgres | `postgres:16` | Same; pin digest in `deploy/compose/docker-compose.digests.example.yml` |
+| Postgres | `postgres:16` | Same; pin via generated `docker-compose.digests.yml` (O04) |
 | ClickHouse | `clickhouse/clickhouse-server:24.8` | Same |
+| Digest Compose override | `scripts/render-digest-compose.sh` | Shipped in the bundle as `docker-compose.digests.yml` |
 | Wheelhouse / npm cache | `backend/wheelhouse/`, `frontend/npm-cache/` | Build with `docker build --build-arg OFFLINE=1` after `offline-bundle.sh` fills the caches |
 | Migrations | Alembic in backend image | `alembic upgrade head` against the customer DB |
 | Local maps / tiles | Host or volume mounts | Must resolve without CDN egress |
@@ -31,6 +32,8 @@ Build on a networked host:
 
 ```bash
 bash scripts/offline-bundle.sh          # → dist/offline-bundle/
+# Includes digests.txt, image *.tar, docs, and docker-compose.digests.yml
+# (OAAS O04 — filled pins, not REPLACE_ placeholders).
 # Optional: rebuild images from a local wheelhouse / npm cache
 docker build --build-arg OFFLINE=1 -t solver-backend ./backend
 docker build --build-arg OFFLINE=1 -t solver-frontend ./frontend
@@ -39,11 +42,18 @@ docker build --build-arg OFFLINE=1 -t solver-frontend ./frontend
 On the isolated host after transfer:
 
 ```bash
-docker load -i solver-backend__latest.tar   # etc.
-# fill digests in deploy/compose/docker-compose.digests.example.yml
-docker compose -f docker-compose.yml -f deploy/compose/docker-compose.digests.example.yml up -d --no-build
-bash scripts/egress-check.sh                # local smoke
-EGRESS_BLOCKED=1 bash scripts/egress-check.sh   # also prove no public egress from backend
+# verify SHA256SUMS, then:
+docker load -i solver-backend__latest.tar
+# …load the other archives…
+docker compose -f docker-compose.yml -f docker-compose.digests.yml up -d --no-build
+```
+
+Acceptance on the isolated host:
+
+```bash
+EGRESS_BLOCKED=1 bash scripts/egress-check.sh
+# or from a checkout with the stack up:
+bash scripts/check.sh --isolated   # OAAS O05 — fails if stack down or egress open
 ```
 
 ## Install sequence (isolated host)
@@ -94,9 +104,9 @@ ClickHouse as required for the reference compose file.
 - Default Dockerfiles still install online unless built with `OFFLINE=1` and a
   populated `backend/wheelhouse/` / `frontend/npm-cache/` (by design for
   development). Release bundles use the offline path.
-- Image digests are not pinned in the main `docker-compose.yml` tags (use
-  `deploy/compose/docker-compose.digests.example.yml` for customer releases).
-- Automated egress-blocked CI on a clean VM is not yet a hard gate in
-  `scripts/check.sh` (egress check runs when the stack is up).
+- Main `docker-compose.yml` stays tag-based for development; customer releases
+  use the generated `docker-compose.digests.yml` from the offline bundle (O04).
+- `scripts/check.sh --isolated` (O05) is the hard egress gate when validating an
+  isolated host; plain `check.sh` still skips egress when the stack is down.
 
-Track progress under backlog **O01** / **O02** / **O03**.
+Track progress under backlog **O01**–**O05**.
