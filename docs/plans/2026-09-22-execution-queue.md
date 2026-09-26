@@ -186,7 +186,7 @@ Track B (model CI and shadow runs), after Tracks A and D:
 
 Track C (scale and enterprise), starting with R39 (before the first paying customer); the rest wait on a named customer need:
 
-- [x] (R39) Backups and disaster recovery -- nightly `pg_dump` plus WAL to the host object store; a restore rehearsal that runs the suites. *(`docs/runbooks/backups.md`: RPO 24 h, RTO 4 h. Backups live under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); Postgres `archive_mode=on` copies WAL into `$SOLVER_BACKUP_DIR/wal`. `scripts/backup.sh dump|rehearse|--install`; nightly.sh dumps after check.sh. `app.ops.backup` naming/retention/safety (7 tests). Live: dump 322 KB; restore into `solver_restore`, suites + `--check` case pass, DB dropped; WAL archiving on.)*
+- [x] (R39) Backups and disaster recovery -- nightly `pg_dump` plus WAL to the host object store; a restore rehearsal that runs the suites. *(`573ab27`, no migration: `docs/runbooks/backups.md` RPO 24 h / RTO 4 h. Backups under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); Postgres `archive_mode=on` copies WAL into `$SOLVER_BACKUP_DIR/wal`. `scripts/backup.sh dump|rehearse|--install`; nightly.sh dumps after check.sh. `app.ops.backup` naming/retention/safety (7 tests). Live: dump ~322 KB; restore into `solver_restore`, suites + `--check` case pass, DB dropped; WAL archiving on.)*
 - [ ] (R33) Worker scale-out and queue metrics -- unlocked when queue wait > 1 min at peak or >~10 concurrent solves.
 - [ ] (R34) Append-only audit log -- unlocked by a regulated customer or security questionnaire.
 - [ ] (R35) SSO (OIDC first) -- unlocked by a customer on Okta / Entra / Google; needs IdP choice.

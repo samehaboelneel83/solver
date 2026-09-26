@@ -7,7 +7,7 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code including R39 backups; database at migration **0076**. Postgres runs with
+- Deployed: app code at `573ab27` (R39 backups); database at migration **0076**. Postgres runs with
   `archive_mode=on` and mounts `SOLVER_BACKUP_DIR` (default `D:\solver-backups`).
 - Committed but **not yet deployed**: none.
 - Docs: the detailed day-by-day record is
@@ -227,7 +227,7 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
-| R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | *(this commit)* | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
+| R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | `573ab27` | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
 
 ---
 
