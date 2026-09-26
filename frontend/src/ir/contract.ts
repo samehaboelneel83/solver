@@ -510,7 +510,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "uncertainty_malformed",
     where: "shape",
-    text: "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios}`",
+    text: "an `uncertainty` is `{kind: interval, deviation, gamma?}` -- deviation a non-negative fraction of each value, gamma a non-negative number of cells that may deviate at once -- or `{kind: scenarios, futures: [{label?, factor}, …]}` with at least one positive factor",
   },
   {
     code: "stage_needs_version_2",

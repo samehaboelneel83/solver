@@ -308,10 +308,47 @@ class ShapeChecker {
       );
     }
     const body = spec as Json;
-    const allowed = kind === "interval" ? ["kind", "deviation", "gamma"] : ["kind"];
+    const allowed = kind === "interval" ? ["kind", "deviation", "gamma"] : ["kind", "futures"];
     const extra = Object.keys(body).filter((key) => !allowed.includes(key)).sort();
     if (extra.length > 0) {
       return refusal("uncertainty_malformed", [...loc, extra[0]], `a ${String(kind)} uncertainty carries no ${extra[0]}`);
+    }
+    if (kind === "scenarios") {
+      const futures = body.futures;
+      if (!Array.isArray(futures) || futures.length === 0) {
+        return refusal(
+          "uncertainty_malformed",
+          [...loc, "futures"],
+          `'${name}' varies by scenario, so it lists at least one future with a positive factor (and an optional label)`
+        );
+      }
+      for (let i = 0; i < futures.length; i++) {
+        const row = futures[i];
+        const rowLoc: IrLoc = [...loc, "futures", i];
+        if (!isObject(row)) {
+          return refusal("uncertainty_malformed", rowLoc, `'${name}'s future ${i + 1} is an object with factor`);
+        }
+        const stray = Object.keys(row).filter((key) => key !== "label" && key !== "factor").sort();
+        if (stray.length > 0) {
+          return refusal("uncertainty_malformed", [...rowLoc, stray[0]], `a scenario future carries no ${stray[0]}`);
+        }
+        const factor = row.factor;
+        if (typeof factor !== "number" || !Number.isFinite(factor) || !(factor > 0)) {
+          return refusal(
+            "uncertainty_malformed",
+            [...rowLoc, "factor"],
+            `'${name}'s future ${i + 1} needs a positive factor (1 keeps the stored value, 1.2 is twenty per cent higher)`
+          );
+        }
+        if ("label" in row && (typeof row.label !== "string" || !String(row.label).trim())) {
+          return refusal(
+            "uncertainty_malformed",
+            [...rowLoc, "label"],
+            `'${name}'s future ${i + 1} label is non-empty text when given`
+          );
+        }
+      }
+      return null;
     }
     if (kind === "interval") {
       for (const key of ["deviation", "gamma"]) {

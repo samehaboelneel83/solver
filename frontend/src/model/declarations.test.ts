@@ -128,7 +128,7 @@ describe("describeUncertainty", () => {
     expect(describeUncertainty({ kind: "interval", deviation: 0.125, gamma: 2 })).toBe(
       "within 12.5% of each value, at most 2 at once"
     );
-    expect(describeUncertainty({ kind: "scenarios" })).toBe("one value per scenario");
+    expect(describeUncertainty({ kind: "scenarios", futures: [{ factor: 1.1 }] })).toBe("1 named future");
   });
 });
 

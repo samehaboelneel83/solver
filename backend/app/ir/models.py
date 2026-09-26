@@ -168,8 +168,14 @@ class IntervalUncertainty(_Model):
     gamma: Optional[Annotated[Number, Field(ge=0)]] = None
 
 
+class ScenarioFuture(_Model):
+    label: Optional[str] = None
+    factor: Annotated[Number, Field(gt=0)]
+
+
 class ScenarioUncertainty(_Model):
     kind: Literal["scenarios"]
+    futures: list[ScenarioFuture]
 
 
 class Parameter(_Model):

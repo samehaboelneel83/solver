@@ -490,15 +490,93 @@ function UncertaintyFields({
           onChange={(event) => {
             const next = event.target.value;
             if (next === "exact") onChange(undefined);
-            else if (next === "scenarios") onChange({ kind: "scenarios" });
+            else if (next === "scenarios")
+              onChange({
+                kind: "scenarios",
+                futures: [
+                  { label: "low", factor: 0.8 },
+                  { label: "high", factor: 1.2 },
+                ],
+              });
             else onChange({ kind: "interval", deviation: Number(shareDraft) / 100 || 0.1 });
           }}
         >
           <option value="exact">exact</option>
           <option value="interval">within a range of each value</option>
-          <option value="scenarios">one per scenario</option>
+          <option value="scenarios">named futures (scaled)</option>
         </select>
       </div>
+      {value?.kind === "scenarios" && (
+        <div className="space-y-1 rounded border border-slate-200 bg-slate-50 p-2">
+          <p className="text-xs text-slate-600">
+            Each future scales every cell of {name} by its factor (1 keeps the stored value).
+          </p>
+          {value.futures.map((future, index) => (
+            <div key={index} className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="block text-xs text-slate-600" htmlFor={`${parameterId ?? name}-sc-label-${index}`}>
+                  Label
+                </label>
+                <input
+                  id={`${parameterId ?? name}-sc-label-${index}`}
+                  className={`${INPUT_CLASS} w-28 text-xs`}
+                  value={future.label ?? ""}
+                  onChange={(event) => {
+                    const futures = value.futures.map((row, i) =>
+                      i === index ? { ...row, label: event.target.value || undefined } : row,
+                    );
+                    onChange({ kind: "scenarios", futures });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-600" htmlFor={`${parameterId ?? name}-sc-factor-${index}`}>
+                  Factor
+                </label>
+                <input
+                  id={`${parameterId ?? name}-sc-factor-${index}`}
+                  inputMode="decimal"
+                  className={`${INPUT_CLASS} w-20 text-xs`}
+                  value={String(future.factor)}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    if (!/^\d*\.?\d*$/.test(raw)) return;
+                    const factor = Number(raw);
+                    if (!Number.isFinite(factor) || !(factor > 0)) return;
+                    const futures = value.futures.map((row, i) => (i === index ? { ...row, factor } : row));
+                    onChange({ kind: "scenarios", futures });
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                className="text-xs text-slate-600 hover:text-red-700"
+                disabled={value.futures.length <= 1}
+                onClick={() =>
+                  onChange({
+                    kind: "scenarios",
+                    futures: value.futures.filter((_, i) => i !== index),
+                  })
+                }
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="text-xs font-medium text-blue-800"
+            onClick={() =>
+              onChange({
+                kind: "scenarios",
+                futures: [...value.futures, { label: `future ${value.futures.length + 1}`, factor: 1 }],
+              })
+            }
+          >
+            Add a future
+          </button>
+        </div>
+      )}
       {range && (
         <div className="flex flex-wrap items-end gap-2">
           <div>

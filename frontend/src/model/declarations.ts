@@ -39,14 +39,20 @@ export type ParameterDeclaration = { name: string; index: string[]; entity?: str
 /** How a parameter's values may be wrong (IR version 2): each within a
  * fraction of itself, at most `gamma` of a rule's cells at once (all when
  * absent) -- or one value per scenario. What a robust solve reads. */
-export type Uncertainty = { kind: "interval"; deviation: number; gamma?: number } | { kind: "scenarios" };
+export type ScenarioFuture = { label?: string; factor: number };
+export type Uncertainty =
+  | { kind: "interval"; deviation: number; gamma?: number }
+  | { kind: "scenarios"; futures: ScenarioFuture[] };
 
 export type ParameterSpec = { index: string[]; uncertainty?: Uncertainty };
 
 /** `within 10% of each value, at most 2 at once`, or null when exact. */
 export function describeUncertainty(uncertainty: Uncertainty | undefined): string | null {
   if (!uncertainty) return null;
-  if (uncertainty.kind === "scenarios") return "one value per scenario";
+  if (uncertainty.kind === "scenarios") {
+    const n = uncertainty.futures?.length ?? 0;
+    return n === 0 ? "one value per scenario (no futures listed yet)" : n === 1 ? "1 named future" : `${n} named futures`;
+  }
   const share = `within ${Number((uncertainty.deviation * 100).toPrecision(6))}% of each value`;
   return uncertainty.gamma === undefined ? share : `${share}, at most ${uncertainty.gamma} at once`;
 }

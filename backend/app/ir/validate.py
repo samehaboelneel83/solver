@@ -320,7 +320,7 @@ class _ShapeChecker:
                 loc,
                 f"an uncertainty names its kind: {' or '.join(sorted(UNCERTAINTY_KINDS))}",
             )
-        allowed = {"kind", "deviation", "gamma"} if kind == "interval" else {"kind"}
+        allowed = {"kind", "deviation", "gamma"} if kind == "interval" else {"kind", "futures"}
         extra = sorted(set(spec) - allowed)
         if extra:
             return Refusal(
@@ -328,6 +328,44 @@ class _ShapeChecker:
                 [*loc, extra[0]],
                 f"a {kind} uncertainty carries no {extra[0]}",
             )
+        if kind == "scenarios":
+            futures_list = spec.get("futures")
+            if not isinstance(futures_list, list) or not futures_list:
+                return Refusal(
+                    "uncertainty_malformed",
+                    [*loc, "futures"],
+                    f"{name!r} varies by scenario, so it lists at least one future "
+                    "with a positive factor (and an optional label)",
+                )
+            for i, row in enumerate(futures_list):
+                row_loc: Loc = [*loc, "futures", i]
+                if not isinstance(row, dict):
+                    return Refusal(
+                        "uncertainty_malformed",
+                        row_loc,
+                        f"{name!r}'s future {i + 1} is an object with factor",
+                    )
+                stray = sorted(set(row) - {"label", "factor"})
+                if stray:
+                    return Refusal(
+                        "uncertainty_malformed",
+                        [*row_loc, stray[0]],
+                        f"a scenario future carries no {stray[0]}",
+                    )
+                if "factor" not in row or not _is_number(row["factor"]) or not (row["factor"] > 0):
+                    return Refusal(
+                        "uncertainty_malformed",
+                        [*row_loc, "factor"],
+                        f"{name!r}'s future {i + 1} needs a positive factor "
+                        "(1 keeps the stored value, 1.2 is twenty per cent higher)",
+                    )
+                if "label" in row and (not isinstance(row["label"], str) or not row["label"].strip()):
+                    return Refusal(
+                        "uncertainty_malformed",
+                        [*row_loc, "label"],
+                        f"{name!r}'s future {i + 1} label is non-empty text when given",
+                    )
+            return None
         if kind == "interval":
             for key in ("deviation", "gamma"):
                 if key not in spec:

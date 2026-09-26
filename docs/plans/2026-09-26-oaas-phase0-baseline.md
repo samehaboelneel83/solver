@@ -11,6 +11,7 @@
 | Solver adapters / choose / sandbox | **implemented** | Track D done |
 | Planner locks / stay-close / why-not / ranges | **implemented** | R24–R28 |
 | Cell-click lock + what-if form | **implemented** | `2bc5713` |
+| Scenario futures for stochastic | **implemented** | R7b `{kind: scenarios, futures: [{factor}]}` + editor |
 | Suite / gate / shadow / nightly | **implemented** | R29–R32 |
 | Gate override + audit | **implemented** | `0081` |
 | Shadow card UI | **implemented** | Model versions |

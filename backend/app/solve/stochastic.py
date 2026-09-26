@@ -10,8 +10,12 @@ is best for the average future.
 (`uncertainty: {kind: interval, deviation}`) takes, in each sampled future,
 each of its values times `1 + u * deviation`, `u` uniform in [-1, 1] and
 drawn per value from a seeded generator: the same run draws the same
-futures. (`{kind: scenarios}` asks for values per scenario, which nothing
-stores yet, and is refused by name.)
+futures. A parameter with `{kind: scenarios, futures: [{label?, factor}, …]}`
+uses those named futures instead: each future scales every cell of the
+parameter by `factor` (> 0). When any parameter lists scenarios, the
+extensive form uses exactly that list (every scenarios parameter must list
+the same number of futures); `solve.stochastic_samples` is ignored for the
+count.
 
 **The extensive form.** Each future is the model compiled with its own values
 (the compiler is linear in values, and deterministic in everything else).
@@ -96,6 +100,42 @@ def uncertain(ir: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if isinstance(spec, dict) and isinstance(spec.get("uncertainty"), dict)}
 
 
+def scenario_lists(ir: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """parameter name → its named futures (each with a positive ``factor``)."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for name, spec in uncertain(ir).items():
+        if spec.get("kind") != "scenarios":
+            continue
+        futures_list = spec.get("futures")
+        if not isinstance(futures_list, list) or not futures_list:
+            continue
+        out[name] = futures_list
+    return out
+
+
+def scenario_count(ir: dict[str, Any]) -> int | None:
+    """How many named futures when every scenarios parameter agrees; else None."""
+    lists = scenario_lists(ir)
+    if not lists:
+        return None
+    lengths = {len(rows) for rows in lists.values()}
+    if len(lengths) != 1:
+        return None
+    return next(iter(lengths))
+
+
+def apply_scenarios(data: dict[str, Any], ir: dict[str, Any], index: int) -> dict[str, Any]:
+    """One named future: scale each scenarios parameter by its factor at ``index``."""
+    drawn = copy.deepcopy(data)
+    for name, rows in scenario_lists(ir).items():
+        factor = float(rows[index]["factor"])
+        for row in drawn.get("parameters", {}).get(name, []):
+            row["value"] = float(row["value"]) * factor
+        if name in drawn.get("parameter_defaults", {}):
+            drawn["parameter_defaults"][name] = float(drawn["parameter_defaults"][name]) * factor
+    return drawn
+
+
 def refusal(ir: dict[str, Any], compiled: Compiled) -> str | None:
     """None when the model is a two-stage program this solves, else why not."""
     if not wanted(ir):
@@ -103,9 +143,16 @@ def refusal(ir: dict[str, Any], compiled: Compiled) -> str | None:
     kinds = uncertain(ir)
     if not kinds:
         return "no data is uncertain: declare a parameter's range (uncertainty within a range)"
-    by_scenario = sorted(n for n, spec in kinds.items() if spec.get("kind") == "scenarios")
+    by_scenario = {n: spec for n, spec in kinds.items() if spec.get("kind") == "scenarios"}
     if by_scenario:
-        return f"{', '.join(by_scenario)} varies by scenario, and no values per scenario are stored yet: declare a range"
+        missing = [n for n, spec in by_scenario.items()
+                   if not isinstance(spec.get("futures"), list) or not spec["futures"]]
+        if missing:
+            return (f"{', '.join(missing)} varies by scenario, and no futures are listed: "
+                    "give each a list of {factor} (and optional label)")
+        lengths = {len(spec["futures"]) for spec in by_scenario.values()}
+        if len(lengths) != 1:
+            return "every scenarios parameter must list the same number of futures"
     if compiled.objective_mode != "weighted":
         return "a goal in order of importance has no single expected value"
     if compiled.objective_quadratic or compiled.pwl or compiled.functions or compiled.intervals:
@@ -124,9 +171,11 @@ def refusal(ir: dict[str, Any], compiled: Compiled) -> str | None:
 
 
 def sample(data: dict[str, Any], ir: dict[str, Any], rng: random.Random) -> dict[str, Any]:
-    """One future: each value of each parameter uncertain within a range, times `1 + u * deviation`."""
+    """One future: each interval-uncertain parameter times `1 + u * deviation`."""
     drawn = copy.deepcopy(data)
     for name, spec in uncertain(ir).items():
+        if spec.get("kind") == "scenarios":
+            continue
         share = float(spec.get("deviation", 0))
         for row in drawn.get("parameters", {}).get(name, []):
             row["value"] = float(row["value"]) * (1 + rng.uniform(-1, 1) * share)
@@ -136,6 +185,14 @@ def sample(data: dict[str, Any], ir: dict[str, Any], rng: random.Random) -> dict
 
 
 def futures(ir: dict[str, Any], data: dict[str, Any], count: int, seed: int | str) -> list[Compiled]:
+    named = scenario_count(ir)
+    if named is not None:
+        out: list[Compiled] = []
+        for i in range(named):
+            base = apply_scenarios(data, ir, i)
+            # Interval params (if any) still jitter inside each named future.
+            out.append(compile_model(ir, sample(base, ir, random.Random(f"{seed}-{i}"))))
+        return out
     return [compile_model(ir, sample(data, ir, random.Random(f"{seed}-{k}"))) for k in range(count)]
 
 
@@ -230,13 +287,20 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
     if why is not None:
         raise NotStochastic(why)
     started = time.monotonic()
-    count = max(2, min(MAX_SAMPLES, int(samples)))
+    named = scenario_count(ir)
+    count = named if named is not None else max(2, min(MAX_SAMPLES, int(samples)))
     recourse = second_stage(ir)
     base = seed if seed is not None else 0
     model, shared = extensive(futures(ir, data, count, f"in-{base}"), recourse)
     solved = run(model, max(1.0, EXTENSIVE_SHARE * time_limit))
     record: dict[str, Any] = {"samples": count, "stage_two": sorted(recourse), "expected": solved.objective,
                               "status": solved.status}
+    if named is not None:
+        first = next(iter(scenario_lists(ir).values()))
+        record["scenario_futures"] = [
+            {"label": (row.get("label") or f"future {i + 1}"), "factor": float(row["factor"])}
+            for i, row in enumerate(first)
+        ]
     if solved.objective is None:
         return Stochastic(solved, record)
     plan = {key: value for key, value in solved.assignments.items() if key in shared}

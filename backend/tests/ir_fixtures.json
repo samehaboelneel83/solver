@@ -2070,7 +2070,11 @@
               "shift"
             ],
             "uncertainty": {
-              "kind": "scenarios"
+              "kind": "scenarios",
+              "futures": [
+                {"label": "quiet", "factor": 0.8},
+                {"label": "busy", "factor": 1.25}
+              ]
             }
           }
         },

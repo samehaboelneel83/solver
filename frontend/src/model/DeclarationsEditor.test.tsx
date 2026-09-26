@@ -384,7 +384,16 @@ describe("DeclarationsEditor and an uncertain parameter", () => {
     });
     const kind = screen.getByLabelText(/demand.s values are/i);
     fireEvent.change(kind, { target: { value: "scenarios" } });
-    expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({ index: ["day"], uncertainty: { kind: "scenarios" } });
+    expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({
+      index: ["day"],
+      uncertainty: {
+        kind: "scenarios",
+        futures: [
+          { label: "low", factor: 0.8 },
+          { label: "high", factor: 1.2 },
+        ],
+      },
+    });
     fireEvent.change(kind, { target: { value: "exact" } });
     expect(onChange.mock.calls.at(-1)![0].parameters.demand).toEqual({ index: ["day"] });
   });

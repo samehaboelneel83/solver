@@ -85,11 +85,34 @@ def test_the_same_seed_draws_the_same_futures():
 @pytest.mark.parametrize("ir, why", [
     (newsvendor(stage_two=False), "no decision waits for the data"),
     (newsvendor(uncertain=False), "no data is uncertain"),
-    (newsvendor(uncertain={"kind": "scenarios"}), "no values per scenario are stored yet"),
+    (newsvendor(uncertain={"kind": "scenarios"}), "no futures"),
 ])
 def test_what_it_refuses_by_name(ir, why):
     with pytest.raises(stochastic.NotStochastic, match=why):
         stochastic.solve(ir, DATA, compile_model(ir, DATA), _run, samples=5, time_limit=5)
+
+
+def test_named_scenario_futures_scale_the_parameter():
+    """OAAS / R7b: `{kind: scenarios, futures: [{factor}]}` is a discrete sample."""
+    ir = newsvendor(uncertain={
+        "kind": "scenarios",
+        "futures": [
+            {"label": "low", "factor": 0.5},
+            {"label": "high", "factor": 1.5},
+        ],
+    })
+    assert stochastic.scenario_count(ir) == 2
+    demands = [
+        stochastic.apply_scenarios(DATA, ir, i)["parameter_defaults"]["demand"]
+        for i in range(2)
+    ]
+    assert sorted(demands) == pytest.approx([50.0, 150.0])
+    samples = stochastic.futures(ir, DATA, count=10, seed=1)
+    assert len(samples) == 2
+    solved = stochastic.solve(ir, DATA, compile_model(ir, DATA), _run, samples=10, time_limit=10, seed=1)
+    assert solved.solution.assignments[("order", ())] > 0
+    assert solved.record["samples"] == 2
+    assert {f["label"] for f in solved.record["scenario_futures"]} == {"low", "high"}
 
 
 def test_a_run_solves_the_plan_and_never_calls_it_proven(db, empty_queue):  # noqa: F811
