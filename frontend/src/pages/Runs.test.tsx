@@ -355,7 +355,8 @@ describe("Runs", () => {
     renderPage();
 
     // The roster is drawn as a grid (queue R17): names inside the cells and on the axes.
-    expect(await screen.findByText("Ahmed Salah")).toBeInTheDocument();
+    // (The planner's pickers under the views name them too -- queue R28.)
+    expect((await screen.findAllByText("Ahmed Salah")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Monday").length).toBeGreaterThan(0);
     // `shift` has no labels in the frozen data, so that position stays as the
     // key rather than going blank.
@@ -364,7 +365,7 @@ describe("Runs", () => {
     expect(screen.queryByText("mon")).not.toBeInTheDocument();
     // And the plain list, one click away, reads the whole tuple in names.
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    expect(screen.getByText(/Ahmed Salah . Monday . morning/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Ahmed Salah . Monday . morning/).length).toBeGreaterThan(0);
   });
 
   it("falls back to the key for a run made before names were frozen", async () => {

@@ -31,6 +31,7 @@ import { parseRouteId } from "../lib/routeId";
 import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
 import RunViews from "../components/RunViews";
+import PlannerPanel from "../components/PlannerPanel";
 import SpreadView from "../components/SpreadView";
 import { RunMapView } from "../genui/components/SpatialMap";
 
@@ -970,6 +971,8 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
         ) : null;
       })()}
       {Object.keys(roster).length > 0 && <RunViews run={data} />}
+      {/* Queue R28: hold part of the plan and solve the rest, ask why not, see how far numbers may move. */}
+      {can("run.submit") && <PlannerPanel run={data} onOpen={onOpen} />}
 
       {data.reduced_costs &&
         Object.values(data.reduced_costs).some((entries) => entries.length > 0) && (

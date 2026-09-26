@@ -490,10 +490,19 @@ export type ModelVersionCreate = { ir: Record<string, unknown>; note?: string | 
 
 /** Each key optional; an explicit null is refused. A constraint may appear
  * under one instruction only; `soften` weights must be positive. */
+/** Queue R24: part of a plan held fixed -- a cell, a slice of an earlier run, or a horizon. */
+export type Lock =
+  | { var: string; index: string[]; value: number }
+  | { var: string; where: Record<string, string[]>; from_run: number }
+  | { before: string | number; attr: string; set: string; from_run: number; vars?: string[] };
+
 export type ScenarioPatch = {
   disable?: string[];
   harden?: string[];
   soften?: Record<string, number>;
+  lock?: Lock[];
+  /** Queue R25: change as little as possible from an earlier run. */
+  stay_close?: { from_run: number; mode?: "weighted" | "lex"; weight?: number; vars?: string[] };
 };
 
 export type Scenario = {
@@ -575,6 +584,29 @@ export type RunSummary = {
   /** Set when someone asked this run to stop. A queued run is already
    * `cancelled`; a running one is still `running` until the worker records it. */
   cancel_requested: boolean;
+  /** Queue R26: a plan, or a question about another run (`why_not`) and its answer. */
+  purpose?: "plan" | "why_not" | "shadow" | "suite";
+  parent_run_id?: number | null;
+  verdict?: Verdict | null;
+};
+
+/** A why-not probe's answer (queue R26). */
+export type Verdict =
+  | { kind: "already"; cells: WhyNotCell[] }
+  | { kind: "blocked"; forced: string[]; conflict: ConflictItem[] | null; minimal: boolean | null; note?: string }
+  | {
+      kind: "possible"; proven: boolean; objective: number | null; delta: number | null; change: number | null;
+      turned_on: string[][]; turned_off: string[][]; override?: WhatIfValue[];
+    }
+  | { kind: "unanswered"; status: string; error: string | null };
+
+export type WhyNotCell = { var: string; index: string[]; value: number };
+export type WhatIfValue = { param: string; index: string[]; value: number };
+
+/** LP ranging at a proven optimum (queue R27): how far each number may move. */
+export type RunRanges = {
+  rows: { rule: string; index: Record<string, string>; rhs: number | null; dual: number; low: number | null; high: number | null }[];
+  costs: { var: string; index: string[]; cost: number | null; low: number | null; high: number | null }[];
 };
 
 /** One instance of a rule that is part of why there is no answer. */
@@ -617,6 +649,8 @@ export type Run = RunSummary & {
   intervals?: Record<string, { start?: string; end?: string; presence?: string }>;
   /** How much each whole-number or continuous decision took (migration 0065). Null for older runs. */
   amounts?: Record<string, { index: string[]; value: number }[]> | null;
+  /** Queue R27: null for any run that is not a proven optimum of a linear program. */
+  ranges?: RunRanges | null;
   constraints: ConstraintOutcome[];
 };
 
@@ -923,6 +957,9 @@ export function listScenarios(
   return apiFetch(`/api/v1/scenarios${query({ problem_id: problemId, model_version_id: modelVersionId, limit, offset })}`);
 }
 export const getScenario = (id: Id) => apiFetch<Scenario>(`/api/v1/scenarios/${id}`);
+/** Ask why a plan is not otherwise (queue R26): a probe to poll, or the verdict at once. */
+export const askWhyNot = ({ runId, force, override }: { runId: Id; force: WhyNotCell[]; override?: WhatIfValue[] }) =>
+  send<{ run_id: number | null; verdict: Verdict | null }>("POST", `/api/v1/runs/${runId}/why-not`, { force, override: override ?? [] });
 export const createScenario = (body: ScenarioCreate) => send<Scenario>("POST", "/api/v1/scenarios", body);
 export const updateScenario = (id: Id, body: ScenarioUpdate) =>
   send<Scenario>("PATCH", `/api/v1/scenarios/${id}`, body);
@@ -1283,6 +1320,18 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
     enabled: isId(scenarioId),
   });
 }
+export const useAskWhyNot = () => useV1Mutation(askWhyNot);
+
+/** A why-not probe, polled until its verdict is written (just after the run settles). */
+export function useProbe(id: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "run", id],
+    queryFn: () => getRun(id as Id),
+    enabled: isId(id),
+    refetchInterval: (query) => ((query.state.data as Run | undefined)?.verdict ? false : 1000),
+  });
+}
+
 export function useRun(id: Id | null | undefined) {
   return useQuery({
     queryKey: [V1, "run", id],
