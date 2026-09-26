@@ -394,7 +394,9 @@ def _check_quota_before_snapshot(db: Session, organization_id, quota: dict, time
         )
     if quota.get("max_queued_runs") is not None:
         queued = db.execute(
-            text("SELECT count(*) FROM run WHERE organization_id = :o AND status = 'queued'"),
+            # Plans only: a why-not probe has its own allowance (app.solve.whynot.OPEN_PROBES), so
+            # asking questions never uses up the room to plan.
+            text("SELECT count(*) FROM run WHERE organization_id = :o AND status = 'queued' AND purpose = 'plan'"),
             {"o": organization_id},
         ).scalar_one()
         if queued >= quota["max_queued_runs"]:
@@ -556,10 +558,12 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     workers = int(params.get("workers", 8))
     gap_rel = float(params.get("gap_rel", 0.0))
     dataset_id = row["dataset_id"]
-    # Parts of an earlier plan held fixed (queue R24), with what those runs decided.
-    locks = (row["patch"] or {}).get("lock") or []
+    # Parts of an earlier plan held fixed (queue R24), with what those runs decided -- for a
+    # why-not probe (queue R26), the scenario's locks and the asked cells, from `probe_patch`.
+    held = params.get("probe_patch") or row["patch"] or {}
+    locks = held.get("lock") or []
     # ... and the plan to change as little as possible from (queue R25).
-    stay = (row["patch"] or {}).get("stay_close")
+    stay = held.get("stay_close")
     if locks or stay:
         params = {**params, "_locks": locks, "_stay_close": stay,
                   "_lock_bases": _lock_bases(db, row["problem_id"], [*locks, *([stay] if stay else [])])}
@@ -569,7 +573,12 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     try:
         # The trace the request that queued this run started, continued here.
         with tracing.continued(params.get("trace")), tracing.span("run", run_id=run_id):
-            return _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
+            outcome = _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
+            if params.get("probe_patch") is not None:
+                from app.solve import whynot
+
+                whynot.settle(db, run_id)
+            return outcome
     finally:
         # Whatever happened -- solved, refused, cancelled, crashed -- the
         # stream's last word is the status the run ended with.

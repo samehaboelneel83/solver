@@ -26,7 +26,7 @@ from typing import Literal, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import capabilities_of, get_current_user, requires
@@ -38,6 +38,7 @@ from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solu
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
 from app.solve.service import CannotCancel, QuotaExceeded, SettingUnusable, cancel_run, enqueue_run
+from app.solve import whynot
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 
@@ -130,6 +131,10 @@ class RunSummary(BaseModel):
     # The run whose proven optimum answered this one without a solve
     # (migration 0042); null for a run that was solved.
     reused_from: int | None = None
+    # Migration 0069 (queue R26): a plan, or a question about another run and its answer.
+    purpose: str = "plan"
+    parent_run_id: int | None = None
+    verdict: dict[str, Any] | None = None
 
 
 class ParetoPoint(BaseModel):
@@ -483,6 +488,8 @@ def compare_runs(
 @router.get("/runs")
 def list_runs(
     scenario_id: int | None = Query(default=None),
+    purpose: Literal["plan", "why_not", "shadow", "suite"] = Query(default="plan"),
+    parent_run_id: int | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -491,7 +498,10 @@ def list_runs(
     """Newest first: the last run of a scenario is the one being looked for."""
     # A trade-off front's points are runs of their own, opened from their
     # front's chart; the list shows the run that was asked for.
-    not_a_point = Run.params["pareto_of"].is_(None)
+    # Why-not probes (queue R26) are asked for by `purpose`, not mixed into the plans.
+    not_a_point = and_(Run.params["pareto_of"].is_(None), Run.purpose == purpose)
+    if parent_run_id is not None:
+        not_a_point = and_(not_a_point, Run.parent_run_id == parent_run_id)
     stmt = select(Run).where(not_a_point)
     count_stmt = select(func.count()).select_from(Run).where(not_a_point)
     if scenario_id is not None:
@@ -502,6 +512,55 @@ def list_runs(
         "items": [RunSummary.model_validate(r) for r in rows],
         "total": db.scalar(count_stmt) or 0,
     }
+
+
+class WhyNotCell(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    var: str
+    index: list[str | int]
+    value: float
+
+
+class WhyNotRequest(BaseModel):
+    """The cells a planner asks about, and the value each should have (queue R26)."""
+
+    model_config = ConfigDict(extra="forbid")
+    force: list[WhyNotCell]
+
+
+class WhyNotAnswer(BaseModel):
+    """Either the probe queued to answer the question (poll `GET /runs/{run_id}` for its
+    `verdict`), or -- when the plan already has every asked cell -- the verdict at once."""
+
+    run_id: int | None
+    verdict: dict[str, Any] | None
+
+
+@router.post("/runs/{run_id}/why-not", status_code=201)
+def ask_why_not(
+    run_id: int,
+    payload: WhyNotRequest,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("run.submit")),
+) -> WhyNotAnswer:
+    """"Why isn't this so?" about an answered run: a probe on the run's own frozen data with the
+    asked cells locked and the rest kept as close to the plan as the rules allow
+    (`app.solve.whynot`)."""
+    try:
+        probe, verdict = whynot.ask(db, run_id, [c.model_dump() for c in payload.force])
+    except whynot.NotAskable as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=exc.status,
+            detail=[{"type": exc.code, "loc": ["body", "force"], "msg": str(exc)}],
+        ) from exc
+    except QuotaExceeded as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "quota", "loc": ["quota", exc.quota], "msg": str(exc)}],
+        ) from exc
+    return WhyNotAnswer(run_id=probe, verdict=verdict)
 
 
 @router.get("/runs/{run_id}")

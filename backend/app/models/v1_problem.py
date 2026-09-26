@@ -248,6 +248,13 @@ class Run(Base):
     reused_from: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("run.id", ondelete="SET NULL"), nullable=True
     )
+    # Migration 0069 (queue R26): why the run was made -- a plan, or a question about another run
+    # (`why_not`, with `parent_run_id`), whose answer is `verdict` once it has settled.
+    purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default="plan")
+    parent_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("run.id", ondelete="CASCADE"), nullable=True
+    )
+    verdict: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class Solution(Base):
