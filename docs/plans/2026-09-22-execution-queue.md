@@ -169,3 +169,10 @@ Track A first. Why-not probes count against quota, with a small separate allowan
 - [x] (R26) "Why not?" probes -- migration for `run.purpose`, `parent_run_id`, `verdict`. *(`75e2db2`, migration 0069 (rehearsed up/down/up on a live copy: 75 runs became `plan`): `POST /runs/{id}/why-not {force: [cells]}` -- `app.solve.whynot.ask` answers `already` at once when the plan has every asked cell, else queues a probe on the plan's own frozen dataset with the asked cells as locks after the scenario's and stay_close lex from the plan; `settle` writes the verdict: `blocked` (the diagnoser's conflict, asked cells named as `forced` lock ids), `possible` (objective, delta, proven, change, cells turned on/off), `unanswered`. Probes are out of the runs list unless `?purpose=why_not`, never a warm-start source, a probe of a probe is 409; they obey the time and CPU quotas but not the queued-plans count (which now counts plans only) and have their own allowance, `OPEN_PROBES` = 3 (429). Pinned by hand-sized rotas (8 h a week: both days for one person blocked by c_max_hours + both locks; a swap is possible at delta 0 moving 4; an extra shift costs exactly 1). Live: weekly rota run 270 optimal 3669 -- two shifts one day blocked by c_one_shift_per_day + lock:1, lock:2; ahmed sat evening possible, delta 0, change 4, proven; a planned cell `already` with no run; two probes listed under the plan.)*
 - [ ] (R27) LP ranging and what-if overrides.
 - [ ] (R28) The planner's page: lock, re-solve, ask.
+
+Track D (asked 2026-09-26: "give me facilities to add any native commercial adapter solver"; no licence bought -- proved with free solvers standing in), taken right after R27:
+
+- [ ] (R41) The adapter contract and discovery -- ortools-engine, command-line (MPS) and python kinds; manifests validated; bad ones skipped with a reason.
+- [ ] (R42) Bring-your-own licences per organization -- encrypted, write-only, into the sandbox child only; allowed/denied solvers.
+- [ ] (R43) The conformance kit -- an adapter that has not passed is never chosen automatically.
+- [ ] (R44) The Solvers admin page.

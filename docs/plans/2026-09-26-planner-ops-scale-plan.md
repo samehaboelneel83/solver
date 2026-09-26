@@ -372,6 +372,136 @@ The others wait for their trigger.
 
 ---
 
+## Track D — a facility to add any native solver, commercial or not (asked 2026-09-26)
+
+**Goal.** Anyone can plug a solver into the platform without changing platform code. Examples:
+Gurobi, Xpress, CPLEX, COPT, a university's research code, or a customer's in-house heuristic.
+
+- The customer brings the licence. The platform buys nothing.
+- An adapter is refused until it passes the same checks our built-in solvers pass.
+- The existing solver-choice policy picks it up without change.
+
+It is proved with free solvers standing in for commercial ones, so no licence is needed to build or
+test any of it.
+
+**What exists.** `app/solve/backends.py` already treats solvers as data:
+- a `Backend` row declares `classes`, `provides`, `rank` and `proves`;
+- `choose()` is one policy over the `REGISTRY` tuple;
+- every solve already runs in a sandboxed child (`sandbox.run`).
+
+The facility makes that registry open and gives it a contract. Our OR-Tools 9.15 build already
+carries the hooks for Gurobi, Xpress and CPLEX: `pywraplp` loads their shared libraries at run time
+when they are present. `cryptography` is already installed.
+
+### R41 — the adapter contract and discovery
+
+Three kinds of adapter, from the least to the most code:
+
+1. **`ortools-engine`**: a manifest only. It names an OR-Tools engine (`GUROBI`, `XPRESS`, `CPLEX`,
+   `SCIP`, `CBC`, …) and where the vendor's library is. The model goes through the same `pywraplp`
+   translation our `milp` backend uses, so every rule we can express reaches the engine. This is the
+   whole Gurobi, Xpress and CPLEX story for linear and whole-number models.
+2. **`command-line`**: a manifest naming an executable. The platform writes the model as MPS (the
+   `bench/mps.py` writer, promoted into `app/solve/mps.py`), runs the executable with the
+   manifest's argument template (`{model}`, `{solution}`, `{time_limit}`, `{threads}`, `{gap}`), and
+   reads back a solution file in the manifest's format. Any solver with a command line fits, with
+   no Python.
+3. **`python`**: a module exposing `solve(compiled, *, time_limit, workers, should_stop, seed,
+   gap_rel, on_progress, hint, options) -> Solution`, the same signature as the built-ins. This is
+   for full control: callbacks, native conflicts, a vendor's Python API.
+
+**Manifest** (`adapter.toml`, one folder per adapter under `SOLVER_ADAPTERS_DIR`, default
+`/opt/solver/adapters`, mounted read-only into backend and worker; or a Python package exposing the
+entry point group `solver.adapters`):
+- `name`, `version`, `kind`;
+- `classes`, `provides` and `proves`, checked against the classifier's vocabulary, so an unknown
+  word is refused;
+- `rank` (default 50, below every built-in unless an organization raises it);
+- `licence`: what the adapter needs (environment variable names, a licence file, a licence server
+  address);
+- `options`: the tuning options it accepts, each with a type.
+
+**Loading** (`app/solve/adapters.py`), at process start in the API, the worker and each sandbox
+child alike, so all three agree:
+- each manifest is validated;
+- a bad one is skipped with a logged reason and shown on the admin page (R44). One broken adapter
+  never stops the platform;
+- a name that clashes with a built-in is refused;
+- adapters join `REGISTRY` as ordinary `Backend` rows.
+
+`is_available()` means: the library or executable is found and the licence check passes.
+
+**Tests:**
+- a manifest for each kind, pointing at **CBC** (`ortools-engine`), a solver executable
+  (`command-line`; CBC's or HiGHS's binary added to the test image) and a small Python adapter;
+- each is discovered, validated, chosen by name, solves the golden models, and runs in the sandbox;
+- a bad manifest (unknown capability, missing `proves`, name clash) is skipped with its reason;
+- an adapter whose library is missing is listed as unavailable, never chosen, and a run that asks
+  for it is refused by name.
+
+### R42 — bring-your-own licences, per organization
+
+- **Migration:** `solver_licence` (organization, adapter, kind `env` | `file` | `server`, `payload`
+  encrypted with Fernet under `SOLVER_SECRETS_KEY` from the environment, `fingerprint`, `set_by`,
+  `set_at`), with RLS by organization.
+- **API:** `PUT /solver-licences/{adapter}` is write-only. `GET` shows only whether a licence is
+  set, its fingerprint and when. There is no read-back of the secret, ever. Deletion is allowed.
+- **At solve time:** the worker decrypts the licence into the sandbox child only, as environment
+  variables or a temporary file under the child's own directory, deleted on exit. The licence never
+  appears in logs, in `run.params`, in errors (vendor messages are scrubbed of the payload before
+  they are stored), or in traces.
+- **Availability** becomes per organization: an adapter that needs a licence is available only to
+  organizations that have set one. `choose()` asks `available_for(org)`.
+- **Settings:** `solve.allowed_solvers` / `solve.denied_solvers` at organization or problem level,
+  so a customer can pin, for example, "Gurobi only, never the free fallback", or the reverse.
+- **Tests:**
+  - a fake licence reaches the child's environment and nothing else: grep logs, params and the
+    error text;
+  - another organization cannot see or use it (RLS);
+  - a wrong licence gives an error naming the adapter, not the secret;
+  - `allowed_solvers` is obeyed and a refusal names it.
+
+### R43 — the conformance kit
+
+`python -m bench.conformance <adapter>` runs the suite every built-in already meets:
+- LP, MIP, an infeasible model, an unbounded one, a trivial one;
+- a time limit that stops early and keeps the best found;
+- a stop request honoured, or reported as not honoured;
+- a hint that is bad and must not change the proven optimum;
+- `gap_rel` obeyed;
+- the answer re-checked against every rule (`evolve.holds`);
+- the objective checked against the known optimum.
+
+It writes a report and records the result (the date, the passed and failed checks, the adapter
+version) in a `solver_conformance` table. **An adapter that has not passed is never chosen
+automatically**. It can still be named explicitly, and each such run says "unverified solver".
+Organization admins can re-run the kit from the page (R44).
+
+- **Tests:** the three reference adapters pass. A deliberately wrong adapter fails, and is never
+  auto-chosen. It is one that reports `optimal` on a feasible plan, or ignores the time limit.
+
+### R44 — the Solvers admin page
+
+Settings → Solvers lists every solver, built-in and added. For each it shows:
+- its kind, version and what it solves;
+- whether it is available, and why not (a missing library, no licence);
+- its conformance result;
+- its rank for this organization.
+
+Actions:
+- set or replace the organization's licence (write-only);
+- run the conformance kit;
+- allow or deny the solver for the organization;
+- read the manifest's options.
+
+The live check is in a browser: the CBC reference adapter is shown, passes conformance, is allowed,
+and solves a model by name.
+
+**Out of scope, on purpose.** No licence is bought, and no vendor's software is shipped in our
+image. A customer's own image (or a volume mount) supplies Gurobi, Xpress or CPLEX. The docs give
+the few-line manifest for each, marked "untested here, for want of a licence" until a customer runs
+the conformance kit with theirs.
+
 ## Order and size
 
 | Order | Items | Rough size | Migrations |
@@ -382,7 +512,8 @@ The others wait for their trigger.
 | 4 | R28 planner UI | 4 days | — |
 | 5 | R29 suites, R30 gate | 4 days | 0072, 0073 |
 | 6 | R31 shadow, R32 nightly | 3–4 days | 0074 |
-| 7 | R39 backups, then R33–R40 on demand | per item | per item |
+| 7 | R41–R44 solver adapters (Track D; asked 2026-09-26, taken right after R27) | 5–6 days | 2 (licences, conformance) |
+| 8 | R39 backups, then R33–R40 on demand | per item | per item |
 
 Migration numbers are provisional. Other sessions commit on master, so each is renumbered at merge, as
 usual.
