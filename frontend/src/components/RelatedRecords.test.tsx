@@ -110,6 +110,7 @@ describe("RelatedRecords", () => {
     renderRelated("iam", "user_account", "u1");
 
     expect(await screen.findByText("user_role (0)")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Roles on this user" })).toBeInTheDocument();
     expect(screen.queryByText("New")).not.toBeInTheDocument();
     expect(screen.getByText("user_role (0)")).toHaveAttribute("href", "/iam/user_role?f_user_id=u1");
   });

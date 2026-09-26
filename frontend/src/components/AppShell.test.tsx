@@ -106,7 +106,7 @@ describe("AppShell", () => {
       expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     });
 
-    it("shows Users, Roles and User roles only when the account may grant roles", async () => {
+    it("shows Users and Roles & permissions only when the account may grant roles", async () => {
       (apiFetch as any).mockImplementation((path: string) => {
         if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
         if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
@@ -123,12 +123,9 @@ describe("AppShell", () => {
       await settled();
 
       expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/iam/user_account");
-      expect(screen.getByRole("link", { name: "Roles" })).toHaveAttribute("href", "/iam/role");
-      expect(screen.getByRole("link", { name: "User roles" })).toHaveAttribute("href", "/iam/user_role");
-      expect(screen.getByRole("link", { name: "Role capabilities" })).toHaveAttribute(
-        "href",
-        "/iam/role_capability"
-      );
+      expect(screen.getByRole("link", { name: "Roles & permissions" })).toHaveAttribute("href", "/iam/role");
+      expect(screen.queryByRole("link", { name: "User roles" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Role capabilities" })).not.toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Capabilities" })).toHaveAttribute("href", "/iam/capability");
     });
 

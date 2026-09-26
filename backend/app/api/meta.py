@@ -53,7 +53,8 @@ FIELD_LABELS: dict[tuple[str | None, str], str] = {
 # rather than retargeted.
 TABLE_LABELS: dict[str, tuple[str, str]] = {
     "entity": ("Entity", "Entities"),
-    "role_capability": ("Role capability", "Role capabilities"),
+    "user_role": ("Role assignment", "Role assignments"),
+    "role_capability": ("Permission", "Permissions"),
     "capability": ("Capability", "Capabilities"),
 }
 

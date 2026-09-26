@@ -323,8 +323,12 @@ def test_schema_reports_table_labels(auth_headers):
     assert user_account_table["label_plural"] == "User accounts"
 
     role_capability_table = tables[("iam", "role_capability")]
-    assert role_capability_table["label"] == "Role capability"
-    assert role_capability_table["label_plural"] == "Role capabilities"
+    assert role_capability_table["label"] == "Permission"
+    assert role_capability_table["label_plural"] == "Permissions"
+
+    user_role_table = tables[("iam", "user_role")]
+    assert user_role_table["label"] == "Role assignment"
+    assert user_role_table["label_plural"] == "Role assignments"
 
 
 def test_schema_reports_field_label_overrides(auth_headers):

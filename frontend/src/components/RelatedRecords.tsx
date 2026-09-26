@@ -148,7 +148,13 @@ export default function RelatedRecords({ schema, table, id }: RelatedRecordsProp
 
   return (
     <div className="mt-6 border-t border-slate-200 pt-4">
-      <h2 className="mb-2 text-sm font-semibold text-slate-900">Related records</h2>
+      <h2 className="mb-2 text-sm font-semibold text-slate-900">
+        {schema === "iam" && table === "user_account"
+          ? "Roles on this user"
+          : schema === "iam" && table === "role"
+            ? "Permissions on this role"
+            : "Related records"}
+      </h2>
       <ul className="space-y-1">
         {nonEmpty.map(({ child, index }) => renderChild(child, index))}
         {shownEmpty.map(({ child, index }) => renderChild(child, index))}
