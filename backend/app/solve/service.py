@@ -1976,7 +1976,8 @@ def _admissible(found) -> set[str]:
 
     names = set()
     for candidate in REGISTRY:
-        if candidate.proves != "global":
+        # An added solver the conformance kit has not passed is never raced unasked (queue R41).
+        if candidate.proves != "global" or not candidate.automatic:
             continue
         try:
             choose(found, candidate.name)

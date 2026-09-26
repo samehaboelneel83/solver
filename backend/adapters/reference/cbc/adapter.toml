@@ -1,0 +1,11 @@
+# Reference adapter (queue R41), kind ortools-engine: COIN-OR CBC through OR-Tools. The same
+# manifest with `engine = "GUROBI"`, "XPRESS" or "CPLEX" is how a commercial engine arrives --
+# see docs/solver-adapters.md.
+name = "cbc"
+kind = "ortools-engine"
+version = "2.10 (ortools)"
+proves = "global"
+note = "COIN-OR CBC, branch and cut; a reference adapter"
+
+[engine]
+engine = "CBC"

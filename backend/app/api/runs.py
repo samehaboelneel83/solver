@@ -449,6 +449,7 @@ def classify_model(
 def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
     """What this build can solve with. A UI that hardcoded the list would
     offer a solver a different build does not have."""
+    from app.solve import adapters
     from app.solve.backends import REGISTRY
 
     return {
@@ -458,9 +459,16 @@ def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
                 "available": b.is_available(),
                 "classes": sorted(b.classes),
                 "note": b.note,
+                # Queue R41: where it came from, and whether the rules may choose it unasked.
+                "origin": b.origin,
+                "automatic": b.automatic,
+                **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves}
+                   if b.manifest is not None else {}),
             }
             for b in sorted(REGISTRY, key=lambda b: b.rank)
-        ]
+        ],
+        # Manifests that were not loaded, and why.
+        "skipped": list(adapters.SKIPPED),
     }
 
 

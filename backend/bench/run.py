@@ -141,6 +141,8 @@ def run(
         for backend in REGISTRY:
             if backends and backend.name not in backends:
                 continue
+            if not backends and not backend.automatic:
+                continue  # an added solver is benched only when named
             if option_of is not None and backend.name != option_of[0]:
                 # A solver option is measured on its own solver only.
                 continue

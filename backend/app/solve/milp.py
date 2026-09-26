@@ -68,12 +68,19 @@ def solve(
     seed: int | None = None,
     gap_rel: float = 0.0,
     on_progress=None,
+    engine: str | None = None,
+    options: str | None = None,
 ) -> Solution:
-    engine = available()
+    """`engine` names an OR-Tools engine to use instead of the preferred one -- an adapter's
+    (queue R41: CBC, or GUROBI, XPRESS, CPLEX where the vendor's library is installed) -- and
+    `options` its own parameters, as the engine's parameter text."""
+    engine = engine or available()
     if engine is None:  # pragma: no cover -- both ship with ortools
         raise RuntimeError("no MILP engine in this build")
 
     solver = pywraplp.Solver.CreateSolver(engine)
+    if solver is None:
+        raise RuntimeError(f"the {engine} engine is not available in this build")
     # One proto, loaded at once (D7): 1.61 s -> 0.43 s on 320,000 entries.
     # Loaded before the settings below, so a load cannot reset them.
     variables, _rows = load(solver, compiled)
@@ -89,6 +96,8 @@ def solve(
     # optimal 0.01% short of the best. The setting decides, 0 by default.
     parameters = pywraplp.MPSolverParameters()
     parameters.SetDoubleParam(pywraplp.MPSolverParameters.RELATIVE_MIP_GAP, float(gap_rel))
+    if options:
+        solver.SetSolverSpecificParametersAsString(options)
     with interrupt_when(should_stop, solver.InterruptSolve):
         status = solver.Solve(parameters)
     solved = status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)

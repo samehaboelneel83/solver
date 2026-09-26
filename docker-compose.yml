@@ -64,6 +64,10 @@ services:
     environment:
       MIGRATION_DATABASE_URL: ${DATABASE_URL}
       CLICKHOUSE_HOST: clickhouse
+      # Solvers added from a manifest (queue R41, docs/solver-adapters.md): the reference
+      # adapters shipped in the image, then a customer's own, mounted at /opt/solver/adapters.
+      # The api and the worker must read the same folders.
+      SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
     ports:
       - "8010:8000"
     # Prometheus metrics (app/core/metrics.py): on the compose network only,
@@ -102,6 +106,8 @@ services:
       CLICKHOUSE_HOST: clickhouse
       # Address space each solve may use (app.solve.sandbox).
       SOLVE_MEMORY_MB: ${SOLVE_MEMORY_MB:-4096}
+      # As the api's: the same added solvers (queue R41).
+      SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
     command: ["python", "-m", "app.worker"]
     # Prometheus metrics, on the compose network only.
     expose:

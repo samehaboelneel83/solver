@@ -64,6 +64,8 @@ def measure(family: str, size: str, instance: int, time_limit: float) -> list[di
         return []
     rows = []
     for backend in REGISTRY:
+        if not backend.automatic:
+            continue
         try:
             choose(found, backend.name)
         except NoBackend:

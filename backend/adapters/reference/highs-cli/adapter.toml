@@ -1,0 +1,13 @@
+# Reference adapter (queue R41), kind command-line: a program that reads MPS and writes a
+# solution file. Here a small script around HiGHS stands in for any solver's own command line.
+name = "highs-cli"
+kind = "command-line"
+version = "1"
+proves = "global"
+classes = ["IP", "LP", "MILP", "trivial"]
+note = "HiGHS as a separate program (MPS in, sol out); a reference adapter"
+
+[command]
+executable = "python3"
+args = ["{adapter_dir}/highs_cli.py", "{model}", "{solution}", "{time_limit}", "{gap}", "{threads}"]
+solution = "sol"

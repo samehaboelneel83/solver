@@ -1,0 +1,13 @@
+# Reference adapter (queue R41), kind python: a function with the built-ins' signature. Here it
+# hands whole-number models to CP-SAT; a vendor's Python API (gurobipy, xpress) goes the same way.
+name = "python-cpsat"
+kind = "python"
+version = "1"
+proves = "global"
+classes = ["IP", "trivial"]
+provides = ["linear", "integral", "soft-constraints"]
+note = "CP-SAT behind the python adapter kind; a reference adapter"
+
+[python]
+module = "adapter.py"
+function = "solve"

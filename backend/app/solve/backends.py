@@ -74,6 +74,13 @@ class Backend:
     #: One sentence the Model editor shows instead of this backend's name.
     #: A picker is a different capability; the editor never offers one.
     planner_choice: str = ""
+    #: `built-in`, or `adapter` -- added from a manifest (queue R41, `app.solve.adapters`).
+    origin: str = "built-in"
+    #: Whether the rules may choose it unasked. An adapter is not, until the conformance kit
+    #: (queue R43) has passed it: until then it runs only when asked for by name.
+    automatic: bool = True
+    #: An adapter's manifest (`app.solve.adapters.Manifest`); None for a built-in.
+    manifest: object = None
 
 
 def _cpsat_solve(
@@ -542,7 +549,18 @@ GA = Backend(
     planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
 )
 
-REGISTRY: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA)
+BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA)
+
+
+def _with_adapters() -> tuple[Backend, ...]:
+    """The built-ins and every solver added from a manifest (queue R41). An adapter that cannot
+    be loaded is skipped with its reason (`app.solve.adapters.SKIPPED`), never raised here."""
+    from app.solve import adapters
+
+    return BUILT_IN + adapters.load(BUILT_IN)
+
+
+REGISTRY: tuple[Backend, ...] = _with_adapters()
 #: The searches: they never say `optimal`, `infeasible` or `unbounded` -- an answer, or none.
 SEARCHES = frozenset({CMA_ES.name, PSO.name, GA.name})
 
@@ -587,7 +605,7 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
     fits = [
         b
         for b in sorted(REGISTRY, key=lambda b: b.rank)
-        if b.proves != "local"
+        if b.proves != "local" and b.automatic
         and b.is_available() and found.model_class in b.classes and not (found.needs - b.provides)
     ]
     if not fits:

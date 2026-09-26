@@ -61,6 +61,15 @@ def row_bounds(c: Constraint) -> tuple[dict, float, float]:
 def load(solver: pywraplp.Solver, compiled: Compiled) -> tuple[dict, list]:
     """Load the model; return {variable key: MPVariable} and the rows'
     MPConstraints, in `compiled.constraints` order."""
+    keys = list(compiled.variables)
+    error = solver.LoadModelFromProto(proto(compiled))
+    if error:  # pragma: no cover -- a malformed proto is this module's bug
+        raise RuntimeError(f"pywraplp refused the model: {error}")
+    return dict(zip(keys, solver.variables())), list(solver.constraints())
+
+
+def proto(compiled: Compiled) -> "linear_solver_pb2.MPModelProto":
+    """The model as OR-Tools' proto, variables and rows in `compiled` order."""
     if compiled.pwl:  # pragma: no cover -- solve_compiled rewrites curves first
         raise ValueError("a piecewise curve reached a backend that holds none")
     if compiled.functions:  # pragma: no cover -- the registry offers these to SCIP only
@@ -88,8 +97,4 @@ def load(solver: pywraplp.Solver, compiled: Compiled) -> tuple[dict, list]:
         row.lower_bound, row.upper_bound = lower, upper
         row.var_index.extend([position[key] for key in coeffs])
         row.coefficient.extend([float(coeff) for coeff in coeffs.values()])
-
-    error = solver.LoadModelFromProto(model)
-    if error:  # pragma: no cover -- a malformed proto is this module's bug
-        raise RuntimeError(f"pywraplp refused the model: {error}")
-    return dict(zip(keys, solver.variables())), list(solver.constraints())
+    return model
