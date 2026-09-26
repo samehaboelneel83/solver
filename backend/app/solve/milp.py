@@ -85,7 +85,8 @@ def solve(
     # Loaded before the settings below, so a load cannot reset them.
     variables, _rows = load(solver, compiled)
     solver.SetTimeLimit(int(time_limit * 1000))
-    if workers > 1:
+    if workers > 1 and engine != "CBC":
+        # CBC takes a thread count as one of its own commands and complains of the rest.
         solver.SetNumThreads(workers)
     if seed is not None and engine == "SCIP":
         solver.SetSolverSpecificParametersAsString(

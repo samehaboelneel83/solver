@@ -26,7 +26,7 @@ from typing import Any, Iterator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.solve.backends import NoBackend, by_name, choose, optimality_of
+from app.solve.backends import NoBackend, by_name, choose, is_automatic, optimality_of
 from app.solve.classify import classify
 from app.solve.convexity import refine
 from app.solve.lp import NotContinuous
@@ -552,6 +552,8 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     if _honour_cancel(db, run_id):
         return _cancelled_outcome(db, run_id)
 
+    # Which added solvers the conformance kit has passed, as of now (queue R43).
+    adapters_rows.refresh_verified(db)
     row = db.execute(
         text(
             "SELECT r.dataset_id, r.params, r.seed, s.patch, s.problem_id, mv.ir, d.data"
@@ -2023,7 +2025,7 @@ def _admissible(found, params: dict | None = None) -> set[str]:
     names = set()
     for candidate in REGISTRY:
         # An added solver the conformance kit has not passed is never raced unasked (queue R41).
-        if candidate.proves != "global" or not candidate.automatic:
+        if candidate.proves != "global" or not is_automatic(candidate):
             continue
         try:
             choose(found, candidate.name, **_policy(params or {}))

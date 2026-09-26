@@ -153,7 +153,7 @@ def test_a_licensed_solver_runs_only_with_this_organizations_licence(registry, d
     version, _ = _feasible(db)
     scenario = _scenario_for(db, version)
     refused = _solve(db, scenario, "licensed-demo")
-    assert refused["status"] == "error" and "needs a licence this organization has not set" in refused["error"]
+    assert refused["status"] == "error" and "needs a licence, and this organization has not set one" in refused["error"]
     _set(db, scenario, GOOD)
     solved = _solve(db, scenario, "licensed-demo")
     assert solved["status"] == "optimal" and "licensed-demo" in solved["solver_version"]

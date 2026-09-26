@@ -29,7 +29,8 @@ def main(argv: list[str]) -> int:
     }.get(status)
     has_values = info.primal_solution_status == 2  # feasible
     if named is None:
-        named = "feasible" if has_values else None
+        # Stopped (a time limit): an answer it has not proven, or none at all.
+        named = "feasible" if has_values else "unknown"
     with open(solution, "w", encoding="utf-8") as out:
         if named is not None:
             out.write(f"# Status = {named}\n")

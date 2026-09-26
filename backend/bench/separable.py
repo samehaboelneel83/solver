@@ -51,7 +51,7 @@ def _blocked(backend: str, compiled, parts, time_limit: float):
 
 def measure(family: str, size: str, instance: int, time_limit: float) -> list[dict[str, Any]]:
     from app.solve import compile_model, sandbox
-    from app.solve.backends import REGISTRY, NoBackend, choose
+    from app.solve.backends import REGISTRY, NoBackend, choose, is_automatic
     from app.solve.blocks import blocks, refusal
     from app.solve.classify import classify
     from app.solve.convexity import refine
@@ -64,7 +64,7 @@ def measure(family: str, size: str, instance: int, time_limit: float) -> list[di
         return []
     rows = []
     for backend in REGISTRY:
-        if not backend.automatic:
+        if not is_automatic(backend):
             continue
         try:
             choose(found, backend.name)

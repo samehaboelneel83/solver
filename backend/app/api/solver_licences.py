@@ -59,6 +59,28 @@ def licence_state(db: Session, organization_id, backend) -> str:
     return "missing" if licences.required(backend) else "not needed"
 
 
+@router.post("/solvers/{name}/conformance")
+def run_conformance(name: str, db: Session = Depends(get_db),
+                    user: UserAccount = Depends(requires("solver.configure"))) -> dict[str, Any]:
+    """Run the conformance kit on an added solver now and keep the report (queue R43). An operator's
+    act: passing makes the solver eligible to be chosen unasked for every organization. A solver
+    that needs a licence is run with this organization's."""
+    from app.solve import conformance, sandbox
+
+    if not db.execute(text("SELECT app_is_operator()")).scalar_one():
+        raise HTTPException(status_code=403, detail="only an operator runs the conformance kit")
+    backend = _adapter(name)
+    if not backend.is_available():
+        raise HTTPException(status_code=409, detail=f"{name} is not available here")
+    licence, missing = licences.for_solve(db, user.organization_id, backend)
+    if missing:
+        raise HTTPException(status_code=409, detail=missing)
+    with sandbox.licensed(licence):
+        report = conformance.run(backend)
+    conformance.store(db, report, user.username)
+    return {"adapter": name, "version": report.version, "passed": report.passed, "checks": report.checks}
+
+
 @router.get("/solver-licences")
 def list_licences(db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
     stored = _state(db, user.organization_id)

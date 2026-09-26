@@ -32,9 +32,27 @@ stops the platform.
 ## Until an adapter is verified, it runs only when named
 
 An added solver is never chosen automatically, raced, or benched unasked, until the conformance kit
-has passed it (queue R43). Until then you ask for it by name: `POST /scenarios/{id}/runs`
+has passed it. Until then you ask for it by name: `POST /scenarios/{id}/runs`
 `{"solver": "cbc"}`, by an account allowed to choose solvers. The run records the adapter:
 `cbc 2.10 (ortools) (adapter): cbc (ortools 9.15…)`.
+
+**The conformance kit** (`app/solve/conformance.py`) puts the solver through the checks every
+built-in meets:
+- small models with answers worked by hand: a linear program, a knapsack, an equality, negative
+  bounds, mixed decisions, one with no answer, one without limit, one that asks nothing;
+- every answer re-checked against every rule;
+- a bad starting hint that must not change the optimum;
+- a market-split model too hard to finish, stopped at its time limit;
+- a stop request (not honouring it is a note, not a failure).
+
+An operator runs it:
+- in a shell: `python -m bench.conformance <name> --store`;
+- or over the API: `POST /api/v1/solvers/{name}/conformance`, which uses the operator's
+  organization's licence where the solver needs one.
+
+A passed report makes the solver's **current version** eligible to be chosen unasked, for every
+organization. A new version must pass again. `GET /api/v1/solvers` shows each added solver's last
+report: passed or failed, on which version, which checks failed, and any notes.
 
 ## The manifest
 
@@ -147,7 +165,7 @@ unbounded_exit_codes = []         # optional
 - one `name value` per line;
 - `#` starts a comment;
 - a `# Status = optimal` (or `feasible`, `infeasible`, `unbounded`) comment is the solver's own
-  claim;
+  claim, and `# Status = unknown` says it stopped (a time limit) with no answer;
 - names not listed are 0.
 
 **A program that does not state a status.** Its answer is `feasible`, never `optimal`: the platform

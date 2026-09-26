@@ -111,8 +111,9 @@ def for_solve(db: Session, organization_id, backend) -> tuple[dict | None, str |
     stored = unseal(row[0]) if row is not None else None
     if stored is None:
         if required(backend):
-            why = "has not set" if row is None else "set a licence this platform can no longer read; set it again for"
-            return None, f"{backend.name} needs a licence this organization {why} it"
+            if row is None:
+                return None, f"{backend.name} needs a licence, and this organization has not set one"
+            return None, f"{backend.name} needs a licence, and this platform can no longer read the one set: set it again"
         return None, None
     wanted = spec(backend.manifest)
     licence: dict[str, Any] = {"env": dict(stored.get("env") or {})}

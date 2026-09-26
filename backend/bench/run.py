@@ -125,7 +125,7 @@ def run(
     workers: int = 8,
     mps_dir: str | None = None,
 ) -> list[dict[str, Any]]:
-    from app.solve.backends import REGISTRY, SEARCHES, NoBackend, choose
+    from app.solve.backends import REGISTRY, SEARCHES, NoBackend, choose, is_automatic
     from app.solve.service import gap_of, solve_compiled
 
     technique = technique or Technique(None, [None])
@@ -141,7 +141,7 @@ def run(
         for backend in REGISTRY:
             if backends and backend.name not in backends:
                 continue
-            if not backends and not backend.automatic:
+            if not backends and not is_automatic(backend):
                 continue  # an added solver is benched only when named
             if option_of is not None and backend.name != option_of[0]:
                 # A solver option is measured on its own solver only.

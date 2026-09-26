@@ -577,6 +577,16 @@ def available_names() -> list[str]:
     return [b.name for b in REGISTRY if b.is_available()]
 
 
+def is_automatic(backend: "Backend") -> bool:
+    """Whether the rules may choose it unasked: a built-in, or an added solver whose current
+    version passed the conformance kit (queue R43, `app.solve.adapters.VERIFIED`)."""
+    if backend.automatic:
+        return True
+    from app.solve.adapters import VERIFIED
+
+    return backend.origin == "adapter" and backend.name in VERIFIED
+
+
 def allows(backend: "Backend", allowed: set[str] | None, denied: set[str] | None) -> str | None:
     """Why an organization's settings keep this backend from solving (queue R42), or None."""
     if denied and backend.name in denied:
@@ -618,7 +628,7 @@ def choose(found: Classification, requested: str | None = None, *, allowed: set[
     fits = [
         b
         for b in sorted(REGISTRY, key=lambda b: b.rank)
-        if b.proves != "local" and b.automatic and allows(b, allowed, denied) is None
+        if b.proves != "local" and is_automatic(b) and allows(b, allowed, denied) is None
         and b.is_available() and found.model_class in b.classes and not (found.needs - b.provides)
     ]
     if not fits:

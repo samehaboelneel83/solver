@@ -450,8 +450,11 @@ def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_
     """What this build can solve with. A UI that hardcoded the list would
     offer a solver a different build does not have."""
     from app.api.solver_licences import licence_state
-    from app.solve import adapters
-    from app.solve.backends import REGISTRY
+    from app.solve import adapters, conformance
+    from app.solve.backends import REGISTRY, is_automatic
+
+    adapters.refresh_verified(db)
+    reports = conformance.latest(db)
 
     return {
         "items": [
@@ -462,10 +465,13 @@ def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_
                 "note": b.note,
                 # Queue R41: where it came from, and whether the rules may choose it unasked.
                 "origin": b.origin,
-                "automatic": b.automatic,
+                # Whether the rules may choose it unasked: a built-in, or an added solver whose
+                # current version passed the conformance kit (queue R43).
+                "automatic": is_automatic(b),
                 # Queue R42: whether this organization has the licence the solver needs.
                 "licence": licence_state(db, user.organization_id, b),
-                **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves}
+                **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves,
+                    "conformance": _conformance_of(reports.get(b.name), b.manifest.version)}
                    if b.manifest is not None else {}),
             }
             for b in sorted(REGISTRY, key=lambda b: b.rank)
@@ -473,6 +479,16 @@ def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_
         # Manifests that were not loaded, and why.
         "skipped": list(adapters.SKIPPED),
     }
+
+
+def _conformance_of(report: dict | None, version: str) -> dict[str, Any] | None:
+    """The kit's last word on an added solver: none yet, or passed/failed, when, on which version."""
+    if report is None:
+        return None
+    return {"passed": report["passed"], "version": report["version"], "current": report["version"] == version,
+            "ran_at": report["ran_at"], "ran_by": report["ran_by"],
+            "failed": [c["check"] for c in report["checks"] if c["result"] == "fail"],
+            "notes": [c["detail"] for c in report["checks"] if c["result"] == "note"]}
 
 
 @router.get("/runs/{left_id}/compare/{right_id}")

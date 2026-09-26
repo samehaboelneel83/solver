@@ -82,6 +82,31 @@ SOLUTION_FORMATS = ("sol",)
 
 #: Manifests that were not loaded, and why: [{"folder": ..., "reason": ...}].
 SKIPPED: list[dict[str, str]] = []
+#: Added solvers whose current version passed the conformance kit (queue R43): the rules may
+#: choose these unasked. Read from `solver_conformance` by `refresh_verified`.
+VERIFIED: set[str] = set()
+
+
+def refresh_verified(db) -> set[str]:
+    """Which added solvers' current versions passed the kit when it last ran on them."""
+    from sqlalchemy import text
+
+    from app.solve.backends import REGISTRY
+
+    current = {b.name: b.manifest.version for b in REGISTRY if b.origin == "adapter"}
+    if not current:
+        VERIFIED.clear()
+        return VERIFIED
+    rows = db.execute(
+        text(
+            "SELECT DISTINCT ON (adapter, version) adapter, version, passed FROM solver_conformance"
+            " WHERE adapter = ANY(:names) ORDER BY adapter, version, ran_at DESC"
+        ),
+        {"names": list(current)},
+    ).all()
+    VERIFIED.clear()
+    VERIFIED.update(name for name, version, passed in rows if passed and current.get(name) == version)
+    return VERIFIED
 
 
 class AdapterRefused(ValueError):
@@ -316,6 +341,8 @@ def run_command(manifest: Manifest, exe: str, compiled: Compiled, *, time_limit:
         status = "unbounded"
     if status in ("optimal", "feasible") and not found:
         raise AdapterFailed(f"{manifest.name} said {status} and wrote no values")
+    if status == "unknown" and found:
+        status = "feasible"  # values it would not vouch for are still an answer, never an optimum
     if status is None:
         if found:
             status = "feasible"
@@ -337,12 +364,13 @@ def run_command(manifest: Manifest, exe: str, compiled: Compiled, *, time_limit:
 
 _STATUS_LINE = re.compile(r"^#\s*status\s*[=:]\s*(\w+)", re.IGNORECASE)
 _STATUSES = {"optimal": "optimal", "feasible": "feasible", "infeasible": "infeasible",
-             "unbounded": "unbounded", "timelimit": "feasible", "time_limit": "feasible"}
+             "unbounded": "unbounded", "unknown": "unknown"}
 
 
 def _read_sol(path: Path) -> tuple[str | None, dict[str, float]]:
     """The `sol` format -- Gurobi's, and what most solvers can write: `name value` per line,
-    `#` comments. A `# Status = optimal` comment, when present, is the solver's own claim."""
+    `#` comments. A `# Status = optimal` comment, when present, is the solver's own claim; `unknown`
+    says it stopped (a time limit) with no answer."""
     status, values = None, {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
