@@ -18,3 +18,10 @@ Stored on `run.idempotency_key` (migration **0083**), unique per organization.
 
 Use this for client retries after network loss; it is not a cache of solve
 results (see `reuse` / `cache_key` for that).
+
+## S03 — Execution-attempt fencing
+
+Each `claim_next` bumps `run.execution_attempt` (migration **0084**). Settling
+writes (`_record`, verification failure, adapter failure) require
+`execution_attempt` to still match. A stale worker that finishes after reclaim
+cannot overwrite the newer attempt's result.

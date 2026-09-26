@@ -250,6 +250,8 @@ class Run(Base):
     )
     # Migration 0083 (OAAS S02): optional client Idempotency-Key for submit retries.
     idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Migration 0084 (OAAS S03): bumped on each claim; settling writes are fenced by it.
+    execution_attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     # Migration 0069 (queue R26): why the run was made -- a plan, or a question about another run
     # (`why_not`, with `parent_run_id`), whose answer is `verdict` once it has settled.
     purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default="plan")

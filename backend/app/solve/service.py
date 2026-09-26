@@ -380,13 +380,33 @@ def claim_next(db: Session) -> int | None:
         return None
     db.execute(
         text(
-            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now()"
+            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now(),"
+            "               execution_attempt = execution_attempt + 1"
             " WHERE id = :r"
         ),
         {"r": run_id},
     )
     db.commit()
     return run_id
+
+
+def run_attempt(db: Session, run_id: int) -> int:
+    """The claim generation currently owning this run (OAAS S03)."""
+    return int(
+        db.execute(
+            text("SELECT execution_attempt FROM run WHERE id = :r"), {"r": run_id}
+        ).scalar_one()
+    )
+
+
+def _owns_attempt(db: Session, run_id: int, attempt: int) -> bool:
+    return (
+        db.execute(
+            text("SELECT 1 FROM run WHERE id = :r AND execution_attempt = :a"),
+            {"r": run_id, "a": attempt},
+        ).scalar_one_or_none()
+        is not None
+    )
 
 
 # Any fixed number, shared by every worker: the key of the claim lock.
@@ -591,6 +611,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
 
     # Which added solvers the conformance kit has passed, as of now (queue R43).
     adapters_rows.refresh_verified(db)
+    attempt = run_attempt(db, run_id)
     row = db.execute(
         text(
             "SELECT r.dataset_id, r.params, r.seed, r.organization_id, s.patch, s.problem_id, mv.ir, d.data"
@@ -642,14 +663,22 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             sandbox.memory_cap(org_memory),
         ):
             try:
-                outcome = _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel,
-                                   dataset_id, stop)
+                outcome = _execute(
+                    db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel,
+                    dataset_id, stop, attempt=attempt,
+                )
             except adapters_rows.AdapterFailed as exc:
                 # An added solver failed (queue R42): its reason, licence scrubbed, is the run's error.
                 db.rollback()
-                db.execute(text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
-                           {"e": str(exc)[:2000], "r": run_id})
-                db.commit()
+                if _owns_attempt(db, run_id, attempt):
+                    db.execute(
+                        text(
+                            "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                            " WHERE id = :r AND execution_attempt = :a"
+                        ),
+                        {"e": str(exc)[:2000], "r": run_id, "a": attempt},
+                    )
+                    db.commit()
                 outcome = RunOutcome(run_id, dataset_id, "error", None, {})
             if params.get("probe_patch") is not None:
                 from app.solve import whynot
@@ -685,6 +714,8 @@ def _execute(
     gap_rel: float,
     dataset_id: int,
     stop: threading.Event,
+    *,
+    attempt: int,
 ) -> RunOutcome:
     phases: dict[str, float] = {}
     with _heartbeat(run_id, stop):
@@ -715,14 +746,15 @@ def _execute(
                 compiling.set_attribute("rules", len(compiled.constraints))
             phases["compile_s"] = round(time.monotonic() - t_compile, 4)
         except Unsupported as exc:
-            db.execute(
-                text(
-                    "UPDATE run SET status = 'error', error = :e, finished_at = now()"
-                    " WHERE id = :r"
-                ),
-                {"e": str(exc), "r": run_id},
-            )
-            db.commit()
+            if _owns_attempt(db, run_id, attempt):
+                db.execute(
+                    text(
+                        "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                        " WHERE id = :r AND execution_attempt = :a"
+                    ),
+                    {"e": str(exc), "r": run_id, "a": attempt},
+                )
+                db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
         # The model's numbers, stored as soon as there is a model: a run that
         # fails later still says what it was (app.solve.fingerprint, Phase 17).
@@ -1334,33 +1366,40 @@ def _execute(
         result = verify_rows.reject_unverified(result, verification)
         detail = verification["failures"][0] if verification["failures"] else {"kind": "failed"}
         extra["verification_failed"] = detail
+        if not _owns_attempt(db, run_id, attempt):
+            db.rollback()
+            return RunOutcome(run_id, dataset_id, "abandoned", None, {})
         db.execute(
             text(
                 "UPDATE run SET status = 'error', error = :e, solver = :s,"
                 "               params = params || CAST(:extra AS jsonb), finished_at = now()"
-                " WHERE id = :r"
+                " WHERE id = :r AND execution_attempt = :a"
             ),
             {
                 "e": f"result failed independent verification ({detail.get('kind')})",
                 "s": backend.name,
                 "extra": _json({**extra, "phases": phases}),
                 "r": run_id,
+                "a": attempt,
             },
         )
         db.commit()
         return RunOutcome(run_id, dataset_id, "error", None, {})
     if phases:
         extra["phases"] = phases
+    if not _owns_attempt(db, run_id, attempt):
+        db.rollback()
+        return RunOutcome(run_id, dataset_id, "abandoned", None, {})
     with tracing.span("persist"):
         t_persist = time.monotonic()
         db.execute(
             text(
                 "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
-                " WHERE id = :r"
+                " WHERE id = :r AND execution_attempt = :a"
             ),
-            {"s": backend.name, "extra": _json(extra), "r": run_id},
+            {"s": backend.name, "extra": _json(extra), "r": run_id, "a": attempt},
         )
-        _record(db, run_id, record_model or compiled, result)
+        _record(db, run_id, record_model or compiled, result, attempt=attempt)
         phases["persist_s"] = round(time.monotonic() - t_persist, 4)
         if phases.get("persist_s") is not None:
             db.execute(
@@ -1510,25 +1549,35 @@ def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return {**ir, "constraints": constraints}
 
 
-def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> None:
+def _record(
+    db: Session, run_id: int, compiled: Compiled, result: Solution, *, attempt: int | None = None
+) -> None:
     solved = result.status in ("optimal", "feasible")
-    db.execute(
+    where = "WHERE id = :r"
+    binds: dict[str, Any] = {
+        "st": result.status,
+        "sv": result.solver,
+        "obj": result.objective,
+        "wall": result.wall_seconds,
+        "bound": result.best_bound if solved else None,
+        "gap": gap_of(result.objective, result.best_bound) if solved else None,
+        "r": run_id,
+    }
+    if attempt is not None:
+        where += " AND execution_attempt = :attempt"
+        binds["attempt"] = attempt
+    updated = db.execute(
         text(
             "UPDATE run SET status = :st, solver_version = :sv, objective = :obj,"
             "               wall_time_s = :wall, finished_at = now(),"
             "               best_bound = :bound, gap = :gap"
-            " WHERE id = :r"
+            f" {where}"
         ),
-        {
-            "st": result.status,
-            "sv": result.solver,
-            "obj": result.objective,
-            "wall": result.wall_seconds,
-            "bound": result.best_bound if solved else None,
-            "gap": gap_of(result.objective, result.best_bound) if solved else None,
-            "r": run_id,
-        },
+        binds,
     )
+    if attempt is not None and (updated.rowcount or 0) == 0:
+        # Stale worker: a newer claim owns this run (OAAS S03).
+        return
 
     if not solved:
         return

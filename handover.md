@@ -281,8 +281,7 @@ Docs: [`docs/runbooks/offline-install.md`](docs/runbooks/offline-install.md),
 
 ## 4. In progress
 
-OAAS S01–S02 (ClickHouse optional API dependency; run `Idempotency-Key`) in the
-working tree after `cff508a`.
+Nothing in flight. Scale S01–S03 follow the OAAS Phase 0–5 commit on `master`.
 
 ---
 
