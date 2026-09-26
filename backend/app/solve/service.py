@@ -566,9 +566,11 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
         {"r": run_id},
     ).mappings().one()
 
-    ir = patched(row["ir"], row["patch"] or {})
-    data = row["data"]
     params = row["params"] or {}
+    # A case run (queue R29) carries its case's own patch; its scenario's is empty.
+    patch = params["case_patch"] if "case_patch" in params else (row["patch"] or {})
+    ir = patched(row["ir"], patch)
+    data = row["data"]
     if (params.get("probe_patch") or {}).get("override"):
         # A what-if (queue R27): some values changed on a copy of the frozen data.
         from app.solve.whynot import overridden
@@ -583,7 +585,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     dataset_id = row["dataset_id"]
     # Parts of an earlier plan held fixed (queue R24), with what those runs decided -- for a
     # why-not probe (queue R26), the scenario's locks and the asked cells, from `probe_patch`.
-    held = params.get("probe_patch") or row["patch"] or {}
+    held = params.get("probe_patch") or patch
     locks = held.get("lock") or []
     # ... and the plan to change as little as possible from (queue R25).
     stay = held.get("stay_close")
@@ -610,6 +612,10 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
                 from app.solve import whynot
 
                 whynot.settle(db, run_id)
+            if params.get("case_id") is not None:
+                from app.solve import suite
+
+                suite.settle(db, run_id)
             return outcome
     finally:
         # Whatever happened -- solved, refused, cancelled, crashed -- the

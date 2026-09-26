@@ -19,6 +19,7 @@ from app.api.parameters import router as parameters_router
 from app.api.problems import router as problems_router
 from app.api.quota import router as quota_router
 from app.api.solver_licences import router as solver_licences_router
+from app.api.suites import router as suites_router
 from app.api.run_events import router as run_events_router
 from app.api.genui import router as genui_router
 from app.api.distances import router as distances_router
@@ -198,6 +199,7 @@ app.include_router(bulk_router)
 app.include_router(run_map_router)
 app.include_router(quota_router)
 app.include_router(solver_licences_router)
+app.include_router(suites_router)
 app.include_router(api_keys_router)
 app.include_router(settings_router)
 # Re-mounted in Task 7. Task 1 had unmounted it because every query behind
