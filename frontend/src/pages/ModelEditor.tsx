@@ -56,6 +56,9 @@ import {
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { resolveById } from "../lib/selection";
+import ContextMismatch from "../components/ContextMismatch";
+import ProblemReadiness from "../components/ProblemReadiness";
 
 /**
  * Writing a model: its constraints and its objective.
@@ -145,11 +148,22 @@ function ForDomain({ domainId }: { domainId: Id }) {
   }
 
   const requested = parseRouteId(searchParams.get("problem"));
-  const problem = items.find((row) => Number(row.id) === requested) ?? items[0];
-  const problemId = Number(problem.id);
+  const { item: problem, missing: problemMissing } = resolveById(items, requested, (row) => Number(row.id));
+  if (problemMissing) {
+    return (
+      <ContextMismatch
+        title="This problem is not available here"
+        detail="The link asked for a problem that is missing or belongs to another domain. Nothing was substituted."
+        parentHref="/public/problem"
+        parentLabel="Open problems in this domain"
+      />
+    );
+  }
+  const problemId = Number(problem!.id);
 
   return (
     <>
+      <ProblemReadiness problemId={problemId} />
       <div className="mb-4">
         <label htmlFor={chooserId} className="block text-sm font-medium text-slate-700">
           Problem
@@ -180,7 +194,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // new latest, because a version a run points at can never change. So this
   // chooses a *starting point*, which is why the label says so.
   const requestedVersion = parseRouteId(searchParams.get("version"));
-  const base = versionItems.find((row) => row.id === requestedVersion) ?? versionItems[0] ?? null;
+  const { item: base, missing: versionMissing } = resolveById(
+    versionItems,
+    requestedVersion,
+    (row) => row.id
+  );
   const baseId = base?.id ?? null;
   const latest = useVersion(baseId);
   const [scratch, setScratch] = useState(false);
@@ -305,6 +323,17 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null,
     problemId
   );
+
+  if (!versions.isLoading && versionMissing) {
+    return (
+      <ContextMismatch
+        title="This model version is not available"
+        detail="The link asked for a model version that is missing on this problem. Nothing was substituted."
+        parentHref={`/versions?problem=${problemId}`}
+        parentLabel="Open versions for this problem"
+      />
+    );
+  }
 
   if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;

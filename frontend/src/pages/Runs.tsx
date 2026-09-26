@@ -28,11 +28,15 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { resolveById } from "../lib/selection";
+import ContextMismatch from "../components/ContextMismatch";
 import RunProgress from "../components/RunProgress";
 import { useToast } from "../components/ToastProvider";
 import RunViews from "../components/RunViews";
 import PlannerPanel from "../components/PlannerPanel";
 import SpreadView from "../components/SpreadView";
+import GuidedRunView from "../components/GuidedRunView";
+import ApprovePlanPanel from "../components/ApprovePlanPanel";
 import { RunMapView } from "../genui/components/SpatialMap";
 
 /**
@@ -322,18 +326,37 @@ function ForDomain({ domainId }: { domainId: Id }) {
 
   const problemItems = problems.data?.items ?? [];
   const requestedProblem = parseRouteId(searchParams.get("problem"));
-  const problem = problemItems.find((row) => Number(row.id) === requestedProblem) ?? problemItems[0];
+  const { item: problem, missing: problemMissing } = resolveById(
+    problemItems,
+    requestedProblem,
+    (row) => Number(row.id)
+  );
   const problemId = problem ? Number(problem.id) : null;
 
   const scenarios = useScenarios(problemId, { limit: 500, offset: 0 });
   const scenarioItems = scenarios.data?.items ?? [];
   const requestedScenario = parseRouteId(searchParams.get("scenario"));
-  const scenario = scenarioItems.find((row) => row.id === requestedScenario) ?? scenarioItems[0];
+  const { item: scenario, missing: scenarioMissing } = resolveById(
+    scenarioItems,
+    requestedScenario,
+    (row) => row.id
+  );
 
   if (problems.fetchStatus === "paused" && !problems.data) return <OfflineNotice subject="The problem list" />;
   if (problems.isLoading) return <Skeleton rows={3} cols={4} />;
   if (problems.isError && !problems.data) {
     return <Failed error={problems.error} onRetry={() => problems.refetch()} />;
+  }
+
+  if (problemMissing) {
+    return (
+      <ContextMismatch
+        title="This problem is not available here"
+        detail="The link asked for a problem that is missing or belongs to another domain. Nothing was substituted."
+        parentHref="/public/problem"
+        parentLabel="Open problems in this domain"
+      />
+    );
   }
 
   if (problemItems.length === 0) {
@@ -348,6 +371,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
           .
         </p>
       </Empty>
+    );
+  }
+
+  if (!scenarios.isLoading && scenarioMissing) {
+    return (
+      <ContextMismatch
+        title="This scenario is not available here"
+        detail="The link asked for a scenario that is missing or belongs to another problem. Nothing was substituted."
+        parentHref={`/scenarios?problem=${problemId}`}
+        parentLabel="Open scenarios for this problem"
+      />
     );
   }
 
@@ -410,6 +444,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           scenarioId={scenario.id}
           scenarioName={scenario.name}
           modelVersionId={scenario.model_version_id}
+          problemId={problemId!}
         />
       ) : null}
     </>
@@ -445,11 +480,14 @@ function ScenarioRuns({
   scenarioId,
   scenarioName,
   modelVersionId,
+  problemId,
 }: {
   scenarioId: Id;
   scenarioName: string;
   modelVersionId: Id;
+  problemId: Id;
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
   const version = useVersion(modelVersionId);
   const unexpressed = unexpressedRules(version.data?.ir);
@@ -475,12 +513,26 @@ function ScenarioRuns({
   }, [settling, runs]);
   const createRun = useCreateRun();
   const toast = useToast();
-  const [openId, setOpenId] = useState<Id | null>(null);
   const [againstId, setAgainstId] = useState<Id | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const items = runs.data?.items ?? [];
-  const selected = openId ?? items[0]?.id ?? null;
+  const requestedRun = parseRouteId(searchParams.get("run"));
+  const { item: explicitRun, missing: runMissing } = resolveById(items, requestedRun, (row) => row.id);
+  const selected = explicitRun?.id ?? (requestedRun === null ? items[0]?.id ?? null : null);
+  const tab = searchParams.get("tab") === "guided" ? "guided" : "summary";
+
+  function setRunSelection(runId: Id | null, nextTab: "summary" | "guided" = tab) {
+    const next = new URLSearchParams(searchParams);
+    next.set("problem", String(problemId));
+    next.set("scenario", String(scenarioId));
+    if (runId === null) next.delete("run");
+    else next.set("run", String(runId));
+    if (nextTab === "guided") next.set("tab", "guided");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  }
+
   // Comparing is only offered once there is something to compare with.
   const comparable = items.filter((row) => row.id !== selected);
   const against = comparable.some((row) => row.id === againstId) ? againstId : null;
@@ -499,7 +551,7 @@ function ScenarioRuns({
       },
       {
         onSuccess: (run: Run) => {
-          setOpenId(run.id);
+          setRunSelection(run.id, tab);
           toast.success(`Run ${run.id}: ${run.status}`);
         },
         onError: (error: unknown) => setFailure(formatApiError(error)),
@@ -625,7 +677,7 @@ function ScenarioRuns({
                   <td className="py-2 pr-3">
                     <button
                       type="button"
-                      onClick={() => setOpenId(row.id)}
+                      onClick={() => setRunSelection(row.id)}
                       className="rounded py-1 text-blue-600 underline"
                     >
                       Run {String(row.id)}
@@ -668,7 +720,25 @@ function ScenarioRuns({
 
           {selected !== null && against !== null && <Comparison left={selected} right={against} />}
 
-          {selected !== null && <RunDetail id={selected} onOpen={setOpenId} />}
+          {!runs.isLoading && runMissing && (
+            <div className="mt-6">
+              <ContextMismatch
+                title="This run is not available here"
+                detail="The link asked for a run that is missing or belongs to another scenario. Nothing was substituted."
+                parentHref={`/runs?problem=${problemId}&scenario=${scenarioId}`}
+                parentLabel="Open runs for this scenario"
+              />
+            </div>
+          )}
+
+          {selected !== null && (
+            <RunDetail
+              id={selected}
+              tab={tab}
+              onOpen={(id) => setRunSelection(id)}
+              onTab={(next) => setRunSelection(selected, next)}
+            />
+          )}
         </>
       )}
     </>
@@ -801,7 +871,17 @@ function naming(labels: Run["labels"], sets: string[] | undefined) {
     tuple.map((key, position) => labels[sets?.[position] ?? ""]?.[key] ?? key);
 }
 
-function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
+function RunDetail({
+  id,
+  tab = "summary",
+  onOpen,
+  onTab,
+}: {
+  id: Id;
+  tab?: "summary" | "guided";
+  onOpen?: (id: Id) => void;
+  onTab?: (tab: "summary" | "guided") => void;
+}) {
   const run = useRun(id);
   const { can } = useCapabilities();
   const cancelRun = useCancelRun();
@@ -848,6 +928,36 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
+      {onTab && (
+        <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Run views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "summary"}
+            className={`px-3 py-2 text-sm ${tab === "summary" ? "border-b-2 border-blue-600 font-semibold text-blue-700" : "text-slate-600"}`}
+            onClick={() => onTab("summary")}
+          >
+            Summary
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "guided"}
+            className={`px-3 py-2 text-sm ${tab === "guided" ? "border-b-2 border-blue-600 font-semibold text-blue-700" : "text-slate-600"}`}
+            onClick={() => onTab("guided")}
+          >
+            Guided view
+          </button>
+        </div>
+      )}
+      {tab === "guided" ? (
+        <div className="mb-2">
+          <GuidedRunView runId={Number(id)} />
+        </div>
+      ) : null}
+      {tab !== "guided" && (
+      <>
+      <ApprovePlanPanel runId={id} scenarioId={data.scenario_id} status={data.status} />
       {data.reused_from != null && (
         <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">
           Answered by run {String(data.reused_from)}: the same model, data and settings were already
@@ -1026,6 +1136,8 @@ function RunDetail({ id, onOpen }: { id: Id; onOpen?: (id: Id) => void }) {
           )}
         </dl>
       </details>
+      </>
+      )}
     </section>
   );
 }

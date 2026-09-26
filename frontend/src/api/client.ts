@@ -33,6 +33,14 @@ export class ApiError extends Error {
   }
 }
 
+/** Browser could not complete the request (API down, DNS, CORS, offline network). */
+export class NetworkError extends Error {
+  constructor(message = "The platform API could not be reached.") {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(options.headers);
@@ -44,7 +52,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(path, { ...options, headers });
+  let response: Response;
+  try {
+    response = await fetch(path, { ...options, headers });
+  } catch {
+    throw new NetworkError();
+  }
 
   if (response.status === 401) {
     setToken(null);
@@ -71,7 +84,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 /** A file from the API, with the signed-in token: a template to download (queue R21). */
 export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
   const token = getToken();
-  const response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  let response: Response;
+  try {
+    response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new NetworkError();
+  }
   if (!response.ok) {
     throw new ApiError(response.status, (await response.text()) || response.statusText);
   }
@@ -82,7 +100,12 @@ export async function apiDownload(path: string): Promise<{ blob: Blob; filename:
 
 export async function login(username: string, password: string): Promise<string> {
   const body = new URLSearchParams({ username, password });
-  const response = await fetch("/api/auth/login", { method: "POST", body });
+  let response: Response;
+  try {
+    response = await fetch("/api/auth/login", { method: "POST", body });
+  } catch {
+    throw new NetworkError();
+  }
   if (!response.ok) {
     throw new ApiError(response.status, "invalid credentials");
   }

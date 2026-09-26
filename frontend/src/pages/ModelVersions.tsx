@@ -11,6 +11,8 @@ import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCellValue } from "../lib/format";
 import { parseRouteId } from "../lib/routeId";
+import { resolveById } from "../lib/selection";
+import ContextMismatch from "../components/ContextMismatch";
 
 /**
  * A problem's model versions, read-only (Ruling 3).
@@ -104,8 +106,18 @@ function ForDomain({ domainId }: { domainId: Id }) {
   }
 
   const requested = parseRouteId(searchParams.get("problem"));
-  const problem = items.find((row) => Number(row.id) === requested) ?? items[0];
-  const problemId = Number(problem.id);
+  const { item: problem, missing: problemMissing } = resolveById(items, requested, (row) => Number(row.id));
+  if (problemMissing) {
+    return (
+      <ContextMismatch
+        title="This problem is not available here"
+        detail="The link asked for a problem that is missing or belongs to another domain. Nothing was substituted."
+        parentHref="/public/problem"
+        parentLabel="Open problems in this domain"
+      />
+    );
+  }
+  const problemId = Number(problem!.id);
   const versionId = parseRouteId(searchParams.get("version"));
 
   return (
@@ -131,7 +143,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
       <VersionList
         key={problemId}
         problemId={problemId}
-        problemLabel={problemName(problem)}
+        problemLabel={problemName(problem!)}
         selectedId={versionId}
         onSelect={(id) =>
           setSearchParams({ problem: String(problemId), version: String(id) }, { replace: true })

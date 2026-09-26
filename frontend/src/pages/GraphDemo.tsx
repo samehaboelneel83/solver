@@ -16,6 +16,7 @@ import { parseRouteId } from "../lib/routeId";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { erKind, isErDecoration, type GraphMode } from "../lib/typesGraph";
 import { useModelTarget } from "../hooks/useModelTarget";
+import ContextMismatch from "../components/ContextMismatch";
 
 /**
  * One domain's entities and relationships, drawn.
@@ -137,9 +138,9 @@ export default function GraphDemo() {
   const searchFocusTokenRef = useRef(0);
 
   // The optimization view's problem and version. Asked for through the URL
-  // (`?problem=` and `?version=`) so a view of one model is a link to it;
-  // resolved by `useModelTarget` to the first problem and its latest version
-  // when nothing -- or something stale -- is asked for.
+  // (`?problem=` and `?version=`) so a view of one model is a link to it.
+  // Defaults apply only when nothing was asked; an explicit stale id does not
+  // silently become another problem (OAAS N02).
   const requestedModel = {
     problemId: parseRouteId(searchParams.get("problem")),
     versionId: parseRouteId(searchParams.get("version")),
@@ -303,6 +304,24 @@ export default function GraphDemo() {
             .
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (mode === "model" && (modelTarget.problemMissing || modelTarget.versionMissing)) {
+    return (
+      <div className="max-w-2xl">
+        <h1 className="mb-4 text-lg font-semibold text-slate-900">Map &amp; graph</h1>
+        <ContextMismatch
+          title={modelTarget.problemMissing ? "This problem is not available here" : "This model version is not available"}
+          detail={
+            modelTarget.problemMissing
+              ? "The link asked for a problem that is missing or belongs to another domain. Nothing was substituted."
+              : "The link asked for a model version that is missing on this problem. Nothing was substituted."
+          }
+          parentHref="/public/problem"
+          parentLabel="Open problems in this domain"
+        />
       </div>
     );
   }

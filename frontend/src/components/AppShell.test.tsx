@@ -38,6 +38,7 @@ describe("AppShell", () => {
     localStorage.clear();
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+      if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
       if (path.startsWith("/api/v1/me")) {
         return Promise.resolve({
           username: "modeller",
@@ -50,7 +51,7 @@ describe("AppShell", () => {
   });
 
   describe("static navigation (Task 10)", () => {
-    it("renders the three workflow groups -- Domain, Problem, Runs -- in that order", async () => {
+    it("renders the primary sidebar groups in planner order", async () => {
       renderWithProviders();
       await settled();
 
@@ -58,15 +59,15 @@ describe("AppShell", () => {
       const headings = within(nav)
         .getAllByRole("button", { expanded: true })
         .map((b) => b.textContent?.replace(/[▾▸]/g, "").trim());
-      expect(headings.slice(0, 3)).toEqual(["Domain", "Problem", "Runs"]);
+      expect(headings.slice(0, 4)).toEqual(["Home", "Domains", "Data structure", "Problems"]);
     });
 
     it("links each group's pages from a static map", async () => {
       renderWithProviders();
       await settled();
 
-      expect(screen.getByRole("link", { name: "Domains" })).toHaveAttribute("href", "/public/domain");
-      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
+      expect(screen.getByRole("link", { name: "All domains" })).toHaveAttribute("href", "/public/domain");
+      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
       // Organizations are domain.edit; Users / Roles / User roles /
       // Role capabilities / Capabilities are iam.manage. A modeller shapes the domain
@@ -80,9 +81,10 @@ describe("AppShell", () => {
       expect(screen.queryByRole("link", { name: "Capabilities" })).not.toBeInTheDocument();
     });
 
-    it("hides Templates and Organizations when the account cannot write them, leaving Access its API keys", async () => {
+    it("hides Templates and Organizations when the account cannot write them, leaving Administration its API keys", async () => {
       (apiFetch as any).mockImplementation((path: string) => {
         if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+        if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
         if (path.startsWith("/api/v1/me")) {
           return Promise.resolve({
             username: "planner",
@@ -95,12 +97,11 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
 
-      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
-      expect(screen.getByRole("link", { name: "Model editor" })).toHaveAttribute("href", "/model");
+      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
+      expect(screen.getByRole("link", { name: "Model" })).toHaveAttribute("href", "/model");
       expect(screen.queryByRole("link", { name: "Templates" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Organizations" })).not.toBeInTheDocument();
-      // Anyone may make keys for their own programs (migration 0035), so the
-      // Access group stays, holding that alone.
+      // Administration stays, holding API keys (no capability gate).
       expect(screen.getByRole("link", { name: "API keys" })).toHaveAttribute("href", "/api-keys");
       expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     });
@@ -108,6 +109,7 @@ describe("AppShell", () => {
     it("shows Users, Roles and User roles only when the account may grant roles", async () => {
       (apiFetch as any).mockImplementation((path: string) => {
         if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
+        if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
         if (path.startsWith("/api/v1/me")) {
           return Promise.resolve({
             username: "admin",
@@ -130,33 +132,29 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Capabilities" })).toHaveAttribute("href", "/iam/capability");
     });
 
-    it("links Entity types from the Domain group (Task 11)", async () => {
+    it("links Record types from the Data structure group (OAAS N01)", async () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
-      const link = within(nav).getByRole("link", { name: "Entity types" });
-      expect(link).toHaveAttribute("href", "/entity-types");
-      const domainToggle = within(nav).getByRole("button", { name: /^Domain/ });
-      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
-      // Inside the Domain group: after its heading, before the Problem group's.
-      expect(domainToggle.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(link.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const link = within(nav).getByRole("link", { name: "Record types" });
+      expect(link).toHaveAttribute("href", "/domains/7/structure/record-types");
+      const structureToggle = within(nav).getByRole("button", { name: /^Data structure/ });
+      const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
+      expect(structureToggle.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(link.compareDocumentPosition(problemsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("links Relationship types from the Domain group, after Entity types (Task 14f)", async () => {
+    it("links Relationship types from the Data structure group, after Record types", async () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       const link = within(nav).getByRole("link", { name: "Relationship types" });
-      expect(link).toHaveAttribute("href", "/relationship-types");
-      const types = within(nav).getByRole("link", { name: "Entity types" });
-      const entities = within(nav).getByRole("link", { name: "Entities" });
-      // Both halves of the schema, together and before the rows that fill it.
+      expect(link).toHaveAttribute("href", "/domains/7/structure/relationship-types");
+      const types = within(nav).getByRole("link", { name: "Record types" });
       expect(types.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(link.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("links Relationships from the Domain group, beside the types it is rows of", async () => {
+    it("links Relationships from Domains, beside Records", async () => {
       // The nav offered "Relationship types" and nothing at all for the
       // rows, which is how a planner ended up believing the product could
       // not record who works where.
@@ -164,50 +162,45 @@ describe("AppShell", () => {
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       const link = within(nav).getByRole("link", { name: "Relationships" });
-      expect(link).toHaveAttribute("href", "/relationships");
-      const types = within(nav).getByRole("link", { name: "Relationship types" });
-      const entities = within(nav).getByRole("link", { name: "Entities" });
-      expect(types.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(link.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(link).toHaveAttribute("href", "/domains/7/data/relationships");
+      const records = within(nav).getByRole("link", { name: "Records" });
+      expect(records.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("links Entities from the Domain group, after Entity types (Task 12)", async () => {
+    it("links Records from Domains", async () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
-      const entities = within(nav).getByRole("link", { name: "Entities" });
-      expect(entities).toHaveAttribute("href", "/entities");
-      const types = within(nav).getByRole("link", { name: "Entity types" });
-      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
-      // The types define the shape, the entities fill it in: that order.
-      expect(types.compareDocumentPosition(entities) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(entities.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const records = within(nav).getByRole("link", { name: "Records" });
+      expect(records).toHaveAttribute("href", "/domains/7/data/records");
+      const domainsToggle = within(nav).getByRole("button", { name: /^Domains/ });
+      const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
+      expect(domainsToggle.compareDocumentPosition(records) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(records.compareDocumentPosition(problemsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("links Parameters from the Domain group, after Entities (Task 13)", async () => {
+    it("links Parameters from Domains, after Records", async () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       const parameters = within(nav).getByRole("link", { name: "Parameters" });
-      expect(parameters).toHaveAttribute("href", "/parameters");
-      const entities = within(nav).getByRole("link", { name: "Entities" });
-      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
-      // Parameters are indexed by entity types and filled with entities, so
-      // they come after both -- and still inside the Domain group.
-      expect(entities.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(parameters.compareDocumentPosition(problemToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(parameters).toHaveAttribute("href", "/domains/7/data/parameters");
+      const records = within(nav).getByRole("link", { name: "Records" });
+      const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
+      expect(records.compareDocumentPosition(parameters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(parameters.compareDocumentPosition(problemsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("links Model versions from the Problem group, after Problems (Task 13)", async () => {
+    it("links Model versions from the Problems group, after Problems", async () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       const versions = within(nav).getByRole("link", { name: "Model versions" });
       expect(versions).toHaveAttribute("href", "/versions");
       const problems = within(nav).getByRole("link", { name: "Problems" });
-      const problemToggle = within(nav).getByRole("button", { name: /^Problem/ });
+      const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
       const runsToggle = within(nav).getByRole("button", { name: /^Runs/ });
-      expect(problemToggle.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(problemsToggle.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(problems.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(versions.compareDocumentPosition(runsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
@@ -234,7 +227,7 @@ describe("AppShell", () => {
       await settled();
       const aside = document.getElementById("sidebar-nav") as HTMLElement;
       const select = within(aside).getByRole("combobox", { name: "Domain" });
-      const firstNavLink = within(aside).getByRole("link", { name: "Dashboard" });
+      const firstNavLink = within(aside).getByRole("link", { name: "Home" });
       expect(select.compareDocumentPosition(firstNavLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
   });
@@ -251,7 +244,7 @@ describe("AppShell", () => {
   it("marks the nav link for the current route as active and leaves the others plain", async () => {
     renderWithProviders(["/public/domain"]);
     await settled();
-    const activeLink = screen.getByRole("link", { name: "Domains" });
+    const activeLink = screen.getByRole("link", { name: "All domains" });
     const otherLink = screen.getByRole("link", { name: "Problems" });
 
     expect(activeLink).toHaveAttribute("aria-current", "page");
@@ -273,14 +266,14 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
 
-      const heading = screen.getByRole("button", { name: "Problem" });
+      const heading = screen.getByRole("button", { name: "Problems" });
       expect(screen.getByRole("link", { name: "Problems" })).toBeInTheDocument();
 
       fireEvent.click(heading);
       expect(heading).toHaveAttribute("aria-expanded", "false");
       expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
       // The other groups are untouched.
-      expect(screen.getByRole("link", { name: "Domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
 
       fireEvent.click(heading);
       expect(screen.getByRole("link", { name: "Problems" })).toBeInTheDocument();
@@ -290,11 +283,11 @@ describe("AppShell", () => {
       const { unmount } = renderWithProviders();
       await settled();
 
-      fireEvent.click(screen.getByRole("button", { name: "Problem" }));
+      fireEvent.click(screen.getByRole("button", { name: "Problems" }));
       expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
 
       const stored = JSON.parse(localStorage.getItem("solver_nav_open_groups") ?? "{}");
-      expect(stored.problem).toBe(false);
+      expect(stored.problems).toBe(false);
 
       unmount();
 
@@ -302,7 +295,7 @@ describe("AppShell", () => {
       await settled();
       // Restored collapsed -- the page link stays hidden without clicking again.
       expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
     });
   });
 
@@ -314,18 +307,18 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("link", { name: "Templates" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Domains" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Domain" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "All domains" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Domains" })).not.toBeInTheDocument();
   });
 
   it("matches the filter against the group name too", async () => {
     renderWithProviders();
     await settled();
 
-    fireEvent.change(screen.getByPlaceholderText("Filter pages…"), { target: { value: "access" } });
+    fireEvent.change(screen.getByPlaceholderText("Filter pages…"), { target: { value: "admin" } });
 
     expect(screen.getByRole("link", { name: "Organizations" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Domains" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "All domains" })).not.toBeInTheDocument();
   });
 
   it("scrolls the nav region independently of the rest of the sidebar", async () => {
@@ -606,7 +599,7 @@ describe("AppShell", () => {
     const signOut = screen.getByRole("button", { name: "Sign out" });
     expect(signOut.className).toMatch(/py-2/);
 
-    const groupToggle = screen.getByRole("button", { name: "Domain" });
+    const groupToggle = screen.getByRole("button", { name: "Domains" });
     expect(groupToggle.className).toMatch(/py-2/);
   });
 
@@ -624,9 +617,9 @@ describe("AppShell", () => {
 
       renderWithProviders();
 
-      expect(await screen.findByTestId("offline-notice")).toHaveTextContent(/offline/i);
+      expect(await screen.findAllByTestId("offline-notice")).not.toHaveLength(0);
       // The nav no longer depends on any request, so it is all still there.
-      expect(screen.getByRole("link", { name: "Domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
       expect(screen.queryByText("Loading navigation…")).not.toBeInTheDocument();
     });
   });

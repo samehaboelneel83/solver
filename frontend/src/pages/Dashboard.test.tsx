@@ -67,12 +67,13 @@ describe("Dashboard", () => {
     mockDefaultResponses();
   });
 
-  it("renders the three entry points a new user can start from (A-1)", async () => {
+  it("renders the three entry points a planner can continue from (OAAS N07)", async () => {
     renderWithProviders();
 
-    expect(await screen.findByRole("link", { name: "Domain model" })).toHaveAttribute("href", "/entity-types");
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Domains" })).toHaveAttribute("href", "/public/domain");
     expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
-    expect(screen.getByRole("link", { name: "Graph" })).toHaveAttribute("href", "/graph");
+    expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/runs");
   });
 
   it("renders a Recent problems section from a mocked list call", async () => {

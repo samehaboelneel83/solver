@@ -11,30 +11,23 @@ import { useDomain } from "../hooks/useDomain";
 import { useCapabilities } from "../hooks/useCapability";
 
 /**
- * The three places a new user actually starts (A-1): the audit's landing
- * page named none of them -- a fresh database was just a table of 31 zeroed
- * row counts under two infrastructure cards, with nothing to click and
- * nothing explaining what the product does.
+ * Home (OAAS N07): continue planning from recent work, not infrastructure counts.
  */
 const ENTRY_POINTS = [
   {
-    // Schema v1: the v0 `domain.entity` table is gone. Entity types are
-    // where a domain model starts -- an entity cannot exist without one.
-    href: "/entity-types",
-    title: "Domain model",
-    description: "Entity types, their attributes, and the entities themselves.",
+    href: "/public/domain",
+    title: "Domains",
+    description: "Shared operational data for a business area.",
   },
   {
-    // `problem` is a public-schema table in v1, so its generic route is
-    // `/public/problem`, not the v0 `/problem/problem` (Ruling 27).
     href: "/public/problem",
     title: "Problems",
-    description: "The problems this workspace is set up to solve.",
+    description: "Decisions to optimize in the selected domain.",
   },
   {
-    href: "/graph",
-    title: "Graph",
-    description: "Explore the domain as a connected graph.",
+    href: "/runs",
+    title: "Runs & results",
+    description: "Open the latest answers and guided run views.",
   },
 ] as const;
 
@@ -46,7 +39,7 @@ function problemDisplayName(problem: Record<string, unknown>): string {
 }
 
 export default function Dashboard() {
-  useDocumentTitle("Dashboard");
+  useDocumentTitle("Home");
   const { data: health, isLoading: healthLoading } = useHealth();
   const {
     data: counts,
@@ -81,8 +74,10 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 className="mb-1 text-lg font-semibold text-slate-900">Dashboard</h1>
-      <p className="mb-6 text-sm text-slate-500">Start with the domain model, or jump into a problem.</p>
+      <h1 className="mb-1 text-lg font-semibold text-slate-900">Home</h1>
+      <p className="mb-6 text-sm text-slate-500">
+        Continue planning from recent work, or start from a template.
+      </p>
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {ENTRY_POINTS.map((entry) => (

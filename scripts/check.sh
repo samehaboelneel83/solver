@@ -322,6 +322,21 @@ backend_checks() {
 }
 
 # ---------------------------------------------------------------------------
+# Offline / egress (OAAS O02) — only when the live stack is up; never required
+# for --fast. Skips cleanly when ports are down so check.sh stays offline-safe.
+# ---------------------------------------------------------------------------
+
+egress_checks() {
+  local api_url="${SMOKE_API_URL:-http://localhost:8010}"
+  if ! curl -fsS --connect-timeout 2 "$api_url/api/health" >/dev/null 2>&1; then
+    record "egress / local smoke" SKIP 0 "stack not up (start compose to exercise)"
+    return 0
+  fi
+  run_step "egress / local smoke (O02)" "API + frontend reachable; optional EGRESS_BLOCKED=1" \
+    bash "$SCRIPT_DIR/egress-check.sh"
+}
+
+# ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
 
@@ -333,7 +348,7 @@ echo
 
 case "$MODE" in
   fast)    frontend_checks 0 ;;
-  full)    frontend_checks 1; backend_checks ;;
+  full)    frontend_checks 1; backend_checks; egress_checks ;;
   backend) backend_checks ;;
 esac
 

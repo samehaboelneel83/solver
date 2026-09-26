@@ -63,6 +63,7 @@ from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve import locks as lock_rows
 from app.solve import adapters as adapters_rows
+from app.solve import verify as verify_rows
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
@@ -672,6 +673,7 @@ def _execute(
     dataset_id: int,
     stop: threading.Event,
 ) -> RunOutcome:
+    phases: dict[str, float] = {}
     with _heartbeat(run_id, stop):
         # Each step as it starts, for whoever watches (the GenUI stream,
         # app.genui.translate): the pipeline is the agent.
@@ -684,6 +686,7 @@ def _execute(
             # objective is convex is a fact about its numbers, and it decides
             # which backends may take the model at all.
             events.stage("compiling", model_class=found.model_class)
+            t_compile = time.monotonic()
             with tracing.span("compile") as compiling:
                 compiled = unlocked = compile_model(ir, data)
                 if (params.get("_locks") or params.get("_stay_close")) and params.get("stochastic_samples")                         and stochastic_rows.wanted(ir):
@@ -697,6 +700,7 @@ def _execute(
                     compiled, stay_measure = lock_rows.stay_close(compiled, params["_stay_close"], params["_lock_bases"])
                 compiling.set_attribute("variables", len(compiled.variables))
                 compiling.set_attribute("rules", len(compiled.constraints))
+            phases["compile_s"] = round(time.monotonic() - t_compile, 4)
         except Unsupported as exc:
             db.execute(
                 text(
@@ -780,6 +784,7 @@ def _execute(
                 model_class="MILP" if "continuous" in found.needs else "IP",
             )
         try:
+            t_choose = time.monotonic()
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"), **_policy(params))
                 # The learned selector's pick, recorded beside the rules' and acting on
@@ -809,6 +814,7 @@ def _execute(
                     race_skipped = race_rows.should_race(numbers, candidates, time_limit)
                     race_candidates = None if race_skipped else candidates
                 choosing.set_attribute("solver", backend.name)
+            phases["choose_s"] = round(time.monotonic() - t_choose, 4)
             bind_log(solver=backend.name)
             events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
         except NoBackend as exc:
@@ -1018,6 +1024,7 @@ def _execute(
                 if refused is not None or not block_rows.worth_splitting(parts):
                     blocks_record = {"solved_whole": refused or "the model is one block"}
                     parts = None
+            t_solve = time.monotonic()
             with tracing.span("solve", solver=backend.name, time_limit_s=time_limit) as solving:
                 if allocate:
                     allocated = allocation_rows.solve(solving_model)
@@ -1187,6 +1194,7 @@ def _execute(
         if stopped and not (result.status in ("optimal", "feasible") and result.assignments):
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
+        phases["solve_s"] = round(time.monotonic() - t_solve, 4)
 
     # Which solver ran, and why it was the one -- a result nobody can
     # attribute to a choice is not reproducible. Empty ranges ride along:
@@ -1300,7 +1308,38 @@ def _execute(
             "change": _json_number(float(stay_measure.evaluated_at(result.assignments))),
             "plan_objective": _json_number(float(plain_goal.evaluated_at(result.assignments))),
         }
+    # OAAS Q02: independent acceptance before a usable plan is persisted.
+    t_verify = time.monotonic()
+    verification = verify_rows.accept(record_model or compiled, result)
+    phases["verify_s"] = round(time.monotonic() - t_verify, 4)
+    extra["verification"] = {
+        "accepted": verification["accepted"],
+        "checks": verification["checks"],
+        **({"failures": verification["failures"]} if verification["failures"] else {}),
+    }
+    if not verification["accepted"]:
+        result = verify_rows.reject_unverified(result, verification)
+        detail = verification["failures"][0] if verification["failures"] else {"kind": "failed"}
+        extra["verification_failed"] = detail
+        db.execute(
+            text(
+                "UPDATE run SET status = 'error', error = :e, solver = :s,"
+                "               params = params || CAST(:extra AS jsonb), finished_at = now()"
+                " WHERE id = :r"
+            ),
+            {
+                "e": f"result failed independent verification ({detail.get('kind')})",
+                "s": backend.name,
+                "extra": _json({**extra, "phases": phases}),
+                "r": run_id,
+            },
+        )
+        db.commit()
+        return RunOutcome(run_id, dataset_id, "error", None, {})
+    if phases:
+        extra["phases"] = phases
     with tracing.span("persist"):
+        t_persist = time.monotonic()
         db.execute(
             text(
                 "UPDATE run SET solver = :s, params = params || CAST(:extra AS jsonb)"
@@ -1309,6 +1348,12 @@ def _execute(
             {"s": backend.name, "extra": _json(extra), "r": run_id},
         )
         _record(db, run_id, record_model or compiled, result)
+        phases["persist_s"] = round(time.monotonic() - t_persist, 4)
+        if phases.get("persist_s") is not None:
+            db.execute(
+                text("UPDATE run SET params = params || CAST(:p AS jsonb) WHERE id = :r"),
+                {"p": _json({"phases": phases}), "r": run_id},
+            )
         if result.objective is not None:
             events.final(result.objective, result.best_bound, result.wall_seconds)
         # What the answer may claim, as the backend that found it declares
@@ -1492,6 +1537,25 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
             "rc": None if (packed := _reduced_costs(result)) is None else _json(packed),
         },
     )
+    if amounts is None and truncated.get("amounts_chunked"):
+        org = db.execute(text("SELECT organization_id FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+        full = _amounts(compiled, result)
+        for variable, chunk_index, rows, cell_count in _amount_chunk_rows(full):
+            db.execute(
+                text(
+                    "INSERT INTO solution_amount_chunk"
+                    " (run_id, variable, chunk_index, organization_id, rows, cell_count)"
+                    " VALUES (:r, :v, :i, :o, CAST(:rows AS jsonb), :c)"
+                ),
+                {
+                    "r": run_id,
+                    "v": variable,
+                    "i": chunk_index,
+                    "o": org,
+                    "rows": _json(rows),
+                    "c": cell_count,
+                },
+            )
 
     # One row per constraint, including the satisfied ones: "which rules held"
     # is as much a part of the answer as the roster, and a missing row would
@@ -2239,18 +2303,35 @@ def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[st
     return out
 
 
-#: Past this many used whole or fractional cells, a run keeps no amounts (queue R23): the roster
-#: still says which were used, and `params.amounts_truncated` says how many there were.
+#: Past this many used whole or fractional cells, a run keeps amounts in
+#: `solution_amount_chunk` instead of the inline `solution.amounts` column
+#: (queue R23 / OAAS Phase 5). The roster still says which cells were used;
+#: `params.amounts_chunked` records the cell count and chunking.
 AMOUNT_CELLS = 200_000
+
+#: Max cells stored in one `solution_amount_chunk` row.
+AMOUNT_CHUNK = 50_000
 
 
 def _kept_amounts(compiled: Compiled, result: Solution) -> tuple[dict[str, list[dict[str, Any]]] | None, dict]:
-    """The amounts a run keeps, and the note for `run.params` when it keeps none because there are too many."""
+    """Inline amounts when small enough; otherwise metadata for chunk storage."""
     amounts = _amounts(compiled, result)
     cells = sum(len(rows) for rows in amounts.values())
     if cells > AMOUNT_CELLS:
-        return None, {"amounts_truncated": cells}
+        return None, {"amounts_chunked": {"cells": cells, "chunk_size": AMOUNT_CHUNK}}
     return amounts, {}
+
+
+def _amount_chunk_rows(
+    amounts: dict[str, list[dict[str, Any]]], chunk_size: int = AMOUNT_CHUNK
+) -> list[tuple[str, int, list[dict[str, Any]], int]]:
+    """Split amounts into (variable, chunk_index, rows, cell_count) for storage."""
+    out: list[tuple[str, int, list[dict[str, Any]], int]] = []
+    for variable, rows in sorted(amounts.items()):
+        for start in range(0, len(rows), chunk_size):
+            piece = rows[start : start + chunk_size]
+            out.append((variable, start // chunk_size, piece, len(piece)))
+    return out
 
 
 def _amounts(compiled: Compiled, result: Solution) -> dict[str, list[dict[str, Any]]]:

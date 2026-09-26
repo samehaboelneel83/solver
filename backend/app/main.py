@@ -32,6 +32,7 @@ from app.api.bulk import router as bulk_router
 from app.api.grids import router as grids_router
 from app.api.run_map import router as run_map_router
 from app.api.runs import router as runs_router
+from app.api.approvals import router as approvals_router
 from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
@@ -196,6 +197,7 @@ app.include_router(relationships_router)
 app.include_router(parameters_router)
 app.include_router(problems_router)
 app.include_router(runs_router)
+app.include_router(approvals_router)
 app.include_router(run_events_router)
 app.include_router(genui_router)
 app.include_router(grids_router)

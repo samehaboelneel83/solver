@@ -1,0 +1,29 @@
+# Example override for a digest-pinned offline install (OAAS O01).
+#
+# On the build host: `bash scripts/offline-bundle.sh` → digests.txt + *.tar
+# On the isolated host: `docker load -i …`, then set the digests below and run:
+#   docker compose -f docker-compose.yml -f deploy/compose/docker-compose.digests.example.yml up -d --no-build
+#
+# Prefer images already loaded locally (`pull_policy: never`). Replace each
+# sha256 placeholder from digests.txt (RepoDigest after the @).
+
+services:
+  postgres:
+    image: postgres@sha256:REPLACE_POSTGRES_DIGEST
+    pull_policy: never
+
+  clickhouse:
+    image: clickhouse/clickhouse-server@sha256:REPLACE_CLICKHOUSE_DIGEST
+    pull_policy: never
+
+  backend:
+    image: solver-backend@sha256:REPLACE_BACKEND_DIGEST
+    pull_policy: never
+
+  worker:
+    image: solver-backend@sha256:REPLACE_BACKEND_DIGEST
+    pull_policy: never
+
+  frontend:
+    image: solver-frontend@sha256:REPLACE_FRONTEND_DIGEST
+    pull_policy: never

@@ -614,6 +614,80 @@ def get_run(
     return _read(db, run_id)
 
 
+class AmountsPage(BaseModel):
+    run_id: int
+    variable: str | None
+    offset: int
+    limit: int
+    total: int
+    chunked: bool
+    items: list[dict[str, Any]]
+
+
+@router.get("/runs/{run_id}/amounts")
+def get_run_amounts(
+    run_id: int,
+    variable: str | None = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> AmountsPage:
+    """Paginated continuous/integer amounts (OAAS Phase 5).
+
+    Inline `solution.amounts` when the run was small enough; otherwise rows from
+    `solution_amount_chunk`. Binary decisions are never listed here.
+    """
+    if db.get(Run, run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
+    if solution is None:
+        raise HTTPException(status_code=404, detail="solution not found")
+
+    if solution.amounts is not None:
+        rows: list[dict[str, Any]] = []
+        for name, entries in sorted(solution.amounts.items()):
+            if variable is not None and name != variable:
+                continue
+            for entry in entries:
+                rows.append({"variable": name, **entry})
+        page = rows[offset : offset + limit]
+        return AmountsPage(
+            run_id=run_id,
+            variable=variable,
+            offset=offset,
+            limit=limit,
+            total=len(rows),
+            chunked=False,
+            items=page,
+        )
+
+    # Chunked path: flatten requested variable (or all) in chunk order.
+    sql = (
+        "SELECT variable, chunk_index, rows FROM solution_amount_chunk"
+        " WHERE run_id = :r"
+        + (" AND variable = :v" if variable else "")
+        + " ORDER BY variable, chunk_index"
+    )
+    params: dict[str, Any] = {"r": run_id}
+    if variable:
+        params["v"] = variable
+    flat: list[dict[str, Any]] = []
+    for name, _idx, chunk_rows in db.execute(text(sql), params):
+        for entry in chunk_rows or []:
+            flat.append({"variable": name, **entry})
+    page = flat[offset : offset + limit]
+    return AmountsPage(
+        run_id=run_id,
+        variable=variable,
+        offset=offset,
+        limit=limit,
+        total=len(flat),
+        chunked=True,
+        items=page,
+    )
+
+
 def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
     """The frozen display names, and which set each index position names.
 

@@ -19,6 +19,9 @@ infeasibility, the fighting rules.
 
 - Schema v1 design: [`docs/superpowers/specs/2026-09-19-schema-v1-migration-design.md`](docs/superpowers/specs/2026-09-19-schema-v1-migration-design.md)
 - The Problem IR (what a model *means*): [`docs/contracts/problem-ir.md`](docs/contracts/problem-ir.md)
+- Offline install contract: [`docs/runbooks/offline-install.md`](docs/runbooks/offline-install.md)
+- Coverage / benchmark gates: [`docs/coverage-acceptance-matrix.md`](docs/coverage-acceptance-matrix.md)
+- Product roadmap (OAAS): [`OAAS_PLATFORM_PROPOSAL.md`](OAAS_PLATFORM_PROPOSAL.md)
 - The authoritative DDL it was built from: [`docs/schema/2026-09-18-schema-v1.sql`](docs/schema/2026-09-18-schema-v1.sql)
 - Original platform skeleton design (v0, largely superseded): [`docs/superpowers/specs/2026-09-16-platform-skeleton-design.md`](docs/superpowers/specs/2026-09-16-platform-skeleton-design.md)
 

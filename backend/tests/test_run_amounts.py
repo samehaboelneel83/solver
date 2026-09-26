@@ -47,15 +47,24 @@ def test_without_amounts_a_used_amount_is_left_to_the_solver():
     assert hint_from(compiled, {"kg": [["maize"]]}, None) == {}
 
 
-def test_a_huge_answer_keeps_no_amounts_and_says_how_many(monkeypatch):
+def test_a_huge_answer_chunks_amounts_and_says_how_many(monkeypatch):
     monkeypatch.setattr(service, "AMOUNT_CELLS", 3)
+    monkeypatch.setattr(service, "AMOUNT_CHUNK", 2)
     compiled = _compiled(*[_var("kg", "continuous", 0, 9, index=[str(i)]) for i in range(5)])
 
     class Result:
         assignments = {("kg", (str(i),)): 1.0 for i in range(5)}
 
     amounts, kept = service._kept_amounts(compiled, Result())
-    assert amounts is None and kept == {"amounts_truncated": 5}
+    assert amounts is None
+    assert kept == {"amounts_chunked": {"cells": 5, "chunk_size": 2}}
+    full = service._amounts(compiled, Result())
+    chunks = service._amount_chunk_rows(full, chunk_size=2)
+    assert chunks == [
+        ("kg", 0, [{"index": ["0"], "value": 1}, {"index": ["1"], "value": 1}], 2),
+        ("kg", 1, [{"index": ["2"], "value": 1}, {"index": ["3"], "value": 1}], 2),
+        ("kg", 2, [{"index": ["4"], "value": 1}], 1),
+    ]
     monkeypatch.setattr(service, "AMOUNT_CELLS", 5)
     amounts, kept = service._kept_amounts(compiled, Result())
     assert len(amounts["kg"]) == 5 and kept == {}

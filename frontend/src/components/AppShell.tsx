@@ -1,5 +1,5 @@
 import { MouseEvent, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bell, BookOpen, Boxes, ChevronDown, ChevronLeft, ChevronRight, Database, FileStack, FlaskConical, FolderTree,
   GitBranch, Home, Cpu,
@@ -10,9 +10,14 @@ import { setToken } from "../api/client";
 import { applyDirection, applyTheme, isDark, storedDirection, storedTheme, type ThemeChoice } from "../lib/theme";
 import CommandPalette from "./CommandPalette";
 import RecentRuns from "./RecentRuns";
+import ContextHeader from "./ContextHeader";
+import ReachabilityBanner from "./ReachabilityBanner";
 import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
+import { buildNavGroups, destinationForPath, stripDomainPrefix } from "../nav/registry";
+import { useDomain } from "../hooks/useDomain";
+import { parseRouteId } from "../lib/routeId";
 
 // H-9: a full app-wide target-size sweep (beyond the three controls the finding named) turned
 // up these two links themselves at 223x20px -- text-sm's 20px line-height with no padding,
@@ -32,8 +37,10 @@ const tableLinkClassName = ({ isActive }: { isActive: boolean }) => `${linkBase}
 /** Each page's icon (lucide), by its route. */
 const ICONS: Record<string, LucideIcon> = {
   "/": Home,
+  "/home": Home,
   "/graph": Network,
   "/public/domain": FolderTree,
+  "/domains": FolderTree,
   "/entity-types": Boxes,
   "/relationship-types": Waypoints,
   "/relationships": GitBranch,
@@ -44,6 +51,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/versions": FileStack,
   "/scenarios": BookOpen,
   "/public/template": LayoutTemplate,
+  "/templates": LayoutTemplate,
   "/runs": Play,
   "/workspace": Table2,
   "/settings": Settings,
@@ -58,25 +66,39 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 function NavIcon({ to }: { to: string }) {
-  const Icon = ICONS[to] ?? Table2;
+  const legacy = stripDomainPrefix(to.split("?")[0] ?? to);
+  const Icon = ICONS[legacy] ?? ICONS[to] ?? Table2;
   return <Icon className="h-4 w-4 shrink-0" aria-hidden />;
 }
 
 const COLLAPSED_STORAGE_KEY = "solver_nav_collapsed";
 
-/** The page the breadcrumb names: its group and label, or the dashboard. */
-export function whereAmI(pathname: string): { group: string | null; page: string } {
-  if (pathname === "/") return { group: null, page: "Dashboard" };
-  if (pathname.startsWith("/graph")) return { group: null, page: "Domain Graph" };
-  let best: { group: string; page: string; length: number } | null = null;
-  for (const group of NAV_GROUPS) {
-    for (const item of group.items) {
-      if ((pathname === item.to || pathname.startsWith(`${item.to}/`)) && item.to.length > (best?.length ?? 0)) {
-        best = { group: group.label, page: item.label, length: item.to.length };
-      }
-    }
+type NavItem = { to: string; label: string; id?: string; /** Hide unless `GET /me` lists this. */ capability?: string };
+type NavGroup = {
+  /** Stable key for the collapse state in localStorage. */
+  key: string;
+  label: string;
+  items: NavItem[];
+  /** Shown instead of links when a group has none yet. */
+  emptyNote?: string;
+  footer?: boolean;
+};
+
+/**
+ * Sidebar groups from `nav/registry` (OAAS N01): planner-centred labels,
+ * Administration separated. Paths become domain-scoped when a domain is selected.
+ */
+export const NAV_GROUPS: NavGroup[] = buildNavGroups();
+
+/** The page the breadcrumb names: its group and label, or Home. */
+export function whereAmI(pathname: string): { group: string | null; page: string; purpose?: string } {
+  const dest = destinationForPath(pathname);
+  if (dest) {
+    const group = NAV_GROUPS.find((g) => g.items.some((i) => i.id === dest.id || i.to === dest.path));
+    return { group: group?.label ?? null, page: dest.label, purpose: dest.purpose };
   }
-  return best ? { group: best.group, page: best.page } : { group: null, page: "Page" };
+  if (pathname === "/" || pathname === "/home") return { group: null, page: "Home" };
+  return { group: null, page: "Page" };
 }
 
 // A-4: the nav used to be 31 tables in one flat, un-collapsible list -- about
@@ -103,89 +125,6 @@ function saveOpenGroups(state: Record<string, boolean>) {
     // just won't survive a reload.
   }
 }
-
-type NavItem = { to: string; label: string; /** Hide unless `GET /me` lists this. */ capability?: string };
-type NavGroup = {
-  /** Stable key for the collapse state in localStorage. */
-  key: string;
-  label: string;
-  items: NavItem[];
-  /** Shown instead of links when a group has none yet. */
-  emptyNote?: string;
-};
-
-/**
- * The sidebar, as a static map (Task 10). It used to be built from
- * `/api/meta/schema`, one group per Postgres schema; schema v1 moved every
- * table into `public`, so the schema no longer says anything about where a
- * page belongs. Grouped instead the way a planner works: model the domain,
- * pose a problem, look at runs.
- *
- * Tasks 11-13 add their pages here (entity types, entities, parameters,
- * model versions) alongside their routes in `App.tsx` -- a link to a route
- * that doesn't exist yet would only lead to the not-found page. Task 14f
- * adds relationship types beside entity types: the two halves of a
- * domain's schema, before the rows that fill it in.
- *
- * `/public/<table>` is the generic list route for the three flat v1 tables;
- * `public` is the schema name `/api/meta/schema` reports for them.
- */
-export const NAV_GROUPS: NavGroup[] = [
-  {
-    key: "domain",
-    label: "Domain",
-    items: [
-      { to: "/public/domain", label: "Domains" },
-      { to: "/entity-types", label: "Entity types" },
-      { to: "/relationship-types", label: "Relationship types" },
-      { to: "/relationships", label: "Relationships" },
-      { to: "/entities", label: "Entities" },
-      { to: "/parameters", label: "Parameters" },
-    ],
-  },
-  {
-    key: "problem",
-    label: "Problem",
-    items: [
-      { to: "/public/problem", label: "Problems" },
-      { to: "/model", label: "Model editor" },
-      { to: "/versions", label: "Model versions" },
-      { to: "/scenarios", label: "Scenarios" },
-      { to: "/public/template", label: "Templates", capability: "model.publish" },
-    ],
-  },
-  {
-    key: "runs",
-    label: "Runs",
-    items: [
-      { to: "/runs", label: "Runs" },
-      { to: "/workspace", label: "Workspace" },
-    ],
-  },
-  {
-    key: "platform",
-    label: "Platform",
-    items: [
-      { to: "/settings", label: "Settings" },
-      { to: "/solvers", label: "Solvers" },
-    ],
-  },
-  {
-    // Not one of the three workflow groups -- user and role administration,
-    // kept reachable rather than dropped with the schema-driven nav.
-    key: "access",
-    label: "Access",
-    items: [
-      { to: "/api-keys", label: "API keys" },
-      { to: "/iam/organization", label: "Organizations", capability: "domain.edit" },
-      { to: "/iam/user_account", label: "Users", capability: "iam.manage" },
-      { to: "/iam/role", label: "Roles", capability: "iam.manage" },
-      { to: "/iam/user_role", label: "User roles", capability: "iam.manage" },
-      { to: "/iam/role_capability", label: "Role capabilities", capability: "iam.manage" },
-      { to: "/iam/capability", label: "Capabilities", capability: "iam.manage" },
-    ],
-  },
-];
 
 /** The items of `group` that match `filter`: all of them when the group's
  * own name matches, otherwise those whose label does. */
@@ -248,6 +187,12 @@ function AppShellContent() {
   const isFirstRender = useRef(true);
   const confirmLeave = useConfirmLeave();
   const { can } = useCapabilities();
+  const { domainId } = useDomain();
+  const [searchParams] = useSearchParams();
+  const pathProblem = location.pathname.match(/^\/domains\/\d+\/problems\/(\d+)/);
+  const problemId =
+    parseRouteId(pathProblem?.[1] ?? null) ?? parseRouteId(searchParams.get("problem"));
+  const navGroups = buildNavGroups({ domainId, problemId });
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");
@@ -529,14 +474,6 @@ function AppShellContent() {
           )}
         </div>
         {!collapsed && <DomainSelector />}
-        <NavLink to="/" end className={navLinkClassName} onClick={handleNavClick} title="Dashboard">
-          <NavIcon to="/" />
-          <span className={collapsed ? "sr-only" : ""}>Dashboard</span>
-        </NavLink>
-        <NavLink to="/graph" className={navLinkClassName} onClick={handleNavClick} title="Domain Graph">
-          <NavIcon to="/graph" />
-          <span className={collapsed ? "sr-only" : ""}>Domain Graph</span>
-        </NavLink>
 
         {!collapsed && (
           <label className="mb-3 mt-2 block">
@@ -554,7 +491,7 @@ function AppShellContent() {
         {/* A-4: scrolls independently of the rest of the sidebar, instead of
             relying on the whole page to grow. */}
         <nav aria-label="Main" className="min-h-0 flex-1 overflow-y-auto">
-          {NAV_GROUPS.map((group) => {
+          {navGroups.map((group) => {
             const isOpen = openGroups[group.key] ?? true;
             const items = visibleItems(group, filterText, can);
             if (items.length === 0 && (filterText.trim() || !group.emptyNote)) return null;
@@ -575,7 +512,13 @@ function AppShellContent() {
                     <ul>
                       {items.map((item) => (
                         <li key={item.to}>
-                          <NavLink to={item.to} className={tableLinkClassName} onClick={handleNavClick} title={item.label}>
+                          <NavLink
+                            to={item.to}
+                            end={item.to === "/"}
+                            className={tableLinkClassName}
+                            onClick={handleNavClick}
+                            title={item.label}
+                          >
                             <NavIcon to={item.to} />
                             <span className={collapsed ? "sr-only" : ""}>{item.label}</span>
                           </NavLink>
@@ -629,14 +572,18 @@ function AppShellContent() {
             )}
             <li aria-current="page" className="font-semibold text-slate-900">{where.page}</li>
           </ol>
+          {where.purpose && (
+            <p className="mt-0.5 truncate text-xs font-normal text-slate-500">{where.purpose}</p>
+          )}
         </nav>
+        <ContextHeader />
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
           className="hidden items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 hover:border-slate-300 sm:inline-flex"
         >
           <Search className="h-4 w-4" aria-hidden />
-          <span className="w-32 text-start">Search…</span>
+          <span className="w-32 text-start">Go to page…</span>
           <kbd className="rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500">Ctrl K</kbd>
         </button>
         <span title="The platform is in English" className="hidden items-center gap-1 rounded px-2 py-1.5 text-xs font-semibold text-slate-600 md:inline-flex">
@@ -689,6 +636,7 @@ function AppShellContent() {
           )}
         </div>
       </header>
+      <ReachabilityBanner />
       <main
         id="main"
         tabIndex={-1}

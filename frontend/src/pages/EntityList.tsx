@@ -17,8 +17,17 @@ const PAGE_SIZE = 20;
 const FILTER_PREFIX = "f_";
 const SEARCH_DEBOUNCE_MS = 300;
 
-export default function EntityList() {
-  const { schemaName = "", tableName = "" } = useParams();
+export default function EntityList({
+  schema: schemaProp,
+  table: tableProp,
+}: {
+  /** Override route params (canonical `/domains/:id/problems`). */
+  schema?: string;
+  table?: string;
+} = {}) {
+  const params = useParams();
+  const schemaName = schemaProp ?? params.schemaName ?? "";
+  const tableName = tableProp ?? params.tableName ?? "";
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteError, setDeleteError] = useState<string | null>(null);

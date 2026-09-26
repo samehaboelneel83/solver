@@ -14,17 +14,18 @@ export type ModelTarget = {
   problems: ProblemOption[];
   versions: ModelVersionSummary[];
   isLoading: boolean;
+  /** Explicit URL asked for a problem that is not in this domain (or gone). */
+  problemMissing: boolean;
+  /** Explicit URL asked for a version that is not on the resolved problem. */
+  versionMissing: boolean;
 };
 
 /**
  * Which problem and which of its model versions the optimization view draws.
  *
- * A request that no longer resolves -- a problem from another domain left in
- * the URL, a version since deleted -- falls back to the defaults rather than
- * drawing nothing: the first problem by name, and its latest version, which
- * is the one a person means by "the model" unless they say otherwise.
- *
- * Fetches only while `enabled`, so the two other views pay nothing for it.
+ * When the URL (or caller) names a problem or version explicitly and it does
+ * not resolve, we do **not** silently substitute another object (OAAS N02).
+ * Defaults apply only when nothing was requested.
  */
 export function useModelTarget(domainId: Id | null, requested: ModelTargetRequest, enabled: boolean): ModelTarget {
   const problems = useQuery({
@@ -39,13 +40,23 @@ export function useModelTarget(domainId: Id | null, requested: ModelTargetReques
     id: Number(row.id),
     name: String(row.name),
   }));
-  const problemId =
-    problemItems.find((row) => row.id === requested.problemId)?.id ?? problemItems[0]?.id ?? null;
+
+  const explicitProblem = requested.problemId !== null;
+  const matchedProblem = problemItems.find((row) => row.id === requested.problemId);
+  const problemMissing = explicitProblem && !problems.isLoading && matchedProblem === undefined;
+  const problemId = explicitProblem
+    ? (matchedProblem?.id ?? null)
+    : (problemItems[0]?.id ?? null);
 
   const versions = useVersions(enabled ? problemId : null, { limit: 500 });
   const versionItems = [...(versions.data?.items ?? [])].sort((a, b) => b.version - a.version);
-  const versionId =
-    versionItems.find((row) => row.id === requested.versionId)?.id ?? versionItems[0]?.id ?? null;
+  const explicitVersion = requested.versionId !== null;
+  const matchedVersion = versionItems.find((row) => row.id === requested.versionId);
+  const versionMissing =
+    explicitVersion && problemId !== null && !versions.isLoading && matchedVersion === undefined;
+  const versionId = explicitVersion
+    ? (matchedVersion?.id ?? null)
+    : (versionItems[0]?.id ?? null);
 
   return {
     problemId,
@@ -53,5 +64,7 @@ export function useModelTarget(domainId: Id | null, requested: ModelTargetReques
     problems: problemItems,
     versions: versionItems,
     isLoading: problems.isLoading || (problemId !== null && versions.isLoading),
+    problemMissing,
+    versionMissing,
   };
 }

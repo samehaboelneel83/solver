@@ -1413,6 +1413,77 @@ export const useCreateRun = () =>
   useV1Mutation(({ scenarioId, body }: { scenarioId: Id; body?: RunRequest }) => createRun(scenarioId, body));
 export const useCancelRun = () => useV1Mutation((id: Id) => cancelRun(id));
 
+/** Business acceptance of an immutable run (OAAS Phase 5). */
+export type ApprovedPlan = {
+  id: Id;
+  run_id: Id;
+  problem_id: Id;
+  reason: string;
+  approved_by: string | null;
+  approved_at: string;
+  effective_from: string | null;
+  effective_to: string | null;
+  superseded_by: Id | null;
+};
+
+export type ApproveBody = {
+  reason: string;
+  effective_from?: string | null;
+  effective_to?: string | null;
+};
+
+export const approveRun = (runId: Id, body: ApproveBody) =>
+  send<ApprovedPlan>("POST", `/api/v1/runs/${runId}/approve`, body);
+
+export const listProblemApprovals = (problemId: Id, currentOnly = true) =>
+  apiFetch<ApprovedPlan[]>(
+    `/api/v1/problems/${problemId}/approvals${query({ current_only: currentOnly })}`
+  );
+
+export function useProblemApprovals(problemId: Id | null | undefined, currentOnly = true) {
+  return useQuery({
+    queryKey: [V1, "approvals", problemId, currentOnly],
+    queryFn: () => listProblemApprovals(problemId as Id, currentOnly),
+    enabled: isId(problemId),
+  });
+}
+
+export const useApproveRun = () =>
+  useV1Mutation(({ runId, body }: { runId: Id; body: ApproveBody }) => approveRun(runId, body));
+
+export type AmountsPage = {
+  run_id: Id;
+  variable: string | null;
+  offset: number;
+  limit: number;
+  total: number;
+  chunked: boolean;
+  items: { variable: string; index: string[]; value: number }[];
+};
+
+export const getRunAmounts = (
+  runId: Id,
+  params: { variable?: string; offset?: number; limit?: number } = {}
+) =>
+  apiFetch<AmountsPage>(
+    `/api/v1/runs/${runId}/amounts${query({
+      variable: params.variable,
+      offset: params.offset,
+      limit: params.limit,
+    })}`
+  );
+
+export function useRunAmounts(
+  runId: Id | null | undefined,
+  params: { variable?: string; offset?: number; limit?: number } = {}
+) {
+  return useQuery({
+    queryKey: [V1, "run-amounts", runId, params],
+    queryFn: () => getRunAmounts(runId as Id, params),
+    enabled: isId(runId),
+  });
+}
+
 // --- grids (spatial, GIS 3) -------------------------------------------------
 
 export type GridRequest = {

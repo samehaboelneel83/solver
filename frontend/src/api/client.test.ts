@@ -50,4 +50,10 @@ describe("apiFetch", () => {
 
     expect(window.location.href).toBe("");
   });
+
+  it("throws NetworkError when fetch itself fails", async () => {
+    (fetch as any).mockRejectedValue(new TypeError("Failed to fetch"));
+    const { NetworkError } = await import("./client");
+    await expect(apiFetch("/api/health")).rejects.toBeInstanceOf(NetworkError);
+  });
 });

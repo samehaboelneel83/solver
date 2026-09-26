@@ -1,5 +1,8 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
+import AliasRedirect from "./components/AliasRedirect";
+import DomainScope from "./components/DomainScope";
+import ProblemQueryBridge from "./components/ProblemQueryBridge";
 import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
@@ -46,6 +49,35 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        {/* OAAS N04: canonical aliases keep query/hash for bookmarks */}
+        <Route path="home" element={<AliasRedirect to="/" />} />
+        <Route path="domains" element={<AliasRedirect to="/public/domain" />} />
+        <Route path="templates" element={<AliasRedirect to="/public/template" />} />
+        {/* OAAS §3.5: URL-authoritative domain / problem routes */}
+        <Route path="domains/:domainId" element={<DomainScope />}>
+          <Route path="overview" element={<AliasRedirect to="/public/domain" />} />
+          <Route path="data/records" element={<Entities />} />
+          <Route path="data/records/new" element={<EntityRecord />} />
+          <Route path="data/records/:id" element={<EntityRecord />} />
+          <Route path="data/relationships" element={<Relationships />} />
+          <Route path="data/parameters" element={<Parameters />} />
+          <Route path="data/explore" element={<GraphDemo />} />
+          <Route path="structure/record-types" element={<EntityTypes />} />
+          <Route path="structure/record-types/:id" element={<EntityTypeDetail />} />
+          <Route path="structure/relationship-types" element={<RelationshipTypes />} />
+          <Route path="structure/relationship-types/:id" element={<RelationshipTypeDetail />} />
+          <Route path="problems" element={<EntityList schema="public" table="problem" />} />
+          <Route path="problems/:problemId" element={<ProblemQueryBridge />}>
+            <Route path="overview" element={<ModelEditor />} />
+            <Route path="model" element={<ModelEditor />} />
+            <Route path="versions" element={<ModelVersions />} />
+            <Route path="versions/:versionId" element={<ModelVersions />} />
+            <Route path="scenarios" element={<Scenarios />} />
+            <Route path="scenarios/:scenarioId" element={<Scenarios />} />
+            <Route path="runs" element={<Runs />} />
+            <Route path="runs/:runId" element={<Runs />} />
+          </Route>
+        </Route>
         <Route path="graph" element={<GraphDemo />} />
         {/* Static segments outrank the generic `:schemaName/:tableName` pair below,
             so `/entity-types/5` reaches the type editor, not a table named "5". */}

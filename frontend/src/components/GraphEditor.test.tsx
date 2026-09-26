@@ -405,6 +405,8 @@ const MODEL_TARGET = {
     { id: 60, problem_id: 3, version: 1, ir_hash: "g", note: "first cut", created_at: "2026-09-21T00:00:00+00:00" },
   ],
   isLoading: false,
+  problemMissing: false,
+  versionMissing: false,
 };
 
 type Stub = {

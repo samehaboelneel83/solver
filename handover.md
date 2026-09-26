@@ -65,6 +65,7 @@ The platform:
 | Track D — any native solver, customer's licence (R41–R44) | 4 | 4 | — | vendor manifests untested (§5.4) |
 | Track B — model CI and shadow runs (R29–R32) | 4 | 4 | — | — |
 | Track C — scale and enterprise (R33–R40) | 8 | 8 | — | — |
+| OAAS Phase 0–5 (nav, offline, chunks, approvals, scoped URLs, Q01–Q05) | 22 | 22 | — | demand-led Phase 6 |
 
 ---
 
@@ -238,9 +239,49 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 
 ---
 
+### 3.10 OAAS Phase 0–1 + offline/coverage (N01–N07, O/Q)
+
+Plan: [`OAAS_PLATFORM_PROPOSAL.md`](OAAS_PLATFORM_PROPOSAL.md); baseline:
+[`docs/plans/2026-09-26-oaas-phase0-baseline.md`](docs/plans/2026-09-26-oaas-phase0-baseline.md).
+
+| ID | Delivered |
+|---|---|
+| Phase 0 | Capability / route / offline inventory reconciled with handover |
+| N01 | Shared `frontend/src/nav/registry.ts` (destinations, TERMS, sidebar groups) |
+| N02 | No silent substitution: `useModelTarget` + `resolveById` + `ContextMismatch` on graph, model, versions, scenarios, runs, workspace |
+| N03 | Purpose under breadcrumbs; domain `ContextHeader`; registry-driven sidebar groups |
+| N04 | `/home`, `/domains`, `/templates` aliases via `AliasRedirect` (keeps query/hash) |
+| N05 | Command palette entries from the same registry (“Go to page…”) |
+| N06 | Runs detail has Summary / Guided view tabs; `/workspace` redirects to `/runs?…&tab=guided`; run id is URL-authoritative |
+| N07 | Home entry points (Domains / Problems / Runs); `ProblemReadiness` checklist on the Model editor |
+| W01 | Cell-click locks + what-if form on `PlannerPanel` (already shipped with Track A follow-ups) |
+| W02 | `VersionChecks` + `ShadowCard`; suite scenarios hidden by default |
+| O01 | Offline install contract + dependency manifest |
+| O02 | `NetworkError`, reachability banner (offline vs unreachable vs degraded DB), OfflineNotice reasons |
+| Q01 | Coverage / benchmark acceptance matrix |
+| O01+ | `scripts/offline-bundle.sh`, digest compose example, Dockerfile `OFFLINE=1` + wheelhouse/npm-cache |
+| O02+ | `scripts/egress-check.sh` wired into `scripts/check.sh` (skips when stack down) |
+| Phase 5 | Migration **0082**: chunked amounts + `approved_plan`; amounts/approve APIs; Runs **ApprovePlanPanel** |
+| N04+ | Canonical `/domains/:domainId/...` routes + scoped sidebar hrefs; legacy paths kept |
+| Q02 | Independent result verification (`app.solve.verify`) before usable persist |
+| Q03 | `params.phases` timings (compile / choose / solve / verify / persist) |
+| Q04 | Family policies + `bench.equal_budget` gate |
+| Q05 | Offline suites path documented (no MIPLIB required) |
+
+Docs: [`docs/runbooks/offline-install.md`](docs/runbooks/offline-install.md),
+[`docs/offline-dependency-manifest.md`](docs/offline-dependency-manifest.md),
+[`docs/coverage-acceptance-matrix.md`](docs/coverage-acceptance-matrix.md),
+[`docs/contracts/approvals-and-chunks.md`](docs/contracts/approvals-and-chunks.md),
+[`docs/contracts/result-verification.md`](docs/contracts/result-verification.md),
+[`docs/contracts/family-policies.md`](docs/contracts/family-policies.md).
+
+**Longer-horizon OAAS:** demand-led Phase 6; further equal-budget re-runs when changing a default.
+
+---
+
 ## 4. In progress
 
-Nothing in flight. Track C complete; planner/gate/shadow follow-ups from §5.4 shipped.
+Nothing in flight. OAAS Phase 0–5 is committed on `master`.
 
 ---
 

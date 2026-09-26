@@ -35,6 +35,7 @@ describe("the app's look (queue R22)", () => {
     document.documentElement.dir = "ltr";
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
+      if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
       if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "sameh", display_name: null, capabilities: ["domain.edit"] });
       if (path.startsWith("/api/v1/runs")) {
         return Promise.resolve({ items: [{ id: 41, scenario_id: 5, status: "optimal", queued_at: new Date().toISOString(), finished_at: new Date().toISOString() }], total: 1 });
@@ -48,9 +49,21 @@ describe("the app's look (queue R22)", () => {
   });
 
   it("names where you are in the breadcrumb, group then page", () => {
-    expect(whereAmI("/entity-types")).toEqual({ group: "Domain", page: "Entity types" });
-    expect(whereAmI("/public/problem/12")).toEqual({ group: "Problem", page: "Problems" });
-    expect(whereAmI("/")).toEqual({ group: null, page: "Dashboard" });
+    expect(whereAmI("/entity-types")).toEqual({
+      group: "Data structure",
+      page: "Record types",
+      purpose: "Define what kinds of records exist in this domain.",
+    });
+    expect(whereAmI("/public/problem/12")).toEqual({
+      group: "Problems",
+      page: "Problems",
+      purpose: "Decisions to optimize in this domain.",
+    });
+    expect(whereAmI("/")).toEqual({
+      group: "Home",
+      page: "Home",
+      purpose: "Continue planning from recent work.",
+    });
     renderAt("/runs");
     const crumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(crumb).toHaveTextContent("Runs");
@@ -79,7 +92,7 @@ describe("the app's look (queue R22)", () => {
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     const search = screen.getByRole("combobox", { name: "Go to a page" });
     fireEvent.change(search, { target: { value: "param" } });
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["ParametersDomain"]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["ParametersDomains"]);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(screen.getByTestId("path")).toHaveTextContent("/parameters");
     expect(screen.queryByRole("dialog")).toBeNull();

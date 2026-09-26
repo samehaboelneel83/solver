@@ -1,13 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { NAV_GROUPS } from "./AppShell";
 
 type Entry = { to: string; label: string; group: string };
 
 /**
- * Ctrl+K: every page of the app, found by typing (queue R22). Arrow keys move,
- * Enter opens, Escape closes. Only pages this account may open are listed.
+ * Ctrl+K: every page of the app, found by typing (queue R22 / OAAS N05).
+ * Arrow keys move, Enter opens, Escape closes. Only pages this account may
+ * open are listed. Entries come from the shared nav registry via NAV_GROUPS.
  */
 export default function CommandPalette({ open, onClose, can }: { open: boolean; onClose: () => void; can: (capability: string) => boolean }) {
   const id = useId();
@@ -16,12 +17,13 @@ export default function CommandPalette({ open, onClose, can }: { open: boolean; 
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const entries: Entry[] = useMemo(
-    () => [
-      { to: "/", label: "Dashboard", group: "Home" },
-      { to: "/graph", label: "Domain Graph", group: "Home" },
-      ...NAV_GROUPS.flatMap((g) => g.items.filter((i) => !i.capability || can(i.capability)).map((i) => ({ to: i.to, label: i.label, group: g.label }))),
-    ],
-    [can],
+    () =>
+      NAV_GROUPS.flatMap((g) =>
+        g.items
+          .filter((i) => !i.capability || can(i.capability))
+          .map((i) => ({ to: i.to, label: i.label, group: g.label }))
+      ),
+    [can]
   );
   const needle = query.trim().toLowerCase();
   const found = needle ? entries.filter((e) => `${e.label} ${e.group}`.toLowerCase().includes(needle)) : entries;

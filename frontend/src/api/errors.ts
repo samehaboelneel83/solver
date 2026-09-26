@@ -1,4 +1,4 @@
-import { ApiError } from "./client";
+import { ApiError, NetworkError } from "./client";
 
 /**
  * The phrase `app/api/concurrency.py` puts in the 409 it refuses a save
@@ -71,6 +71,13 @@ function fieldNameFromLoc(loc: (string | number)[] | undefined): string {
  * - a non-ApiError Error: its `message`.
  */
 export function formatApiError(err: unknown): string {
+  if (err instanceof NetworkError) {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return "You appear to be offline. Check your connection and try again.";
+    }
+    return err.message;
+  }
+
   if (err instanceof ApiError) {
     if (err.status >= 500) {
       return `Server error (${err.status}). Please try again.`;

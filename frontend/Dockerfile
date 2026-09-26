@@ -1,7 +1,21 @@
+# Offline-capable frontend image (OAAS O01).
+# Default build uses the public npm registry. For an air-gapped build:
+#   1. Populate frontend/npm-cache (see scripts/offline-bundle.sh)
+#   2. docker build --build-arg OFFLINE=1 -t solver-frontend .
+ARG OFFLINE=0
+
 FROM node:20-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+# Optional npm cache for offline installs.
+COPY npm-cache/ /tmp/npm-cache/
+
+ARG OFFLINE
+RUN if [ "$OFFLINE" = "1" ]; then \
+      npm ci --offline --cache /tmp/npm-cache; \
+    else \
+      npm install; \
+    fi
 COPY . .
 RUN npm run build
 
