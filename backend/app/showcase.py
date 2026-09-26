@@ -1,9 +1,9 @@
-"""Two templates that show the solving the demo rota cannot.
+"""Showcase templates that show the solving the demo rota cannot.
 
 The seeded rota is an integer program: every decision is yes or no, so a
 person exploring the product never meets a fractional answer, a linear
 program, or a quadratic objective -- the platform's widest capabilities were
-its least visible. These two are small, real, and checkable by hand, and each
+its least visible. These are small, real, and checkable by hand, and each
 is a template, so applying one builds its own domain and model beside
 whatever is already there.
 
@@ -34,7 +34,14 @@ area in 1 km hexes with a population layer, cut into 4 connected zones of
 whose docstring says why the goal is a moment of inertia and why the cells
 are 1 km.
 
-All four are refreshed on every start, as `weekly_rota` is, so a live
+**cairo_university_lectures** -- OAAS Phase 6 demand-led use case. Four
+FCAI sections meet once in a week: day × morning/afternoon × room, with the
+instructor fixed on each section. Hard rules stop room and instructor
+clashes and keep enrollment inside capacity; the goal prefers mornings.
+Built in `app.lectures`; every section can sit in a morning slot, so the
+proven objective is 0.
+
+All six are refreshed on every start, as `weekly_rota` is, so a live
 database cannot drift from this file.
 """
 
@@ -49,6 +56,9 @@ from app.models.v1_problem import Template
 from app.facilities import FACILITY_COVERAGE
 from app.facilities import build_ir as facility_ir
 from app.facilities import build_seed as facility_seed
+from app.lectures import CAIRO_UNIVERSITY_LECTURES
+from app.lectures import build_ir as lectures_ir
+from app.lectures import build_seed as lectures_seed
 from app.regions import REGION_PARTITIONING, build_ir, build_seed
 
 FEED_BLEND = "feed_blend"
@@ -282,6 +292,7 @@ SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     WORKSHOP: (WORKSHOP_SEED, WORKSHOP_IR),
     REGION_PARTITIONING: (build_seed(), build_ir()),
     FACILITY_COVERAGE: (facility_seed(), facility_ir()),
+    CAIRO_UNIVERSITY_LECTURES: (lectures_seed(), lectures_ir()),
 }
 
 

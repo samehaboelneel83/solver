@@ -65,7 +65,8 @@ The platform:
 | Track D — any native solver, customer's licence (R41–R44) | 4 | 4 | — | vendor manifests untested (§5.4) |
 | Track B — model CI and shadow runs (R29–R32) | 4 | 4 | — | — |
 | Track C — scale and enterprise (R33–R40) | 8 | 8 | — | — |
-| OAAS Phase 0–5 (nav, offline, chunks, approvals, scoped URLs, Q01–Q05) | 22 | 22 | — | demand-led Phase 6 |
+| OAAS Phase 0–5 (nav, offline, chunks, approvals, scoped URLs, Q01–Q05) | 22 | 22 | — | — |
+| OAAS Phase 6 U01 (Cairo University lectures) | 1 | 1 | — | further demand-led use cases |
 
 ---
 
@@ -275,13 +276,14 @@ Docs: [`docs/runbooks/offline-install.md`](docs/runbooks/offline-install.md),
 [`docs/contracts/result-verification.md`](docs/contracts/result-verification.md),
 [`docs/contracts/family-policies.md`](docs/contracts/family-policies.md).
 
-**Longer-horizon OAAS:** demand-led Phase 6; further equal-budget re-runs when changing a default.
+**Longer-horizon OAAS:** further demand-led Phase 6 use cases (U01 Cairo lectures done);
+further equal-budget re-runs when changing a default.
 
 ---
 
 ## 4. In progress
 
-Nothing in flight. Scale S01–S03 follow the OAAS Phase 0–5 commit on `master`.
+Nothing in flight. U01 `cairo_university_lectures` is on master after the Phase 0–5 commit.
 
 ---
 

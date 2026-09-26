@@ -564,6 +564,7 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | S03 | Execution-attempt fencing for stale workers | `claim_next` / `_record`, migration 0084 | S02 |
 | S04 | Reserve CPU/memory/licence seats; check pool for shadow/suite | `app/solve/reserve.py`, `claim_next`, portfolio path | S03 |
 | S05 | Document and enforce measured host capacity limits | `docs/contracts/scale-reliability.md`, reserve defaults | S04 |
+| U01 | Cairo University lecture timetable (FCAI demo template) | `app/lectures.py`, `showcase.py`, `tests/test_lectures.py` | Phase 6 |
 
 Do not renumber or overwrite the existing R-series execution history. Link completed work from the new backlog and track new work with distinct identifiers.
 

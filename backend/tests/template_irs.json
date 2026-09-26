@@ -1,4 +1,262 @@
 {
+ "cairo_university_lectures": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "section"
+     }
+    ],
+    "id": "c_once",
+    "left": {
+     "over": [
+      {
+       "index": "d",
+       "set": "day"
+      },
+      {
+       "index": "p",
+       "set": "period"
+      },
+      {
+       "index": "r",
+       "set": "room"
+      }
+     ],
+     "sum": {
+      "index": [
+       "s",
+       "d",
+       "p",
+       "r"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "each section meets exactly once in the week",
+    "relation": "=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "d",
+      "set": "day"
+     },
+     {
+      "index": "p",
+      "set": "period"
+     },
+     {
+      "index": "r",
+      "set": "room"
+     }
+    ],
+    "id": "c_room",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "section"
+      }
+     ],
+     "sum": {
+      "index": [
+       "s",
+       "d",
+       "p",
+       "r"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "a room holds at most one section in a slot",
+    "relation": "<=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "i",
+      "set": "instructor"
+     },
+     {
+      "index": "d",
+      "set": "day"
+     },
+     {
+      "index": "p",
+      "set": "period"
+     }
+    ],
+    "id": "c_instructor",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "section",
+       "via": {
+        "rel": "taught_by",
+        "to": "i"
+       }
+      },
+      {
+       "index": "r",
+       "set": "room"
+      }
+     ],
+     "sum": {
+      "index": [
+       "s",
+       "d",
+       "p",
+       "r"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "an instructor teaches at most one section in a slot",
+    "relation": "<=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "section"
+     },
+     {
+      "index": "d",
+      "set": "day"
+     },
+     {
+      "index": "p",
+      "set": "period"
+     },
+     {
+      "index": "r",
+      "set": "room"
+     }
+    ],
+    "id": "c_capacity",
+    "left": {
+     "mul": [
+      {
+       "attr": {
+        "name": "enrollment",
+        "of": "s"
+       }
+      },
+      {
+       "index": [
+        "s",
+        "d",
+        "p",
+        "r"
+       ],
+       "var": "assign"
+      }
+     ]
+    },
+    "note": "enrollment fits the room",
+    "relation": "<=",
+    "right": {
+     "attr": {
+      "name": "capacity",
+      "of": "r"
+     }
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "s",
+        "set": "section"
+       },
+       {
+        "index": "d",
+        "set": "day"
+       },
+       {
+        "index": "p",
+        "set": "period"
+       },
+       {
+        "index": "r",
+        "set": "room"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "index": [
+          "p"
+         ],
+         "par": "late"
+        },
+        {
+         "index": [
+          "s",
+          "d",
+          "p",
+          "r"
+         ],
+         "var": "assign"
+        }
+       ]
+      }
+     },
+     "id": "o_morning",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "late": {
+    "index": [
+     "period"
+    ]
+   }
+  },
+  "relationships": [
+   "taught_by"
+  ],
+  "sets": [
+   "section",
+   "instructor",
+   "day",
+   "period",
+   "room"
+  ],
+  "variables": {
+   "assign": {
+    "domain": "binary",
+    "index": [
+     "section",
+     "day",
+     "period",
+     "room"
+    ]
+   }
+  },
+  "version": 1
+ },
  "facility_coverage": {
   "constraints": [
    {

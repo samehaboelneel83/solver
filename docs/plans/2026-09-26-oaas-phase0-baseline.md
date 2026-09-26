@@ -32,6 +32,7 @@
 | Coverage / bench gates | **implemented** | Q01 matrix + Q02 verify + Q03 `params.phases` + Q04 family policies / equal_budget + Q05 suites path |
 | Navigation hierarchy (proposal §3) | **implemented** | Phase 1 N01–N07 + §3.5 scoped URLs |
 | Learned selector promotion | **partial** | shadow only (by design) |
+| Cairo University lectures (Phase 6 use case) | **implemented** | U01 `cairo_university_lectures` template; apply → four morning slots, objective 0 |
 
 ## Route inventory (current → proposed owner)
 
@@ -65,5 +66,7 @@
 ## Next
 
 OAAS Phase 0–5 backlog items (N/W/O/Q01–Q05, S01–S05, chunks/approvals, scoped URLs,
-offline Docker path, Archivo/teal theme) are in the working tree. Remaining work is
-demand-led extensions (Phase 6) and further equal-budget re-runs when changing defaults.
+offline Docker path, Archivo/teal theme) are in the working tree. Phase 6 demand-led
+use case **U01** (Cairo University lecture timetable) is implemented. Remaining work is
+further equal-budget re-runs when changing defaults, and any new named use case with
+an operating owner and acceptance case.
