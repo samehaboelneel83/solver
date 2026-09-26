@@ -59,7 +59,7 @@ describe("VersionChecks", () => {
       }],
     };
     renderIt();
-    expect(await screen.findByText("nightly")).toBeInTheDocument();
+    expect(await screen.findByText("regressed overnight")).toBeInTheDocument();
     expect(screen.getByText(/passed last night, fails tonight/)).toBeInTheDocument();
   });
 
@@ -67,13 +67,13 @@ describe("VersionChecks", () => {
     checks = { model_version_id: 5, state: "unchecked", cases: [{ case_id: 1, name: "two shifts", run_id: null, state: "unchecked", reasons: [] }] };
     renderIt();
     fireEvent.click(await screen.findByRole("button", { name: "Run checks" }));
-    await waitFor(() => expect(screen.getAllByText("passed").length).toBe(2));
+    await waitFor(() => expect(screen.getAllByText("Passed").length).toBe(2));
   });
 
   it("says a problem with no cases has no gate", async () => {
     checks = { model_version_id: 5, state: "no cases", cases: [] };
     renderIt();
-    expect(await screen.findByText(/has no acceptance cases/)).toBeInTheDocument();
+    expect(await screen.findByText(/has no acceptance cases yet/)).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

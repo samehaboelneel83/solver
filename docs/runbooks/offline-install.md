@@ -91,10 +91,12 @@ ClickHouse as required for the reference compose file.
 
 ## What is not yet done
 
-- Dockerfile `pip install` / `npm install` are not replaced by offline wheelhouse
-  COPY steps in the default Dockerfiles (development still builds online).
-- Image digests are not pinned in `docker-compose.yml` tags (use a release
-  override file when shipping a customer bundle).
-- Automated egress-blocked CI on a clean VM is not yet a gate in `scripts/check.sh`.
+- Default Dockerfiles still install online unless built with `OFFLINE=1` and a
+  populated `backend/wheelhouse/` / `frontend/npm-cache/` (by design for
+  development). Release bundles use the offline path.
+- Image digests are not pinned in the main `docker-compose.yml` tags (use
+  `deploy/compose/docker-compose.digests.example.yml` for customer releases).
+- Automated egress-blocked CI on a clean VM is not yet a hard gate in
+  `scripts/check.sh` (egress check runs when the stack is up).
 
-Track progress under backlog **O01** / **O02**.
+Track progress under backlog **O01** / **O02** / **O03**.

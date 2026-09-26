@@ -15,6 +15,7 @@
 | Gate override + audit | **implemented** | `0081` |
 | Shadow card UI | **implemented** | Model versions |
 | Hide `checks:` scenarios | **implemented** | default list filter |
+| Suite / shadow plain-language UI | **implemented** | W02 VersionChecks + ShadowCard |
 | SSO / SCIM / retention / Helm / tiers | **implemented** | Track C R35–R40 |
 | Backups / queue metrics / audit | **implemented** | R39 / R33 / R34 |
 | Offline install bundle (digest-pinned) | **implemented** | O01 + offline-bundle + digest compose + Dockerfile `OFFLINE=1` wheelhouse/npm-cache |
