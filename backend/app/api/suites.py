@@ -153,6 +153,15 @@ def check_version(version_id: int, db: Session = Depends(get_db),
     return {"run_ids": runs, **suite.version_checks(db, version_id)}
 
 
+@router.get("/problems/{problem_id}/shadow")
+def shadow_report(problem_id: int, db: Session = Depends(get_db),
+                  _: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """Each candidate version's record on this problem's real runs (queue R31)."""
+    from app.solve import shadow
+
+    return shadow.report(db, problem_id)
+
+
 @router.post("/suite-cases/{case_id}/runs", status_code=201)
 def run_case(case_id: int, payload: CaseRun | None = None, db: Session = Depends(get_db),
              _: UserAccount = Depends(requires("run.submit"))) -> dict[str, Any]:

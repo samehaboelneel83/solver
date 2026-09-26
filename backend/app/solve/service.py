@@ -314,6 +314,15 @@ def enqueue_run(
             "k": cache_key,
         },
     ).scalar_one()
+    if not pareto_steps and not robust:
+        # The candidate version's twin, when the problem shadows one (queue R31).
+        from app.solve import shadow as shadow_rows
+
+        noted = shadow_rows.twin(db, run_id, scenario["problem_id"], scenario["model_version_id"],
+                                 scenario["patch"] or {}, request_params, settings)
+        if noted:
+            db.execute(text("UPDATE run SET params = params || CAST(:n AS jsonb) WHERE id = :r"),
+                       {"n": _json(noted), "r": run_id})
     db.commit()
     return run_id
 
@@ -462,6 +471,17 @@ def cancel_run(db: Session, run_id: int) -> str:
     ).scalar_one_or_none()
     if row is None:
         raise LookupError(f"run {run_id} not found")
+    if row in ("queued", "running"):
+        # Its shadow twin (queue R31) asks the same question for no one once it is not wanted.
+        db.execute(
+            text(
+                "UPDATE run SET status = CASE WHEN status = 'queued' THEN 'cancelled'::run_status ELSE status END,"
+                "               cancel_requested = true,"
+                "               finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END"
+                " WHERE parent_run_id = :r AND purpose = 'shadow' AND status IN ('queued', 'running')"
+            ),
+            {"r": run_id},
+        )
     if row == "queued":
         db.execute(
             text(
@@ -617,6 +637,10 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
                 from app.solve import suite
 
                 suite.settle(db, run_id)
+            # A real run and its shadow twin compared, once both have settled (queue R31).
+            from app.solve import shadow as shadow_rows
+
+            shadow_rows.settle(db, run_id)
             return outcome
     finally:
         # Whatever happened -- solved, refused, cancelled, crashed -- the
