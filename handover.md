@@ -7,8 +7,8 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code at `23c02b9`, database at migration **0075**.
-- Committed but **not yet deployed**: none. App and database at **`23c02b9` / migration 0075** (R31 shadow runs).
+- Deployed: app code at `a7db47d`, database at migration **0076**.
+- Committed but **not yet deployed**: none.
 - Docs: the detailed day-by-day record is
   [`docs/plans/2026-09-24-session-handover.md`](docs/plans/2026-09-24-session-handover.md) (one row per
   delivered item). The ordered work list, with each item's evidence, is
@@ -62,7 +62,7 @@ The platform:
 | Roadmap queue R1–R22 (incl. R8b/c, R15a–c, R16a–b, R17a–d, R20a–b) | 31 | 31 | — | — |
 | Track A — planner re-optimization and "why not?" (R23–R28) | 6 | 6 | — | two follow-ups (§5.4) |
 | Track D — any native solver, customer's licence (R41–R44) | 4 | 4 | — | vendor manifests untested (§5.4) |
-| Track B — model CI and shadow runs (R29–R32) | 4 | 3 | — | R32 |
+| Track B — model CI and shadow runs (R29–R32) | 4 | 4 | — | — |
 | Track C — scale and enterprise (R33–R40) | 8 | 0 | — | all 8, waiting on customer demand (§5.2) |
 
 ---
@@ -213,19 +213,20 @@ Everything is proved with free solvers standing in for commercial ones.
 The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference adapters are in
 `backend/adapters/reference/`.
 
-### 3.8 Track B — model CI and shadow runs (R29–R31 delivered)
+### 3.8 Track B — model CI and shadow runs (R29–R32) — **complete**
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
 | R29 | **acceptance cases**: any answered run becomes a case (its frozen data, patch and answer), asked again of any version, judged with reasons | 0073 | `5894e4d` | the blend case passed on its version; a 25 kg-protein version failed: "the objective is 53.849206, expected 43.531746" |
 | R30 | **the gate**: a new version is put into use only once it passes every case. Checks run after plan runs. A checks panel on the Model versions page | 0074 | `73c4916` | a reworded version refused, checked, passed, accepted; a dearer one failed and stays refused |
 | R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
+| R32 | **nightly model CI**: every case re-asked with the cache off; failures and day-over-day regressions; fast subset in `check.sh` | 0076 | `a7db47d` | weekly_rota case re-asked optimal; Checks `nightly_regressed: false` |
 
 ---
 
 ## 4. In progress
 
-None. Next in order is **R32** (§5.1).
+None. Track B is complete. Next planned work is Track C (R33–R40), each gated on a named customer need (§5.2); **R39 (backups) before the first paying customer**.
 
 ---
 
@@ -233,9 +234,7 @@ None. Next in order is **R32** (§5.1).
 
 ### 5.1 Planned next (Track B)
 
-| Item | What it is | Why not yet |
-|---|---|---|
-| **R32 — nightly model checks** | every problem's cases re-run nightly with the result cache off, so a solver or library upgrade that changes answers is caught; a fast subset in `check.sh`; red rows on the Checks panel | next in order, after R31 |
+Track B is complete (R29–R32).
 
 ### 5.2 Planned, waiting on a named customer need (Track C, R33–R40)
 
