@@ -729,7 +729,7 @@ def _execute(
             # `solve.warm_start`, app.solve.warm).
             prior = warm.prior_run(db, run_id)
             if prior is not None:
-                hint = warm.hint_from(compiled, prior[1]) or None
+                hint = warm.hint_from(compiled, prior[1], prior[2]) or None
                 db.execute(
                     text("UPDATE run SET params = params || CAST(:w AS jsonb) WHERE id = :r"),
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
@@ -1296,6 +1296,10 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
     if not solved:
         return
 
+    amounts, truncated = _kept_amounts(compiled, result)
+    if truncated:
+        db.execute(text("UPDATE run SET params = params || CAST(:t AS jsonb) WHERE id = :r"),
+                   {"t": _json(truncated), "r": run_id})
     db.execute(
         text(
             "INSERT INTO solution (run_id, assignments, reduced_costs, amounts)"
@@ -1304,7 +1308,7 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
         {
             "r": run_id,
             "a": _json(_assignments(compiled, result)),
-            "am": _json(_amounts(compiled, result)),
+            "am": None if amounts is None else _json(amounts),
             "rc": None if (packed := _reduced_costs(result)) is None else _json(packed),
         },
     )
@@ -2046,6 +2050,20 @@ def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[st
         if not name.startswith("__") and value:
             out.setdefault(name, []).append(list(index))
     return out
+
+
+#: Past this many used whole or fractional cells, a run keeps no amounts (queue R23): the roster
+#: still says which were used, and `params.amounts_truncated` says how many there were.
+AMOUNT_CELLS = 200_000
+
+
+def _kept_amounts(compiled: Compiled, result: Solution) -> tuple[dict[str, list[dict[str, Any]]] | None, dict]:
+    """The amounts a run keeps, and the note for `run.params` when it keeps none because there are too many."""
+    amounts = _amounts(compiled, result)
+    cells = sum(len(rows) for rows in amounts.values())
+    if cells > AMOUNT_CELLS:
+        return None, {"amounts_truncated": cells}
+    return amounts, {}
 
 
 def _amounts(compiled: Compiled, result: Solution) -> dict[str, list[dict[str, Any]]]:
