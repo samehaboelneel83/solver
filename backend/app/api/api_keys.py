@@ -16,11 +16,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.deps import capabilities_of, get_current_user
 from app.core import api_keys
 from app.core.db import get_db
@@ -70,6 +71,7 @@ def _refuse_a_key_acting(user: UserAccount) -> None:
 @router.post("/api-keys", status_code=201)
 def create_key(
     payload: ApiKeyCreate,
+    request: Request,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -95,6 +97,13 @@ def create_key(
         ),
         {"u": user.id, "n": payload.name.strip(), "p": prefix, "h": secret_hash, "c": sorted(wanted), "e": expires},
     ).scalar_one()
+    audit.write(
+        db, user, request,
+        action="api_key.create",
+        object_type="api_key",
+        object_id=key_id,
+        after={"name": payload.name.strip(), "prefix": prefix, "capabilities": sorted(wanted)},
+    )
     db.commit()
     row = db.execute(text(f"{_SELECT} WHERE k.id = :k"), {"k": key_id}).mappings().one()
     # The only time the token exists outside the caller's hands.
@@ -114,6 +123,7 @@ def list_keys(db: Session = Depends(get_db), user: UserAccount = Depends(get_cur
 @router.delete("/api-keys/{key_id}", status_code=204)
 def revoke_key(
     key_id: uuid.UUID,
+    request: Request,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(get_current_user),
 ) -> Response:
@@ -126,7 +136,8 @@ def revoke_key(
         ),
         {"k": key_id, "all": everyone, "u": user.id},
     ).scalar_one_or_none()
-    db.commit()
     if done is None:
         raise HTTPException(status_code=404, detail="API key not found")
+    audit.write(db, user, request, action="api_key.revoke", object_type="api_key", object_id=key_id)
+    db.commit()
     return Response(status_code=204)

@@ -85,6 +85,7 @@ router.include_router(
         table_name="user_account",
         prepare=hash_user_password,
         write_capability="iam.manage",
+        audit_action="iam.user_account",
     )
 )
 
@@ -100,6 +101,7 @@ router.include_router(
         schema_name="iam",
         table_name="role",
         write_capability="iam.manage",
+        audit_action="iam.role",
     )
 )
 
@@ -115,6 +117,7 @@ router.include_router(
         schema_name="iam",
         table_name="user_role",
         write_capability="iam.manage",
+        audit_action="iam.user_role",
     )
 )
 
@@ -130,6 +133,7 @@ router.include_router(
         schema_name="iam",
         table_name="role_capability",
         write_capability="iam.manage",
+        audit_action="iam.role_capability",
     )
 )
 

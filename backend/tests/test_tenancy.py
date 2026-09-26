@@ -113,6 +113,10 @@ def tenants(db):
     db.execute(text("DELETE FROM iam.usage_month WHERE organization_id = :o"), {"o": org_b})
     db.execute(text("DELETE FROM iam.quota WHERE organization_id = :o"), {"o": org_b})
     db.execute(text("DELETE FROM iam.rate_bucket"))
+    # Audit rows are append-only; allow the fixture teardown to clear them.
+    db.execute(text("SELECT set_config('app.audit_prune', '1', true)"))
+    db.execute(text("DELETE FROM iam.audit_event WHERE organization_id = :o"), {"o": org_b})
+    db.execute(text("SELECT set_config('app.audit_prune', '', true)"))
     db.execute(text("DELETE FROM iam.organization WHERE id = :o"), {"o": org_b})
     db.commit()
 

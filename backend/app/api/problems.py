@@ -122,7 +122,7 @@ not state are enforced here, as 422s:
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -136,6 +136,7 @@ from sqlalchemy import func, insert, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, reject_null
 from app.core.db import get_db
@@ -581,8 +582,9 @@ def validate_version(
 def create_version(
     problem_id: int,
     payload: ModelVersionCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(requires("model.publish")),
+    user: UserAccount = Depends(requires("model.publish")),
 ) -> ModelVersionRead:
     problem = _get_problem(db, problem_id)
     _check_ir(db, problem, payload.ir)
@@ -596,6 +598,13 @@ def create_version(
     )
     try:
         row = db.execute(statement).mappings().one()
+        audit.write(
+            db, user, request,
+            action="model.publish",
+            object_type="model_version",
+            object_id=row["id"],
+            after={"problem_id": problem_id, "version": row["version"], "note": payload.note},
+        )
         db.commit()
     except DBAPIError as exc:
         db.rollback()
@@ -753,8 +762,9 @@ def list_scenarios(
 @router.post("/scenarios", status_code=201)
 def create_scenario(
     payload: ScenarioCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(requires("model.publish")),
+    user: UserAccount = Depends(requires("model.publish")),
 ) -> ScenarioRead:
     _check_version_belongs(db, payload.problem_id, payload.model_version_id)
     _check_gate(db, payload.problem_id, payload.model_version_id)
@@ -769,6 +779,14 @@ def create_scenario(
     db.add(row)
     _commit(db, "scenario")
     db.refresh(row)
+    audit.write(
+        db, user, request,
+        action="scenario.create",
+        object_type="scenario",
+        object_id=row.id,
+        after={"name": row.name, "model_version_id": row.model_version_id, "patch": row.patch},
+    )
+    db.commit()
     return ScenarioRead.model_validate(row)
 
 
@@ -785,10 +803,12 @@ def get_scenario(
 def update_scenario(
     scenario_id: int,
     payload: ScenarioUpdate,
+    request: Request,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(requires("model.publish")),
+    user: UserAccount = Depends(requires("model.publish")),
 ) -> ScenarioRead:
     row = _get_scenario(db, scenario_id)
+    before = {"name": row.name, "model_version_id": row.model_version_id, "patch": row.patch}
     changes = payload.model_fields_set
     if "model_version_id" in changes:
         _check_version_belongs(db, row.problem_id, payload.model_version_id)
@@ -806,17 +826,36 @@ def update_scenario(
     if "patch" in changes or "model_version_id" in changes:
         _check_patch_ids(db, row.model_version_id, ScenarioPatch(**row.patch))
         _check_locks(db, row.problem_id, row.model_version_id, ScenarioPatch(**row.patch))
+    action = "scenario.lock" if "patch" in changes and (row.patch or {}).get("lock") else "scenario.update"
     _commit(db, "scenario")
     db.refresh(row)
+    audit.write(
+        db, user, request,
+        action=action,
+        object_type="scenario",
+        object_id=row.id,
+        before=before,
+        after={"name": row.name, "model_version_id": row.model_version_id, "patch": row.patch},
+    )
+    db.commit()
     return ScenarioRead.model_validate(row)
 
 
 @router.delete("/scenarios/{scenario_id}", status_code=204)
 def delete_scenario(
     scenario_id: int,
+    request: Request,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(requires("model.publish")),
+    user: UserAccount = Depends(requires("model.publish")),
 ) -> None:
     # `run` rows cascade in the database (ON DELETE CASCADE).
-    db.delete(_get_scenario(db, scenario_id))
+    row = _get_scenario(db, scenario_id)
+    audit.write(
+        db, user, request,
+        action="scenario.delete",
+        object_type="scenario",
+        object_id=row.id,
+        before={"name": row.name, "model_version_id": row.model_version_id},
+    )
+    db.delete(row)
     _commit(db, "scenario")

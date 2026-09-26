@@ -36,7 +36,7 @@ from decimal import Decimal, InvalidOperation
 from itertools import product
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
@@ -44,6 +44,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
@@ -261,7 +262,8 @@ def _file(name: str, columns: list[Column], rows: list[list[Any]], fmt: str) -> 
 
 
 def _run(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
-         clean_only: bool, dry_run: bool) -> UploadReport:
+         clean_only: bool, dry_run: bool, *, user=None, request=None, audit_object: tuple[str, Any] | None = None,
+         ) -> UploadReport:
     """Parse each row, write it inside a savepoint, and keep or undo the lot."""
     faults = _check_header(header, columns)
     if faults:
@@ -311,6 +313,15 @@ def _run(db: Session, header: list[str], rows: list[list[Any]], columns: list[Co
             written += 1
     keep = not dry_run and (not faults or clean_only)
     if keep:
+        if user is not None and audit_object is not None and written:
+            ot, oid = audit_object
+            audit.write(
+                db, user, request,
+                action="bulk.upload",
+                object_type=ot,
+                object_id=oid,
+                after={"rows": written, "faults": len(faults), "clean_only": clean_only},
+            )
         db.commit()
     else:
         db.rollback()
@@ -353,8 +364,9 @@ def entity_template(entity_type_id: int, format: str = Query("csv", pattern="^(c
 
 
 @router.post("/entity-types/{entity_type_id}/upload")
-def entity_upload(entity_type_id: int, file: UploadFile = File(...), clean_only: bool = False, dry_run: bool = False,
-                  db: Session = Depends(get_db), _: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
+                  dry_run: bool = False, db: Session = Depends(get_db),
+                  user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
     entity_type = _get(db, EntityType, entity_type_id, "entity type")
     if entity_type.is_abstract:
         raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
@@ -388,7 +400,8 @@ def entity_upload(entity_type_id: int, file: UploadFile = File(...), clean_only:
             found.active = values["active"]
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run)
+    return _run(db, header, rows, columns, write, clean_only, dry_run,
+                user=user, request=request, audit_object=("entity_type", entity_type_id))
 
 
 # --- relationship types ------------------------------------------------------------
@@ -448,9 +461,9 @@ def relationship_template(relationship_type_id: int, format: str = Query("csv", 
 
 
 @router.post("/relationship-types/{relationship_type_id}/upload")
-def relationship_upload(relationship_type_id: int, file: UploadFile = File(...), clean_only: bool = False,
-                        dry_run: bool = False, db: Session = Depends(get_db),
-                        _: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+def relationship_upload(relationship_type_id: int, request: Request, file: UploadFile = File(...),
+                        clean_only: bool = False, dry_run: bool = False, db: Session = Depends(get_db),
+                        user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
     rel = _get(db, RelationshipType, relationship_type_id, "relationship type")
     _mirror(db, rel)
     columns, attributes = _relationship_columns(db, rel)
@@ -488,7 +501,8 @@ def relationship_upload(relationship_type_id: int, file: UploadFile = File(...),
                 setattr(found, when, date.fromisoformat(values[when]) if values.get(when) else None)
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run)
+    return _run(db, header, rows, columns, write, clean_only, dry_run,
+                user=user, request=request, audit_object=("relationship_type", relationship_type_id))
 
 
 # --- parameters ----------------------------------------------------------------------
@@ -538,8 +552,9 @@ def parameter_template(parameter_id: int, format: str = Query("csv", pattern="^(
 
 
 @router.post("/parameters/{parameter_id}/upload")
-def parameter_upload(parameter_id: int, file: UploadFile = File(...), clean_only: bool = False, dry_run: bool = False,
-                     db: Session = Depends(get_db), _: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+def parameter_upload(parameter_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
+                     dry_run: bool = False, db: Session = Depends(get_db),
+                     user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
     parameter = _get(db, ParameterDef, parameter_id, "parameter")
     columns, heads = _parameter_columns(db, parameter)
     axes = [_keyed(db, t) for t in parameter.index_type_ids]
@@ -577,4 +592,5 @@ def parameter_upload(parameter_id: int, file: UploadFile = File(...), clean_only
             db.execute(delete(ParameterValue).where(where))  # sparse: the default is not stored
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run)
+    return _run(db, header, rows, columns, write, clean_only, dry_run,
+                user=user, request=request, audit_object=("parameter", parameter_id))

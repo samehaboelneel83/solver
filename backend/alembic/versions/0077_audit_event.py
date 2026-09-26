@@ -21,7 +21,7 @@ def upgrade() -> None:
             id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             at               timestamptz NOT NULL DEFAULT now(),
             organization_id  uuid NOT NULL REFERENCES iam.organization(id),
-            actor_id         uuid REFERENCES iam.user_account(id) ON DELETE SET NULL,
+            actor_id         uuid,
             api_key_id       uuid,
             action           text NOT NULL,
             object_type      text,

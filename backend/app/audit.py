@@ -77,6 +77,33 @@ def record(
     )
 
 
+def write(
+    db: Session,
+    user,
+    request,
+    *,
+    action: str,
+    object_type: str | None = None,
+    object_id: str | int | None = None,
+    before: Any | None = None,
+    after: Any | None = None,
+) -> int:
+    """Record an event for the signed-in user (and their API key, if any)."""
+    ip = request.client.host if request is not None and getattr(request, "client", None) else None
+    return record(
+        db,
+        organization_id=user.organization_id,
+        actor_id=user.id,
+        api_key_id=getattr(user, "api_key_id", None),
+        action=action,
+        object_type=object_type,
+        object_id=object_id,
+        before=before,
+        after=after,
+        ip=ip,
+    )
+
+
 def retention_days(db: Session, organization_id: UUID | str) -> int:
     """Days to keep this organization's audit rows (platform override, else default)."""
     del organization_id  # reserved for a per-org override once settings allow it

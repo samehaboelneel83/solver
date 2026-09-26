@@ -9,6 +9,7 @@ from sqlalchemy import String, Text, inspect, or_
 from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.concurrency import check_not_stale
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error
@@ -101,6 +102,7 @@ def build_crud_router(
     deletable: bool = True,
     prepare=None,
     write_capability: str = "domain.edit",
+    audit_action: str | None = None,
 ) -> APIRouter:
     """Build a generic list/get/create/update/delete router for one table.
 
@@ -127,6 +129,9 @@ def build_crud_router(
     update and delete. Domain tables stay on `domain.edit`; a problem
     or template is `model.publish`; granting a role, or saying what that
     role may do, is `iam.manage`.
+
+    `audit_action`, when set (e.g. ``"iam.user_role"``), writes an append-only
+    audit event on each successful create/update/delete (queue R34).
 
     `schema_name == "public"` (schema v1's flat tables all live there) is
     special-cased to drop the schema segment from the URL, so these read as
@@ -243,6 +248,7 @@ def build_crud_router(
         @router.post("/", status_code=201)
         def create_item(
             payload: create_schema,
+            request: Request,
             db: Session = Depends(get_db),
             user: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
@@ -252,6 +258,16 @@ def build_crud_router(
             item = model(**data)
             db.add(item)
             try:
+                db.flush()
+                if audit_action:
+                    pk = getattr(item, inspect(model).primary_key[0].key)
+                    audit.write(
+                        db, user, request,
+                        action=f"{audit_action}.create",
+                        object_type=table_name,
+                        object_id=pk,
+                        after=data,
+                    )
                 db.commit()
             except DBAPIError as exc:
                 db.rollback()
@@ -265,6 +281,7 @@ def build_crud_router(
         def update_item(
             item_id: item_id_type,
             payload: update_schema,
+            request: Request,
             db: Session = Depends(get_db),
             user: UserAccount = Depends(requires(write_capability)),
         ) -> read_schema:
@@ -276,9 +293,19 @@ def build_crud_router(
             if item is None:
                 raise HTTPException(status_code=404, detail="not found")
             check_not_stale(table_name.replace("_", " "), item.updated_at, expected)
+            before = {k: getattr(item, k, None) for k in changes}
             for field, value in changes.items():
                 setattr(item, field, value)
             try:
+                if audit_action:
+                    audit.write(
+                        db, user, request,
+                        action=f"{audit_action}.update",
+                        object_type=table_name,
+                        object_id=item_id,
+                        before=before,
+                        after=changes,
+                    )
                 db.commit()
             except DBAPIError as exc:
                 db.rollback()
@@ -291,12 +318,20 @@ def build_crud_router(
         @router.delete("/{item_id}", status_code=204)
         def delete_item(
             item_id: item_id_type,
+            request: Request,
             db: Session = Depends(get_db),
-            _: UserAccount = Depends(requires(write_capability)),
+            user: UserAccount = Depends(requires(write_capability)),
         ) -> None:
             item = db.get(model, item_id)
             if item is None:
                 raise HTTPException(status_code=404, detail="not found")
+            if audit_action:
+                audit.write(
+                    db, user, request,
+                    action=f"{audit_action}.delete",
+                    object_type=table_name,
+                    object_id=item_id,
+                )
             db.delete(item)
             try:
                 db.commit()
