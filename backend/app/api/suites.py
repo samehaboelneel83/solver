@@ -131,6 +131,28 @@ def delete_case(case_id: int, db: Session = Depends(get_db),
     db.commit()
 
 
+@router.get("/model-versions/{version_id}/checks")
+def version_checks(version_id: int, db: Session = Depends(get_db),
+                   _: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """Where a version stands against its problem's cases (queue R30)."""
+    try:
+        return suite.version_checks(db, version_id)
+    except suite.NotACase as exc:
+        raise _refused(exc) from exc
+
+
+@router.post("/model-versions/{version_id}/check", status_code=201)
+def check_version(version_id: int, db: Session = Depends(get_db),
+                  _: UserAccount = Depends(requires("run.submit"))) -> dict[str, Any]:
+    """Ask every case of the version's problem of it (queue R30); poll `GET .../checks`."""
+    try:
+        runs = suite.check_version(db, version_id)
+    except suite.NotACase as exc:
+        db.rollback()
+        raise _refused(exc) from exc
+    return {"run_ids": runs, **suite.version_checks(db, version_id)}
+
+
 @router.post("/suite-cases/{case_id}/runs", status_code=201)
 def run_case(case_id: int, payload: CaseRun | None = None, db: Session = Depends(get_db),
              _: UserAccount = Depends(requires("run.submit"))) -> dict[str, Any]:

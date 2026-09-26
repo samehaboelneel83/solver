@@ -169,3 +169,70 @@ def settle(db: Session, run_id: int) -> None:
 def _number(value) -> int | float:
     value = Decimal(str(value))
     return int(value) if value == value.to_integral_value() else float(value)
+
+
+# -- the gate (queue R30) ----------------------------------------------------------------
+
+
+def version_checks(db: Session, model_version_id: int) -> dict[str, Any]:
+    """Where a version stands against its problem's cases: each case's latest run on this version,
+    and overall -- `no cases`, `unchecked` (a case never run on it), `checking` (one still running),
+    `failed` (one failed) or `passed` (every one passed)."""
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": model_version_id}).scalar_one_or_none()
+    if problem is None:
+        raise NotACase("case_no_version", f"model version {model_version_id} not found", 404)
+    rows = db.execute(
+        text(
+            "SELECT c.id, c.name, r.id AS run_id, r.status, r.verdict"
+            "  FROM suite_case c"
+            "  LEFT JOIN LATERAL (SELECT id, status, verdict FROM run"
+            "                      WHERE purpose = 'suite' AND (params ->> 'case_id')::bigint = c.id"
+            "                        AND (params ->> 'model_version_id')::bigint = :v"
+            "                      ORDER BY id DESC LIMIT 1) r ON true"
+            " WHERE c.problem_id = :p ORDER BY c.name, c.id"
+        ),
+        {"p": problem, "v": model_version_id},
+    ).mappings().all()
+    cases = []
+    for row in rows:
+        verdict = row["verdict"] or {}
+        state = ("unchecked" if row["run_id"] is None else
+                 "checking" if row["status"] in ("queued", "running") or not verdict else
+                 "passed" if verdict.get("passed") else "failed")
+        cases.append({"case_id": row["id"], "name": row["name"], "run_id": row["run_id"], "state": state,
+                      "reasons": verdict.get("reasons", [])})
+    states = {c["state"] for c in cases}
+    overall = ("no cases" if not cases else "failed" if "failed" in states else "checking" if "checking" in states
+               else "unchecked" if "unchecked" in states else "passed")
+    return {"model_version_id": model_version_id, "state": overall, "cases": cases}
+
+
+def check_version(db: Session, model_version_id: int) -> list[int]:
+    """Queue every case of the version's problem against it, except one already being checked."""
+    current = version_checks(db, model_version_id)
+    return [queue(db, c["case_id"], model_version_id) for c in current["cases"] if c["state"] != "checking"]
+
+
+def gate(db: Session, problem_id: int, model_version_id: int) -> str | None:
+    """Why this version may not be put into use yet, or None. Only a version no scenario of the
+    problem uses yet is held back; a problem with no cases, or `suite.required` off, holds none."""
+    in_use = db.execute(
+        text("SELECT 1 FROM scenario WHERE problem_id = :p AND model_version_id = :v AND name NOT LIKE 'checks: version %'"),
+        {"p": problem_id, "v": model_version_id},
+    ).first()
+    if in_use is not None:
+        return None
+    from app.settings_resolve import resolve
+
+    if not bool(resolve(db, problem_id=problem_id)["suite.required"].value):
+        return None
+    checks = version_checks(db, model_version_id)
+    if checks["state"] in ("no cases", "passed"):
+        return None
+    version = db.execute(text("SELECT version FROM model_version WHERE id = :v"), {"v": model_version_id}).scalar_one()
+    detail = "; ".join(
+        f"{c['name']}: {c['state']}" + (f" ({', '.join(c['reasons'])})" if c["reasons"] else "")
+        for c in checks["cases"] if c["state"] != "passed"
+    )
+    return (f"version {version} has not passed this problem's acceptance cases ({checks['state']}) -- {detail}. "
+            "Run its checks, loosen a case, or turn the setting suite.required off")

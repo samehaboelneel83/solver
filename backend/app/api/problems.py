@@ -502,6 +502,16 @@ def _answered(db: Session, problem_id: int, run_id: int) -> bool:
     ).first() is not None
 
 
+def _check_gate(db: Session, problem_id: int, model_version_id: int) -> None:
+    """Queue R30: a version is put into use only once it has passed the problem's cases."""
+    from app.solve import suite
+
+    held = suite.gate(db, problem_id, model_version_id)
+    if held:
+        raise HTTPException(status_code=409, detail=[{"type": "version_not_checked", "loc": ["body", "model_version_id"],
+                                                     "msg": held}])
+
+
 def _check_version_belongs(db: Session, problem_id: int, model_version_id: int) -> None:
     """The rule the schema does not state: a scenario's version must be a
     version of the scenario's own problem."""
@@ -747,6 +757,7 @@ def create_scenario(
     _: UserAccount = Depends(requires("model.publish")),
 ) -> ScenarioRead:
     _check_version_belongs(db, payload.problem_id, payload.model_version_id)
+    _check_gate(db, payload.problem_id, payload.model_version_id)
     _check_patch_ids(db, payload.model_version_id, payload.patch)
     _check_locks(db, payload.problem_id, payload.model_version_id, payload.patch)
     row = Scenario(
@@ -781,6 +792,8 @@ def update_scenario(
     changes = payload.model_fields_set
     if "model_version_id" in changes:
         _check_version_belongs(db, row.problem_id, payload.model_version_id)
+        if payload.model_version_id != row.model_version_id:
+            _check_gate(db, row.problem_id, payload.model_version_id)
         row.model_version_id = payload.model_version_id
     if "name" in changes:
         row.name = payload.name

@@ -1322,6 +1322,24 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
 }
 export const useAskWhyNot = () => useV1Mutation(askWhyNot);
 
+/** Where a version stands against its problem's acceptance cases (queue R30). */
+export type VersionChecks = {
+  model_version_id: number;
+  state: "no cases" | "unchecked" | "checking" | "failed" | "passed";
+  cases: { case_id: number; name: string; run_id: number | null; state: "unchecked" | "checking" | "failed" | "passed"; reasons: string[] }[];
+};
+export const getVersionChecks = (id: Id) => apiFetch<VersionChecks>(`/api/v1/model-versions/${id}/checks`);
+export const checkVersion = (id: Id) => send<VersionChecks & { run_ids: number[] }>("POST", `/api/v1/model-versions/${id}/check`, {});
+export function useVersionChecks(id: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "version-checks", id],
+    queryFn: () => getVersionChecks(id as Id),
+    enabled: isId(id),
+    refetchInterval: (query) => ((query.state.data as VersionChecks | undefined)?.state === "checking" ? 1500 : false),
+  });
+}
+export const useCheckVersion = () => useV1Mutation(checkVersion);
+
 /** A why-not probe, polled until its verdict is written (just after the run settles). */
 export function useProbe(id: Id | null | undefined) {
   return useQuery({

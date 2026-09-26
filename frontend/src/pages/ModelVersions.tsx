@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
+import VersionChecks from "../components/VersionChecks";
 import Skeleton from "../components/Skeleton";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
@@ -259,6 +260,7 @@ function IrViewer({ versionId }: { versionId: Id | null }) {
       <h2 id="ir-heading" className="mb-2 text-base font-semibold text-slate-900">
         Version {data.version} &mdash; model IR
       </h2>
+      <VersionChecks versionId={versionId} />
       <pre
         data-testid="version-ir"
         tabIndex={0}

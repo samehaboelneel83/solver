@@ -345,7 +345,8 @@ def claim_next(db: Session) -> int | None:
             "   LEFT JOIN iam.quota q ON q.organization_id = r.organization_id"
             "  WHERE r.status = 'queued'"
             "    AND (q.max_concurrent_runs IS NULL OR coalesce(c.n, 0) < q.max_concurrent_runs)"
-            "  ORDER BY coalesce(c.n, 0), r.queued_at, r.id"
+            # Checks (suite, shadow) after every plan and question: they never delay a planner (queue R30).
+            "  ORDER BY (r.purpose IN ('suite', 'shadow')), coalesce(c.n, 0), r.queued_at, r.id"
             "  FOR UPDATE OF r SKIP LOCKED LIMIT 1"
         )
     ).scalar_one_or_none()
