@@ -10,7 +10,9 @@
 #   1. `scripts/check.sh` -- lint, types, both test suites, the build --
 #      on a clean detached worktree of `master`, so work in progress in the
 #      main checkout neither breaks nor excuses the night.
-#   2. `python -m bench.nightly` -- the L-size instances on every backend,
+#   2. `scripts/backup.sh dump` -- nightly Postgres dump to SOLVER_BACKUP_DIR
+#      (queue R39); WAL archives continuously into the same tree.
+#   3. `python -m bench.nightly` -- the L-size instances on every backend,
 #      stored in `bench_result`, compared with the previous night: wrong
 #      answers, a moved optimum, a lost proof or a 2x slowdown fail it.
 #
@@ -72,6 +74,9 @@ trap 'git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1' EXIT
 SOLVER_TEST_SUFFIX=_nightly_test bash "$WORKTREE/scripts/check.sh" > "$OUT/$NIGHT-check.log" 2>&1
 check=$?
 
+bash "$REPO/scripts/backup.sh" dump > "$OUT/$NIGHT-backup.log" 2>&1
+backup=$?
+
 docker run --rm \
   --network "${SOLVER_DOCKER_NET:-solver_solver_net}" \
   -v "$WORKTREE/backend:/app" \
@@ -84,7 +89,7 @@ docker run --rm \
 bench=$?
 
 verdict="PASS"
-if [[ $check -ne 0 || $bench -ne 0 ]]; then verdict="FAIL"; fi
-echo "$NIGHT $COMMIT $verdict -- checks exit $check, benchmark exit $bench ($(tail -n 1 "$OUT/$NIGHT-bench.log"))" \
+if [[ $check -ne 0 || $backup -ne 0 || $bench -ne 0 ]]; then verdict="FAIL"; fi
+echo "$NIGHT $COMMIT $verdict -- checks exit $check, backup exit $backup, benchmark exit $bench ($(tail -n 1 "$OUT/$NIGHT-bench.log"))" \
   | tee "$OUT/LATEST"
 [[ $verdict == "PASS" ]]

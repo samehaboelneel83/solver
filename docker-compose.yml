@@ -12,6 +12,16 @@ services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    # R39: nightly dumps + WAL land under SOLVER_BACKUP_DIR on the host
+    # (default: sibling solver-backups/). archive_mode needs a restart once.
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=300
+      - -c
+      - archive_command=mkdir -p /backups/wal && test ! -f /backups/wal/%f && cp %p /backups/wal/%f
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -20,6 +30,7 @@ services:
       - "127.0.0.1:5544:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ${SOLVER_BACKUP_DIR:-../solver-backups}:/backups
     networks:
       - solver_net
     healthcheck:

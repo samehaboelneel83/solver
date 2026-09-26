@@ -7,7 +7,8 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code at `a7db47d`, database at migration **0076**.
+- Deployed: app code including R39 backups; database at migration **0076**. Postgres runs with
+  `archive_mode=on` and mounts `SOLVER_BACKUP_DIR` (default `D:\solver-backups`).
 - Committed but **not yet deployed**: none.
 - Docs: the detailed day-by-day record is
   [`docs/plans/2026-09-24-session-handover.md`](docs/plans/2026-09-24-session-handover.md) (one row per
@@ -222,11 +223,17 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 | R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
 | R32 | **nightly model CI**: every case re-asked with the cache off; failures and day-over-day regressions; fast subset in `check.sh` | 0076 | `a7db47d` | weekly_rota case re-asked optimal; Checks `nightly_regressed: false` |
 
+### 3.9 Track C — scale and enterprise (R33–R40) — **R39 done; rest gated**
+
+| Item | What it gives | Migration | Commit | Live evidence |
+|---|---|---|---|---|
+| R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | *(this commit)* | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
+
 ---
 
 ## 4. In progress
 
-None. Track B is complete. Next planned work is Track C (R33–R40), each gated on a named customer need (§5.2); **R39 (backups) before the first paying customer**.
+None. R39 is live-checked. Remaining Track C items (R33–R38, R40) wait on a named customer need (§5.2).
 
 ---
 
@@ -234,12 +241,12 @@ None. Track B is complete. Next planned work is Track C (R33–R40), each gated 
 
 ### 5.1 Planned next (Track B)
 
-Track B is complete (R29–R32).
+Track B is complete (R29–R32). R39 (backups) of Track C is done.
 
 ### 5.2 Planned, waiting on a named customer need (Track C, R33–R40)
 
 By the plan's rule, none of these starts without a customer (or signed pilot) that needs it.
-**R39 is the exception, and should be done before the first paying customer.**
+**R39 is done** (local host folder as the object store; sync elsewhere if you want off-box copies).
 
 | Item | What it is | Unlocked by | Decision needed from you |
 |---|---|---|---|
@@ -249,7 +256,7 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 | R36 | SCIM user provisioning | more than ~200 users, or automatic deprovisioning | needs R35 |
 | R37 | data retention, organization deletion and full export | a GDPR request or a contract clause | retention defaults; deletion report wording |
 | R38 | Kubernetes / Helm deployment | a customer hosting it themselves, or moving off one machine | target cluster; managed Postgres or not |
-| **R39** | **backups and disaster recovery**: nightly dumps plus WAL to object storage, a restore rehearsal that runs the cases | **any paying customer** | **where backups live (this costs money)** |
+| ~~R39~~ | ~~backups and disaster recovery~~ | **done** — see §3.9 | — |
 | R40 | per-organization solve limits and priority tiers | tiered pricing | tier definitions |
 
 ### 5.3 Deliberately not built (standing decisions)
@@ -288,7 +295,7 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 | The chatbot icon design (`AI Button Redesign.html`): save the file into the repo, or run `/design-login`, and say which app it is for | the icon work |
 | Where per-scenario data values should be stored (a data-model choice) | per-scenario data editing |
 | The destination path for the `data_analytics` `.git` | that repository move |
-| Where backups should live (R39); which identity provider (R35) | Track C, when triggered |
+| Which identity provider (R35) | Track C SSO, when a customer needs it |
 
 ---
 
@@ -296,6 +303,7 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 
 | Task | How |
 |---|---|
+| **Backups (R39)** | `bash scripts/backup.sh dump`; restore rehearsal: `bash scripts/backup.sh rehearse`. Files under `SOLVER_BACKUP_DIR` (default `D:\solver-backups`). Runbook: `docs/runbooks/backups.md` |
 | **Full check** | `SOLVER_BACKEND_IMAGE=solver-backend-test bash scripts/check.sh`: lint, typecheck, frontend tests, build, backend tests against a `_test` database, about 18 minutes. It mounts the working tree, so it tests uncommitted changes. |
 | **One backend test file** | `docker run --rm --network solver_solver_net -v "D:/solver/backend:/app" -w /app --env-file D:/solver/.env solver-backend-test sh -c 'TEST_DATABASE_URL=${DATABASE_URL}_test pytest -q tests/<file>'` (`.env` is never read by hand) |
 | **Migration rehearsal** | `pg_dump` the live database into `solver_migtest`, then `alembic upgrade head`, `downgrade -1`, `upgrade head`, then drop the copy |

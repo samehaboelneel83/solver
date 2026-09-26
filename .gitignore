@@ -27,3 +27,8 @@ backend/bench/mps/
 
 # Nightly job output (scripts/nightly.sh).
 backend/bench/nightly_results/
+
+# Local backup tree when someone points SOLVER_BACKUP_DIR inside the repo.
+# The default is a sibling ../solver-backups/ (outside git).
+solver-backups/
+**/solver-backups/
