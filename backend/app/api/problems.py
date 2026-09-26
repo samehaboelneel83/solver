@@ -120,7 +120,7 @@ not state are enforced here, as 422s:
 """
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import (
@@ -227,6 +227,18 @@ class HorizonLock(BaseModel):
 Lock = CellLock | SliceLock | HorizonLock
 
 
+class StayClose(BaseModel):
+    """Change as little as possible from an earlier run (queue R25, app.solve.locks.stay_close):
+    `weighted` adds `weight` per changed cell (or unit an amount moved) to the goal; `lex` keeps
+    the goal first and, among the plans that reach it, takes the closest."""
+
+    model_config = ConfigDict(extra="forbid")
+    from_run: BigintId
+    mode: Literal["weighted", "lex"] = None  # type: ignore[assignment]
+    weight: Annotated[float, Field(gt=0)] = None  # type: ignore[assignment]
+    vars: list[StrictStr] = None  # type: ignore[assignment]
+
+
 class ScenarioPatch(BaseModel):
     """``ProblemIR.patched()``'s argument. Each key is optional; a key the
     client omits is omitted from what is stored (`model_dump(exclude_unset
@@ -240,6 +252,7 @@ class ScenarioPatch(BaseModel):
     soften: dict[ConstraintId, Weight] = None  # type: ignore[assignment]
     # Parts of a plan held fixed while the rest is solved again (queue R24).
     lock: list[Lock] = None  # type: ignore[assignment]
+    stay_close: StayClose = None  # type: ignore[assignment]
 
     @model_validator(mode="after")
     def _one_instruction_per_constraint(self) -> "ScenarioPatch":
@@ -431,7 +444,7 @@ def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "Sc
     names are this version's, a cell has as many keys as its decision has sets, and an earlier run
     is an answered run of this problem. The rest -- a value within today's bounds, an amount that
     run kept, the attribute a horizon compares -- is refused when the run is compiled."""
-    if not patch.lock:
+    if not patch.lock and not patch.stay_close:
         return
     ir = db.execute(select(_version_columns.ir).where(_version_columns.id == model_version_id)).scalar_one()
     decisions = {name: spec.get("index", []) for name, spec in (ir.get("variables") or {}).items()
@@ -440,7 +453,18 @@ def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "Sc
     def refuse(position: int, key: str, code: str, message: str, value: Any) -> None:
         raise field_error(["patch", "lock", position, key], f"{code}: {message}", value)
 
-    for position, lock in enumerate(patch.lock):
+    if patch.stay_close:
+        stay = patch.stay_close
+        for name in stay.vars or []:
+            if name not in decisions:
+                raise field_error(["patch", "stay_close", "vars"],
+                                  f"stay_close_unknown: model version {model_version_id} has no decision {name!r}", name)
+        if not _answered(db, problem_id, stay.from_run):
+            raise field_error(["patch", "stay_close", "from_run"],
+                              f"stay_close_run_invalid: run {stay.from_run} is not an answered run of this problem",
+                              stay.from_run)
+
+    for position, lock in enumerate(patch.lock or []):
         names = [lock.var] if not isinstance(lock, HorizonLock) else (lock.vars or [])
         for name in names:
             if name not in decisions:
@@ -462,16 +486,20 @@ def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "Sc
                 if lock.set not in decisions[name]:
                     refuse(position, "vars", "lock_unknown", f"{name!r} is not indexed by {lock.set!r}", name)
         if not isinstance(lock, CellLock):
-            answered = db.execute(
-                text(
-                    "SELECT 1 FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN solution so ON so.run_id = r.id"
-                    " WHERE r.id = :r AND s.problem_id = :p AND r.status IN ('optimal', 'feasible')"
-                ),
-                {"r": lock.from_run, "p": problem_id},
-            ).first()
-            if answered is None:
+            if not _answered(db, problem_id, lock.from_run):
                 refuse(position, "from_run", "lock_run_invalid",
                        f"run {lock.from_run} is not an answered run of this problem", lock.from_run)
+
+
+def _answered(db: Session, problem_id: int, run_id: int) -> bool:
+    """Whether a run is an answered run of this problem: what a lock or stay_close may read from."""
+    return db.execute(
+        text(
+            "SELECT 1 FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN solution so ON so.run_id = r.id"
+            " WHERE r.id = :r AND s.problem_id = :p AND r.status IN ('optimal', 'feasible')"
+        ),
+        {"r": run_id, "p": problem_id},
+    ).first() is not None
 
 
 def _check_version_belongs(db: Session, problem_id: int, model_version_id: int) -> None:

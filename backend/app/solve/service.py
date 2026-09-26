@@ -558,8 +558,11 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     dataset_id = row["dataset_id"]
     # Parts of an earlier plan held fixed (queue R24), with what those runs decided.
     locks = (row["patch"] or {}).get("lock") or []
-    if locks:
-        params = {**params, "_locks": locks, "_lock_bases": _lock_bases(db, row["problem_id"], locks)}
+    # ... and the plan to change as little as possible from (queue R25).
+    stay = (row["patch"] or {}).get("stay_close")
+    if locks or stay:
+        params = {**params, "_locks": locks, "_stay_close": stay,
+                  "_lock_bases": _lock_bases(db, row["problem_id"], [*locks, *([stay] if stay else [])])}
 
     stop = threading.Event()
     events = RunEvents(run_id)
@@ -603,12 +606,15 @@ def _execute(
             events.stage("compiling", model_class=found.model_class)
             with tracing.span("compile") as compiling:
                 compiled = unlocked = compile_model(ir, data)
+                if (params.get("_locks") or params.get("_stay_close")) and params.get("stochastic_samples")                         and stochastic_rows.wanted(ir):
+                    raise Unsupported("locks and stay_close are not kept by a stochastic solve: each future is "
+                                      "compiled afresh; solve without sampled futures to keep them")
                 if params.get("_locks"):
-                    if params.get("stochastic_samples") and stochastic_rows.wanted(ir):
-                        raise Unsupported("locks are not kept by a stochastic solve: each future is compiled "
-                                          "afresh; solve without sampled futures to keep them")
                     # Rows after the model's own, so a rule's position is the same with or without them.
                     compiled = lock_rows.apply(compiled, params["_locks"], params["_lock_bases"], data.get("sets") or {})
+                if params.get("_stay_close"):
+                    plain_goal = compiled.objective.copy()
+                    compiled, stay_measure = lock_rows.stay_close(compiled, params["_stay_close"], params["_lock_bases"])
                 compiling.set_attribute("variables", len(compiled.variables))
                 compiling.set_attribute("rules", len(compiled.constraints))
         except Unsupported as exc:
@@ -1175,6 +1181,14 @@ def _execute(
                 )
             ]
     events.stage("post_processing")
+    if params.get("_stay_close") and result.assignments:
+        # How far the answer moved from the base plan, and (weighted) its cost without the churn penalty.
+        spec = params["_stay_close"]
+        extra["stay_close"] = {
+            "from_run": spec["from_run"], "mode": spec.get("mode", "weighted"), "weight": spec.get("weight", 1),
+            "change": _json_number(float(stay_measure.evaluated_at(result.assignments))),
+            "plan_objective": _json_number(float(plain_goal.evaluated_at(result.assignments))),
+        }
     with tracing.span("persist"):
         db.execute(
             text(

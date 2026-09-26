@@ -27,10 +27,11 @@ rules is not refused: that is a planning fact, and the run says it is infeasible
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import cached_property
 from decimal import Decimal
 from typing import Any
 
-from app.solve.compile import Compiled, Constraint, Linear, Unsupported, VarKey
+from app.solve.compile import Compiled, Constraint, Linear, Unsupported, Variable, VarKey
 
 #: The prefix of every lock row's id; the rest is the lock's position in the patch, from 1.
 PREFIX = "lock:"
@@ -51,18 +52,22 @@ class Base:
     assignments: dict[str, list[list[str]]]
     amounts: dict[str, list[dict[str, Any]]] | None
 
+    @cached_property
+    def _used(self) -> set[VarKey]:
+        return {(name, tuple(row)) for name, rows in self.assignments.items() for row in rows}
+
+    @cached_property
+    def _took(self) -> dict[VarKey, Decimal]:
+        return {(name, tuple(cell["index"])): Decimal(str(cell["value"]))
+                for name, cells in (self.amounts or {}).items() for cell in cells}
+
     def value(self, key: VarKey, domain: str) -> Decimal | None:
         """The run's value for one cell, or None when it used the cell and kept no amount."""
-        name, index = key
-        used = [tuple(row) for row in self.assignments.get(name, [])]
-        if index not in used:
+        if key not in self._used:
             return Decimal(0)
         if domain == "binary":
             return Decimal(1)
-        for cell in (self.amounts or {}).get(name, []):
-            if tuple(cell["index"]) == index:
-                return Decimal(str(cell["value"]))
-        return None
+        return self._took.get(key)
 
 
 def runs_named(locks: list[dict[str, Any]]) -> set[int]:
@@ -178,3 +183,78 @@ def _label(compiled: Compiled, key: VarKey) -> dict[str, str]:
     if len(set(positions)) == len(positions) == len(index):
         return {"var": name, **{s: str(k) for s, k in zip(positions, index)}}
     return {"var": name, **{f"{s}#{p + 1}": str(k) for p, (s, k) in enumerate(zip(positions, index))}}
+
+
+#: The id of the rows that measure how far an amount moved from the base plan (queue R25).
+MOVE_ROW = "stay_close:move"
+MOVE_VAR = "__move"
+
+
+def stay_close(compiled: Compiled, spec: dict[str, Any], bases: dict[int, Base]) -> tuple[Compiled, Linear]:
+    """The model asked to change as little as it can from an earlier run (queue R25), and the
+    measure of change: the number of yes-or-no cells that differ, plus how far each amount moved.
+
+    A yes-or-no cell costs `x` where the base run had it off and `1 - x` where on -- linear, with
+    no new decision. An amount costs `|x - base|` through one continuous `__move` decision and two
+    rows each. `mode: weighted` (the default) adds `weight` x the measure to the goal, a stated
+    exchange rate between cost and churn; `mode: lex` keeps the goal first and then, among the
+    plans that reach it, takes the one closest to the base (the goal becomes a two-stage lex goal;
+    a lex goal already present keeps its order, with the measure last)."""
+    base = bases.get(int(spec["from_run"]))
+    if base is None:
+        raise LockRefused("stay_close_run_invalid",
+                          f"stay_close: run {spec['from_run']} is not an answered run of this problem")
+    names = spec.get("vars") or [n for n in compiled.var_index_sets if not n.startswith("__")]
+    for name in names:
+        if name not in compiled.var_index_sets:
+            raise LockRefused("stay_close_unknown", f"stay_close: this model has no decision {name!r}")
+    one = Decimal(1)
+    measure = Linear()
+    variables = dict(compiled.variables)
+    rows: list[Constraint] = []
+    for key, variable in compiled.variables.items():
+        name, index = key
+        if name not in names or key in compiled.intervals:
+            continue
+        value = base.value(key, variable.domain)
+        if value is None:
+            raise LockRefused("stay_close_amounts_missing",
+                              f"stay_close: run {spec['from_run']} used {name}{list(index)} and kept no amount for it")
+        if variable.domain == "binary":
+            if value >= 1:
+                measure.const += one
+                measure.coeffs[key] = measure.coeffs.get(key, Decimal(0)) - one
+            else:
+                measure.coeffs[key] = measure.coeffs.get(key, Decimal(0)) + one
+            continue
+        move = (MOVE_VAR, (name, *index))
+        reach = max(abs(variable.upper - value), abs(value - variable.lower))
+        variables[move] = Variable(move, "continuous", Decimal(0), reach)
+        label = _label(compiled, key)
+        # move >= x - base and move >= base - x: at the optimum, move = |x - base|.
+        rows.append(Constraint(MOVE_ROW, label, Linear(coeffs={move: one, key: -one}), ">=", Linear(const=-value)))
+        rows.append(Constraint(MOVE_ROW, label, Linear(coeffs={move: one, key: one}), ">=", Linear(const=value)))
+        measure.coeffs[move] = one
+    towards = measure if compiled.sense == "minimize" else _negated(measure)
+    changed = replace(compiled, variables=variables, constraints=[*compiled.constraints, *rows])
+    if spec.get("mode", "weighted") == "lex":
+        if compiled.objective_mode == "lex":
+            stages = [*compiled.objective_terms]
+            if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
+                stages.append(compiled.penalty_objective)
+            ids = [*compiled.objective_term_ids]
+        else:
+            # The weighted goal, soft penalties folded in, as the first stage.
+            stages, ids = [compiled.objective], ["goal"]
+        return replace(changed, objective_mode="lex", objective_terms=[*stages, towards],
+                       objective_term_ids=[*ids, "stay_close"], penalty_objective=Linear()), measure
+    weight = Decimal(str(spec.get("weight", 1)))
+    objective = compiled.objective.copy()
+    for key, c in towards.coeffs.items():
+        objective.coeffs[key] = objective.coeffs.get(key, Decimal(0)) + weight * c
+    objective.const += weight * towards.const
+    return replace(changed, objective=objective), measure
+
+
+def _negated(linear: Linear) -> Linear:
+    return Linear(coeffs={k: -c for k, c in linear.coeffs.items()}, const=-linear.const)
