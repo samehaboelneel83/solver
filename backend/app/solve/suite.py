@@ -85,8 +85,19 @@ def checks_scenario(db: Session, model_version_id: int) -> int:
     ).scalar_one())
 
 
-def queue(db: Session, case_id: int, model_version_id: int | None = None) -> int:
-    """Queue a case against a version (the problem's newest when none is named); the run's id."""
+def queue(
+    db: Session,
+    case_id: int,
+    model_version_id: int | None = None,
+    *,
+    max_seconds: float | None = None,
+    night: str | None = None,
+) -> int:
+    """Queue a case against a version (the problem's newest when none is named); the run's id.
+
+    Suite runs never take the result cache: they insert without a `cache_key`, so a night that
+    re-asks the same question always solves it again (queue R32).
+    """
     case = db.execute(
         text("SELECT id, problem_id, dataset_id, patch, expect FROM suite_case WHERE id = :c"), {"c": case_id}
     ).mappings().one_or_none()
@@ -103,8 +114,19 @@ def queue(db: Session, case_id: int, model_version_id: int | None = None) -> int
     scenario = checks_scenario(db, model_version_id)
     from app.solve.service import COMPILER_VERSION
 
-    params = {"time_limit_s": float(case["expect"].get("max_seconds", MIN_SECONDS)), "workers": 8, "gap_rel": 0.0,
-              "case_id": case_id, "case_patch": case["patch"] or {}, "model_version_id": model_version_id}
+    limit = float(case["expect"].get("max_seconds", MIN_SECONDS))
+    if max_seconds is not None:
+        limit = min(limit, float(max_seconds))
+    params: dict[str, Any] = {
+        "time_limit_s": limit,
+        "workers": 8,
+        "gap_rel": 0.0,
+        "case_id": case_id,
+        "case_patch": case["patch"] or {},
+        "model_version_id": model_version_id,
+    }
+    if night is not None:
+        params["nightly"] = night
     run_id = db.execute(
         text(
             "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version, params, seed, purpose)"
@@ -177,7 +199,11 @@ def _number(value) -> int | float:
 def version_checks(db: Session, model_version_id: int) -> dict[str, Any]:
     """Where a version stands against its problem's cases: each case's latest run on this version,
     and overall -- `no cases`, `unchecked` (a case never run on it), `checking` (one still running),
-    `failed` (one failed) or `passed` (every one passed)."""
+    `failed` (one failed) or `passed` (every one passed).
+
+    A case that passed the previous night's CI and fails tonight carries `nightly_regressed`
+    (queue R32), so the Checks panel can mark it red with both nights' reasons.
+    """
     problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": model_version_id}).scalar_one_or_none()
     if problem is None:
         raise NotACase("case_no_version", f"model version {model_version_id} not found", 404)
@@ -193,18 +219,153 @@ def version_checks(db: Session, model_version_id: int) -> dict[str, Any]:
         ),
         {"p": problem, "v": model_version_id},
     ).mappings().all()
+    regressions = _nightly_regressions(db, model_version_id)
     cases = []
     for row in rows:
         verdict = row["verdict"] or {}
         state = ("unchecked" if row["run_id"] is None else
                  "checking" if row["status"] in ("queued", "running") or not verdict else
                  "passed" if verdict.get("passed") else "failed")
+        reasons = list(verdict.get("reasons", []))
+        regressed = row["id"] in regressions
+        if regressed and state == "passed":
+            # Tonight's suite run may not yet be the latest night's row; still flag it.
+            state = "failed"
+        if regressed:
+            reasons = regressions[row["id"]] + reasons
         cases.append({"case_id": row["id"], "name": row["name"], "run_id": row["run_id"], "state": state,
-                      "reasons": verdict.get("reasons", [])})
+                      "reasons": reasons, "nightly_regressed": regressed})
     states = {c["state"] for c in cases}
     overall = ("no cases" if not cases else "failed" if "failed" in states else "checking" if "checking" in states
                else "unchecked" if "unchecked" in states else "passed")
     return {"model_version_id": model_version_id, "state": overall, "cases": cases}
+
+
+def _nightly_regressions(db: Session, model_version_id: int) -> dict[int, list[str]]:
+    """case_id -> reasons, for cases that passed the previous night and failed the latest night."""
+    rows = db.execute(
+        text(
+            "SELECT case_id, night, passed, reasons FROM suite_nightly"
+            " WHERE model_version_id = :v"
+            " ORDER BY case_id, night DESC"
+        ),
+        {"v": model_version_id},
+    ).mappings().all()
+    by_case: dict[int, list] = {}
+    for row in rows:
+        by_case.setdefault(row["case_id"], []).append(row)
+    out: dict[int, list[str]] = {}
+    for case_id, nights in by_case.items():
+        if len(nights) < 2:
+            continue
+        today, yesterday = nights[0], nights[1]
+        if today["passed"] is False and yesterday["passed"] is True:
+            reasons = list(today["reasons"] or [])
+            out[case_id] = [
+                "passed last night, fails tonight"
+                + (f" ({'; '.join(reasons)})" if reasons else ""),
+            ]
+    return out
+
+
+def published_version(db: Session, problem_id: int) -> int | None:
+    """The version a planner's scenario of this problem points at (highest version number), or None."""
+    return db.execute(
+        text(
+            "SELECT mv.id FROM model_version mv"
+            "  JOIN scenario s ON s.model_version_id = mv.id"
+            " WHERE mv.problem_id = :p AND s.name NOT LIKE 'checks: version %'"
+            " ORDER BY mv.version DESC LIMIT 1"
+        ),
+        {"p": problem_id},
+    ).scalar_one_or_none()
+
+
+def nightly(
+    db: Session,
+    *,
+    night,
+    max_seconds: float | None = None,
+    problem_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Re-ask every case of each problem's published version, cache off; write `suite_nightly`.
+
+    Does not publish or unpublish any version. Returns one row per case asked.
+    """
+    from app.solve.service import claim_next, execute_run
+
+    night_s = night.isoformat() if hasattr(night, "isoformat") else str(night)
+    if problem_ids is not None:
+        problems = list(problem_ids)
+    else:
+        problems = list(
+            db.execute(text("SELECT DISTINCT problem_id FROM suite_case ORDER BY problem_id")).scalars().all()
+        )
+    results: list[dict[str, Any]] = []
+    for problem_id in problems:
+        version_id = published_version(db, problem_id)
+        if version_id is None:
+            continue
+        cases = db.execute(
+            text("SELECT id FROM suite_case WHERE problem_id = :p ORDER BY id"),
+            {"p": problem_id},
+        ).scalars().all()
+        for case_id in cases:
+            run_id = queue(
+                db, case_id, version_id, max_seconds=max_seconds, night=night_s
+            )
+            while (claimed := claim_next(db)) is not None:
+                execute_run(db, claimed)
+                if claimed == run_id:
+                    break
+            row = db.execute(
+                text(
+                    "SELECT status, objective, wall_time_s, verdict FROM run WHERE id = :r"
+                ),
+                {"r": run_id},
+            ).mappings().one()
+            verdict = row["verdict"] or {}
+            passed = bool(verdict.get("passed"))
+            reasons = list(verdict.get("reasons") or [])
+            objective = row["objective"]
+            db.execute(
+                text(
+                    "INSERT INTO suite_nightly"
+                    " (night, problem_id, model_version_id, case_id, status, objective, seconds,"
+                    "  passed, reasons)"
+                    " VALUES (:n, :p, :v, :c, :st, :obj, :sec, :pass, CAST(:reasons AS jsonb))"
+                    " ON CONFLICT (night, case_id, model_version_id) DO UPDATE SET"
+                    "  status = EXCLUDED.status, objective = EXCLUDED.objective,"
+                    "  seconds = EXCLUDED.seconds, passed = EXCLUDED.passed,"
+                    "  reasons = EXCLUDED.reasons"
+                ),
+                {
+                    "n": night,
+                    "p": problem_id,
+                    "v": version_id,
+                    "c": case_id,
+                    "st": row["status"],
+                    "obj": objective,
+                    "sec": row["wall_time_s"],
+                    "pass": passed,
+                    "reasons": json.dumps(reasons),
+                },
+            )
+            db.commit()
+            results.append(
+                {
+                    "night": night_s,
+                    "problem_id": problem_id,
+                    "model_version_id": version_id,
+                    "case_id": case_id,
+                    "status": row["status"],
+                    "objective": _number(objective) if objective is not None else None,
+                    "seconds": row["wall_time_s"],
+                    "passed": passed,
+                    "reasons": reasons,
+                }
+            )
+    return results
 
 
 def check_version(db: Session, model_version_id: int) -> list[int]:

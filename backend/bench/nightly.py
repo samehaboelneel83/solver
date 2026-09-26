@@ -134,39 +134,70 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--time-limit", type=float, default=30.0)
     parser.add_argument("--no-store", action="store_true", help="do not write bench_result")
     parser.add_argument("--night", default=date.today().isoformat(), help="names the files")
+    parser.add_argument(
+        "--suites",
+        action="store_true",
+        help="also re-ask every problem's acceptance cases (queue R32)",
+    )
+    parser.add_argument(
+        "--suites-only",
+        action="store_true",
+        help="only the acceptance-suite pass, skip the benchmark families",
+    )
     args = parser.parse_args(argv)
-
-    from bench import run
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows_path = out_dir / f"{args.night}.json"
-    from bench.families import COMPARISON_ONLY, FAMILIES
+    status = 0
 
-    run_args = [
-        "--family", ",".join(f for f in FAMILIES if f not in COMPARISON_ONLY),
-        "--sizes", args.sizes,
-        "--instances", str(args.instances),
-        "--seeds", str(args.seeds),
-        "--time-limit", str(args.time_limit),
-        "--out", str(rows_path),
-    ]
-    if not args.no_store:
-        run_args.append("--store")
-    status = run.main(run_args)
-    if status:
-        print(f"bench.run exited {status}", file=sys.stderr)
-        return status
+    if not args.suites_only:
+        from bench import run
+        from bench.families import COMPARISON_ONLY, FAMILIES
 
-    rows = json.loads(rows_path.read_text())
-    found = _previous(out_dir, args.night)
-    against, previous = found if found else (None, None)
-    problems = compare(previous, rows)
-    (out_dir / f"{args.night}.md").write_text(summary(args.night, rows, against, problems))
-    for problem in problems:
-        print(problem)
-    print(f"{len(rows)} runs, {len(problems)} problems; summary in {out_dir / (args.night + '.md')}")
-    return 1 if problems else 0
+        rows_path = out_dir / f"{args.night}.json"
+        run_args = [
+            "--family", ",".join(f for f in FAMILIES if f not in COMPARISON_ONLY),
+            "--sizes", args.sizes,
+            "--instances", str(args.instances),
+            "--seeds", str(args.seeds),
+            "--time-limit", str(args.time_limit),
+            "--out", str(rows_path),
+        ]
+        if not args.no_store:
+            run_args.append("--store")
+        status = run.main(run_args)
+        if status:
+            print(f"bench.run exited {status}", file=sys.stderr)
+            return status
+
+        rows = json.loads(rows_path.read_text())
+        found = _previous(out_dir, args.night)
+        against, previous = found if found else (None, None)
+        problems = compare(previous, rows)
+        (out_dir / f"{args.night}.md").write_text(summary(args.night, rows, against, problems))
+        for problem in problems:
+            print(problem)
+        print(f"{len(rows)} runs, {len(problems)} problems; summary in {out_dir / (args.night + '.md')}")
+        status = 1 if problems else 0
+
+    if args.suites or args.suites_only:
+        from bench import suites as suites_mod
+        from app.core.db import SessionLocal
+
+        night = date.fromisoformat(args.night)
+        # Prefer bench/results for the suites report (plan); fall back beside the night's files.
+        results_dir = Path(__file__).parent / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        suites_out = results_dir / f"{args.night}-suites.md"
+        db = SessionLocal()
+        try:
+            _, suites_status = suites_mod.run_night(db, night=night, out=suites_out)
+        finally:
+            db.close()
+        print(f"suites exit {suites_status}; report in {suites_out}")
+        status = status or suites_status
+
+    return status
 
 
 if __name__ == "__main__":

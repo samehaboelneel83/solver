@@ -45,6 +45,24 @@ describe("VersionChecks", () => {
     expect(screen.getByText(/the objective is 53.8, expected 43.5/)).toBeInTheDocument();
   });
 
+  it("marks a nightly regression in red", async () => {
+    checks = {
+      model_version_id: 5,
+      state: "failed",
+      cases: [{
+        case_id: 1,
+        name: "two shifts",
+        run_id: 3,
+        state: "failed",
+        nightly_regressed: true,
+        reasons: ["passed last night, fails tonight (the objective is 99, expected 2 within 2e-06)"],
+      }],
+    };
+    renderIt();
+    expect(await screen.findByText("nightly")).toBeInTheDocument();
+    expect(screen.getByText(/passed last night, fails tonight/)).toBeInTheDocument();
+  });
+
   it("runs the checks and shows them passing", async () => {
     checks = { model_version_id: 5, state: "unchecked", cases: [{ case_id: 1, name: "two shifts", run_id: null, state: "unchecked", reasons: [] }] };
     renderIt();

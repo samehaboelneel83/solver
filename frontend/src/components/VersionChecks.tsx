@@ -44,6 +44,9 @@ export default function VersionChecks({ versionId }: { versionId: Id }) {
           {cases.map((c) => (
             <li key={c.case_id} className="text-xs">
               <span className={`rounded px-1.5 py-0.5 ${TONE[c.state]}`}>{c.state}</span>{" "}
+              {c.nightly_regressed && (
+                <span className="rounded px-1.5 py-0.5 bg-red-200 text-red-950">nightly</span>
+              )}{" "}
               <span className="font-medium text-slate-900">{c.name}</span>
               {c.reasons.length > 0 && <span className="text-red-800"> -- {c.reasons.join("; ")}</span>}
             </li>

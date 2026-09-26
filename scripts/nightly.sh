@@ -79,7 +79,7 @@ docker run --rm \
   -w /app \
   --env-file "$REPO/.env" \
   "${SOLVER_BACKEND_IMAGE:-solver-backend}" \
-  python -m bench.nightly --out-dir /nightly --night "$NIGHT" \
+  python -m bench.nightly --out-dir /nightly --night "$NIGHT" --suites \
   > "$OUT/$NIGHT-bench.log" 2>&1
 bench=$?
 

@@ -1322,11 +1322,18 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
 }
 export const useAskWhyNot = () => useV1Mutation(askWhyNot);
 
-/** Where a version stands against its problem's acceptance cases (queue R30). */
+/** Where a version stands against its problem's acceptance cases (queue R30 / R32). */
 export type VersionChecks = {
   model_version_id: number;
   state: "no cases" | "unchecked" | "checking" | "failed" | "passed";
-  cases: { case_id: number; name: string; run_id: number | null; state: "unchecked" | "checking" | "failed" | "passed"; reasons: string[] }[];
+  cases: {
+    case_id: number;
+    name: string;
+    run_id: number | null;
+    state: "unchecked" | "checking" | "failed" | "passed";
+    reasons: string[];
+    nightly_regressed?: boolean;
+  }[];
 };
 export const getVersionChecks = (id: Id) => apiFetch<VersionChecks>(`/api/v1/model-versions/${id}/checks`);
 export const checkVersion = (id: Id) => send<VersionChecks & { run_ids: number[] }>("POST", `/api/v1/model-versions/${id}/check`, {});

@@ -305,6 +305,20 @@ backend_checks() {
       -e TEST_CLICKHOUSE_DB="analytics${SOLVER_TEST_SUFFIX:-_test}" \
       -e CLICKHOUSE_HOST=clickhouse \
       "$BACKEND_IMAGE" pytest -q
+
+  # Queue R32: a fast re-ask of one seeded acceptance case (≤5 s), so a code
+  # change that moves a known answer fails the check before deploy.
+  run_step "seeded suite cases (fast, ≤5 s)" "acceptance cases still hold" \
+    docker run --rm \
+      --network "$DOCKER_NET" \
+      -v "$(to_host_path "$REPO_ROOT/backend"):/app" \
+      -w /app \
+      --env-file "$(to_host_path "$ENV_FILE")" \
+      -e TEST_DATABASE_URL="$test_url" \
+      -e DATABASE_URL="$test_url" \
+      -e TEST_CLICKHOUSE_DB="analytics${SOLVER_TEST_SUFFIX:-_test}" \
+      -e CLICKHOUSE_HOST=clickhouse \
+      "$BACKEND_IMAGE" python -m bench.suites --check
 }
 
 # ---------------------------------------------------------------------------
