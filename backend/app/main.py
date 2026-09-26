@@ -19,6 +19,7 @@ from app.api.parameters import router as parameters_router
 from app.api.problems import router as problems_router
 from app.api.quota import router as quota_router
 from app.api.metrics import router as metrics_router
+from app.api.audit import router as audit_router
 from app.api.solver_licences import router as solver_licences_router
 from app.api.suites import router as suites_router
 from app.api.run_events import router as run_events_router
@@ -200,6 +201,7 @@ app.include_router(bulk_router)
 app.include_router(run_map_router)
 app.include_router(quota_router)
 app.include_router(metrics_router)
+app.include_router(audit_router)
 app.include_router(solver_licences_router)
 app.include_router(suites_router)
 app.include_router(api_keys_router)

@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
@@ -69,8 +70,9 @@ def read_settings(
 @router.put("/settings")
 def write_setting(
     payload: SettingWrite,
+    request: Request,
     db: Session = Depends(get_db),
-    _: UserAccount = Depends(requires("settings.edit")),
+    user: UserAccount = Depends(requires("settings.edit")),
 ) -> dict[str, Any]:
     """Set or unset one setting at one level.
 
@@ -99,6 +101,14 @@ def write_setting(
             detail="platform settings apply to every organization; only an operator organization may change them",
         )
 
+    before = db.execute(
+        text(
+            "SELECT value FROM setting WHERE scope = CAST(:s AS setting_scope)"
+            "   AND scope_id IS NOT DISTINCT FROM :i AND key = :k"
+        ),
+        {"s": payload.scope, "i": payload.scope_id, "k": payload.key},
+    ).scalar_one_or_none()
+
     if payload.value is None:
         db.execute(
             text(
@@ -106,6 +116,16 @@ def write_setting(
                 "   AND scope_id IS NOT DISTINCT FROM :i AND key = :k"
             ),
             {"s": payload.scope, "i": payload.scope_id, "k": payload.key},
+        )
+        audit.record(
+            db,
+            organization_id=user.organization_id,
+            actor_id=user.id,
+            action="settings.unset",
+            object_type="setting",
+            object_id=payload.key,
+            before={"scope": payload.scope, "scope_id": payload.scope_id, "value": before},
+            ip=request.client.host if request.client else None,
         )
         db.commit()
         return {"unset": payload.key, "scope": payload.scope, "scope_id": payload.scope_id}
@@ -122,6 +142,17 @@ def write_setting(
                 " DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
             ),
             {"s": payload.scope, "i": payload.scope_id, "k": payload.key, "v": _json(payload.value)},
+        )
+        audit.record(
+            db,
+            organization_id=user.organization_id,
+            actor_id=user.id,
+            action="settings.set",
+            object_type="setting",
+            object_id=payload.key,
+            before={"scope": payload.scope, "scope_id": payload.scope_id, "value": before},
+            after={"scope": payload.scope, "scope_id": payload.scope_id, "value": payload.value},
+            ip=request.client.host if request.client else None,
         )
         db.commit()
     except DBAPIError as exc:

@@ -7,7 +7,7 @@ with the commit that did it), what is in progress, and what is not delivered and
 **State in one paragraph:**
 - Repository: `D:\solver`, branch `master`, 520 commits since 2026-09-16. Nothing is pushed: there
   is no remote.
-- Deployed: app code at `573ab27` (R39 backups); database at migration **0076**. Postgres runs with
+- Deployed: app code through R34 (migration **0077**). Postgres runs with
   `archive_mode=on` and mounts `SOLVER_BACKUP_DIR` (default `D:\solver-backups`).
 - Committed but **not yet deployed**: none.
 - Docs: the detailed day-by-day record is
@@ -229,12 +229,13 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 |---|---|---|---|---|
 | R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | `573ab27` | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
 | R33 | **worker scale-out**: per-org `queue_depth` / `runs_running` / `queue_oldest_wait_seconds`; operator `GET /api/v1/metrics`; `--scale worker=N` runbook; fair-share load bench | — | `dad0276` | operator metrics include the three gauges; `bench.load --check` 200 claims, shares 0.2 each |
+| R34 | **audit log**: append-only `iam.audit_event`; retention 400 days; `GET /api/v1/audit` (+ CSV); login + settings wired; nightly prune | 0077 | *(this commit)* | migration 0077; login writes `auth.login`; list total≥1 |
 
 ---
 
 ## 4. In progress
 
-R34 (audit log) next under “continue all plan work”. Remaining Track C items that need a decision (R35 IdP, R38 cluster, R40 tiers, R37 wording) still ask before coding dependencies.
+Remaining Track C: R35 (needs IdP), R36 (needs R35), R37 (needs retention/legal defaults), R38 (needs cluster), R40 (needs tiers). R34 still needs writers for scenario/lock, dataset, bulk, roles/keys on the same table.
 
 ---
 
@@ -252,7 +253,7 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 | Item | What it is | Unlocked by | Decision needed from you |
 |---|---|---|---|
 | ~~R33~~ | ~~worker scale-out and queue metrics~~ | **done** — see §3.9 | — |
-| R34 | an append-only audit log, exportable | a regulated customer or a security questionnaire | retention default **400** (plan default; using it) |
+| ~~R34~~ | ~~an append-only audit log~~ | **done** (core) — see §3.9; more writers still open | retention **400** |
 | R35 | single sign-on, OIDC first | a customer on Okta, Entra ID or Google | which identity provider; adding `authlib` |
 | R36 | SCIM user provisioning | more than ~200 users, or automatic deprovisioning | needs R35 |
 | R37 | data retention, organization deletion and full export | a GDPR request or a contract clause | retention defaults; deletion report wording |

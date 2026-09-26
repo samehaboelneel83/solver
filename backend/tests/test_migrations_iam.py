@@ -25,4 +25,6 @@ def test_iam_tables_exist_after_migration():
         "rate_bucket",
         # Migration 0071: an organization's own licences for added solvers (queue R42).
         "solver_licence",
+        # Migration 0077: append-only audit log (queue R34).
+        "audit_event",
     }

@@ -80,6 +80,16 @@ backup=$?
 docker run --rm \
   --network "${SOLVER_DOCKER_NET:-solver_solver_net}" \
   -v "$WORKTREE/backend:/app" \
+  -w /app \
+  --env-file "$REPO/.env" \
+  "${SOLVER_BACKEND_IMAGE:-solver-backend}" \
+  python -m app.audit \
+  > "$OUT/$NIGHT-audit.log" 2>&1
+audit=$?
+
+docker run --rm \
+  --network "${SOLVER_DOCKER_NET:-solver_solver_net}" \
+  -v "$WORKTREE/backend:/app" \
   -v "$OUT:/nightly" \
   -w /app \
   --env-file "$REPO/.env" \
@@ -89,7 +99,7 @@ docker run --rm \
 bench=$?
 
 verdict="PASS"
-if [[ $check -ne 0 || $backup -ne 0 || $bench -ne 0 ]]; then verdict="FAIL"; fi
-echo "$NIGHT $COMMIT $verdict -- checks exit $check, backup exit $backup, benchmark exit $bench ($(tail -n 1 "$OUT/$NIGHT-bench.log"))" \
+if [[ $check -ne 0 || $backup -ne 0 || $audit -ne 0 || $bench -ne 0 ]]; then verdict="FAIL"; fi
+echo "$NIGHT $COMMIT $verdict -- checks exit $check, backup exit $backup, audit exit $audit, benchmark exit $bench ($(tail -n 1 "$OUT/$NIGHT-bench.log"))" \
   | tee "$OUT/LATEST"
 [[ $verdict == "PASS" ]]
