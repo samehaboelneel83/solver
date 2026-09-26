@@ -19,6 +19,8 @@ dist/
 # with fixed ids and are not part of the test suite; kept locally, never
 # committed by accident.
 frontend/_browser_check_*.mjs
+# Screenshots / CSVs captured while checking the live UI in a browser.
+frontend/_shots/
 # One-off backend probes, same idea.
 backend/_probe_*.py
 
