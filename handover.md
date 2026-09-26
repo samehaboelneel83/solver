@@ -68,7 +68,8 @@ The platform:
 | OAAS Phase 0–5 (nav, offline, chunks, approvals, scoped URLs, Q01–Q05) | 22 | 22 | — | — |
 | OAAS Phase 6 U01 (Cairo University lectures) | 1 | 1 | — | further demand-led use cases |
 | OAAS OPS01 (Operations queue / audit / backups) | 1 | 1 | — | — |
-| OAAS ADM01 (IAM nav: Users + Roles & permissions) | 1 | 1 | — | demand-led Phase 6 only |
+| OAAS ADM01 (IAM nav: Users + Roles & permissions) | 1 | 1 | — | — |
+| OAAS HELP01 (in-app Help + install page) | 1 | 1 | — | demand-led Phase 6 only |
 
 ---
 
@@ -285,7 +286,7 @@ further equal-budget re-runs when changing a default.
 
 ## 4. In progress
 
-Nothing in flight. OAAS first backlog (N/W/O/Q/S + U01 + OPS01 + ADM01) is on master.
+Nothing in flight. OAAS first backlog (N/W/O/Q/S + U01 + OPS01 + ADM01 + HELP01) is on master.
 Further Phase 6 work needs a named use case and acceptance case.
 
 ---

@@ -35,6 +35,7 @@
 | Cairo University lectures (Phase 6 use case) | **implemented** | U01 `cairo_university_lectures` template; apply → four morning slots, objective 0 |
 | Operations area (queue / audit / backups) | **implemented** | OPS01 `/ops/queue`, `/ops/audit`, `/ops/backups` + `GET /api/v1/backups` |
 | Admin IAM navigation | **implemented** | ADM01 Users + Roles & permissions; assignments on detail; junction tables unlisted |
+| Help (offline) | **implemented** | HELP01 `/help/*` + Installation & updates under Administration |
 
 ## Route inventory (current → proposed owner)
 

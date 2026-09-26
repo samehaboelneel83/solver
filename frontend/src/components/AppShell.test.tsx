@@ -69,6 +69,14 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "All domains" })).toHaveAttribute("href", "/public/domain");
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
+      expect(screen.getByRole("link", { name: "Getting started" })).toHaveAttribute(
+        "href",
+        "/help/getting-started"
+      );
+      expect(screen.getByRole("link", { name: "Installation & updates" })).toHaveAttribute(
+        "href",
+        "/help/install"
+      );
       // Organizations are domain.edit; Users / Roles / User roles /
       // Role capabilities / Capabilities are iam.manage. A modeller shapes the domain
       // (and so still sees Organizations) and does not grant roles.

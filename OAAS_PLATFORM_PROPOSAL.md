@@ -567,6 +567,7 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | U01 | Cairo University lecture timetable (FCAI demo template) | `app/lectures.py`, `showcase.py`, `tests/test_lectures.py` | Phase 6 |
 | OPS01 | Operations pages: run queue, audit, backups (+ status API) | `pages/Ops*.tsx`, `api/backups.py`, nav registry | S05, R33–R39 |
 | ADM01 | Collapse IAM nav; assignments on user/role detail | `nav/registry`, `RelatedRecords`, `meta.py` labels | OPS01 |
+| HELP01 | In-app Help (getting started, coverage, API, releases) + install page | `pages/Help.tsx`, nav registry | ADM01 |
 
 Do not renumber or overwrite the existing R-series execution history. Link completed work from the new backlog and track new work with distinct identifiers.
 

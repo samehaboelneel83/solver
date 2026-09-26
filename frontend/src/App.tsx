@@ -25,6 +25,7 @@ import OpsQueue from "./pages/OpsQueue";
 import OpsAudit from "./pages/OpsAudit";
 import OpsBackups from "./pages/OpsBackups";
 import Settings from "./pages/Settings";
+import Help from "./pages/Help";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
 import NotFound from "./pages/NotFound";
@@ -104,6 +105,12 @@ export default function App() {
         <Route path="ops/queue" element={<OpsQueue />} />
         <Route path="ops/audit" element={<OpsAudit />} />
         <Route path="ops/backups" element={<OpsBackups />} />
+        <Route path="help/getting-started" element={<Help topic="getting-started" />} />
+        <Route path="help/modeling" element={<Help topic="modeling" />} />
+        <Route path="help/coverage" element={<Help topic="coverage" />} />
+        <Route path="help/api" element={<Help topic="api" />} />
+        <Route path="help/release-notes" element={<Help topic="release-notes" />} />
+        <Route path="help/install" element={<Help topic="install" />} />
         <Route path="model" element={<ModelEditor />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
