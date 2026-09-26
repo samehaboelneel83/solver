@@ -312,6 +312,7 @@ def solve_in_process(
         solver=f"highs {_HIGHS_VERSION}",
         duals=_lp_duals(solver, compiled, added_ids) if solved else None,
         reduced_costs=_lp_reduced(solver, compiled, keys) if solved else None,
+        ranges=_lp_ranges(solver, compiled, keys, values) if status == "optimal" else None,
     )
 
 
@@ -360,6 +361,56 @@ def _lp_duals(solver, compiled: Compiled, added_ids: list[str]) -> dict[str, flo
     return fold_duals(
         zip(added_ids, (report_quantity(float(value)) for value in raw))
     )
+
+
+#: At most this many rows and this many costs are ranged on one run.
+RANGED = 500
+
+
+def _lp_ranges(solver, compiled: Compiled, keys: list, values) -> dict | None:
+    """LP ranging (queue R27) at a proven optimum of a linear program, in the model's own terms.
+
+    **Rows**: every rule instance whose dual is not zero (the binding ones -- a slack rule's
+    limit may move freely until it binds), with its limit (`rhs`, the right side less the left's
+    constant), the dual (what one more unit of the limit is worth to the goal) and the range the
+    limit may move in with that dual still exact. **Costs**: each used decision's goal
+    coefficient and the range it may move in with the plan unchanged. HiGHS reports both as the
+    bounds of the current basis; checked by moving each number just inside and just outside.
+    Nothing for a model with a whole-number decision or a quadratic goal."""
+    if any(spec.is_integral for spec in compiled.variables.values()) or compiled.objective_quadratic:
+        return None
+    try:
+        status, found = solver.getRanging()
+        duals = list(solver.getSolution().row_dual)
+    except Exception:
+        return None
+    if int(status) != 0 or len(duals) != len(compiled.constraints):
+        return None
+    rows = []
+    for i, c in enumerate(compiled.constraints):
+        if abs(duals[i]) < 1e-9 or len(rows) >= RANGED:
+            continue
+        rows.append({
+            "rule": c.id, "index": c.index, "rhs": _finite(float(c.right.const - c.left.const)),
+            "dual": report_quantity(float(duals[i])),
+            "low": _finite(float(found.row_bound_dn.value_[i])), "high": _finite(float(found.row_bound_up.value_[i])),
+        })
+    costs = []
+    for i, key in enumerate(keys):
+        if key[0].startswith("__") or abs(float(values[i])) < 1e-9 or len(costs) >= RANGED:
+            continue
+        costs.append({
+            "var": key[0], "index": list(key[1]), "cost": _finite(float(compiled.objective.coeffs.get(key, 0))),
+            "low": _finite(float(found.col_cost_dn.value_[i])), "high": _finite(float(found.col_cost_up.value_[i])),
+        })
+    return {"rows": rows, "costs": costs}
+
+
+def _finite(value: float) -> float | None:
+    """A number for JSON; an unlimited end of a range is None."""
+    if value != value or abs(value) >= 1e30:
+        return None
+    return report_quantity(value)
 
 
 def _lp_reduced(solver, compiled: Compiled, keys: list) -> dict | None:

@@ -185,6 +185,9 @@ class RunRead(RunSummary):
     # How much each whole-number or continuous decision took, where it took any (migration 0065).
     # Null for runs recorded before it, and when there is no answer.
     amounts: dict[str, list[dict[str, Any]]] | None = None
+    # LP ranging (queue R27): `rows` and `costs`, each with the range it may move in; null for
+    # any run that is not a proven optimum of a linear program.
+    ranges: dict[str, Any] | None = None
     # The trade-off front, when one was asked for (migration 0045): its
     # points in order of the first term, each linked to its own run, and
     # the two terms' ids. Null otherwise.
@@ -521,11 +524,20 @@ class WhyNotCell(BaseModel):
     value: float
 
 
+class WhatIfValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    param: str
+    index: list[str | int]
+    value: float
+
+
 class WhyNotRequest(BaseModel):
-    """The cells a planner asks about, and the value each should have (queue R26)."""
+    """The cells a planner asks about and the value each should have (queue R26), and the
+    parameter values to change for the question (a what-if, queue R27)."""
 
     model_config = ConfigDict(extra="forbid")
-    force: list[WhyNotCell]
+    force: list[WhyNotCell] = Field(default_factory=list)
+    override: list[WhatIfValue] = Field(default_factory=list)
 
 
 class WhyNotAnswer(BaseModel):
@@ -547,7 +559,8 @@ def ask_why_not(
     asked cells locked and the rest kept as close to the plan as the rules allow
     (`app.solve.whynot`)."""
     try:
-        probe, verdict = whynot.ask(db, run_id, [c.model_dump() for c in payload.force])
+        probe, verdict = whynot.ask(db, run_id, [c.model_dump() for c in payload.force],
+                                    [v.model_dump() for v in payload.override])
     except whynot.NotAskable as exc:
         db.rollback()
         raise HTTPException(
@@ -681,6 +694,7 @@ def _read(db: Session, run_id: int) -> RunRead:
         set_order=order,
         intervals=intervals,
         amounts=solution.amounts if solution else None,
+        ranges=solution.ranges if solution else None,
         **_front(db, run),
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,

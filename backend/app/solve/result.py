@@ -28,6 +28,11 @@ class Solution:
     # the objective at a proven optimum; None when the solver has none.
     # Measured on the same objective the backend reports (migration 0029).
     best_bound: float | None = None
+    # How far each number may move before the plan changes (queue R27): LP ranging, from a
+    # linear solver at a proven optimum of a model with no whole-number decision -- `rows`, each
+    # binding rule instance's limit with its range, and `costs`, each goal coefficient's range.
+    # None anywhere else: ranging is not defined for a MIP, and no relaxation stands in for it.
+    ranges: dict | None = None
 
     def chosen(self, variable: str) -> list[tuple[str, ...]]:
         """The index tuples a binary variable took as 1 -- the roster, in the

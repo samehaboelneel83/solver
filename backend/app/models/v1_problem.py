@@ -274,6 +274,8 @@ class Solution(Base):
     reduced_costs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     # Migration 0065 (queue R17): how much each whole-number or continuous decision took.
     amounts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Migration 0070 (queue R27): LP ranging at a proven optimum of a linear program; NULL otherwise.
+    ranges: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ConstraintResult(Base):

@@ -551,6 +551,11 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     ir = patched(row["ir"], row["patch"] or {})
     data = row["data"]
     params = row["params"] or {}
+    if (params.get("probe_patch") or {}).get("override"):
+        # A what-if (queue R27): some values changed on a copy of the frozen data.
+        from app.solve.whynot import overridden
+
+        data = overridden(data, ir, params["probe_patch"]["override"])
     time_limit = float(params.get("time_limit_s", 10.0))
     seed = row["seed"]
     # Runs queued before migration 0030 carry neither; they keep what they
@@ -1190,6 +1195,22 @@ def _execute(
                 )
             ]
     events.stage("post_processing")
+    planners_model = not (solving_model is not compiled or compiled.objective_mode == "lex"
+                          or stochastic_record is not None or record_model is not None
+                          or (horizon_record or {}).get("used") or (lns_record or {}).get("used")
+                          or params.get("_stay_close"))
+    if not planners_model or result.status != "optimal":
+        # Ranges are of the model the solver was given. Where that is not the planner's model --
+        # a robust counterpart, a lex stage, sampled futures, a window of a rolling horizon, an
+        # LNS neighbourhood, a goal with a churn penalty -- or the answer is not proven, they
+        # would describe something else, so none are kept (queue R27).
+        result = replace(result, ranges=None)
+    elif result.ranges is None:
+        # A linear program answered by a solver with no ranging (GLOP): HiGHS ranges it, and
+        # the ranges are kept only when HiGHS stands at the same plan.
+        result, ranges_note = _ranged_by_highs(compiled, result, time_limit)
+        if ranges_note:
+            extra["ranges"] = ranges_note
     if params.get("_stay_close") and result.assignments:
         # How far the answer moved from the base plan, and (weighted) its cost without the churn penalty.
         spec = params["_stay_close"]
@@ -1275,6 +1296,31 @@ def _stored_outcome(db: Session, run_id: int) -> RunOutcome:
     return RunOutcome(run_id, row["dataset_id"], row["status"], objective, row["assignments"] or {})
 
 
+def _ranged_by_highs(compiled: Compiled, result: Solution, time_limit: float) -> tuple[Solution, str | None]:
+    """LP ranging for an answer found by a solver that has none (queue R27): the same linear
+    program solved again by HiGHS, its ranges taken only when it stands at the same plan -- a
+    degenerate LP has more than one optimal vertex, and another vertex's ranges would describe
+    another plan. Returns the answer, with ranges or not, and a note when none could be had."""
+    # A linear program only: anything else is not ranged, and HiGHS may not even take it.
+    if any(v.is_integral for v in compiled.variables.values()) or compiled.objective_quadratic             or compiled.pwl or compiled.functions or compiled.intervals             or any(c.quadratic or c.when is not None or c.schedule is not None or c.chance is not None
+                   for c in compiled.constraints):
+        return result, None
+    highs = by_name("highs")
+    if not highs.is_available():
+        return result, None
+    try:
+        ranged = highs.solve(compiled, time_limit=max(1.0, min(10.0, time_limit)), workers=1)
+    except Exception as exc:  # the answer stands; only its ranges are missing
+        return result, f"HiGHS could not range this model: {str(exc)[:200]}"
+    if ranged.status != "optimal" or ranged.ranges is None:
+        return result, "HiGHS did not reach a proven optimum to range"
+    same = all(abs(float(ranged.assignments.get(k, 0)) - float(v)) <= 1e-6 * (1 + abs(float(v)))
+               for k, v in result.assignments.items())
+    if not same:
+        return result, "the model has more than one optimal plan; ranges would describe another one"
+    return replace(result, ranges=ranged.ranges), None
+
+
 def _lock_bases(db: Session, problem_id: int, locks: list[dict[str, Any]]) -> dict[int, "lock_rows.Base"]:
     """What each run a lock reads from decided -- only answered runs of this same problem; any
     other is left out, and the lock that names it is refused when the model is compiled."""
@@ -1354,13 +1400,14 @@ def _record(db: Session, run_id: int, compiled: Compiled, result: Solution) -> N
                    {"t": _json(truncated), "r": run_id})
     db.execute(
         text(
-            "INSERT INTO solution (run_id, assignments, reduced_costs, amounts)"
-            " VALUES (:r, :a, CAST(:rc AS jsonb), CAST(:am AS jsonb))"
+            "INSERT INTO solution (run_id, assignments, reduced_costs, amounts, ranges)"
+            " VALUES (:r, :a, CAST(:rc AS jsonb), CAST(:am AS jsonb), CAST(:rg AS jsonb))"
         ),
         {
             "r": run_id,
             "a": _json(_assignments(compiled, result)),
             "am": None if amounts is None else _json(amounts),
+            "rg": None if result.ranges is None else _json(result.ranges),
             "rc": None if (packed := _reduced_costs(result)) is None else _json(packed),
         },
     )

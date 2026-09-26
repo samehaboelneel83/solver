@@ -54,13 +54,18 @@ class NotAskable(Exception):
         self.code, self.status = code, status
 
 
-def ask(db: Session, run_id: int, force: list[dict[str, Any]]) -> tuple[int | None, dict[str, Any] | None]:
-    """Queue a probe of `run_id` with the cells in `force` locked, or answer at once when the plan
-    already has them. Returns (the probe's run id, None) or (None, the verdict)."""
-    if not force:
-        raise NotAskable("why_not_empty", "ask about at least one cell")
-    if len(force) > MAX_CELLS:
-        raise NotAskable("why_not_too_many", f"ask about at most {MAX_CELLS} cells at once, not {len(force)}")
+def ask(db: Session, run_id: int, force: list[dict[str, Any]],
+        override: list[dict[str, Any]] | None = None) -> tuple[int | None, dict[str, Any] | None]:
+    """Queue a probe of `run_id` with the cells in `force` locked and the parameter values in
+    `override` changed (a what-if, queue R27: on a copy of the frozen data, never the stored
+    dataset), or answer at once when the plan already has every asked cell and nothing is
+    changed. Returns (the probe's run id, None) or (None, the verdict)."""
+    override = override or []
+    if not force and not override:
+        raise NotAskable("why_not_empty", "ask about at least one cell or one changed value")
+    if len(force) + len(override) > MAX_CELLS:
+        raise NotAskable("why_not_too_many",
+                         f"ask about at most {MAX_CELLS} cells and values at once, not {len(force) + len(override)}")
     run = db.execute(
         text(
             "SELECT r.id, r.status, r.purpose, r.params, r.seed, r.scenario_id, r.dataset_id, r.solver,"
@@ -81,10 +86,11 @@ def ask(db: Session, run_id: int, force: list[dict[str, Any]]) -> tuple[int | No
     if (run["params"] or {}).get("pareto_steps"):
         raise NotAskable("why_not_front", "a trade-off front is many plans; ask about one of its points", 409)
     _check_cells(run["ir"], force)
+    _check_overrides(run["ir"], override)
 
     used = {(name, tuple(row)) for name, rows in (run["assignments"] or {}).items() for row in rows}
     domains = {name: spec.get("domain") for name, spec in (run["ir"].get("variables") or {}).items()}
-    if all(domains[c["var"]] == "binary" and ((c["var"], tuple(c["index"])) in used) == (c["value"] == 1)
+    if not override and all(domains[c["var"]] == "binary" and ((c["var"], tuple(c["index"])) in used) == (c["value"] == 1)
            for c in force):
         return None, {"kind": "already", "cells": force}
 
@@ -107,6 +113,7 @@ def ask(db: Session, run_id: int, force: list[dict[str, Any]]) -> tuple[int | No
     params["probe_patch"] = {
         "lock": [*scenario_locks, *({"var": c["var"], "index": c["index"], "value": c["value"]} for c in force)],
         "stay_close": {"from_run": run_id, "mode": "lex"},
+        **({"override": override} if override else {}),
     }
     params["forced"] = [f"{PREFIX}{len(scenario_locks) + n}" for n in range(1, len(force) + 1)]
     params["warm_start"] = False
@@ -137,6 +144,38 @@ def _check_cells(ir: dict[str, Any], force: list[dict[str, Any]]) -> None:
                              f"{len(spec.get('index') or [])} keys")
 
 
+def _check_overrides(ir: dict[str, Any], override: list[dict[str, Any]]) -> None:
+    """Each changed value names a number parameter of the plan's model, with a key per set."""
+    parameters = ir.get("parameters") or {}
+    for n, cell in enumerate(override):
+        spec = parameters.get(cell.get("param"))
+        if not isinstance(spec, dict) or spec.get("entity"):
+            raise NotAskable("why_not_unknown",
+                             f"value {n + 1}: the model has no number parameter {cell.get('param')!r}")
+        if len(cell.get("index") or []) != len(spec.get("index") or []):
+            raise NotAskable("why_not_index_arity",
+                             f"value {n + 1}: {cell['param']!r} is indexed by {spec.get('index')}, so a value names "
+                             f"{len(spec.get('index') or [])} keys")
+
+
+def overridden(data: dict[str, Any], ir: dict[str, Any], override: list[dict[str, Any]]) -> dict[str, Any]:
+    """A copy of the frozen data with some parameter values changed: a cell stored replaced, a
+    cell not stored (which took the default) added. Keys by set name, or by position where a
+    set repeats -- as the dataset keys them."""
+    data = {**data, "parameters": {k: [dict(r) for r in rows] for k, rows in (data.get("parameters") or {}).items()}}
+    for cell in override:
+        sets = (ir.get("parameters") or {})[cell["param"]].get("index") or []
+        names = sets if len(set(sets)) == len(sets) else [str(p) for p in range(len(sets))]
+        key = {name: str(k) for name, k in zip(names, cell["index"])}
+        rows = data["parameters"].setdefault(cell["param"], [])
+        match = next((r for r in rows if all(str(r.get(n)) == v for n, v in key.items())), None)
+        if match is None:
+            rows.append({**key, "value": cell["value"]})
+        else:
+            match["value"] = cell["value"]
+    return data
+
+
 def settle(db: Session, run_id: int) -> None:
     """Write a settled probe's verdict. Nothing for a run that is not a probe."""
     probe = db.execute(
@@ -154,6 +193,7 @@ def settle(db: Session, run_id: int) -> None:
         return
     params = probe["params"] or {}
     forced = params.get("forced") or []
+    changed = (params.get("probe_patch") or {}).get("override")
     if probe["status"] == "infeasible":
         verdict: dict[str, Any] = {
             "kind": "blocked", "forced": forced, "conflict": probe["conflict"],
@@ -173,6 +213,8 @@ def settle(db: Session, run_id: int) -> None:
         }
     else:
         verdict = {"kind": "unanswered", "status": probe["status"], "error": probe["error"]}
+    if changed:
+        verdict["override"] = changed
     db.execute(text("UPDATE run SET verdict = CAST(:v AS jsonb) WHERE id = :r"),
                {"v": json.dumps(verdict), "r": run_id})
     db.commit()
