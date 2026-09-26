@@ -446,9 +446,10 @@ def classify_model(
 
 
 @router.get("/solvers")
-def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
     """What this build can solve with. A UI that hardcoded the list would
     offer a solver a different build does not have."""
+    from app.api.solver_licences import licence_state
     from app.solve import adapters
     from app.solve.backends import REGISTRY
 
@@ -462,6 +463,8 @@ def list_solvers(_: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
                 # Queue R41: where it came from, and whether the rules may choose it unasked.
                 "origin": b.origin,
                 "automatic": b.automatic,
+                # Queue R42: whether this organization has the licence the solver needs.
+                "licence": licence_state(db, user.organization_id, b),
                 **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves}
                    if b.manifest is not None else {}),
             }

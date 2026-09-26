@@ -62,6 +62,7 @@ from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve import locks as lock_rows
+from app.solve import adapters as adapters_rows
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
@@ -176,6 +177,19 @@ def enqueue_run(
     connected_start = bool(settings["solve.connected_start"].value)
     routing_start = bool(settings["solve.routing_start"].value)
     from_settings["routing_start"] = settings["solve.routing_start"].source
+    # Which solvers this problem's organization lets solve (queue R42).
+    from app.solve.licences import solver_list
+
+    allowed_solvers = sorted(solver_list(settings["solve.allowed_solvers"].value))
+    denied_solvers = sorted(solver_list(settings["solve.denied_solvers"].value))
+    if solver is not None:
+        from app.solve.backends import allows
+
+        chosen = by_name(solver)
+        kept_out = allows(chosen, set(allowed_solvers), set(denied_solvers)) if chosen is not None else None
+        if kept_out:
+            raise SettingUnusable("solve.allowed_solvers" if "allowed" in kept_out else "solve.denied_solvers",
+                                  kept_out)
     network = bool(settings["solve.network"].value)
     from_settings["network"] = settings["solve.network"].source
     metaheuristic = bool(settings["solve.metaheuristic"].value)
@@ -255,6 +269,8 @@ def enqueue_run(
         "metaheuristic": metaheuristic,
         "network": network,
         "routing_start": routing_start,
+        **({"allowed_solvers": allowed_solvers} if allowed_solvers else {}),
+        **({"denied_solvers": denied_solvers} if denied_solvers else {}),
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
@@ -577,8 +593,17 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     events = RunEvents(run_id)
     try:
         # The trace the request that queued this run started, continued here.
-        with tracing.continued(params.get("trace")), tracing.span("run", run_id=run_id):
-            outcome = _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel, dataset_id, stop)
+        with tracing.continued(params.get("trace")), tracing.span("run", run_id=run_id), sandbox.licensed(None):
+            try:
+                outcome = _execute(db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel,
+                                   dataset_id, stop)
+            except adapters_rows.AdapterFailed as exc:
+                # An added solver failed (queue R42): its reason, licence scrubbed, is the run's error.
+                db.rollback()
+                db.execute(text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                           {"e": str(exc)[:2000], "r": run_id})
+                db.commit()
+                outcome = RunOutcome(run_id, dataset_id, "error", None, {})
             if params.get("probe_patch") is not None:
                 from app.solve import whynot
 
@@ -715,15 +740,15 @@ def _execute(
             )
         try:
             with tracing.span("choose", model_class=found.model_class) as choosing:
-                backend, why = choose(found, params.get("requested_solver"))
+                backend, why = choose(found, params.get("requested_solver"), **_policy(params))
                 # The learned selector's pick, recorded beside the rules' and acting on
                 # nothing (shadow mode, app.solve.selector, queue R11).
-                shadow = selector_rows.predict(numbers, sorted(_admissible(found)))
+                shadow = selector_rows.predict(numbers, sorted(_admissible(found, params)))
                 recalled = None
                 if params.get("memory") and not params.get("requested_solver"):
                     # The problem's own history, among what the rules admit
                     # for this model (app.solve.memory, queue 17a).
-                    recalled = _recall(db, run_id, found)
+                    recalled = _recall(db, run_id, found, params)
                     if recalled is not None:
                         backend, why = by_name(recalled.solver), recalled.evidence
                 if (params.get("portfolio") and not params.get("requested_solver") and recalled is None
@@ -731,7 +756,7 @@ def _execute(
                         and not params.get("pareto_steps") and not params.get("robust")):
                     # Every admissible solver at once for the whole time
                     # (app.solve.race, queue R2) -- in place of the probe race.
-                    candidates = sorted(_admissible(found), key=_rank_of)
+                    candidates = sorted(_admissible(found, params), key=_rank_of)
                     portfolio_skipped = race_rows.should_portfolio(found.model_class, numbers, candidates)
                     portfolio_candidates = None if portfolio_skipped else candidates
                 if (params.get("probe") and not params.get("requested_solver") and recalled is None
@@ -739,7 +764,7 @@ def _execute(
                         and not params.get("pareto_steps") and not params.get("robust")):
                     # Nothing to remember: race the admissible solvers
                     # briefly (app.solve.race, queue 17b).
-                    candidates = sorted(_admissible(found), key=_rank_of)
+                    candidates = sorted(_admissible(found, params), key=_rank_of)
                     race_skipped = race_rows.should_race(numbers, candidates, time_limit)
                     race_candidates = None if race_skipped else candidates
                 choosing.set_attribute("solver", backend.name)
@@ -754,6 +779,21 @@ def _execute(
             )
             db.commit()
             return RunOutcome(run_id, dataset_id, "error", None, {})
+
+        if backend.origin == "adapter":
+            # This organization's own licence for an added solver (queue R42): given to this run's
+            # sandboxed solves only; a solver that needs one it has not set does not run.
+            from app.solve import licences
+
+            organization = db.execute(text("SELECT organization_id FROM run WHERE id = :r"),
+                                      {"r": run_id}).scalar_one()
+            licence, missing = licences.for_solve(db, organization, backend)
+            if missing:
+                db.execute(text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                           {"e": missing, "r": run_id})
+                db.commit()
+                return RunOutcome(run_id, dataset_id, "error", None, {})
+            sandbox.grant(licence)
 
         hint = None
         if params.get("warm_start") and backend.name in warm.HINTED:
@@ -1968,7 +2008,13 @@ class RunEvents:
             logger.warning("could not record a run event", exc_info=True)
 
 
-def _admissible(found) -> set[str]:
+def _policy(params: dict) -> dict[str, set[str] | None]:
+    """The organization's allowed and denied solvers, as the run was queued with them (queue R42)."""
+    return {"allowed": set(params.get("allowed_solvers") or []) or None,
+            "denied": set(params.get("denied_solvers") or []) or None}
+
+
+def _admissible(found, params: dict | None = None) -> set[str]:
     """Every available backend the rules let take this model and that proves
     its optimum: memory and the probe race compare proofs, and an
     approximate answer (PDLP) is none."""
@@ -1980,7 +2026,7 @@ def _admissible(found) -> set[str]:
         if candidate.proves != "global" or not candidate.automatic:
             continue
         try:
-            choose(found, candidate.name)
+            choose(found, candidate.name, **_policy(params or {}))
             names.add(candidate.name)
         except NoBackend:
             continue
@@ -1991,10 +2037,10 @@ def _rank_of(name: str) -> tuple[int, str]:
     return (by_name(name).rank, name)
 
 
-def _recall(db: Session, run_id: int, found):
+def _recall(db: Session, run_id: int, found, params: dict | None = None):
     from app.solve.memory import RECENT, recall
 
-    admissible = _admissible(found)
+    admissible = _admissible(found, params)
     history = db.execute(
         text(
             "SELECT r.solver, r.wall_time_s FROM run r JOIN scenario s ON s.id = r.scenario_id"

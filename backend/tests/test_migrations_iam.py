@@ -23,4 +23,6 @@ def test_iam_tables_exist_after_migration():
         # Migration 0035: keys for programs, and the rate limit's buckets.
         "api_key",
         "rate_bucket",
+        # Migration 0071: an organization's own licences for added solvers (queue R42).
+        "solver_licence",
     }

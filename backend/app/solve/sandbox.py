@@ -27,6 +27,7 @@ caller's `on_progress` and `should_stop` behave the same.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import multiprocessing
 import os
@@ -67,6 +68,93 @@ def _ctx():
     return _context
 
 
+#: The licence this process's solves are to be given (queue R42): set by the worker for the run it
+#: is solving (`licensed`), carried into each sandboxed child, applied there and nowhere else.
+_LICENCE: dict | None = None
+
+
+@contextlib.contextmanager
+def licensed(licence: dict | None):
+    """Solves inside this block are given `licence`: `{"env": {NAME: value}, "file": {"name": ...,
+    "text": ..., "env": NAME}}` -- environment values, and a licence file written into the solve's
+    own private folder with its path in `env`. The worker's own environment is never changed."""
+    global _LICENCE
+    before, _LICENCE = _LICENCE, licence
+    try:
+        yield
+    finally:
+        _LICENCE = before
+
+
+def grant(licence: dict | None) -> None:
+    """Give the solves from here to the end of the enclosing `licensed` block this licence -- for
+    code that learns the licence part-way through (the run, once its solver is chosen)."""
+    global _LICENCE
+    _LICENCE = licence
+
+
+@contextlib.contextmanager
+def _applied(licence: dict | None):
+    """The licence in this process's environment for the length of the block, then taken back."""
+    if not licence:
+        yield
+        return
+    import tempfile
+
+    saved: dict[str, str | None] = {}
+
+    def put(name: str, value: str) -> None:
+        saved.setdefault(name, os.environ.get(name))
+        os.environ[name] = value
+
+    with tempfile.TemporaryDirectory(prefix="licence-") as folder:
+        os.chmod(folder, 0o700)
+        for name, value in (licence.get("env") or {}).items():
+            put(name, value)
+        file = licence.get("file")
+        if file:
+            path = os.path.join(folder, os.path.basename(file["name"]))
+            with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as out:
+                out.write(file["text"])
+            put(file["env"], path)
+        try:
+            yield
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+
+def _secrets(licence: dict | None) -> list[str]:
+    """What must never leave a solve: every value a licence carries, and each line of its file."""
+    if not licence:
+        return []
+    found = [v for v in (licence.get("env") or {}).values() if len(v) >= 4]
+    text = (licence.get("file") or {}).get("text") or ""
+    found += [line.strip() for line in text.splitlines() if len(line.strip()) >= 8]
+    if len(text.strip()) >= 8:
+        found.append(text.strip())
+    return sorted(set(found), key=len, reverse=True)
+
+
+def scrubbed(exc: BaseException, licence: dict | None) -> BaseException:
+    """An error as it may be stored: a vendor's message quoting the licence loses the licence."""
+    message = str(exc)
+    secrets = [s for s in _secrets(licence) if s in message]
+    if not secrets:
+        return exc
+    for secret in secrets:
+        message = message.replace(secret, "[licence]")
+    try:
+        # The same kind of error where it can be made from a message alone (an adapter's failure
+        # stays one, so the run records it), else a plain one.
+        return type(exc)(message)
+    except Exception:
+        return RuntimeError(f"{type(exc).__name__}: {message}")
+
+
 def run(
     target: str,
     kwargs: dict[str, Any],
@@ -86,12 +174,21 @@ def run(
     that does not look runs on to its time limit. `abandon` ends the child
     at once and raises `Abandoned`: for work whose answer is no longer
     wanted (a portfolio entrant another solver has beaten)."""
+    licence = _LICENCE
     if not enabled():
         fn = _resolve(target)
-        return fn(**kwargs, should_stop=should_stop, on_progress=on_progress)
+        try:
+            with _applied(licence):
+                return fn(**kwargs, should_stop=should_stop, on_progress=on_progress)
+        except Exception as exc:
+            clean = scrubbed(exc, licence)
+            if clean is exc:
+                raise
+            raise clean from None
 
     ctx = _ctx()
-    limits = {"memory_mb": memory_mb(), "cpu_s": int(time_limit * max(1, workers)) + _cpu_slack_s()}
+    limits = {"memory_mb": memory_mb(), "cpu_s": int(time_limit * max(1, workers)) + _cpu_slack_s(),
+              "licence": licence}
     parent, child = ctx.Pipe(duplex=False)
     stop = ctx.Event()
     process = ctx.Process(target=_child, args=(child, target, kwargs, limits, stop), daemon=True)
@@ -137,7 +234,8 @@ def run(
         return payload
     if kind == "memory":
         raise SandboxFailed(f"ran out of memory (limit {limits['memory_mb']} MB)")
-    raise payload  # the child's own exception, e.g. Unsupported
+    clean = scrubbed(payload, licence)
+    raise clean  # the child's own exception, e.g. Unsupported -- with no licence in it
 
 
 class Abandoned(SandboxFailed):
@@ -220,7 +318,8 @@ def _child(conn, target: str, kwargs: dict, limits: dict, stop) -> None:  # prag
         conn.send(("progress", kind, payload))
 
     try:
-        result = fn(**kwargs, should_stop=stop.is_set, on_progress=progress)
+        with _applied(limits.get("licence")):
+            result = fn(**kwargs, should_stop=stop.is_set, on_progress=progress)
         conn.send(("result", result))
     except BaseException as exc:  # noqa: BLE001 -- carried to the parent, raised there
         if _looks_like_memory(exc):

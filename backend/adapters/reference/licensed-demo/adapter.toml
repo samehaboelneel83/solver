@@ -1,0 +1,21 @@
+# Reference adapter (queue R42): a stand-in for a licensed solver. It solves (by HiGHS, as the
+# highs-cli adapter does) only when the organization has set a licence: an environment value
+# DEMO_LICENCE_KEY beginning "DEMO-" and a licence file whose first line is "demo licence".
+# Nothing here is a real licence; it exercises the path a Gurobi or Xpress licence takes.
+name = "licensed-demo"
+kind = "command-line"
+version = "1"
+proves = "global"
+classes = ["IP", "LP", "MILP", "trivial"]
+note = "a stand-in for a licensed solver: solves only with the organization's licence"
+
+[command]
+executable = "python3"
+args = ["{adapter_dir}/licensed.py", "{model}", "{solution}", "{time_limit}", "{gap}", "{threads}"]
+solution = "sol"
+
+[licence]
+required = true
+env = ["DEMO_LICENCE_KEY"]
+file = "demo.lic"
+file_env = "DEMO_LICENCE_FILE"

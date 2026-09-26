@@ -577,7 +577,17 @@ def available_names() -> list[str]:
     return [b.name for b in REGISTRY if b.is_available()]
 
 
-def choose(found: Classification, requested: str | None = None) -> tuple[Backend, str]:
+def allows(backend: "Backend", allowed: set[str] | None, denied: set[str] | None) -> str | None:
+    """Why an organization's settings keep this backend from solving (queue R42), or None."""
+    if denied and backend.name in denied:
+        return f"{backend.name} is denied here (setting solve.denied_solvers)"
+    if allowed and backend.name not in allowed:
+        return f"{backend.name} is not among the solvers allowed here (setting solve.allowed_solvers)"
+    return None
+
+
+def choose(found: Classification, requested: str | None = None, *, allowed: set[str] | None = None,
+           denied: set[str] | None = None) -> tuple[Backend, str]:
     """The backend to use and, in words, why.
 
     The reason is stored on the run. A result whose solver nobody can account
@@ -590,6 +600,9 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
             raise NoBackend(f"there is no solver called {requested!r}")
         if not backend.is_available():
             raise NoBackend(f"{requested} is not available in this build")
+        kept_out = allows(backend, allowed, denied)
+        if kept_out:
+            raise NoBackend(kept_out)
         missing = found.needs - backend.provides
         if found.model_class not in backend.classes or missing:
             raise NoBackend(
@@ -605,7 +618,7 @@ def choose(found: Classification, requested: str | None = None) -> tuple[Backend
     fits = [
         b
         for b in sorted(REGISTRY, key=lambda b: b.rank)
-        if b.proves != "local" and b.automatic
+        if b.proves != "local" and b.automatic and allows(b, allowed, denied) is None
         and b.is_available() and found.model_class in b.classes and not (found.needs - b.provides)
     ]
     if not fits:

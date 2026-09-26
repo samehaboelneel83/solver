@@ -88,6 +88,11 @@ class AdapterRefused(ValueError):
     """A manifest that cannot be loaded. The message says why, for the Solvers page."""
 
 
+class AdapterFailed(RuntimeError):
+    """An added solver that failed while solving: the run records this message as its error
+    (with any licence scrubbed from it, `app.solve.sandbox.scrubbed`)."""
+
+
 @dataclass(frozen=True)
 class Manifest:
     name: str
@@ -180,11 +185,14 @@ def read(folder: Path, built_in: tuple) -> Manifest:
     environment = raw.get("environment", {})
     if not isinstance(environment, dict) or not all(isinstance(v, str) for v in environment.values()):
         raise AdapterRefused("[environment] values must be text")
+    licence = raw.get("licence", {})
+    if not isinstance(licence, dict) or not isinstance(licence.get("required", False), bool)             or not all(isinstance(v, str) for v in licence.get("env", []))             or bool(licence.get("file")) != bool(licence.get("file_env")):
+        raise AdapterRefused("[licence] is `required` (true or false), `env` (names), and `file` with `file_env` together")
     return Manifest(
         name=name, kind=kind, version=str(raw.get("version", "")), proves=proves, classes=classes,
         provides=provides, rank=rank, note=str(raw.get("note", "")), folder=folder,
         engine=body if kind == "ortools-engine" else {}, command=body if kind == "command-line" else {},
-        python=body if kind == "python" else {}, environment=environment, licence=raw.get("licence", {}),
+        python=body if kind == "python" else {}, environment=environment, licence=licence,
     )
 
 
@@ -235,9 +243,12 @@ def _engine(manifest: Manifest) -> tuple[Callable, Callable[[], bool]]:
               gap_rel: float = 0.0, on_progress=None, **_: Any) -> Solution:
         from app.solve import milp
 
-        with _environment(manifest):
-            result = milp.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop,
-                                seed=seed, gap_rel=gap_rel, engine=engine, options=options)
+        try:
+            with _environment(manifest):
+                result = milp.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop,
+                                    seed=seed, gap_rel=gap_rel, engine=engine, options=options)
+        except Exception as exc:
+            raise AdapterFailed(f"{manifest.name}: {exc}") from exc
         return _named(result, manifest)
 
     return solve, available
@@ -261,7 +272,7 @@ def _command(manifest: Manifest) -> tuple[Callable, Callable[[], bool]]:
               gap_rel: float = 0.0, on_progress=None, **_: Any) -> Solution:
         exe = executable()
         if exe is None:
-            raise RuntimeError(f"{manifest.name}: {command['executable']!r} is not installed here")
+            raise AdapterFailed(f"{manifest.name}: {command['executable']!r} is not installed here")
         return run_command(manifest, exe, compiled, time_limit=time_limit, workers=workers,
                            should_stop=should_stop, seed=seed, gap_rel=gap_rel)
 
@@ -304,14 +315,14 @@ def run_command(manifest: Manifest, exe: str, compiled: Compiled, *, time_limit:
     elif code in manifest.command.get("unbounded_exit_codes", []):
         status = "unbounded"
     if status in ("optimal", "feasible") and not found:
-        raise RuntimeError(f"{manifest.name} said {status} and wrote no values")
+        raise AdapterFailed(f"{manifest.name} said {status} and wrote no values")
     if status is None:
         if found:
             status = "feasible"
         elif stopped:
             status = "unknown"
         else:
-            raise RuntimeError(f"{manifest.name} exited {code} with no solution" + (f": {stderr}" if stderr else ""))
+            raise AdapterFailed(f"{manifest.name} exited {code} with no solution" + (f": {stderr}" if stderr else ""))
     wall = round(time.monotonic() - started, 3)
     if status not in ("optimal", "feasible"):
         return Solution(status=status, optimal=False, objective=None, assignments={}, wall_seconds=wall,
@@ -372,9 +383,14 @@ def _python(manifest: Manifest) -> tuple[Callable, Callable[[], bool]]:
     def solve(compiled: Compiled, **knobs: Any) -> Solution:
         fn = function()
         if fn is None:
-            raise RuntimeError(f"{manifest.name}: {loaded.get('why', 'its module has no solve function')}")
-        with _environment(manifest):
-            return _named(fn(compiled, **knobs), manifest)
+            raise AdapterFailed(f"{manifest.name}: {loaded.get('why', 'its module has no solve function')}")
+        try:
+            with _environment(manifest):
+                return _named(fn(compiled, **knobs), manifest)
+        except (AdapterFailed, MemoryError):
+            raise
+        except Exception as exc:
+            raise AdapterFailed(f"{manifest.name}: {type(exc).__name__}: {exc}") from exc
 
     return solve, lambda: function() is not None
 
