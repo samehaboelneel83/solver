@@ -69,7 +69,8 @@ The platform:
 | OAAS Phase 6 U01 (Cairo University lectures) | 1 | 1 | — | further demand-led use cases |
 | OAAS OPS01 (Operations queue / audit / backups) | 1 | 1 | — | — |
 | OAAS ADM01 (IAM nav: Users + Roles & permissions) | 1 | 1 | — | — |
-| OAAS HELP01 (in-app Help + install page) | 1 | 1 | — | demand-led Phase 6 only |
+| OAAS HELP01 (in-app Help + install page) | 1 | 1 | — | — |
+| OAAS P2a (answer-shaping stage → `answers.py`) | 1 | 1 | — | further service.py extractions |
 
 ---
 
@@ -286,8 +287,8 @@ further equal-budget re-runs when changing a default.
 
 ## 4. In progress
 
-Nothing in flight. OAAS first backlog (N/W/O/Q/S + U01 + OPS01 + ADM01 + HELP01) is on master.
-Further Phase 6 work needs a named use case and acceptance case.
+Nothing in flight. OAAS first backlog plus HELP01 and P2a (answer shaping) are on master.
+Further Phase 6 work needs a named use case; further P2 extractions are optional.
 
 ---
 

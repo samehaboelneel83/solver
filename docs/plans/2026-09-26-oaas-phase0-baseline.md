@@ -36,6 +36,7 @@
 | Operations area (queue / audit / backups) | **implemented** | OPS01 `/ops/queue`, `/ops/audit`, `/ops/backups` + `GET /api/v1/backups` |
 | Admin IAM navigation | **implemented** | ADM01 Users + Roles & permissions; assignments on detail; junction tables unlisted |
 | Help (offline) | **implemented** | HELP01 `/help/*` + Installation & updates under Administration |
+| Solve service stages (P2) | **partial** | P2a `app/solve/answers.py`; further extractions optional |
 
 ## Route inventory (current → proposed owner)
 

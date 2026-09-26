@@ -64,6 +64,7 @@ from app.solve import warm
 from app.solve import locks as lock_rows
 from app.solve import adapters as adapters_rows
 from app.solve import verify as verify_rows
+from app.solve import answers as answer_rows
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
@@ -82,6 +83,27 @@ _MAX_REPORTED_VIOLATIONS = 20
 # How often a running worker says it is still alive. Reclaim is a multiple
 # of this, not of the time limit: a slow solve that heartbeats is not stale.
 HEARTBEAT_SECONDS = float(os.environ.get("WORKER_HEARTBEAT_SECONDS", "2.0"))
+
+# Answer shaping lived in this file; thin wrappers keep monkeypatches on
+# `app.solve.service.AMOUNT_CELLS` working (OAAS P2).
+AMOUNT_CELLS = answer_rows.AMOUNT_CELLS
+AMOUNT_CHUNK = answer_rows.AMOUNT_CHUNK
+_assignments = answer_rows.assignments
+_amounts = answer_rows.amounts
+_reduced_costs = answer_rows.reduced_costs
+_json_number = answer_rows.json_number
+
+
+def _kept_amounts(compiled: Compiled, result: Solution):
+    return answer_rows.kept_amounts(
+        compiled, result, cell_limit=AMOUNT_CELLS, chunk_size=AMOUNT_CHUNK
+    )
+
+
+def _amount_chunk_rows(amounts: dict[str, list[dict[str, Any]]], chunk_size: int | None = None):
+    return answer_rows.amount_chunk_rows(
+        amounts, chunk_size=AMOUNT_CHUNK if chunk_size is None else chunk_size
+    )
 
 
 @dataclass
@@ -2426,89 +2448,6 @@ def _record_conflict(
             "r": run_id,
         },
     )
-
-
-def _assignments(compiled: Compiled, result: Solution) -> dict[str, list[list[str]]]:
-    """The answer in the domain's own words: which index tuples each variable
-    took. Violation variables are not part of the roster and are reported
-    through `constraint_result` instead."""
-    out: dict[str, list[list[str]]] = {name: [] for name in compiled.var_index_sets}
-    for (name, index), value in sorted(result.assignments.items()):
-        # Violations and the auxiliaries a curve stands for are not decisions
-        # anyone made; `__` names are the compiler's own.
-        if not name.startswith("__") and value:
-            out.setdefault(name, []).append(list(index))
-    return out
-
-
-#: Past this many used whole or fractional cells, a run keeps amounts in
-#: `solution_amount_chunk` instead of the inline `solution.amounts` column
-#: (queue R23 / OAAS Phase 5). The roster still says which cells were used;
-#: `params.amounts_chunked` records the cell count and chunking.
-AMOUNT_CELLS = 200_000
-
-#: Max cells stored in one `solution_amount_chunk` row.
-AMOUNT_CHUNK = 50_000
-
-
-def _kept_amounts(compiled: Compiled, result: Solution) -> tuple[dict[str, list[dict[str, Any]]] | None, dict]:
-    """Inline amounts when small enough; otherwise metadata for chunk storage."""
-    amounts = _amounts(compiled, result)
-    cells = sum(len(rows) for rows in amounts.values())
-    if cells > AMOUNT_CELLS:
-        return None, {"amounts_chunked": {"cells": cells, "chunk_size": AMOUNT_CHUNK}}
-    return amounts, {}
-
-
-def _amount_chunk_rows(
-    amounts: dict[str, list[dict[str, Any]]], chunk_size: int = AMOUNT_CHUNK
-) -> list[tuple[str, int, list[dict[str, Any]], int]]:
-    """Split amounts into (variable, chunk_index, rows, cell_count) for storage."""
-    out: list[tuple[str, int, list[dict[str, Any]], int]] = []
-    for variable, rows in sorted(amounts.items()):
-        for start in range(0, len(rows), chunk_size):
-            piece = rows[start : start + chunk_size]
-            out.append((variable, start // chunk_size, piece, len(piece)))
-    return out
-
-
-def _amounts(compiled: Compiled, result: Solution) -> dict[str, list[dict[str, Any]]]:
-    """How much each whole-number or continuous decision took, where it took any (queue R17):
-    what a heat matrix, bars or a line are drawn from. A yes-or-no decision says all it has
-    to say in `_assignments`."""
-    out: dict[str, list[dict[str, Any]]] = {}
-    for (name, index), value in sorted(result.assignments.items()):
-        variable = compiled.variables.get((name, index))
-        if name.startswith("__") or not value or variable is None or variable.domain == "binary":
-            continue
-        out.setdefault(name, []).append({"index": list(index), "value": _json_number(value)})
-    return out
-
-
-_REDUCED_COST_FLOOR = 1e-8
-
-
-def _reduced_costs(result: Solution) -> dict[str, list[dict[str, Any]]] | None:
-    """Non-zero reduced costs, grouped like the roster. None when this
-    backend has nothing to say -- not an empty object, which would mean it
-    looked and every decision was free."""
-    if result.reduced_costs is None:
-        return None
-    out: dict[str, list[dict[str, Any]]] = {}
-    for (name, index), value in sorted(result.reduced_costs.items()):
-        if name.startswith("__") or abs(value) < _REDUCED_COST_FLOOR:
-            continue
-        out.setdefault(name, []).append(
-            {"index": list(index), "value": _json_number(value)}
-        )
-    return out
-
-
-def _json_number(value: float) -> int | float:
-    rounded = round(value)
-    if abs(value - rounded) < _REDUCED_COST_FLOOR:
-        return int(rounded)
-    return float(value)
 
 
 def _json(value: Any) -> str:

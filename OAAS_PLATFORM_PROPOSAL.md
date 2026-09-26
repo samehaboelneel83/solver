@@ -67,7 +67,7 @@ The current `handover.md` is more recent than the September 22 platform report a
 | P1 | Large non-binary results can lose stored amounts above the cap in `_kept_amounts`. | Introduce chunked result storage and paginated access before promising large-scale replay and re-optimization. |
 | P1 | Solver improvements have workload-dependent benefits. | Retain conservative defaults and promote changes only through benchmark gates. |
 | P1 | Operational capabilities exist, but the main router lacks dedicated queue, audit, backup, and shadow-report pages. | Add a focused Operations area, reusing existing APIs where possible. |
-| P2 | The solve service coordinates many policies in a file of more than 2,000 lines. | Extract explicit stages gradually, protected by existing regression cases. |
+| P2 | The solve service coordinates many policies in a file of more than 2,000 lines. | Extract explicit stages gradually, protected by existing regression cases. **Started:** answer shaping → `app/solve/answers.py` (P2a). |
 
 ### What the recorded benchmarks actually establish
 
@@ -568,6 +568,7 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | OPS01 | Operations pages: run queue, audit, backups (+ status API) | `pages/Ops*.tsx`, `api/backups.py`, nav registry | S05, R33–R39 |
 | ADM01 | Collapse IAM nav; assignments on user/role detail | `nav/registry`, `RelatedRecords`, `meta.py` labels | OPS01 |
 | HELP01 | In-app Help (getting started, coverage, API, releases) + install page | `pages/Help.tsx`, nav registry | ADM01 |
+| P2a | Extract answer-shaping stage from `service.py` | `app/solve/answers.py` | HELP01 |
 
 Do not renumber or overwrite the existing R-series execution history. Link completed work from the new backlog and track new work with distinct identifiers.
 
