@@ -92,6 +92,7 @@ Every item below was tested (unit + full check) and verified live unless it says
 | 60 | **R17d** an uncertain parameter's values as ranges in the Model editor | R17b's last input view | `model/RangePicture.tsx`, `model/DeclarationsEditor.tsx` | `9b25080` |
 | 61 | **R23** warm starts hint kept amounts; a huge answer keeps none | Track A of `2026-09-26-planner-ops-scale-plan.md` | `solve/warm.py`, `solve/service.py` | `eb2d670` |
 | 62 | **R24** locks: a cell, a slice of an earlier run, a horizon; rows `lock:N` | re-plan around committed decisions | `solve/locks.py`, `api/problems.py` (`patch.lock`) | `91c191b` |
+| 63 | **R25** stay close to a base plan, weighted or lex | a re-plan that moves 4 cells, not 24, at the same cost | `solve/locks.py` (`stay_close`), `api/problems.py` | `9a99254` |
 | 47 | **R22** the app's look everywhere (the user's datalytics screenshot) | queue R22 | `tailwind.config.js`, `index.css`, `components/AppShell.tsx`, `CommandPalette.tsx`, `RecentRuns.tsx`, `lib/theme.ts`; lucide-react added | `bc6159b` |
 | 46 | **R17a** answers drawn by their shape: roster grid, pivot, heat, bars, line, chosen set | queue R17 | migration 0065, `lib/runViews.ts`, `components/RunViews.tsx`, `api/runs.py` (`_shapes`), `service.py` (`_amounts`) | `25f022a`, `7f74198` |
 | 45 | **R16b** road distances and travel times from the tile server's roads | queue R16b | `app/spatial/mvt.py`, `roads.py`, `app/api/distances.py`, `components/MeasureFromMap.tsx`; scipy added | `cf0c0cd`; median road/straight 1.30 |
