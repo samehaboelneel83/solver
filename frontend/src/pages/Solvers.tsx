@@ -233,7 +233,7 @@ export default function Solvers() {
                     <td className="py-2">
                       <div className="flex flex-col items-start gap-1">
                         {licence && editing !== s.name && (
-                          <button type="button" onClick={() => setEditing(s.name)} className="text-sm text-blue-700 underline">
+                          <button type="button" onClick={() => setEditing(s.name)} className="whitespace-nowrap text-sm text-blue-700 underline">
                             {licence.set ? "Replace licence" : "Set licence"}
                           </button>
                         )}
@@ -247,7 +247,7 @@ export default function Solvers() {
                                 onError: (error) => toast.error(formatApiError(error)),
                               });
                             }}
-                            className="text-sm text-red-700 underline"
+                            className="whitespace-nowrap text-sm text-red-700 underline"
                           >
                             Remove licence
                           </button>
@@ -257,7 +257,7 @@ export default function Solvers() {
                             type="button"
                             disabled={conformance.isPending}
                             onClick={() => runKit(s.name)}
-                            className="text-sm text-blue-700 underline disabled:opacity-60"
+                            className="whitespace-nowrap text-sm text-blue-700 underline disabled:opacity-60"
                           >
                             {conformance.isPending && conformance.variables === s.name ? "Running the kit…" : "Run conformance kit"}
                           </button>
