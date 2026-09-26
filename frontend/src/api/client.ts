@@ -81,6 +81,30 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   return response.json() as Promise<T>;
 }
 
+/** Plain-text API response (Prometheus metrics, CSV exports). */
+export async function apiText(path: string): Promise<string> {
+  const token = getToken();
+  let response: Response;
+  try {
+    response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new NetworkError();
+  }
+  if (response.status === 401) {
+    setToken(null);
+    const { pathname, search } = window.location;
+    if (pathname !== "/login") {
+      const next = currentLocationParam(pathname, search);
+      window.location.href = `/login?reason=expired&next=${next}`;
+    }
+    throw new ApiError(401, "unauthorized");
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, (await response.text()) || response.statusText);
+  }
+  return response.text();
+}
+
 /** A file from the API, with the signed-in token: a template to download (queue R21). */
 export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
   const token = getToken();

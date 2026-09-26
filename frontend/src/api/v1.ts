@@ -27,7 +27,7 @@
  */
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ExpressionDocument } from "../expressions/document";
-import { ApiError, apiFetch } from "./client";
+import { ApiError, apiFetch, apiText } from "./client";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 
 // --- shared -------------------------------------------------------------
@@ -1271,6 +1271,93 @@ export const useRevokeApiKey = () => useV1Mutation(revokeApiKey);
 
 export function useSolvers() {
   return useQuery({ queryKey: [V1, "solvers"], queryFn: listSolvers, staleTime: 5 * 60 * 1000 });
+}
+
+export type QueueOrgRow = { org: string; depth: number; running: number; oldestWaitSeconds: number };
+
+/** Parse Prometheus text exposition into per-org queue gauges (R33 / OPS01). */
+export function parseQueueMetrics(text: string): QueueOrgRow[] {
+  const depth = new Map<string, number>();
+  const running = new Map<string, number>();
+  const wait = new Map<string, number>();
+  for (const line of text.split("\n")) {
+    if (!line || line.startsWith("#")) continue;
+    const m = /^(queue_depth|runs_running|queue_oldest_wait_seconds)\{org="([^"]*)"\}\s+(\S+)/.exec(line);
+    if (!m) continue;
+    const [, name, org, raw] = m;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) continue;
+    if (name === "queue_depth") depth.set(org, value);
+    else if (name === "runs_running") running.set(org, value);
+    else wait.set(org, value);
+  }
+  const orgs = new Set([...depth.keys(), ...running.keys(), ...wait.keys()]);
+  return [...orgs]
+    .sort()
+    .map((org) => ({
+      org,
+      depth: depth.get(org) ?? 0,
+      running: running.get(org) ?? 0,
+      oldestWaitSeconds: wait.get(org) ?? 0,
+    }));
+}
+
+export const fetchMetricsText = () => apiText("/api/v1/metrics");
+
+export function useQueueMetrics() {
+  return useQuery({
+    queryKey: [V1, "metrics", "queue"],
+    queryFn: async () => parseQueueMetrics(await fetchMetricsText()),
+    refetchInterval: 10_000,
+  });
+}
+
+export type AuditEvent = {
+  id: number;
+  at: string | null;
+  organization_id: string;
+  actor_id: string | null;
+  api_key_id: string | null;
+  action: string;
+  object_type: string | null;
+  object_id: string | null;
+  before_hash: string | null;
+  after_hash: string | null;
+  ip: string | null;
+};
+
+export const listAudit = (params: { limit?: number; offset?: number; action?: string } = {}) => {
+  const q = new URLSearchParams();
+  if (params.limit != null) q.set("limit", String(params.limit));
+  if (params.offset != null) q.set("offset", String(params.offset));
+  if (params.action) q.set("action", params.action);
+  const qs = q.toString();
+  return apiFetch<Page<AuditEvent>>(`/api/v1/audit${qs ? `?${qs}` : ""}`);
+};
+
+export function useAudit(params: { limit?: number; offset?: number; action?: string } = {}) {
+  return useQuery({
+    queryKey: [V1, "audit", params],
+    queryFn: () => listAudit(params),
+  });
+}
+
+export type BackupStatus = {
+  root: string;
+  reachable: boolean;
+  rpo_hours: number;
+  rto_hours: number;
+  latest: Record<string, string> | null;
+  dumps: string[];
+  dump_count: number;
+  wal_present: boolean;
+  runbook: string;
+};
+
+export const fetchBackupStatus = () => apiFetch<BackupStatus>("/api/v1/backups");
+
+export function useBackupStatus() {
+  return useQuery({ queryKey: [V1, "backups"], queryFn: fetchBackupStatus, staleTime: 30_000 });
 }
 
 export function useSolverLicences() {

@@ -21,6 +21,9 @@ import Runs from "./pages/Runs";
 import Workspace from "./pages/Workspace";
 import ApiKeys from "./pages/ApiKeys";
 import Solvers from "./pages/Solvers";
+import OpsQueue from "./pages/OpsQueue";
+import OpsAudit from "./pages/OpsAudit";
+import OpsBackups from "./pages/OpsBackups";
 import Settings from "./pages/Settings";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
@@ -98,6 +101,9 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
+        <Route path="ops/queue" element={<OpsQueue />} />
+        <Route path="ops/audit" element={<OpsAudit />} />
+        <Route path="ops/backups" element={<OpsBackups />} />
         <Route path="model" element={<ModelEditor />} />
         <Route path="scenarios" element={<Scenarios />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />

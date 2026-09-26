@@ -79,12 +79,16 @@ services:
       # adapters shipped in the image, then a customer's own, mounted at /opt/solver/adapters.
       # The api and the worker must read the same folders.
       SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
+      # OAAS OPS01: LATEST manifest + dump list for the Backups page.
+      SOLVER_BACKUP_DIR: /backups
     ports:
       - "8010:8000"
     # Prometheus metrics (app/core/metrics.py): on the compose network only,
     # never published -- queue depth names organizations.
     expose:
       - "9101"
+    volumes:
+      - ${SOLVER_BACKUP_DIR:-../solver-backups}:/backups:ro
     # Solving happens in the worker; the API only answers requests.
     mem_limit: 2g
     cpus: "4"

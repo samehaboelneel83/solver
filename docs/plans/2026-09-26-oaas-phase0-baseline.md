@@ -33,6 +33,7 @@
 | Navigation hierarchy (proposal §3) | **implemented** | Phase 1 N01–N07 + §3.5 scoped URLs |
 | Learned selector promotion | **partial** | shadow only (by design) |
 | Cairo University lectures (Phase 6 use case) | **implemented** | U01 `cairo_university_lectures` template; apply → four morning slots, objective 0 |
+| Operations area (queue / audit / backups) | **implemented** | OPS01 `/ops/queue`, `/ops/audit`, `/ops/backups` + `GET /api/v1/backups` |
 
 ## Route inventory (current → proposed owner)
 

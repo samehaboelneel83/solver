@@ -1,9 +1,9 @@
 import { MouseEvent, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Bell, BookOpen, Boxes, ChevronDown, ChevronLeft, ChevronRight, Database, FileStack, FlaskConical, FolderTree,
+  Activity, Archive, Bell, BookOpen, Boxes, ChevronDown, ChevronLeft, ChevronRight, Database, FileStack, FlaskConical, FolderTree,
   GitBranch, Home, Cpu,
-  KeyRound, Languages, LayoutTemplate, LogOut, Menu, Moon, Network, Play, Search, Settings,
+  KeyRound, Languages, LayoutTemplate, LogOut, Menu, Moon, Network, Play, ScrollText, Search, Settings,
   ShieldCheck, SlidersHorizontal, Sun, Table2, UserCog, Users, Waypoints, Workflow, type LucideIcon,
 } from "lucide-react";
 import { setToken } from "../api/client";
@@ -56,6 +56,9 @@ const ICONS: Record<string, LucideIcon> = {
   "/workspace": Table2,
   "/settings": Settings,
   "/solvers": Cpu,
+  "/ops/queue": Activity,
+  "/ops/audit": ScrollText,
+  "/ops/backups": Archive,
   "/api-keys": KeyRound,
   "/iam/organization": Users,
   "/iam/user_account": UserCog,

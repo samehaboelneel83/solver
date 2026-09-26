@@ -67,6 +67,7 @@ The platform:
 | Track C — scale and enterprise (R33–R40) | 8 | 8 | — | — |
 | OAAS Phase 0–5 (nav, offline, chunks, approvals, scoped URLs, Q01–Q05) | 22 | 22 | — | — |
 | OAAS Phase 6 U01 (Cairo University lectures) | 1 | 1 | — | further demand-led use cases |
+| OAAS OPS01 (Operations queue / audit / backups) | 1 | 1 | — | admin user/role detail screens (proposal P1) |
 
 ---
 
@@ -283,7 +284,7 @@ further equal-budget re-runs when changing a default.
 
 ## 4. In progress
 
-Nothing in flight. U01 `cairo_university_lectures` is on master after the Phase 0–5 commit.
+Nothing in flight. U01 and OPS01 are committed after Phase 0–5.
 
 ---
 
