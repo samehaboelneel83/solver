@@ -76,9 +76,8 @@ and confirm:
 - [ ] API `/api/health` returns postgres (and clickhouse if required).
 - [ ] FastAPI docs, if enabled, use only local assets or are disabled.
 - [ ] Basemap / terrain / vector / font requests stay on the internal tile server.
-- [ ] UI webfonts (Archivo + Source Serif 4 via Google Fonts in `frontend/index.html`)
-      are either self-hosted in the image or fail closed to system fonts with no
-      public egress.
+- [ ] UI webfonts are bundled via `@fontsource/archivo` and
+      `@fontsource/source-serif-4` (no Google Fonts link in `index.html`).
 - [ ] Telemetry exporters are off or pointed at an internal endpoint.
 - [ ] Commercial licence activation works under the isolation policy (customer-owned).
 

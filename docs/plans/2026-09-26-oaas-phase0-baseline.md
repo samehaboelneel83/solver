@@ -19,6 +19,7 @@
 | Backups / queue metrics / audit | **implemented** | R39 / R33 / R34 |
 | Offline install bundle (digest-pinned) | **implemented** | O01 + offline-bundle + digest compose + Dockerfile `OFFLINE=1` wheelhouse/npm-cache |
 | Reachability UX | **implemented** | O02 banner + egress-check + hooked in `check.sh` (skips if stack down) |
+| Self-hosted UI fonts | **implemented** | O03 `@fontsource/archivo` + `@fontsource/source-serif-4` (no Google Fonts) |
 | Chunked large results | **implemented** | 0082 + `GET …/amounts`; inline cap 200k |
 | Approval lifecycle | **implemented** | 0082 + API + Runs `ApprovePlanPanel` UI |
 | Scale reservations / capacity | **implemented** | S04 `app.solve.reserve` + S05 reference limits in `docs/contracts/scale-reliability.md` |

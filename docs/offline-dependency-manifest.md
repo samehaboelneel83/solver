@@ -23,7 +23,9 @@ adapter under `/opt/solver/adapters`).
 ## Frontend Node (`frontend/package.json`)
 
 Installed at frontend image build (`npm install`). Runtime is static files in
-nginx — no Node at serve time.
+nginx — no Node at serve time. UI fonts (`@fontsource/archivo`,
+`@fontsource/source-serif-4`) are npm dependencies bundled into the Vite build
+(OAAS **O03**); there is no Google Fonts (or other CDN) link in `index.html`.
 
 ## Maps / tiles
 
