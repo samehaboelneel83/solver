@@ -355,39 +355,70 @@ def claim_next(db: Session) -> int | None:
     concurrency quota exact -- two workers counting at once could otherwise
     both see room for one more. `SKIP LOCKED` stays, so a worker never waits
     on a row another is updating.
+
+    **Host room (OAAS S04).** After org fairness, a candidate that does not
+    fit the host CPU/memory/licence budget (with shadow/suite capped in the
+    check pool) is left queued; another run that still fits may start.
     """
+    from app.solve import reserve as reserve_rows
+
     db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _CLAIM_LOCK})
-    run_id = db.execute(
-        text(
-            "WITH running AS ("
-            "    SELECT organization_id, count(*) AS n FROM run"
-            "     WHERE status = 'running' GROUP BY organization_id"
-            ")"
-            " SELECT r.id FROM run r"
-            "   LEFT JOIN running c ON c.organization_id = r.organization_id"
-            "   LEFT JOIN iam.quota q ON q.organization_id = r.organization_id"
-            "  WHERE r.status = 'queued'"
-            "    AND (q.max_concurrent_runs IS NULL OR coalesce(c.n, 0) < q.max_concurrent_runs)"
-            # Checks (suite, shadow) after every plan and question: they never delay a planner (queue R30).
-            "  ORDER BY (r.purpose IN ('suite', 'shadow')),"
-            "           coalesce(c.n, 0)::float / greatest(coalesce(q.priority_weight, 1), 1),"
-            "           r.queued_at, r.id"
-            "  FOR UPDATE OF r SKIP LOCKED LIMIT 1"
+    deferred: list[int] = []
+    for _ in range(8):
+        run_id = db.execute(
+            text(
+                "WITH running AS ("
+                "    SELECT organization_id, count(*) AS n FROM run"
+                "     WHERE status = 'running' GROUP BY organization_id"
+                ")"
+                " SELECT r.id FROM run r"
+                "   LEFT JOIN running c ON c.organization_id = r.organization_id"
+                "   LEFT JOIN iam.quota q ON q.organization_id = r.organization_id"
+                "  WHERE r.status = 'queued'"
+                "    AND (q.max_concurrent_runs IS NULL OR coalesce(c.n, 0) < q.max_concurrent_runs)"
+                "    AND NOT (r.id = ANY(CAST(:deferred AS int[])))"
+                # Checks (suite, shadow) after every plan and question: they never delay a planner (queue R30).
+                "  ORDER BY (r.purpose IN ('suite', 'shadow')),"
+                "           coalesce(c.n, 0)::float / greatest(coalesce(q.priority_weight, 1), 1),"
+                "           r.queued_at, r.id"
+                "  FOR UPDATE OF r SKIP LOCKED LIMIT 1"
+            ),
+            {"deferred": deferred},
+        ).scalar_one_or_none()
+        if run_id is None:
+            db.rollback()
+            return None
+        row = db.execute(
+            text("SELECT purpose, params, organization_id FROM run WHERE id = :r"),
+            {"r": run_id},
+        ).mappings().one()
+        purpose = row["purpose"] or "plan"
+        params = row["params"] or {}
+        org_memory = quota_of(db, row["organization_id"]).get("max_memory_mb")
+        need = reserve_rows.need_for(
+            purpose=purpose,
+            workers=int(params.get("workers") or 8),
+            memory_mb=org_memory,
         )
-    ).scalar_one_or_none()
-    if run_id is None:
-        db.rollback()
-        return None
-    db.execute(
-        text(
-            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now(),"
-            "               execution_attempt = execution_attempt + 1"
-            " WHERE id = :r"
-        ),
-        {"r": run_id},
-    )
-    db.commit()
-    return run_id
+        why = reserve_rows.can_admit(
+            reserve_rows.held_running(db), need, reserve_rows.host_capacity()
+        )
+        if why is not None:
+            deferred.append(int(run_id))
+            continue
+        db.execute(
+            text(
+                "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now(),"
+                "               execution_attempt = execution_attempt + 1,"
+                "               params = coalesce(params, '{}'::jsonb) || CAST(:n AS jsonb)"
+                " WHERE id = :r"
+            ),
+            {"n": _json({"reservation": reserve_rows.as_params(need)}), "r": run_id},
+        )
+        db.commit()
+        return run_id
+    db.rollback()
+    return None
 
 
 def run_attempt(db: Session, run_id: int) -> int:
@@ -850,6 +881,50 @@ def _execute(
                     candidates = sorted(_admissible(found, params), key=_rank_of)
                     portfolio_skipped = race_rows.should_portfolio(found.model_class, numbers, candidates)
                     portfolio_candidates = None if portfolio_skipped else candidates
+                    if portfolio_candidates:
+                        # OAAS S04: only start a portfolio that fits host room.
+                        from app.solve import licences as licence_rows
+                        from app.solve import reserve as reserve_rows
+
+                        purpose = db.execute(
+                            text("SELECT purpose FROM run WHERE id = :r"), {"r": run_id}
+                        ).scalar_one()
+                        licensed = {
+                            name
+                            for name in portfolio_candidates
+                            if licence_rows.required(by_name(name))
+                        }
+                        org_memory = quota_of(
+                            db,
+                            db.execute(
+                                text("SELECT organization_id FROM run WHERE id = :r"),
+                                {"r": run_id},
+                            ).scalar_one(),
+                        ).get("max_memory_mb")
+                        need, why_room = reserve_rows.portfolio_fit(
+                            db,
+                            run_id=run_id,
+                            purpose=purpose or "plan",
+                            workers=workers,
+                            memory_mb=org_memory,
+                            candidates=portfolio_candidates,
+                            licensed_names=licensed,
+                        )
+                        if why_room is not None:
+                            portfolio_skipped = why_room
+                            portfolio_candidates = None
+                        else:
+                            db.execute(
+                                text(
+                                    "UPDATE run SET params = coalesce(params, '{}'::jsonb)"
+                                    " || CAST(:n AS jsonb) WHERE id = :r"
+                                ),
+                                {
+                                    "n": _json({"reservation": reserve_rows.as_params(need)}),
+                                    "r": run_id,
+                                },
+                            )
+                            db.commit()
                 if (params.get("probe") and not params.get("requested_solver") and recalled is None
                         and portfolio_candidates is None and not stochastic_wanted
                         and not params.get("pareto_steps") and not params.get("robust")):
@@ -963,6 +1038,7 @@ def _execute(
                 return RunOutcome(run_id, dataset_id, "error", None, {})
 
         try:
+            t_solve = time.monotonic()
             if _honour_cancel(db, run_id):
                 return _cancelled_outcome(db, run_id)
             if points:

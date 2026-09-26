@@ -559,6 +559,8 @@ Offline dependency discovery begins in Phase 0. Correctness or security defects 
 | S01 | ClickHouse optional for API startup (analytics degrade) | `docker-compose.yml`, health | Phase 5 |
 | S02 | Idempotency-Key on run submit | `runs.py`, migration 0083 | Phase 5 |
 | S03 | Execution-attempt fencing for stale workers | `claim_next` / `_record`, migration 0084 | S02 |
+| S04 | Reserve CPU/memory/licence seats; check pool for shadow/suite | `app/solve/reserve.py`, `claim_next`, portfolio path | S03 |
+| S05 | Document and enforce measured host capacity limits | `docs/contracts/scale-reliability.md`, reserve defaults | S04 |
 
 Do not renumber or overwrite the existing R-series execution history. Link completed work from the new backlog and track new work with distinct identifiers.
 

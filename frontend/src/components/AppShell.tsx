@@ -26,8 +26,8 @@ import { parseRouteId } from "../lib/routeId";
 // unchanged, so the gap between links stays the same).
 // R22: every link the same shape -- an icon, the label, the active page in the accent's
 // soft green with a bar on the start edge (the screenshot's look), hover a quiet grey.
-const linkBase = "relative flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm transition-colors";
-const activeLink = "bg-blue-50 font-semibold text-blue-700 before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-blue-600";
+const linkBase = "relative flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-sm transition-colors";
+const activeLink = "bg-blue-50 font-semibold text-blue-800 before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-blue-600";
 const idleLink = "text-slate-600 hover:bg-slate-100 hover:text-slate-900";
 
 const navLinkClassName = ({ isActive }: { isActive: boolean }) => `mb-0.5 ${linkBase} ${isActive ? activeLink : idleLink}`;
@@ -409,11 +409,11 @@ function AppShellContent() {
     // horizontal-scroll backstop lives in index.css (`html { overflow-x:
     // hidden }`) -- see that file's comment for why it has to be on <html>
     // specifically, not a class here or on <main>/the table's own wrapper.
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-slate-50">
       <a
         href="#main"
         onClick={handleSkipLinkClick}
-        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-shell focus:bg-white focus:px-3 focus:py-2 focus:shadow-panel"
       >
         Skip to content
       </a>
@@ -438,17 +438,17 @@ function AppShellContent() {
         id="sidebar-nav"
         ref={asideRef}
         inert={drawerInert ? "" : undefined}
-        className={`fixed inset-y-0 start-0 z-40 flex h-screen shrink-0 flex-col border-e border-slate-200 bg-white px-3 py-4 transition-[transform,width] duration-200 ease-in-out lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 start-0 z-40 flex h-screen shrink-0 flex-col border-e border-slate-200/80 bg-white px-3 py-shell shadow-shell transition-[transform,width] duration-200 ease-in-out lg:static lg:translate-x-0 ${
           collapsed ? "w-16" : "w-64"
         } ${drawerOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full lg:rtl:translate-x-0"}`}
       >
-        <div className={`mb-4 flex items-center gap-2 ${collapsed ? "flex-col" : ""}`}>
-          <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-sm font-bold text-white">PS</span>
+        <div className={`mb-shell flex items-center gap-2 ${collapsed ? "flex-col" : ""}`}>
+          <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-shell bg-blue-600 text-sm font-bold tracking-tight text-white shadow-sm">PS</span>
           {/* fix round 2: focus target when the drawer opens (see the effect
               above) -- non-interactive and `tabIndex={-1}` on purpose, so it
               never joins the normal Tab sequence itself, it's just somewhere
               safe to land focus before the user has pressed anything. */}
-          <h2 ref={drawerHeadingRef} tabIndex={-1} className={`flex-1 whitespace-nowrap text-[15px] font-semibold text-slate-900 ${collapsed ? "sr-only" : ""}`}>
+          <h2 ref={drawerHeadingRef} tabIndex={-1} className={`flex-1 whitespace-nowrap font-serif text-[15px] font-semibold tracking-tight text-slate-900 ${collapsed ? "sr-only" : ""}`}>
             Problem Solver
           </h2>
           {/* H-9: was text with no padding at all (44x16px) -- under the WCAG 2.2 24x24
@@ -483,7 +483,7 @@ function AppShellContent() {
               value={filterText}
               onChange={(event) => setFilterText(event.target.value)}
               placeholder="Filter pages…"
-              className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+              className="w-full rounded-shell border border-slate-300 bg-white px-2.5 py-1.5 text-sm shadow-sm"
             />
           </label>
         )}
@@ -544,7 +544,7 @@ function AppShellContent() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-shell shadow-sm">
         {/* G-2/G-5: below `lg` the sidebar is a drawer, hidden until this
             toggles it -- always rendered (data-testid always present) so a
             small-screen user always has a way to open navigation, but hidden
@@ -661,7 +661,7 @@ function AppShellContent() {
         // `<main>` instead of the viewport, with no error to flag it.
         // (DataTable.tsx's own row-actions menu portals to `document.body`
         // specifically to stay outside this containing block.)
-        className="min-h-0 min-w-0 flex-1 overflow-y-auto contain-layout bg-slate-50 p-6 focus:outline-none"
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto contain-layout bg-slate-50 px-shell py-shell-lg focus:outline-none sm:px-shell-lg"
       >
         <Outlet />
       </main>

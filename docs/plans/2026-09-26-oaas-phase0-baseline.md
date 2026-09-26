@@ -21,6 +21,7 @@
 | Reachability UX | **implemented** | O02 banner + egress-check + hooked in `check.sh` (skips if stack down) |
 | Chunked large results | **implemented** | 0082 + `GET …/amounts`; inline cap 200k |
 | Approval lifecycle | **implemented** | 0082 + API + Runs `ApprovePlanPanel` UI |
+| Scale reservations / capacity | **implemented** | S04 `app.solve.reserve` + S05 reference limits in `docs/contracts/scale-reliability.md` |
 | URL-authoritative context (no silent fallback) | **implemented** | `useModelTarget` + ContextMismatch + `/domains/:domainId/...` routes + scoped nav |
 | Unified run detail (Runs + Workspace) | **implemented** | N06 guided tab; `/workspace` → `/runs?tab=guided` |
 | Coverage / bench gates | **implemented** | Q01 matrix + Q02 verify + Q03 `params.phases` + Q04 family policies / equal_budget + Q05 suites path |
@@ -58,6 +59,6 @@
 
 ## Next
 
-OAAS Phase 0–5 backlog items (N/W/O/Q01–Q05, chunks/approvals, scoped URLs,
-offline Docker path) are in the working tree. Remaining work is demand-led
-extensions (Phase 6) and further equal-budget re-runs when changing defaults.
+OAAS Phase 0–5 backlog items (N/W/O/Q01–Q05, S01–S05, chunks/approvals, scoped URLs,
+offline Docker path, Archivo/teal theme) are in the working tree. Remaining work is
+demand-led extensions (Phase 6) and further equal-budget re-runs when changing defaults.
