@@ -62,9 +62,11 @@ def test_queue_depth_counts_queued_runs_per_organization(db, empty_queue):  # no
         text("SELECT organization_id FROM scenario WHERE id = :s"), {"s": seeded["scenario_id"]}
     ).scalar_one()
 
-    (family,) = list(metrics.QueueDepth().collect())
-    by_org = {sample.labels["org"]: sample.value for sample in family.samples}
+    families = {f.name: f for f in metrics.QueueDepth().collect()}
+    by_org = {sample.labels["org"]: sample.value for sample in families["queue_depth"].samples}
     assert by_org == {str(org): 2}
+    assert families["runs_running"].samples == []
+    assert str(org) in {s.labels["org"] for s in families["queue_oldest_wait_seconds"].samples}
 
 
 def test_metrics_are_served_on_their_own_port(monkeypatch):

@@ -20,6 +20,10 @@ What there is, and who writes it:
 * `queue_depth{org}` -- gauge, API: queued runs per organization, counted
   from the database when scraped, so it is right however many workers
   there are.
+* `runs_running{org}` -- gauge, API: runs currently held by a worker, per
+  organization (queue R33).
+* `queue_oldest_wait_seconds{org}` -- gauge, API: age of the oldest queued
+  run per organization (queue R33).
 """
 
 from __future__ import annotations
@@ -55,31 +59,61 @@ WORKER_BUSY = Gauge("worker_busy", "1 while this worker holds a run, else 0")
 
 
 class QueueDepth(Collector):
-    """`queue_depth{org}`, read from the database at scrape time. Registered
-    by the API only (`serve(..., queue_depth=True)`)."""
+    """Queue gauges per organization, read from the database at scrape time.
+
+    Registered by the API only (`register_queue_depth`). Yields
+    ``queue_depth``, ``runs_running`` and ``queue_oldest_wait_seconds``.
+    """
 
     def collect(self):
         from sqlalchemy import text
 
         from app.core.db import SessionLocal
 
-        family = GaugeMetricFamily("queue_depth", "Queued runs per organization", labels=["org"])
+        depth = GaugeMetricFamily("queue_depth", "Queued runs per organization", labels=["org"])
+        running = GaugeMetricFamily(
+            "runs_running", "Runs currently held by a worker, per organization", labels=["org"]
+        )
+        wait = GaugeMetricFamily(
+            "queue_oldest_wait_seconds",
+            "Seconds the oldest queued run of each organization has been waiting",
+            labels=["org"],
+        )
         db = SessionLocal()
         try:
-            rows = db.execute(
+            depth_rows = db.execute(
                 text(
                     "SELECT organization_id, count(*) FROM run"
                     " WHERE status = 'queued' GROUP BY organization_id"
                 )
             ).all()
+            running_rows = db.execute(
+                text(
+                    "SELECT organization_id, count(*) FROM run"
+                    " WHERE status = 'running' GROUP BY organization_id"
+                )
+            ).all()
+            wait_rows = db.execute(
+                text(
+                    "SELECT organization_id,"
+                    " EXTRACT(EPOCH FROM (now() - min(queued_at)))::double precision"
+                    "  FROM run WHERE status = 'queued' GROUP BY organization_id"
+                )
+            ).all()
         except Exception:  # pragma: no cover -- a scrape must not take the process down
             logger.warning("could not count the queue", exc_info=True)
-            rows = []
+            depth_rows, running_rows, wait_rows = [], [], []
         finally:
             db.close()
-        for org, count in rows:
-            family.add_metric([str(org)], count)
-        yield family
+        for org, count in depth_rows:
+            depth.add_metric([str(org)], count)
+        for org, count in running_rows:
+            running.add_metric([str(org)], count)
+        for org, seconds in wait_rows:
+            wait.add_metric([str(org)], float(seconds or 0.0))
+        yield depth
+        yield running
+        yield wait
 
 
 _QUEUE_DEPTH: QueueDepth | None = None
@@ -113,3 +147,10 @@ def record_run(solver: str | None, model_class: str | None, status: str, seconds
     RUNS.labels(solver, status).inc()
     if gap is not None:
         RUN_GAP.labels(solver).observe(float(gap))
+
+
+def exposition() -> bytes:
+    """Prometheus text for every collector registered in this process."""
+    from prometheus_client import generate_latest
+
+    return generate_latest(REGISTRY)

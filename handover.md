@@ -223,17 +223,18 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 | R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
 | R32 | **nightly model CI**: every case re-asked with the cache off; failures and day-over-day regressions; fast subset in `check.sh` | 0076 | `a7db47d` | weekly_rota case re-asked optimal; Checks `nightly_regressed: false` |
 
-### 3.9 Track C — scale and enterprise (R33–R40) — **R39 done; rest gated**
+### 3.9 Track C — scale and enterprise (R33–R40) — **R39 + R33 done; rest gated / in flight**
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
 | R39 | **backups and DR**: nightly `pg_dump` + WAL under `SOLVER_BACKUP_DIR` (default sibling `solver-backups/`); restore rehearsal into `solver_restore` runs the suites; RPO 24 h / RTO 4 h | — | `573ab27` | dump ~322 KB; restore + suite self-check case pass; `solver_restore` dropped; `archive_mode=on` |
+| R33 | **worker scale-out**: per-org `queue_depth` / `runs_running` / `queue_oldest_wait_seconds`; operator `GET /api/v1/metrics`; `--scale worker=N` runbook; fair-share load bench | — | *(this commit)* | operator metrics include the three gauges; `bench.load --check` 200 claims, shares 0.2 each |
 
 ---
 
 ## 4. In progress
 
-None. R39 is live-checked. Remaining Track C items (R33–R38, R40) wait on a named customer need (§5.2).
+R34 (audit log) next under “continue all plan work”. Remaining Track C items that need a decision (R35 IdP, R38 cluster, R40 tiers, R37 wording) still ask before coding dependencies.
 
 ---
 
@@ -250,8 +251,8 @@ By the plan's rule, none of these starts without a customer (or signed pilot) th
 
 | Item | What it is | Unlocked by | Decision needed from you |
 |---|---|---|---|
-| R33 | worker scale-out and queue metrics; a load test showing fair shares | queue waits over 1 min at peak, or more than ~10 concurrent solves | none (no Redis) |
-| R34 | an append-only audit log, exportable | a regulated customer or a security questionnaire | retention default |
+| ~~R33~~ | ~~worker scale-out and queue metrics~~ | **done** — see §3.9 | — |
+| R34 | an append-only audit log, exportable | a regulated customer or a security questionnaire | retention default **400** (plan default; using it) |
 | R35 | single sign-on, OIDC first | a customer on Okta, Entra ID or Google | which identity provider; adding `authlib` |
 | R36 | SCIM user provisioning | more than ~200 users, or automatic deprovisioning | needs R35 |
 | R37 | data retention, organization deletion and full export | a GDPR request or a contract clause | retention defaults; deletion report wording |
