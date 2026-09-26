@@ -15,12 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
@@ -53,6 +54,11 @@ class CaseUpdate(BaseModel):
 class CaseRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model_version_id: int | None = None
+
+
+class GateOverrideBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 def _refused(exc: suite.NotACase) -> HTTPException:
@@ -151,6 +157,51 @@ def check_version(version_id: int, db: Session = Depends(get_db),
         db.rollback()
         raise _refused(exc) from exc
     return {"run_ids": runs, **suite.version_checks(db, version_id)}
+
+
+@router.post("/model-versions/{version_id}/gate-override")
+def gate_override(
+    version_id: int,
+    body: GateOverrideBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("model.publish")),
+) -> dict[str, Any]:
+    """Put a version into use despite failed acceptance cases, with a recorded reason (R30)."""
+    row = db.execute(
+        text(
+            "SELECT mv.id, mv.problem_id, mv.version, p.organization_id"
+            "  FROM model_version mv JOIN problem p ON p.id = mv.problem_id"
+            " WHERE mv.id = :v"
+        ),
+        {"v": version_id},
+    ).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="model version not found")
+    reason = body.reason.strip()
+    if len(reason) < 8:
+        raise HTTPException(status_code=422, detail="reason must be at least 8 characters")
+    db.execute(
+        text(
+            "INSERT INTO suite_gate_override (model_version_id, organization_id, reason, actor_id, at)"
+            " VALUES (:v, :o, :r, :a, now())"
+            " ON CONFLICT (model_version_id) DO UPDATE SET"
+            "  reason = EXCLUDED.reason, actor_id = EXCLUDED.actor_id, at = now()"
+        ),
+        {"v": version_id, "o": row["organization_id"], "r": reason, "a": user.id},
+    )
+    audit.record(
+        db,
+        organization_id=row["organization_id"],
+        actor_id=user.id,
+        action="suite.gate_override",
+        object_type="model_version",
+        object_id=str(version_id),
+        after={"version": row["version"], "reason": reason},
+        ip=request.client.host if request.client else None,
+    )
+    db.commit()
+    return {"model_version_id": version_id, "reason": reason, "overridden": True}
 
 
 @router.get("/problems/{problem_id}/shadow")

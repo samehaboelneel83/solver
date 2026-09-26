@@ -75,7 +75,7 @@ describe("PlannerPanel", () => {
     probe = { ...RUN, id: 20, purpose: "why_not", verdict: { kind: "blocked", forced: ["lock:1"], minimal: true,
       conflict: [{ constraint_id: "c_max_hours", instance: ["ann"] }, { constraint_id: "lock:1", instance: [] }] } };
     renderPanel();
-    fireEvent.change(screen.getByLabelText("day"), { target: { value: "tue" } });
+    fireEvent.change(screen.getAllByLabelText("day")[0], { target: { value: "tue" } });
     fireEvent.click(screen.getByRole("button", { name: "Why isn't Ann · Tuesday on?" }));
     expect(await screen.findByText(/No plan allows it/)).toBeInTheDocument();
     expect(screen.getByText("at most eight hours a week (c_max_hours)")).toBeInTheDocument();

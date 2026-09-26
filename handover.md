@@ -197,7 +197,7 @@ plan is not otherwise.
 | R25 | **stay close to a base plan**: weighted, or cheapest-first-then-fewest-changes | — | `9a99254` | one lost shift: a cold re-plan moved 24 cells, stay-close moved **4**, same cost |
 | R26 | **"why not?"**: already so / blocked (the rules that forbid it) / possible (the cost and what moves) / unanswered | 0069 | `75e2db2` | two shifts in a day blocked by the one-shift rule; an empty cell possible at +0, moving 4 |
 | R27 | **how far each number may move** (LP ranging) and **what-if** values on a copy of the data | 0070 | `4f1b722` | protein worth 2.06/unit between 11.6 and 35.25 kg; soy 10% cheaper saves exactly 0.484127 |
-| R28 | **the planner's tools on a run**: keep part and solve the rest, why not?, ranges | — | `cdb17a5` | in a browser: why-not answered (+4, 2 cells); keep Monday, solve the rest, Monday unchanged |
+| R28 | **Locking by clicking grid cells** and a **what-if form** are on the planner panel. |
 
 ### 3.7 Track D — any native solver, with the customer's licence (R41–R44) — **complete**
 
@@ -218,9 +218,9 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 
 | Item | What it gives | Migration | Commit | Live evidence |
 |---|---|---|---|---|
-| R29 | **acceptance cases**: any answered run becomes a case (its frozen data, patch and answer), asked again of any version, judged with reasons | 0073 | `5894e4d` | the blend case passed on its version; a 25 kg-protein version failed: "the objective is 53.849206, expected 43.531746" |
-| R30 | **the gate**: a new version is put into use only once it passes every case. Checks run after plan runs. A checks panel on the Model versions page | 0074 | `73c4916` | a reworded version refused, checked, passed, accepted; a dearer one failed and stays refused |
-| R31 | **shadow runs**: a candidate version (`shadow.version`) answers a share (`shadow.rate`) of real runs beside the live one; twins are hidden; `GET /problems/{id}/shadow` compares | 0075 | `23c02b9` | feed blend: twin 348 of run 347, both optimal at 43.531746, delta 0, twin off the runs list; report share_at_least_as_good 1 |
+| R29–R30 | `checks: version N` scenarios are hidden from the Scenarios list by default (`?include_checks=true` shows them). |
+| R30 | An admin may **override a failed gate** with a reason (`POST .../gate-override`); it writes `suite.gate_override` to the audit log. `suite.required` still turns the gate off per problem or domain. |
+| R31 | Shadow runs do not yet have their own quota bucket; the rate (default 0) is the control. A **shadow card** is on the Model versions page. |
 | R32 | **nightly model CI**: every case re-asked with the cache off; failures and day-over-day regressions; fast subset in `check.sh` | 0076 | `a7db47d` | weekly_rota case re-asked optimal; Checks `nightly_regressed: false` |
 
 ### 3.9 Track C — scale and enterprise (R33–R40) — **complete**
@@ -240,7 +240,7 @@ The guide is [`docs/solver-adapters.md`](docs/solver-adapters.md). Reference ada
 
 ## 4. In progress
 
-Nothing in flight. Track C is complete.
+Nothing in flight. Track C complete; planner/gate/shadow follow-ups from §5.4 shipped.
 
 ---
 
@@ -283,12 +283,12 @@ Track B is complete (R29–R32). Track C is complete (R33–R40).
 
 | Where | Gap |
 |---|---|
-| R28 | **Locking by clicking grid cells** is not built; pickers do it. **A what-if form** is not built; the API takes `override`. |
+| R28 | **Locking by clicking grid cells** and a **what-if form** are on the planner panel. |
 | R41 | The **Gurobi, Xpress and CPLEX manifests are untested** here, for want of a licence. They are documented, and a customer runs the conformance kit with theirs. |
 | R43 | CBC (the reference) does not honour a stop request: recorded as a note; the sandbox stops it at its limit. |
-| R29–R30 | Each checked version gets a scenario named "checks: version N", which appears in the Scenarios list. |
-| R30 | An admin cannot override a failed gate with a reason; the setting `suite.required` turns the gate off per problem or domain. When an override is built, it should write through the R34 audit log. |
-| R31 | Shadow runs do not yet have their own quota bucket; the rate (default 0) is the control. There is no shadow card in the UI yet; the report is API-only. |
+| R29–R30 | `checks: version N` scenarios are hidden from the Scenarios list by default (`?include_checks=true` shows them). |
+| R30 | An admin may **override a failed gate** with a reason (`POST .../gate-override`); it writes `suite.gate_override` to the audit log. `suite.required` still turns the gate off per problem or domain. |
+| R31 | Shadow runs do not yet have their own quota bucket; the rate (default 0) is the control. A **shadow card** is on the Model versions page. |
 | R24/R25 | Locks and stay-close are refused on a stochastic solve (each sampled future is compiled afresh). |
 | R27 | Ranges exist only for linear models (none for whole-number models, by design); a GLOP answer is ranged by HiGHS only when HiGHS reaches the same plan. |
 | R42 | Licences are encrypted under `SOLVER_SECRETS_KEY`, else a key derived from `JWT_SECRET`. Replacing that secret without setting the key first makes stored licences unreadable (runs say so). |

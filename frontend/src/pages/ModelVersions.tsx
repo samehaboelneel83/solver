@@ -2,6 +2,7 @@ import { useId } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import VersionChecks from "../components/VersionChecks";
+import ShadowCard from "../components/ShadowCard";
 import Skeleton from "../components/Skeleton";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
@@ -136,6 +137,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           setSearchParams({ problem: String(problemId), version: String(id) }, { replace: true })
         }
       />
+      <ShadowCard problemId={problemId} />
       <IrViewer versionId={versionId} />
     </>
   );

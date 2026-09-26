@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { formatApiError } from "../api/errors";
-import { useCheckVersion, useVersionChecks, type Id } from "../api/v1";
+import { useCheckVersion, useGateOverride, useVersionChecks, type Id } from "../api/v1";
 import { useToast } from "./ToastProvider";
 
 const TONE: Record<string, string> = {
@@ -13,12 +14,14 @@ const TONE: Record<string, string> = {
 /**
  * A version against its problem's acceptance cases (queue R30): each case's latest verdict on this
  * version, and a button to ask them all. A problem with cases puts a new version into use -- points
- * a scenario at it -- only once every case has passed here.
+ * a scenario at it -- only once every case has passed here (or an admin records a gate override).
  */
 export default function VersionChecks({ versionId }: { versionId: Id }) {
   const checks = useVersionChecks(versionId);
   const run = useCheckVersion();
+  const override = useGateOverride();
   const toast = useToast();
+  const [reason, setReason] = useState("");
   if (!checks.data) return null;
   const { state, cases } = checks.data;
   return (
@@ -52,6 +55,35 @@ export default function VersionChecks({ versionId }: { versionId: Id }) {
             </li>
           ))}
         </ul>
+      )}
+      {(state === "failed" || state === "unchecked") && cases.length > 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-2">
+          <label className="block text-xs font-medium text-slate-800">
+            Override the gate (records a reason in the audit log)
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Why this version may be used despite failed checks"
+              className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={override.isPending || reason.trim().length < 8}
+            onClick={() =>
+              override.mutate(
+                { versionId, reason: reason.trim() },
+                {
+                  onSuccess: () => toast.success("Gate override recorded — scenarios may point at this version"),
+                  onError: (error) => toast.error(formatApiError(error)),
+                },
+              )
+            }
+            className="mt-2 rounded-md border border-amber-700 px-3 py-1 text-xs text-amber-900 disabled:opacity-60"
+          >
+            Override and allow use
+          </button>
+        </div>
       )}
     </section>
   );

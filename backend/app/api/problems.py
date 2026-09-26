@@ -743,6 +743,7 @@ def get_version(
 def list_scenarios(
     problem_id: int | None = Query(None),
     model_version_id: int | None = Query(None),
+    include_checks: bool = Query(False),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -753,6 +754,9 @@ def list_scenarios(
         query = query.filter(Scenario.problem_id == problem_id)
     if model_version_id is not None:
         query = query.filter(Scenario.model_version_id == model_version_id)
+    # Acceptance-check scenarios (queue R29/R30) stay off the planner's list unless asked for.
+    if not include_checks:
+        query = query.filter(~Scenario.name.like("checks: version %"))
     total = query.count()
     # `name` is unique per problem, not globally, so `id` completes the order.
     rows = query.order_by(Scenario.name.asc(), Scenario.id.asc()).offset(offset).limit(limit).all()

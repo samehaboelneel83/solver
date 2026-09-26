@@ -1347,6 +1347,42 @@ export function useVersionChecks(id: Id | null | undefined) {
 }
 export const useCheckVersion = () => useV1Mutation(checkVersion);
 
+export type ShadowReport = {
+  problem_id: number;
+  candidates: {
+    model_version_id: number;
+    runs: number;
+    compared: number;
+    at_least_as_good: number;
+    share_at_least_as_good: number | null;
+    median_time_ratio: number | null;
+    worst: Record<string, unknown> | null;
+    recent: {
+      real_run: number;
+      shadow_run: number;
+      status: string;
+      verdict: { delta?: number; at_least_as_good?: boolean } | null;
+    }[];
+  }[];
+};
+export const getShadowReport = (problemId: Id) =>
+  apiFetch<ShadowReport>(`/api/v1/problems/${problemId}/shadow`);
+export function useShadowReport(problemId: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "shadow", problemId],
+    queryFn: () => getShadowReport(problemId as Id),
+    enabled: isId(problemId),
+  });
+}
+
+export const gateOverride = ({ versionId, reason }: { versionId: Id; reason: string }) =>
+  send<{ model_version_id: number; reason: string; overridden: boolean }>(
+    "POST",
+    `/api/v1/model-versions/${versionId}/gate-override`,
+    { reason },
+  );
+export const useGateOverride = () => useV1Mutation(gateOverride);
+
 /** A why-not probe, polled until its verdict is written (just after the run settles). */
 export function useProbe(id: Id | null | undefined) {
   return useQuery({

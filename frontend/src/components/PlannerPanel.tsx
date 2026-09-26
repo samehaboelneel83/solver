@@ -9,6 +9,7 @@ import {
   type Id,
   type Run,
   type Verdict,
+  type WhatIfValue,
   type WhyNotCell,
 } from "../api/v1";
 import { formatAmount } from "../lib/runViews";
@@ -28,6 +29,7 @@ export default function PlannerPanel({ run, onOpen }: { run: Run; onOpen?: (id: 
       <h3 className="text-sm font-semibold text-slate-900">Plan again, or ask why</h3>
       {decisions.length > 0 && <LockAndResolve run={run} decisions={decisions} onOpen={onOpen} />}
       {decisions.length > 0 && <WhyNot run={run} decisions={decisions} />}
+      {decisions.length > 0 && <WhatIf run={run} decisions={decisions} />}
       <Sensitivity run={run} />
     </section>
   );
@@ -123,6 +125,16 @@ function LockAndResolve({ run, decisions, onOpen }: { run: Run; decisions: strin
           ))}
         </div>
       </fieldset>
+      <CellGrid
+        run={run}
+        variable={variable}
+        sets={sets}
+        held={held}
+        onToggleMember={(setName, key) => {
+          if (setName !== chosenSet) return;
+          toggle(key);
+        }}
+      />
       <label className="mt-2 flex items-center gap-1 text-xs text-slate-700">
         <input type="checkbox" checked={close} onChange={() => setClose(!close)} />
         Stay close to this plan (the cheapest plan first, then the fewest changes)
@@ -237,6 +249,167 @@ export function VerdictText({ verdict, run }: { verdict: Verdict; run: Run }) {
       </p>
       {verdict.turned_on.length > 0 && <p className="mt-1 text-xs">On: {verdict.turned_on.map((c) => cellText(run, c)).join("; ")}</p>}
       {verdict.turned_off.length > 0 && <p className="mt-1 text-xs">Off: {verdict.turned_off.map((c) => cellText(run, c)).join("; ")}</p>}
+    </div>
+  );
+}
+
+function CellGrid({
+  run,
+  variable,
+  sets,
+  held,
+  onToggleMember,
+}: {
+  run: Run;
+  variable: string;
+  sets: string[];
+  held: Set<string>;
+  onToggleMember: (setName: string, key: string) => void;
+}) {
+  // Clickable grid when the decision has exactly two index sets: rows × columns.
+  if (sets.length !== 2) return null;
+  const [rowSet, colSet] = sets;
+  const rows = members(run, rowSet);
+  const cols = members(run, colSet);
+  if (rows.length === 0 || cols.length === 0 || rows.length * cols.length > 200) return null;
+  const on = new Set((run.assignments?.[variable] ?? []).map((c) => c.join("\u0001")));
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <p className="mb-1 text-xs text-slate-600">Click a cell to keep that {rowSet} (or clear it). Dark cells are on in this plan.</p>
+      <table className="border-collapse text-xs">
+        <thead>
+          <tr>
+            <th className="p-1" />
+            {cols.map((c) => (
+              <th key={c} className="p-1 font-normal text-slate-600">{label(run, colSet, c)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r}>
+              <th scope="row" className="p-1 text-left font-normal text-slate-600">{label(run, rowSet, r)}</th>
+              {cols.map((c) => {
+                const key = `${r}\u0001${c}`;
+                const isOn = on.has(key);
+                const rowHeld = held.has(r);
+                return (
+                  <td key={c} className="p-0.5">
+                    <button
+                      type="button"
+                      aria-pressed={rowHeld}
+                      aria-label={`${variable} ${label(run, rowSet, r)} ${label(run, colSet, c)}${isOn ? " on" : " off"}`}
+                      onClick={() => onToggleMember(rowSet, r)}
+                      className={`h-7 w-7 rounded border text-[10px] ${
+                        rowHeld
+                          ? "border-blue-700 bg-blue-600 text-white"
+                          : isOn
+                            ? "border-slate-400 bg-slate-700 text-white"
+                            : "border-slate-200 bg-white text-slate-400"
+                      }`}
+                    >
+                      {isOn ? "●" : "○"}
+                    </button>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function WhatIf({ run, decisions }: { run: Run; decisions: string[] }) {
+  const binaries = decisions.filter((v) => (run.variable_kinds?.[v] ?? "binary") === "binary");
+  const ask = useAskWhyNot();
+  const [variable, setVariable] = useState(binaries[0] ?? "");
+  const sets = run.index_sets.variables[variable] ?? [];
+  const [cell, setCell] = useState<string[]>([]);
+  const [param, setParam] = useState("");
+  const [paramIndex, setParamIndex] = useState("");
+  const [paramValue, setParamValue] = useState("0");
+  const [probe, setProbe] = useState<number | null>(null);
+  const [answer, setAnswer] = useState<Verdict | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const index = sets.map((s, p) => cell[p] ?? members(run, s)[0] ?? "");
+  const chosen = useMemo(() => new Set((run.assignments?.[variable] ?? []).map((c) => c.join("\u0001"))), [run.assignments, variable]);
+  const isOn = chosen.has(index.join("\u0001"));
+  if (binaries.length === 0) return null;
+
+  function submit() {
+    setFailure(null);
+    setAnswer(null);
+    setProbe(null);
+    const force: WhyNotCell[] = [{ var: variable, index, value: isOn ? 0 : 1 }];
+    const override: WhatIfValue[] = [];
+    if (param.trim()) {
+      const value = Number(paramValue);
+      if (!Number.isFinite(value)) {
+        setFailure("what-if value must be a number");
+        return;
+      }
+      override.push({
+        param: param.trim(),
+        index: paramIndex.trim() ? paramIndex.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        value,
+      });
+    }
+    ask.mutate(
+      { runId: run.id, force, override },
+      {
+        onSuccess: (got) => (got.run_id !== null ? setProbe(got.run_id) : setAnswer(got.verdict)),
+        onError: (error) => setFailure(formatApiError(error)),
+      },
+    );
+  }
+
+  return (
+    <div>
+      <h4 className="mb-1 text-sm font-medium text-slate-800">What if?</h4>
+      <p className="mb-2 text-xs text-slate-600">
+        Ask why a cell is not otherwise, optionally after changing one input number on a copy of the frozen data.
+      </p>
+      <div className="flex flex-wrap items-end gap-3 text-sm">
+        <label className="flex flex-col text-slate-700">
+          Decision
+          <select value={variable} onChange={(e) => { setVariable(e.target.value); setCell([]); }} className="mt-1 rounded-md border border-slate-300 px-2 py-1">
+            {binaries.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </label>
+        {sets.map((s, p) => (
+          <label key={`${s}-${p}`} className="flex flex-col text-slate-700">
+            {s}
+            <select value={index[p]} onChange={(e) => { const next = [...index]; next[p] = e.target.value; setCell(next); }}
+                    className="mt-1 rounded-md border border-slate-300 px-2 py-1">
+              {members(run, s).map((k) => <option key={k} value={k}>{label(run, s, k)}</option>)}
+            </select>
+          </label>
+        ))}
+        <label className="flex flex-col text-slate-700">
+          Parameter (optional)
+          <input value={param} onChange={(e) => setParam(e.target.value)} placeholder="e.g. demand"
+                 className="mt-1 rounded-md border border-slate-300 px-2 py-1" />
+        </label>
+        <label className="flex flex-col text-slate-700">
+          Index (comma-separated)
+          <input value={paramIndex} onChange={(e) => setParamIndex(e.target.value)} placeholder="shift, day"
+                 className="mt-1 rounded-md border border-slate-300 px-2 py-1" />
+        </label>
+        <label className="flex flex-col text-slate-700">
+          New value
+          <input value={paramValue} onChange={(e) => setParamValue(e.target.value)}
+                 className="mt-1 w-24 rounded-md border border-slate-300 px-2 py-1" />
+        </label>
+        <button type="button" onClick={submit} disabled={ask.isPending || index.some((k) => !k)}
+                className="rounded-md border border-slate-700 bg-white px-3 py-1.5 text-sm text-slate-900 disabled:opacity-60">
+          Ask with what-if
+        </button>
+      </div>
+      {failure && <p role="alert" className="mt-2 text-sm text-red-700">{failure}</p>}
+      {probe !== null && <Probe id={probe} run={run} />}
+      {answer && <VerdictText verdict={answer} run={run} />}
     </div>
   );
 }

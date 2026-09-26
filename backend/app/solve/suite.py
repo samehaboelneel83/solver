@@ -387,6 +387,11 @@ def gate(db: Session, problem_id: int, model_version_id: int) -> str | None:
 
     if not bool(resolve(db, problem_id=problem_id)["suite.required"].value):
         return None
+    if db.execute(
+        text("SELECT 1 FROM suite_gate_override WHERE model_version_id = :v"),
+        {"v": model_version_id},
+    ).first() is not None:
+        return None
     checks = version_checks(db, model_version_id)
     if checks["state"] in ("no cases", "passed"):
         return None
