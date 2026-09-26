@@ -61,6 +61,7 @@ from app.solve import robust as robust_rows
 from app.solve import params as solver_param_table
 from app.solve import symmetry as symmetry_rows
 from app.solve import warm
+from app.solve import locks as lock_rows
 from app.solve.cache import key_of
 from app.solve.cache import reuse as cache_reuse
 from app.solve.reformulate import bigm, pwl_rewrite
@@ -535,7 +536,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
 
     row = db.execute(
         text(
-            "SELECT r.dataset_id, r.params, r.seed, s.patch, mv.ir, d.data"
+            "SELECT r.dataset_id, r.params, r.seed, s.patch, s.problem_id, mv.ir, d.data"
             "  FROM run r"
             "  JOIN scenario s ON s.id = r.scenario_id"
             "  JOIN model_version mv ON mv.id = s.model_version_id"
@@ -555,6 +556,10 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     workers = int(params.get("workers", 8))
     gap_rel = float(params.get("gap_rel", 0.0))
     dataset_id = row["dataset_id"]
+    # Parts of an earlier plan held fixed (queue R24), with what those runs decided.
+    locks = (row["patch"] or {}).get("lock") or []
+    if locks:
+        params = {**params, "_locks": locks, "_lock_bases": _lock_bases(db, row["problem_id"], locks)}
 
     stop = threading.Event()
     events = RunEvents(run_id)
@@ -597,7 +602,13 @@ def _execute(
             # which backends may take the model at all.
             events.stage("compiling", model_class=found.model_class)
             with tracing.span("compile") as compiling:
-                compiled = compile_model(ir, data)
+                compiled = unlocked = compile_model(ir, data)
+                if params.get("_locks"):
+                    if params.get("stochastic_samples") and stochastic_rows.wanted(ir):
+                        raise Unsupported("locks are not kept by a stochastic solve: each future is compiled "
+                                          "afresh; solve without sampled futures to keep them")
+                    # Rows after the model's own, so a rule's position is the same with or without them.
+                    compiled = lock_rows.apply(compiled, params["_locks"], params["_lock_bases"], data.get("sets") or {})
                 compiling.set_attribute("variables", len(compiled.variables))
                 compiling.set_attribute("rules", len(compiled.constraints))
         except Unsupported as exc:
@@ -619,7 +630,8 @@ def _execute(
         solving_model, robust_record, nominal = compiled, None, None
         if params.get("robust"):
             try:
-                moving = robust_rows.deviations(ir, data, compiled)
+                # Compared against a compile of the same IR, which has no lock rows.
+                moving = robust_rows.deviations(ir, data, unlocked)
             except (robust_rows.NotRobust, Unsupported) as exc:
                 db.execute(
                     text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
@@ -1238,6 +1250,23 @@ def _stored_outcome(db: Session, run_id: int) -> RunOutcome:
     if objective is not None:
         objective = int(objective) if objective == objective.to_integral_value() else float(objective)
     return RunOutcome(run_id, row["dataset_id"], row["status"], objective, row["assignments"] or {})
+
+
+def _lock_bases(db: Session, problem_id: int, locks: list[dict[str, Any]]) -> dict[int, "lock_rows.Base"]:
+    """What each run a lock reads from decided -- only answered runs of this same problem; any
+    other is left out, and the lock that names it is refused when the model is compiled."""
+    wanted = sorted(lock_rows.runs_named(locks))
+    if not wanted:
+        return {}
+    rows = db.execute(
+        text(
+            "SELECT r.id, s.assignments, s.amounts"
+            "  FROM run r JOIN solution s ON s.run_id = r.id JOIN scenario sc ON sc.id = r.scenario_id"
+            " WHERE r.id = ANY(:ids) AND sc.problem_id = :p AND r.status IN ('optimal', 'feasible')"
+        ),
+        {"ids": wanted, "p": problem_id},
+    ).all()
+    return {int(r[0]): lock_rows.Base(r[1] or {}, r[2]) for r in rows}
 
 
 def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:

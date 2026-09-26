@@ -132,7 +132,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -192,6 +192,41 @@ class ModelVersionCreate(BaseModel):
     note: str | None = None
 
 
+Key = Annotated[StrictStr | StrictInt, Field()]
+
+
+class CellLock(BaseModel):
+    """One decision fixed at a value (queue R24, app.solve.locks)."""
+
+    model_config = ConfigDict(extra="forbid")
+    var: StrictStr
+    index: list[Key]
+    value: float
+
+
+class SliceLock(BaseModel):
+    """Every cell of a decision whose index is in the lists, fixed at its value in an earlier run."""
+
+    model_config = ConfigDict(extra="forbid")
+    var: StrictStr
+    where: dict[StrictStr, Annotated[list[Key], Field(min_length=1)]] = Field(min_length=1)
+    from_run: BigintId
+
+
+class HorizonLock(BaseModel):
+    """Every cell indexed by a set's entity whose attribute is before a cut-off, from an earlier run."""
+
+    model_config = ConfigDict(extra="forbid")
+    before: StrictStr | float
+    attr: StrictStr
+    set: StrictStr
+    from_run: BigintId
+    vars: list[StrictStr] = None  # type: ignore[assignment]
+
+
+Lock = CellLock | SliceLock | HorizonLock
+
+
 class ScenarioPatch(BaseModel):
     """``ProblemIR.patched()``'s argument. Each key is optional; a key the
     client omits is omitted from what is stored (`model_dump(exclude_unset
@@ -203,6 +238,8 @@ class ScenarioPatch(BaseModel):
     disable: list[ConstraintId] = None  # type: ignore[assignment]
     harden: list[ConstraintId] = None  # type: ignore[assignment]
     soften: dict[ConstraintId, Weight] = None  # type: ignore[assignment]
+    # Parts of a plan held fixed while the rest is solved again (queue R24).
+    lock: list[Lock] = None  # type: ignore[assignment]
 
     @model_validator(mode="after")
     def _one_instruction_per_constraint(self) -> "ScenarioPatch":
@@ -226,7 +263,7 @@ class ScenarioPatch(BaseModel):
         return self
 
     def stored(self) -> dict[str, Any]:
-        return self.model_dump(exclude_unset=True)
+        return self.model_dump(exclude_unset=True, exclude_none=True)
 
 
 class ScenarioRead(BaseModel):
@@ -387,6 +424,54 @@ def _check_patch_ids(db: Session, model_version_id: int, patch: "ScenarioPatch")
                 + (", ".join(sorted(known)) if known else "no constraints at all"),
                 constraint_id,
             )
+
+
+def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "ScenarioPatch") -> None:
+    """What can be known of a lock before the data is (queue R24): the decision and the sets it
+    names are this version's, a cell has as many keys as its decision has sets, and an earlier run
+    is an answered run of this problem. The rest -- a value within today's bounds, an amount that
+    run kept, the attribute a horizon compares -- is refused when the run is compiled."""
+    if not patch.lock:
+        return
+    ir = db.execute(select(_version_columns.ir).where(_version_columns.id == model_version_id)).scalar_one()
+    decisions = {name: spec.get("index", []) for name, spec in (ir.get("variables") or {}).items()
+                 if isinstance(spec, dict) and spec.get("domain") != "interval"}
+
+    def refuse(position: int, key: str, code: str, message: str, value: Any) -> None:
+        raise field_error(["patch", "lock", position, key], f"{code}: {message}", value)
+
+    for position, lock in enumerate(patch.lock):
+        names = [lock.var] if not isinstance(lock, HorizonLock) else (lock.vars or [])
+        for name in names:
+            if name not in decisions:
+                refuse(position, "vars" if isinstance(lock, HorizonLock) else "var", "lock_unknown",
+                       f"model version {model_version_id} has no decision {name!r}"
+                       + (f"; it has {', '.join(sorted(decisions))}" if decisions else ""), name)
+        if isinstance(lock, CellLock) and len(lock.index) != len(decisions[lock.var]):
+            refuse(position, "index", "lock_index_arity",
+                   f"{lock.var!r} is indexed by {decisions[lock.var]}, so a cell names {len(decisions[lock.var])} keys",
+                   lock.index)
+        if isinstance(lock, SliceLock):
+            for s in lock.where:
+                if s not in decisions[lock.var]:
+                    refuse(position, "where", "lock_unknown", f"{lock.var!r} is not indexed by {s!r}", s)
+        if isinstance(lock, HorizonLock):
+            if lock.set not in (ir.get("sets") or []):
+                refuse(position, "set", "lock_unknown", f"model version {model_version_id} has no set {lock.set!r}", lock.set)
+            for name in names:
+                if lock.set not in decisions[name]:
+                    refuse(position, "vars", "lock_unknown", f"{name!r} is not indexed by {lock.set!r}", name)
+        if not isinstance(lock, CellLock):
+            answered = db.execute(
+                text(
+                    "SELECT 1 FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN solution so ON so.run_id = r.id"
+                    " WHERE r.id = :r AND s.problem_id = :p AND r.status IN ('optimal', 'feasible')"
+                ),
+                {"r": lock.from_run, "p": problem_id},
+            ).first()
+            if answered is None:
+                refuse(position, "from_run", "lock_run_invalid",
+                       f"run {lock.from_run} is not an answered run of this problem", lock.from_run)
 
 
 def _check_version_belongs(db: Session, problem_id: int, model_version_id: int) -> None:
@@ -635,6 +720,7 @@ def create_scenario(
 ) -> ScenarioRead:
     _check_version_belongs(db, payload.problem_id, payload.model_version_id)
     _check_patch_ids(db, payload.model_version_id, payload.patch)
+    _check_locks(db, payload.problem_id, payload.model_version_id, payload.patch)
     row = Scenario(
         problem_id=payload.problem_id,
         model_version_id=payload.model_version_id,
@@ -678,6 +764,7 @@ def update_scenario(
     # PATCH that changes only `model_version_id` is checked too.
     if "patch" in changes or "model_version_id" in changes:
         _check_patch_ids(db, row.model_version_id, ScenarioPatch(**row.patch))
+        _check_locks(db, row.problem_id, row.model_version_id, ScenarioPatch(**row.patch))
     _commit(db, "scenario")
     db.refresh(row)
     return ScenarioRead.model_validate(row)
