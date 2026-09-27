@@ -1,0 +1,32 @@
+# Opt-in overlay. Supply an operator-owned environment file and CA directory.
+# Base paths are relative to the repository's docker-compose.yml.
+services:
+  backend:
+    env_file:
+      - ${OAAS_INTEGRATION_ENV_FILE:?Set a private integration environment file}
+    volumes:
+      - ${OAAS_INTEGRATION_CERT_DIR:?Set the local CA directory}:/integration-certs:ro
+  ingestion-worker:
+    image: solver-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+      - path: .env.runtime
+        required: false
+      - ${OAAS_INTEGRATION_ENV_FILE:?Set a private integration environment file}
+    environment:
+      OAAS_INTEGRATION_OUTPUT: /integration-artifacts
+    command: ["python", "-m", "app.integrations.worker"]
+    volumes:
+      - integration_artifacts:/integration-artifacts
+      - ${OAAS_INTEGRATION_CERT_DIR:?Set the local CA directory}:/integration-certs:ro
+    mem_limit: 2g
+    cpus: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - solver_net
+
+volumes:
+  integration_artifacts:
