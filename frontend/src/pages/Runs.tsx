@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useEntityList } from "../api/entities";
@@ -313,6 +313,8 @@ function problemName(problem: Record<string, unknown>): string {
 
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const route = useParams();
   const problemChooser = useId();
   const scenarioChooser = useId();
 
@@ -396,7 +398,9 @@ function ForDomain({ domainId }: { domainId: Id }) {
             id={problemChooser}
             className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             value={String(problemId ?? "")}
-            onChange={(event) => setSearchParams({ problem: event.target.value }, { replace: true })}
+            onChange={(event) => route.domainId
+              ? navigate(`/domains/${domainId}/problems/${event.target.value}/runs`)
+              : setSearchParams({ problem: event.target.value }, { replace: true })}
           >
             {problemItems.map((row) => (
               <option key={String(row.id)} value={String(row.id)}>
@@ -414,8 +418,9 @@ function ForDomain({ domainId }: { domainId: Id }) {
             className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             value={scenario ? String(scenario.id) : ""}
             disabled={scenarioItems.length === 0}
-            onChange={(event) =>
-              setSearchParams(
+            onChange={(event) => route.domainId
+              ? navigate(`/domains/${domainId}/problems/${problemId}/runs?scenario=${event.target.value}`)
+              : setSearchParams(
                 { problem: String(problemId ?? ""), scenario: event.target.value },
                 { replace: true }
               )
@@ -518,8 +523,15 @@ function ScenarioRuns({
 
   const items = runs.data?.items ?? [];
   const requestedRun = parseRouteId(searchParams.get("run"));
-  const { item: explicitRun, missing: runMissing } = resolveById(items, requestedRun, (row) => row.id);
-  const selected = explicitRun?.id ?? (requestedRun === null ? items[0]?.id ?? null : null);
+  // A Pareto point or an older run need not be in the first page of history.
+  // Resolve explicit ids directly and verify ownership rather than substituting.
+  const requestedDetail = useRun(requestedRun);
+  const runMissing = requestedRun !== null && requestedDetail.data !== undefined &&
+    requestedDetail.data.scenario_id !== scenarioId;
+  const selected = requestedRun === null ? items[0]?.id ?? null
+    : requestedDetail.data && !runMissing ? requestedRun : null;
+  const navigate = useNavigate();
+  const route = useParams();
   const tab = searchParams.get("tab") === "guided" ? "guided" : "summary";
 
   function setRunSelection(runId: Id | null, nextTab: "summary" | "guided" = tab) {
@@ -530,7 +542,10 @@ function ScenarioRuns({
     else next.set("run", String(runId));
     if (nextTab === "guided") next.set("tab", "guided");
     else next.delete("tab");
-    setSearchParams(next, { replace: true });
+    if (route.domainId && route.problemId) {
+      const base = `/domains/${route.domainId}/problems/${problemId}/runs`;
+      navigate({ pathname: runId === null ? base : `${base}/${runId}`, search: next.toString() });
+    } else setSearchParams(next, { replace: true });
   }
 
   // Comparing is only offered once there is something to compare with.
@@ -649,9 +664,13 @@ function ScenarioRuns({
         </p>
       )}
 
+      {requestedRun !== null && requestedDetail.isError && (
+        <Failed error={requestedDetail.error} onRetry={() => requestedDetail.refetch()} />
+      )}
+      {requestedRun !== null && requestedDetail.isLoading && <p role="status">Loading selected run…</p>}
       {runs.isLoading ? (
         <Skeleton rows={3} cols={4} />
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && requestedRun === null ? (
         <Empty>
           <p>No runs yet for this scenario. Solve it to get one.</p>
         </Empty>

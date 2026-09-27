@@ -186,7 +186,12 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
         ...(kind === "interval"
           ? { uncertainty: { kind, deviation: numberOr(fieldOf(d, "DEVIATION"), null), ...(gamma !== "" ? { gamma: numberOr(gamma, null) } : {}) } }
           : kind === "scenarios"
-            ? { uncertainty: { kind } }
+            ? { uncertainty: { kind, futures: [...stackOf(d.inputs?.FUTURES)].map((future, i) => {
+                mark(future, ["parameters", name, "uncertainty", "futures", i]);
+                const label = fieldOf(future, "LABEL");
+                return { ...((label || (future.extraState as Json | undefined)?.labelPresent) ? { label } : {}),
+                  factor: numberOr(fieldOf(future, "FACTOR"), null) };
+              }) } }
             : {}),
       };
     } else if (d.type === "ir_opaque_declaration") {

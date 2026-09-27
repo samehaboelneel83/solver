@@ -15,8 +15,8 @@ import ReachabilityBanner from "./ReachabilityBanner";
 import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
-import { buildNavGroups, destinationForPath, stripDomainPrefix } from "../nav/registry";
-import { useDomain } from "../hooks/useDomain";
+import { buildNavGroups, buildSidebarGroups, destinationForPath, stripDomainPrefix } from "../nav/registry";
+import { DomainRouteProvider, useDomain } from "../hooks/useDomain";
 import { parseRouteId } from "../lib/routeId";
 
 // H-9: a full app-wide target-size sweep (beyond the three controls the finding named) turned
@@ -29,8 +29,6 @@ import { parseRouteId } from "../lib/routeId";
 const linkBase = "relative flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-sm transition-colors";
 const activeLink = "bg-blue-50 font-semibold text-blue-800 before:absolute before:inset-y-1 before:start-0 before:w-0.5 before:rounded-full before:bg-blue-600";
 const idleLink = "text-slate-600 hover:bg-slate-100 hover:text-slate-900";
-
-const navLinkClassName = ({ isActive }: { isActive: boolean }) => `mb-0.5 ${linkBase} ${isActive ? activeLink : idleLink}`;
 
 const tableLinkClassName = ({ isActive }: { isActive: boolean }) => `${linkBase} ${isActive ? activeLink : idleLink}`;
 
@@ -180,9 +178,9 @@ export default function AppShell() {
   // form registers itself via useUnsavedChangesGuard, and this component's
   // own nav links below consult it via useConfirmLeave before navigating.
   return (
-    <UnsavedChangesProvider>
+    <DomainRouteProvider><UnsavedChangesProvider>
       <AppShellContent />
-    </UnsavedChangesProvider>
+    </UnsavedChangesProvider></DomainRouteProvider>
   );
 }
 
@@ -201,7 +199,7 @@ function AppShellContent() {
   const pathProblem = location.pathname.match(/^\/domains\/\d+\/problems\/(\d+)/);
   const problemId =
     parseRouteId(pathProblem?.[1] ?? null) ?? parseRouteId(searchParams.get("problem"));
-  const navGroups = buildNavGroups({ domainId, problemId });
+  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId });
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");

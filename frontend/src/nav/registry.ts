@@ -47,6 +47,8 @@ export const TERMS = {
 
 /** Canonical path templates (OAAS §3.5). `:domainId` / `:problemId` filled by `scopedPath`. */
 const DOMAIN_TEMPLATES: Record<string, string> = {
+  "domain-overview": "/domains/:domainId/overview",
+  "problem-overview": "/domains/:domainId/problems/:problemId/overview",
   "record-types": "/domains/:domainId/structure/record-types",
   "relationship-types": "/domains/:domainId/structure/relationship-types",
   records: "/domains/:domainId/data/records",
@@ -62,6 +64,10 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
 };
 
 export const DESTINATIONS: Destination[] = [
+  { id: "domain-overview", path: "/domains/:domainId/overview", canonical: "/domains/:domainId/overview",
+    label: "Domain overview", purpose: "Prepare data and continue a planning problem.", scope: "domain", group: "domains" },
+  { id: "problem-overview", path: "/domains/:domainId/problems/:problemId/overview", canonical: "/domains/:domainId/problems/:problemId/overview",
+    label: "Problem overview", purpose: "See model readiness, scenarios and results.", scope: "problem", group: "problems" },
   {
     id: "home",
     path: "/",
@@ -388,7 +394,7 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
   {
     key: "domains",
     label: "Domains",
-    itemIds: ["domains", "records", "relationships", "parameters", "map-graph"],
+    itemIds: ["domains", "domain-overview", "records", "relationships", "parameters", "map-graph"],
   },
   {
     key: "structure",
@@ -398,7 +404,7 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
   {
     key: "problems",
     label: "Problems",
-    itemIds: ["problems", "model", "versions", "scenarios"],
+    itemIds: ["problems", "problem-overview", "model", "versions", "scenarios"],
   },
   {
     key: "results",
@@ -482,6 +488,8 @@ export function stripDomainPrefix(pathname: string): string {
 }
 
 export function destinationForPath(pathname: string): Destination | undefined {
+  if (/^\/domains\/\d+(?:\/overview)?\/?$/.test(pathname)) return byId.get("domain-overview");
+  if (/^\/domains\/\d+\/problems\/\d+(?:\/overview)?\/?$/.test(pathname)) return byId.get("problem-overview");
   const normalized = stripDomainPrefix(pathname);
   if (byPath.has(pathname)) return byPath.get(pathname);
   if (byPath.has(normalized)) return byPath.get(normalized);
@@ -539,6 +547,8 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
     items: g.itemIds
       .map((id) => byId.get(id))
       .filter((d): d is Destination => d != null)
+      .filter((d) => d.id !== "domain-overview" || ctx.domainId != null)
+      .filter((d) => d.id !== "problem-overview" || (ctx.domainId != null && ctx.problemId != null))
       .map((d) => ({
         id: d.id,
         to: scopedPath(d.id, ctx),
@@ -546,6 +556,36 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
         capability: d.capability,
       })),
   }));
+}
+
+/** Contextual sidebar; the palette retains the complete destination catalog. */
+export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {}): ReturnType<typeof buildNavGroups> {
+  const groups = buildNavGroups(ctx);
+  const inDomain = /^\/domains\/\d+(?:\/|$)/.test(pathname) && ctx.domainId != null;
+  const inProblem = inDomain && /^\/domains\/\d+\/problems\/\d+(?:\/|$)/.test(pathname) && ctx.problemId != null;
+  // Legacy pages retain their navigation until their canonical migration finishes.
+  const legacy = destinationForPath(pathname);
+  if (!inDomain && legacy && ["domain", "problem"].includes(legacy.scope) && !["domains"].includes(legacy.id)) return groups;
+  const select = (key: string, label: string, ids: string[]) => ({
+    key, label, items: ids.map((id) => {
+      const d = byId.get(id)!;
+      return { id, to: scopedPath(id, ctx), label: d.label, capability: d.capability };
+    }),
+  });
+  const common = groups.filter((g) => ["operations", "help", "administration"].includes(g.key));
+  if (inProblem) return [
+    select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
+    select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
+    ...common,
+  ];
+  if (inDomain) return [
+    select("context", "Navigate", ["home", "domains", "templates"]),
+    select("domain", "This domain", ["domain-overview", "problems"]),
+    select("data", "Data", ["records", "relationships", "parameters", "map-graph"]),
+    select("structure", "Data structure", ["record-types", "relationship-types"]),
+    ...common,
+  ];
+  return [select("global", "Platform", ["home", "domains", "templates"]), ...common];
 }
 
 /** Resolve a compatibility alias to the path AppShell already serves. */

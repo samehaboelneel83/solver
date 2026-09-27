@@ -212,12 +212,14 @@ export function irToBlocks(
           ? true
           : (shaped(u, ["kind", "deviation"], ["gamma"]) && u.kind === "interval" && typeof u.deviation === "number" &&
               (u.gamma === undefined || typeof u.gamma === "number")) ||
-            (shaped(u, ["kind"]) && u.kind === "scenarios");
+            (shaped(u, ["kind", "futures"]) && u.kind === "scenarios" && Array.isArray(u.futures) &&
+              u.futures.every((f) => shaped(f, ["factor"], ["label"]) && typeof f.factor === "number" &&
+                (f.label === undefined || typeof f.label === "string")));
       if (Object.keys(spec).some((k) => k !== "index" && k !== "uncertainty" && k !== "entity") || !uncertainty) {
         return opaque("declaration", loc, { kind: "parameter", name, spec }, `data ${name} (kept as it is)`);
       }
       const index = (spec.index as string[]) ?? [];
-      const given = (u ?? {}) as { kind?: string; deviation?: number; gamma?: number };
+      const given = (u ?? {}) as { kind?: string; deviation?: number; gamma?: number; futures?: { label?: string; factor: number }[] };
       return block(loc, {
         type: "ir_parameter",
         fields: {
@@ -229,6 +231,12 @@ export function irToBlocks(
           ENTITY: typeof spec.entity === "string" ? spec.entity : "",
         },
         extraState: { index },
+        inputs: inputs({ FUTURES: stack((given.futures ?? []).map((future, i) =>
+          block([...loc, "uncertainty", "futures", i], {
+            type: "ir_future",
+            fields: { LABEL: future.label ?? "", FACTOR: String(future.factor) },
+            extraState: { labelPresent: future.label !== undefined },
+          }))) }),
       });
     }),
   ];

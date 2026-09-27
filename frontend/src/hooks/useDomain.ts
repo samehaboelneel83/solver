@@ -1,11 +1,28 @@
-import { useSyncExternalStore } from "react";
+import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+
+// undefined means an unscoped route; null means an explicitly invalid id.
+const RouteDomainContext = createContext<number | null | undefined>(undefined);
+
+/** Make URL scope available to the shell and pages on their very first render. */
+export function DomainRouteProvider({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  const match = pathname.match(/^\/domains\/([^/]+)(?:\/|$)/);
+  const value = match ? parseId(match[1]) : undefined;
+  return createElement(RouteDomainContext.Provider, { value }, children);
+}
+
+export function useHasRouteDomain(): boolean {
+  return useContext(RouteDomainContext) !== undefined;
+}
 
 /**
  * The domain everything domain-scoped is shown for (entity types, entities,
  * relationship types, parameters, problems). Persisted in `localStorage`
  * so it survives a reload, and shared by every component that calls
  * `useDomain()` -- the selector in the sidebar writes it, pages read it --
- * without a provider, through a small external store.
+ * through a small external store on legacy routes. Inside DomainRouteProvider,
+ * an explicit URL domain takes precedence synchronously, including an invalid id.
  *
  * This hook only stores the choice; it does not know which domains exist.
  * `DomainSelector` owns validating it against the real list (see
@@ -69,7 +86,9 @@ function subscribe(listener: Listener): () => void {
 }
 
 export function useDomain(): { domainId: number | null; setDomainId: (id: number | null) => void } {
-  const domainId = useSyncExternalStore(subscribe, read, () => null);
+  const storedId = useSyncExternalStore(subscribe, read, () => null);
+  const routeId = useContext(RouteDomainContext);
+  const domainId = routeId === undefined ? storedId : routeId;
   return { domainId, setDomainId: write };
 }
 

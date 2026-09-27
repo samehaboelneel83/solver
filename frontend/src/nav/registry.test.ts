@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNavGroups,
+  buildSidebarGroups,
   destination,
   destinationForPath,
   resolveAlias,
@@ -10,6 +11,31 @@ import {
 } from "./registry";
 
 describe("nav registry", () => {
+  it("keeps global navigation independent of a remembered problem", () => {
+    const ids = buildSidebarGroups("/", { domainId: 7, problemId: 9 }).flatMap((g) => g.items.map((i) => i.id));
+    expect(ids).toContain("domains");
+    expect(ids).not.toContain("model");
+    expect(ids).not.toContain("records");
+  });
+  it("offers domain data without showing an unselected problem's editor", () => {
+    const ids = buildSidebarGroups("/domains/7/overview", { domainId: 7 }).flatMap((g) => g.items.map((i) => i.id));
+    expect(ids).toContain("records");
+    expect(ids).toContain("problems");
+    expect(ids).not.toContain("model");
+  });
+  it("focuses problem navigation and retains a path back to shared data", () => {
+    const links = buildSidebarGroups("/domains/7/problems/9/model", { domainId: 7, problemId: 9 }).flatMap((g) => g.items);
+    expect(links.find((i) => i.id === "domain-overview")?.to).toBe("/domains/7/overview");
+    expect(links.filter((i) => i.to === "/domains/7/problems/9/runs")).toHaveLength(1);
+    expect(links.some((i) => i.id === "records")).toBe(false);
+  });
+  it("offers overview links only with enough context and names them in breadcrumbs", () => {
+    expect(buildNavGroups().flatMap((group) => group.items).some((item) => item.id.endsWith("-overview"))).toBe(false);
+    const links = buildNavGroups({ domainId: 7, problemId: 3 }).flatMap((group) => group.items);
+    expect(links.find((item) => item.id === "problem-overview")?.to).toBe("/domains/7/problems/3/overview");
+    expect(destinationForPath("/domains/7/overview")?.id).toBe("domain-overview");
+    expect(destinationForPath("/domains/7/problems/3/overview")?.id).toBe("problem-overview");
+  });
   it("maps Records to the entities route with planner wording", () => {
     const records = destination("records");
     expect(records?.label).toBe(TERMS.records);

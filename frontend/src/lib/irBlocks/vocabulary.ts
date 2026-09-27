@@ -36,6 +36,7 @@ type B = Blockly.Block & {
   version?: number;
   isGiven?: boolean;
   emptyGiven?: boolean;
+  labelPresent?: boolean;
   json?: unknown;
   setSlots?(n: number): void;
   setTerms?(n: number): void;
@@ -476,6 +477,7 @@ export function defineIrBlocks(): void {
         .appendField(new Blockly.FieldLabelSerializable(""), "ENTITY");
       const deviates = (kind: string) => {
         for (const name of ["DEVIATION", "GAMMA_LABEL", "GAMMA", "CELLS"]) this.getField(name)?.setVisible(kind === "interval");
+        this.getInput("FUTURES")?.setVisible(kind === "scenarios");
         rerender(this);
         return kind;
       };
@@ -489,6 +491,7 @@ export function defineIrBlocks(): void {
         .appendField(numberText(""), "GAMMA")
         .appendField(new Blockly.FieldLabel("cells at once"), "CELLS");
       for (const name of ["DEVIATION", "GAMMA_LABEL", "GAMMA", "CELLS"]) this.getField(name)!.setVisible(false);
+      this.appendStatementInput("FUTURES").setCheck("future").appendField("possible futures").setVisible(false);
       this.setPreviousStatement(true, "declaration");
       this.setNextStatement(true, "declaration");
       this.setColour(COLOUR.data);
@@ -503,6 +506,20 @@ export function defineIrBlocks(): void {
     loadExtraState(this: B, state: { index: string[] }) {
       this.index = [...state.index];
     },
+  };
+
+  Blockly.Blocks.ir_future = {
+    init(this: B) {
+      this.appendDummyInput().appendField("future")
+        .appendField(new Blockly.FieldTextInput(""), "LABEL")
+        .appendField("multiply stored values by").appendField(numberText("1"), "FACTOR");
+      this.setPreviousStatement(true, "future");
+      this.setNextStatement(true, "future");
+      this.setColour(COLOUR.data);
+      this.setTooltip("A possible future: 1 keeps the stored values; 1.2 makes them twenty percent higher. The factor must be positive.");
+    },
+    saveExtraState(this: B) { return { labelPresent: this.labelPresent ?? false }; },
+    loadExtraState(this: B, state: { labelPresent?: boolean }) { this.labelPresent = state.labelPresent ?? false; },
   };
 
   Blockly.Blocks.ir_rule = {
@@ -1000,7 +1017,7 @@ export function defineIrBlocks(): void {
 export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route"] as const;
 
 export const IR_BLOCK_TYPES = [
-  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
+  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
   "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
@@ -1021,7 +1038,7 @@ export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
   return {
     kind: "categoryToolbox",
     contents: [
-      { kind: "category", name: "Declare", colour: "#0d9488", contents: blocks([hasTypes && "ir_set", "ir_variable", hasParameters && "ir_parameter"]) },
+      { kind: "category", name: "Declare", colour: "#0d9488", contents: blocks([hasTypes && "ir_set", "ir_variable", hasParameters && "ir_parameter", hasParameters && "ir_future"]) },
       {
         kind: "category",
         name: "Rules",

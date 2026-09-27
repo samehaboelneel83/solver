@@ -6,7 +6,7 @@ import ShadowCard from "./ShadowCard";
 
 const emptyMock = {
   data: { problem_id: 1, candidates: [] },
-  isError: false,
+  isError: false as const,
   error: null,
 };
 
@@ -33,7 +33,7 @@ const filledMock = {
       },
     ],
   },
-  isError: false,
+  isError: false as const,
   error: null,
 };
 
@@ -55,7 +55,7 @@ function renderCard() {
 
 describe("ShadowCard (OAAS W02)", () => {
   it("explains how to start without naming setting keys", () => {
-    vi.mocked(useShadowReport).mockReturnValue(emptyMock as ReturnType<typeof useShadowReport>);
+    vi.mocked(useShadowReport, { partial: true }).mockReturnValue(emptyMock);
     renderCard();
     expect(screen.getByRole("region", { name: "Candidate comparison" })).toBeInTheDocument();
     expect(screen.getByText(/Model versions/i)).toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("ShadowCard (OAAS W02)", () => {
   });
 
   it("shows candidate share and recent pairs in plain language", () => {
-    vi.mocked(useShadowReport).mockReturnValue(filledMock as ReturnType<typeof useShadowReport>);
+    vi.mocked(useShadowReport, { partial: true }).mockReturnValue(filledMock);
     renderCard();
     expect(screen.getByText(/Version 7/)).toBeInTheDocument();
     expect(screen.getByText(/100% as good or better/)).toBeInTheDocument();

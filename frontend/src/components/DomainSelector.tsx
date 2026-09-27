@@ -1,6 +1,8 @@
 import { useEffect, useId } from "react";
-import { useDomains } from "../api/v1";
-import { resolveDomainId, useDomain } from "../hooks/useDomain";
+import { useNavigate } from "react-router-dom";
+import { useDomains, useDomainDetail } from "../api/v1";
+import { resolveDomainId, useDomain, useHasRouteDomain } from "../hooks/useDomain";
+import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import OfflineNotice from "./OfflineNotice";
 
 /**
@@ -17,15 +19,19 @@ import OfflineNotice from "./OfflineNotice";
  */
 export default function DomainSelector() {
   const selectId = useId();
+  const navigate = useNavigate();
+  const confirmLeave = useConfirmLeave();
+  const routeScoped = useHasRouteDomain();
   const { domainId, setDomainId } = useDomain();
   const { data, isLoading, error, fetchStatus } = useDomains();
   // Guard against a body that isn't the `{items, total}` page it should be.
   const domains = Array.isArray(data?.items) ? data.items : undefined;
-  const resolved = domains ? resolveDomainId(domainId, domains) : domainId;
+  const detail = useDomainDetail(routeScoped && domains && !domains.some((row) => row.id === domainId) ? domainId : null);
+  const resolved = routeScoped ? domainId : domains ? resolveDomainId(domainId, domains) : domainId;
 
   useEffect(() => {
-    if (domains && resolved !== domainId) setDomainId(resolved);
-  }, [domains, resolved, domainId, setDomainId]);
+    if (!routeScoped && domains && resolved !== domainId) setDomainId(resolved);
+  }, [routeScoped, domains, resolved, domainId, setDomainId]);
 
   const paused = fetchStatus === "paused" && !data;
 
@@ -43,9 +49,18 @@ export default function DomainSelector() {
       <select
         id={selectId}
         value={resolved === null ? "" : String(resolved)}
-        onChange={(event) => setDomainId(Number(event.target.value))}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (next === domainId || !confirmLeave()) return;
+          setDomainId(next);
+          // A different domain cannot retain the previous problem or record id.
+          navigate(`/domains/${next}/problems`);
+        }}
         className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
       >
+        {routeScoped && !domains.some((domain) => domain.id === resolved) && (
+          <option value={resolved ?? ""} disabled>{detail.data?.id === resolved ? detail.data.name : detail.isLoading ? "Loading selected domain…" : "Domain unavailable"}</option>
+        )}
         {domains.map((domain) => (
           <option key={domain.id} value={String(domain.id)}>
             {domain.name}

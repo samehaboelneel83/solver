@@ -163,7 +163,7 @@ export default function Dashboard() {
                 return (
                   <li key={id}>
                     <Link
-                      to={`/public/problem/${id}`}
+                      to={problem.domain_id != null ? `/domains/${problem.domain_id}/problems/${id}/overview` : `/public/problem/${id}`}
                       className="flex items-center justify-between gap-2 px-4 py-2 text-sm hover:bg-slate-50"
                     >
                       <span className="font-medium text-blue-700">{problemDisplayName(problem)}</span>

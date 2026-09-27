@@ -2,6 +2,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DomainSelector from "./DomainSelector";
+import { MemoryRouter } from "react-router-dom";
 import { DOMAIN_STORAGE_KEY, useDomain } from "../hooks/useDomain";
 
 vi.mock("../api/client", async () => {
@@ -39,8 +40,10 @@ function renderSelector() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
       <DomainSelector />
       <ScopeProbe />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }

@@ -1,7 +1,10 @@
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
-import { NAV_GROUPS } from "./AppShell";
+import { buildNavGroups } from "../nav/registry";
+import { useDomain } from "../hooks/useDomain";
+import { parseRouteId } from "../lib/routeId";
+import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 
 type Entry = { to: string; label: string; group: string };
 
@@ -13,33 +16,43 @@ type Entry = { to: string; label: string; group: string };
 export default function CommandPalette({ open, onClose, can }: { open: boolean; onClose: () => void; can: (capability: string) => boolean }) {
   const id = useId();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { domainId } = useDomain();
+  const confirmLeave = useConfirmLeave();
+  const pathProblem = location.pathname.match(/^\/domains\/[^/]+\/problems\/([^/]+)(?:\/|$)/);
+  const problemId = parseRouteId(pathProblem ? pathProblem[1] : new URLSearchParams(location.search).get("problem"));
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const entries: Entry[] = useMemo(
     () =>
-      NAV_GROUPS.flatMap((g) =>
+      buildNavGroups({ domainId, problemId }).flatMap((g) =>
         g.items
           .filter((i) => !i.capability || can(i.capability))
           .map((i) => ({ to: i.to, label: i.label, group: g.label }))
       ),
-    [can]
+    [can, domainId, problemId]
   );
   const needle = query.trim().toLowerCase();
   const found = needle ? entries.filter((e) => `${e.label} ${e.group}`.toLowerCase().includes(needle)) : entries;
 
   useEffect(() => {
     if (open) {
+      const previous = document.activeElement;
       setQuery("");
       setAt(0);
-      requestAnimationFrame(() => input.current?.focus());
+      const frame = requestAnimationFrame(() => input.current?.focus());
+      return () => {
+        cancelAnimationFrame(frame);
+        if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+      };
     }
   }, [open]);
 
   if (!open) return null;
 
   function go(entry: Entry | undefined) {
-    if (!entry) return;
+    if (!entry || !confirmLeave()) return;
     onClose();
     navigate(entry.to);
   }
@@ -64,7 +77,9 @@ export default function CommandPalette({ open, onClose, can }: { open: boolean; 
               setAt(0);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") onClose();
+              // Search is the dialog's only tab stop.
+              if (event.key === "Tab") event.preventDefault();
+              else if (event.key === "Escape") onClose();
               else if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setAt((i) => Math.min(i + 1, found.length - 1));

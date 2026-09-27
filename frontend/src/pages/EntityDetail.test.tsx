@@ -626,7 +626,7 @@ describe("EntityDetail (create mode with query-string prefill)", () => {
       </QueryClientProvider>
     );
 
-    const related = await screen.findByRole("heading", { name: /related records/i });
+    const related = await screen.findByRole("heading", { name: /permissions on this role/i });
     const row = related.parentElement?.parentElement ?? related.closest("section") ?? document.body;
     fireEvent.click(within(row instanceof HTMLElement ? row : document.body).getByRole("link", { name: "New" }));
 

@@ -5,6 +5,37 @@
 **Primary priority:** Navigation, readability, and a complete planning workflow  
 **Deployment assumption:** An isolated installation with no public internet. Browsers can reach the platform over localhost or a private network.
 
+### Implementation review — 27 September 2026
+
+The original assessment below is a September 26 design baseline, not a current list of missing features. Substantial implementation has since been added. This review tightens the navigation foundation instead of treating the presence of routes as proof that the entire navigation phase is complete.
+
+**Implemented in this review:**
+
+- URL-scoped domain context is available on the first render and takes precedence over browser storage. A storage event from another tab cannot redirect the active page's data context.
+- Domain switching respects the active unsaved-change guard and navigates to the selected domain's problem list, discarding the previous child selection.
+- Domain pages wait for scope validation; failed requests offer retry and unavailable domains do not overwrite the remembered selection.
+- Problem routes validate domain ownership and selected run/scenario/version ownership before rendering. Legacy query consumers mount only after their query IDs match the validated path.
+- Command-palette destinations retain the active domain/problem and consult the same unsaved-change guard. The palette retains keyboard focus and restores it on close.
+- The context header identifies the selected problem alongside its domain and is no longer deliberately hidden at small breakpoints.
+- Regression coverage exercises cross-tab preference changes, invalid links, conflicting path/query IDs, ownership mismatches, loading failures, and declined navigation.
+- Domain and problem overview pages now provide clear next actions, model/scenario readiness, and links to shared data. The domain problem list enforces its domain filter, supports search and pagination, and respects creation capabilities.
+- Home and navigation metadata link to the scoped overviews. Run and scenario selection on the Runs page updates canonical routes; explicit runs are fetched directly so a Pareto result outside the history page remains accessible.
+- Scenario uncertainty futures are editable native blocks, with factors and optional labels preserved through IR round trips. The permissions-related-record regression test now follows the current heading while retaining its parent-prefill assertions.
+
+**Remaining navigation work, in order:**
+
+1. Validate the newly implemented global/domain/problem sidebar layouts in a live browser; legacy routes retain compatibility navigation. Track the current increment in `OAAS_ENHANCEMENT_PLAN.md`.
+2. Move remaining page selection controls and internal links completely to canonical scoped routes, then retire the query bridge. Runs navigation is covered; version and scenario editors still need a complete migration audit.
+3. Complete dedicated Inputs and Quality Checks destinations, with appropriate capability rules.
+4. Extend draft protection to browser Back/Forward through a suitable router integration; the current guard does not intercept those browser actions.
+5. Audit remaining paginated-list assumptions and add searchable selection for large-domain installations. Explicit domain validation now uses a direct lookup, with regression coverage beyond the first 500 domains.
+6. Perform live browser accessibility, narrow-screen layout, and representative user acceptance checks before calling the navigation redesign complete.
+
+This increment changes frontend behavior only. It does not establish new solver-performance claims, verify an isolated installation, or deploy the application. Existing modifications to the baseline inventory and handover are preserved separately.
+
+**Validation for this increment:** The full frontend suite passes: **2,194 passed / 0 failed**. TypeScript (`tsc --noEmit`), full frontend ESLint, and the Vite production build also pass. All three previously reproduced failures in `EntityDetail.test.tsx`, `Runs.test.tsx`, and `irBlocks/roundTrip.test.ts` are resolved. Added regression cases cover overview scope/readiness, canonical Pareto navigation, and editable scenario-future round trips. The production build still reports a large main bundle (approximately 3.84 MB minified) and a mixed static/dynamic import warning; bundle optimization remains follow-up work. Backend suites, live browser checks, and isolated-installation acceptance were not run for this frontend increment.
+
+
 ## 1. Product direction
 
 Build a platform where a planner can understand a problem, prepare its data, describe decisions and rules, compare alternatives, and adopt a defensible plan without learning database structure or solver internals.

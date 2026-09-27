@@ -80,7 +80,7 @@ describe("Dashboard", () => {
     renderWithProviders();
 
     const link = await screen.findByRole("link", { name: /reduce staffing gaps/i });
-    expect(link).toHaveAttribute("href", "/public/problem/31");
+    expect(link).toHaveAttribute("href", "/domains/7/problems/31/overview");
 
     // The v1 route (Ruling 27): `problem` lives in `public`, so the generic
     // path collapses to `/api/problem/`. The v0 `/api/problem/problem/` the

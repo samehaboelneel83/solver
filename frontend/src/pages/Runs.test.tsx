@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Runs, { formatGap, howFound, statusNote, unexpressedRules } from "./Runs";
 import { ToastProvider } from "../components/ToastProvider";
-import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
+import { DOMAIN_STORAGE_KEY, DomainRouteProvider } from "../hooks/useDomain";
+import ProblemQueryBridge from "../components/ProblemQueryBridge";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -111,6 +112,7 @@ function stub(overrides: Record<string, unknown> = {}) {
     }
     // `/api/problem/`, not `/api/public/problem` -- the public schema's
     // prefix is collapsed (Ruling 27).
+    if (path === "/api/problem/1") return Promise.resolve(PROBLEMS.items[0]);
     if (path.startsWith("/api/problem")) return Promise.resolve(overrides.problems ?? PROBLEMS);
     if (/^\/api\/v1\/scenarios\/\d+$/.test(path)) {
       return Promise.resolve(overrides.scenario ?? SCENARIOS.items[0]);
@@ -176,6 +178,32 @@ beforeEach(() => {
   mockFetch.mockReset();
   localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
   stub();
+});
+
+function RouteProbe() {
+  const location = useLocation();
+  return <span data-testid="run-location">{location.pathname}</span>;
+}
+
+describe("canonical result navigation", () => {
+  it("moves to another run path without the query bridge reverting the selection", async () => {
+    const front = { ...RUN_DETAIL, pareto_terms: ["cost", "time"],
+      pareto: [{ seq: 1, first: 6, second: 6, epsilon: null, status: "optimal", run_id: 22 }] };
+    const point = { ...RUN_DETAIL, id: 22, params: { pareto_of: 11 } };
+    stub({ run: (path: string) => path.endsWith("/22") ? point : front });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ToastProvider><MemoryRouter initialEntries={["/domains/1/problems/1/runs/11"]}>
+        <DomainRouteProvider><RouteProbe /><Routes>
+          <Route path="domains/:domainId/problems/:problemId" element={<ProblemQueryBridge />}>
+            <Route path="runs/:runId" element={<Runs />} />
+          </Route>
+        </Routes></DomainRouteProvider>
+      </MemoryRouter></ToastProvider>
+    </QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Point 1: cost 6, time 6" }));
+    expect(await screen.findByText(/one point of run 11.s trade-off front/i)).toBeInTheDocument();
+    expect(screen.getByTestId("run-location")).toHaveTextContent("/domains/1/problems/1/runs/22");
+  });
 });
 
 describe("gap and unbounded (migration 0029)", () => {

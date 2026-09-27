@@ -11,7 +11,7 @@ vi.mock("../api/client", async () => {
 
 import { apiFetch } from "../api/client";
 
-function renderWithProviders(initialEntries: string[] = ["/"]) {
+function renderWithProviders(initialEntries: string[] = ["/entities"]) {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
@@ -50,7 +50,21 @@ describe("AppShell", () => {
     });
   });
 
-  describe("static navigation (Task 10)", () => {
+  describe("legacy navigation compatibility", () => {
+    it("keeps Home focused on global destinations", async () => {
+      renderWithProviders(["/"]);
+      await settled();
+      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Model" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+    });
+    it("shows only the selected problem workflow and a link back to its domain", async () => {
+      renderWithProviders(["/domains/7/problems/9/model"]);
+      await settled();
+      expect(screen.getByRole("link", { name: "Model" })).toHaveAttribute("href", "/domains/7/problems/9/model");
+      expect(screen.getByRole("link", { name: "Domain overview" })).toHaveAttribute("href", "/domains/7/overview");
+      expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+    });
     it("renders the primary sidebar groups in planner order", async () => {
       renderWithProviders();
       await settled();
@@ -250,7 +264,7 @@ describe("AppShell", () => {
     renderWithProviders(["/public/domain"]);
     await settled();
     const activeLink = screen.getByRole("link", { name: "All domains" });
-    const otherLink = screen.getByRole("link", { name: "Problems" });
+    const otherLink = screen.getByRole("link", { name: "Home" });
 
     expect(activeLink).toHaveAttribute("aria-current", "page");
     expect(activeLink.className).not.toBe(otherLink.className);
@@ -587,7 +601,7 @@ describe("AppShell", () => {
     main.scrollTop = 240;
     expect(main.scrollTop).toBe(240);
 
-    fireEvent.click(screen.getByRole("link", { name: "Problems" }));
+    fireEvent.click(screen.getByRole("link", { name: "All domains" }));
 
     expect(main).toHaveFocus();
     expect(main.scrollTop).toBe(0);

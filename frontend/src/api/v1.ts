@@ -986,6 +986,15 @@ export function useDomains() {
   return useQuery({ queryKey: DOMAINS_QUERY_KEY, queryFn: listDomains });
 }
 
+/** Resolve explicit context independently of the paginated domain picker. */
+export function useDomainDetail(id: number | null) {
+  return useQuery({
+    queryKey: ["entities", "public", "domain", id],
+    queryFn: () => apiFetch<Domain>(`/api/domain/${id}`),
+    enabled: id !== null,
+  });
+}
+
 function useV1Mutation<TVars, TResult>(fn: (vars: TVars) => Promise<TResult>) {
   const queryClient = useQueryClient();
   return useMutation({

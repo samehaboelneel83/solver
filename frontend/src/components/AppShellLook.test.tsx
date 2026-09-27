@@ -113,7 +113,7 @@ describe("the app's look (queue R22)", () => {
       renderAt();
       fireEvent.click(screen.getByRole("button", { name: "Collapse the sidebar" }));
       expect(document.getElementById("sidebar-nav")).toHaveClass("w-16");
-      expect(screen.getByRole("link", { name: "Parameters" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
       expect(localStorage.getItem("solver_nav_collapsed")).toBe("1");
     } finally {
       window.matchMedia = original;

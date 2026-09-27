@@ -1,5 +1,9 @@
-import { useDomains } from "../api/v1";
+import { useDomains, useDomainDetail } from "../api/v1";
 import { useDomain } from "../hooks/useDomain";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
+import { apiFetch } from "../api/client";
+import { parseRouteId } from "../lib/routeId";
 
 /**
  * Visible domain context for the shell header (OAAS N03 §3.6).
@@ -8,20 +12,33 @@ import { useDomain } from "../hooks/useDomain";
 export default function ContextHeader() {
   const { domainId } = useDomain();
   const { data } = useDomains();
+  const { pathname, search } = useLocation();
+  const pathProblem = pathname.match(/^\/domains\/[^/]+\/problems\/([^/]+)(?:\/|$)/);
+  const problemId = parseRouteId(pathProblem ? pathProblem[1] : new URLSearchParams(search).get("problem"));
+  const problem = useQuery({
+    queryKey: ["entities", "public", "problem", problemId],
+    queryFn: () => apiFetch<{ id: number; domain_id: number; name: string }>(`/api/problem/${problemId}`),
+    enabled: problemId !== null && domainId !== null,
+  });
   const domains = Array.isArray(data?.items) ? data.items : [];
-  const domain = domains.find((row) => row.id === domainId);
+  const listed = domains.find((row) => row.id === domainId);
+  const detail = useDomainDetail(data && !listed ? domainId : null);
+  const domain = listed ?? (detail.data?.id === domainId ? detail.data : undefined);
 
   if (!domain) {
     return (
-      <p className="hidden truncate text-xs text-slate-500 lg:block" data-testid="context-header">
+      <p className="truncate text-xs text-slate-500" data-testid="context-header">
         No domain selected
       </p>
     );
   }
 
   return (
-    <p className="hidden max-w-[12rem] truncate text-xs text-slate-600 lg:block" data-testid="context-header" title={domain.name}>
+    <p className="min-w-0 max-w-[24rem] truncate text-xs text-slate-600" data-testid="context-header" title={domain.name}>
       Domain: <span className="font-medium text-slate-800">{domain.name}</span>
+      {problem.data && Number(problem.data.domain_id) === domainId && (
+        <> / Problem: <span className="font-medium text-slate-800">{problem.data.name}</span></>
+      )}
     </p>
   );
 }

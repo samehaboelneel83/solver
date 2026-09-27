@@ -61,6 +61,26 @@ describe("blocks round-trip every model exactly", () => {
 });
 
 describe("blocksToIr", () => {
+  it("edits scenario futures without an opaque declaration and preserves optional labels", () => {
+    const ir = { version: 2, sets: [], parameters: { demand: { index: [], uncertainty: {
+      kind: "scenarios", futures: [{ factor: 0.8 }, { label: "", factor: 1 }, { label: "busy", factor: 1.25 }],
+    } } }, variables: {}, constraints: [] };
+    const ws = new Blockly.Workspace();
+    try {
+      setCatalogue(ws, EMPTY_CATALOGUE);
+      loadBlocks(ws, irToBlocks(ir, { editable: true }));
+      const futures = ws.getAllBlocks(false).filter((block) => block.type === "ir_future");
+      expect(futures).toHaveLength(3);
+      const busy = futures.find((block) => block.getFieldValue("LABEL") === "busy")!;
+      busy.setFieldValue("1.5", "FACTOR");
+      const saved = Blockly.serialization.workspaces.save(ws);
+      const result = blocksToIr(saved as Parameters<typeof blocksToIr>[0]);
+      expect(result.ir.parameters).toEqual({ demand: { index: [], uncertainty: {
+        kind: "scenarios", futures: [{ factor: 0.8 }, { label: "", factor: 1 }, { label: "busy", factor: 1.5 }],
+      } } });
+      expect(result.paths.get(busy.id)).toEqual(["parameters", "demand", "uncertainty", "futures", 2]);
+    } finally { ws.dispose(); }
+  });
   it("keeps an unfinished block as a named refusal, not a silent change", () => {
     const { ir, paths } = blocksToIr({ blocks: { blocks: [{ type: "ir_model", id: "model-root", extraState: { version: 2 },
       inputs: { RULES: { block: { type: "ir_rule", id: "r", fields: { ID: "c", NOTE: "", SEVERITY: "hard", WEIGHT: "1", RELATION: "<=" },
