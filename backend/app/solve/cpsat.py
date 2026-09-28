@@ -115,10 +115,16 @@ def solve(
         compiled.objective.coeffs, Decimal(0), compiled.objective_quadratic, reach, "the objective"
     )
 
+    offset = compiled.objective.const
+
     def unscale(value):
-        if value is None or goal.factor == 1:
+        # The goal's constant is part of its value (HiGHS reports it too), and
+        # CP-SAT's scaled row does not carry it: added back on the way out.
+        if value is None:
             return value
-        return float(Decimal(str(value)) / goal.factor)
+        if goal.factor == 1:
+            return value + float(offset) if offset else value
+        return float(Decimal(str(value)) / goal.factor + offset)
 
     if has_objective:
         expr = sum(cp_vars[k] * coeff for k, coeff in goal.coeffs.items())
@@ -160,7 +166,7 @@ def solve(
         status=_STATUS.get(status, "unknown"),
         optimal=status == cp_model.OPTIMAL,
         objective=(
-            _objective(solver.ObjectiveValue(), goal) if solved and has_objective else None
+            _objective(solver.ObjectiveValue(), goal, offset) if solved and has_objective else None
         ),
         best_bound=(
             unscale(float(solver.BestObjectiveBound())) if solved and has_objective else None
@@ -234,11 +240,11 @@ def _scaled(coeffs, rhs, quadratic, reach, what) -> ScaledRow:
         raise NotIntegral(f"cp-sat takes whole numbers, and {exc}") from exc
 
 
-def _objective(value: float, goal: ScaledRow) -> float | int:
-    """The objective in the model's own units. A whole-number objective keeps
-    its integer shape; a scaled one is divided back exactly and reported at
-    the platform's precision."""
-    exact = Decimal(int(round(value))) / goal.factor
+def _objective(value: float, goal: ScaledRow, offset: Decimal = Decimal(0)) -> float | int:
+    """The objective in the model's own units, its constant included. A
+    whole-number objective keeps its integer shape; a scaled one is divided
+    back exactly and reported at the platform's precision."""
+    exact = Decimal(int(round(value))) / goal.factor + offset
     # A common factor divided out of whole coefficients comes back whole.
     if exact == exact.to_integral_value():
         return int(exact)

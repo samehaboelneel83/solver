@@ -108,6 +108,11 @@ def solve(
     has_objective = bool(compiled.objective.coeffs or compiled.objective_quadratic)
     if has_objective:
         model.setObjective(objective, compiled.sense)
+        # The goal's constant is part of its value (HiGHS reports it too): as
+        # SCIP's offset it is in every objective value and bound SCIP reports,
+        # incumbents streamed while it runs included.
+        if compiled.objective.const:
+            model.addObjoffset(float(compiled.objective.const))
 
     # Whitelisted emphasis settings only, and the benchmark's winners.
     for name, value in check_params("scip", solver_params).items():

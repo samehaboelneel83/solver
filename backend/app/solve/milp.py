@@ -110,7 +110,8 @@ def solve(
         # rather than truncating, because 0.9999999 is a 1 that took a
         # floating-point detour and `int()` would read it as 0.
         objective=(
-            _report(compiled, solver.Objective().Value())
+            # The goal's constant is part of its value (HiGHS reports it too).
+            _report(compiled, solver.Objective().Value() + float(compiled.objective.const))
             if solved and compiled.objective.coeffs
             else None
         ),
@@ -123,7 +124,9 @@ def solve(
             else {}
         ),
         best_bound=(
-            solver.Objective().BestBound() if solved and compiled.objective.coeffs else None
+            solver.Objective().BestBound() + float(compiled.objective.const)
+            if solved and compiled.objective.coeffs
+            else None
         ),
         wall_seconds=round(solver.WallTime() / 1000, 3),
         solver=f"{engine.lower()} (ortools {_ORTOOLS_VERSION})",
