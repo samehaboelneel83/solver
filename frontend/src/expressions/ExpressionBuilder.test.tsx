@@ -221,10 +221,40 @@ describe("ExpressionBuilder — editing", () => {
     expect(lastDoc(onChange).query.rules).toHaveLength(0);
   });
 
-  it("changes a group's combinator", () => {
-    const onChange = renderBuilder(docWith({ field: CODE, operator: "contains", value: "a" }));
+  it("changes a group's combinator, which sits between conditions", () => {
+    const onChange = renderBuilder(docWith(
+      { field: CODE, operator: "contains", value: "a" },
+      { field: CODE, operator: "contains", value: "b" },
+    ));
     fireEvent.change(screen.getAllByTestId("expression-combinator")[0], { target: { value: "or" } });
     expect(lastDoc(onChange).query.combinator).toBe("or");
+  });
+
+  it("offers no combinator ahead of a single condition", () => {
+    renderBuilder(docWith({ field: CODE, operator: "contains", value: "a" }));
+    expect(screen.queryByTestId("expression-combinator")).toBeNull();
+  });
+
+  it("adds beside the last condition, not in the header, once there is one", () => {
+    const onChange = renderBuilder(docWith(
+      { field: CODE, operator: "contains", value: "a" },
+      { field: CODE, operator: "contains", value: "b" },
+    ));
+    // One add of each kind for the group, on the last row.
+    const rows = screen.getAllByTestId("expression-rule");
+    expect(screen.getAllByTestId("expression-add-rule")).toHaveLength(1);
+    expect(rows[1]).toContainElement(screen.getByTestId("expression-add-rule"));
+    expect(rows[0].querySelector('[data-testid="expression-add-rule"]')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add a condition" }));
+    expect(lastDoc(onChange).query.rules).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Add a group of conditions" }));
+    expect(lastDoc(onChange).query.rules.some((rule: object) => "rules" in rule)).toBe(true);
+  });
+
+  it("keeps the header adds for an empty filter", () => {
+    renderBuilder(docWith());
+    expect(screen.getByRole("button", { name: "Add a condition" })).toHaveTextContent("+ Condition");
+    expect(screen.getByRole("button", { name: "Add a group of conditions" })).toHaveTextContent("+ Group");
   });
 });
 

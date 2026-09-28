@@ -16,7 +16,8 @@ import {
   toQuery,
   type ExpressionDocument,
 } from "./document";
-import { defaultFieldId, defaultOperatorFor, defaultValueFor } from "./defaults";
+import { defaultFieldId, defaultOperatorFor, defaultRule, defaultValueFor } from "./defaults";
+import { ListPlus, Plus } from "lucide-react";
 import { groupFields, type FieldCatalogue } from "./fields";
 import { EXPRESSION_OPERATORS, operatorsForField } from "./operators";
 import { validateExpression } from "./validate";
@@ -45,11 +46,22 @@ import { validateExpression } from "./validate";
  * and for Task 14d.
  */
 
-type CatalogueContext = { catalogue: FieldCatalogue; invalidPaths: ReadonlySet<string> };
+type CatalogueContext = { catalogue: FieldCatalogue; invalidPaths: ReadonlySet<string>; query: RuleGroupType | null };
 const BuilderContext = createContext<CatalogueContext>({
   catalogue: { fields: [], get: () => undefined },
   invalidPaths: new Set(),
+  query: null,
 });
+
+/** The children of the group at `path` in `query` ([] = the root). */
+function childrenAt(query: RuleGroupType | null, path: number[]): RuleGroupType["rules"] {
+  let group: RuleGroupType | null = query;
+  for (const step of path) {
+    const next: unknown = group?.rules[step];
+    group = next && typeof next === "object" && "rules" in next ? (next as RuleGroupType) : null;
+  }
+  return group?.rules ?? [];
+}
 
 const pathKey = (path: number[]) => path.join(".");
 /** A rule's position as a person would say it: `[1, 0]` is "2.1". */
@@ -305,8 +317,16 @@ function CombinatorSelector(props: ValueSelectorProps) {
 
 // --- actions ----------------------------------------------------------------
 
-function action(testID: string, text: string, describe: (path: number[]) => string) {
+function action(testID: string, text: string, describe: (path: number[]) => string, headerOnly = false) {
   return function Action(props: ActionProps) {
+    // A group's adds sit beside its last condition (see InvalidAwareRule).
+    // The header keeps them only where there is no such row: an empty group,
+    // or one that ends in a sub-group.
+    if (headerOnly) {
+      const children = (props.ruleOrGroup as RuleGroupType | undefined)?.rules ?? [];
+      const last = children[children.length - 1];
+      if (last && typeof last === "object" && !("rules" in last)) return null;
+    }
     return (
       <button
         type="button"
@@ -325,25 +345,62 @@ function action(testID: string, text: string, describe: (path: number[]) => stri
 
 const AddRule = action("expression-add-rule", "+ Condition", (path) =>
   path.length === 0 ? "Add a condition" : `Add a condition to group ${pathLabel(path)}`
-);
+, true);
 const AddGroup = action("expression-add-group", "+ Group", (path) =>
   path.length === 0 ? "Add a group of conditions" : `Add a group inside group ${pathLabel(path)}`
-);
+, true);
+
+const ICON_CLASS =
+  "inline-flex items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50";
 const RemoveRule = action("expression-remove-rule", "Remove", (path) => `Remove condition ${pathLabel(path)}`);
 const RemoveGroup = action("expression-remove-group", "Remove group", (path) => `Remove group ${pathLabel(path)}`);
 
 /** The default rule, wrapped so the row can say whether the validator
  * objected to it. */
 function InvalidAwareRule(props: RuleProps) {
-  const { invalidPaths } = useContext(BuilderContext);
+  const { invalidPaths, catalogue, query } = useContext(BuilderContext);
   const invalid = invalidPaths.has(pathKey(props.path));
+  const parent = props.path.slice(0, -1);
+  const isLast = props.path[props.path.length - 1] === childrenAt(query, parent).length - 1;
+  const where = parent.length === 0 ? "" : ` to group ${pathLabel(parent)}`;
   return (
     <div
       data-testid="expression-rule"
       data-invalid={invalid ? "true" : "false"}
-      className={invalid ? "rounded-md border border-red-300 bg-red-50 p-1" : undefined}
+      className={`flex flex-wrap items-center gap-2 ${invalid ? "rounded-md border border-red-300 bg-red-50 p-1" : ""}`}
     >
       <DefaultRule {...props} />
+      {isLast && (
+        <span className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            data-testid="expression-add-rule"
+            aria-label={`Add a condition${where}`}
+            title="Add a condition"
+            className={ICON_CLASS}
+            style={ACTION_SIZE}
+            disabled={props.disabled}
+            onClick={() => {
+              const rule = defaultRule(catalogue);
+              if (rule) props.actions.onRuleAdd(rule as never, parent);
+            }}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            data-testid="expression-add-group"
+            aria-label={parent.length === 0 ? "Add a group of conditions" : `Add a group inside group ${pathLabel(parent)}`}
+            title="Add a group of conditions"
+            className={ICON_CLASS}
+            style={ACTION_SIZE}
+            disabled={props.disabled}
+            onClick={() => props.actions.onGroupAdd({ combinator: "and", rules: [] } as never, parent)}
+          >
+            <ListPlus size={14} aria-hidden="true" />
+          </button>
+        </span>
+      )}
     </div>
   );
 }
@@ -436,8 +493,8 @@ export default function ExpressionBuilder({
     [validation, extraProblems]
   );
   const context = useMemo<CatalogueContext>(
-    () => ({ catalogue, invalidPaths: new Set(result.problems.map((p) => pathKey(p.path))) }),
-    [catalogue, result]
+    () => ({ catalogue, invalidPaths: new Set(result.problems.map((p) => pathKey(p.path))), query }),
+    [catalogue, result, query]
   );
 
   const fields = useMemo(
@@ -489,6 +546,9 @@ export default function ExpressionBuilder({
           // configuration no test can distinguish is configuration nobody
           // can rely on.
           resetOnFieldChange
+          // "and"/"or" between conditions, not ahead of the first: one
+          // condition joins nothing.
+          showCombinatorsBetweenRules
         />
         {/* `role="alert"` goes on a WRAPPER, never on the <ul> itself: the
             role overrides the element's own list role, which orphans every
