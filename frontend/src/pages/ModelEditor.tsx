@@ -36,6 +36,8 @@ import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
+import EquationField, { chipsFor } from "../model/EquationField";
+import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
 import { useDomainProblem } from "../hooks/useDomainProblem";
@@ -792,6 +794,10 @@ function ConstraintCard({
 }) {
   const idField = useId();
   const noteField = useId();
+  // Condition, chance and the structure tree: advanced, so folded away unless
+  // the rule already uses a chance.
+  const [structure, setStructure] = useState(Boolean(constraint.chance));
+  const equation = useMemo(() => ruleEquation(constraint, context), [constraint, context]);
   const bound: Binding[] = constraint.forall ?? [];
   const idProblem = !constraint.id
     ? "A rule needs a name."
@@ -872,6 +878,158 @@ function ConstraintCard({
           >
             Start expressing it
           </button>
+        </div>
+      ) : equation !== null ? (
+        <div className="space-y-2 px-2 py-1">
+          <div className="flex flex-wrap items-start gap-3">
+            <EquationField
+              label={`Equation for ${constraint.id || "this rule"}`}
+              equation={equation}
+              parse={(text) => parseRule(text, context)}
+              onCommit={(parsed) => onChange(withEquation(constraint, parsed))}
+              chips={chipsFor(context)}
+              sets={context.sets}
+            />
+            <div className="flex flex-wrap items-end gap-3">
+              <Choice
+                label="Strength"
+                value={constraint.severity ?? "hard"}
+                options={SEVERITIES.map((s) => ({
+                  value: s,
+                  label: s === "hard" ? "required" : "preferred",
+                }))}
+                onChange={(severity) => {
+                  const next = severity as Constraint["severity"];
+                  if (next === "soft") {
+                    // A preferred rule takes no condition and no chance (contract: when_on_soft, chance_misplaced).
+                    const { when: _unswitched, chance: _unchanced, ...rest } = constraint;
+                    onChange({
+                      ...rest,
+                      severity: next,
+                      weight: constraint.weight && constraint.weight >= 1 ? constraint.weight : 1,
+                    });
+                    return;
+                  }
+                  const { weight: _dropped, ...rest } = constraint;
+                  onChange({ ...rest, severity: next });
+                }}
+              />
+              {constraint.severity === "soft" && (
+                <div>
+                  <label className="block text-xs text-slate-600" htmlFor={`${idField}-weight`}>
+                    How much it matters
+                  </label>
+                  <input
+                    id={`${idField}-weight`}
+                    inputMode="numeric"
+                    className={`${INPUT_CLASS} w-28 text-sm`}
+                    value={String(constraint.weight ?? 1)}
+                    onChange={(event) => {
+                      // A soft cost must be a positive integer (contract §3.4).
+                      // Rejecting 0 here keeps the field honest — Publish used
+                      // to coerce it silently while the box still showed 0.
+                      const raw = event.target.value;
+                      if (!/^\d*$/.test(raw)) return;
+                      if (raw === "") {
+                        onChange({ ...constraint, weight: 1 });
+                        return;
+                      }
+                      const next = Number(raw);
+                      if (Number.isSafeInteger(next) && next >= 1) {
+                        onChange({ ...constraint, weight: next });
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-expanded={structure}
+            className="rounded py-1 text-xs font-medium text-blue-700 underline"
+            onClick={() => setStructure((open) => !open)}
+          >
+            {structure ? "Fewer options" : "More options"}
+          </button>
+          {structure && (
+            <>
+          <WhenEditor
+            when={constraint.when}
+            soft={constraint.severity === "soft"}
+            bound={bound}
+            context={context}
+            onChange={(when) => {
+              if (when === undefined) {
+                const { when: _dropped, ...rest } = constraint;
+                onChange(rest);
+                return;
+              }
+              // A conditional rule takes no chance: the chance is its own switch (contract: chance_misplaced).
+              const { chance: _dropped, ...rest } = constraint;
+              onChange({ ...rest, when });
+            }}
+          />
+          {constraint.severity !== "soft" && !constraint.when && (
+            <ChanceField
+              id={`${idField}-chance`}
+              chance={constraint.chance}
+              onChange={(chance) => {
+                const { chance: _previous, ...rest } = constraint;
+                onChange(chance === undefined ? rest : { ...rest, chance });
+              }}
+            />
+          )}
+            </>
+          )}
+          {structure && (
+            <TreeView>
+          <BindingsEditor
+            bindings={bound}
+            onChange={(forall) => {
+              // Omit the key when there is nothing to range over — an empty
+              // array is refused (contract §3.4).
+              if (forall.length === 0) {
+                const { forall: _dropped, ...rest } = constraint;
+                onChange(rest);
+                return;
+              }
+              onChange({ ...constraint, forall });
+            }}
+            context={context}
+            outer={[]}
+            legend="For every"
+            minBindings={0}
+          />
+
+          <TermBuilder
+            value={constraint.left}
+            onChange={(left) => onChange({ ...constraint, left })}
+            context={context}
+            bound={bound}
+            label="This"
+          />
+
+          <div className="flex flex-wrap items-end gap-3 px-2 py-1">
+            <Choice
+              label="Must be"
+              value={constraint.relation ?? "<="}
+              options={RELATIONS.map((r) => ({ value: r, label: relationLabel(r) }))}
+              onChange={(relation) =>
+                onChange({ ...constraint, relation: relation as Constraint["relation"] })
+              }
+            />
+          </div>
+
+          <TermBuilder
+            value={constraint.right}
+            onChange={(right) => onChange({ ...constraint, right })}
+            context={context}
+            bound={bound}
+            label="That"
+          />
+            </TreeView>
+          )}
         </div>
       ) : (
         <TreeView>
@@ -1057,6 +1215,41 @@ function ChanceField({
   );
 }
 
+/** A goal's expression as an equation, with its structure a click away; a
+ * goal the equation form cannot write exactly keeps the structure editor. */
+function GoalExpression({ goalId, expression, context, onChange }: {
+  goalId: string;
+  expression: Term;
+  context: ModelContext;
+  onChange: (expression: Term) => void;
+}) {
+  const [structure, setStructure] = useState(false);
+  const equation = useMemo(() => goalEquation(expression, context), [expression, context]);
+  const builder = <TermBuilder value={expression} onChange={onChange} context={context} bound={[]} label="Count" />;
+  if (equation === null) return builder;
+  return (
+    <div className="space-y-2 px-2 py-1">
+      <EquationField
+        label={`Equation for ${goalId || "this goal"}`}
+        equation={equation}
+        parse={(text) => parseGoal(text, context)}
+        onCommit={(next) => onChange(next)}
+        chips={chipsFor(context)}
+        sets={context.sets}
+      />
+      <button
+        type="button"
+        aria-expanded={structure}
+        className="rounded py-1 text-xs font-medium text-blue-700 underline"
+        onClick={() => setStructure((open) => !open)}
+      >
+        {structure ? "Fewer options" : "More options"}
+      </button>
+      {structure && builder}
+    </div>
+  );
+}
+
 function ObjectiveEditor({
   objective,
   context,
@@ -1100,6 +1293,18 @@ function ObjectiveEditor({
             No goals yet. Leave it empty for a feasibility problem, or add one.
           </p>
         )}
+        {objective.terms.length > 0 && (() => {
+          const parts = objective.terms.map((term) => goalEquation(term.expression, context));
+          if (parts.some((part) => part === null)) return null;
+          const joined = objective.mode === "lex"
+            ? parts.join(", then ")
+            : objective.terms.map((term, i) => `${term.weight ?? 1} × (${parts[i]})`).join(" + ");
+          return (
+            <p data-testid="objective-equation" className="mb-2 overflow-x-auto whitespace-nowrap rounded bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
+              {objective.sense ?? "minimize"} {joined}
+            </p>
+          );
+        })()}
         {objective.terms.map((term, position) => {
           const otherIds = objective.terms
             .filter((_, i) => i !== position)
@@ -1232,8 +1437,10 @@ function ObjectiveEditor({
                 </button>
               </div>
             ) : (
-              <TermBuilder
-                value={term.expression}
+              <GoalExpression
+                goalId={term.id}
+                expression={term.expression}
+                context={context}
                 onChange={(expression) =>
                   onChange({
                     ...objective,
@@ -1242,9 +1449,6 @@ function ObjectiveEditor({
                     ),
                   })
                 }
-                context={context}
-                bound={[]}
-                label="Count"
               />
             )}
           </TreeItem>

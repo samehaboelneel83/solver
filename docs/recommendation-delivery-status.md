@@ -128,3 +128,13 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - On platform pages the "Recent" shortcut follows the selected domain: its last problem, or the domain itself.
 - The last problem per domain is remembered in this browser (`frontend/src/nav/recentScope.ts`); it is a shortcut only, and server permissions still govern every page.
 - Verification: switch-rule unit test and 2 shell tests; full frontend suite (2291), lint and production build pass.
+
+## Rules and goals as equations
+
+- Each rule on Build model is one editable equation in the IR's own terms, e.g. `for each d in day: sum(assign[e, d] for e in employee) >= demand[d]`, beside its strength (required / preferred). Condition, chance and the full structure tree fold under "More options". Goals are `weight` + equation, and the whole objective reads as one line (`minimize 1 × (…) + …`).
+- `frontend/src/model/formula.ts` prints and parses the equations: sums with `for i in set`, `where` filters, parameters, variables, attributes, `+ - *`, the contract's functions and `for each …:`. It checks names, index counts and bound indices, with plain messages ("did you mean “assign”?") and the offending span highlighted.
+- The equation form is offered only when printing and parsing give back the identical IR; walks, curves, conditional, scheduling, connected and route rules keep the structure editor. Every template's rules and goals that have an equation are checked to round-trip exactly.
+- Typing is applied on Enter or leaving the field, only when it reads; Esc restores. Name chips insert variables, parameters and a `sum(… for … in …)` skeleton.
+- A binding's filter sits beside its Index and Set, and the filter's add controls are icons beside its last condition, with and/or between conditions only.
+- Also fixed: shade-950 status text (warning boxes) was unreadable in dark mode.
+- Verification: formula round-trip and error tests, EquationField tests, 3 editor tests for equations; full frontend suite (2306), lint and build pass; checked in Chromium in dark and light.

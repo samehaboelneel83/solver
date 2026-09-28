@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 import type { FormDraft } from "./draftIr";
 import { applyGuidedCommand, type GuidedCommand, type ParameterUse } from "./guidedCommands";
+import { printRule, printTerm } from "./formula";
+import type { Constraint, Term } from "./terms";
 import { INPUT_CLASS } from "../components/attrTypes";
 
 type Props = { draft: FormDraft; availableSets: string[]; onApply: (command: GuidedCommand) => void };
@@ -115,6 +117,20 @@ export default function GuidedCreation({ draft, availableSets, onApply }: Props)
           : kind === "rule" ? `${preference ? "Prefer" : "Require"} ${coefficient.name ? `${coefficient.name} × ` : ""}${decision || "the selected decision"}${chosen?.index.some((_, i) => !separate.includes(i)) ? " summed over unchecked dimensions" : ""} ${relation} ${limitSource === "parameter" ? limitParameter.name || "a parameter" : limit || "a limit"}${separate.length ? `, separately by ${separate.map(i => chosen?.index[i]).join(", ")}` : " overall"}.`
           : `${actualSense} the total of ${coefficient.name ? `${coefficient.name} × ` : ""}${decision || "the selected decision"} with weight ${weight || "to be supplied"}.`}
       </div>
+      {!issue && kind === "rule" && preview !== undefined && (
+        <p className="-mt-2 mb-4 overflow-x-auto whitespace-nowrap rounded bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700" aria-label="Equation">
+          {printRule(preview as Constraint)}
+        </p>
+      )}
+      {!issue && kind === "objective" && (preview as { terms?: { expression?: Term }[] } | undefined)?.terms?.length ? (
+        <p className="-mt-2 mb-4 overflow-x-auto whitespace-nowrap rounded bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700" aria-label="Equation">
+          {(() => {
+            const terms = (preview as { terms: { expression?: Term }[] }).terms;
+            const last = terms[terms.length - 1]?.expression;
+            return last ? printTerm(last) : "";
+          })()}
+        </p>
+      ) : null}
       {issue && <p id={`${prefix}-issue`} className="mb-3 text-sm text-slate-600">{issue}</p>}
       {!issue && <details className="mb-3"><summary className="cursor-pointer py-2 text-sm">Preview exact model representation</summary><pre className="max-h-64 overflow-auto bg-slate-50 p-3 text-xs">{JSON.stringify(preview, null, 2)}</pre></details>}
       <button type="submit" disabled={issue !== null} aria-describedby={issue ? `${prefix}-issue` : undefined} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{kind === "variable" ? "Create decision variable" : kind === "rule" ? "Create rule" : "Add objective term"}</button>

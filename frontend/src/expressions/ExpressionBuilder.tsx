@@ -419,7 +419,7 @@ const CONTROL_ELEMENTS = {
 
 const CONTROL_CLASSNAMES = {
   queryBuilder: "text-xs",
-  ruleGroup: "rounded-md border border-slate-200 p-2",
+  ruleGroup: "rounded-md",
   header: "flex flex-wrap items-center gap-2",
   body: "mt-2 flex flex-col gap-2 border-l-2 border-slate-200 pl-2",
   rule: "flex flex-wrap items-center gap-2",

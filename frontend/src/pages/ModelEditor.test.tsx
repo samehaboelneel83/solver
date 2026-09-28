@@ -148,6 +148,11 @@ function stub(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/** Rules and goals open as equations; a test that drives their structure opens it first. */
+function showStructure() {
+  screen.queryAllByRole("button", { name: "More options" }).forEach((button) => fireEvent.click(button));
+}
+
 function renderPage(entry = "/model") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -257,6 +262,7 @@ describe("ModelEditor", () => {
     const sets = screen.getByRole("group", { name: "Sets" });
     fireEvent.click(within(sets).getByRole("checkbox", { name: "day" }));
     fireEvent.click(screen.getByRole("button", { name: /add a rule/i }));
+    showStructure();
 
     // The new rule's binding offers `day` -- if the term editor read the
     // stored version instead of the draft, the two halves of this page would
@@ -479,6 +485,8 @@ describe("ModelEditor", () => {
       },
     });
     renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    showStructure();
 
     fireEvent.click(await screen.findByLabelText(/only while a yes-or-no decision is set/i));
     fireEvent.change(screen.getByLabelText("Switch"), { target: { value: "staffed" } });
@@ -503,11 +511,14 @@ describe("ModelEditor", () => {
     });
     renderPage();
 
-    const toggle = await screen.findByLabelText(/only while a yes-or-no decision is set/i);
-    expect(toggle).toBeChecked();
+    expect(await screen.findByLabelText(/only while a yes-or-no decision is set/i)).toBeChecked();
     fireEvent.change(screen.getByLabelText("Strength"), { target: { value: "soft" } });
-    expect(toggle).not.toBeChecked();
-    expect(toggle).toBeDisabled();
+    // Without its condition the rule reads as an equation, so its card is
+    // redrawn, with the condition under More options.
+    showStructure();
+    const after = screen.getByLabelText(/only while a yes-or-no decision is set/i);
+    expect(after).not.toBeChecked();
+    expect(after).toBeDisabled();
     expect(screen.getByText(/a preferred rule can already be broken at a cost/i)).toBeInTheDocument();
   });
 
@@ -604,6 +615,7 @@ describe("ModelEditor", () => {
   it("gives For every, Of and That each a tree chevron", async () => {
     renderPage();
     await screen.findByDisplayValue("c_cover");
+    showStructure();
     expect(screen.getByRole("button", { name: /collapse for every/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^collapse of$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^collapse that$/i })).toBeInTheDocument();
@@ -723,6 +735,7 @@ describe("ModelEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: /add a rule/i }));
 
     expect(await screen.findByDisplayValue("c_1")).toBeInTheDocument();
+    showStructure();
     expect(screen.getByLabelText("Index")).toHaveValue("e");
     expect(screen.getByLabelText("Set")).toHaveValue("employee");
   });
@@ -790,6 +803,7 @@ describe("ModelEditor", () => {
     });
     renderPage();
     await screen.findByDisplayValue("c_global");
+    showStructure();
 
     fireEvent.click(screen.getByRole("button", { name: /remove d in day/i }));
 
@@ -925,6 +939,7 @@ describe("ModelEditor", () => {
     });
     renderPage();
     await screen.findByDisplayValue("c_cover");
+    showStructure();
 
     fireEvent.click(screen.getByRole("button", { name: /remove condition/i }));
     // The query builder reports a removal a tick after rendering it; a
@@ -1116,6 +1131,8 @@ describe("the domain's check of the draft (Blocks 4)", () => {
 describe("a rule's chance in the forms (queue R8)", () => {
   it("writes the percentage as an epsilon, and a preferred rule drops it", async () => {
     renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    showStructure();
     const field = await screen.findByLabelText(/May fail in at most this % of sampled futures/i);
     fireEvent.change(field, { target: { value: "10" } });
     await waitFor(() => {
@@ -1228,4 +1245,52 @@ it("focuses a graph rule, follows its rename, and restores all editors", async (
   fireEvent.click(screen.getByRole("tab", { name: "Guided Form" }));
   expect(screen.getByDisplayValue("c_renamed")).toBeInTheDocument();
   expect(screen.getByDisplayValue("graph inspector edit")).toBeInTheDocument();
+});
+
+describe("rules and goals as equations", () => {
+  const EQUATION = "for each d in day: sum(assign[e, d] for e in employee) >= demand[d]";
+
+  it("shows a rule as its equation and publishes an edited one", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    const field = (await screen.findByLabelText("Equation for c_cover")) as HTMLTextAreaElement;
+    expect(field).toHaveValue(EQUATION);
+    // The tree is a click away, not on screen by default.
+    expect(screen.queryByRole("button", { name: /collapse for every/i })).toBeNull();
+
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "for each d in day: sum(assign[e, d] for e in employee where hours_per_week >= 20) >= 2 * demand[d]" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/problems/1/versions")).toBe(true));
+    const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/problems/1/versions")!;
+    const rule = JSON.parse(options.body).ir.constraints[0];
+    expect(rule).toMatchObject({
+      id: "c_cover", note: "each day is staffed", severity: "hard", relation: ">=",
+      left: { over: [{ index: "e", set: "employee", where: [{ attr: "hours_per_week", op: ">=", value: 20 }] }] },
+      right: { mul: [{ const: 2 }, { par: "demand", index: ["d"] }] },
+    });
+  });
+
+  it("explains a wrong equation and leaves the rule as it was", async () => {
+    renderPage();
+    const field = (await screen.findByLabelText("Equation for c_cover")) as HTMLTextAreaElement;
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "sum(asign[e, d] for e in employee) >= 1" } });
+    expect(screen.getByText(/“asign” is not a variable.*did you mean “assign”/)).toBeInTheDocument();
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(field).toHaveValue(EQUATION);
+  });
+
+  it("keeps the equation and the structure in step", async () => {
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    fireEvent.change(screen.getByLabelText("Must be"), { target: { value: "<=" } });
+    expect(screen.getByLabelText("Equation for c_cover")).toHaveValue(
+      "for each d in day: sum(assign[e, d] for e in employee) <= demand[d]",
+    );
+  });
 });

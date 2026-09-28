@@ -489,6 +489,60 @@ export function BindingsEditor({
                   earlier={[...outer, ...bindings.slice(0, position)]}
                   onChange={(next) => replace(position, next)}
                 />
+                {hasFilter ? (
+                  <div className="min-w-[16rem] flex-1">
+                    <p className="mb-1 text-xs text-slate-600">
+                      Only some of {binding.set} (optional)
+                    </p>
+                    <ExpressionBuilder
+                      catalogue={buildFieldCatalogue({
+                        entityTypes: [
+                          {
+                            id: setId,
+                            name: binding.set,
+                            attributes: attributes.map((a, index) => ({
+                              id: index,
+                              entity_type_id: setId,
+                              name: a.name,
+                              data_type: a.data_type,
+                              required: false,
+                              unit: null,
+                              enum_values: null,
+                              default_value: null,
+                            })),
+                          } as never,
+                        ],
+                        columns: [],
+                      })}
+                      label={`Filter for ${binding.index} in ${binding.set}`}
+                      value={fromIrWhere(binding.where, setId)}
+                      onChange={(document) => {
+                        const converted = toIrWhere(document);
+                        if (!converted.ok) {
+                          // Keep the last good where; surface the reason inline.
+                          // `problems` is UI-only — cleanBinding strips it on publish.
+                          replace(position, {
+                            ...binding,
+                            problems: converted.problems,
+                          } as Binding & { problems?: string[] });
+                          return;
+                        }
+                        replace(
+                          position,
+                          cleanBinding({
+                            ...binding,
+                            where: converted.where,
+                          })
+                        );
+                      }}
+                    />
+                    {(binding as Binding & { problems?: string[] }).problems?.map((problem) => (
+                      <p key={problem} role="alert" className="mt-1 text-xs text-red-600">
+                        {problem}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               {keyed && (
                 <p className="text-xs text-slate-600">
@@ -499,60 +553,7 @@ export function BindingsEditor({
                   (kept as written; edit it in the block view)
                 </p>
               )}
-              {hasFilter ? (
-                <div>
-                  <p className="mb-1 text-xs text-slate-600">
-                    Only some of {binding.set} (optional)
-                  </p>
-                  <ExpressionBuilder
-                    catalogue={buildFieldCatalogue({
-                      entityTypes: [
-                        {
-                          id: setId,
-                          name: binding.set,
-                          attributes: attributes.map((a, index) => ({
-                            id: index,
-                            entity_type_id: setId,
-                            name: a.name,
-                            data_type: a.data_type,
-                            required: false,
-                            unit: null,
-                            enum_values: null,
-                            default_value: null,
-                          })),
-                        } as never,
-                      ],
-                      columns: [],
-                    })}
-                    label={`Filter for ${binding.index} in ${binding.set}`}
-                    value={fromIrWhere(binding.where, setId)}
-                    onChange={(document) => {
-                      const converted = toIrWhere(document);
-                      if (!converted.ok) {
-                        // Keep the last good where; surface the reason inline.
-                        // `problems` is UI-only — cleanBinding strips it on publish.
-                        replace(position, {
-                          ...binding,
-                          problems: converted.problems,
-                        } as Binding & { problems?: string[] });
-                        return;
-                      }
-                      replace(
-                        position,
-                        cleanBinding({
-                          ...binding,
-                          where: converted.where,
-                        })
-                      );
-                    }}
-                  />
-                  {(binding as Binding & { problems?: string[] }).problems?.map((problem) => (
-                    <p key={problem} role="alert" className="mt-1 text-xs text-red-600">
-                      {problem}
-                    </p>
-                  ))}
-                </div>
-              ) : null}
+
             </TreeItem>
           );
 
