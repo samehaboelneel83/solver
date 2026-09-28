@@ -10,6 +10,7 @@ export function setToken(token: string | null) {
   } catch {
     // localStorage unavailable (private mode, etc.) — token just won't persist
   }
+  window.dispatchEvent(new Event("solver-auth-changed"));
 }
 
 export function getToken(): string | null {

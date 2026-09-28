@@ -5,7 +5,8 @@
  * what it would throw away, rather than in a browser dialog.
  */
 import { useState } from "react";
-import type { ModelDraft } from "./draftStore";
+import DraftRecovery from "./DraftRecovery";
+import { draftHistory, replayDraft, type ModelDraft } from "./draftStore";
 
 /** "14:02": a 24-hour clock in Latin digits, since it sits inside an English
  * sentence -- the browser's own locale may write it in another script. */
@@ -28,6 +29,16 @@ export default function DraftBar({
   onDiscard: () => void;
 }) {
   const [asking, setAsking] = useState(false);
+  const history = draft ? draftHistory(draft.problemId) : { canUndo: false, canRedo: false };
+  function downloadDraft() {
+    if (!draft) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ format: "oaas-draft-backup-v1", draft }, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `problem-${draft.problemId}-draft.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
@@ -41,6 +52,9 @@ export default function DraftBar({
       </button>
       {draft && (
         <>
+          <button type="button" disabled={publishing || !history.canUndo} onClick={() => replayDraft(draft.problemId, "undo")} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Undo edit</button>
+          <button type="button" disabled={publishing || !history.canRedo} onClick={() => replayDraft(draft.problemId, "redo")} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Redo edit</button>
+          <button type="button" onClick={downloadDraft} className="rounded border px-3 py-2 text-sm">Download draft backup</button>
           <span role="status" className="text-sm text-amber-800">
             {`Unpublished changes · edited ${editedAt(draft)}`}
             {!draft.persisted && " — not saved in this browser: they are lost on reload"}
@@ -69,6 +83,7 @@ export default function DraftBar({
           )}
         </>
       )}
+      {draft && <DraftRecovery draft={draft} disabled={publishing} />}
       {!draft && (
         <span className="text-sm text-slate-500">
           The version you started from is untouched, and any run of it keeps its answer.

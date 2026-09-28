@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import AliasRedirect from "./components/AliasRedirect";
@@ -43,6 +45,22 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const clearAccountCache = () => queryClient.clear();
+    const accountChangedElsewhere = (event: StorageEvent) => {
+      if (event.key === "solver_token" || event.key === null) {
+        queryClient.clear();
+        window.location.reload();
+      }
+    };
+    window.addEventListener("solver-auth-changed", clearAccountCache);
+    window.addEventListener("storage", accountChangedElsewhere);
+    return () => {
+      window.removeEventListener("solver-auth-changed", clearAccountCache);
+      window.removeEventListener("storage", accountChangedElsewhere);
+    };
+  }, [queryClient]);
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

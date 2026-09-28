@@ -57,3 +57,24 @@ Updated: 2026-09-28. This is an implementation ledger for OAAS_UX_FORM_GRAPH_PLA
 - Dragged card positions survive semantic edits while the graph remains mounted. Reset graph layout restores automatic arrangement. Positions are view state, are not part of solver IR, and are not persisted across reloads or view changes.
 - Verification: 61 model-editor tests and three graph-component tests pass; production build and ESLint pass. The existing large-bundle warning remains.
 - Remaining graph work: individual variable/parameter inspectors, typed connection commands, durable layout storage, undo/redo and broader accessibility evaluation.
+
+## Draft recovery increment
+
+- Shared draft controls now offer undo and redo for up to 30 edits in the current tab, including the first edit from a published version. Forms, graph editors and Blocks use the same store.
+- A new edit clears redo history; discard clears history. Undo refuses to overwrite a different draft written by another tab. This is not server-side concurrency protection.
+- Fixed a storage-full regression: if a previous saved draft exists but a later write fails, the latest in-memory draft now remains visible and is marked unsaved.
+- Download draft backup exports the full IR and starting-version metadata. Restore accepts backups up to 5 MB for the same problem and starting version, requires confirmation, refuses stale previews and can be undone. Restored work remains unpublished and must pass normal validation before publishing.
+- To restore when no local draft exists, open the backup's starting version and make an edit to create a local draft first. A dedicated recovery entry point remains to be added.
+- Validation: 81 tests passed across draft store, recovery UI, model editor and Blocks integration. Build and lint pass; the existing bundle-size warning remains.
+- Still pending: authenticated ownership migration for legacy drafts, account-scoped storage, server persistence and revision conflicts, idempotent publication, and the remaining navigation/data/graph/release milestones. Undo history does not survive reloads.
+
+Deployment note: Docker Desktop was started and the recovery frontend was built offline and deployed. Frontend-proxied PostgreSQL and ClickHouse health checks returned `ok`. A restart revealed that the ingestion worker could dynamically take the reference database's fixed address; the reference overlay now reserves `.3` for the worker while the database keeps `.2`.
+
+## Account-scoped browser drafts
+
+- New drafts, in-memory fallback and undo history are keyed by the signed-in JWT subject and problem. This is UI-level account separation, not encryption or a server authorization boundary; localStorage remains readable by code running on this origin.
+- Login/logout clears cached API data. Cross-tab token changes reload the application so an editor cannot remain on the former account's loaded screen.
+- Drafts with old unscoped keys remain untouched and are not automatically loaded into any account. A notice identifies their presence without displaying model contents. A verified ownership recovery/migration workflow remains outstanding; do not clear browser data before recovery.
+- Standard password and SSO sessions use the JWT subject as supplied by the current authentication contract. Unrecognized token formats receive a distinct temporary namespace; persistence across reloads for such sessions is not supported.
+- Validation: 102 tests passed across six authentication/modeling suites, followed by the expanded 14-test App suite including account-cache invalidation. Production build and lint pass.
+- Still outstanding: server-saved drafts with revisions, stable server user/organization identifiers for draft ownership, legacy ownership recovery, conflict resolution and duplicate-publish protection.

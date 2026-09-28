@@ -36,7 +36,7 @@ import type { ModelPart } from "../lib/modelGraph";
 import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
-import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
+import { hasLegacyDraft, clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { useDraftRefusal } from "../model/useDraftRefusal";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
@@ -175,6 +175,9 @@ function ForDomain({ domainId }: { domainId: Id }) {
 
   return (
     <>
+      {hasLegacyDraft(Number(problemId)) && <p role="status" className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        An older browser draft is preserved for this problem, but its owner was not recorded. It has not been assigned to this account. Keep this browser’s data until the original author’s draft has been recovered.
+      </p>}
       <ProblemReadiness problemId={problemId} />
       <div className="mb-4">
         <label htmlFor={chooserId} className="block text-sm font-medium text-slate-700">
@@ -276,14 +279,14 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       base: seedKey,
       baseVersion: seedKey === "scratch" ? null : base?.version ?? null,
       ir: withFormDraft(workingIr, next),
-    });
+    }, workingIr);
   }
 
   /** A whole-IR edit (the Blocks tab), through the same store as `setDraft`. */
   function setIr(next: Record<string, unknown>) {
     if (seedKey === null) return;
     if (readDraft(Number(problemId))) updateDraftIr(Number(problemId), () => next);
-    else writeDraft({ problemId: Number(problemId), base: seedKey, baseVersion: seedKey === "scratch" ? null : base?.version ?? null, ir: next });
+    else writeDraft({ problemId: Number(problemId), base: seedKey, baseVersion: seedKey === "scratch" ? null : base?.version ?? null, ir: next }, workingIr);
   }
 
   const catalogue = useMemo(

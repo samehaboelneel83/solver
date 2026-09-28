@@ -79,7 +79,7 @@ export default function BlocklyEdit({ domainId, problemId, versionId, versionNum
 
   function setIr(next: Record<string, unknown>) {
     if (readDraft(problem)) updateDraftIr(problem, () => next);
-    else writeDraft({ problemId: problem, base: seedKey, baseVersion: scratch ? null : versionNumber, ir: next });
+    else writeDraft({ problemId: problem, base: seedKey, baseVersion: scratch ? null : versionNumber, ir: next }, workingIr ?? undefined);
   }
 
   function publish() {

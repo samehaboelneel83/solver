@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -24,10 +24,12 @@ describe("RequireAuth", () => {
 
   it("redirects to /login with next=<current path> and no reason when there is no token", () => {
     render(
-      <MemoryRouter initialEntries={["/finance/invoice?tab=details"]}>
-        <LocationDisplay />
-        <App />
-      </MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/finance/invoice?tab=details"]}>
+          <LocationDisplay />
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
     );
 
     expect(screen.getByTestId("location").textContent).toBe(
@@ -237,4 +239,13 @@ describe("parameter and version routes (Task 13)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Model versions" })).toBeInTheDocument();
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
   });
+});
+
+
+it("clears cached account data when authentication changes", () => {
+  const client = new QueryClient();
+  client.setQueryData(["private-account-data"], { owner: "previous" });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/login"]}><App /></MemoryRouter></QueryClientProvider>);
+  act(() => setToken("new-account-session"));
+  expect(client.getQueryData(["private-account-data"])).toBeUndefined();
 });

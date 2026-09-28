@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelEditor from "./ModelEditor";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
-import { clearDraft } from "../model/draftStore";
+import { clearDraft, draftStorageKey } from "../model/draftStore";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -982,7 +982,7 @@ describe("ModelEditor and the shared draft", () => {
   });
 
   it("never swaps a draft from another version silently", async () => {
-    localStorage.setItem("solver_model_draft_1", JSON.stringify({
+    localStorage.setItem(draftStorageKey(1), JSON.stringify({
       problemId: 1, base: "version-21", baseVersion: 1, editedAt: "2026-09-24T12:00:00Z", persisted: true,
       ir: { ...IR_V2, constraints: [] },
     }));
@@ -990,7 +990,7 @@ describe("ModelEditor and the shared draft", () => {
     expect(await screen.findByText(/unpublished changes started from version 1/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /start again from version 2/i }));
     expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
-    expect(localStorage.getItem("solver_model_draft_1")).toBeNull();
+    expect(localStorage.getItem(draftStorageKey(1))).toBeNull();
   });
 
   it("clears the draft on publish, and on a confirmed discard only", async () => {
@@ -1000,10 +1000,10 @@ describe("ModelEditor and the shared draft", () => {
     fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(localStorage.getItem("solver_model_draft_1")).not.toBeNull();
+    expect(localStorage.getItem(draftStorageKey(1))).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
-    await waitFor(() => expect(localStorage.getItem("solver_model_draft_1")).toBeNull());
+    await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).toBeNull());
   });
 
   it("says when changes cannot outlive the page", async () => {
@@ -1071,7 +1071,7 @@ describe("a rule's chance in the forms (queue R8)", () => {
     const field = await screen.findByLabelText(/May fail in at most this % of sampled futures/i);
     fireEvent.change(field, { target: { value: "10" } });
     await waitFor(() => {
-      const draft = JSON.parse(localStorage.getItem("solver_model_draft_1") ?? "{}");
+      const draft = JSON.parse(localStorage.getItem(draftStorageKey(1)) ?? "{}");
       expect(draft.ir.constraints[0].chance).toEqual({ epsilon: 0.1 });
     });
     fireEvent.change(field, { target: { value: "100" } });
@@ -1079,7 +1079,7 @@ describe("a rule's chance in the forms (queue R8)", () => {
     const strength = screen.getAllByLabelText("Strength")[0];
     fireEvent.change(strength, { target: { value: "soft" } });
     await waitFor(() => {
-      const draft = JSON.parse(localStorage.getItem("solver_model_draft_1") ?? "{}");
+      const draft = JSON.parse(localStorage.getItem(draftStorageKey(1)) ?? "{}");
       expect(draft.ir.constraints[0]).not.toHaveProperty("chance");
     });
   });

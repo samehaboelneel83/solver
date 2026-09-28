@@ -1,3 +1,4 @@
+import TemplateSummary from "./TemplateSummary";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueries } from "@tanstack/react-query";
@@ -387,12 +388,20 @@ export default function DataTable({
    * and the small-screen card markup below (G-4) so the two never resolve a
    * foreign key or format a value differently.
    */
+  function displayFieldLabel(field: FieldMeta): string {
+    const templateLabels: Record<string, string> = { domain_seed: "Sample data", default_ir: "Model summary", ir_version: "Model format" };
+    return schema === "public" && table === "template" ? templateLabels[field.name] ?? fieldLabel(field) : fieldLabel(field);
+  }
+
   function cellContent(field: FieldMeta, row: Row): { content: React.ReactNode; title?: string } {
     const value = row[field.name];
     const isFk = fkFields.some((f) => f.name === field.name);
     if (isFk && value !== null && value !== undefined && value !== "") {
       const id = String(value);
       return { content: labelFor(field.name, id), title: id };
+    }
+    if (schema === "public" && table === "template" && (field.name === "domain_seed" || field.name === "default_ir")) {
+      return { content: <TemplateSummary value={value} kind={field.name === "domain_seed" ? "seed" : "model"} /> };
     }
     const formatted = formatCellValue(field, value);
     const content = formatted.ariaLabel ? (
@@ -483,7 +492,7 @@ export default function DataTable({
                     const { content, title } = cellContent(field, row);
                     return (
                       <div key={field.name} title={title} className="flex items-baseline justify-between gap-3">
-                        <dt className="text-slate-500">{fieldLabel(field)}</dt>
+                        <dt className="text-slate-500">{displayFieldLabel(field)}</dt>
                         <dd className="text-right text-slate-900">{content}</dd>
                       </div>
                     );
@@ -501,7 +510,7 @@ export default function DataTable({
             <tr className="border-b border-slate-200 text-left text-slate-500">
               {displayFields.map((field) => {
                 const isActive = orderBy === field.name;
-                const label = fieldLabel(field);
+                const label = displayFieldLabel(field);
                 return (
                   <th
                     key={field.name}
@@ -563,7 +572,7 @@ export default function DataTable({
                     const { content, title } = cellContent(field, row);
                     if (index === 0) {
                       return (
-                        <td key={field.name} className="px-3 py-2" title={title}>
+                        <td key={field.name} className="px-3 py-2 align-top" title={title}>
                           {rowHref !== undefined ? (
                             <RowLink to={rowHref} empty={isEmptyValue(row[field.name])} recordLabel={label}>
                               {content}
@@ -575,7 +584,7 @@ export default function DataTable({
                       );
                     }
                     return (
-                      <td key={field.name} className="px-3 py-2" title={title}>
+                      <td key={field.name} className="px-3 py-2 align-top" title={title}>
                         {content}
                       </td>
                     );
