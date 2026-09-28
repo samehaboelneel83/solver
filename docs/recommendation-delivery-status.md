@@ -87,3 +87,11 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Editor: server-save status, Save to server, conflict choice (use server copy or replace it), server-draft offer in a browser without a local draft, server publication with one key per attempt reused on retry, and server discard alongside local discard.
 - Verification: 13 backend draft tests (including concurrent keyed retries creating one version and cross-tenant isolation) and 317 tests across tenancy, problem, audit and concurrency suites; migration downgrade/upgrade exercised. Frontend: 2268 tests, lint and production build pass (existing bundle-size warning remains).
 - Still outstanding: automatic background saving, revision history/compare, browser-draft keys based on stable account IDs rather than the JWT subject, and a dedicated backup recovery entry point.
+
+## Searchable problem picker (model editor)
+
+- The model editor loads the first 50 problems by name instead of up to 500. When a domain has more, a "Find a problem" box searches all of them through the list API's `q`, 50 matches at a time, with the count stated ("Showing 50 of 812 matches").
+- The chosen problem always remains an option, so a deep-linked problem outside the first page or the current matches is never replaced. Direct-ID loading and ownership checks are unchanged.
+- Small domains look as before: the search box and count appear only when the first page is not everything.
+- `useEntityList` accepts `enabled`, so the search query waits for input. `ProblemPicker` is reusable; Scenarios, Runs, Versions and Settings still load 500 and should adopt it together with direct-ID loading.
+- Verification: 3 picker tests; 63 model-editor tests; full frontend suite (2271) and lint pass.

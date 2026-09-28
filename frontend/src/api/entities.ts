@@ -11,10 +11,12 @@ export type EntityListParams = {
   filters?: Record<string, string>;
   orderBy?: string;
   order?: "asc" | "desc";
+  /** False holds the query (a search box with nothing typed in it). */
+  enabled?: boolean;
 };
 
 export function useEntityList(schemaName: string, tableName: string, params: EntityListParams) {
-  const { limit, offset, q = "", filters = {}, orderBy, order } = params;
+  const { limit, offset, q = "", filters = {}, orderBy, order, enabled = true } = params;
   const filterEntries = Object.entries(filters).sort(([a], [b]) => a.localeCompare(b));
 
   return useQuery({
@@ -31,7 +33,7 @@ export function useEntityList(schemaName: string, tableName: string, params: Ent
       }
       return apiFetch<ListResult>(`${tableApiPath(schemaName, tableName)}/?${search.toString()}`);
     },
-    enabled: Boolean(schemaName && tableName),
+    enabled: enabled && Boolean(schemaName && tableName),
     // Keep the previous page's rows on screen while the next query (sort,
     // page, or search) is in flight, instead of dropping straight to
     // `isLoading` -- without this every sort/page/search click unmounted

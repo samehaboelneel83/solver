@@ -37,6 +37,7 @@ import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
+import ProblemPicker, { PROBLEM_PAGE } from "../components/ProblemPicker";
 import ServerDraftSync, { saveToServer } from "../model/ServerDraftSync";
 import { discardServerDraft, publishServerDraft } from "../api/drafts";
 import { clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
@@ -122,14 +123,13 @@ export default function ModelEditor() {
 
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const chooserId = useId();
   const navigate = useNavigate();
   const route = useParams();
   const chooseProblem = (id: string) => route.problemId
     ? navigate(`/domains/${domainId}/problems/${id}/model`)
     : setSearchParams({ problem: id }, { replace: true });
   const problems = useEntityList("public", "problem", {
-    limit: 500,
+    limit: PROBLEM_PAGE,
     offset: 0,
     orderBy: "name",
     order: "asc",
@@ -180,23 +180,13 @@ function ForDomain({ domainId }: { domainId: Id }) {
     <>
       <LegacyDraftRecovery problemId={problemId} />
       <ProblemReadiness problemId={problemId} />
-      <div className="mb-4">
-        <label htmlFor={chooserId} className="block text-sm font-medium text-slate-700">
-          Problem
-        </label>
-        <select
-          id={chooserId}
-          className={`${INPUT_CLASS} max-w-sm`}
-          value={String(problemId)}
-          onChange={(event) => chooseProblem(event.target.value)}
-        >
-          {items.map((row) => (
-            <option key={String(row.id)} value={String(row.id)}>
-              {String(row.name ?? row.id)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <ProblemPicker
+        domainId={domainId}
+        current={problem!}
+        firstPage={listed}
+        total={problems.data?.total ?? listed.length}
+        onChoose={chooseProblem}
+      />
       <Editor key={problemId} problemId={problemId} domainId={domainId} />
     </>
   );
