@@ -121,3 +121,10 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Templates are outlined cards stating what they do ("Create a starting model" or, marked "In use", "Open your problem made from it") instead of a row of solid accent buttons.
 - Service health and row counts move to a compact "System" section at the bottom.
 - Verification: full frontend suite (2288), lint and production build pass; checked in Chromium in dark and light themes with representative data.
+
+## Domain switch keeps the page
+
+- Choosing another domain in the sidebar no longer always opens its problem list. A problem page opens the same page (Runs, Build model, ...) of the problem last opened in the new domain, or the problem list if none was; a domain page opens the same page in the new domain, cut before any record id; a platform page (Home, operations, help) stays where it is.
+- On platform pages the "Recent" shortcut follows the selected domain: its last problem, or the domain itself.
+- The last problem per domain is remembered in this browser (`frontend/src/nav/recentScope.ts`); it is a shortcut only, and server permissions still govern every page.
+- Verification: switch-rule unit test and 2 shell tests; full frontend suite (2291), lint and production build pass.

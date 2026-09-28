@@ -77,6 +77,28 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Runs & queues" })).toHaveAttribute("aria-current", "page");
       expect(within(nav).getByText("Navigate")).toBeInTheDocument();
     });
+    it("switches domains on a problem page to the same page of that domain's last problem", async () => {
+      localStorage.setItem("solver_last_problem_by_domain", JSON.stringify({ 3: 5 }));
+      renderWithProviders(["/domains/7/problems/9/runs"]);
+      await settled();
+      fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "3" } });
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getByText("This problem")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/domains/3/problems/5/runs");
+      expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("aria-current", "page");
+    });
+    it("keeps a platform page and its menu when the domain changes", async () => {
+      renderWithProviders(["/domains/7/problems/9/runs"]);
+      await settled();
+      fireEvent.click(screen.getByRole("link", { name: "Runs & queues" }));
+      fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "3" } });
+      expect(screen.getByRole("link", { name: "Runs & queues" })).toHaveAttribute("aria-current", "page");
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getByText("Navigate")).toBeInTheDocument();
+      // Domain 3 has no problem opened yet: the shortcut is the domain itself.
+      expect(within(nav).getByText("Recent domain")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/3/problems");
+    });
     it("renders the primary sidebar groups in planner order", async () => {
       renderWithProviders();
       await settled();

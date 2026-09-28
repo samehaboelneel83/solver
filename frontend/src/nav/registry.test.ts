@@ -4,6 +4,7 @@ import {
   buildSidebarGroups,
   destination,
   destinationForPath,
+  domainSwitchTarget,
   resolveAlias,
   scopedPath,
   stripDomainPrefix,
@@ -64,6 +65,21 @@ describe("nav registry", () => {
   it("drops the recent shortcut once another domain is selected", () => {
     const groups = buildSidebarGroups("/ops/queue", { domainId: 8 }, { domainId: 7, problemId: 9 });
     expect(groups.some((g) => g.key === "recent")).toBe(false);
+  });
+  it("switches domains to the same kind of page, never an old id", () => {
+    // A problem page: the same page of the problem last opened in the new domain.
+    expect(domainSwitchTarget("/domains/7/problems/9/runs", 3, 12)).toBe("/domains/3/problems/12/runs");
+    expect(domainSwitchTarget("/domains/7/problems/9/runs/11", 3, 12)).toBe("/domains/3/problems/12/runs");
+    expect(domainSwitchTarget("/domains/7/problems/9/unknown", 3, 12)).toBe("/domains/3/problems/12/overview");
+    // ...or its problem list when none was opened there.
+    expect(domainSwitchTarget("/domains/7/problems/9/model", 3, null)).toBe("/domains/3/problems");
+    // A domain page keeps its page and drops a record id.
+    expect(domainSwitchTarget("/domains/7/data/records/42", 3, null)).toBe("/domains/3/data/records");
+    expect(domainSwitchTarget("/domains/7/overview", 3, 12)).toBe("/domains/3/overview");
+    expect(domainSwitchTarget("/domains/7", 3, null)).toBe("/domains/3/overview");
+    // A platform page stays.
+    expect(domainSwitchTarget("/ops/queue", 3, 12)).toBeNull();
+    expect(domainSwitchTarget("/", 3, null)).toBeNull();
   });
   it("hides domain data on global pages when no domain is selected", () => {
     const ids = buildSidebarGroups("/", {}).flatMap((g) => g.items.map((i) => i.id));

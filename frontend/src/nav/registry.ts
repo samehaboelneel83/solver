@@ -593,6 +593,33 @@ export function scopeOfPath(pathname: string): RecentScope | null {
   return route ? { domainId: Number(route[1]), problemId: route[2] ? Number(route[2]) : null } : null;
 }
 
+/** A problem's own pages, which a domain switch can land on again in another problem. */
+const PROBLEM_PAGES = new Set(["overview", "inputs", "model", "versions", "scenarios", "runs"]);
+
+/**
+ * Where choosing domain `next` in the sidebar should take the person, from
+ * `pathname`: the same kind of page, never the old domain's records.
+ *
+ * - A problem page goes to the same page of the problem last opened in the
+ *   new domain (`lastProblem`), or to that domain's problem list if none was.
+ * - A domain page goes to the same page of the new domain, cut before any
+ *   record id, since an id belongs to the old domain.
+ * - A platform page (Home, operations, help) stays where it is: null.
+ */
+export function domainSwitchTarget(pathname: string, next: number, lastProblem: number | null): string | null {
+  const scope = scopeOfPath(pathname);
+  if (!scope) return null;
+  if (scope.problemId !== null) {
+    const page = pathname.split("/")[5] ?? "";
+    if (lastProblem === null) return `/domains/${next}/problems`;
+    return `/domains/${next}/problems/${lastProblem}/${PROBLEM_PAGES.has(page) ? page : "overview"}`;
+  }
+  const rest = pathname.split("/").slice(3).filter(Boolean);
+  const cut = rest.findIndex((segment) => /^\d+$/.test(segment));
+  const kept = cut === -1 ? rest : rest.slice(0, cut);
+  return `/domains/${next}/${kept.length ? kept.join("/") : "overview"}`;
+}
+
 /**
  * Contextual sidebar; the palette retains the complete destination catalog.
  *

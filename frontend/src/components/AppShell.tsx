@@ -16,6 +16,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
 import { buildNavGroups, buildSidebarGroups, destinationForPath, scopeOfPath, stripDomainPrefix, type RecentScope } from "../nav/registry";
+import { lastProblemIn, readRecentScope, rememberScope } from "../nav/recentScope";
 import { DomainRouteProvider, useDomain } from "../hooks/useDomain";
 import { parseRouteId } from "../lib/routeId";
 
@@ -184,26 +185,6 @@ export default function AppShell() {
   );
 }
 
-const RECENT_SCOPE_KEY = "solver_recent_scope";
-
-function readRecentScope(): RecentScope | null {
-  try {
-    const value = JSON.parse(localStorage.getItem(RECENT_SCOPE_KEY) ?? "null") as Partial<RecentScope> | null;
-    if (!value || !Number.isSafeInteger(value.domainId)) return null;
-    return { domainId: value.domainId!, problemId: Number.isSafeInteger(value.problemId) ? value.problemId! : null };
-  } catch {
-    return null;
-  }
-}
-
-function writeRecentScope(scope: RecentScope) {
-  try {
-    localStorage.setItem(RECENT_SCOPE_KEY, JSON.stringify(scope));
-  } catch {
-    // Without storage the shortcut lasts for this page only.
-  }
-}
-
 function AppShellContent() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -226,9 +207,13 @@ function AppShellContent() {
   useEffect(() => {
     if (!scoped) return;
     setRecent((current) => current?.domainId === scoped.domainId && current.problemId === scoped.problemId ? current : scoped);
-    writeRecentScope(scoped);
+    rememberScope(scoped);
   }, [scoped?.domainId, scoped?.problemId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId }, scoped ?? recent);
+  // On a platform page the shortcut follows the selected domain: its last
+  // problem when one was opened there, else the domain itself.
+  const shortcut = scoped ?? (recent && recent.domainId === domainId ? recent
+    : domainId !== null ? { domainId, problemId: lastProblemIn(domainId) } : null);
+  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId }, shortcut);
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");

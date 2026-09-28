@@ -1,9 +1,11 @@
 import { useEffect, useId } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useDomains, useDomainDetail } from "../api/v1";
 import { resolveDomainId, useDomain, useHasRouteDomain } from "../hooks/useDomain";
 import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import OfflineNotice from "./OfflineNotice";
+import { domainSwitchTarget } from "../nav/registry";
+import { lastProblemIn } from "../nav/recentScope";
 
 /**
  * The sidebar's domain picker. Everything domain-scoped reads the choice
@@ -20,6 +22,7 @@ import OfflineNotice from "./OfflineNotice";
 export default function DomainSelector() {
   const selectId = useId();
   const navigate = useNavigate();
+  const location = useLocation();
   const confirmLeave = useConfirmLeave();
   const routeScoped = useHasRouteDomain();
   const { domainId, setDomainId } = useDomain();
@@ -53,8 +56,10 @@ export default function DomainSelector() {
           const next = Number(event.target.value);
           if (next === domainId || !confirmLeave()) return;
           setDomainId(next);
-          // A different domain cannot retain the previous problem or record id.
-          navigate(`/domains/${next}/problems`);
+          // The same kind of page in the new domain, never the old one's
+          // problem or record id; a platform page stays where it is.
+          const target = domainSwitchTarget(location.pathname, next, lastProblemIn(next));
+          if (target) navigate(target);
         }}
         className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
       >
