@@ -226,10 +226,30 @@ class Parser {
   }
 
   goal(): Term {
-    this.scope.push([]);
+    return this.termIn([]);
+  }
+
+  /** A term inside a rule, where `bound` indices are already in scope. */
+  termIn(bound: Binding[]): Term {
+    this.scope.push(bound);
     const term = this.expr();
     this.scope.pop();
     return term;
+  }
+
+  /** A comma-separated list of bindings, with `bound` in scope, to the end. */
+  bindingList(bound: Binding[]): Binding[] {
+    this.scope.push(bound);
+    const list: Binding[] = [];
+    this.scope.push(list);
+    for (;;) {
+      list.push(this.binding());
+      if (!this.isOp(",")) break;
+      this.next();
+    }
+    this.scope.pop();
+    this.scope.pop();
+    return list;
   }
 
   private bindings(stop: string): Binding[] {
@@ -537,6 +557,26 @@ export function parseGoal(text: string, context: ModelContext): Parsed<Term> {
     const term = parser.goal();
     parser.end();
     return term;
+  });
+}
+
+/** Read one part of a rule, with the indices bound around it in scope. */
+export function parseTermIn(text: string, context: ModelContext, bound: Binding[]): Parsed<Term> {
+  return attempt(() => {
+    const parser = new Parser(tokenize(text), context);
+    const term = parser.termIn(bound);
+    parser.end();
+    return term;
+  });
+}
+
+/** Read what a sum or a rule ranges over: `p in person where team = "north", d in day`. */
+export function parseBindings(text: string, context: ModelContext, bound: Binding[]): Parsed<Binding[]> {
+  return attempt(() => {
+    const parser = new Parser(tokenize(text), context);
+    const list = parser.bindingList(bound);
+    parser.end();
+    return list;
   });
 }
 

@@ -138,3 +138,10 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - A binding's filter sits beside its Index and Set, and the filter's add controls are icons beside its last condition, with and/or between conditions only.
 - Also fixed: shade-950 status text (warning boxes) was unreadable in dark mode.
 - Verification: formula round-trip and error tests, EquationField tests, 3 editor tests for equations; full frontend suite (2306), lint and build pass; checked in Chromium in dark and light.
+
+## Equations as drill-down diagrams
+
+- Each rule and goal can also be shown as a nested diagram (in the style of scikit-learn's pipeline view): a dashed rule box holds "for each", the left side, the relation and the right side side by side; every box opens with ▶/▼ into its own parts (sum → over / of, product → factors, added terms, function argument, a variable's indices with their sets), recursively down to numbers and names. "Open all" / "Close all" per diagram.
+- Every box has ✎ to edit just that part as an equation, parsed with the indices bound around it (`parseTermIn`, `parseBindings` in `formula.ts`); the change rebuilds only the path above it.
+- Switching: an Equation | Diagram switch on "What must be true" sets every rule and goal and is remembered in this browser; each rule and goal also has its own toggle, reset when the page switch changes.
+- Verification: diagram tests (recursive walk to leaves, open/close all, in-place edit), scoped-parse tests, 3 editor tests (page switch persists, per-rule override, diagram edit publishes); full frontend suite (2315), lint and build pass; checked in Chromium in dark and light.

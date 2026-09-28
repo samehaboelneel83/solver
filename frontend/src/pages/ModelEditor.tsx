@@ -37,6 +37,7 @@ import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
 import EquationField, { chipsFor } from "../model/EquationField";
+import { GoalDiagram, RuleDiagram } from "../model/EquationDiagram";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
@@ -202,6 +203,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toast = useToast();
 
   const [failure, setFailure] = useState<string | null>(null);
+  const [equationView, setEquationView] = useEquationView();
   // One key per publication attempt, kept across retries (see publishFromServer).
   const publishKey = useRef<{ key: string; revision: number } | null>(null);
   const [serverPublishing, setServerPublishing] = useState(false);
@@ -566,9 +568,12 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       </div>
       <section hidden={focusedPart !== undefined && focusedPart !== "rules"} id="constraints-editor" tabIndex={-1} aria-labelledby="constraints-heading" className="mb-6">
-        <h2 id="constraints-heading" className="mb-2 text-base font-semibold text-slate-900">
-          What must be true
-        </h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="constraints-heading" className="text-base font-semibold text-slate-900">
+            What must be true
+          </h2>
+          <ViewToggle value={equationView} onChange={setEquationView} name="all" />
+        </div>
         {draft.constraints.length === 0 && (
           <p className="mb-2 text-sm text-slate-600">No rules yet. Add one that must hold.</p>
         )}
@@ -576,6 +581,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           {draft.constraints.map((constraint, position) => focusedPart === "rules" && graphFocus?.rulePosition !== position ? null : (
             <ConstraintCard
               key={position}
+              view={equationView}
               constraint={constraint}
               otherIds={draft.constraints
                 .filter((_, i) => i !== position)
@@ -693,6 +699,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           What to make best
         </h2>
         <ObjectiveEditor
+          view={equationView}
           objective={draft.objective}
           context={context}
           onChange={(objective) => setDraft((current) => current && { ...current, objective })}
@@ -779,13 +786,73 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   );
 }
 
+export type EquationView = "equation" | "diagram";
+const EQUATION_VIEW_KEY = "solver_equation_view";
+
+/** How rules and goals are shown on this page, remembered in this browser. */
+function useEquationView(): [EquationView, (next: EquationView) => void] {
+  const [view, setView] = useState<EquationView>(() => {
+    try {
+      return localStorage.getItem(EQUATION_VIEW_KEY) === "diagram" ? "diagram" : "equation";
+    } catch {
+      return "equation";
+    }
+  });
+  return [view, (next) => {
+    setView(next);
+    try {
+      localStorage.setItem(EQUATION_VIEW_KEY, next);
+    } catch {
+      // Without storage the choice holds for this page only.
+    }
+  }];
+}
+
+/** Equation | Diagram, as two pressed-state buttons. */
+function ViewToggle({ value, onChange, name, size = "sm" }: {
+  value: EquationView;
+  onChange: (next: EquationView) => void;
+  /** What is being shown, for the buttons' names: "all" (the page switch) or a rule or goal id. */
+  name: string;
+  size?: "sm" | "xs";
+}) {
+  const pad = size === "sm" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
+  return (
+    <div role="group" aria-label={`Show ${name} as`} className="inline-flex overflow-hidden rounded-md border border-slate-300">
+      {(["equation", "diagram"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={value === option}
+          aria-label={name === "all"
+            ? `Show all as ${option === "equation" ? "equations" : "diagrams"}`
+            : `Show ${name} as ${option === "equation" ? "an equation" : "a diagram"}`}
+          onClick={() => onChange(option)}
+          className={`${pad} ${value === option ? "bg-blue-600 font-medium text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+        >
+          {option === "equation" ? "Equation" : "Diagram"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A card's own view: the page's until the card is switched, and the page's again when the page switches. */
+function useCardView(page: EquationView): [EquationView, (next: EquationView) => void] {
+  const [own, setOwn] = useState<EquationView | null>(null);
+  useEffect(() => setOwn(null), [page]);
+  return [own ?? page, setOwn];
+}
+
 function ConstraintCard({
+  view,
   constraint,
   otherIds,
   context,
   onChange,
   onRemove,
 }: {
+  view: EquationView;
   constraint: Constraint;
   otherIds: string[];
   context: ModelContext;
@@ -798,6 +865,7 @@ function ConstraintCard({
   // the rule already uses a chance.
   const [structure, setStructure] = useState(Boolean(constraint.chance));
   const equation = useMemo(() => ruleEquation(constraint, context), [constraint, context]);
+  const [shown, setShown] = useCardView(view);
   const bound: Binding[] = constraint.forall ?? [];
   const idProblem = !constraint.id
     ? "A rule needs a name."
@@ -882,14 +950,21 @@ function ConstraintCard({
       ) : equation !== null ? (
         <div className="space-y-2 px-2 py-1">
           <div className="flex flex-wrap items-start gap-3">
-            <EquationField
-              label={`Equation for ${constraint.id || "this rule"}`}
-              equation={equation}
-              parse={(text) => parseRule(text, context)}
-              onCommit={(parsed) => onChange(withEquation(constraint, parsed))}
-              chips={chipsFor(context)}
-              sets={context.sets}
-            />
+            <div className="min-w-0 flex-1 space-y-1">
+              <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
+              {shown === "diagram" ? (
+                <RuleDiagram rule={constraint} context={context} onChange={onChange} />
+              ) : (
+                <EquationField
+                  label={`Equation for ${constraint.id || "this rule"}`}
+                  equation={equation}
+                  parse={(text) => parseRule(text, context)}
+                  onCommit={(parsed) => onChange(withEquation(constraint, parsed))}
+                  chips={chipsFor(context)}
+                  sets={context.sets}
+                />
+              )}
+            </div>
             <div className="flex flex-wrap items-end gap-3">
               <Choice
                 label="Strength"
@@ -1217,7 +1292,8 @@ function ChanceField({
 
 /** A goal's expression as an equation, with its structure a click away; a
  * goal the equation form cannot write exactly keeps the structure editor. */
-function GoalExpression({ goalId, expression, context, onChange }: {
+function GoalExpression({ view, goalId, expression, context, onChange }: {
+  view: EquationView;
   goalId: string;
   expression: Term;
   context: ModelContext;
@@ -1225,18 +1301,22 @@ function GoalExpression({ goalId, expression, context, onChange }: {
 }) {
   const [structure, setStructure] = useState(false);
   const equation = useMemo(() => goalEquation(expression, context), [expression, context]);
+  const [shown, setShown] = useCardView(view);
   const builder = <TermBuilder value={expression} onChange={onChange} context={context} bound={[]} label="Count" />;
   if (equation === null) return builder;
   return (
     <div className="space-y-2 px-2 py-1">
-      <EquationField
+      <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
+      {shown === "diagram" ? (
+        <GoalDiagram label={goalId || "goal"} expression={expression} context={context} onChange={onChange} />
+      ) : <EquationField
         label={`Equation for ${goalId || "this goal"}`}
         equation={equation}
         parse={(text) => parseGoal(text, context)}
         onCommit={(next) => onChange(next)}
         chips={chipsFor(context)}
         sets={context.sets}
-      />
+      />}
       <button
         type="button"
         aria-expanded={structure}
@@ -1251,10 +1331,12 @@ function GoalExpression({ goalId, expression, context, onChange }: {
 }
 
 function ObjectiveEditor({
+  view,
   objective,
   context,
   onChange,
 }: {
+  view: EquationView;
   objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
   context: ModelContext;
   onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
@@ -1438,6 +1520,7 @@ function ObjectiveEditor({
               </div>
             ) : (
               <GoalExpression
+                view={view}
                 goalId={term.id}
                 expression={term.expression}
                 context={context}

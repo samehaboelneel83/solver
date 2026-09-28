@@ -1294,3 +1294,57 @@ describe("rules and goals as equations", () => {
     );
   });
 });
+
+describe("equations as drill-down diagrams", () => {
+  const TWO_RULES = {
+    ...IR_V2,
+    constraints: [
+      IR_V2.constraints[0],
+      { id: "c_small", forall: [{ index: "d", set: "day" }], left: { par: "demand", index: ["d"] }, relation: "<=", right: { const: 9 }, severity: "hard" },
+    ],
+  };
+
+  it("switches every rule to a diagram, and remembers it", async () => {
+    stub({ ir: TWO_RULES });
+    const first = renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show all as diagrams" }));
+    expect(screen.getAllByTestId("rule-diagram")).toHaveLength(2);
+    expect(screen.queryByLabelText("Equation for c_cover")).toBeNull();
+    first.unmount();
+
+    renderPage();
+    expect(await screen.findAllByTestId("rule-diagram")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Show all as diagrams" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("lets one rule show as a diagram while the others stay equations", async () => {
+    stub({ ir: TWO_RULES });
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show c_small as a diagram" }));
+    expect(screen.getAllByTestId("rule-diagram")).toHaveLength(1);
+    expect(screen.getByLabelText("Equation for c_cover")).toBeInTheDocument();
+    // The page switch takes every card with it again.
+    fireEvent.click(screen.getByRole("button", { name: "Show all as diagrams" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all as equations" }));
+    expect(screen.queryAllByTestId("rule-diagram")).toHaveLength(0);
+  });
+
+  it("edits a rule through its diagram and publishes the change", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a diagram" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit right side" }));
+    const field = screen.getByLabelText("Equation for right side");
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: "demand[d] + 1" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/problems/1/versions")).toBe(true));
+    const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/problems/1/versions")!;
+    expect(JSON.parse(options.body).ir.constraints[0].right).toEqual({ add: [{ par: "demand", index: ["d"] }, { const: 1 }] });
+  });
+});

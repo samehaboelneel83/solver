@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { goalEquation, parseGoal, parseRule, printRule, ruleEquation, withEquation } from "./formula";
+import { goalEquation, parseBindings, parseGoal, parseRule, parseTermIn, printRule, ruleEquation, withEquation } from "./formula";
 import type { Binding, Constraint, ModelContext, Term } from "./terms";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -82,6 +82,24 @@ describe("equations for rules", () => {
     expect(ruleEquation(walk, CONTEXT)).toBeNull();
     expect(ruleEquation({ id: "s", no_overlap: { interval: { var: "x", index: [] }, over: [] } } as Constraint, CONTEXT)).toBeNull();
     expect(ruleEquation({ id: "empty" }, CONTEXT)).toBeNull();
+  });
+});
+
+describe("parts of an equation", () => {
+  it("reads a part with the indices bound around it", () => {
+    const outer = [{ index: "p", set: "person" }];
+    expect(parseTermIn("2 * cap[p]", CONTEXT, outer)).toEqual({ ok: true, value: { mul: [{ const: 2 }, { attr: { of: "p", name: "cap" } }] } });
+    const unbound = parseTermIn("hours[q]", CONTEXT, outer);
+    expect(unbound.ok).toBe(false);
+    if (!unbound.ok) expect(unbound.message).toMatch(/“q” is not bound here/);
+  });
+
+  it("reads what a sum ranges over, filters included", () => {
+    expect(parseBindings('p in person where team = "north", d in day', CONTEXT, [])).toEqual({
+      ok: true,
+      value: [{ index: "p", set: "person", where: [{ attr: "team", op: "=", value: "north" }] }, { index: "d", set: "day" }],
+    });
+    expect(parseBindings("p in nowhere", CONTEXT, []).ok).toBe(false);
   });
 });
 
