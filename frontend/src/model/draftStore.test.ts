@@ -1,7 +1,7 @@
 import { setToken } from "../api/client";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { draftStorageKey, draftHistory, replayDraft, clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft } from "./draftStore";
+import { claimLegacyDraft, draftStorageKey, draftHistory, legacyDraftStatus, replayDraft, clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft } from "./draftStore";
 
 const IR = { version: 2, sets: ["day"], parameters: {}, variables: {}, constraints: [] };
 
@@ -126,6 +126,57 @@ it("does not assign legacy drafts to the next signed-in user", () => {
   setToken(tokenFor("alice"));
   expect(readDraft(1)).toBeNull();
   expect(localStorage.getItem("solver_model_draft_1")).not.toBeNull();
+});
+
+const legacy = (ir = IR) => localStorage.setItem("solver_model_draft_1", JSON.stringify({ problemId: 1, base: "version-7", baseVersion: 3, ir, editedAt: "2026-09-01T10:00:00.000Z" }));
+
+it("recovers a legacy draft only on an explicit claim, keeping the original", () => {
+  legacy({ ...IR, sets: ["legacy"] });
+  setToken(tokenFor("alice"));
+  expect(legacyDraftStatus(1)).toBe("available");
+  expect(readDraft(1)).toBeNull();
+  const saved = claimLegacyDraft(1);
+  expect(saved).toMatchObject({ problemId: 1, base: "version-7", baseVersion: 3, persisted: true });
+  expect(readDraft(1)?.ir.sets).toEqual(["legacy"]);
+  expect(legacyDraftStatus(1)).toBe("claimed-by-you");
+  expect(JSON.parse(localStorage.getItem("solver_model_draft_1")!).ir.sets).toEqual(["legacy"]);
+  expect(() => claimLegacyDraft(1)).toThrow(/already recovered/);
+});
+
+it("lets only one account claim a legacy draft", () => {
+  legacy();
+  setToken(tokenFor("alice"));
+  claimLegacyDraft(1);
+  setToken(tokenFor("bob"));
+  expect(legacyDraftStatus(1)).toBe("claimed-by-other");
+  expect(() => claimLegacyDraft(1)).toThrow(/another account/i);
+  expect(readDraft(1)).toBeNull();
+});
+
+it("refuses to recover over the account's own draft, or without a named account", () => {
+  legacy();
+  expect(legacyDraftStatus(1)).toBe("signed-out");
+  expect(() => claimLegacyDraft(1)).toThrow(/sign in/i);
+  setToken("not-a-jwt");
+  expect(legacyDraftStatus(1)).toBe("signed-out");
+  setToken(tokenFor("alice"));
+  writeDraft({ problemId: 1, base: "scratch", baseVersion: null, ir: { ...IR, sets: ["mine"] } });
+  expect(() => claimLegacyDraft(1)).toThrow(/current unpublished draft/);
+  expect(readDraft(1)?.ir.sets).toEqual(["mine"]);
+  expect(legacyDraftStatus(1)).toBe("available");
+});
+
+it("does not claim unreadable legacy drafts, or keep a claim storage refused", () => {
+  localStorage.setItem("solver_model_draft_1", "{not json");
+  setToken(tokenFor("alice"));
+  expect(legacyDraftStatus(1)).toBe("unreadable");
+  expect(() => claimLegacyDraft(1)).toThrow(/could not be read/);
+  legacy();
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+  expect(() => claimLegacyDraft(1)).toThrow(/refused/);
+  vi.restoreAllMocks();
+  expect(legacyDraftStatus(1)).toBe("available");
+  expect(readDraft(1)).toBeNull();
 });
 
 it("isolates memory-only drafts when accounts change", () => {

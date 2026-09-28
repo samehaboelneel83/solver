@@ -27,7 +27,7 @@ export const DRAFT_KEY_PREFIX = "solver_model_draft_";
 // JWT subject is a browser namespace, not an authorization decision.
 // Server permissions still govern every model read and publication.
 const unknownSessions = new Map<string, string>();
-export function draftStorageKey(problemId: number): string {
+function draftOwner(): string {
   let owner = "signed-out";
   const token = getToken();
   if (token) {
@@ -41,13 +41,79 @@ export function draftStorageKey(problemId: number): string {
       owner = `session:${unknownSessions.get(token)}`;
     }
   }
-  return `${DRAFT_KEY_PREFIX}v2:${owner}:${problemId}`;
+  return owner;
+}
+export function draftStorageKey(problemId: number): string {
+  return `${DRAFT_KEY_PREFIX}v2:${draftOwner()}:${problemId}`;
 }
 const key = draftStorageKey;
 
+const legacyKey = (problemId: number) => `${DRAFT_KEY_PREFIX}${problemId}`;
+const legacyClaimKey = (problemId: number) => `${DRAFT_KEY_PREFIX}legacy-claim:${problemId}`;
+
 export function hasLegacyDraft(problemId: number): boolean {
-  try { return localStorage.getItem(`${DRAFT_KEY_PREFIX}${problemId}`) !== null; }
+  try { return localStorage.getItem(legacyKey(problemId)) !== null; }
   catch { return false; }
+}
+
+/**
+ * Where an unscoped (pre-account) draft stands for the signed-in account.
+ * The browser never recorded who wrote it, so recovery is an explicit claim
+ * by one signed-in account; the original entry is never modified or removed.
+ */
+export type LegacyDraftStatus = "none" | "unreadable" | "available" | "signed-out" | "claimed-by-you" | "claimed-by-other";
+
+function legacyClaimOwner(problemId: number): string | null {
+  try {
+    const claim: unknown = JSON.parse(localStorage.getItem(legacyClaimKey(problemId)) ?? "null");
+    return claim && typeof claim === "object" && typeof (claim as { owner?: unknown }).owner === "string"
+      ? (claim as { owner: string }).owner : null;
+  } catch { return null; }
+}
+
+function readLegacyDraft(problemId: number): Omit<ModelDraft, "persisted"> | null {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(legacyKey(problemId)) ?? "null");
+    if (!isDraft(parsed) || parsed.problemId !== problemId) return null;
+    const baseVersion = typeof parsed.baseVersion === "number" && Number.isInteger(parsed.baseVersion) ? parsed.baseVersion : null;
+    return { problemId, base: parsed.base, baseVersion, ir: parsed.ir, editedAt: parsed.editedAt };
+  } catch { return null; }
+}
+
+export function legacyDraftStatus(problemId: number): LegacyDraftStatus {
+  if (!hasLegacyDraft(problemId)) return "none";
+  const claimedBy = legacyClaimOwner(problemId);
+  const owner = draftOwner();
+  if (claimedBy) return claimedBy === owner ? "claimed-by-you" : "claimed-by-other";
+  if (!owner.startsWith("user:")) return "signed-out";
+  return readLegacyDraft(problemId) ? "available" : "unreadable";
+}
+
+/**
+ * Copy an unscoped draft into the signed-in account's draft, once, on that
+ * account's explicit request. Refuses to overwrite the account's own draft,
+ * and records the claim so no other account in this browser can recover it
+ * afterwards. The original entry stays untouched as the source backup.
+ */
+export function claimLegacyDraft(problemId: number): ModelDraft {
+  const status = legacyDraftStatus(problemId);
+  if (status === "claimed-by-other") throw new Error("Another account in this browser has already recovered this draft.");
+  if (status === "claimed-by-you") throw new Error("You have already recovered this draft.");
+  if (status === "signed-out") throw new Error("Sign in with a named account to recover this draft.");
+  const legacy = status === "available" ? readLegacyDraft(problemId) : null;
+  if (!legacy) throw new Error("The older draft could not be read, so it cannot be recovered here. It remains preserved in this browser.");
+  if (readDraft(problemId)) throw new Error("Publish or discard your current unpublished draft before recovering the older one.");
+  try {
+    localStorage.setItem(legacyClaimKey(problemId), JSON.stringify({ owner: draftOwner(), claimedAt: new Date().toISOString() }));
+  } catch {
+    throw new Error("This browser's storage refused the recovery. Free some space and try again; nothing was changed.");
+  }
+  const saved = writeDraft({ problemId, base: legacy.base, baseVersion: legacy.baseVersion, ir: legacy.ir });
+  if (!saved.persisted) {
+    // A memory-only copy would be lost on reload while the claim blocks a retry.
+    try { localStorage.removeItem(legacyClaimKey(problemId)); } catch { /* claim was never kept */ }
+  }
+  return saved;
 }
 
 type Listener = () => void;
