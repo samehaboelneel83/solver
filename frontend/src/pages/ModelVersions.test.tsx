@@ -112,6 +112,26 @@ describe("ModelVersions: choosing what to show", () => {
   });
 });
 
+describe("ModelVersions: problems beyond the first page", () => {
+  it("opens a linked problem that is not on the first page, by its id", async () => {
+    serve({
+      "/api/problem/900": { id: 900, domain_id: 7, name: "far down the list" },
+      "/api/v1/problems/900/versions": { items: [], total: 0 },
+    });
+    renderPage("/versions?problem=900");
+    expect(await screen.findByText(/no versions of this problem yet/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Problem")).toHaveValue("900");
+    expect(screen.getByRole("option", { name: "far down the list" })).toBeInTheDocument();
+  });
+
+  it("refuses a linked problem from another domain rather than substituting one", async () => {
+    serve({ "/api/problem/900": { id: 900, domain_id: 8, name: "elsewhere" } });
+    renderPage("/versions?problem=900");
+    expect(await screen.findByText("This problem is not available here")).toBeInTheDocument();
+    expect(paths().some((path) => path.startsWith("/api/v1/problems/"))).toBe(false);
+  });
+});
+
 describe("ModelVersions: the list", () => {
   it("lists the versions in the order the API returned them, newest first", async () => {
     serve();

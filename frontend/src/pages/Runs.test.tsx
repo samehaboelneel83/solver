@@ -161,12 +161,12 @@ function stub(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function renderPage() {
+function renderPage(entry = "/runs") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/runs"]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Runs />
         </MemoryRouter>
       </ToastProvider>
@@ -1038,5 +1038,27 @@ describe("what was computed from the map (queue R16a)", () => {
       { input: "relationship", name: "near", kind: "within", metric: "road (OpenMapTiles zoom-12 roads ...)", from: "site", to: "customer",
         max_min: 15, computed_at: "2026-09-25T12:00:00+00:00" },
     ])).toBe("drive: depot to stop in min, road travel time, 3 pairs with no road left far, 2026-09-25; near: site to customer within 15 min, road travel time, 2026-09-25");
+  });
+});
+
+describe("Runs: choosing the problem", () => {
+  it("opens a linked problem that is not on the first page, by its id", async () => {
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: unknown) => {
+      if (path === "/api/problem/900") return Promise.resolve({ id: 900, domain_id: 1, name: "far down the list" });
+      if (path.startsWith("/api/v1/scenarios") && path.includes("problem_id=900")) return Promise.resolve({ items: [], total: 0 });
+      return base(path, options);
+    });
+    renderPage("/runs?problem=900");
+    expect(await screen.findByText(/This problem has no scenarios/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Problem")).toHaveValue("900");
+  });
+
+  it("refuses a linked problem from another domain rather than substituting one", async () => {
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: unknown) =>
+      path === "/api/problem/900" ? Promise.resolve({ id: 900, domain_id: 2, name: "elsewhere" }) : base(path, options));
+    renderPage("/runs?problem=900");
+    expect(await screen.findByText("This problem is not available here")).toBeInTheDocument();
   });
 });

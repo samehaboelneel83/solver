@@ -4,7 +4,6 @@ import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
-import { useEntity, useEntityList } from "../api/entities";
 import { formatApiError, isStaleRecordError } from "../api/errors";
 import { useCapabilities } from "../hooks/useCapability";
 import {
@@ -37,7 +36,9 @@ import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
-import ProblemPicker, { PROBLEM_PAGE } from "../components/ProblemPicker";
+import ProblemPicker from "../components/ProblemPicker";
+import LoadFailure from "../components/LoadFailure";
+import { useDomainProblem } from "../hooks/useDomainProblem";
 import ServerDraftSync, { saveToServer } from "../model/ServerDraftSync";
 import { discardServerDraft, publishServerDraft } from "../api/drafts";
 import { clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
@@ -128,34 +129,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
   const chooseProblem = (id: string) => route.problemId
     ? navigate(`/domains/${domainId}/problems/${id}/model`)
     : setSearchParams({ problem: id }, { replace: true });
-  const problems = useEntityList("public", "problem", {
-    limit: PROBLEM_PAGE,
-    offset: 0,
-    orderBy: "name",
-    order: "asc",
-    filters: { domain_id: String(domainId) },
-  });
-
-  const rawProblem = route.problemId ?? searchParams.get("problem");
-  const requested = parseRouteId(rawProblem);
-  const listed = problems.data?.items ?? [];
-  const needsDetail = requested !== null && !listed.some(row => Number(row.id) === requested);
-  const detail = useEntity("public", "problem", needsDetail ? String(requested) : undefined);
-  const extra = detail.data && Number(detail.data.domain_id) === Number(domainId) && Number(detail.data.id) === requested ? detail.data : undefined;
-  const items = needsDetail && extra ? [...listed, extra] : listed;
-  const problem = requested === null ? items[0] : items.find(row => Number(row.id) === requested);
-  const invalid = rawProblem !== null && rawProblem !== undefined && requested === null;
-  if (invalid || (needsDetail && detail.data && !extra) || (needsDetail && detail.error instanceof ApiError && detail.error.status === 404)) {
+  const found = useDomainProblem(domainId, route.problemId ?? searchParams.get("problem"));
+  if (found.state === "mismatch") {
     return <ContextMismatch title="This problem is not available here"
       detail="The requested problem is missing, invalid, or belongs to another domain. Nothing was substituted."
       parentHref={`/domains/${domainId}/problems`} parentLabel="Open problems in this domain" />;
   }
-  if (needsDetail && detail.isError) return <LoadFailure subject="The requested problem" error={detail.error} retry={() => { void detail.refetch(); }} />;
-  if (problems.isError) return <LoadFailure subject="The problem list" error={problems.error} retry={() => { void problems.refetch(); }} />;
-  if ((problems.fetchStatus === "paused" && !problems.data) || (needsDetail && detail.fetchStatus === "paused" && !detail.data)) return <OfflineNotice subject="The problem" />;
-  if (problems.isLoading || (needsDetail && detail.isLoading) || problems.isPlaceholderData) return <Skeleton rows={3} cols={4} />;
+  if (found.state === "failed") return <LoadFailure subject={found.subject} error={found.error} retry={found.retry} />;
+  if (found.state === "offline") return <OfflineNotice subject="The problem" />;
+  if (found.state === "loading") return <Skeleton rows={3} cols={4} />;
 
-  if (items.length === 0) {
+  if (found.state === "empty") {
     return (
       <Note>
         <p>This domain has no problems yet, and a model belongs to one.</p>
@@ -174,7 +158,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
     );
   }
 
-  const problemId = Number(problem!.id);
+  const { problem, firstPage, total } = found;
+  const problemId = Number(problem.id);
 
   return (
     <>
@@ -182,9 +167,9 @@ function ForDomain({ domainId }: { domainId: Id }) {
       <ProblemReadiness problemId={problemId} />
       <ProblemPicker
         domainId={domainId}
-        current={problem!}
-        firstPage={listed}
-        total={problems.data?.total ?? listed.length}
+        current={problem}
+        firstPage={firstPage}
+        total={total}
         onChoose={chooseProblem}
       />
       <Editor key={problemId} problemId={problemId} domainId={domainId} />
@@ -1406,9 +1391,3 @@ function StartFromTemplates({
 }
 
 
-function LoadFailure({ subject, error, retry }: { subject: string; error: unknown; retry: () => void }) {
-  return <div role="alert" className="my-4 rounded border border-amber-300 p-4">
-    <p>{subject} could not be loaded. {formatApiError(error)}</p>
-    <button type="button" className="mt-2 rounded border px-3 py-2" aria-label={`Retry loading ${subject.toLowerCase()}`} onClick={retry}>Retry</button>
-  </div>;
-}

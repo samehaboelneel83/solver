@@ -1,17 +1,16 @@
-import { useId } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import VersionChecks from "../components/VersionChecks";
 import ShadowCard from "../components/ShadowCard";
 import Skeleton from "../components/Skeleton";
-import { useEntityList } from "../api/entities";
+import ProblemPicker from "../components/ProblemPicker";
+import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import { useVersion, useVersions, type Id } from "../api/v1";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCellValue } from "../lib/format";
 import { parseRouteId } from "../lib/routeId";
-import { resolveById } from "../lib/selection";
 import ContextMismatch from "../components/ContextMismatch";
 
 /**
@@ -74,23 +73,12 @@ function problemName(problem: Record<string, unknown>): string {
 
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const chooserId = useId();
-  const problems = useEntityList("public", "problem", {
-    limit: 500,
-    offset: 0,
-    orderBy: "name",
-    order: "asc",
-    filters: { domain_id: String(domainId) },
-  });
+  const found = useDomainProblem(domainId, searchParams.get("problem"));
 
-  if (problems.fetchStatus === "paused" && !problems.data) return <OfflineNotice subject="The problem list" />;
-  if (problems.isLoading) return <Skeleton rows={3} cols={4} />;
-  if (problems.isError && !problems.data) {
-    return <Failed error={problems.error} onRetry={() => problems.refetch()} />;
-  }
-
-  const items = problems.data?.items ?? [];
-  if (items.length === 0) {
+  if (found.state === "offline") return <OfflineNotice subject="The problem list" />;
+  if (found.state === "loading") return <Skeleton rows={3} cols={4} />;
+  if (found.state === "failed") return <Failed error={found.error} onRetry={found.retry} />;
+  if (found.state === "empty") {
     return (
       <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
         <p>This domain has no problems yet, and every model version belongs to one.</p>
@@ -104,10 +92,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
       </div>
     );
   }
-
-  const requested = parseRouteId(searchParams.get("problem"));
-  const { item: problem, missing: problemMissing } = resolveById(items, requested, (row) => Number(row.id));
-  if (problemMissing) {
+  if (found.state === "mismatch") {
     return (
       <ContextMismatch
         title="This problem is not available here"
@@ -117,33 +102,24 @@ function ForDomain({ domainId }: { domainId: Id }) {
       />
     );
   }
-  const problemId = Number(problem!.id);
+  const { problem, firstPage, total } = found;
+  const problemId = Number(problem.id);
   const versionId = parseRouteId(searchParams.get("version"));
 
   return (
     <>
-      <div className="mb-4">
-        <label htmlFor={chooserId} className="block text-sm font-medium text-slate-700">
-          Problem
-        </label>
-        <select
-          id={chooserId}
-          className="mt-1 block w-full max-w-sm rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-          value={String(problemId)}
-          onChange={(event) => setSearchParams({ problem: event.target.value }, { replace: true })}
-        >
-          {items.map((row) => (
-            <option key={String(row.id)} value={String(row.id)}>
-              {problemName(row)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <ProblemPicker
+        domainId={domainId}
+        current={problem}
+        firstPage={firstPage}
+        total={total}
+        onChoose={(id) => setSearchParams({ problem: id }, { replace: true })}
+      />
 
       <VersionList
         key={problemId}
         problemId={problemId}
-        problemLabel={problemName(problem!)}
+        problemLabel={problemName(problem)}
         selectedId={versionId}
         onSelect={(id) =>
           setSearchParams({ problem: String(problemId), version: String(id) }, { replace: true })

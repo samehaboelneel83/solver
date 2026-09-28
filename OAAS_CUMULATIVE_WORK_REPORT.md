@@ -18,7 +18,7 @@ The product is intended for an isolated environment. Recent deployment builds us
 
 | Area | Delivered | Still incomplete |
 | --- | --- | --- |
-| Navigation | Domain/problem context, navigation hubs, canonical routes, editor deep-link recovery, searchable problem picker in the model editor | Searchable pickers on Scenarios, Runs, Versions and Settings, remaining legacy-route migration, full permission/deep-link matrix |
+| Navigation | Domain/problem context, navigation hubs, canonical routes, editor deep-link recovery, searchable problem picker and direct-ID problem links on the model editor, Versions, Scenarios and Runs | Searchable scenario and version pickers, remaining legacy-route migration, full permission/deep-link matrix |
 | Guided Form | Decision variables, hard/soft rules, parameter limits and weighted objectives | Broader guided patterns, units guidance and a complete model-review workflow |
 | Visual Graph | Current-draft graph, focused rule/objective editing through shared forms, accessible parts list | Typed connection authoring, individual declaration inspectors, saved layouts |
 | Draft recovery | Local persistence, 30-edit undo/redo, backup download and confirmed restoration; server-saved drafts with revision checks, conflict choice and cross-browser recovery; idempotent publication of the exact saved revision | Automatic background saving, revision history and comparison, a dedicated recovery entry point for backups |

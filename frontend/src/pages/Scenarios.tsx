@@ -4,7 +4,9 @@ import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
-import { useEntityList } from "../api/entities";
+import ProblemPicker from "../components/ProblemPicker";
+import LoadFailure from "../components/LoadFailure";
+import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import {
   useCreateScenario,
@@ -20,8 +22,6 @@ import {
 import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { parseRouteId } from "../lib/routeId";
-import { resolveById } from "../lib/selection";
 import ContextMismatch from "../components/ContextMismatch";
 
 /**
@@ -70,20 +70,12 @@ export default function Scenarios() {
 
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const chooserId = useId();
-  const problems = useEntityList("public", "problem", {
-    limit: 500,
-    offset: 0,
-    orderBy: "name",
-    order: "asc",
-    filters: { domain_id: String(domainId) },
-  });
+  const found = useDomainProblem(domainId, searchParams.get("problem"));
 
-  if (problems.fetchStatus === "paused" && !problems.data) return <OfflineNotice subject="The problem list" />;
-  if (problems.isLoading) return <Skeleton rows={3} cols={4} />;
-
-  const items = problems.data?.items ?? [];
-  if (items.length === 0) {
+  if (found.state === "offline") return <OfflineNotice subject="The problem list" />;
+  if (found.state === "loading") return <Skeleton rows={3} cols={4} />;
+  if (found.state === "failed") return <LoadFailure subject={found.subject} error={found.error} retry={found.retry} />;
+  if (found.state === "empty") {
     return (
       <Note>
         <p>This domain has no problems yet, and a scenario belongs to one.</p>
@@ -97,10 +89,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
       </Note>
     );
   }
-
-  const requested = parseRouteId(searchParams.get("problem"));
-  const { item: problem, missing: problemMissing } = resolveById(items, requested, (row) => Number(row.id));
-  if (problemMissing) {
+  if (found.state === "mismatch") {
     return (
       <ContextMismatch
         title="This problem is not available here"
@@ -110,27 +99,18 @@ function ForDomain({ domainId }: { domainId: Id }) {
       />
     );
   }
-  const problemId = Number(problem!.id);
+  const { problem, firstPage, total } = found;
+  const problemId = Number(problem.id);
 
   return (
     <>
-      <div className="mb-4">
-        <label htmlFor={chooserId} className="block text-sm font-medium text-slate-700">
-          Problem
-        </label>
-        <select
-          id={chooserId}
-          className={`${INPUT_CLASS} max-w-sm`}
-          value={String(problemId)}
-          onChange={(event) => setSearchParams({ problem: event.target.value }, { replace: true })}
-        >
-          {items.map((row) => (
-            <option key={String(row.id)} value={String(row.id)}>
-              {String(row.name ?? row.id)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <ProblemPicker
+        domainId={domainId}
+        current={problem}
+        firstPage={firstPage}
+        total={total}
+        onChoose={(id) => setSearchParams({ problem: id }, { replace: true })}
+      />
       <ForProblem key={problemId} problemId={problemId} />
     </>
   );

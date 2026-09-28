@@ -2,7 +2,8 @@ import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
-import { useEntityList } from "../api/entities";
+import ProblemPicker from "../components/ProblemPicker";
+import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import {
   useCancelRun,
@@ -307,32 +308,14 @@ export default function Runs() {
   );
 }
 
-function problemName(problem: Record<string, unknown>): string {
-  return typeof problem.name === "string" && problem.name ? problem.name : String(problem.id ?? "");
-}
-
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const route = useParams();
-  const problemChooser = useId();
   const scenarioChooser = useId();
 
-  const problems = useEntityList("public", "problem", {
-    limit: 500,
-    offset: 0,
-    orderBy: "name",
-    order: "asc",
-    filters: { domain_id: String(domainId) },
-  });
-
-  const problemItems = problems.data?.items ?? [];
-  const requestedProblem = parseRouteId(searchParams.get("problem"));
-  const { item: problem, missing: problemMissing } = resolveById(
-    problemItems,
-    requestedProblem,
-    (row) => Number(row.id)
-  );
+  const found = useDomainProblem(domainId, searchParams.get("problem"));
+  const problem = found.state === "ready" ? found.problem : null;
   const problemId = problem ? Number(problem.id) : null;
 
   const scenarios = useScenarios(problemId, { limit: 500, offset: 0 });
@@ -344,13 +327,11 @@ function ForDomain({ domainId }: { domainId: Id }) {
     (row) => row.id
   );
 
-  if (problems.fetchStatus === "paused" && !problems.data) return <OfflineNotice subject="The problem list" />;
-  if (problems.isLoading) return <Skeleton rows={3} cols={4} />;
-  if (problems.isError && !problems.data) {
-    return <Failed error={problems.error} onRetry={() => problems.refetch()} />;
-  }
+  if (found.state === "offline") return <OfflineNotice subject="The problem list" />;
+  if (found.state === "loading") return <Skeleton rows={3} cols={4} />;
+  if (found.state === "failed") return <Failed error={found.error} onRetry={found.retry} />;
 
-  if (problemMissing) {
+  if (found.state === "mismatch") {
     return (
       <ContextMismatch
         title="This problem is not available here"
@@ -361,7 +342,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
     );
   }
 
-  if (problemItems.length === 0) {
+  if (found.state === "empty") {
     return (
       <Empty>
         <p>This domain has no problems yet, and every run belongs to one.</p>
@@ -390,25 +371,15 @@ function ForDomain({ domainId }: { domainId: Id }) {
   return (
     <>
       <div className="mb-4 grid gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor={problemChooser} className="block text-sm font-medium text-slate-700">
-            Problem
-          </label>
-          <select
-            id={problemChooser}
-            className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-            value={String(problemId ?? "")}
-            onChange={(event) => route.domainId
-              ? navigate(`/domains/${domainId}/problems/${event.target.value}/runs`)
-              : setSearchParams({ problem: event.target.value }, { replace: true })}
-          >
-            {problemItems.map((row) => (
-              <option key={String(row.id)} value={String(row.id)}>
-                {problemName(row)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <ProblemPicker
+          domainId={domainId}
+          current={found.problem}
+          firstPage={found.firstPage}
+          total={found.total}
+          onChoose={(id) => route.domainId
+            ? navigate(`/domains/${domainId}/problems/${id}/runs`)
+            : setSearchParams({ problem: id }, { replace: true })}
+        />
         <div>
           <label htmlFor={scenarioChooser} className="block text-sm font-medium text-slate-700">
             Scenario

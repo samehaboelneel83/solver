@@ -93,5 +93,7 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - The model editor loads the first 50 problems by name instead of up to 500. When a domain has more, a "Find a problem" box searches all of them through the list API's `q`, 50 matches at a time, with the count stated ("Showing 50 of 812 matches").
 - The chosen problem always remains an option, so a deep-linked problem outside the first page or the current matches is never replaced. Direct-ID loading and ownership checks are unchanged.
 - Small domains look as before: the search box and count appear only when the first page is not everything.
-- `useEntityList` accepts `enabled`, so the search query waits for input. `ProblemPicker` is reusable; Scenarios, Runs, Versions and Settings still load 500 and should adopt it together with direct-ID loading.
-- Verification: 3 picker tests; 63 model-editor tests; full frontend suite (2271) and lint pass.
+- `useEntityList` accepts `enabled`, so the search query waits for input.
+- Follow-up: `useDomainProblem` now resolves the page's problem for the model editor, Versions, Scenarios and Runs: the first page for the picker, and a linked problem outside it fetched by ID and checked against the domain. Before this, Versions, Scenarios and Runs reported a valid link to a problem past the 500th as "not available here". Scenarios also showed a failed problem list as an empty domain; it now reports the failure with a retry (`LoadFailure`, shared with the editor).
+- Settings keeps its own list: it has no deep link and lists every domain's problems when none is selected.
+- Verification: 3 picker tests and 6 new deep-link/failure tests across Versions, Scenarios and Runs; full frontend suite (2277), lint and production build pass. One unrelated GraphDemo test timed out once under full-suite load and passes on rerun, with or without these changes.

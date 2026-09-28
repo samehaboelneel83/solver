@@ -67,12 +67,12 @@ function stub(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function renderPage() {
+function renderPage(entry = "/scenarios") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/scenarios"]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Scenarios />
         </MemoryRouter>
       </ToastProvider>
@@ -211,5 +211,30 @@ describe("Scenarios", () => {
     // can win the race.
     expect(await screen.findByText(/name already taken/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveValue("relaxed_cover");
+  });
+});
+
+describe("Scenarios: choosing the problem", () => {
+  it("opens a linked problem that is not on the first page, by its id", async () => {
+    mockFetch.mockImplementation((path: string) => {
+      if (path.startsWith("/api/problem/900")) return Promise.resolve({ id: 900, domain_id: 1, name: "far down the list" });
+      if (path.startsWith("/api/problem")) return Promise.resolve(PROBLEMS);
+      if (path.startsWith("/api/v1/problems/900/versions")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/scenarios")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "admin", display_name: null, capabilities: [] });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    renderPage("/scenarios?problem=900");
+    expect(await screen.findByText(/no model version, and a scenario patches one/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Problem")).toHaveValue("900");
+  });
+
+  it("says the problem list failed, with a retry, rather than that the domain is empty", async () => {
+    mockFetch.mockImplementation((path: string) =>
+      path.startsWith("/api/problem") ? Promise.reject(new Error("server down")) : Promise.reject(new Error(`unexpected ${path}`)));
+    renderPage();
+    expect(await screen.findByText(/The problem list could not be loaded\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry loading the problem list" })).toBeInTheDocument();
+    expect(screen.queryByText(/has no problems yet/)).toBeNull();
   });
 });
