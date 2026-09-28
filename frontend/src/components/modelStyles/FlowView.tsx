@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   Background,
   Controls,
@@ -10,6 +10,7 @@ import {
   type Edge,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { labelForeground } from "../../lib/colour";
@@ -81,10 +82,27 @@ function cardHeight(spec: NodeSpec): number {
  * sets to the goal, wired the way the model's dependencies run. Pan, zoom
  * and drag to rearrange; selecting a card opens its side panel.
  */
-export default function FlowView({ graph, palette, onSelect, positions, onMove }: ModelStyleProps & {
+/** A request to move one card by an offset -- the non-drag way to arrange
+ * cards (WCAG 2.5.7). `seq` makes each press a new request. */
+export type Nudge = { id: string; dx: number; dy: number; seq: number };
+
+export default function FlowView({ graph, palette, onSelect, positions, onMove, nudge }: ModelStyleProps & {
   positions?: Record<string, { x: number; y: number }>;
   onMove?: (id: string, position: { x: number; y: number }) => void;
+  nudge?: Nudge | null;
 }) {
+  const flow = useRef<ReactFlowInstance<Card, Edge> | null>(null);
+  const done = useRef<number | null>(null);
+  useEffect(() => {
+    const instance = flow.current;
+    if (!nudge || !instance || done.current === nudge.seq) return;
+    done.current = nudge.seq;
+    const node = instance.getNode(nudge.id);
+    if (!node) return;
+    const position = { x: node.position.x + nudge.dx, y: node.position.y + nudge.dy };
+    instance.updateNode(nudge.id, { position });
+    onMove?.(nudge.id, position);
+  }, [nudge, onMove]);
   const { nodes, edges } = useMemo(() => {
     const specs = reteNodes(graph);
     const byId = new Map(specs.map((spec) => [spec.id, spec]));
@@ -130,6 +148,7 @@ export default function FlowView({ graph, palette, onSelect, positions, onMove }
         nodesConnectable={false}
         onNodeClick={(_event, node) => onSelect(node.id)}
         onNodeDragStop={(_event, node) => onMove?.(node.id, node.position)}
+        onInit={(instance) => { flow.current = instance; }}
         fitView
         fitViewOptions={{ padding: 0.12 }}
         minZoom={0.2}

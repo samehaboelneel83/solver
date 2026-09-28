@@ -20,7 +20,7 @@ The product is intended for an isolated environment. Recent deployment builds us
 | --- | --- | --- |
 | Navigation | Domain/problem context, navigation hubs, canonical routes, editor deep-link recovery, searchable problem picker and direct-ID problem links on the model editor, Versions, Scenarios and Runs | Searchable scenario and version pickers, remaining legacy-route migration, full permission/deep-link matrix |
 | Guided Form | Decision variables, hard/soft rules, parameter limits and weighted objectives | Broader guided patterns, units guidance and a complete model-review workflow |
-| Visual Graph | Current-draft graph, focused rule/objective editing through shared forms, accessible parts list, layouts kept per account in the browser | Typed connection authoring, individual declaration inspectors, server-saved layouts, non-drag card moves |
+| Visual Graph | Current-draft graph, focused rule/objective editing through shared forms, accessible parts list, layouts kept per account in the browser | Typed connection authoring, individual declaration inspectors, server-saved layouts |
 | Draft recovery | Local persistence, 30-edit undo/redo, backup download and confirmed restoration; server-saved drafts with revision checks, conflict choice and cross-browser recovery; idempotent publication of the exact saved revision | Automatic background saving, revision history and comparison, a dedicated recovery entry point for backups |
 | Account separation | Account-specific browser keys, memory and history; API-cache clearing; server drafts owned by the stable account ID; attested one-account claim of legacy browser drafts | Browser drafts are still keyed by the JWT subject (username) |
 | Templates | Compact summaries and bounded technical-detail panels | Broader end-user template onboarding and usability evaluation |
@@ -313,7 +313,7 @@ This command deploys existing images; it does not compile source. Do not recreat
 | P0 — delivered | Publication safety | Delivered for server-linked drafts (section 6.5); drafts never saved to the server still publish through the direct version route |
 | P1 | Navigation completion | Searchable large collections; direct-ID retrieval and useful retry states beyond ModelEditor; role/deep-link matrix passes; legacy destinations migrate coherently |
 | P1 | Complete graph authoring | Individual variable/parameter inspectors; typed semantic connection commands; deletion preserves unrelated references; keyboard-equivalent authoring |
-| P1 — delivered in browser | Durable graph layout | Kept per account and problem, apart from the IR; survives reloads and view changes; reset and undo behaviour specified and tested. Remaining: server storage and a non-drag move |
+| P1 — delivered in browser | Durable graph layout | Kept per account and problem, apart from the IR; survives reloads and view changes; reset and undo behaviour specified and tested; cards can be moved without dragging. Remaining: server storage |
 | P1 | Guided pattern expansion | More scheduling/routing patterns; clearer units and mapping feedback; stable item identities; readable end-to-end model review |
 | P1 | Import/mapping workflow | Source setup and job-status UI; preview and mapping; actionable validation failures; validated, reproducible dataset publication |
 | P1 | Pre-run and result experience | Clear required inputs, quality failures, compatible solvers and worker availability; feasibility/optimality/status explanations and comparable results |

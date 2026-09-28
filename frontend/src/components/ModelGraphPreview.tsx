@@ -5,6 +5,15 @@ import { readLayout, writeLayout, type Positions } from "../model/graphLayout";
 
 const FlowView = lazy(() => import("./modelStyles/FlowView"));
 
+/** How far one press of a move button shifts a card, in canvas pixels. */
+const STEP = 40;
+const MOVES = [
+  { name: "left", dx: -STEP, dy: 0, arrow: "←" },
+  { name: "up", dx: 0, dy: -STEP, arrow: "↑" },
+  { name: "down", dx: 0, dy: STEP, arrow: "↓" },
+  { name: "right", dx: STEP, dy: 0, arrow: "→" },
+] as const;
+
 export default function ModelGraphPreview({ ir, entityTypes, editorHref, selection, onSelect, layoutKey }: {
   ir: Record<string, unknown>;
   entityTypes: EntityType[];
@@ -17,6 +26,7 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
   const view = useMemo(() => buildModelView(ir, entityTypes), [ir, entityTypes]);
   const [positions, setPositions] = useState<Positions>(() => (layoutKey ? readLayout(layoutKey) : {}));
   const [unsaved, setUnsaved] = useState(false);
+  const [nudge, setNudge] = useState<{ id: string; dx: number; dy: number; seq: number } | null>(null);
   const arrange = (next: Positions) => {
     setPositions(next);
     if (layoutKey) setUnsaved(!writeLayout(layoutKey, next));
@@ -29,6 +39,8 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
     const node = view.graph.nodes.find(item => item.id === id);
     if (node) onSelect?.(id, node.attributes?.part as ModelPart);
   };
+  // A card's label may run over lines; a button's name reads as one.
+  const selectedName = selectedNode ? String(selectedNode.label ?? selectedNode.id).replace(/\s+/g, " ").trim() : "";
   const details = modelDetails(selectedNode);
   const part = selectedNode?.attributes?.part as ModelPart | undefined;
   return <section aria-label="Visual Graph preview" className="mb-6 space-y-3">
@@ -38,9 +50,17 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
     <Suspense fallback={<p role="status">Loading visual graph…</p>}>
       <div className="h-[32rem] rounded-xl border border-slate-200">
         <FlowView key={`${layoutRevision}:${JSON.stringify(ir)}`} {...view} ir={ir} onSelect={select}
-          positions={positions} onMove={(id, position) => arrange({ ...positions, [id]: position })} />
+          positions={positions} onMove={(id, position) => arrange({ ...positions, [id]: position })} nudge={nudge} />
       </div>
     </Suspense>
+    {selectedNode && <div role="group" aria-label={`Move ${selectedName}`} className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-slate-700">Move the selected card without dragging:</span>
+      {MOVES.map(move => <button key={move.name} type="button" className="rounded border px-3 py-2"
+        aria-label={`Move ${selectedName} ${move.name}`}
+        onClick={() => setNudge(current => ({ id: selectedNode.id, dx: move.dx, dy: move.dy, seq: (current?.seq ?? 0) + 1 }))}>
+        {move.arrow}
+      </button>)}
+    </div>}
     <div className="flex items-center gap-3 text-sm">
       <button type="button" className="rounded border px-3 py-2" onClick={() => { arrange({}); setLayoutRevision(value => value + 1); }}>Reset graph layout</button>
       <span className="text-slate-600">

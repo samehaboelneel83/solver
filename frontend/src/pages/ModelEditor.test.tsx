@@ -1216,12 +1216,12 @@ it("focuses a graph rule, follows its rename, and restores all editors", async (
   await screen.findByDisplayValue("c_cover");
   const graph = screen.getByRole("region", { name: "Visual Graph preview" });
   fireEvent.click(within(graph).getByText("Model parts as a list"));
-  fireEvent.click(within(graph).getByRole("button", { name: /c_cover/ }));
+  fireEvent.click(within(graph).getByRole("button", { name: /^c_cover/ }));
   expect(screen.queryByDisplayValue("c_other")).toBeNull();
   const name = screen.getByDisplayValue("c_cover");
   fireEvent.change(name, { target: { value: "c_renamed" } });
   expect(screen.getByDisplayValue("c_renamed")).toBe(name);
-  expect(within(graph).getByRole("button", { name: /c_renamed/ })).toHaveAttribute("aria-pressed", "true");
+  expect(within(graph).getByRole("button", { name: /^c_renamed/ })).toHaveAttribute("aria-pressed", "true");
   fireEvent.change(screen.getByLabelText(/what it means/i), { target: { value: "graph inspector edit" } });
   fireEvent.click(screen.getByRole("button", { name: "Show all model editors" }));
   expect(screen.getByDisplayValue("c_other")).toBeInTheDocument();

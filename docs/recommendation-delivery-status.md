@@ -103,5 +103,6 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Visual Graph card positions are kept per account and problem in this browser (`frontend/src/model/graphLayout.ts`), keyed by the cards' stable ids. They survive reloads, switching views and model edits.
 - Layout is presentation only: never in the draft or IR, so it cannot change the model, its hash, publication or the draft's undo history. **Undo edit** does not move cards; **Reset graph layout** returns to automatic arrangement and forgets the kept positions.
 - Accounts do not see each other's layouts (same namespace as account-scoped drafts). If storage refuses a save, the page says the positions last only until leaving the graph.
-- Not yet: server-side layout storage (a separate presentation endpoint, per plan §9.6) and a non-drag way to move a card.
-- Verification: 3 new layout tests; full frontend suite (2280), lint and production build pass.
+- Non-drag moves (WCAG 2.5.7): with a card selected, ← ↑ ↓ → buttons move it 40 px per press, named for the card ("Move c_cover right"). Moves go through the same kept layout as drags, without remounting or refitting the canvas.
+- Not yet: server-side layout storage (a separate presentation endpoint, per plan §9.6). The canvas's application of a move is typechecked but not exercised in jsdom; the buttons and the requests they send are tested.
+- Verification: 4 new layout and move tests; full frontend suite (2281), lint and production build pass.

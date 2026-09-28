@@ -2,10 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setToken } from "../api/client";
 import ModelGraphPreview from "./ModelGraphPreview";
-vi.mock("./modelStyles/FlowView", () => ({ default: ({ positions, onMove }: {
+vi.mock("./modelStyles/FlowView", () => ({ default: ({ positions, onMove, nudge }: {
   positions: Record<string, { x: number; y: number }>;
   onMove: (id: string, position: { x: number; y: number }) => void;
+  nudge?: { id: string; dx: number; dy: number; seq: number } | null;
 }) => <div><span>Canvas</span><output data-testid="layout">{JSON.stringify(positions)}</output>
+  <output data-testid="nudge">{JSON.stringify(nudge ?? null)}</output>
   <button onClick={() => onMove("model-var-staff", { x: 125, y: 90 })}>Move staff card</button></div> }));
 
 it("offers the matching shared editor after keyboard-accessible selection", async () => {
@@ -78,4 +80,18 @@ it("says so when the browser cannot keep the layout", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Move staff card" }));
   expect(screen.getByText(/could not save the card positions/)).toBeInTheDocument();
   expect(await screen.findByTestId("layout")).toHaveTextContent('"x":125');
+});
+
+it("moves the selected card without dragging, one step per press", async () => {
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} />);
+  await screen.findByText("Canvas");
+  expect(screen.queryByRole("group", { name: /^Move / })).toBeNull();
+  fireEvent.click(screen.getAllByRole("button").find(item => item.textContent?.startsWith("staff"))!);
+  const right = screen.getByRole("button", { name: /^Move staff.* right$/ });
+  fireEvent.click(right);
+  expect(JSON.parse(screen.getByTestId("nudge").textContent!)).toEqual({ id: "model-var-staff", dx: 40, dy: 0, seq: 1 });
+  fireEvent.click(right);
+  expect(JSON.parse(screen.getByTestId("nudge").textContent!)).toMatchObject({ dx: 40, seq: 2 });
+  fireEvent.click(screen.getByRole("button", { name: /^Move staff.* up$/ }));
+  expect(JSON.parse(screen.getByTestId("nudge").textContent!)).toMatchObject({ dx: 0, dy: -40, seq: 3 });
 });
