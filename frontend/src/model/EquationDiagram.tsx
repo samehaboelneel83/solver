@@ -28,6 +28,7 @@ function kindOf(term: Term): string {
   if ("add" in term) return "added together";
   if ("mul" in term) return "product";
   if ("fn" in term) return `function ${term.fn}`;
+  if ("predict" in term) return `prediction of ${term.predict}`;
   return "curve";
 }
 
@@ -195,6 +196,11 @@ export function PartBox({ label, term, bound, context, onChange, startOpen = fal
       ];
     } else if ("fn" in term) {
       parts = [<PartBox key="of" label={`${term.fn} of`} term={term.of} bound={bound} context={context} onChange={(of) => onChange({ ...term, of })} />];
+    } else if ("predict" in term) {
+      parts = term.of.map((input, i) => (
+        <PartBox key={i} label={`input ${i + 1}`} term={input} bound={bound} context={context}
+          onChange={(next) => onChange({ ...term, of: term.of.map((p, j) => (j === i ? next : p)) })} />
+      ));
     } else if ("var" in term || "par" in term) {
       const name = "var" in term ? term.var : term.par;
       const sets = ("var" in term ? context.variables[name]?.index : context.parameters[name]?.index) ?? [];

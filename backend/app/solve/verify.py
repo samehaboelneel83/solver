@@ -148,6 +148,26 @@ def accept(compiled: Compiled, result: Solution, approximate: float | None = Non
     if not any(f["kind"] in ("bound", "integrality", "non_finite_value", "non_numeric") for f in report["failures"]):
         report["checks"].append("bounds_and_integrality")
 
+    # Epic ML: a prediction the model optimized over is re-made by the trained
+    # model itself at the answer's inputs, and must agree with what the rows
+    # said -- the check that the lowering (`app.solve.predict`) is the model.
+    # An input sitting on a threshold may take either side and is waived.
+    mismatched = False
+    for prediction in getattr(compiled, "predictions", []) or []:
+        if prediction.on_a_threshold(result.assignments):
+            continue
+        embedded = prediction.embedded_at(result.assignments)
+        actual = prediction.value_at(result.assignments)
+        if abs(embedded - actual) > 1e-6 * (1 + abs(actual)):
+            mismatched = True
+            report["accepted"] = False
+            report["failures"].append(
+                {"kind": "prediction_mismatch", "predictor": prediction.name,
+                 "embedded": embedded, "model": actual}
+            )
+    if getattr(compiled, "predictions", None) and not mismatched:
+        report["checks"].append("predictions")
+
     return report
 
 

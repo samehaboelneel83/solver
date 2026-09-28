@@ -50,6 +50,9 @@ STRUCTURAL = frozenset({
     "stage_invalid",
     # A chance is {epsilon} with 0 < epsilon < 1: a fact of the object itself.
     "chance_malformed",
+    # A predictors declaration is {name: {inputs: 1..32}}, and a predict carries a
+    # non-empty `of`: facts of the objects themselves (Epic ML).
+    "predictors_malformed", "predict_malformed",
 })
 
 #: Rules that need the whole document, the limits or the domain: validate.py's.
@@ -94,6 +97,10 @@ SEMANTIC = frozenset({
     "connected_via_invalid", "connected_on_soft", "connected_via_not_self",
     # Likewise a route rule's variable, its order and its severity.
     "route_needs_version_2", "route_not_binary", "route_index_mismatch", "route_on_soft",
+    # Which predictors a document declares, how many inputs each takes, and what
+    # the domain holds are facts about the rest of the document (Epic ML).
+    "predict_needs_version_2", "predict_unknown", "predict_arity", "predict_argument_nonlinear",
+    "predictor_not_in_domain", "predictor_inputs_mismatch",
 })
 
 

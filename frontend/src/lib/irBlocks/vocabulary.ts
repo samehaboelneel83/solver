@@ -25,6 +25,8 @@ import { NONE, bindingsOf, catalogueOf, declared, edgeOf, menu, scopeAt } from "
 const NAME = /^[a-z][a-z0-9_]*$/;
 const MAX_ARITY = 4;
 const MAX_ADD = 16;
+/** A predictor takes at most this many inputs (contract: `predictors`, 1 to 32). */
+const MAX_PREDICT_INPUTS = 32;
 /** The most points a curve block holds. */
 export const MAX_POINTS = 12;
 
@@ -34,6 +36,8 @@ type B = Blockly.Block & {
   count?: number;
   index?: string[];
   version?: number;
+  /** The model's `predictors` declaration, carried as it is (Epic ML). */
+  predictors?: Record<string, { inputs: number }>;
   isGiven?: boolean;
   emptyGiven?: boolean;
   labelPresent?: boolean;
@@ -331,10 +335,11 @@ export function defineIrBlocks(): void {
       this.version = 2;
     },
     saveExtraState(this: B) {
-      return { version: this.version };
+      return { version: this.version, ...(this.predictors ? { predictors: this.predictors } : {}) };
     },
-    loadExtraState(this: B, state: { version: number }) {
+    loadExtraState(this: B, state: { version: number; predictors?: Record<string, { inputs: number }> }) {
       this.version = state.version;
+      if (state.predictors) this.predictors = state.predictors;
     },
   };
 
@@ -1008,6 +1013,49 @@ export function defineIrBlocks(): void {
     },
   };
 
+  /** A declared predictor applied to its inputs, in order (version 2, Epic ML). */
+  Blockly.Blocks.ir_predict = {
+    init(this: B) {
+      this.appendDummyInput("HEAD")
+        .appendField("predict")
+        .appendField(
+          new Blockly.FieldTextInput("model", (text: string) => (loading || NAME.test(text) ? text : null)),
+          "NAME"
+        )
+        .appendField("from")
+        .appendField(
+          fixed(
+            Array.from({ length: MAX_PREDICT_INPUTS }, (_, i) => String(i + 1)),
+            (n) => (n === "1" ? "1 input" : `${n} inputs`),
+            (n: string) => {
+              this.setTerms!(Number(n));
+              return n;
+            }
+          ),
+          "COUNT"
+        );
+      this.setOutput(true, "Number");
+      this.setInputsInline(true);
+      this.setColour(COLOUR.operator);
+      this.setTooltip("A trained model the domain holds, applied to its inputs in its input order");
+      this.count = 0;
+      this.setTerms!(1);
+    },
+    setTerms(this: B, n: number) {
+      reshape(this, "count", Math.max(1, Math.min(MAX_PREDICT_INPUTS, n)), (i) => {
+        const input = this.appendValueInput(`X${i}`).setCheck("Number");
+        if (i > 0) input.appendField(",");
+      }, "X");
+    },
+    saveExtraState(this: B) {
+      return { count: this.count ?? 1 };
+    },
+    loadExtraState(this: B, state: { count: number }) {
+      this.setTerms!(state.count);
+      this.setFieldValue(String(state.count), "COUNT");
+    },
+  };
+
   Blockly.Blocks.ir_opaque_declaration = opaqueBlock("declaration");
   Blockly.Blocks.ir_opaque_rule = opaqueBlock("rule");
   Blockly.Blocks.ir_opaque_term = opaqueBlock("term");
@@ -1019,7 +1067,7 @@ export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cum
 export const IR_BLOCK_TYPES = [
   "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
-  "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn",
+  "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn", "ir_predict",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
 ] as const;
 

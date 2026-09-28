@@ -136,8 +136,7 @@
             "data_type": "text"
           }
         ]
-      }
-,
+      },
       {
         "name": "vehicle",
         "role": "resource",
@@ -209,6 +208,47 @@
         "to": "cell",
         "cardinality": "many_to_many",
         "is_hierarchy": false
+      }
+    ],
+    "predictors": [
+      {
+        "name": "demand_model",
+        "model": {
+          "format": "tree-ensemble/1",
+          "inputs": [
+            "price",
+            "promo"
+          ],
+          "aggregation": "mean",
+          "base": 0,
+          "trees": [
+            {
+              "nodes": [
+                {
+                  "feature": 0,
+                  "threshold": 5.5,
+                  "left": 1,
+                  "right": 2
+                },
+                {
+                  "value": 120
+                },
+                {
+                  "feature": 1,
+                  "threshold": 0.5,
+                  "left": 3,
+                  "right": 4
+                },
+                {
+                  "value": 60
+                },
+                {
+                  "value": 90
+                }
+              ]
+            }
+          ]
+        }
       }
     ]
   },
@@ -2072,8 +2112,14 @@
             "uncertainty": {
               "kind": "scenarios",
               "futures": [
-                {"label": "quiet", "factor": 0.8},
-                {"label": "busy", "factor": 1.25}
+                {
+                  "label": "quiet",
+                  "factor": 0.8
+                },
+                {
+                  "label": "busy",
+                  "factor": 1.25
+                }
               ]
             }
           }
@@ -3588,6 +3634,110 @@
                   {
                     "index": "j",
                     "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "predict_over_decisions",
+      "why": "Epic ML: a trained model the domain holds, read through `predict` with decisions as its inputs -- the compiler lowers it to exact rows.",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "predict_of_data",
+      "why": "Epic ML: a prediction from data is a number (a forecast), so it may scale a decision like any coefficient.",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "mul": [
+                  {
+                    "predict": "demand_model",
+                    "of": [
+                      {
+                        "const": 4
+                      },
+                      {
+                        "const": 1
+                      }
+                    ]
+                  },
+                  {
+                    "var": "price",
+                    "index": []
                   }
                 ]
               }
@@ -15485,6 +15635,435 @@
                   {
                     "index": "j",
                     "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predict_needs_version_2",
+      "loc": [
+        "predictors"
+      ],
+      "why": "predictors are a version 2 construct; the document declares one and reads none",
+      "ir": {
+        "version": 1,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "var": "price",
+                "index": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predictors_malformed",
+      "loc": [
+        "predictors",
+        "spare_model"
+      ],
+      "why": "a predictor takes at least one input; this one is declared with none",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          },
+          "spare_model": {
+            "inputs": 0
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predict_unknown",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "predict"
+      ],
+      "why": "the term names a predictor the document does not declare",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "price_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predict_malformed",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "of"
+      ],
+      "why": "a prediction needs its inputs",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predict_arity",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "of"
+      ],
+      "why": "demand_model takes two inputs and is given one",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predict_argument_nonlinear",
+      "loc": [
+        "objective",
+        "terms",
+        0,
+        "expression",
+        "of",
+        0
+      ],
+      "why": "an input that multiplies two decisions",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": [
+                  {
+                    "mul": [
+                      {
+                        "var": "price",
+                        "index": []
+                      },
+                      {
+                        "var": "price",
+                        "index": []
+                      }
+                    ]
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predictor_not_in_domain",
+      "loc": [
+        "predictors",
+        "missing_model"
+      ],
+      "why": "the domain holds no predictor of that name",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "missing_model": {
+            "inputs": 2
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "missing_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "code": "predictor_inputs_mismatch",
+      "loc": [
+        "predictors",
+        "demand_model",
+        "inputs"
+      ],
+      "why": "the domain's demand_model takes two inputs, the document says three",
+      "ir": {
+        "version": 2,
+        "sets": [],
+        "parameters": {},
+        "predictors": {
+          "demand_model": {
+            "inputs": 3
+          }
+        },
+        "variables": {
+          "price": {
+            "index": [],
+            "domain": "continuous",
+            "lower": 1,
+            "upper": 10
+          },
+          "promo": {
+            "index": [],
+            "domain": "binary"
+          }
+        },
+        "constraints": [],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "o_revenue",
+              "weight": 1,
+              "expression": {
+                "predict": "demand_model",
+                "of": [
+                  {
+                    "var": "price",
+                    "index": []
+                  },
+                  {
+                    "var": "promo",
+                    "index": []
+                  },
+                  {
+                    "const": 1
                   }
                 ]
               }

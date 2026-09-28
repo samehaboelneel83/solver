@@ -7,7 +7,8 @@ reason §10 now records.
 
 **Version 2** (2026-09-23, target roadmap Phase 10) is version 1 plus the
 constructs Phase 10 adds as they land -- indicators, piecewise-linear terms,
-scheduling -- and, since Phase 16, catalogue functions (§4.3). It removes and changes nothing, so every version 1 document is
+scheduling -- and, since Phase 16, catalogue functions (§4.3), and since
+Epic ML (2026-09-28) trained predictors (§3.6, §4.6). It removes and changes nothing, so every version 1 document is
 a valid version 2 document as written: the platform reads `version` 1 or 2
 (`acceptedVersions` in `contract.json`) and writes 2, and `upgrade_v1`
 (`backend/app/ir/models.py`) only restamps. The same contract is also
@@ -187,6 +188,7 @@ An IR is a JSON **object**. It carries exactly these keys and no others.
 | `version` | yes | `1` or `2` (written as `2` since Phase 10). Present from the first document ever written, so a reader can refuse what it does not understand instead of misreading it. |
 | `sets` | yes | An array of **entity type names**. What the dataset must freeze. |
 | `relationships` | no | An array of **relationship type names**. Which edges the dataset must freeze, and the only ones a `via` may walk (§4.2). Omit it for a model that does not traverse. |
+| `predictors` | no | Version 2. An object keyed by **predictor name**: the trained models the dataset must freeze, each `{"inputs": n}` (§3.6). Omit it for a model that reads none. |
 | `parameters` | yes | An object keyed by **parameter name**. What indexed data the model reads. |
 | `variables` | yes | An object keyed by variable name. What the solver decides. At least one. |
 | `constraints` | yes | An array. May be empty. |
@@ -374,9 +376,36 @@ sketch was missing.
 
 ---
 
+### 3.6 `predictors` (version 2, Epic ML)
+
+```json
+"predictors": { "demand_model": { "inputs": 2 } }
+```
+
+Optional, and absent means none -- which is every model written before it. Each
+key names a `predictor` of the problem's domain: a trained regression model the
+domain holds as `tree-ensemble/1` JSON (`backend/app/ml/trees.py`), uploaded or
+trained through `/api/v1/predictors`. `inputs` is how many inputs the model takes,
+from 1 to 32, and must be the predictor's own count (checked at submit, like a
+parameter's index).
+
+`snapshot_dataset()` freezes the declared predictors' models under the
+dataset's `predictors` key (migration 0087), **only when the document declares
+the key**, so a model that declares none freezes the same bytes, and hashes the
+same, as before -- the widening rule of §10.1. A retrained predictor changes the
+datasets of later runs, never of earlier ones.
+
+A model is never a pickle: loading one runs code, and a model is data.
+
+Refusals: `predict_needs_version_2` (a version 1 document), `predictors_malformed`
+(shape); `predictor_not_in_domain`, `predictor_inputs_mismatch` (domain).
+
+*Invented*, all of it.
+
 ## 4. Terms — the arithmetic
 
-A **term** is an object naming exactly one kind. Seven kinds:
+A **term** is an object naming exactly one kind. Seven kinds here, and three
+more in version 2 -- `pwl`, `fn` (§4.3) and `predict` (§4.6):
 
 | kind | shape | means |
 |---|---|---|
@@ -683,6 +712,35 @@ Compiled exactly: an arrival time per stop inside its window, and on every arc i
 arrival at least this one plus the service here plus the travel -- a big-M row, M as small as the
 windows allow. Arriving early waits; arriving late is not allowed; the depot's arrival is when the
 vehicles set out. The routing search's start carries the same windows as a time dimension.
+
+### 4.6 `predict` — a trained model's prediction (version 2, Epic ML)
+
+```json
+{ "predict": "demand_model", "of": [ {"var": "price", "index": []}, {"par": "promo", "index": ["d"]} ] }
+```
+
+A declared predictor (§3.6) applied to `of`: exactly as many inputs as it
+declares, in the predictor's input order, each a **linear** term.
+
+- **Of data it is a number.** Every input constant: the compiler evaluates
+  the frozen model once and the term is that value -- a forecast, and the
+  model stays whatever class it was.
+- **Of decisions it is the model itself, as rows.** The compiler writes the
+  tree ensemble as a mixed-integer program (`backend/app/solve/predict.py`):
+  one yes-or-no choice per leaf the inputs' bounds can reach, exactly one per
+  tree, and big-M rows that hold each split while its leaf is chosen, M from
+  the decisions' **declared** bounds. Every backend that solves a MILP solves
+  it; the model becomes mixed-integer with fractional data (`classify`). An
+  input reading a decision with no declared upper bound is refused before any
+  solve, as is a model past 20,000 reachable leaves.
+- **Checked on every answer.** `app.solve.verify` re-makes the prediction
+  with the trained model at the answer's inputs and refuses the answer if the
+  rows said otherwise (an input sitting on a threshold is waived).
+- A degree of 1 when an input reads a decision, 0 when all are data, as `fn`.
+
+Refusals, all `shape`: `predict_needs_version_2`, `predict_unknown` (not
+declared in `predictors`), `predict_malformed` (no `of`, or an empty one),
+`predict_arity`, `predict_argument_nonlinear`.
 
 ## 5. What is deliberately not supported yet
 

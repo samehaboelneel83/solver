@@ -173,6 +173,20 @@ def world():
                     "h": relationship["is_hierarchy"],
                 },
             )
+        for predictor in FIXTURES["domain"].get("predictors", []):
+            # Epic ML: a trained model the domain holds, as `tree-ensemble/1`.
+            db.execute(
+                text(
+                    "INSERT INTO predictor (domain_id, name, inputs, model) "
+                    "VALUES (:d, :n, :i, CAST(:m AS jsonb))"
+                ),
+                {
+                    "d": domain_id,
+                    "n": predictor["name"],
+                    "i": predictor["model"]["inputs"],
+                    "m": json.dumps(predictor["model"]),
+                },
+            )
         db.commit()
         yield db, domain_id
     finally:

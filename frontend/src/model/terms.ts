@@ -38,7 +38,10 @@ export type Term =
   | { add: Term[] }
   | { mul: [Term, Term] }
   | { pwl: { var: string; index: string[] }; points: [number, number][] }
-  | { fn: string; of: Term };
+  | { fn: string; of: Term }
+  /** A declared predictor (a trained model) applied to its inputs, in order
+   * (version 2, Epic ML). */
+  | { predict: string; of: Term[] };
 
 export type Constraint = {
   id: string;
@@ -238,6 +241,7 @@ export const TERM_LABELS: Record<TermKind, string> = {
   mul: "one term times another",
   pwl: "a piecewise curve of a variable",
   fn: "a function (log, exp, …) of a term",
+  predict: "a trained model's prediction",
 };
 
 export function termKind(term: Term): TermKind {
@@ -249,6 +253,7 @@ export function termKind(term: Term): TermKind {
   if ("add" in term) return "add";
   if ("pwl" in term) return "pwl";
   if ("fn" in term) return "fn";
+  if ("predict" in term) return "predict";
   return "mul";
 }
 
@@ -304,6 +309,10 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       const numeric = Object.keys(context.variables).some((n) => context.variables[n].domain !== "interval");
       return { fn: "exp", of: numeric ? emptyTerm("var", context, bound) : { const: 0 } };
     }
+    case "predict":
+      // A prediction names a predictor the model declares; the editor keeps
+      // one it is given and does not mint one (the kind picker hides it).
+      return { predict: "", of: [{ const: 0 }] };
     default:
       return { mul: [{ const: 1 }, { const: 0 }] };
   }
@@ -555,6 +564,10 @@ export function describeTerm(term: Term | undefined | null): string {
       const t = term as { fn: string; of: Term };
       return `${t.fn}(${describeTerm(t.of)})`;
     }
+    case "predict": {
+      const t = term as { predict: string; of: Term[] };
+      return `predict ${t.predict}(${t.of.map(describeTerm).join(", ")})`;
+    }
     default: {
       const t = term as { mul: [Term, Term] };
       return `${describeTerm(t.mul[0])} × ${describeTerm(t.mul[1])}`;
@@ -573,6 +586,9 @@ export function degree(term: Term): number {
     case "fn":
       // It stands for a decision of its own when its argument reads one.
       return degree((term as { of: Term }).of) ? 1 : 0;
+    case "predict":
+      // Likewise a prediction, when any input reads one.
+      return (term as { of: Term[] }).of.some((input) => degree(input) > 0) ? 1 : 0;
     case "sum":
       return degree((term as { sum: Term }).sum);
     case "add":

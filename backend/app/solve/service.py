@@ -1722,7 +1722,9 @@ def _record(
     # is as much a part of the answer as the roster, and a missing row would
     # be indistinguishable from a rule nobody checked.
     seen: dict[str, dict[str, Any]] = {}
-    for spec_id in dict.fromkeys(c.id for c in compiled.constraints):
+    # Rows the compiler wrote for itself (`__predict`, Epic ML) are not rules a
+    # person wrote, so they get no row of their own; the rule they serve does.
+    for spec_id in dict.fromkeys(c.id for c in compiled.constraints if not c.id.startswith("__")):
         seen[spec_id] = {"hard": True, "total": 0, "penalty": 0, "where": [], "slack": None}
 
     slacks = slack_by_constraint(compiled, result.assignments)

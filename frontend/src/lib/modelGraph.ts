@@ -86,6 +86,7 @@ function degree(term: unknown): number {
   const t = term as Record<string, unknown>;
   if (typeof t.var === "string" || t.pwl !== undefined) return 1;
   if (typeof t.fn === "string") return degree(t.of) ? 1 : 0;
+  if (typeof t.predict === "string") return Array.isArray(t.of) && t.of.some((input) => degree(input) > 0) ? 1 : 0;
   if (t.sum !== undefined) return degree(t.sum);
   if (Array.isArray(t.add)) return Math.max(0, ...t.add.map(degree));
   if (Array.isArray(t.mul)) return t.mul.reduce((total: number, child) => total + degree(child), 0);
@@ -124,6 +125,8 @@ function collect(
   if (t.pwl && typeof t.pwl === "object") collect(t.pwl, found, bound);
   // A function reads what its argument reads.
   if (typeof t.fn === "string") collect(t.of, found, bound);
+  // A prediction reads what its inputs read (Epic ML).
+  if (typeof t.predict === "string" && Array.isArray(t.of)) t.of.forEach((input) => collect(input, found, bound));
 }
 
 /**

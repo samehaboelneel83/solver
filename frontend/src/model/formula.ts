@@ -63,6 +63,7 @@ export function printTerm(term: Term): string {
   if ("attr" in term) return `${term.attr.name}[${term.attr.of}]`;
   if ("sum" in term) return `sum(${printTerm(term.sum)} for ${term.over.map(printBinding).join(", ")})`;
   if ("fn" in term) return `${term.fn}(${printTerm(term.of)})`;
+  if ("predict" in term) return `predict ${term.predict}(${term.of.map(printTerm).join(", ")})`;
   if ("add" in term) {
     return term.add
       .map((part, i) => {

@@ -50,6 +50,15 @@ function walkedIn(value: unknown, into: Set<string>) {
   }
 }
 
+function predictedIn(value: unknown, into: Map<string, number>) {
+  if (Array.isArray(value)) value.forEach((v) => predictedIn(v, into));
+  else if (value && typeof value === "object") {
+    const x = value as Json;
+    if (typeof x.predict === "string" && Array.isArray(x.of)) into.set(x.predict, x.of.length);
+    Object.values(x).forEach((v) => predictedIn(v, into));
+  }
+}
+
 export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<string, IrLoc>; outside: number } {
   const tops = workspace.blocks?.blocks ?? [];
   const root = tops.find((b) => b.type === "ir_model" && b.id === "model-root") ?? tops.find((b) => b.type === "ir_model");
@@ -124,6 +133,10 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       }
       case "ir_fn":
         return { fn: fieldOf(b, "NAME"), of: term(b.inputs?.OF, [...loc, "of"]) };
+      case "ir_predict": {
+        const count = Number(state.count ?? 1);
+        return { predict: fieldOf(b, "NAME"), of: Array.from({ length: count }, (_, k) => term(b.inputs?.[`X${k}`], [...loc, "of", k])) };
+      }
       case "ir_opaque_term":
         return state.json;
       default:
@@ -309,6 +322,18 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
   walkedIn(ir.constraints, walked);
   walkedIn(ir.objective, walked);
   if (walked.size) ir.relationships = [...walked].sort();
+
+  // Predictors (Epic ML): the declaration the model block carries, and any
+  // prediction a block makes that it does not declare, at the inputs given.
+  const declared = (((root?.extraState ?? {}) as Json).predictors ?? {}) as Record<string, { inputs: number }>;
+  const used = new Map<string, number>();
+  predictedIn(ir.constraints, used);
+  predictedIn(ir.objective, used);
+  if (Object.keys(declared).length || used.size || "predictors" in ((root?.extraState ?? {}) as Json)) {
+    const predictors: Record<string, { inputs: number }> = { ...declared };
+    for (const [name, inputs] of used) predictors[name] = { inputs };
+    ir.predictors = predictors;
+  }
 
   return { ir, paths, outside };
 }

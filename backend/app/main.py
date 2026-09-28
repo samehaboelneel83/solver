@@ -36,6 +36,8 @@ from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
 from app.api.integrations import router as integrations_router
+from app.api.predictors import router as predictors_router
+from app.api.eta import router as eta_router
 from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
@@ -198,6 +200,8 @@ app.include_router(entity_types_router)
 app.include_router(entities_router)
 app.include_router(relationships_router)
 app.include_router(parameters_router)
+app.include_router(predictors_router)
+app.include_router(eta_router)
 app.include_router(problems_router)
 app.include_router(runs_router)
 app.include_router(approvals_router)

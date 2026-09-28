@@ -28,3 +28,5 @@ scipy==1.14.1
 Pillow==11.0.0
 # IPOPT, carried in casadi's wheel: the local nonlinear lane (queue R6).
 casadi==3.8.1
+# Trained predictors (Epic ML): tree ensembles fitted here and stored as JSON, never pickled.
+scikit-learn==1.5.2

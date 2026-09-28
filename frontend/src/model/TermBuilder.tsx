@@ -69,7 +69,7 @@ export default function TermBuilder({
 }: TermBuilderProps) {
   const kindId = useId();
   const kind = termKind(value);
-  const nested = kind === "sum" || kind === "add" || kind === "mul" || kind === "fn";
+  const nested = kind === "sum" || kind === "add" || kind === "mul" || kind === "fn" || kind === "predict";
   const namedBlock = Boolean(label);
   // A sum needs a set to range over. Offering one with none declared would
   // mint a binding whose set is empty — refused on publish.
@@ -79,7 +79,11 @@ export default function TermBuilder({
     context.sets.length > 0 || kind === "sum"
       ? TERM_KINDS
       : TERM_KINDS.filter((option) => option !== "sum")
-  ).filter((option) => option !== "pwl" || kind === "pwl" || numericVariables(context).length > 0);
+  )
+    .filter((option) => option !== "pwl" || kind === "pwl" || numericVariables(context).length > 0)
+    // A prediction names a predictor the model declares (Epic ML); one is
+    // kept and edited here, not minted from the picker.
+    .filter((option) => option !== "predict" || kind === "predict");
   const name = label ?? TERM_LABELS[kind];
   const kindSelect = (
     <>
@@ -188,6 +192,35 @@ function Body({
           depth={depth + 1}
           label="Of"
         />
+      </div>
+    );
+  }
+
+  if (kind === "predict") {
+    const term = value as { predict: string; of: Term[] };
+    return (
+      <div className="space-y-2">
+        <p role="note" className="text-xs text-slate-600">
+          The trained model <span className="font-mono">{term.predict}</span>, applied to its inputs in order. Of
+          decisions, it is written as rows with a yes-or-no choice per leaf, so the decisions it reads need upper
+          bounds; of data, it is a number.
+        </p>
+        {term.of.map((input, i) => (
+          <TermBuilder
+            key={i}
+            value={input}
+            onChange={(next) => onChange({ predict: term.predict, of: term.of.map((p, j) => (j === i ? next : p)) })}
+            context={context}
+            bound={bound}
+            depth={depth + 1}
+            label={`Input ${i + 1}`}
+          />
+        ))}
+        {term.of.some((input) => degree(input) > 1) && (
+          <p role="alert" className="text-xs text-red-600">
+            An input multiplies decisions together. A trained model's inputs are linear.
+          </p>
+        )}
       </div>
     );
   }

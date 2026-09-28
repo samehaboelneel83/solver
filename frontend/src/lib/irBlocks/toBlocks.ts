@@ -40,6 +40,8 @@ const RULE_KEYS = new Set(["id", "note", "forall", "left", "relation", "right", 
 export const MAX_ADD_TERMS = 16;
 /** The most points a curve block holds (`MAX_POINTS` in vocabulary.ts). */
 const MAX_CURVE_POINTS = 12;
+/** The inputs a `predict` block holds: a predictor takes 1 to 32 (the contract). */
+const MAX_PREDICT_INPUTS = 32;
 
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 /** `value` is an object whose keys are exactly `keys` (the optional ones may be missing). */
@@ -163,6 +165,18 @@ export function irToBlocks(
           extraState: { arity: ref.index.length, count: points.length },
         });
       }
+    }
+    if (
+      shaped(x, ["predict", "of"]) && isName(x.predict) && Array.isArray(x.of) &&
+      x.of.length >= 1 && x.of.length <= MAX_PREDICT_INPUTS
+    ) {
+      const parts = x.of as Term[];
+      return block(loc, {
+        type: "ir_predict",
+        fields: { NAME: x.predict, COUNT: String(parts.length) },
+        extraState: { count: parts.length },
+        inputs: inputs(Object.fromEntries(parts.map((p, k) => [`X${k}`, wrap(term(p, [...loc, "of", k]))]))),
+      });
     }
     if (shaped(x, ["fn", "of"]) && isName(x.fn)) {
       return block(loc, { type: "ir_fn", fields: { NAME: x.fn }, inputs: inputs({ OF: wrap(term(x.of as Term, [...loc, "of"])) }) });
@@ -392,7 +406,7 @@ export function irToBlocks(
       SENSE: String(objective.sense ?? "minimize"),
       MODE: String(objective.mode ?? "weighted"),
     },
-    extraState: { version: ir.version ?? 2 },
+    extraState: { version: ir.version ?? 2, ...(ir.predictors ? { predictors: ir.predictors } : {}) },
     inputs: inputs({ DECLARE: stack(declarations), RULES: stack(rules), GOAL: stack(goal) }),
   });
   root.id = "model-root";

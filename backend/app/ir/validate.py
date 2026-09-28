@@ -34,7 +34,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.expressions.catalogue import operators_for
@@ -87,6 +87,7 @@ _TERM_KEYS: dict[str, frozenset[str]] = {
     "mul": frozenset(),
     "pwl": frozenset({"points"}),
     "fn": frozenset({"of"}),
+    "predict": frozenset({"of"}),
 }
 _LIST_OPERATORS = frozenset({"in", "notIn"})
 _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
@@ -100,6 +101,8 @@ _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INT
 _PARAMETER_KEYS = frozenset({"index", "uncertainty", "entity"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
 _OBJECTIVE_TERM_KEYS = frozenset({"id", "weight", "expression"})
+#: A predictor takes at most this many inputs (`app.ml.trees.MAX_INPUTS`).
+_MAX_PREDICTOR_INPUTS = 32
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,8 @@ class _ShapeChecker:
         #: Queue R20b: parameter name -> the set its values are entities of.
         self.entity_parameters: dict[str, str] = {}
         self.variables: dict[str, list[str]] = {}
+        #: Epic ML: predictor name -> how many inputs the model declares it takes.
+        self.predictors: dict[str, int] = {}
         self.terms = 0
 
     # -- declarations --------------------------------------------------
@@ -295,6 +300,50 @@ class _ShapeChecker:
                     )
                 self.entity_parameters[name] = of
             self.parameters[name] = list(index)
+        return None
+
+    def check_predictors(self):
+        """`predictors` (Epic ML): the trained models this document reads,
+        each by name with the number of inputs it takes. Optional, version 2,
+        and a widening: absent means none, which is every model written before
+        it. `snapshot_dataset()` freezes exactly these, as it freezes the
+        parameters `parameters` names."""
+        predictors = self.ir.get("predictors")
+        if predictors is None:
+            return None
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "predict_needs_version_2",
+                ["predictors"],
+                "predictors are a version 2 construct; publish the model as version 2",
+            )
+        if not isinstance(predictors, dict):
+            return Refusal(
+                "predictors_malformed",
+                ["predictors"],
+                'predictors is an object keyed by predictor name: {"demand_model": {"inputs": 2}}',
+            )
+        for name, declaration in predictors.items():
+            at: Loc = ["predictors", name]
+            if not _is_name(name):
+                return Refusal(
+                    "predictors_malformed",
+                    at,
+                    f"{json.dumps(name)} is not a predictor name; predictor.name is ^[a-z][a-z0-9_]*$",
+                )
+            if (
+                not isinstance(declaration, dict)
+                or set(declaration) != {"inputs"}
+                or not _is_int(declaration["inputs"])
+                or not 1 <= declaration["inputs"] <= _MAX_PREDICTOR_INPUTS
+            ):
+                return Refusal(
+                    "predictors_malformed",
+                    at,
+                    f"{name!r} is declared as {{\"inputs\": n}}, n the number of inputs the model "
+                    f"takes, 1 to {_MAX_PREDICTOR_INPUTS}",
+                )
+            self.predictors[name] = declaration["inputs"]
         return None
 
     def _check_uncertainty(self, name: str, declaration: dict[str, Any], at: Loc):
@@ -1598,6 +1647,51 @@ class _ShapeChecker:
             )
         return None
 
+    def _term_predict(self, term, loc, scope, depth):
+        """`{"predict": "demand_model", "of": [<term>, ...]}` (Epic ML): a
+        declared predictor applied to linear arguments, in its input order.
+        Of degree 1 when an argument reads a decision (the prediction stands
+        for a decision of its own), 0 when every argument is data."""
+        if self.ir.get("version") == 1:
+            return Refusal(
+                "predict_needs_version_2",
+                [*loc, "predict"],
+                "a predict term is version 2; publish the model as version 2",
+            )
+        name = term["predict"]
+        if not isinstance(name, str) or name not in self.predictors:
+            declared = ", ".join(sorted(self.predictors)) or "none"
+            return Refusal(
+                "predict_unknown",
+                [*loc, "predict"],
+                f"{json.dumps(name)} is not a predictor this model declares in predictors "
+                f"(it declares {declared})",
+            )
+        arguments = term.get("of")
+        if not isinstance(arguments, list) or not arguments:
+            return Refusal(
+                "predict_malformed",
+                [*loc, "of"],
+                f"a prediction is made from its inputs: {name} needs them as an array in `of`",
+            )
+        if len(arguments) != self.predictors[name]:
+            return Refusal(
+                "predict_arity",
+                [*loc, "of"],
+                f"{name} takes {self.predictors[name]} inputs and is given {len(arguments)}",
+            )
+        for i, argument in enumerate(arguments):
+            problem = self.check_term(argument, [*loc, "of", i], scope, depth + 1)
+            if problem:
+                return problem
+            if _degree(argument) > 1:
+                return Refusal(
+                    "predict_argument_nonlinear",
+                    [*loc, "of", i],
+                    f"input {i} of {name} multiplies decisions together; a predictor's inputs are linear",
+                )
+        return None
+
     def _term_add(self, term, loc, scope, depth):
         summands = term["add"]
         if not isinstance(summands, list) or not summands:
@@ -1757,6 +1851,9 @@ def _degree(term: Any) -> int:
     if "fn" in term:
         # It stands for a decision of its own when its argument reads one.
         return 1 if _degree(term["of"]) else 0
+    if "predict" in term:
+        # Likewise, when any input reads one (Epic ML).
+        return 1 if any(_degree(a) for a in term["of"]) else 0
     if "sum" in term:
         return _degree(term["sum"])
     if "add" in term:
@@ -1819,6 +1916,7 @@ def check_shape(ir: Any) -> Refusal | None:
         checker.check_sets,
         checker.check_relationships,
         checker.check_parameters,
+        checker.check_predictors,
         checker.check_variables,
         checker.check_constraints,
         checker.check_objective,
@@ -1886,6 +1984,13 @@ class _DomainWorld:
             self.parameter_index[name] = [
                 self.type_name_by_id.get(type_id, f"#{type_id}") for type_id in index_type_ids
             ]
+        #: Epic ML: predictor name -> the number of inputs its model takes.
+        self.predictor_inputs: dict[str, int] = {
+            name: len(inputs)
+            for name, inputs in db.execute(
+                text("SELECT name, inputs FROM predictor WHERE domain_id = :d"), {"d": domain_id}
+            ).all()
+        }
         #: name -> (from set name, to set name). The endpoint types are what
         #: makes a `via` checkable: walking `works_in` from a `unit` is a
         #: modelling mistake the domain can see and the document cannot.
@@ -1946,6 +2051,21 @@ class _DomainChecker:
                     ["sets", i],
                     f"there is no entity type called {name!r} in this problem's domain, so "
                     "snapshot_dataset() could not freeze it",
+                )
+        for name, declaration in (self.ir.get("predictors") or {}).items():
+            if name not in self.world.predictor_inputs:
+                return Refusal(
+                    "predictor_not_in_domain",
+                    ["predictors", name],
+                    f"there is no predictor called {name!r} in this problem's domain, so "
+                    "snapshot_dataset() could not freeze it",
+                )
+            if declaration["inputs"] != self.world.predictor_inputs[name]:
+                return Refusal(
+                    "predictor_inputs_mismatch",
+                    ["predictors", name, "inputs"],
+                    f"the predictor {name!r} takes {self.world.predictor_inputs[name]} inputs; "
+                    f"this model declares {declaration['inputs']}",
                 )
         for i, name in enumerate(self.ir.get("relationships") or []):
             if name not in self.world.relationship_ends:
@@ -2196,6 +2316,11 @@ class _DomainChecker:
                     problem = self._term(child, [*loc, key, i], scope)
                     if problem:
                         return problem
+        if "predict" in term:
+            for i, child in enumerate(term["of"]):
+                problem = self._term(child, [*loc, "of", i], scope)
+                if problem:
+                    return problem
         return None
 
 

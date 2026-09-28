@@ -20,6 +20,10 @@ wheelhouse or a pre-built image. Solvers (OR-Tools, HiGHS, SCIP, IPOPT, …)
 come from that install; commercial engines are **external** (customer licence +
 adapter under `/opt/solver/adapters`).
 
+`scikit-learn` (with its `joblib` and `threadpoolctl`) is part of that install since
+Epic ML (2026-09-28): it trains predictors (`app.ml.train`) and the run-time estimate
+(`app.ml.eta`). An offline wheelhouse must carry it; nothing is fetched at run time.
+
 ## Frontend Node (`frontend/package.json`)
 
 Installed at frontend image build (`npm install`). Runtime is static files in

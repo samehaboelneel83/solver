@@ -73,6 +73,8 @@ const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", 
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty", "entity"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
 const OBJECTIVE_TERM_KEYS: ReadonlySet<string> = new Set(["id", "weight", "expression"]);
+/** A predictor takes at most this many inputs (`app.ml.trees.MAX_INPUTS`). */
+const MAX_PREDICTOR_INPUTS = 32;
 const TERM_KEYS: Record<string, readonly string[]> = {
   const: [],
   par: ["index"],
@@ -83,6 +85,7 @@ const TERM_KEYS: Record<string, readonly string[]> = {
   mul: [],
   pwl: ["points"],
   fn: ["of"],
+  predict: ["of"],
 };
 
 function isObject(value: unknown): value is Json {
@@ -142,6 +145,8 @@ class ShapeChecker {
   /** Queue R20b: parameter name -> the set its values are entities of. */
   readonly entityParameters = new Map<string, string>();
   readonly variables = new Map<string, string[]>();
+  /** Epic ML: predictor name -> how many inputs the model declares it takes. */
+  readonly predictors = new Map<string, number>();
   terms = 0;
 
   constructor(private readonly ir: Json) {}
@@ -1502,6 +1507,8 @@ class ShapeChecker {
         return this.termPwl(term, loc, scope, depth);
       case "fn":
         return this.termFn(term, loc, scope, depth);
+      case "predict":
+        return this.termPredict(term, loc, scope, depth);
       default:
         return this.termMul(term, loc, scope, depth);
     }
@@ -1734,6 +1741,92 @@ class ShapeChecker {
     return null;
   }
 
+  /** The same checks, in the same order, as `check_predictors` in `app/ir/validate.py`. */
+  checkPredictors(): IrRefusal | null {
+    const predictors = this.ir.predictors;
+    if (predictors === undefined || predictors === null) return null;
+    if (this.ir.version === 1) {
+      return refusal(
+        "predict_needs_version_2",
+        ["predictors"],
+        "predictors are a version 2 construct; publish the model as version 2"
+      );
+    }
+    if (!isObject(predictors)) {
+      return refusal(
+        "predictors_malformed",
+        ["predictors"],
+        'predictors is an object keyed by predictor name: {"demand_model": {"inputs": 2}}'
+      );
+    }
+    for (const [name, declaration] of Object.entries(predictors)) {
+      const at: IrLoc = ["predictors", name];
+      if (!isName(name)) {
+        return refusal(
+          "predictors_malformed",
+          at,
+          `${show(name)} is not a predictor name; predictor.name is ^[a-z][a-z0-9_]*$`
+        );
+      }
+      if (
+        !isObject(declaration) ||
+        Object.keys(declaration).length !== 1 ||
+        !("inputs" in declaration) ||
+        !isInt(declaration.inputs) ||
+        declaration.inputs < 1 ||
+        declaration.inputs > MAX_PREDICTOR_INPUTS
+      ) {
+        return refusal(
+          "predictors_malformed",
+          at,
+          `'${name}' is declared as {"inputs": n}, n the number of inputs the model takes, 1 to ${MAX_PREDICTOR_INPUTS}`
+        );
+      }
+      this.predictors.set(name, declaration.inputs as number);
+    }
+    return null;
+  }
+
+  /** The same checks, in the same order, as `_term_predict` in `app/ir/validate.py`. */
+  private termPredict(term: Json, loc: IrLoc, scope: Map<string, string>, depth: number): IrRefusal | null {
+    if (this.ir.version === 1) {
+      return refusal("predict_needs_version_2", [...loc, "predict"], "a predict term is version 2; publish the model as version 2");
+    }
+    const name = term.predict;
+    if (typeof name !== "string" || !this.predictors.has(name)) {
+      const declared = [...this.predictors.keys()].sort().join(", ") || "none";
+      return refusal(
+        "predict_unknown",
+        [...loc, "predict"],
+        `${show(name)} is not a predictor this model declares in predictors (it declares ${declared})`
+      );
+    }
+    const inputs = term.of;
+    if (!Array.isArray(inputs) || inputs.length === 0) {
+      return refusal(
+        "predict_malformed",
+        [...loc, "of"],
+        `a prediction is made from its inputs: ${name} needs them as an array in \`of\``
+      );
+    }
+    const wanted = this.predictors.get(name) as number;
+    if (inputs.length !== wanted) {
+      return refusal("predict_arity", [...loc, "of"], `${name} takes ${wanted} inputs and is given ${inputs.length}`);
+    }
+    for (let i = 0; i < inputs.length; i += 1) {
+      const problem = this.checkTerm(inputs[i], [...loc, "of", i], scope, depth + 1);
+      if (problem) return problem;
+      if (degree(inputs[i]) > 1) {
+        return refusal(
+          "predict_argument_nonlinear",
+          [...loc, "of", i],
+          `input ${i} of ${name} multiplies decisions together; a predictor's inputs are linear`
+        );
+      }
+    }
+    return null;
+  }
+
   /** The same checks, in the same order, as `_term_fn` in `app/ir/validate.py`. */
   private termFn(term: Json, loc: IrLoc, scope: Map<string, string>, depth: number): IrRefusal | null {
     if (this.ir.version === 1) {
@@ -1915,6 +2008,8 @@ function degree(term: unknown): number {
   if ("var" in term || "pwl" in term) return 1;
   // A function stands for a decision of its own when its argument reads one.
   if ("fn" in term) return degree(term.of) ? 1 : 0;
+  // Likewise a prediction, when any input reads a decision (Epic ML).
+  if ("predict" in term) return Array.isArray(term.of) && term.of.some((input: unknown) => degree(input) > 0) ? 1 : 0;
   if ("sum" in term) return degree(term.sum);
   if (Array.isArray(term.add)) return Math.max(0, ...term.add.map(degree));
   if (Array.isArray(term.mul)) return term.mul.reduce((total: number, child: unknown) => total + degree(child), 0);
@@ -1964,6 +2059,7 @@ export function checkIrShape(ir: unknown): IrRefusal | null {
     () => checker.checkSets(),
     () => checker.checkRelationships(),
     () => checker.checkParameters(),
+    () => checker.checkPredictors(),
     () => checker.checkVariables(),
     () => checker.checkConstraints(),
     () => checker.checkObjective(),

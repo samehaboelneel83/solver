@@ -340,6 +340,9 @@ class Compiled:
     connectivity: list[str] = field(default_factory=list)
     # The ids of `route` rules (version 2, queue R15b), a subset of `connectivity`.
     routes: list[str] = field(default_factory=list)
+    # The predictions the model optimizes over (Epic ML, `app.solve.predict`):
+    # each a trained model's inputs and the leaf-binary form standing for it.
+    predictions: list[Any] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -411,6 +414,12 @@ class _Compiler:
     def __init__(self, ir: dict[str, Any], data: dict[str, Any]) -> None:
         self._pwls: list[PwlDef] = []
         self._fns: list[FnDef] = []
+        #: Epic ML: the predictors the dataset froze (migration 0087), each
+        #: checked once, and the predictions embedded so far.
+        self.predictors: dict[str, dict[str, Any]] = data.get("predictors") or {}
+        self._models: dict[str, dict[str, Any]] = {}
+        self._predictions: list[Any] = []
+        self._embedded_leaves = 0
         self.ir = ir
         self.sets: dict[str, list[dict[str, Any]]] = data.get("sets", {})
         self.params_raw: dict[str, list[dict[str, Any]]] = data.get("parameters", {})
@@ -466,6 +475,7 @@ class _Compiler:
             empty_ranges=self.empty_ranges[:_MAX_EMPTY_RANGES],
             pwl=list(self._pwls),
             functions=list(self._fns),
+            predictions=list(self._predictions),
             intervals=intervals,
             symmetry=self._symmetry(),
             connectivity=self.connectivity,
@@ -810,6 +820,32 @@ class _Compiler:
         self._fns.append(FnDef(name, argument.copy(), y))
         return Linear(coeffs={y: Decimal(1)})
 
+    def _predict(self, name: str, arguments: list[Linear]) -> Linear:
+        """What a `predict` term compiles to (Epic ML): the trained model's
+        value when every input is data, else the leaf-binary form of the
+        ensemble (`app.solve.predict`)."""
+        from app.ml.trees import EnsembleError, check_ensemble
+        from app.solve import predict
+
+        where = f" in {self._current_id}" if self._current_id else " in the goal"
+        model = self._models.get(name)
+        if model is None:
+            frozen = self.predictors.get(name)
+            if not isinstance(frozen, dict) or "model" not in frozen:
+                raise Unsupported(
+                    f"the dataset carries no predictor {name!r}; it was frozen before the model declared it"
+                )
+            try:
+                check_ensemble(frozen["model"])
+            except EnsembleError as exc:
+                raise Unsupported(f"the predictor {name!r} is not a model this platform reads: {exc}") from exc
+            model = self._models[name] = frozen["model"]
+        if len(arguments) != len(model["inputs"]):  # pragma: no cover -- the domain check pins it
+            raise Unsupported(f"{name} takes {len(model['inputs'])} inputs and is given {len(arguments)}")
+        if all(a.is_constant for a in arguments):
+            return Linear(const=predict.evaluate(model, arguments))
+        return predict.embed(self, name, model, arguments, where)
+
     def _range(self, argument: Linear) -> tuple[float, float]:
         """The least and greatest a linear argument can be, from its
         decisions' bounds (a stand-in's may be infinite)."""
@@ -1027,6 +1063,9 @@ class _Compiler:
 
         if "fn" in term:
             return self._fn(term["fn"], self._term(term["of"], env))
+
+        if "predict" in term:
+            return self._predict(term["predict"], [self._term(a, env) for a in term["of"]])
 
         if "sum" in term:
             over = term.get("over") or []

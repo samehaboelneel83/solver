@@ -41,7 +41,7 @@ export function isName(value: unknown): value is string {
 }
 
 export const REQUIRED_KEYS = ["version", "sets", "parameters", "variables", "constraints"] as const;
-export const OPTIONAL_KEYS = ["objective", "relationships"] as const;
+export const OPTIONAL_KEYS = ["objective", "relationships", "predictors"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
 export const VARIABLE_DOMAINS = ["binary", "integer", "continuous", "interval"] as const;
@@ -63,7 +63,7 @@ export const EDGE_MARK = "@";
 export const SEVERITIES = ["hard", "soft"] as const;
 export const SENSES = ["minimize", "maximize"] as const;
 export const OBJECTIVE_MODES = ["weighted", "lex"] as const;
-export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn"] as const;
+export const TERM_KINDS = ["const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn", "predict"] as const;
 export const FILTER_OPERATORS = ["=", "!=", "<", "<=", ">", ">=", "in", "notIn"] as const;
 export const ARITHMETIC_ATTR_TYPES = ["integer", "number"] as const;
 
@@ -451,6 +451,46 @@ export const IR_RULES: readonly IrRule[] = [
     code: "fn_argument_nonlinear",
     where: "shape",
     text: "a function's argument is linear: no part of it multiplies two decisions",
+  },
+  {
+    code: "predict_needs_version_2",
+    where: "shape",
+    text: "`predictors` and a `predict` term appear only in a version 2 document",
+  },
+  {
+    code: "predictors_malformed",
+    where: "shape",
+    text: "`predictors` is an object keyed by predictor name, each `{\"inputs\": n}` with n from 1 to 32",
+  },
+  {
+    code: "predict_unknown",
+    where: "shape",
+    text: "a `predict` names a predictor the document declares in `predictors`",
+  },
+  {
+    code: "predict_malformed",
+    where: "shape",
+    text: "a `predict` carries its inputs, a non-empty array of terms, in `of`",
+  },
+  {
+    code: "predict_arity",
+    where: "shape",
+    text: "a `predict` is given exactly as many inputs as its predictor declares",
+  },
+  {
+    code: "predict_argument_nonlinear",
+    where: "shape",
+    text: "each input of a `predict` is linear: no part of it multiplies two decisions",
+  },
+  {
+    code: "predictor_not_in_domain",
+    where: "domain",
+    text: "every declared predictor is a predictor of the problem's domain",
+  },
+  {
+    code: "predictor_inputs_mismatch",
+    where: "domain",
+    text: "a declared predictor's `inputs` is the number of inputs its trained model takes",
   },
   {
     code: "interval_needs_version_2",

@@ -50,7 +50,7 @@ FilterOperator = Literal["=", "!=", "<", "<=", ">", ">=", "in", "notIn"]
 
 #: The term kinds, by the key that names each (the IR has no `kind` field:
 #: a term is `{"var": ...}`, `{"sum": ..., "over": ...}` and so on).
-TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn")
+TERM_KINDS = ("const", "par", "var", "attr", "sum", "add", "mul", "pwl", "fn", "predict")
 #: The function catalogue's names (`contract.json` `functions`).
 FunctionName = Literal["exp", "log", "sqrt", "abs", "sin", "cos"]
 
@@ -156,7 +156,22 @@ class Fn(_Model):
     of: "Term"
 
 
-Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl, Fn]
+class Predict(_Model):
+    """A declared predictor applied to its inputs, in its input order
+    (version 2, Epic ML). That the inputs are linear, as many as declared,
+    and the predictor declared is `validate.py`'s to say."""
+
+    predict: Name
+    of: list["Term"] = Field(min_length=1)
+
+
+Term = Union[Const, ParRef, VarRef, AttrRef, Sum, Add, Mul, Pwl, Fn, Predict]
+
+
+class PredictorDeclaration(_Model):
+    """A trained model the document reads (Epic ML): how many inputs it takes."""
+
+    inputs: Annotated[StrictInt, Field(ge=1, le=32)]
 
 
 class IntervalUncertainty(_Model):
@@ -356,9 +371,10 @@ class ProblemIR(_Model):
     constraints: list[Constraint]
     objective: Optional[Objective] = None
     relationships: Optional[list[Name]] = None
+    predictors: Optional[dict[Name, PredictorDeclaration]] = None
 
 
-for _model in (Sum, Add, Mul, Fn, NoOverlap, Cumulative, ConnectedBody, Constraint, ObjectiveTerm):
+for _model in (Sum, Add, Mul, Fn, Predict, NoOverlap, Cumulative, ConnectedBody, Constraint, ObjectiveTerm):
     _model.model_rebuild()
 
 

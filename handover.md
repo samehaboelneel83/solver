@@ -285,6 +285,24 @@ further equal-budget re-runs when changing a default.
 
 ---
 
+### 3.11 Epic ML — trained models in optimization (2026-09-28, branch `epic/ml`)
+
+Plan: [`docs/plans/2026-09-28-enterprise-plan-gap-analysis.md`](docs/plans/2026-09-28-enterprise-plan-gap-analysis.md)
+(what the enterprise plan still lacked) and
+[`docs/plans/2026-09-28-ml-epic-design.md`](docs/plans/2026-09-28-ml-epic-design.md). Guide: [`docs/ml.md`](docs/ml.md).
+
+| Item | What it gives | Migration |
+|---|---|---|
+| Predictor registry | trained models as domain data, `tree-ensemble/1` JSON only (never pickle), RLS, audit, `/api/v1/predictors` (upload, train, predict, delete refused while a version reads one) | 0087 |
+| Training | random forest or gradient boosting from a domain's entities, holdout R²/MAE/RMSE | — |
+| IR `predictors` + `predict` (version 2, a widening) | of data a number (a forecast); of decisions exact MILP rows (one binary per reachable leaf, big-M from declared bounds), so every MILP backend solves it; Python + TypeScript validators, fixtures, Blocks round trip | — |
+| Snapshot | `snapshot_dataset()` freezes declared predictors, and only then: every other dataset's bytes and hash are unchanged | 0087 |
+| Verification | every answer's embedded prediction is re-made by the trained model and must agree | — |
+| Run-time estimate | `GET /api/v1/runs/{id}/eta`: random forest on the organization's settled runs (≥ 30), capped at the time limit | — |
+| **Fix, all models:** the goal's constant | SCIP, CP-SAT and the MILP wrapper reported the objective (and bound) without the goal's constant, so the same model recorded 10 on one solver and 15 on HiGHS; all four now count it | — |
+
+Not done here: quantile forests, classification models, a Predictors page, guided-form patterns.
+
 ## 4. In progress
 
 Nothing in flight. OAAS first backlog plus HELP01 and P2a (answer shaping) are on master.

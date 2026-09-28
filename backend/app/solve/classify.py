@@ -196,6 +196,21 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some amounts follow a curve with corners")
 
+    predictors = sorted(_predictors(ir))
+    if predictors:
+        # A trained model over decisions (Epic ML): the compiler writes its
+        # trees as rows with one yes-or-no choice per leaf (`app.solve.predict`),
+        # so the model gains whole-number decisions whatever it had, and the
+        # leaves' values are rarely whole.
+        model_class = {"LP": "MILP", "QP": "MIQP", "QCQP": "MIQCQP", "NLP": "MINLP"}.get(model_class, model_class)
+        needs |= {"integral", "fractional-data"}
+        names = ", ".join(predictors)
+        reasons.append(
+            f"the model optimizes over the trained model{'s' if len(predictors) > 1 else ''} {names}, "
+            "whose trees are written as rows with a yes-or-no choice per leaf"
+        )
+        planner.append(f"a goal or rule follows the prediction of {names}")
+
     fractional = _fractional(ir, data)
     if fractional:
         needs.add("fractional-data")
@@ -242,6 +257,8 @@ def _degree(term: Any) -> int:
         return 1
     if "fn" in term:
         return 1 if _degree(term.get("of")) else 0
+    if "predict" in term:
+        return 1 if any(_degree(a) for a in term.get("of") or []) else 0
     if "sum" in term:
         return _degree(term["sum"])
     if isinstance(term.get("add"), list):
@@ -281,6 +298,19 @@ def _functions(node: Any) -> set[str]:
         return found
     if isinstance(node, list):
         return set().union(*(_functions(v) for v in node)) if node else set()
+    return set()
+
+
+def _predictors(node: Any) -> set[str]:
+    """The predictors the model applies to a decision -- one of data is only
+    a number, a forecast (Epic ML)."""
+    if isinstance(node, dict):
+        found = set().union(*(_predictors(v) for v in node.values())) if node else set()
+        if isinstance(node.get("predict"), str) and any(_degree(a) for a in node.get("of") or []):
+            found.add(node["predict"])
+        return found
+    if isinstance(node, list):
+        return set().union(*(_predictors(v) for v in node)) if node else set()
     return set()
 
 

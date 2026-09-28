@@ -170,6 +170,9 @@ export function referencesOf(
     case "fn":
       referencesOf((term as { of: Term }).of, found);
       break;
+    case "predict":
+      (term as { of: Term[] }).of.forEach((input) => referencesOf(input, found));
+      break;
     case "sum": {
       const t = term as { sum: Term; over: { set: string }[] };
       t.over.forEach((binding) => found.sets.add(binding.set));
