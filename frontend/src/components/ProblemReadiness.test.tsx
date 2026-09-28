@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProblemReadiness from "./ProblemReadiness";
 
@@ -14,6 +14,14 @@ vi.mock("../api/v1", async () => {
 });
 
 describe("ProblemReadiness", () => {
+  it("keeps readiness links inside the scoped problem", () => {
+    render(<QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/domains/7/problems/12/model"]}><Routes>
+        <Route path="/domains/:domainId/problems/:problemId/model" element={<ProblemReadiness problemId={12} />} />
+      </Routes></MemoryRouter>
+    </QueryClientProvider>);
+    expect(screen.getByRole("link", { name: "Create a scenario" })).toHaveAttribute("href", "/domains/7/problems/12/scenarios");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

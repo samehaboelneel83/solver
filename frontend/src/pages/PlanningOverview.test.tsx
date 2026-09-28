@@ -48,7 +48,7 @@ describe("planning overviews", () => {
     const request = vi.mocked(apiFetch).mock.calls.find(([path]) => path.startsWith("/api/problem/?"))?.[0];
     expect(request).toContain("f_domain_id=7");
     expect(request).not.toContain("99");
-    expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute("href", "/domains/7/data/records");
+    expect(screen.getByRole("link", { name: "Records & relationships" })).toHaveAttribute("href", "/domains/7/data");
     expect(screen.getByRole("link", { name: /New problem/ })).toHaveAttribute("href", "/public/problem/new?f_domain_id=7");
   });
 

@@ -1,0 +1,43 @@
+# Local reference source for end-to-end certification; contains sample data only.
+services:
+  ingestion-reference:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - ${OAAS_REFERENCE_ENV_FILE:?Set the private reference-source environment file}
+    command:
+      - bash
+      - -c
+      - >-
+        install -o postgres -g postgres -m 600 /source-tls/server.key /tmp/source-server.key &&
+        install -o postgres -g postgres -m 644 /source-tls/server.crt /tmp/source-server.crt &&
+        exec docker-entrypoint.sh postgres -c ssl=on
+        -c ssl_cert_file=/tmp/source-server.crt -c ssl_key_file=/tmp/source-server.key
+    volumes:
+      - ingestion_reference_data:/var/lib/postgresql/data
+      - ${OAAS_REFERENCE_TLS_DIR:?Set the private reference TLS directory}:/source-tls:ro
+    networks:
+      ingestion_source_net:
+        ipv4_address: 172.29.89.2
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U reference_owner -d ingestion_reference"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  ingestion-worker:
+    networks:
+      - solver_net
+      - ingestion_source_net
+    depends_on:
+      ingestion-reference:
+        condition: service_healthy
+
+networks:
+  ingestion_source_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.89.0/28
+
+volumes:
+  ingestion_reference_data:

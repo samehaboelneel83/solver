@@ -64,6 +64,9 @@ def test_capability_limited_key_cannot_read_or_create_connections(setup):
     headers = {"Authorization": f"Bearer {key['token']}"}
     assert client.post("/api/v1/connections", json=body, headers=headers).status_code == 403
     assert client.get("/api/v1/connections", params={"domain_id": body["domain_id"]}, headers=headers).status_code == 403
+    with SessionLocal() as db:
+        db.execute(text("DELETE FROM iam.api_key WHERE id=:id"), {"id": key["id"]})
+        db.commit()
 
 
 def test_queued_cancel_duplicate_and_disable(setup, tmp_path):

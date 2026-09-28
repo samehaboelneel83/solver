@@ -1,8 +1,9 @@
 # Offline PostgreSQL extraction pilot
 
-Status: experimental operator tool. Unit tests use a simulated driver; a real
-PostgreSQL/TLS installation has not yet been certified. This does not enable web
-users to connect databases or create optimization-ready datasets.
+Status: operator tool with a verified local PostgreSQL 16/TLS extraction path.
+The authenticated service is now deployed separately; see
+[operational evidence](ingestion-operational-check.md). Broader database/version
+certification and optimization-ready dataset publication remain outstanding.
 
 ## Prepare
 

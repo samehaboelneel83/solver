@@ -6,6 +6,7 @@ import { useHealth } from "../api/health";
 import { formatApiError } from "../api/errors";
 import { useApplyTemplate, useTemplates } from "../api/v1";
 import OfflineNotice from "../components/OfflineNotice";
+import HomeResults from "../components/HomeResults";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
 import { useCapabilities } from "../hooks/useCapability";
@@ -148,8 +149,9 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        <section className="lg:col-span-2">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Recent problems</h2>
+        <section id="continue-working" className="lg:col-span-2">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Continue working</h2>
+          <p className="mb-3 text-sm text-slate-500">Recently created problems{domainId !== null ? " in the selected domain" : " across your domains"}.</p>
           {problemsOffline ? (
             <OfflineNotice subject="Recent problems" />
           ) : problemsLoading ? (
@@ -235,6 +237,7 @@ export default function Dashboard() {
           )}
         </section>
       </div>
+      <HomeResults />
     </div>
   );
 }

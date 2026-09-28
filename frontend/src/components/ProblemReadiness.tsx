@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useScenarios, useVersions, type Id } from "../api/v1";
 
 /**
@@ -8,6 +8,10 @@ import { useScenarios, useVersions, type Id } from "../api/v1";
 export default function ProblemReadiness({ problemId }: { problemId: Id }) {
   const versions = useVersions(problemId, { limit: 1, offset: 0 });
   const scenarios = useScenarios(problemId, { limit: 1, offset: 0 });
+  const { domainId } = useParams();
+  const href = (page: string) => domainId
+    ? `/domains/${domainId}/problems/${problemId}/${page}`
+    : `/${page}?problem=${problemId}`;
   const hasVersion = (versions.data?.items.length ?? 0) > 0;
   const hasScenario = (scenarios.data?.items.length ?? 0) > 0;
   const loading = versions.isLoading || scenarios.isLoading;
@@ -16,21 +20,26 @@ export default function ProblemReadiness({ problemId }: { problemId: Id }) {
     {
       done: hasVersion,
       label: "Publish a model version",
-      href: `/model?problem=${problemId}`,
+      href: href("model"),
     },
     {
       done: hasScenario,
       label: "Create a scenario",
-      href: `/scenarios?problem=${problemId}`,
+      href: href("scenarios"),
     },
     {
       done: false,
       label: "Run and review a result",
-      href: `/runs?problem=${problemId}`,
+      href: href("runs"),
       optionalUntil: !hasScenario,
     },
   ];
 
+  if (versions.isError || scenarios.isError) {
+    return <div role="alert" className="mb-4 text-sm">Readiness could not be checked.
+      <button type="button" className="p-2 text-blue-700 underline" onClick={() => { void versions.refetch(); void scenarios.refetch(); }}>Retry</button>
+    </div>;
+  }
   if (loading) {
     return <p className="mb-4 text-sm text-slate-500">Checking readiness…</p>;
   }

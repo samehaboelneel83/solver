@@ -28,7 +28,7 @@ vi.mock("../components/BlocksEditor", () => ({
   ),
 }));
 
-const { apiFetch } = await import("../api/client");
+const { apiFetch, ApiError } = await import("../api/client");
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
 const PROBLEMS = { items: [{ id: 1, name: "weekly_rota", domain_id: 1 }], total: 1 };
@@ -1021,7 +1021,7 @@ describe("ModelEditor's Blocks tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Blocks" }));
     expect(screen.getByTestId("blocks-ir").textContent).toContain("changed in forms");
     fireEvent.click(screen.getByRole("button", { name: "edit in blocks" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Forms" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Guided Form" }));
     expect(await screen.findByDisplayValue("changed in blocks")).toBeInTheDocument();
   });
 
@@ -1083,4 +1083,101 @@ describe("a rule's chance in the forms (queue R8)", () => {
       expect(draft.ir.constraints[0]).not.toHaveProperty("chance");
     });
   });
+});
+
+
+it("edits the shared draft from the graph workspace and preserves it in forms", async () => {
+  renderPage("/model?view=graph");
+  const note = await screen.findByLabelText(/what it means/i);
+  expect(screen.getByRole("button", { name: "1. Decision variable" })).toBeInTheDocument();
+  fireEvent.change(note, { target: { value: "edited beside the graph" } });
+  fireEvent.click(screen.getByRole("tab", { name: "Guided Form" }));
+  expect(screen.getByLabelText(/what it means/i)).toHaveValue("edited beside the graph");
+  fireEvent.click(screen.getByRole("tab", { name: "Exact IR" }));
+  expect(screen.getByRole("region", { name: "Exact IR" })).toHaveTextContent("edited beside the graph");
+});
+
+
+
+describe("model deep links", () => {
+  function overrideReads(read: (path: string) => Promise<unknown> | undefined) {
+    const original = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: unknown) => read(path) ?? original(path, options));
+  }
+
+  it("loads a requested problem outside the first list page", async () => {
+    stub({ problems: { items: [], total: 501 } });
+    overrideReads(path => path === "/api/problem/1" ? Promise.resolve(PROBLEMS.items[0]) : undefined);
+    renderPage("/model?problem=1");
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+    expect(screen.getByLabelText("Problem")).toHaveValue("1");
+  });
+
+  it("refuses an out-of-page problem from another domain", async () => {
+    overrideReads(path => path === "/api/problem/99" ? Promise.resolve({ id: 99, domain_id: 2, name: "other" }) : undefined);
+    renderPage("/model?problem=99");
+    expect(await screen.findByText("This problem is not available here")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/starting from/i)).toBeNull();
+  });
+
+  it("loads an older version absent from the version list", async () => {
+    overrideReads(path => path === "/api/v1/versions/10" ? Promise.resolve({ ...VERSIONS.items[1], id: 10, ir: IR_V2 }) : undefined);
+    renderPage("/model?problem=1&version=10");
+    expect(await screen.findByLabelText(/starting from/i)).toHaveValue("10");
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+  });
+
+  it("refuses a version belonging to another problem", async () => {
+    overrideReads(path => path === "/api/v1/versions/10" ? Promise.resolve({ ...VERSIONS.items[1], id: 10, problem_id: 99, ir: IR_V2 }) : undefined);
+    renderPage("/model?problem=1&version=10");
+    expect(await screen.findByText("This model version is not available")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("c_cover")).toBeNull();
+  });
+
+  it.each(["/model?problem=broken", "/model?version=broken"])("does not replace an invalid explicit ID: %s", async entry => {
+    renderPage(entry);
+    expect(await screen.findByText(/This (problem|model version) is not available/)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("c_cover")).toBeNull();
+  });
+
+  it("retries a version read failure without presenting an empty model", async () => {
+    let failed = true;
+    overrideReads(path => path === "/api/v1/versions/22"
+      ? failed ? Promise.reject(new ApiError(503, "Unavailable")) : Promise.resolve({ ...VERSIONS.items[0], ir: IR_V2 })
+      : undefined);
+    renderPage();
+    expect(await screen.findByText(/The selected model version could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start a model" })).toBeNull();
+    failed = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading the selected model version" }));
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+  });
+
+  it("shows a list failure instead of claiming the domain has no problems", async () => {
+    overrideReads(path => path.startsWith("/api/problem/") ? Promise.reject(new ApiError(503, "Unavailable")) : undefined);
+    renderPage();
+    expect(await screen.findByText(/The problem list could not be loaded/)).toBeInTheDocument();
+    expect(screen.queryByText(/This domain has no problems yet/)).toBeNull();
+  });
+});
+
+
+it("focuses a graph rule, follows its rename, and restores all editors", async () => {
+  stub({ ir: { ...IR_V2, constraints: [...IR_V2.constraints, { ...IR_V2.constraints[0], id: "c_other", note: "another rule" }] } });
+  renderPage("/model?view=graph");
+  await screen.findByDisplayValue("c_cover");
+  const graph = screen.getByRole("region", { name: "Visual Graph preview" });
+  fireEvent.click(within(graph).getByText("Model parts as a list"));
+  fireEvent.click(within(graph).getByRole("button", { name: /c_cover/ }));
+  expect(screen.queryByDisplayValue("c_other")).toBeNull();
+  const name = screen.getByDisplayValue("c_cover");
+  fireEvent.change(name, { target: { value: "c_renamed" } });
+  expect(screen.getByDisplayValue("c_renamed")).toBe(name);
+  expect(within(graph).getByRole("button", { name: /c_renamed/ })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.change(screen.getByLabelText(/what it means/i), { target: { value: "graph inspector edit" } });
+  fireEvent.click(screen.getByRole("button", { name: "Show all model editors" }));
+  expect(screen.getByDisplayValue("c_other")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Guided Form" }));
+  expect(screen.getByDisplayValue("c_renamed")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("graph inspector edit")).toBeInTheDocument();
 });

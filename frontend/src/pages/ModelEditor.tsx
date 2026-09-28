@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
-import { useEntityList } from "../api/entities";
+import { useEntity, useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
 import { useCapabilities } from "../hooks/useCapability";
 import {
@@ -28,8 +28,12 @@ import RouteEditor from "../model/RouteEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
 import DeclarationsEditor from "../model/DeclarationsEditor";
+import GuidedCreation from "../model/GuidedCreation";
+import { applyGuidedCommand } from "../model/guidedCommands";
 import DraftBar, { DraftConflict } from "../model/DraftBar";
 import BlocksEditor from "../components/BlocksEditor";
+import type { ModelPart } from "../lib/modelGraph";
+import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
@@ -56,7 +60,7 @@ import {
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
-import { resolveById } from "../lib/selection";
+import { ApiError } from "../api/client";
 import ContextMismatch from "../components/ContextMismatch";
 import ProblemReadiness from "../components/ProblemReadiness";
 
@@ -116,6 +120,11 @@ export default function ModelEditor() {
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const chooserId = useId();
+  const navigate = useNavigate();
+  const route = useParams();
+  const chooseProblem = (id: string) => route.problemId
+    ? navigate(`/domains/${domainId}/problems/${id}/model`)
+    : setSearchParams({ problem: id }, { replace: true });
   const problems = useEntityList("public", "problem", {
     limit: 500,
     offset: 0,
@@ -124,10 +133,25 @@ function ForDomain({ domainId }: { domainId: Id }) {
     filters: { domain_id: String(domainId) },
   });
 
-  if (problems.fetchStatus === "paused" && !problems.data) return <OfflineNotice subject="The problem list" />;
-  if (problems.isLoading) return <Skeleton rows={3} cols={4} />;
+  const rawProblem = route.problemId ?? searchParams.get("problem");
+  const requested = parseRouteId(rawProblem);
+  const listed = problems.data?.items ?? [];
+  const needsDetail = requested !== null && !listed.some(row => Number(row.id) === requested);
+  const detail = useEntity("public", "problem", needsDetail ? String(requested) : undefined);
+  const extra = detail.data && Number(detail.data.domain_id) === Number(domainId) && Number(detail.data.id) === requested ? detail.data : undefined;
+  const items = needsDetail && extra ? [...listed, extra] : listed;
+  const problem = requested === null ? items[0] : items.find(row => Number(row.id) === requested);
+  const invalid = rawProblem !== null && rawProblem !== undefined && requested === null;
+  if (invalid || (needsDetail && detail.data && !extra) || (needsDetail && detail.error instanceof ApiError && detail.error.status === 404)) {
+    return <ContextMismatch title="This problem is not available here"
+      detail="The requested problem is missing, invalid, or belongs to another domain. Nothing was substituted."
+      parentHref={`/domains/${domainId}/problems`} parentLabel="Open problems in this domain" />;
+  }
+  if (needsDetail && detail.isError) return <LoadFailure subject="The requested problem" error={detail.error} retry={() => { void detail.refetch(); }} />;
+  if (problems.isError) return <LoadFailure subject="The problem list" error={problems.error} retry={() => { void problems.refetch(); }} />;
+  if ((problems.fetchStatus === "paused" && !problems.data) || (needsDetail && detail.fetchStatus === "paused" && !detail.data)) return <OfflineNotice subject="The problem" />;
+  if (problems.isLoading || (needsDetail && detail.isLoading) || problems.isPlaceholderData) return <Skeleton rows={3} cols={4} />;
 
-  const items = problems.data?.items ?? [];
   if (items.length === 0) {
     return (
       <Note>
@@ -141,24 +165,12 @@ function ForDomain({ domainId }: { domainId: Id }) {
         </p>
         <StartFromTemplates
           domainId={domainId}
-          onApplied={(result) => setSearchParams({ problem: String(result.problem_id) }, { replace: true })}
+          onApplied={(result) => chooseProblem(String(result.problem_id))}
         />
       </Note>
     );
   }
 
-  const requested = parseRouteId(searchParams.get("problem"));
-  const { item: problem, missing: problemMissing } = resolveById(items, requested, (row) => Number(row.id));
-  if (problemMissing) {
-    return (
-      <ContextMismatch
-        title="This problem is not available here"
-        detail="The link asked for a problem that is missing or belongs to another domain. Nothing was substituted."
-        parentHref="/public/problem"
-        parentLabel="Open problems in this domain"
-      />
-    );
-  }
   const problemId = Number(problem!.id);
 
   return (
@@ -172,7 +184,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           id={chooserId}
           className={`${INPUT_CLASS} max-w-sm`}
           value={String(problemId)}
-          onChange={(event) => setSearchParams({ problem: event.target.value }, { replace: true })}
+          onChange={(event) => chooseProblem(event.target.value)}
         >
           {items.map((row) => (
             <option key={String(row.id)} value={String(row.id)}>
@@ -189,18 +201,18 @@ function ForDomain({ domainId }: { domainId: Id }) {
 function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const versions = useVersions(problemId, { limit: 50, offset: 0 });
-  const versionItems = versions.data?.items ?? [];
-  // Editing an older version is not editing it: publishing always writes a
-  // new latest, because a version a run points at can never change. So this
-  // chooses a *starting point*, which is why the label says so.
-  const requestedVersion = parseRouteId(searchParams.get("version"));
-  const { item: base, missing: versionMissing } = resolveById(
-    versionItems,
-    requestedVersion,
-    (row) => row.id
-  );
-  const baseId = base?.id ?? null;
+  const rawVersion = searchParams.get("version");
+  const requestedVersion = parseRouteId(rawVersion);
+  const listedVersions = versions.data?.items ?? [];
+  const baseId = requestedVersion ?? (rawVersion === null ? listedVersions[0]?.id ?? null : null);
   const latest = useVersion(baseId);
+  const validVersion = latest.data?.problem_id === Number(problemId) && latest.data?.id === baseId;
+  const base = validVersion ? latest.data : listedVersions.find(row => row.id === baseId);
+  const versionItems = validVersion && !listedVersions.some(row => row.id === baseId)
+    ? [...listedVersions, latest.data!] : listedVersions;
+  const versionMissing = (rawVersion !== null && requestedVersion === null)
+    || (latest.data !== undefined && !validVersion)
+    || (latest.error instanceof ApiError && latest.error.status === 404);
   const [scratch, setScratch] = useState(false);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500, offset: 0 });
@@ -210,12 +222,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   const [failure, setFailure] = useState<string | null>(null);
   // Forms | Blocks (Blockly edit mode spec §6), in the URL so a reload keeps it.
-  const view = searchParams.get("view") === "blocks" ? "blocks" : "forms";
-  const setView = (next: "forms" | "blocks") =>
+  const requestedView = searchParams.get("view");
+  const view = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" ? requestedView : "forms";
+  const setView = (next: "forms" | "blocks" | "graph" | "ir") =>
     setSearchParams(
       (current) => {
         const params = new URLSearchParams(current);
-        if (next === "blocks") params.set("view", "blocks");
+        if (next !== "forms") params.set("view", next);
         else params.delete("view");
         return params;
       },
@@ -224,8 +237,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // Blocks dropped beside the model rather than in it: not part of it, so
   // Publish waits until they are placed or deleted.
   const [outside, setOutside] = useState(0);
+  const [graphFocus, setGraphFocus] = useState<{ part: ModelPart; id: string; rulePosition?: number } | null>(null);
+  const focusedPart = view === "graph" ? graphFocus?.part : undefined;
 
-  const ir = (scratch ? EMPTY_MODEL : latest.data?.ir) as Record<string, unknown> | undefined;
+  const ir = (scratch ? EMPTY_MODEL : validVersion ? latest.data?.ir : undefined) as Record<string, unknown> | undefined;
   const seedKey: DraftBase | null = scratch ? "scratch" : baseId === null ? null : `version-${Number(baseId)}`;
 
   // The shared draft (Blockly edit mode spec §2): the Model editor's forms,
@@ -324,7 +339,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     problemId
   );
 
-  if (!versions.isLoading && versionMissing) {
+  if (versionMissing) {
     return (
       <ContextMismatch
         title="This model version is not available"
@@ -335,6 +350,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     );
   }
 
+  if (versions.isError) return <LoadFailure subject="Model versions" error={versions.error} retry={() => { void versions.refetch(); }} />;
+  if (latest.isError) return <LoadFailure subject="The selected model version" error={latest.error} retry={() => { void latest.refetch(); }} />;
+  if ((versions.fetchStatus === "paused" && !versions.data) || (baseId !== null && latest.fetchStatus === "paused" && !latest.data)) return <OfflineNotice subject="The model version" />;
   if (versions.isLoading || (baseId !== null && latest.isLoading) || entityTypes.isLoading) {
     return <Skeleton rows={4} cols={3} />;
   }
@@ -442,7 +460,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
-          {(["forms", "blocks"] as const).map((tab) => (
+          {(["forms", "graph", "blocks", "ir"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -451,7 +469,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               onClick={() => setView(tab)}
               className={`px-3 py-1.5 text-sm ${view === tab ? "bg-blue-700 text-white" : "bg-white text-slate-700"}`}
             >
-              {tab === "forms" ? "Forms" : "Blocks"}
+              {{ forms: "Guided Form", graph: "Visual Graph", blocks: "Blocks", ir: "Exact IR" }[tab]}
             </button>
           ))}
         </div>
@@ -460,7 +478,19 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </p>
       </div>
 
-      {view === "blocks" && workingIr ? (
+      <details className="mb-4 text-sm text-slate-600">
+        <summary className="cursor-pointer py-2">Advanced views</summary>
+        <p className="my-2">Blocks edits the same draft. Exact IR is read-only. Legacy visualizations show published model versions.</p>
+        <Link className="inline-block py-2 text-blue-700 underline" to={`/domains/${domainId}/data/explore?mode=model&problem=${problemId}`}>Open legacy visualizations</Link>
+      </details>
+
+      {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
+        selection={graphFocus?.part === "rules" && graphFocus.rulePosition !== undefined
+          ? `model-con-${draft.constraints[graphFocus.rulePosition]?.id}` : graphFocus?.id ?? null}
+        onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { rulePosition: draft.constraints.findIndex(rule => `model-con-${rule.id}` === id) } : {}) })}
+        editorHref={part => part === "objective" ? "#objective-editor" : part === "rules" ? "#constraints-editor" : "#declarations-editor"} />}
+      {view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
+      : view === "blocks" && workingIr ? (
         <div className="mb-6">
           <BlocksEditor
             ir={workingIr}
@@ -474,6 +504,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </div>
       ) : (
       <>
+      {view === "graph" && graphFocus && <div role="status" className="mb-4 rounded border border-blue-200 p-3">
+        <p>{focusedPart === "rules" ? "Editing the selected rule" : focusedPart === "objective" ? "Editing the objective" : "Editing declarations"}. Changes update this graph and Guided Form.</p>
+        <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
+      </div>}
+      <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
+        onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))} />
+      <div hidden={focusedPart === "rules" || focusedPart === "objective"} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
       <DeclarationsEditor
         sets={draft.sets}
         parameters={draft.parameters}
@@ -488,7 +525,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onChange={(next) => setDraft((current) => current && { ...current, ...next })}
       />
 
-      <section aria-labelledby="constraints-heading" className="mb-6">
+      </div>
+      <section hidden={focusedPart !== undefined && focusedPart !== "rules"} id="constraints-editor" tabIndex={-1} aria-labelledby="constraints-heading" className="mb-6">
         <h2 id="constraints-heading" className="mb-2 text-base font-semibold text-slate-900">
           What must be true
         </h2>
@@ -496,7 +534,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           <p className="mb-2 text-sm text-slate-600">No rules yet. Add one that must hold.</p>
         )}
         <div className="space-y-1">
-          {draft.constraints.map((constraint, position) => (
+          {draft.constraints.map((constraint, position) => focusedPart === "rules" && graphFocus?.rulePosition !== position ? null : (
             <ConstraintCard
               key={position}
               constraint={constraint}
@@ -512,14 +550,15 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                   }
                 )
               }
-              onRemove={() =>
+              onRemove={() => {
+                setGraphFocus(null);
                 setDraft((current) =>
                   current && {
                     ...current,
                     constraints: current.constraints.filter((_, i) => i !== position),
                   }
-                )
-              }
+                );
+              }}
             />
           ))}
         </div>
@@ -610,7 +649,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         )}
       </section>
 
-      <section aria-labelledby="objective-heading" className="mb-6">
+      <section hidden={focusedPart !== undefined && focusedPart !== "objective"} id="objective-editor" tabIndex={-1} aria-labelledby="objective-heading" className="mb-6">
         <h2 id="objective-heading" className="mb-2 text-base font-semibold text-slate-900">
           What to make best
         </h2>
@@ -1310,4 +1349,12 @@ function StartFromTemplates({
       )}
     </div>
   );
+}
+
+
+function LoadFailure({ subject, error, retry }: { subject: string; error: unknown; retry: () => void }) {
+  return <div role="alert" className="my-4 rounded border border-amber-300 p-4">
+    <p>{subject} could not be loaded. {formatApiError(error)}</p>
+    <button type="button" className="mt-2 rounded border px-3 py-2" aria-label={`Retry loading ${subject.toLowerCase()}`} onClick={retry}>Retry</button>
+  </div>;
 }

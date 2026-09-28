@@ -160,6 +160,11 @@ export default function Solvers() {
   return (
     <div className="max-w-6xl">
       <h1 className="mb-1 text-lg font-semibold text-slate-900">Solvers</h1>
+      <section aria-label="Worker availability" className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+        <h2 className="font-semibold">Worker availability</h2>
+        <p className="mt-1">Per-worker heartbeat status is not available on this screen. Review queue activity to investigate waiting or running solves.</p>
+        <Link className="mt-2 inline-block py-2 text-blue-700 underline" to="/ops/queue">Open runs & queues</Link>
+      </section>
       <p className="mb-4 max-w-3xl text-sm text-slate-600">
         The built-in solvers, and any added from a manifest -- Gurobi, Xpress, CPLEX or your own, with your licence
         (see <code className="rounded bg-slate-100 px-1">docs/solver-adapters.md</code>). An added solver runs only when

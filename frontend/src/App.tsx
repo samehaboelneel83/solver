@@ -29,6 +29,7 @@ import Settings from "./pages/Settings";
 import Help from "./pages/Help";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
+import NavigationHub, { SourcesPage } from "./pages/NavigationHub";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -62,6 +63,10 @@ export default function App() {
         <Route path="domains/:domainId" element={<DomainScope />}>
           <Route index element={<DomainOverview />} />
           <Route path="overview" element={<DomainOverview />} />
+          <Route path="data" element={<NavigationHub kind="data" />} />
+          <Route path="structure" element={<NavigationHub kind="structure" />} />
+          <Route path="data/quality" element={<NavigationHub kind="quality" />} />
+          <Route path="data/sources" element={<SourcesPage />} />
           <Route path="data/records" element={<Entities />} />
           <Route path="data/records/new" element={<EntityRecord />} />
           <Route path="data/records/:id" element={<EntityRecord />} />
@@ -76,6 +81,7 @@ export default function App() {
           <Route path="problems/:problemId" element={<ProblemQueryBridge />}>
             <Route index element={<ProblemOverview />} />
             <Route path="overview" element={<ProblemOverview />} />
+            <Route path="inputs" element={<NavigationHub kind="inputs" />} />
             <Route path="model" element={<ModelEditor />} />
             <Route path="versions" element={<ModelVersions />} />
             <Route path="versions/:versionId" element={<ModelVersions />} />
@@ -103,6 +109,12 @@ export default function App() {
         <Route path="runs" element={<Runs />} />
         <Route path="workspace" element={<Workspace />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="administration/access" element={<NavigationHub kind="access" />} />
+        <Route path="inputs" element={<AliasRedirect to="/domains" />} />
+        <Route path="data" element={<AliasRedirect to="/domains" />} />
+        <Route path="structure" element={<AliasRedirect to="/domains" />} />
+        <Route path="sources" element={<AliasRedirect to="/domains" />} />
+        <Route path="quality" element={<AliasRedirect to="/domains" />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
         <Route path="ops/queue" element={<OpsQueue />} />

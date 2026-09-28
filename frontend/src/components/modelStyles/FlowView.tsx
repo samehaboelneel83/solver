@@ -81,7 +81,10 @@ function cardHeight(spec: NodeSpec): number {
  * sets to the goal, wired the way the model's dependencies run. Pan, zoom
  * and drag to rearrange; selecting a card opens its side panel.
  */
-export default function FlowView({ graph, palette, onSelect }: ModelStyleProps) {
+export default function FlowView({ graph, palette, onSelect, positions, onMove }: ModelStyleProps & {
+  positions?: Record<string, { x: number; y: number }>;
+  onMove?: (id: string, position: { x: number; y: number }) => void;
+}) {
   const { nodes, edges } = useMemo(() => {
     const specs = reteNodes(graph);
     const byId = new Map(specs.map((spec) => [spec.id, spec]));
@@ -92,7 +95,7 @@ export default function FlowView({ graph, palette, onSelect }: ModelStyleProps) 
     const nodes: Card[] = specs.map((spec) => ({
       id: spec.id,
       type: "part",
-      position: { x: boxes.get(spec.id)?.x ?? 0, y: boxes.get(spec.id)?.y ?? 0 },
+      position: positions?.[spec.id] ?? { x: boxes.get(spec.id)?.x ?? 0, y: boxes.get(spec.id)?.y ?? 0 },
       data: { spec, fill: palette.nodeFill[spec.id] ?? "#e2e8f0", soft: palette.nodeData?.[spec.id]?.soft === "yes" },
       connectable: false,
     }));
@@ -113,7 +116,7 @@ export default function FlowView({ graph, palette, onSelect }: ModelStyleProps) 
       labelBgStyle: { fill: "#f8fafc" },
     }));
     return { nodes, edges };
-  }, [graph, palette]);
+  }, [graph, palette, positions]);
 
   return (
     <div className="h-full w-full" data-testid="model-style-view-flow">
@@ -126,6 +129,7 @@ export default function FlowView({ graph, palette, onSelect }: ModelStyleProps) 
         nodeTypes={nodeTypes}
         nodesConnectable={false}
         onNodeClick={(_event, node) => onSelect(node.id)}
+        onNodeDragStop={(_event, node) => onMove?.(node.id, node.position)}
         fitView
         fitViewOptions={{ padding: 0.12 }}
         minZoom={0.2}

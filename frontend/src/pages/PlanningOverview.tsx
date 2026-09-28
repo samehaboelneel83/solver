@@ -48,9 +48,9 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     </header>
     {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-3">
       {[
-        { label: "Records", detail: "People, places, resources and other operational data.", href: "data/records", Icon: Database },
+        { label: "Records & relationships", detail: "People, places, resources and other operational data.", href: "data", Icon: Database },
         { label: "Parameters", detail: "Demand, capacities, costs and other model inputs.", href: "data/parameters", Icon: FileStack },
-        { label: "Map & graph", detail: "Explore locations and connections in your data.", href: "data/explore", Icon: GitBranch },
+        { label: "Data relationships (graph)", detail: "Explore locations and connections in your data.", href: "data/explore", Icon: GitBranch },
       ].map(({ label, detail, href, Icon }) => <article key={href} className={card}>
         <Icon className="mb-3 h-5 w-5 text-blue-700" aria-hidden />
         <h2 className="font-semibold text-slate-900"><Link className={link} to={`${base}/${href}`}>{label}</Link></h2>
@@ -142,6 +142,7 @@ export function ProblemOverview() {
     </section>
     <footer className="flex flex-wrap gap-6">
       <Link className={link} to={`${base}/versions`}>Versions & quality checks</Link>
+      <Link className={link} to={`${base}/inputs`}>Inputs</Link>
       <Link className={link} to={`/domains/${domainId}/data/parameters`}>Shared input values</Link>
     </footer>
   </div>;

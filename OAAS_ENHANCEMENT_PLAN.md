@@ -23,7 +23,17 @@ Validation: **2,200 frontend tests pass**, TypeScript and full ESLint pass, and 
 - Added an operator-only offline command and [runbook](docs/runbooks/database-extraction.md). Passwords resolve from a worker environment reference; this is not the planned encrypted application credential store.
 - Validation: **17 isolated integration tests pass**, including mocked driver behavior, scope refusal before credential resolution, network rejection, SQL identifier construction, precision preservation, artifact integrity and failure cleanup. Command help runs locally. No live source database was contacted, and no engine/version combination is certified yet.
 
-Next implementation milestone: authenticated connection grants and encrypted secret references, supervised persisted ingestion jobs, real PostgreSQL certification, and the mapping/validation interface. The full delivery roadmap below remains active; these increments do not mark it complete.
+### Third implementation increment — authenticated ingestion service
+
+- Migration 0085 adds domain-owned connections and persisted ingestion jobs with tenant-inheritance triggers, row-level security and one active job per connection.
+- Dedicated `integration.manage` and `integration.run` capabilities protect the API. AES-GCM credential envelopes are bound to organization/connection identity; create, rotate, disable, submit, status and cancel endpoints do not expose credentials.
+- A separate worker claims jobs with row locking, supervises extraction children, enforces time/memory bounds, handles cancellation and fences completion with attempt UUIDs. Expired supervisor attempts become failed without automatic replay.
+- Added an opt-in Compose overlay and [service runbook](docs/runbooks/ingestion-service.md). Capabilities remain organization-wide; finer per-user/domain grants and a mapping interface are outstanding.
+- Validation: **37 PostgreSQL-backed tests pass** across ingestion, tenancy and API keys in a disposable isolated container; **19 pure integration tests pass**. Python compilation, Compose configuration validation and diff checks pass. Tests found and fixed a nullable-UUID settlement query and test API-key cleanup.
+
+Latest live verification: ingestion is now configured and operational against a separate local PostgreSQL 16 sample source. Authenticated job 1 extracted three rows over verified TLS 1.3; checksum, decimal precision and read-only source permissions pass. The private keyring and certificates are outside the repository, and the dedicated worker is running. Frontend/API health remains good. Run 589's failed PSO selection already has a successful replacement: run 590 used CP-SAT on the same scenario/dataset and reached optimal objective 2564. See the [operational evidence and restart procedure](docs/runbooks/ingestion-operational-check.md).
+
+Next milestone: onboard the installation's actual business database, broaden connector certification beyond the verified local PostgreSQL path, and build connection/mapping/validation screens and validated dataset publication. The full delivery roadmap below remains active; these increments do not mark it complete.
 
 ## 1. Outcome and priorities
 

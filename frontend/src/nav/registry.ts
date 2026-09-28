@@ -35,9 +35,9 @@ export const TERMS = {
   relationshipTypes: "Relationship types",
   relationships: "Relationships",
   parameters: "Parameters",
-  mapGraph: "Map & graph",
+  mapGraph: "Data relationships (graph)",
   problems: "Problems",
-  model: "Model",
+  model: "Build model",
   versions: "Versions",
   scenarios: "Scenarios",
   runs: "Runs & results",
@@ -61,9 +61,20 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
   scenarios: "/domains/:domainId/problems/:problemId/scenarios",
   runs: "/domains/:domainId/problems/:problemId/runs",
   workspace: "/domains/:domainId/problems/:problemId/runs",
+  inputs: "/domains/:domainId/problems/:problemId/inputs",
+  "data-records": "/domains/:domainId/data",
+  "data-structure": "/domains/:domainId/structure",
+  sources: "/domains/:domainId/data/sources",
+  quality: "/domains/:domainId/data/quality",
 };
 
 export const DESTINATIONS: Destination[] = [
+  { id: "inputs", path: "/inputs", canonical: DOMAIN_TEMPLATES.inputs, label: "Inputs", purpose: "Prepare shared data and scenario inputs.", scope: "problem", group: "problems" },
+  { id: "data-records", path: "/data", canonical: DOMAIN_TEMPLATES["data-records"], label: "Records & relationships", purpose: "Manage operational records, links and values.", scope: "domain", group: "data" },
+  { id: "data-structure", path: "/structure", canonical: DOMAIN_TEMPLATES["data-structure"], label: "Data structure", purpose: "Define record types and relationship types.", scope: "domain", group: "data" },
+  { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Sources & imports", purpose: "Review configured database sources.", scope: "domain", group: "data", capability: "integration.run" },
+  { id: "quality", path: "/quality", canonical: DOMAIN_TEMPLATES.quality, label: "Quality checks", purpose: "Review data and model validation workflows.", scope: "domain", group: "data" },
+  { id: "access", path: "/administration/access", canonical: "/administration/access", label: "Access & policies", purpose: "Manage people, permissions and platform policies.", scope: "administration", group: "administration", capability: "iam.manage" },
   { id: "domain-overview", path: "/domains/:domainId/overview", canonical: "/domains/:domainId/overview",
     label: "Domain overview", purpose: "Prepare data and continue a planning problem.", scope: "domain", group: "domains" },
   { id: "problem-overview", path: "/domains/:domainId/problems/:problemId/overview", canonical: "/domains/:domainId/problems/:problemId/overview",
@@ -164,7 +175,7 @@ export const DESTINATIONS: Destination[] = [
     id: "versions",
     path: "/versions",
     canonical: "/domains/:domainId/problems/:problemId/versions",
-    label: "Model versions",
+    label: "Versions",
     purpose: "Immutable published model definitions and quality checks.",
     scope: "problem",
     group: "problems",
@@ -182,7 +193,7 @@ export const DESTINATIONS: Destination[] = [
     id: "runs",
     path: "/runs",
     canonical: "/domains/:domainId/problems/:problemId/runs",
-    label: "Runs",
+    label: "Runs & results",
     purpose: "Executions and results for this problem.",
     scope: "problem",
     group: "results",
@@ -212,19 +223,21 @@ export const DESTINATIONS: Destination[] = [
     id: "ops-queue",
     path: "/ops/queue",
     canonical: "/ops/queue",
-    label: "Run queue",
+    label: "Runs & queues",
     purpose: "Queued and running solves per organization.",
     scope: "operations",
     group: "operations",
+    capability: "solver.configure",
   },
   {
     id: "solvers",
     path: "/solvers",
     canonical: "/solvers",
-    label: "Solver health & licenses",
+    label: "Workers & solver availability",
     purpose: "Installed solvers, conformance and licences.",
     scope: "operations",
     group: "operations",
+    capability: "solver.configure",
   },
   {
     id: "ops-audit",
@@ -232,8 +245,9 @@ export const DESTINATIONS: Destination[] = [
     canonical: "/ops/audit",
     label: "Audit history",
     purpose: "Append-only record of who changed what.",
-    scope: "operations",
-    group: "operations",
+    scope: "administration",
+    group: "administration",
+    capability: "iam.manage",
   },
   {
     id: "ops-backups",
@@ -243,6 +257,7 @@ export const DESTINATIONS: Destination[] = [
     purpose: "Last dump, RPO/RTO targets, and restore commands.",
     scope: "operations",
     group: "operations",
+    capability: "solver.configure",
   },
   {
     id: "help-start",
@@ -297,6 +312,7 @@ export const DESTINATIONS: Destination[] = [
     purpose: "Platform, domain and problem defaults.",
     scope: "administration",
     group: "administration",
+    capability: "settings.edit",
   },
   {
     id: "help-install",
@@ -401,10 +417,11 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
     label: "Data structure",
     itemIds: ["record-types", "relationship-types"],
   },
+  { key: "data", label: "Data", itemIds: ["data-records", "data-structure", "sources", "quality"] },
   {
     key: "problems",
     label: "Problems",
-    itemIds: ["problems", "problem-overview", "model", "versions", "scenarios"],
+    itemIds: ["problems", "problem-overview", "inputs", "model", "versions", "scenarios"],
   },
   {
     key: "results",
@@ -419,7 +436,7 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
   {
     key: "operations",
     label: "Operations",
-    itemIds: ["ops-queue", "solvers", "ops-audit", "ops-backups"],
+    itemIds: ["ops-queue", "solvers", "ops-backups"],
   },
   {
     key: "help",
@@ -436,6 +453,8 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
     key: "administration",
     label: "Administration",
     itemIds: [
+      "access",
+      "ops-audit",
       "settings",
       "help-install",
       "api-keys",
@@ -470,6 +489,7 @@ export function stripDomainPrefix(pathname: string): string {
   if (/^\/problems\/\d+\/versions/.test(rest)) return "/versions";
   if (/^\/problems\/\d+\/scenarios/.test(rest)) return "/scenarios";
   if (/^\/problems\/\d+\/runs/.test(rest)) return "/runs";
+  if (/^\/problems\/\d+\/inputs/.test(rest)) return "/inputs";
   if (/^\/problems\/\d+/.test(rest)) return "/public/problem";
   const map: Record<string, string> = {
     "/structure/record-types": "/entity-types",
@@ -478,6 +498,10 @@ export function stripDomainPrefix(pathname: string): string {
     "/data/relationships": "/relationships",
     "/data/parameters": "/parameters",
     "/data/explore": "/graph",
+    "/data/sources": "/sources",
+    "/data/quality": "/quality",
+    "/data": "/data",
+    "/structure": "/structure",
     "/problems": "/public/problem",
     "/overview": "/public/domain",
   };
@@ -549,6 +573,8 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
       .filter((d): d is Destination => d != null)
       .filter((d) => d.id !== "domain-overview" || ctx.domainId != null)
       .filter((d) => d.id !== "problem-overview" || (ctx.domainId != null && ctx.problemId != null))
+      .filter((d) => !["data-records", "data-structure", "sources", "quality"].includes(d.id) || ctx.domainId != null)
+      .filter((d) => d.id !== "inputs" || (ctx.domainId != null && ctx.problemId != null))
       .map((d) => ({
         id: d.id,
         to: scopedPath(d.id, ctx),
@@ -560,6 +586,9 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
 
 /** Contextual sidebar; the palette retains the complete destination catalog. */
 export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {}): ReturnType<typeof buildNavGroups> {
+  // Route context is authoritative, even before stored selection has caught up.
+  const route = pathname.match(/^\/domains\/(\d+)(?:\/problems\/(\d+))?(?:\/|$)/);
+  if (route) ctx = { domainId: Number(route[1]), problemId: route[2] ? Number(route[2]) : null };
   const groups = buildNavGroups(ctx);
   const inDomain = /^\/domains\/\d+(?:\/|$)/.test(pathname) && ctx.domainId != null;
   const inProblem = inDomain && /^\/domains\/\d+\/problems\/\d+(?:\/|$)/.test(pathname) && ctx.problemId != null;
@@ -572,17 +601,20 @@ export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {})
       return { id, to: scopedPath(id, ctx), label: d.label, capability: d.capability };
     }),
   });
-  const common = groups.filter((g) => ["operations", "help", "administration"].includes(g.key));
+  const common = [
+    select("operations", "Operations", ["ops-queue", "solvers"]),
+    { ...select("administration", "Administration", ["access", "ops-audit", "settings"]), footer: true },
+    select("help", "Help", ["help-start", "help-modeling", "help-coverage"]),
+  ];
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
-    select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
+    select("planning", "This problem", ["problem-overview", "inputs", "model", "versions", "scenarios", "runs"]),
     ...common,
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
     select("domain", "This domain", ["domain-overview", "problems"]),
-    select("data", "Data", ["records", "relationships", "parameters", "map-graph"]),
-    select("structure", "Data structure", ["record-types", "relationship-types"]),
+    select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "quality"]),
     ...common,
   ];
   return [select("global", "Platform", ["home", "domains", "templates"]), ...common];

@@ -521,7 +521,7 @@ function AppShellContent() {
                         <li key={item.to}>
                           <NavLink
                             to={item.to}
-                            end={item.to === "/"}
+                            end={item.to === "/" || ["problems", "data-records", "data-structure"].includes(item.id ?? "")}
                             className={tableLinkClassName}
                             onClick={handleNavClick}
                             title={item.label}

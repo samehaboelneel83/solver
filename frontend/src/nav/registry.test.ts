@@ -11,15 +11,43 @@ import {
 } from "./registry";
 
 describe("nav registry", () => {
+  it("takes domain and problem ids from the URL instead of stale preferences", () => {
+    const groups = buildSidebarGroups("/domains/8/problems/12/inputs", { domainId: 7, problemId: 9 });
+    const workflow = groups.find(group => group.key === "planning")!;
+    expect(workflow.items.map(item => item.label)).toEqual(["Problem overview", "Inputs", "Build model", "Versions", "Scenarios", "Runs & results"]);
+    expect(workflow.items.find(item => item.id === "inputs")?.to).toBe("/domains/8/problems/12/inputs");
+  });
+  it("resolves new hubs without swallowing their child routes", () => {
+    expect(destinationForPath("/domains/8/data/sources")?.id).toBe("sources");
+    expect(destinationForPath("/domains/8/data/quality")?.id).toBe("quality");
+    expect(destinationForPath("/domains/8/data/records/3")?.id).toBe("records");
+    expect(destinationForPath("/domains/8/structure/record-types")?.id).toBe("record-types");
+    expect(destinationForPath("/domains/8/problems/12/inputs")?.id).toBe("inputs");
+  });
+  it("gates operational and administration destinations with existing capabilities", () => {
+    expect(destination("ops-queue")?.capability).toBe("solver.configure");
+    expect(destination("solvers")?.capability).toBe("solver.configure");
+    expect(destination("access")?.capability).toBe("iam.manage");
+    expect(destination("ops-audit")?.scope).toBe("administration");
+  });
   it("keeps global navigation independent of a remembered problem", () => {
     const ids = buildSidebarGroups("/", { domainId: 7, problemId: 9 }).flatMap((g) => g.items.map((i) => i.id));
     expect(ids).toContain("domains");
     expect(ids).not.toContain("model");
+  });
+  it("does not turn global pages into the remembered domain", () => {
+    const links = buildSidebarGroups("/ops/queue", { domainId: 7 }).flatMap((g) => g.items);
+    expect(links.some((i) => i.id === "data-records")).toBe(false);
+    expect(links.some((i) => i.id === "data-structure")).toBe(false);
+    expect(links.some((i) => i.id === "ops-queue")).toBe(true);
+  });
+  it("hides domain data on global pages when no domain is selected", () => {
+    const ids = buildSidebarGroups("/", {}).flatMap((g) => g.items.map((i) => i.id));
     expect(ids).not.toContain("records");
   });
   it("offers domain data without showing an unselected problem's editor", () => {
     const ids = buildSidebarGroups("/domains/7/overview", { domainId: 7 }).flatMap((g) => g.items.map((i) => i.id));
-    expect(ids).toContain("records");
+    expect(ids).toContain("data-records");
     expect(ids).toContain("problems");
     expect(ids).not.toContain("model");
   });

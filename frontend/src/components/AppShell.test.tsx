@@ -51,17 +51,19 @@ describe("AppShell", () => {
   });
 
   describe("legacy navigation compatibility", () => {
-    it("keeps Home focused on global destinations", async () => {
+    it("keeps Home independent of the remembered domain", async () => {
       renderWithProviders(["/"]);
       await settled();
       expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Model" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Build model" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
     });
     it("shows only the selected problem workflow and a link back to its domain", async () => {
       renderWithProviders(["/domains/7/problems/9/model"]);
       await settled();
-      expect(screen.getByRole("link", { name: "Model" })).toHaveAttribute("href", "/domains/7/problems/9/model");
+      expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("href", "/domains/7/problems/9/model");
+      expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("link", { name: "Problems" })).not.toHaveAttribute("aria-current");
       expect(screen.getByRole("link", { name: "Domain overview" })).toHaveAttribute("href", "/domains/7/overview");
       expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
     });
@@ -73,7 +75,7 @@ describe("AppShell", () => {
       const headings = within(nav)
         .getAllByRole("button", { expanded: true })
         .map((b) => b.textContent?.replace(/[▾▸]/g, "").trim());
-      expect(headings.slice(0, 4)).toEqual(["Home", "Domains", "Data structure", "Problems"]);
+      expect(headings.slice(0, 5)).toEqual(["Home", "Domains", "Data structure", "Data", "Problems"]);
     });
 
     it("links each group's pages from a static map", async () => {
@@ -120,7 +122,7 @@ describe("AppShell", () => {
       await settled();
 
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
-      expect(screen.getByRole("link", { name: "Model" })).toHaveAttribute("href", "/model");
+      expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("href", "/model");
       expect(screen.queryByRole("link", { name: "Templates" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Organizations" })).not.toBeInTheDocument();
       // Administration stays, holding API keys (no capability gate).
@@ -214,7 +216,7 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
-      const versions = within(nav).getByRole("link", { name: "Model versions" });
+      const versions = within(nav).getByRole("link", { name: "Versions" });
       expect(versions).toHaveAttribute("href", "/versions");
       const problems = within(nav).getByRole("link", { name: "Problems" });
       const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
@@ -230,7 +232,7 @@ describe("AppShell", () => {
       // run API exist now, so the note would be a lie.
       renderWithProviders();
       await settled();
-      expect(screen.getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/runs");
+      expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/runs");
       expect(screen.queryByText(/no run screens yet/i)).not.toBeInTheDocument();
     });
 
