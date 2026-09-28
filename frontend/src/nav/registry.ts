@@ -584,8 +584,26 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
   }));
 }
 
-/** Contextual sidebar; the palette retains the complete destination catalog. */
-export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {}): ReturnType<typeof buildNavGroups> {
+/** Where the person last worked: a domain, and a problem in it if one was open. */
+export type RecentScope = { domainId: number; problemId: number | null };
+
+/** The domain or problem a URL is scoped to, or null for a platform page. */
+export function scopeOfPath(pathname: string): RecentScope | null {
+  const route = pathname.match(/^\/domains\/(\d+)(?:\/problems\/(\d+))?(?:\/|$)/);
+  return route ? { domainId: Number(route[1]), problemId: route[2] ? Number(route[2]) : null } : null;
+}
+
+/**
+ * Contextual sidebar; the palette retains the complete destination catalog.
+ *
+ * A platform page (operations, administration, help, home) is never scoped
+ * to a remembered domain. But the tree must not jump away from the work in
+ * hand either (plan §4.2: a recent domain is a shortcut, separate from
+ * active scope), so `recent` -- the last domain or problem the person had
+ * open -- is offered there as its own group of links back to it, when it is
+ * in the domain still selected.
+ */
+export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {}, recent: RecentScope | null = null): ReturnType<typeof buildNavGroups> {
   // Route context is authoritative, even before stored selection has caught up.
   const route = pathname.match(/^\/domains\/(\d+)(?:\/problems\/(\d+))?(?:\/|$)/);
   if (route) ctx = { domainId: Number(route[1]), problemId: route[2] ? Number(route[2]) : null };
@@ -617,7 +635,29 @@ export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {})
     select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "quality"]),
     ...common,
   ];
-  return [select("global", "Platform", ["home", "domains", "templates"]), ...common];
+  const navigate = select("context", "Navigate", ["home", "domains", "templates"]);
+  const back = recent && ctx.domainId != null && recent.domainId === ctx.domainId ? recent : null;
+  if (back?.problemId != null) {
+    const scope = { domainId: back.domainId, problemId: back.problemId };
+    return [navigate, {
+      key: "recent", label: "Recent problem",
+      items: ["problem-overview", "inputs", "model", "versions", "scenarios", "runs"].map((id) => {
+        const d = byId.get(id)!;
+        return { id, to: scopedPath(id, scope), label: d.label, capability: d.capability };
+      }),
+    }, ...common];
+  }
+  if (back) {
+    const scope = { domainId: back.domainId, problemId: null };
+    return [navigate, {
+      key: "recent", label: "Recent domain",
+      items: ["domain-overview", "problems"].map((id) => {
+        const d = byId.get(id)!;
+        return { id, to: scopedPath(id, scope), label: d.label, capability: d.capability };
+      }),
+    }, ...common];
+  }
+  return [navigate, ...common];
 }
 
 /** Resolve a compatibility alias to the path AppShell already serves. */

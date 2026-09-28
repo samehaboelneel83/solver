@@ -22,7 +22,7 @@ export default function OpsQueue() {
   const metrics = useQueueMetrics();
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6">
+    <div className="max-w-4xl">
       <h1 className="text-2xl font-semibold text-slate-900">Run queue</h1>
       <p className="mt-1 text-sm text-slate-600">
         Depth, running solves and oldest wait per organization. Refreshes every ten seconds.

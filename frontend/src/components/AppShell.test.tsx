@@ -67,6 +67,16 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Domain overview" })).toHaveAttribute("href", "/domains/7/overview");
       expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
     });
+    it("keeps the problem one click away after opening a platform page", async () => {
+      renderWithProviders(["/domains/7/problems/9/runs"]);
+      await settled();
+      fireEvent.click(screen.getByRole("link", { name: "Runs & queues" }));
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getByText("Recent problem")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/domains/7/problems/9/runs");
+      expect(screen.getByRole("link", { name: "Runs & queues" })).toHaveAttribute("aria-current", "page");
+      expect(within(nav).getByText("Navigate")).toBeInTheDocument();
+    });
     it("renders the primary sidebar groups in planner order", async () => {
       renderWithProviders();
       await settled();

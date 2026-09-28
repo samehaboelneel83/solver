@@ -106,3 +106,10 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Non-drag moves (WCAG 2.5.7): with a card selected, ← ↑ ↓ → buttons move it 40 px per press, named for the card ("Move c_cover right"). Moves go through the same kept layout as drags, without remounting or refitting the canvas.
 - Not yet: server-side layout storage (a separate presentation endpoint, per plan §9.6). The canvas's application of a move is typechecked but not exercised in jsdom; the buttons and the requests they send are tested.
 - Verification: 4 new layout and move tests; full frontend suite (2281), lint and production build pass.
+
+## Dark theme and stable sidebar
+
+- Dark theme moved to neutral charcoal (page `rgb(17 18 21)`, surfaces a step lighter) with measured contrast: muted text about 6:1, secondary about 8:1, control borders 3:1 (WCAG 1.4.3, 1.4.11). `color-scheme: dark` makes native selects and scrollbars dark; placeholders, focus outline and loading shimmers follow the theme.
+- Opening a platform page (Runs & queues, Settings, Help) no longer rebuilds the sidebar into a different tree. The top group is "Navigate" everywhere, and the last domain or problem opened by URL is offered as a "Recent problem" / "Recent domain" group linking back to its own routes. The platform page itself stays unscoped, and the shortcut is dropped once another domain is selected.
+- Operations, Help, hub and overview pages are left-aligned like the rest of the application instead of centred.
+- Verification: 5 new navigation tests (registry and shell); full frontend suite (2286), lint and production build pass; checked in Chromium on the sign-in, Runs and Runs & queues pages in dark mode.

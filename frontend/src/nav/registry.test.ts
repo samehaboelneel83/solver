@@ -41,6 +41,30 @@ describe("nav registry", () => {
     expect(links.some((i) => i.id === "data-structure")).toBe(false);
     expect(links.some((i) => i.id === "ops-queue")).toBe(true);
   });
+  it("keeps the same top group on platform pages as inside a domain", () => {
+    const labels = (path: string) => buildSidebarGroups(path, { domainId: 7 }).map((g) => g.label);
+    expect(labels("/ops/queue")[0]).toBe("Navigate");
+    expect(labels("/domains/7/problems/9/runs")[0]).toBe("Navigate");
+  });
+  it("offers the recent problem back on a platform page, as links to its own routes", () => {
+    const groups = buildSidebarGroups("/ops/queue", { domainId: 7 }, { domainId: 7, problemId: 9 });
+    const recent = groups.find((g) => g.key === "recent")!;
+    expect(recent.label).toBe("Recent problem");
+    expect(recent.items.find((i) => i.id === "runs")?.to).toBe("/domains/7/problems/9/runs");
+    expect(recent.items.find((i) => i.id === "model")?.to).toBe("/domains/7/problems/9/model");
+    // Still a platform page: the operations group is its own, not the problem's.
+    expect(groups.some((g) => g.key === "planning")).toBe(false);
+    expect(groups.find((g) => g.key === "operations")?.items.some((i) => i.id === "ops-queue")).toBe(true);
+  });
+  it("offers a recent domain when no problem was open", () => {
+    const recent = buildSidebarGroups("/settings", { domainId: 7 }, { domainId: 7, problemId: null }).find((g) => g.key === "recent")!;
+    expect(recent.label).toBe("Recent domain");
+    expect(recent.items.map((i) => i.to)).toEqual(["/domains/7/overview", "/domains/7/problems"]);
+  });
+  it("drops the recent shortcut once another domain is selected", () => {
+    const groups = buildSidebarGroups("/ops/queue", { domainId: 8 }, { domainId: 7, problemId: 9 });
+    expect(groups.some((g) => g.key === "recent")).toBe(false);
+  });
   it("hides domain data on global pages when no domain is selected", () => {
     const ids = buildSidebarGroups("/", {}).flatMap((g) => g.items.map((i) => i.id));
     expect(ids).not.toContain("records");

@@ -62,7 +62,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
   };
   const page = content[kind];
   useDocumentTitle(page.title);
-  return <div className="mx-auto max-w-5xl space-y-6">
+  return <div className="max-w-5xl space-y-6">
     <header><h1 className="text-2xl font-semibold text-slate-900">{page.title}</h1>
       <p className="mt-2 text-sm text-slate-600">{page.detail}</p></header>
     <div className="grid gap-4 sm:grid-cols-2">
@@ -94,7 +94,7 @@ function SourceList({ domainId }: { domainId: string }) {
     queryKey: ["connections", domainId, page],
     queryFn: () => apiFetch<{ items: Connection[]; total: number }>(`/api/v1/connections?domain_id=${domainId}&limit=20&offset=${page * 20}`),
   });
-  return <div className="mx-auto max-w-5xl space-y-5">
+  return <div className="max-w-5xl space-y-5">
     <h1 className="text-2xl font-semibold">Sources & imports</h1>
     <p className="text-sm text-slate-600">Configured database sources for this domain. Connection setup and extraction remain available through the local integration API; the import wizard is not available yet.</p>
     {sources.isError ? <div role="alert">Sources could not be loaded. <button className="p-2 text-blue-700 underline" onClick={() => void sources.refetch()}>Retry</button></div>

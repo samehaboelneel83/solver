@@ -15,7 +15,7 @@ import ReachabilityBanner from "./ReachabilityBanner";
 import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
-import { buildNavGroups, buildSidebarGroups, destinationForPath, stripDomainPrefix } from "../nav/registry";
+import { buildNavGroups, buildSidebarGroups, destinationForPath, scopeOfPath, stripDomainPrefix, type RecentScope } from "../nav/registry";
 import { DomainRouteProvider, useDomain } from "../hooks/useDomain";
 import { parseRouteId } from "../lib/routeId";
 
@@ -184,6 +184,26 @@ export default function AppShell() {
   );
 }
 
+const RECENT_SCOPE_KEY = "solver_recent_scope";
+
+function readRecentScope(): RecentScope | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_SCOPE_KEY) ?? "null") as Partial<RecentScope> | null;
+    if (!value || !Number.isSafeInteger(value.domainId)) return null;
+    return { domainId: value.domainId!, problemId: Number.isSafeInteger(value.problemId) ? value.problemId! : null };
+  } catch {
+    return null;
+  }
+}
+
+function writeRecentScope(scope: RecentScope) {
+  try {
+    localStorage.setItem(RECENT_SCOPE_KEY, JSON.stringify(scope));
+  } catch {
+    // Without storage the shortcut lasts for this page only.
+  }
+}
+
 function AppShellContent() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -199,7 +219,16 @@ function AppShellContent() {
   const pathProblem = location.pathname.match(/^\/domains\/\d+\/problems\/(\d+)/);
   const problemId =
     parseRouteId(pathProblem?.[1] ?? null) ?? parseRouteId(searchParams.get("problem"));
-  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId });
+  // The last domain or problem the URL was scoped to, offered back on
+  // platform pages so the tree does not lose the work in hand.
+  const scoped = scopeOfPath(location.pathname);
+  const [recent, setRecent] = useState<RecentScope | null>(readRecentScope);
+  useEffect(() => {
+    if (!scoped) return;
+    setRecent((current) => current?.domainId === scoped.domainId && current.problemId === scoped.problemId ? current : scoped);
+    writeRecentScope(scoped);
+  }, [scoped?.domainId, scoped?.problemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId }, scoped ?? recent);
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");

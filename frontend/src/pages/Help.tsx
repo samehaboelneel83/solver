@@ -219,7 +219,7 @@ export default function Help({ topic }: { topic: HelpTopicId }) {
   useDocumentTitle(page.title);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="max-w-3xl">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Help</p>
       <h1 className="mt-1 text-2xl font-semibold text-slate-900">{page.title}</h1>
       <p className="mt-1 text-sm text-slate-600">{page.purpose}</p>

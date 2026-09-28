@@ -36,18 +36,24 @@
   --radius-shell: 0.75rem;
 }
 
+/* Dark: neutral charcoal rather than blue-black -- a near-black page, the
+   sidebar and cards a step lighter, hairline borders. Contrast on the page
+   colour: slate-400 (muted) about 6:1, slate-500 (secondary) about 8:1,
+   slate-700 and up 13:1 and more; slate-300, the control border, 3:1
+   (WCAG 1.4.3 text, 1.4.11 control boundaries). */
 .dark {
-  --slate-50: 2 6 23;
-  --slate-100: 15 23 42;
-  --slate-200: 30 41 59;
-  --slate-300: 51 65 85;
-  --slate-400: 71 85 105;
-  --slate-500: 100 116 139;
-  --slate-600: 148 163 184;
-  --slate-700: 203 213 225;
-  --slate-800: 226 232 240;
-  --slate-900: 241 245 249;
-  --slate-950: 248 250 252;
+  color-scheme: dark;
+  --slate-50: 22 23 27;
+  --slate-100: 32 34 39;
+  --slate-200: 46 49 55;
+  --slate-300: 96 101 110;
+  --slate-400: 140 145 154;
+  --slate-500: 163 168 176;
+  --slate-600: 188 192 199;
+  --slate-700: 214 217 222;
+  --slate-800: 230 232 235;
+  --slate-900: 243 244 246;
+  --slate-950: 249 250 251;
   --accent-50: 4 47 46;
   --accent-100: 19 78 74;
   --accent-200: 17 94 89;
@@ -59,10 +65,10 @@
   --accent-800: 153 246 228;
   --accent-900: 204 251 241;
   --accent-950: 240 253 250;
-  --surface: 15 23 42;
-  --page: 2 6 23;
-  --shadow-shell: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 24px rgb(0 0 0 / 0.35);
-  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px rgb(0 0 0 / 0.4);
+  --surface: 26 28 32;
+  --page: 17 18 21;
+  --shadow-shell: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-panel: 0 0 0 1px rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.45), 0 12px 28px rgb(0 0 0 / 0.4);
 }
 
 /* `white` is not a variable (text on a coloured button stays white in light
@@ -71,7 +77,25 @@
   background-color: rgb(var(--surface));
 }
 .dark .text-white {
-  color: rgb(2 6 23);
+  color: rgb(var(--page));
+}
+/* Form controls: the surface colour and readable placeholder text. `:where`
+   keeps this at zero specificity, so any control's own classes still win. */
+:where(.dark) :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), select, textarea) {
+  background-color: rgb(var(--surface));
+  color: rgb(var(--slate-900));
+}
+.dark ::placeholder {
+  color: rgb(var(--slate-400));
+  opacity: 1;
+}
+/* Focus stays obvious on the darker page (WCAG 2.4.7). */
+.dark :focus-visible {
+  outline-color: rgb(var(--accent-600));
+}
+/* Scrollbars follow the theme where the browser lets a page colour them. */
+.dark * {
+  scrollbar-color: rgb(var(--slate-300)) transparent;
 }
 /* Status colours (green chips, red errors...) are Tailwind's own, not the palette's variables:
    in dark their soft backgrounds go deep and translucent, their text and borders light. */
@@ -204,6 +228,14 @@ html {
     position: relative;
     overflow: hidden;
     background: rgb(226 232 240);
+  }
+
+  .dark .genui-shimmer {
+    background: rgb(var(--slate-100));
+  }
+
+  .dark .genui-shimmer::after {
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
   }
 
   .genui-shimmer::after {

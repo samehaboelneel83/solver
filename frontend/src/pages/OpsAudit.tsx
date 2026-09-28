@@ -32,7 +32,7 @@ export default function OpsAudit() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6">
+    <div className="max-w-5xl">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Audit history</h1>

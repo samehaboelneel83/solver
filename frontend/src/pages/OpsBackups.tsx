@@ -15,7 +15,7 @@ export default function OpsBackups() {
   const status = useBackupStatus();
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="max-w-3xl">
       <h1 className="text-2xl font-semibold text-slate-900">Backups & recovery</h1>
       <p className="mt-1 text-sm text-slate-600">
         Nightly Postgres dumps and WAL under the host backup directory. ClickHouse

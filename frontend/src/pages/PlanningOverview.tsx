@@ -39,7 +39,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     Object.entries(values).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key));
     setSearch(next);
   }
-  return <div className="mx-auto max-w-6xl space-y-6">
+  return <div className="max-w-6xl space-y-6">
     <Link className={link} to="/domains">All domains</Link>
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold text-slate-900">{listing ? `${name} problems` : name}</h1>
@@ -112,7 +112,7 @@ export function ProblemOverview() {
   const hasScenarios = (scenarios.data?.total ?? 0) > 0;
   const nextHref = !latest ? `${base}/model` : !hasScenarios ? `${base}/scenarios` : `${base}/runs`;
   const nextLabel = !latest ? (can("model.publish") ? "Build the model" : "View the model") : !hasScenarios ? "Review scenarios" : "Open results";
-  return <div className="mx-auto max-w-6xl space-y-6">
+  return <div className="max-w-6xl space-y-6">
     <Link className={link} to={`/domains/${domainId}/problems`}>All problems in this domain</Link>
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold text-slate-900">{problem.data.name}</h1>
