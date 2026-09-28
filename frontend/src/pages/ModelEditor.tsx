@@ -521,6 +521,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       </details>
 
       {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
+        layoutKey={`problem-${problemId}`}
         selection={graphFocus?.part === "rules" && graphFocus.rulePosition !== undefined
           ? `model-con-${draft.constraints[graphFocus.rulePosition]?.id}` : graphFocus?.id ?? null}
         onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { rulePosition: draft.constraints.findIndex(rule => `model-con-${rule.id}` === id) } : {}) })}

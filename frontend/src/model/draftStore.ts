@@ -27,6 +27,12 @@ export const DRAFT_KEY_PREFIX = "solver_model_draft_";
 // JWT subject is a browser namespace, not an authorization decision.
 // Server permissions still govern every model read and publication.
 const unknownSessions = new Map<string, string>();
+/** Whose browser namespace this is: the signed-in subject, an unrecognised
+ * session, or signed out. Shared by everything kept per account in storage. */
+export function accountNamespace(): string {
+  return draftOwner();
+}
+
 function draftOwner(): string {
   let owner = "signed-out";
   const token = getToken();

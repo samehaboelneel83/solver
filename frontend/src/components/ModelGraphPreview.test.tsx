@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { setToken } from "../api/client";
 import ModelGraphPreview from "./ModelGraphPreview";
 vi.mock("./modelStyles/FlowView", () => ({ default: ({ positions, onMove }: {
   positions: Record<string, { x: number; y: number }>;
@@ -33,4 +34,48 @@ it("keeps layout separate from model edits and resets it on request", async () =
   expect(ir).not.toHaveProperty("layout");
   fireEvent.click(screen.getByRole("button", { name: "Reset graph layout" }));
   expect(await screen.findByTestId("layout")).toHaveTextContent("{}");
+});
+
+
+const tokenFor = (sub: string) => `header.${btoa(JSON.stringify({ sub }))}.signature`;
+const STAFF = { sets: [], variables: { staff: { domain: "integer", lower: 0 } }, constraints: [] };
+afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+
+it("keeps a problem's layout across a remount, per account and per problem", async () => {
+  setToken(tokenFor("alice"));
+  const first = render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Move staff card" }));
+  first.unmount();
+
+  const again = render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  expect(await screen.findByTestId("layout")).toHaveTextContent('"x":125');
+  again.unmount();
+
+  setToken(tokenFor("bob"));
+  const bob = render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  expect(await screen.findByTestId("layout")).toHaveTextContent("{}");
+  bob.unmount();
+
+  setToken(tokenFor("alice"));
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-2" />);
+  expect(await screen.findByTestId("layout")).toHaveTextContent("{}");
+});
+
+it("clears the kept layout on reset", async () => {
+  setToken(tokenFor("alice"));
+  const first = render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Move staff card" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reset graph layout" }));
+  first.unmount();
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  expect(await screen.findByTestId("layout")).toHaveTextContent("{}");
+});
+
+it("says so when the browser cannot keep the layout", async () => {
+  setToken(tokenFor("alice"));
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Move staff card" }));
+  expect(screen.getByText(/could not save the card positions/)).toBeInTheDocument();
+  expect(await screen.findByTestId("layout")).toHaveTextContent('"x":125');
 });

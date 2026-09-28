@@ -1,12 +1,26 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { buildModelView, modelDetails, type ModelPart } from "../lib/modelGraph";
 import type { EntityType } from "../api/v1";
+import { readLayout, writeLayout, type Positions } from "../model/graphLayout";
 
 const FlowView = lazy(() => import("./modelStyles/FlowView"));
 
-export default function ModelGraphPreview({ ir, entityTypes, editorHref, selection, onSelect }: { ir: Record<string, unknown>; entityTypes: EntityType[]; editorHref?: (part: ModelPart) => string; selection?: string | null; onSelect?: (id: string, part: ModelPart) => void }) {
+export default function ModelGraphPreview({ ir, entityTypes, editorHref, selection, onSelect, layoutKey }: {
+  ir: Record<string, unknown>;
+  entityTypes: EntityType[];
+  editorHref?: (part: ModelPart) => string;
+  selection?: string | null;
+  onSelect?: (id: string, part: ModelPart) => void;
+  /** Where to keep card positions (per account, in this browser); without it they last as long as the graph. */
+  layoutKey?: string;
+}) {
   const view = useMemo(() => buildModelView(ir, entityTypes), [ir, entityTypes]);
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [positions, setPositions] = useState<Positions>(() => (layoutKey ? readLayout(layoutKey) : {}));
+  const [unsaved, setUnsaved] = useState(false);
+  const arrange = (next: Positions) => {
+    setPositions(next);
+    if (layoutKey) setUnsaved(!writeLayout(layoutKey, next));
+  };
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const selectedNode = view.graph.nodes.find(node => node.id === (selection === undefined ? selected : selection));
@@ -24,12 +38,16 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
     <Suspense fallback={<p role="status">Loading visual graph…</p>}>
       <div className="h-[32rem] rounded-xl border border-slate-200">
         <FlowView key={`${layoutRevision}:${JSON.stringify(ir)}`} {...view} ir={ir} onSelect={select}
-          positions={positions} onMove={(id, position) => setPositions(current => ({ ...current, [id]: position }))} />
+          positions={positions} onMove={(id, position) => arrange({ ...positions, [id]: position })} />
       </div>
     </Suspense>
     <div className="flex items-center gap-3 text-sm">
-      <button type="button" className="rounded border px-3 py-2" onClick={() => { setPositions({}); setLayoutRevision(value => value + 1); }}>Reset graph layout</button>
-      <span className="text-slate-600">Card positions stay while editing this graph. They are not saved with the model.</span>
+      <button type="button" className="rounded border px-3 py-2" onClick={() => { arrange({}); setLayoutRevision(value => value + 1); }}>Reset graph layout</button>
+      <span className="text-slate-600">
+        {!layoutKey ? "Card positions stay while editing this graph. They are not saved with the model."
+          : unsaved ? "This browser could not save the card positions; they last until you leave this graph."
+            : "Card positions are kept for you in this browser. They are never part of the model, and Undo edit does not move them."}
+      </span>
     </div>
     <details><summary className="cursor-pointer py-2 text-sm font-medium">Model parts as a list</summary>
       <ul className="flex flex-wrap gap-2">{view.graph.nodes.map(node => <li key={node.id}>

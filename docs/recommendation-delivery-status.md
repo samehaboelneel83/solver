@@ -97,3 +97,11 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Follow-up: `useDomainProblem` now resolves the page's problem for the model editor, Versions, Scenarios and Runs: the first page for the picker, and a linked problem outside it fetched by ID and checked against the domain. Before this, Versions, Scenarios and Runs reported a valid link to a problem past the 500th as "not available here". Scenarios also showed a failed problem list as an empty domain; it now reports the failure with a retry (`LoadFailure`, shared with the editor).
 - Settings keeps its own list: it has no deep link and lists every domain's problems when none is selected.
 - Verification: 3 picker tests and 6 new deep-link/failure tests across Versions, Scenarios and Runs; full frontend suite (2277), lint and production build pass. One unrelated GraphDemo test timed out once under full-suite load and passes on rerun, with or without these changes.
+
+## Durable graph layout
+
+- Visual Graph card positions are kept per account and problem in this browser (`frontend/src/model/graphLayout.ts`), keyed by the cards' stable ids. They survive reloads, switching views and model edits.
+- Layout is presentation only: never in the draft or IR, so it cannot change the model, its hash, publication or the draft's undo history. **Undo edit** does not move cards; **Reset graph layout** returns to automatic arrangement and forgets the kept positions.
+- Accounts do not see each other's layouts (same namespace as account-scoped drafts). If storage refuses a save, the page says the positions last only until leaving the graph.
+- Not yet: server-side layout storage (a separate presentation endpoint, per plan §9.6) and a non-drag way to move a card.
+- Verification: 3 new layout tests; full frontend suite (2280), lint and production build pass.
