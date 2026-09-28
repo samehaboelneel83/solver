@@ -27,4 +27,7 @@ def test_iam_tables_exist_after_migration():
         "solver_licence",
         # Migration 0077: append-only audit log (queue R34).
         "audit_event",
+        # Migration 0079: an organization's SSO provider and SCIM bearer tokens.
+        "oidc_provider",
+        "scim_token",
     }

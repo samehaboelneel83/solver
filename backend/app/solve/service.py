@@ -1453,7 +1453,8 @@ def _execute(
         }
     # OAAS Q02: independent acceptance before a usable plan is persisted.
     t_verify = time.monotonic()
-    verification = verify_rows.accept(record_model or compiled, result)
+    # An approximate answer is held to the tolerance its solver stated.
+    verification = verify_rows.accept(record_model or compiled, result, approximate=extra.get("tolerance"))
     phases["verify_s"] = round(time.monotonic() - t_verify, 4)
     extra["verification"] = {
         "accepted": verification["accepted"],

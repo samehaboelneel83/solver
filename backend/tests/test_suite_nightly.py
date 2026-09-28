@@ -20,10 +20,15 @@ from tests.test_v1_problem_run import db  # noqa: F401
 
 @pytest.fixture
 def empty_queue(db):
+    """No runs and no suite cases: a night re-asks every case in the
+    database, so cases other modules left behind would be counted here.
+    Their nightly rows cascade with them."""
     db.execute(text("DELETE FROM run"))
+    db.execute(text("DELETE FROM suite_case"))
     db.commit()
     yield
     db.execute(text("DELETE FROM run"))
+    db.execute(text("DELETE FROM suite_case"))
     db.commit()
 
 

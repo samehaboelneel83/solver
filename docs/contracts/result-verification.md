@@ -17,7 +17,16 @@ After the solver returns and **before** a solution is persisted as usable,
 | Bounds | Decision values lie within declared lower/upper |
 | Integrality | Binary / integer decisions are within 1e−6 of an integer |
 
-Tolerance: `1e-6` relative to magnitude (`app.solve.verify.TOLERANCE`).
+Tolerance: `1e-6` relative to magnitude (`app.solve.verify.TOLERANCE`). A
+rule's magnitude is the larger of its two sides at the answer, and never less
+than one — not the size of the residual itself.
+
+An **approximate** solver (`proves="approximate"`, PDLP) states its own
+tolerance, and its guarantee is model-wide: the residual norm is within that
+tolerance times one plus the norm of the rules' magnitudes. Its answers are
+checked against that same scale, so a breach within what the solver promised
+passes and anything beyond it is still refused. The run records the tolerance
+in `params.tolerance`.
 
 ## Explicit non-claims
 

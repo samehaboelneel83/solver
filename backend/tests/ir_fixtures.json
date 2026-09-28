@@ -10579,6 +10579,11 @@
             ],
             "uncertainty": {
               "kind": "scenarios",
+              "futures": [
+                {
+                  "factor": 1
+                }
+              ],
               "deviation": 0.1
             }
           }

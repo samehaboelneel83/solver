@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from sqlalchemy import text
 
 from app.seed import seed_admin
@@ -9,6 +12,29 @@ from app.solve.service import claim_next
 from app.tiers import TIERS, apply_tier
 from tests.test_api_problems import auth_headers, client  # noqa: F401
 from tests.test_v1_problem_run import db  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def restore_quotas(db):
+    """These tests change the seed organization's tier and add two others.
+    Put both back, so later tests (the worker's claims) see the quota they
+    would have seen had this module never run."""
+    seed_admin(db)
+    org = db.execute(text("SELECT id FROM iam.organization WHERE code = 'default'")).scalar_one()
+    before = db.execute(
+        text("SELECT row_to_json(q) FROM iam.quota q WHERE organization_id = :o"), {"o": org}
+    ).scalar_one_or_none()
+    db.commit()
+    yield
+    db.rollback()
+    db.execute(text("DELETE FROM iam.quota WHERE organization_id = :o"), {"o": org})
+    if before is not None:
+        db.execute(
+            text("INSERT INTO iam.quota SELECT * FROM json_populate_record(NULL::iam.quota, CAST(:q AS json))"),
+            {"q": json.dumps(before)},
+        )
+    db.execute(text("DELETE FROM iam.organization WHERE code IN ('tier-free', 'tier-ent')"))
+    db.commit()
 
 
 def test_apply_tier_and_quota_api(db, client, auth_headers):

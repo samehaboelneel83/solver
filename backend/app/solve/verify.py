@@ -14,11 +14,22 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
-from app.solve.compile import Compiled, slack_of
+from app.solve.compile import Compiled, quadratic_at, slack_of
 from app.solve.result import Solution
 
 #: Relative / absolute room for floating residuals on hard rules.
 TOLERANCE = Decimal("1e-6")
+
+
+def _magnitude(constraint, assignments) -> Decimal:
+    """The size a hard rule's residual is judged against: the larger of its
+    two sides at the assignment, and never less than one. A breach of 4e-5 on
+    a rule whose sides are near 1000 is floating noise; on a rule near 1 it
+    is not."""
+    left = constraint.left.evaluated_at(assignments, skip_names={_VIOLATION})
+    left += quadratic_at(constraint.quadratic, assignments)
+    right = constraint.right.evaluated_at(assignments, skip_names={_VIOLATION})
+    return max(Decimal(1), abs(left), abs(right))
 
 _VIOLATION = "__violation"
 _PWL = "__pwl"
@@ -26,9 +37,15 @@ _FN = "__fn"
 _AUX = {_VIOLATION, _PWL, _FN}
 
 
-def accept(compiled: Compiled, result: Solution) -> dict[str, Any]:
+def accept(compiled: Compiled, result: Solution, approximate: float | None = None) -> dict[str, Any]:
     """Return a verification report. `accepted` is False when the answer must not
-    be shown as a usable plan."""
+    be shown as a usable plan.
+
+    `approximate` is the stated tolerance of a solver that answers to one
+    rather than proving (PDLP). Its guarantee is model-wide -- the residual
+    norm within tolerance times (1 + the norm of the rules' sizes) -- so a
+    single rule is judged against that scale rather than its own size alone;
+    a breach beyond what the solver promised is still refused."""
     report: dict[str, Any] = {
         "accepted": True,
         "checks": [],
@@ -51,6 +68,14 @@ def accept(compiled: Compiled, result: Solution) -> dict[str, Any]:
         report["checks"].append("finite_objective")
 
     soft_ids = set(compiled.violations)
+    hard = [
+        c for c in compiled.constraints
+        if c.id not in soft_ids and c.schedule is None and c.is_active(result.assignments)
+    ]
+    magnitudes = {id(c): _magnitude(c, result.assignments) for c in hard}
+    if approximate is not None:
+        scale = Decimal(1) + sum((m * m for m in magnitudes.values()), Decimal(0)).sqrt()
+        allowed = Decimal(str(approximate)) * scale
     for constraint in compiled.constraints:
         if constraint.id in soft_ids:
             continue
@@ -60,7 +85,11 @@ def accept(compiled: Compiled, result: Solution) -> dict[str, Any]:
         if not constraint.is_active(result.assignments):
             continue
         slack = slack_of(constraint, result.assignments)
-        tol = TOLERANCE * max(Decimal(1), abs(slack) if slack != 0 else Decimal(1))
+        # Relative to the rule's own magnitude (the contract), not to the
+        # residual: scaling by the residual made every breach over 1e-6 fail.
+        tol = TOLERANCE * magnitudes[id(constraint)]
+        if approximate is not None:
+            tol = max(tol, allowed)
         if slack < -tol:
             report["accepted"] = False
             report["failures"].append(
