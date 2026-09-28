@@ -113,3 +113,11 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Opening a platform page (Runs & queues, Settings, Help) no longer rebuilds the sidebar into a different tree. The top group is "Navigate" everywhere, and the last domain or problem opened by URL is offered as a "Recent problem" / "Recent domain" group linking back to its own routes. The platform page itself stays unscoped, and the shortcut is dropped once another domain is selected.
 - Operations, Help, hub and overview pages are left-aligned like the rest of the application instead of centred.
 - Verification: 5 new navigation tests (registry and shell); full frontend suite (2286), lint and production build pass; checked in Chromium on the sign-in, Runs and Runs & queues pages in dark mode.
+
+## Home redesign
+
+- One card style and one section header (title, purpose line, optional "View all") across Home, replacing tinted boxes, small-caps labels and large bordered panels.
+- Entry points, recent problems, recent and failed runs, and templates are icon cards. Problems show owner and "created 2 hours ago"; runs show a status badge (green usable, amber infeasible, red failed), objective and when they finished.
+- Templates are outlined cards stating what they do ("Create a starting model" or, marked "In use", "Open your problem made from it") instead of a row of solid accent buttons.
+- Service health and row counts move to a compact "System" section at the bottom.
+- Verification: full frontend suite (2288), lint and production build pass; checked in Chromium in dark and light themes with representative data.
