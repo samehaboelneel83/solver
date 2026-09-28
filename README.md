@@ -684,3 +684,4 @@ python scripts/graph_smoke_check.py
   `no-control-regex` for the `next` sanitiser, and `dom.d.ts` keeping
   the React merge parameter named `T` (`_T` replaces the interface).
 - Neither image has a bind mount; see "Rebuilding after a code change".
+"# solver" 
