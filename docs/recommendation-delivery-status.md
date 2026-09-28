@@ -78,3 +78,12 @@ Deployment note: Docker Desktop was started and the recovery frontend was built 
 - Standard password and SSO sessions use the JWT subject as supplied by the current authentication contract. Unrecognized token formats receive a distinct temporary namespace; persistence across reloads for such sessions is not supported.
 - Validation: 102 tests passed across six authentication/modeling suites, followed by the expanded 14-test App suite including account-cache invalidation. Production build and lint pass.
 - Still outstanding: server-saved drafts with revisions, stable server user/organization identifiers for draft ownership, legacy ownership recovery, conflict resolution and duplicate-publish protection.
+
+## Legacy draft recovery and server-saved drafts
+
+- Legacy unscoped browser drafts can be recovered by one signed-in account through an attested, explicit claim. Contents stay hidden until then; the original entry is never modified; other accounts see that it was recovered elsewhere. Refused when signed out, over an existing account draft, or for an unreadable entry.
+- Migration `0086`: `model_draft` (per account and problem, stable account-ID ownership, revision) and `model_publication` (idempotency records). Both use row-level security with inherited organization.
+- API: `GET/PUT/DELETE /api/v1/problems/{id}/draft`, `POST /api/v1/problems/{id}/draft/publish` with optional `Idempotency-Key`. Stale revisions get the platform's 409; publication validates the exact locked revision and is transactional; a retried keyed publish returns the same version.
+- Editor: server-save status, Save to server, conflict choice (use server copy or replace it), server-draft offer in a browser without a local draft, server publication with one key per attempt reused on retry, and server discard alongside local discard.
+- Verification: 13 backend draft tests (including concurrent keyed retries creating one version and cross-tenant isolation) and 317 tests across tenancy, problem, audit and concurrency suites; migration downgrade/upgrade exercised. Frontend: 2268 tests, lint and production build pass (existing bundle-size warning remains).
+- Still outstanding: automatic background saving, revision history/compare, browser-draft keys based on stable account IDs rather than the JWT subject, and a dedicated backup recovery entry point.

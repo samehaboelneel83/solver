@@ -21,8 +21,8 @@ The product is intended for an isolated environment. Recent deployment builds us
 | Navigation | Domain/problem context, navigation hubs, canonical routes, editor deep-link recovery | Searchable large lists, remaining legacy-route migration, full permission/deep-link matrix |
 | Guided Form | Decision variables, hard/soft rules, parameter limits and weighted objectives | Broader guided patterns, units guidance and a complete model-review workflow |
 | Visual Graph | Current-draft graph, focused rule/objective editing through shared forms, accessible parts list | Typed connection authoring, individual declaration inspectors, saved layouts |
-| Draft recovery | Local persistence, 30-edit undo/redo, backup download and confirmed restoration | Server persistence, server revisions, collaborative conflicts, idempotent publishing |
-| Account separation | Account-specific browser keys, memory and history; API-cache clearing | Stable server ownership IDs and legacy-draft ownership recovery |
+| Draft recovery | Local persistence, 30-edit undo/redo, backup download and confirmed restoration; server-saved drafts with revision checks, conflict choice and cross-browser recovery; idempotent publication of the exact saved revision | Automatic background saving, revision history and comparison, a dedicated recovery entry point for backups |
+| Account separation | Account-specific browser keys, memory and history; API-cache clearing; server drafts owned by the stable account ID; attested one-account claim of legacy browser drafts | Browser drafts are still keyed by the JWT subject (username) |
 | Templates | Compact summaries and bounded technical-detail panels | Broader end-user template onboarding and usability evaluation |
 | Database ingestion | Authenticated service and operational PostgreSQL/TLS reference extraction | Business-source onboarding, mapping/import UI and validated dataset publication |
 | Solvers/results | Specific failed-run diagnosis and verification of a compatible successful run | Unified pre-run review, richer result confidence and comparative benchmarks |
@@ -168,11 +168,23 @@ New saved drafts, memory fallback and undo history are keyed by JWT subject and 
 
 This provides UI-level separation, not encryption. Same-origin code can read browser storage, and backend permissions remain the authorization boundary. Stable server user/organization IDs should replace reliance on the current username-based JWT subject in the durable draft design. Unrecognized token formats receive distinct temporary namespaces without reliable reload persistence.
 
-### 6.4 Legacy draft preservation
+### 6.4 Legacy draft preservation and recovery
 
-Older unscoped browser drafts remain untouched and are not automatically assigned to the next signed-in account. The editor displays a notice without showing their contents, including on problems with no published version.
+Older unscoped browser drafts are not automatically assigned to the next signed-in account. The editor displays a notice without showing their contents, including on problems with no published version.
 
-A verified ownership recovery/migration workflow is not yet implemented. Preserve the original browser data until the author's work has been recovered. Historical demonstration drafts may now fall into this legacy category.
+A signed-in account can now recover such a draft explicitly: it attests “I wrote this draft in this browser”, and the draft becomes that account's unpublished draft, subject to normal validation before publishing. The original browser entry is never changed or removed. The claim is recorded, so only one account in the browser can recover it; other accounts are told it was recovered by another account. Recovery is refused when signed out or with an unrecognized session, when the account already has a draft for the problem, and when the entry is unreadable. The browser cannot prove authorship; the attestation and single claim are the safeguards, and server-saved drafts are the durable ownership mechanism from here on.
+
+### 6.5 Server-saved drafts and publication safety
+
+Migration `0086` adds `model_draft` (one draft per account per problem, owned by the stable `iam.user_account.id`, with a `revision`) and `model_publication` (which version a keyed publish request created). Both are tenant tables under row-level security, with the organization inherited from the problem and account.
+
+- `GET/PUT/DELETE /api/v1/problems/{id}/draft` and `POST …/draft/publish` require `model.publish`. A draft is visible only to its owner, not to colleagues or other organizations.
+- Every save and discard names the revision it was built on; any other is the platform's stale-record 409. Rows are locked for the comparison, so concurrent saves cannot both succeed.
+- Drafts may be incomplete (object and 5 MB limits only). Publication validates the exact locked revision against the IR contract, inserts the version, deletes the draft and records the request in one transaction.
+- With an `Idempotency-Key`, a retried publish returns the first attempt's version (200); a reused key with a different request is refused. Without a key, the deleted draft still prevents a second publication.
+- The proposal suggested ETag/If-Match with 412; the implementation keeps the platform's existing 409 body shape, which the browser already recognizes.
+
+The model editor keeps the browser draft as the working copy and shows its server status: “Saved on this device only”, “Changes not saved to the server”, or “Saved to the server · revision N”. **Save to server** sends the last known revision. When another tab or browser saved in between, the editor asks whether to use the server copy or keep this draft and replace it. A browser with no local draft is offered the server draft. A draft linked to the server publishes through the server under one idempotency key per attempt, reused on retry; discarding also discards the server copy.
 
 ## 7. Templates UI/UX correction
 
@@ -296,9 +308,9 @@ This command deploys existing images; it does not compile source. Do not recreat
 
 | Priority | Work package | Acceptance criteria |
 | --- | --- | --- |
-| P0 | Legacy draft ownership recovery | Original author can recover work through a verified, explicit flow; no automatic assignment or cross-account disclosure; source backup remains available |
-| P0 | Durable server drafts | User/organization ownership IDs; authenticated save/load; revision checks; clear conflict UI; recovery across browsers; isolated tenant tests |
-| P0 | Publication safety | Validation is tied to the exact current revision; duplicate requests create at most one publication; retry behavior is tested |
+| P0 — delivered | Legacy draft ownership recovery | Explicit attested claim by one signed-in account; contents hidden until claimed; original entry preserved (section 6.4) |
+| P0 — delivered | Durable server drafts | Delivered as in section 6.5. Remaining: automatic background saving and revision history/comparison |
+| P0 — delivered | Publication safety | Delivered for server-linked drafts (section 6.5); drafts never saved to the server still publish through the direct version route |
 | P1 | Navigation completion | Searchable large collections; direct-ID retrieval and useful retry states beyond ModelEditor; role/deep-link matrix passes; legacy destinations migrate coherently |
 | P1 | Complete graph authoring | Individual variable/parameter inspectors; typed semantic connection commands; deletion preserves unrelated references; keyboard-equivalent authoring |
 | P1 | Durable graph layout | Layout saved separately from solver IR; positions survive view changes/reloads; layout reset and undo behavior are specified and tested |
@@ -309,7 +321,7 @@ This command deploys existing images; it does not compile source. Do not recreat
 | P2 | Product and solver benchmarks | Representative user studies and timed tasks; repeatable model/data/hardware comparisons; documented limitations and measured outcomes |
 | P2 | Portable offline distribution | Versioned dependency caches, image bundle, install/upgrade/rollback procedures and successful clean-machine installation test |
 
-Recommended sequence: recover legacy ownership safely, implement durable draft revisions/publication protection, then complete navigation and graph authoring, followed by data onboarding and pre-run/results workflows. Accessibility and focused regression testing should accompany each delivery, not be deferred entirely to the end.
+Recommended sequence: with the P0 draft work delivered, complete navigation and graph authoring, followed by data onboarding and pre-run/results workflows. Accessibility and focused regression testing should accompany each delivery, not be deferred entirely to the end.
 
 ## 13. Key implementation files
 

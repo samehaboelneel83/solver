@@ -208,7 +208,37 @@ export function updateDraftIr(
   return writeDraft({ problemId, base: current.base, baseVersion: current.baseVersion, ir: update(current.ir) });
 }
 
+/**
+ * Which server revision this browser's draft was last saved as, and the
+ * local edit that save carried. A draft edited since then has unsaved
+ * changes; the revision is what the next save names, so the server can
+ * refuse it if another tab or browser saved in between.
+ */
+export type ServerLink = { revision: number; savedEditedAt: string };
+const serverKey = (problemId: number) => `${key(problemId)}:server`;
+
+export function readServerLink(problemId: number): ServerLink | null {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(serverKey(problemId)) ?? "null");
+    const link = parsed as Partial<ServerLink> | null;
+    return link && Number.isInteger(link.revision) && typeof link.savedEditedAt === "string"
+      ? { revision: link.revision!, savedEditedAt: link.savedEditedAt } : null;
+  } catch { return null; }
+}
+
+export function writeServerLink(problemId: number, link: ServerLink | null): void {
+  try {
+    if (link) localStorage.setItem(serverKey(problemId), JSON.stringify(link));
+    else localStorage.removeItem(serverKey(problemId));
+  } catch {
+    // Without storage the link lasts only as long as the page; the next save
+    // is then refused as stale and the person chooses which copy to keep.
+  }
+  notify();
+}
+
 export function clearDraft(problemId: number): void {
+  try { localStorage.removeItem(serverKey(problemId)); } catch { /* nothing stored */ }
   histories.delete(key(problemId));
   memory.delete(key(problemId));
   try {
@@ -224,7 +254,8 @@ function subscribe(listener: Listener): () => void {
   function onStorage(event: StorageEvent) {
     if (event.key === null || event.key === "solver_token" || event.key.startsWith(DRAFT_KEY_PREFIX)) {
       // A different tab may have replaced the draft. Never replay history over it.
-      histories.clear();
+      // Recording a server save changes no draft, so it keeps the history.
+      if (!event.key?.endsWith(":server")) histories.clear();
       listener();
     }
   }

@@ -1,11 +1,11 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
 import { useEntity, useEntityList } from "../api/entities";
-import { formatApiError } from "../api/errors";
+import { formatApiError, isStaleRecordError } from "../api/errors";
 import { useCapabilities } from "../hooks/useCapability";
 import {
   useApplyTemplate,
@@ -37,7 +37,9 @@ import ModelGraphPreview from "../components/ModelGraphPreview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
-import { clearDraft, readDraft, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
+import ServerDraftSync, { saveToServer } from "../model/ServerDraftSync";
+import { discardServerDraft, publishServerDraft } from "../api/drafts";
+import { clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { useDraftRefusal } from "../model/useDraftRefusal";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
@@ -223,6 +225,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toast = useToast();
 
   const [failure, setFailure] = useState<string | null>(null);
+  // One key per publication attempt, kept across retries (see publishFromServer).
+  const publishKey = useRef<{ key: string; revision: number } | null>(null);
+  const [serverPublishing, setServerPublishing] = useState(false);
   // Forms | Blocks (Blockly edit mode spec §6), in the URL so a reload keeps it.
   const requestedView = searchParams.get("view");
   const view = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" ? requestedView : "forms";
@@ -383,6 +388,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             versions.refetch();
           }}
         />
+        <div className="mt-3"><ServerDraftSync problemId={Number(problemId)} draft={null} disabled={false} /></div>
       </Note>
     );
   }
@@ -406,24 +412,77 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   if (!draft || !context || !ir || nextIr === null) return <Skeleton rows={4} cols={3} />;
   const toPublish = nextIr as Record<string, unknown>;
 
+  function published(created: { id: Id; version: number }) {
+    toast.success(`Published version ${created.version}`);
+    clearDraft(Number(problemId));
+    setScratch(false);
+    setSearchParams(
+      { problem: String(problemId), version: String(created.id) },
+      { replace: true }
+    );
+    versions.refetch();
+  }
+
+  // A draft saved to the server publishes from there: the server validates
+  // the exact revision it holds, and the Idempotency-Key makes a retried
+  // click answer with the version the first one created.
+  async function publishFromServer() {
+    const current = readDraft(Number(problemId));
+    const link = readServerLink(Number(problemId));
+    if (!current || !link) return;
+    setServerPublishing(true);
+    try {
+      // A retry of an unchanged draft repeats the same request under the same
+      // key; anything edited since is saved as a new revision with a new key.
+      const pending = publishKey.current;
+      const retry = pending !== null && pending.revision === link.revision && link.savedEditedAt === current.editedAt;
+      if (!retry) {
+        const saved = await saveToServer({ ...current, ir: toPublish }, link.revision);
+        publishKey.current = { key: crypto.randomUUID(), revision: saved.revision };
+      }
+      const { key, revision } = publishKey.current!;
+      const created = await publishServerDraft(
+        Number(problemId), { expected_revision: revision, note: "edited in the model editor" }, key
+      );
+      publishKey.current = null;
+      published(created);
+    } catch (error) {
+      setFailure(isStaleRecordError(error)
+        ? "The server copy of this draft changed in another tab or browser. Resolve it with Save to server, then publish."
+        : formatApiError(error));
+    } finally {
+      setServerPublishing(false);
+    }
+  }
+
   function publish() {
     setFailure(null);
+    if (readServerLink(Number(problemId))) {
+      void publishFromServer();
+      return;
+    }
     createVersion.mutate(
       { problemId, body: { ir: toPublish, note: "edited in the model editor" } },
       {
-        onSuccess: (created: { id: Id; version: number }) => {
-          toast.success(`Published version ${created.version}`);
-          clearDraft(Number(problemId));
-          setScratch(false);
-          setSearchParams(
-            { problem: String(problemId), version: String(created.id) },
-            { replace: true }
-          );
-          versions.refetch();
-        },
+        onSuccess: published,
         onError: (error: unknown) => setFailure(formatApiError(error)),
       }
     );
+  }
+
+  async function discard() {
+    const link = readServerLink(Number(problemId));
+    // The server copy goes first, so nothing offers to reopen it afterwards.
+    if (link) {
+      try {
+        await discardServerDraft(Number(problemId), link.revision);
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 404)) {
+          setFailure(`The server copy was not discarded: ${formatApiError(error)}`);
+        }
+      }
+    }
+    clearDraft(Number(problemId));
   }
 
   return (
@@ -724,7 +783,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <DraftBar
         draft={stored}
-        publishing={createVersion.isPending}
+        publishing={createVersion.isPending || serverPublishing}
         blocked={
           view === "blocks" && outside > 0
             ? `${outside} ${outside === 1 ? "block is" : "blocks are"} outside the model: put ${outside === 1 ? "it" : "them"} inside, or delete ${outside === 1 ? "it" : "them"}`
@@ -733,8 +792,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               : null
         }
         onPublish={publish}
-        onDiscard={() => clearDraft(Number(problemId))}
+        onDiscard={() => void discard()}
       />
+      <div className="mt-3">
+        <ServerDraftSync problemId={Number(problemId)} draft={stored} disabled={createVersion.isPending || serverPublishing} />
+      </div>
     </>
   );
 }

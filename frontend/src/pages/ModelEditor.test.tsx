@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelEditor from "./ModelEditor";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
-import { clearDraft, draftStorageKey } from "../model/draftStore";
+import { clearDraft, draftStorageKey, writeServerLink } from "../model/draftStore";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -1004,6 +1004,54 @@ describe("ModelEditor and the shared draft", () => {
     fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
     await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).toBeNull());
+  });
+
+  it("publishes a server-saved draft from the server, retrying under one key", async () => {
+    const calls: { path: string; method?: string; body?: Record<string, unknown>; key?: string | null }[] = [];
+    let publishes = 0;
+    const write = vi.fn((path: string, options: { method?: string; body?: string; headers?: Record<string, string> }) => {
+      calls.push({ path, method: options.method, body: options.body ? JSON.parse(options.body) : undefined, key: options.headers?.["Idempotency-Key"] ?? null });
+      if (path === "/api/v1/problems/1/draft" && options.method === "PUT") {
+        return Promise.resolve({ id: 9, problem_id: 1, base_version_id: 22, base_version: 2, ir: {}, revision: 2, created_at: "", updated_at: "" });
+      }
+      if (path === "/api/v1/problems/1/draft/publish") {
+        publishes += 1;
+        // The first response is lost on the way back.
+        return publishes === 1 ? Promise.reject(new Error("network")) : Promise.resolve({ id: 23, version: 3 });
+      }
+      return Promise.resolve({ id: 23, version: 3 });
+    });
+    stub({ write });
+    renderPage();
+    fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "x" } });
+    writeServerLink(1, { revision: 1, savedEditedAt: "before this edit" });
+    const publish = screen.getByRole("button", { name: /publish a new version/i });
+    fireEvent.click(publish);
+    await waitFor(() => expect(publishes).toBe(1));
+    await waitFor(() => expect(publish).not.toBeDisabled());
+    fireEvent.click(publish);
+    await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).toBeNull());
+    const saves = calls.filter(c => c.method === "PUT");
+    const posts = calls.filter(c => c.path.endsWith("/draft/publish"));
+    expect(saves).toHaveLength(1);
+    expect(saves[0].body).toMatchObject({ base_version_id: 22, expected_revision: 1 });
+    expect(posts).toHaveLength(2);
+    expect(posts.map(c => c.body)).toEqual([{ expected_revision: 2, note: "edited in the model editor" }, { expected_revision: 2, note: "edited in the model editor" }]);
+    expect(posts[0].key).toBeTruthy();
+    expect(posts[1].key).toBe(posts[0].key);
+    expect(calls.some(c => c.path === "/api/v1/problems/1/versions" && c.method === "POST")).toBe(false);
+  });
+
+  it("discards the server copy with the local one", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    stub({ write });
+    renderPage();
+    fireEvent.change(await screen.findByDisplayValue("each day is staffed"), { target: { value: "x" } });
+    writeServerLink(1, { revision: 4, savedEditedAt: "earlier" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard them" }));
+    await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).toBeNull());
+    expect(write).toHaveBeenCalledWith("/api/v1/problems/1/draft?expected_revision=4", { method: "DELETE" });
   });
 
   it("says when changes cannot outlive the page", async () => {
