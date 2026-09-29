@@ -70,7 +70,8 @@ export default function FkPicker({
   }, [query]);
 
   const search = useOptions(fkTable, debouncedQuery, { enabled: isOpen || debouncedQuery.length > 0 });
-  const options = query ? (search.data ?? []) : [];
+  // Opened with nothing typed, the first rows are listed: a short list (four roles) needs no typing (F21).
+  const options = isOpen || query ? (search.data ?? []) : [];
 
   const labels = useQuery(optionLabelsQuery(fkTable, value ? [value] : []));
   const resolvedLabel = value ? labels.data?.[value] : undefined;
@@ -280,12 +281,10 @@ export default function FkPicker({
           role="listbox"
           className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border border-slate-300 bg-white text-sm shadow-md"
         >
-          {query === "" ? (
-            <li className="px-3 py-2 text-slate-500">Type to search</li>
-          ) : search.isLoading ? (
-            <li className="px-3 py-2 text-slate-500">Searching…</li>
+          {search.isLoading ? (
+            <li className="px-3 py-2 text-slate-500">{query === "" ? "Loading…" : "Searching…"}</li>
           ) : options.length === 0 ? (
-            <li className="px-3 py-2 text-slate-500">No matches</li>
+            <li className="px-3 py-2 text-slate-500">{query === "" ? "Nothing to choose yet" : "No matches"}</li>
           ) : (
             options.map((option, index) => (
               <li

@@ -29,6 +29,9 @@ describe("FkPicker", () => {
       if (path === "/api/iam/organization/options?ids=org-1") {
         return Promise.resolve([{ id: "org-1", label: "Acme" }]);
       }
+      if (path === "/api/iam/organization/options") {
+        return Promise.resolve([{ id: "org-1", label: "Acme" }, { id: "org-2", label: "Nur Hospital" }]);
+      }
       return Promise.resolve([]);
     });
   });
@@ -96,12 +99,13 @@ describe("FkPicker", () => {
     expect(apiFetch).not.toHaveBeenCalledWith(expect.stringContaining("/options?q="));
   });
 
-  it("shows a prompt before typing and 'No matches' when a search is empty", async () => {
+  it("lists the first rows before typing, and 'No matches' when a search is empty (operator trial F21)", async () => {
     renderPicker();
 
     const input = screen.getByTestId("field-organization_id");
     fireEvent.focus(input);
-    expect(screen.getByText("Type to search")).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Nur Hospital" })).toBeInTheDocument();
+    expect(screen.queryByText("Type to search")).not.toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "zzz" } });
     await waitFor(
