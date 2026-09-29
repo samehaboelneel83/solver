@@ -92,8 +92,9 @@ export default function OpsAudit() {
                     {row.object_type ?? "—"}
                     {row.object_id ? ` ${row.object_id}` : ""}
                   </td>
-                  <td className="py-2 font-mono text-xs text-slate-500">
-                    {row.actor_id?.slice(0, 8) ?? row.api_key_id?.slice(0, 8) ?? "—"}
+                  <td className="py-2 text-xs text-slate-600">
+                    {row.actor ?? (row.api_key_name ? `API key ${row.api_key_name}`
+                      : row.actor_id?.slice(0, 8) ?? row.api_key_id?.slice(0, 8) ?? "the platform")}
                   </td>
                   <td className="py-2 text-xs text-slate-500">{row.ip ?? "—"}</td>
                 </tr>

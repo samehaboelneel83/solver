@@ -74,6 +74,12 @@ def test_applying_a_template_creates_a_problem_with_the_starting_model(seeded, a
         f"/api/v1/versions/{body['model_version_id']}", headers=auth_headers
     ).json()
     assert version["note"] == "from template weekly_rota"
+    # The history says a template made this problem, and who applied it (operator trial F34 F30).
+    event = db.execute(text("SELECT object_id FROM iam.audit_event WHERE action = 'template.apply'"
+                            " ORDER BY id DESC LIMIT 1")).one()
+    assert event.object_id == str(body["problem_id"])
+    listed = client.get("/api/v1/audit?action=template.apply", headers=auth_headers).json()["items"][0]
+    assert listed["actor"] == "admin"
     assert "c_cover_demand" in [c["id"] for c in version["ir"]["constraints"]]
     scenario = client.get(
         f"/api/v1/scenarios/{body['scenario_id']}", headers=auth_headers

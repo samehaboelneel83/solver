@@ -1385,6 +1385,9 @@ export type AuditEvent = {
   at: string | null;
   organization_id: string;
   actor_id: string | null;
+  /** The account's username, or the API key's name (operator trial F30). */
+  actor?: string | null;
+  api_key_name?: string | null;
   api_key_id: string | null;
   action: string;
   object_type: string | null;
