@@ -1,3 +1,6 @@
+import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import RelationshipTypeFields, {
@@ -15,7 +18,6 @@ import {
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
-import { formatApiError } from "../api/errors";
 import {
   useCreateRelationshipType,
   useEntityTypes,
@@ -69,16 +71,32 @@ export default function RelationshipTypes() {
   );
 }
 
+/** Types shown at once; the rest are paged and searched on the server (Epic UX, U-1). */
+const TYPE_PAGE = 100;
+
 function Loaded({ domainId }: { domainId: Id }) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
   const entityTypes = useEntityTypes(domainId, { limit: 500 });
-  const relationshipTypes = useRelationshipTypes(domainId, { limit: 500 });
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const relationshipTypes = useRelationshipTypes(domainId, { limit: TYPE_PAGE, offset, q });
   const types = entityTypes.data?.items ?? [];
+  const total = relationshipTypes.data?.total ?? 0;
 
   return (
     <>
-      <TypeList query={relationshipTypes} entityTypes={types} />
+      {(q || total > TYPE_PAGE) && (
+        <div className="mb-3">
+          <SearchBox label="relationship types" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+        </div>
+      )}
+      {q && relationshipTypes.data?.items.length === 0 ? (
+        <NoMatches label="relationship types" q={q} />
+      ) : (
+        <TypeList query={relationshipTypes} entityTypes={types} />
+      )}
+      <Pager label="Relationship type" offset={offset} size={TYPE_PAGE} total={total} onOffset={setOffset} />
       {entityTypes.isLoading ? null : types.length === 0 ? (
         <p className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           A relationship type joins two entity types, so this domain needs at least one entity type first.{" "}
@@ -111,21 +129,8 @@ function TypeList({
   const { data, error, isLoading, refetch, fetchStatus } = query;
 
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="The relationship type list" />;
-  if (isLoading) return <Skeleton rows={3} cols={4} />;
-  if (error && !data) {
-    return (
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <p className="text-sm text-red-600">{formatApiError(error)}</p>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
+  if (isLoading && !data) return <Skeleton rows={3} cols={4} />;
+  if (error && !data) return <LoadFailure subject="The relationship type list" error={error} retry={() => void refetch()} />;
 
   const types: RelationshipType[] = data?.items ?? [];
   if (types.length === 0) {

@@ -1,3 +1,6 @@
+import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
 import { FormEvent, useId, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -18,7 +21,6 @@ import ColourField from "../components/ColourField";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
-import { formatApiError } from "../api/errors";
 import GridGeneratorForm from "../components/GridGeneratorForm";
 import { useCreateEntityType, useEntityTypes, type EntityRole, type Id } from "../api/v1";
 import InheritanceFields from "../components/InheritanceFields";
@@ -69,27 +71,26 @@ export default function EntityTypes() {
   );
 }
 
+/** Types shown at once; the rest are paged and searched on the server (Epic UX, U-1). */
+const TYPE_PAGE = 100;
+
 function TypeList({ domainId }: { domainId: Id }) {
-  const { data, error, isLoading, refetch, fetchStatus } = useEntityTypes(domainId, { limit: 500 });
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const { data, error, isLoading, refetch, fetchStatus } = useEntityTypes(domainId, { limit: TYPE_PAGE, offset, q });
+  const total = data?.total ?? 0;
+  const search = (q || total > TYPE_PAGE) && (
+    <div className="mb-3">
+      <SearchBox label="entity types" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+    </div>
+  );
 
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="The entity type list" />;
-  if (isLoading) return <Skeleton rows={3} cols={3} />;
-  if (error && !data) {
-    return (
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <p className="text-sm text-red-600">{formatApiError(error)}</p>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
+  if (isLoading && !data) return <Skeleton rows={3} cols={3} />;
+  if (error && !data) return <LoadFailure subject="The entity type list" error={error} retry={() => void refetch()} />;
 
   const types = data?.items ?? [];
+  if (types.length === 0 && q) return <>{search}<NoMatches label="entity types" q={q} /></>;
   if (types.length === 0) {
     return (
       <p className="mb-6 text-sm text-slate-600">
@@ -99,6 +100,8 @@ function TypeList({ domainId }: { domainId: Id }) {
   }
 
   return (
+    <>
+    {search}
     <div className="mb-6 overflow-x-auto rounded-md border border-slate-200 bg-white">
       <table className="w-full text-left text-sm" aria-label="Entity types">
         <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
@@ -148,6 +151,8 @@ function TypeList({ domainId }: { domainId: Id }) {
         </tbody>
       </table>
     </div>
+    <Pager label="Entity type" offset={offset} size={TYPE_PAGE} total={total} onOffset={setOffset} />
+    </>
   );
 }
 

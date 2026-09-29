@@ -92,6 +92,6 @@ describe("planning overviews", () => {
     mount("/domains/7/problems/9/overview");
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
     expect(screen.queryByText("0 scenarios")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Retry/ })).toBeInTheDocument();
   });
 });

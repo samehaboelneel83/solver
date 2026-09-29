@@ -100,7 +100,7 @@ describe("RelationshipTypes list page", () => {
     mockFetch.mockRejectedValue(new Error("should not be called"));
     renderPage();
     expect(await screen.findByText(/choose a domain in the sidebar/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Retry/ })).not.toBeInTheDocument();
     expect(mockFetch.mock.calls).toHaveLength(0);
   });
 
@@ -164,7 +164,7 @@ describe("RelationshipTypes list page", () => {
     renderPage();
     expect(await screen.findByText(/server error \(500\)/i)).toBeInTheDocument();
     fail = false;
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Retry/ }));
     expect(await screen.findByRole("link", { name: "works_on" })).toBeInTheDocument();
   });
 

@@ -114,7 +114,8 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
 
-      expect(screen.getByRole("link", { name: "All domains" })).toHaveAttribute("href", "/public/domain");
+      // The chooser (Epic UX, U-1); the editable table stays at /public/domain.
+      expect(screen.getByRole("link", { name: "All domains" })).toHaveAttribute("href", "/domains");
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
       expect(screen.getByRole("link", { name: "Getting started" })).toHaveAttribute(
@@ -295,7 +296,7 @@ describe("AppShell", () => {
   });
 
   it("marks the nav link for the current route as active and leaves the others plain", async () => {
-    renderWithProviders(["/public/domain"]);
+    renderWithProviders(["/domains"]);
     await settled();
     const activeLink = screen.getByRole("link", { name: "All domains" });
     const otherLink = screen.getByRole("link", { name: "Home" });

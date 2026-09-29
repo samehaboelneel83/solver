@@ -3,6 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import AliasRedirect from "./components/AliasRedirect";
+import CapabilityGate from "./components/CapabilityGate";
+import { LegacyDomainRedirect, LegacyProblemRedirect } from "./components/LegacyRedirect";
+import DomainChooser from "./pages/DomainChooser";
 import DomainScope from "./components/DomainScope";
 import ProblemQueryBridge from "./components/ProblemQueryBridge";
 import Login from "./pages/Login";
@@ -72,10 +75,11 @@ export default function App() {
           </RequireAuth>
         }
       >
+        <Route element={<CapabilityGate />}>
         <Route index element={<Dashboard />} />
         {/* OAAS N04: canonical aliases keep query/hash for bookmarks */}
         <Route path="home" element={<AliasRedirect to="/" />} />
-        <Route path="domains" element={<AliasRedirect to="/public/domain" />} />
+        <Route path="domains" element={<DomainChooser />} />
         <Route path="templates" element={<AliasRedirect to="/public/template" />} />
         {/* OAAS §3.5: URL-authoritative domain / problem routes */}
         <Route path="domains/:domainId" element={<DomainScope />}>
@@ -109,30 +113,31 @@ export default function App() {
             <Route path="runs/:runId" element={<Runs />} />
           </Route>
         </Route>
-        <Route path="graph" element={<GraphDemo />} />
+        {/* Old unscoped pages (Epic UX, U-1): to their scoped page when the context is known. */}
+        <Route path="graph" element={<LegacyDomainRedirect page="graph" fallback={<GraphDemo />} />} />
         {/* Static segments outrank the generic `:schemaName/:tableName` pair below,
             so `/entity-types/5` reaches the type editor, not a table named "5". */}
-        <Route path="entity-types" element={<EntityTypes />} />
-        <Route path="entity-types/:id" element={<EntityTypeDetail />} />
-        <Route path="relationship-types" element={<RelationshipTypes />} />
-        <Route path="relationship-types/:id" element={<RelationshipTypeDetail />} />
-        <Route path="relationships" element={<Relationships />} />
+        <Route path="entity-types" element={<LegacyDomainRedirect page="entity-types" fallback={<EntityTypes />} />} />
+        <Route path="entity-types/:id" element={<LegacyDomainRedirect page="entity-types" fallback={<EntityTypeDetail />} />} />
+        <Route path="relationship-types" element={<LegacyDomainRedirect page="relationship-types" fallback={<RelationshipTypes />} />} />
+        <Route path="relationship-types/:id" element={<LegacyDomainRedirect page="relationship-types" fallback={<RelationshipTypeDetail />} />} />
+        <Route path="relationships" element={<LegacyDomainRedirect page="relationships" fallback={<Relationships />} />} />
         {/* `entities/new` before `entities/:id`: the literal segment has to win,
             or a new entity would be looked up as the entity whose id is "new". */}
-        <Route path="entities" element={<Entities />} />
-        <Route path="entities/new" element={<EntityRecord />} />
-        <Route path="entities/:id" element={<EntityRecord />} />
-        <Route path="parameters" element={<Parameters />} />
-        <Route path="versions" element={<ModelVersions />} />
-        <Route path="runs" element={<Runs />} />
-        <Route path="workspace" element={<Workspace />} />
+        <Route path="entities" element={<LegacyDomainRedirect page="entities" fallback={<Entities />} />} />
+        <Route path="entities/new" element={<LegacyDomainRedirect page="entities" fallback={<EntityRecord />} />} />
+        <Route path="entities/:id" element={<LegacyDomainRedirect page="entities" fallback={<EntityRecord />} />} />
+        <Route path="parameters" element={<LegacyDomainRedirect page="parameters" fallback={<Parameters />} />} />
+        <Route path="versions" element={<LegacyProblemRedirect page="versions" fallback={<ModelVersions />} />} />
+        <Route path="runs" element={<LegacyProblemRedirect page="runs" fallback={<Runs />} />} />
+        <Route path="workspace" element={<LegacyProblemRedirect page="workspace" fallback={<Workspace />} />} />
         <Route path="settings" element={<Settings />} />
         <Route path="administration/access" element={<NavigationHub kind="access" />} />
-        <Route path="inputs" element={<AliasRedirect to="/domains" />} />
-        <Route path="data" element={<AliasRedirect to="/domains" />} />
-        <Route path="structure" element={<AliasRedirect to="/domains" />} />
-        <Route path="sources" element={<AliasRedirect to="/domains" />} />
-        <Route path="quality" element={<AliasRedirect to="/domains" />} />
+        <Route path="inputs" element={<LegacyProblemRedirect page="inputs" fallback={<AliasRedirect to="/domains" />} />} />
+        <Route path="data" element={<LegacyDomainRedirect page="data" />} />
+        <Route path="structure" element={<LegacyDomainRedirect page="structure" />} />
+        <Route path="sources" element={<LegacyDomainRedirect page="sources" />} />
+        <Route path="quality" element={<LegacyDomainRedirect page="quality" />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
         <Route path="ops/queue" element={<OpsQueue />} />
@@ -144,12 +149,13 @@ export default function App() {
         <Route path="help/api" element={<Help topic="api" />} />
         <Route path="help/release-notes" element={<Help topic="release-notes" />} />
         <Route path="help/install" element={<Help topic="install" />} />
-        <Route path="model" element={<ModelEditor />} />
-        <Route path="scenarios" element={<Scenarios />} />
+        <Route path="model" element={<LegacyProblemRedirect page="model" fallback={<ModelEditor />} />} />
+        <Route path="scenarios" element={<LegacyProblemRedirect page="scenarios" fallback={<Scenarios />} />} />
         <Route path=":schemaName/:tableName" element={<EntityList />} />
         <Route path=":schemaName/:tableName/new" element={<EntityDetail />} />
         <Route path=":schemaName/:tableName/:id" element={<EntityDetail />} />
         <Route path="*" element={<NotFound />} />
+        </Route>
       </Route>
     </Routes>
   );

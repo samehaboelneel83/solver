@@ -91,7 +91,8 @@ export const DESTINATIONS: Destination[] = [
   },
   {
     id: "domains",
-    path: "/public/domain",
+    // The chooser (Epic UX, U-1); the editable table stays at /public/domain.
+    path: "/domains",
     canonical: "/domains",
     label: "All domains",
     purpose: "Choose shared operational data for a business area.",

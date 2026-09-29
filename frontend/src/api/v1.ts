@@ -36,7 +36,8 @@ export type Id = number;
 
 export type Page<T> = { items: T[]; total: number };
 
-export type PageParams = { limit?: number; offset?: number };
+/** `q` searches the list by name (or other text), and by id when it is a number (Epic UX, U-1). */
+export type PageParams = { limit?: number; offset?: number; q?: string };
 
 /** The machine-readable reason a database trigger rejected a write. Only
  * present on 422 entries that came from a trigger (`translate_db_error`);
@@ -210,8 +211,8 @@ export function withInherited(type: EntityType & { inherited_attributes?: Attrib
 }
 
 export async function listEntityTypes(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<EntityType>> {
-  const { domainId, limit, offset } = params;
-  const page = await apiFetch<Page<EntityType>>(`/api/v1/entity-types${query({ domain_id: domainId, limit, offset })}`);
+  const { domainId, limit, offset, q } = params;
+  const page = await apiFetch<Page<EntityType>>(`/api/v1/entity-types${query({ domain_id: domainId, q: q || undefined, limit, offset })}`);
   return page && Array.isArray(page.items) ? { ...page, items: page.items.map(withInherited) } : page;
 }
 export const getEntityType = async (id: Id) => withInherited(await apiFetch<EntityType>(`/api/v1/entity-types/${id}`));
@@ -376,8 +377,8 @@ export type RelationshipUpdate = Partial<Omit<RelationshipCreate, "relationship_
 export function listRelationshipTypes(
   params: { domainId?: Id | null; isHierarchy?: boolean } & PageParams = {}
 ): Promise<Page<RelationshipType>> {
-  const { domainId, isHierarchy, limit, offset } = params;
-  return apiFetch(`/api/v1/relationship-types${query({ domain_id: domainId, is_hierarchy: isHierarchy, limit, offset })}`);
+  const { domainId, isHierarchy, limit, offset, q } = params;
+  return apiFetch(`/api/v1/relationship-types${query({ domain_id: domainId, is_hierarchy: isHierarchy, q: q || undefined, limit, offset })}`);
 }
 export const getRelationshipType = (id: Id) => apiFetch<RelationshipType>(`/api/v1/relationship-types/${id}`);
 export const createRelationshipType = (body: RelationshipTypeCreate) =>
@@ -456,8 +457,8 @@ export type ParameterValues = {
 };
 
 export function listParameters(params: { domainId?: Id | null } & PageParams = {}): Promise<Page<ParameterDef>> {
-  const { domainId, limit, offset } = params;
-  return apiFetch(`/api/v1/parameters${query({ domain_id: domainId, limit, offset })}`);
+  const { domainId, limit, offset, q } = params;
+  return apiFetch(`/api/v1/parameters${query({ domain_id: domainId, q: q || undefined, limit, offset })}`);
 }
 export const getParameter = (id: Id) => apiFetch<ParameterDef>(`/api/v1/parameters/${id}`);
 export const createParameter = (body: ParameterDefCreate) =>
@@ -855,8 +856,8 @@ export const setSetting = (body: {
 }) => send<Record<string, unknown>>("PUT", "/api/v1/settings", body);
 
 export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
-  const { scenarioId, limit, offset } = params;
-  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, limit, offset })}`);
+  const { scenarioId, limit, offset, q } = params;
+  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, q: q || undefined, limit, offset })}`);
 }
 export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
 
@@ -920,7 +921,7 @@ export const createRun = (scenarioId: Id, body: RunRequest = {}) =>
 export const cancelRun = (id: Id) => send<Run>("POST", `/api/v1/runs/${id}/cancel`, {});
 
 export function listVersions(problemId: Id, params: PageParams = {}): Promise<Page<ModelVersionSummary>> {
-  return apiFetch(`/api/v1/problems/${problemId}/versions${query({ limit: params.limit, offset: params.offset })}`);
+  return apiFetch(`/api/v1/problems/${problemId}/versions${query({ q: params.q || undefined, limit: params.limit, offset: params.offset })}`);
 }
 export const createVersion = (problemId: Id, body: ModelVersionCreate) =>
   send<ModelVersion>("POST", `/api/v1/problems/${problemId}/versions`, body);
@@ -967,8 +968,8 @@ export const getVersion = (id: Id) => apiFetch<ModelVersion>(`/api/v1/versions/$
 export function listScenarios(
   params: { problemId?: Id | null; modelVersionId?: Id | null } & PageParams = {}
 ): Promise<Page<Scenario>> {
-  const { problemId, modelVersionId, limit, offset } = params;
-  return apiFetch(`/api/v1/scenarios${query({ problem_id: problemId, model_version_id: modelVersionId, limit, offset })}`);
+  const { problemId, modelVersionId, limit, offset, q } = params;
+  return apiFetch(`/api/v1/scenarios${query({ problem_id: problemId, model_version_id: modelVersionId, q: q || undefined, limit, offset })}`);
 }
 export const getScenario = (id: Id) => apiFetch<Scenario>(`/api/v1/scenarios/${id}`);
 /** Ask why a plan is not otherwise (queue R26): a probe to poll, or the verdict at once. */

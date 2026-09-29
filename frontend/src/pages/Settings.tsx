@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { useEffect, useId, useState } from "react";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
@@ -123,7 +124,7 @@ export default function Settings() {
       ) : settings.isLoading ? (
         <Skeleton rows={4} cols={3} />
       ) : settings.isError && !settings.data ? (
-        <Note>{formatApiError(settings.error)}</Note>
+        <LoadFailure subject="Settings" error={settings.error} retry={() => void settings.refetch()} />
       ) : (
         <ul className="space-y-3">
           {(settings.data?.items ?? []).map((item) => (

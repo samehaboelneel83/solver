@@ -1,8 +1,8 @@
+import LoadFailure from "../components/LoadFailure";
 import { useState } from "react";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { NetworkError, apiDownload } from "../api/client";
-import { formatApiError } from "../api/errors";
 import { useAudit } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -65,7 +65,7 @@ export default function OpsAudit() {
           {audit.error instanceof NetworkError ? (
             <OfflineNotice subject="Audit history" reason="unreachable" />
           ) : (
-            <p role="alert" className="text-sm text-red-700">{formatApiError(audit.error)}</p>
+            <LoadFailure subject="Audit history" error={audit.error} retry={() => void audit.refetch()} />
           )}
         </div>
       ) : audit.isLoading ? (

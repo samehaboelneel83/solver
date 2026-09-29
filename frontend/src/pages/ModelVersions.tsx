@@ -1,3 +1,7 @@
+import { useState } from "react";
+import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
 import { Link, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import VersionChecks from "../components/VersionChecks";
@@ -5,7 +9,6 @@ import ShadowCard from "../components/ShadowCard";
 import Skeleton from "../components/Skeleton";
 import ProblemPicker from "../components/ProblemPicker";
 import { useDomainProblem } from "../hooks/useDomainProblem";
-import { formatApiError } from "../api/errors";
 import { useVersion, useVersions, type Id } from "../api/v1";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -131,19 +134,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
   );
 }
 
-function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <div className="mb-6 flex flex-wrap items-center gap-3">
-      <p className="text-sm text-red-600">{formatApiError(error)}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-      >
-        Retry
-      </button>
-    </div>
-  );
+function Failed({ subject = "The version list", error, onRetry }: { subject?: string; error: unknown; onRetry: () => void }) {
+  return <LoadFailure subject={subject} error={error} retry={() => void onRetry()} />;
 }
 
 function VersionList({
@@ -157,13 +149,22 @@ function VersionList({
   selectedId: Id | null;
   onSelect: (id: Id) => void;
 }) {
-  const { data, error, isError, isLoading, refetch, fetchStatus } = useVersions(problemId, { limit: PAGE_SIZE });
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const { data, error, isError, isLoading, refetch, fetchStatus } = useVersions(problemId, { limit: PAGE_SIZE, offset, q });
+  const total = data?.total ?? 0;
+  const search = (q || total > PAGE_SIZE) && (
+    <div className="mb-3">
+      <SearchBox label="versions" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+    </div>
+  );
 
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="The version list" />;
-  if (isLoading) return <Skeleton rows={3} cols={4} />;
+  if (isLoading && !data) return <Skeleton rows={3} cols={4} />;
   if (isError && !data) return <Failed error={error} onRetry={() => refetch()} />;
 
   const versions = data?.items ?? [];
+  if (versions.length === 0 && q) return <>{search}<NoMatches label="versions" q={q} /></>;
   if (versions.length === 0) {
     return (
       <p className="mb-6 text-sm text-slate-600">
@@ -177,6 +178,8 @@ function VersionList({
   }
 
   return (
+    <>
+    {search}
     <div className="mb-6 overflow-x-auto rounded-md border border-slate-200 bg-white">
       <table className="w-full text-left text-sm" aria-label={`Versions of ${problemLabel}`}>
         <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
@@ -231,18 +234,20 @@ function VersionList({
         </tbody>
       </table>
     </div>
+    <Pager label="Version" offset={offset} size={PAGE_SIZE} total={total} onOffset={setOffset} />
+    </>
   );
 }
 
 function IrViewer({ versionId }: { versionId: Id | null }) {
-  const { data, error, isError, isLoading, fetchStatus } = useVersion(versionId);
+  const { data, error, isError, isLoading, fetchStatus, refetch } = useVersion(versionId);
 
   if (versionId === null) {
     return <p className="text-sm text-slate-600">Choose a version above to see the model it holds.</p>;
   }
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="This version" />;
   if (isLoading) return <Skeleton rows={6} cols={1} />;
-  if (isError && !data) return <p className="text-sm text-red-600">{formatApiError(error)}</p>;
+  if (isError && !data) return <Failed subject="This version" error={error} onRetry={() => refetch()} />;
   if (!data) return null;
 
   return (

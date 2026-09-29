@@ -112,7 +112,8 @@ describe("nav registry", () => {
 
   it("resolves aliases to legacy paths", () => {
     expect(resolveAlias("/home")).toBe("/");
-    expect(resolveAlias("/domains")).toBe("/public/domain");
+    // `/domains` is the chooser's own path now (Epic UX, U-1), not an alias.
+    expect(resolveAlias("/domains")).toBeNull();
     expect(resolveAlias("/templates")).toBe("/public/template");
     expect(resolveAlias("/")).toBeNull();
   });

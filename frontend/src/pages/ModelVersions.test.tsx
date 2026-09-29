@@ -107,7 +107,7 @@ describe("ModelVersions: choosing what to show", () => {
     renderPage("/versions?problem=12");
 
     expect(await screen.findByText(/no versions of this problem yet/i)).toBeInTheDocument();
-    expect(paths()).toContain("/api/v1/problems/12/versions?limit=50");
+    expect(paths()).toContain("/api/v1/problems/12/versions?limit=50&offset=0");
     expect(paths().some((path) => path.startsWith("/api/v1/problems/11/"))).toBe(false);
   });
 });

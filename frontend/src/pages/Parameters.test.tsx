@@ -140,7 +140,7 @@ describe("Parameters: the list", () => {
       "—",
       "Delete",
     ]);
-    expect(mockFetch.mock.calls.map((c) => c[0] as string)).toContain("/api/v1/parameters?domain_id=7&limit=500");
+    expect(mockFetch.mock.calls.map((c) => c[0] as string)).toContain("/api/v1/parameters?domain_id=7&limit=100&offset=0");
   });
 
   it("names an index type that no longer exists by its id rather than leaving the cell blank", async () => {

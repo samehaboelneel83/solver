@@ -132,11 +132,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from sqlalchemy import func, insert, select, text
+from sqlalchemy import and_, func, insert, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app import audit
+from app.api import search
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, reject_null
 from app.core.db import get_db
@@ -538,6 +539,7 @@ def _check_version_belongs(db: Session, problem_id: int, model_version_id: int) 
 @router.get("/problems/{problem_id}/versions")
 def list_versions(
     problem_id: int,
+    q: str | None = Query(None, description="the note contains this; a number also matches the version number or id"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -545,6 +547,10 @@ def list_versions(
 ) -> ModelVersionList:
     _get_problem(db, problem_id)
     where = _version_columns.problem_id == problem_id
+    searched = search.condition(q, _version_columns.note, id_column=_version_columns.id,
+                                number_columns=(_version_columns.version,))
+    if searched is not None:
+        where = and_(where, searched)
     total = db.execute(
         select(func.count()).select_from(ModelVersion.__table__).where(where)
     ).scalar_one()
@@ -744,6 +750,7 @@ def list_scenarios(
     problem_id: int | None = Query(None),
     model_version_id: int | None = Query(None),
     include_checks: bool = Query(False),
+    q: str | None = Query(None, description="the name contains this; a number also matches the id"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -757,6 +764,9 @@ def list_scenarios(
     # Acceptance-check scenarios (queue R29/R30) stay off the planner's list unless asked for.
     if not include_checks:
         query = query.filter(~Scenario.name.like("checks: version %"))
+    searched = search.condition(q, Scenario.name, id_column=Scenario.id)
+    if searched is not None:
+        query = query.filter(searched)
     total = query.count()
     # `name` is unique per problem, not globally, so `id` completes the order.
     rows = query.order_by(Scenario.name.asc(), Scenario.id.asc()).offset(offset).limit(limit).all()

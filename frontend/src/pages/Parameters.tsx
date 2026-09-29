@@ -1,3 +1,6 @@
+import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
 import { FormEvent, useId, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import MeasureFromMap from "../components/MeasureFromMap";
@@ -24,6 +27,7 @@ import {
   useCreateParameter,
   useDeleteParameter,
   useEntityTypes,
+  useParameter,
   useParameters,
   useUpdateParameter,
   type EntityType,
@@ -81,30 +85,53 @@ export default function Parameters() {
   );
 }
 
+/** Parameters shown at once; the rest are paged and searched on the server (Epic UX, U-1). */
+const PARAMETER_PAGE = 100;
+
 function ForDomain({ domainId }: { domainId: Id }) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
   const [searchParams, setSearchParams] = useSearchParams();
-  const parameters = useParameters(domainId, { limit: 500 });
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const parameters = useParameters(domainId, { limit: PARAMETER_PAGE, offset, q });
   const types = useEntityTypes(domainId, { limit: 500 });
+  const requested = parseRouteId(searchParams.get("parameter"));
+  // A linked parameter past this page (or outside the search) is fetched by its id (Epic UX, U-1).
+  const listedHere = (parameters.data?.items ?? []).some((parameter) => parameter.id === requested);
+  const linked = useParameter(requested !== null && parameters.data && !listedHere ? requested : null);
 
   if ((parameters.fetchStatus === "paused" && !parameters.data) || (types.fetchStatus === "paused" && !types.data)) {
     return <OfflineNotice subject="The parameter list" />;
   }
-  if (parameters.isLoading || types.isLoading) return <Skeleton rows={3} cols={4} />;
+  if ((parameters.isLoading && !parameters.data) || types.isLoading) return <Skeleton rows={3} cols={4} />;
   if (parameters.isError && !parameters.data) {
     return <Failed error={parameters.error} onRetry={() => parameters.refetch()} />;
   }
   if (types.isError && !types.data) return <Failed error={types.error} onRetry={() => types.refetch()} />;
 
   const items = parameters.data?.items ?? [];
+  const total = parameters.data?.total ?? items.length;
   const entityTypes = types.data?.items ?? [];
-  const requested = parseRouteId(searchParams.get("parameter"));
-  const selected = items.find((parameter) => parameter.id === requested) ?? null;
+  const fromLink = linked.data && Number(linked.data.domain_id) === Number(domainId) ? linked.data : null;
+  const selected = items.find((parameter) => parameter.id === requested) ?? fromLink;
 
   return (
     <>
-      {items.length === 0 ? (
+      {requested !== null && !listedHere && linked.isError && (
+        <LoadFailure subject="The linked parameter" error={linked.error} retry={() => void linked.refetch()} />
+      )}
+      {requested !== null && linked.data && !fromLink && (
+        <p role="alert" className="mb-4 text-sm text-amber-800">The linked parameter belongs to another domain; nothing was substituted.</p>
+      )}
+      {(q || total > PARAMETER_PAGE) && (
+        <div className="mb-3">
+          <SearchBox label="parameters" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+        </div>
+      )}
+      {items.length === 0 && q ? (
+        <NoMatches label="parameters" q={q} />
+      ) : items.length === 0 ? (
         <p className="mb-6 text-sm text-slate-600">
           No parameters in this domain yet.{" "}
           {entityTypes.length > 0 && canEdit ? "Define the first one below." : ""}
@@ -117,6 +144,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           onSelect={(id) => setSearchParams({ parameter: String(id) }, { replace: true })}
         />
       )}
+      <Pager label="Parameter" offset={offset} size={PARAMETER_PAGE} total={total} onOffset={setOffset} />
 
       {selected ? (
         <section aria-labelledby="parameter-values-heading" className="mb-8">
@@ -172,18 +200,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
 }
 
 function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <div className="mb-6 flex flex-wrap items-center gap-3">
-      <p className="text-sm text-red-600">{formatApiError(error)}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-      >
-        Retry
-      </button>
-    </div>
-  );
+  return <LoadFailure subject="The parameter list" error={error} retry={() => void onRetry()} />;
 }
 
 /** The index types of a parameter, named, **in index order**:

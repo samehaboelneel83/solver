@@ -74,7 +74,7 @@ describe("EntityTypes list page", () => {
     expect(await screen.findByText(/choose a domain in the sidebar/i)).toBeInTheDocument();
     // Not an error: nothing red, no retry (the toast region's empty role="alert" is always mounted).
     expect(screen.queryByText(/error|failed/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Retry/ })).not.toBeInTheDocument();
     expect(listCalls()).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe("EntityTypes list page", () => {
     renderPage();
     expect(await screen.findByText(/server error \(500\)/i)).toBeInTheDocument();
     mockFetch.mockResolvedValue({ items: TYPES, total: 2 });
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Retry/ }));
     expect(await screen.findByRole("link", { name: "employee" })).toBeInTheDocument();
   });
 

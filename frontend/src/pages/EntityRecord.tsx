@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { FormEvent, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
@@ -160,19 +161,8 @@ export default function EntityRecord() {
   if (failed) {
     return (
       <div>
-        <div className="mb-2 flex flex-wrap items-center gap-3">
-          <p className="text-sm text-red-600">{formatApiError(entityQuery.error ?? typeQuery.error)}</p>
-          <button
-            type="button"
-            onClick={() => {
-              entityQuery.refetch();
-              typeQuery.refetch();
-            }}
-            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-          >
-            Retry
-          </button>
-        </div>
+        <LoadFailure subject="This entity" error={entityQuery.error ?? typeQuery.error}
+          retry={() => { void entityQuery.refetch(); void typeQuery.refetch(); }} />
         <Link to="/entities" className={BACK_LINK}>
           Back to entities
         </Link>

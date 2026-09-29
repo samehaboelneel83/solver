@@ -30,6 +30,7 @@ from sqlalchemy import and_, func, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from app.api import search
 from app.api.deps import capabilities_of, get_current_user, requires
 from app.api.quantity import QuantityOut
 from app.api.routers import hash_user_password
@@ -594,6 +595,7 @@ def list_runs(
     scenario_id: int | None = Query(default=None),
     purpose: Literal["plan", "why_not", "shadow", "suite"] = Query(default="plan"),
     parent_run_id: int | None = Query(default=None),
+    q: str | None = Query(default=None, description="status or solver contains this; a number also matches the id"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -608,6 +610,9 @@ def list_runs(
                        Run.purpose == purpose)
     if parent_run_id is not None:
         not_a_point = and_(not_a_point, Run.parent_run_id == parent_run_id)
+    searched = search.condition(q, Run.status, Run.params["chosen_solver"].astext, id_column=Run.id)
+    if searched is not None:
+        not_a_point = and_(not_a_point, searched)
     stmt = select(Run).where(not_a_point)
     count_stmt = select(func.count()).select_from(Run).where(not_a_point)
     if scenario_id is not None:

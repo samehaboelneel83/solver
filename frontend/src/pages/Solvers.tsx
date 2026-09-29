@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
@@ -189,7 +190,9 @@ export default function Solvers() {
 
       {report && <Report report={report} />}
 
-      {solvers.isLoading ? (
+      {solvers.isError && !solvers.data ? (
+        <LoadFailure subject="The solver list" error={solvers.error} retry={() => void solvers.refetch()} />
+      ) : solvers.isLoading ? (
         <Skeleton rows={5} cols={7} />
       ) : (
         <div className="mt-2 overflow-x-auto">

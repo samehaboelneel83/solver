@@ -1,3 +1,4 @@
+import LoadFailure from "./LoadFailure";
 import { useEffect } from "react";
 import { Outlet, useParams } from "react-router-dom";
 import { useDomainDetail } from "../api/v1";
@@ -25,7 +26,7 @@ export default function DomainScope() {
       <ContextMismatch
         title="This domain link is not valid"
         detail="The URL does not name a domain id."
-        parentHref="/public/domain"
+        parentHref="/domains"
         parentLabel="Open all domains"
       />
     );
@@ -34,17 +35,15 @@ export default function DomainScope() {
   if (domains.isLoading) return <p role="status">Loading domain…</p>;
   const unavailable = domains.error instanceof ApiError && [403, 404].includes(domains.error.status);
   if (!unavailable && (domains.isError || !domains.data)) return (
-    <div role="alert">
-      <p>The domain could not be loaded. Your selected domain has not changed.</p>
-      <button type="button" onClick={() => void domains.refetch()}>Retry</button>
-    </div>
+    <LoadFailure subject="The domain (your selected domain has not changed)" error={domains.error}
+      retry={() => void domains.refetch()} />
   );
   if (unavailable || Number(domains.data?.id) !== requested) {
     return (
       <ContextMismatch
         title="This domain is not available"
         detail="The link asked for a domain that is missing or not in your organization. Nothing was substituted."
-        parentHref="/public/domain"
+        parentHref="/domains"
         parentLabel="Open all domains"
       />
     );

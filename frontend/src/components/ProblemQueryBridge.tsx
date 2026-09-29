@@ -1,3 +1,4 @@
+import LoadFailure from "./LoadFailure";
 import { useEffect } from "react";
 import { Outlet, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -59,8 +60,7 @@ export default function ProblemQueryBridge() {
       detail="The requested problem or result is unavailable or does not belong to this context. Nothing was substituted."
       parentHref={domainId === null ? "/domains" : `/domains/${domainId}/problems`} parentLabel="Open problems" />;
   }
-  if (failed) return <div role="alert"><p>The problem context could not be loaded.</p>
-    <button type="button" onClick={() => void failed.refetch()}>Retry</button></div>;
+  if (failed) return <LoadFailure subject="The problem context" error={failed.error} retry={() => void failed.refetch()} />;
   // Never mount a legacy page with the previous query's object ids.
   if (!ready || canonicalSearch !== searchParams.toString()) return <p role="status">Loading problem…</p>;
 

@@ -125,7 +125,7 @@ describe("navigation context", () => {
   it("blocks content when the API is unreachable and allows retry", async () => {
     vi.mocked(apiFetch).mockRejectedValue(new Error("unreachable"));
     mount("/domains/7/data/records", { scope: true });
-    const retry = await screen.findByRole("button", { name: "Retry" });
+    const retry = await screen.findByRole("button", { name: /^Retry/ });
     expect(screen.queryByText("Scoped content")).not.toBeInTheDocument();
     vi.mocked(apiFetch).mockResolvedValue({ id: 7, name: "Workforce" });
     fireEvent.click(retry);

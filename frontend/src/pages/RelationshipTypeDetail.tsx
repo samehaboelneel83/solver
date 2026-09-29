@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import BulkPanel from "../components/BulkPanel";
@@ -68,25 +69,8 @@ export default function RelationshipTypeDetail() {
     );
   }
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="This relationship type" />;
-  if (isError && !data) {
-    return (
-      <div>
-        <div className="mb-2 flex flex-wrap items-center gap-3">
-          <p className="text-sm text-red-600">{formatApiError(error)}</p>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-          >
-            Retry
-          </button>
-        </div>
-        <Link to="/relationship-types" className={BACK_LINK}>
-          Back to relationship types
-        </Link>
-      </div>
-    );
-  }
+  if (isError && !data) return <LoadFailure subject="The relationship type" error={error} retry={() => void refetch()} />;
+
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
 
   // Keyed on the row, so switching types re-seeds the form rather than

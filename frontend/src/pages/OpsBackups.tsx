@@ -1,7 +1,7 @@
+import LoadFailure from "../components/LoadFailure";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { NetworkError } from "../api/client";
-import { formatApiError } from "../api/errors";
 import { useBackupStatus } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -28,7 +28,7 @@ export default function OpsBackups() {
           {status.error instanceof NetworkError ? (
             <OfflineNotice subject="Backup status" reason="unreachable" />
           ) : (
-            <p role="alert" className="text-sm text-red-700">{formatApiError(status.error)}</p>
+            <LoadFailure subject="Backup status" error={status.error} retry={() => void status.refetch()} />
           )}
         </div>
       ) : status.isLoading || !status.data ? (

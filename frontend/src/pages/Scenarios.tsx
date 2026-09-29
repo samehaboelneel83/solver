@@ -6,6 +6,11 @@ import { INPUT_CLASS } from "../components/attrTypes";
 import { useToast } from "../components/ToastProvider";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
+
+/** Scenarios shown at once; the rest are paged and searched on the server (Epic UX, U-1). */
+const SCENARIO_PAGE = 50;
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import {
@@ -119,11 +124,15 @@ function ForDomain({ domainId }: { domainId: Id }) {
 function ForProblem({ problemId }: { problemId: Id }) {
   const { can } = useCapabilities();
   const canPublish = can("model.publish");
-  const scenarios = useScenarios(problemId, { limit: 500, offset: 0 });
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const scenarios = useScenarios(problemId, { limit: SCENARIO_PAGE, offset, q });
   const versions = useVersions(problemId, { limit: 50, offset: 0 });
   const [editing, setEditing] = useState<Scenario | "new" | null>(null);
 
-  if (scenarios.isLoading || versions.isLoading) return <Skeleton rows={3} cols={3} />;
+  if (scenarios.isError) return <LoadFailure subject="The scenario list" error={scenarios.error} retry={() => void scenarios.refetch()} />;
+  if (versions.isError) return <LoadFailure subject="The model versions" error={versions.error} retry={() => void versions.refetch()} />;
+  if ((scenarios.isLoading && !scenarios.data) || versions.isLoading) return <Skeleton rows={3} cols={3} />;
 
   const versionItems = versions.data?.items ?? [];
   if (versionItems.length === 0) {
@@ -142,10 +151,18 @@ function ForProblem({ problemId }: { problemId: Id }) {
   }
 
   const items = scenarios.data?.items ?? [];
+  const total = scenarios.data?.total ?? items.length;
 
   return (
     <>
-      {items.length === 0 ? (
+      {(q || total > SCENARIO_PAGE) && (
+        <div className="mb-3">
+          <SearchBox label="scenarios" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+        </div>
+      )}
+      {items.length === 0 && q ? (
+        <NoMatches label="scenarios" q={q} />
+      ) : items.length === 0 ? (
         <Note>
           <p>No scenarios yet. One that changes nothing still works: it asks the model as written.</p>
         </Note>
@@ -179,6 +196,7 @@ function ForProblem({ problemId }: { problemId: Id }) {
           ))}
         </ul>
       )}
+      <Pager label="Scenario" offset={offset} size={SCENARIO_PAGE} total={total} onOffset={setOffset} />
 
       {editing === null ? (
         canPublish ? (

@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Database, FileStack, GitBranch, Play, Workflow } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -66,7 +67,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
         </label>
       </div>
       {pending ? <p role="status" className="py-6 text-sm text-slate-600">Loading problems…</p>
-        : problems.isError ? <div role="alert" className="py-6"><p>Problems could not be loaded.</p><button className={link} onClick={() => void problems.refetch()}>Retry</button></div>
+        : problems.isError ? <LoadFailure subject="The problem list" error={problems.error} retry={() => void problems.refetch()} />
         : <>
           <p className="mt-2 text-sm text-slate-500" aria-live="polite">{problems.data?.total ?? 0} problems{q ? " matching your search" : " in this domain"}</p>
           {problems.data?.items.length ? <ul className="mt-4 divide-y divide-slate-100">
@@ -105,7 +106,7 @@ export function ProblemOverview() {
   const base = `/domains/${domainId}/problems/${problemId}`;
   const checks = [problem, versions, scenarios];
   const failed = checks.find((query) => query.isError);
-  if (failed) return <div role="alert"><p>The problem overview could not be loaded.</p><button className={link} onClick={() => void failed.refetch()}>Retry</button></div>;
+  if (failed) return <LoadFailure subject="The problem overview" error={failed.error} retry={() => void failed.refetch()} />;
   if (checks.some((query) => query.isLoading)) return <p role="status">Loading problem overview…</p>;
   if (!problem.data || Number(problem.data.domain_id) !== domainId) return <p role="alert">This problem is not available in this domain.</p>;
   const latest = versions.data?.items[0];

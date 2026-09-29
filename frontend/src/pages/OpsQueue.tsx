@@ -1,7 +1,7 @@
+import LoadFailure from "../components/LoadFailure";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { NetworkError } from "../api/client";
-import { formatApiError } from "../api/errors";
 import { useQueueMetrics } from "../api/v1";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -35,7 +35,7 @@ export default function OpsQueue() {
           {metrics.error instanceof NetworkError ? (
             <OfflineNotice subject="Queue metrics" reason="unreachable" />
           ) : (
-            <p role="alert" className="text-sm text-red-700">{formatApiError(metrics.error)}</p>
+            <LoadFailure subject="Queue metrics" error={metrics.error} retry={() => void metrics.refetch()} />
           )}
         </div>
       ) : metrics.isLoading ? (

@@ -1,3 +1,6 @@
+import LoadFailure from "../components/LoadFailure";
+import Pager from "../components/Pager";
+import SearchBox, { NoMatches } from "../components/SearchBox";
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
@@ -335,7 +338,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
 
   if (found.state === "offline") return <OfflineNotice subject="The problem list" />;
   if (found.state === "loading") return <Skeleton rows={3} cols={4} />;
-  if (found.state === "failed") return <Failed error={found.error} onRetry={found.retry} />;
+  if (found.state === "failed") return <Failed subject={found.subject} error={found.error} onRetry={found.retry} />;
 
   if (found.state === "mismatch") {
     return (
@@ -487,7 +490,9 @@ function ScenarioRuns({
   ).some((spec) => (spec.domain ?? "binary") === "binary");
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
-  const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
+  const [runQuery, setRunQuery] = useState("");
+  const [runOffset, setRunOffset] = useState(0);
+  const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: runOffset, q: runQuery });
   // While anything is unfinished the list is stale the moment it arrives.
   const settling = (runs.data?.items ?? []).some(
     (row) => row.status === "queued" || row.status === "running"
@@ -657,11 +662,20 @@ function ScenarioRuns({
       )}
 
       {requestedRun !== null && requestedDetail.isError && (
-        <Failed error={requestedDetail.error} onRetry={() => requestedDetail.refetch()} />
+        <Failed subject="The linked run" error={requestedDetail.error} onRetry={() => requestedDetail.refetch()} />
       )}
       {requestedRun !== null && requestedDetail.isLoading && <p role="status">Loading selected run…</p>}
-      {runs.isLoading ? (
+      {(runQuery || (runs.data?.total ?? 0) > PAGE_SIZE) && (
+        <div className="mb-3">
+          <SearchBox label="runs" initial={runQuery} onSearch={(text) => { setRunQuery(text); setRunOffset(0); }} />
+        </div>
+      )}
+      {runs.isError ? (
+        <Failed subject="The run history" error={runs.error} onRetry={() => runs.refetch()} />
+      ) : runs.isLoading && !runs.data ? (
         <Skeleton rows={3} cols={4} />
+      ) : items.length === 0 && runQuery ? (
+        <NoMatches label="runs" q={runQuery} />
       ) : items.length === 0 && requestedRun === null ? (
         <Empty>
           <p>No runs yet for this scenario. Solve it to get one.</p>
@@ -706,6 +720,7 @@ function ScenarioRuns({
               ))}
             </tbody>
           </table>
+          <Pager label="Run" offset={runOffset} size={PAGE_SIZE} total={runs.data?.total ?? 0} onOffset={setRunOffset} />
 
           {selected !== null && comparable.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -772,7 +787,7 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
 
   if (comparison.isLoading) return <Skeleton rows={3} cols={3} />;
   if (comparison.isError && !comparison.data) {
-    return <Failed error={comparison.error} onRetry={() => comparison.refetch()} />;
+    return <Failed subject="The comparison" error={comparison.error} onRetry={() => comparison.refetch()} />;
   }
   const data = comparison.data;
   if (!data) return null;
@@ -900,7 +915,7 @@ function RunDetail({
   const [stopFailure, setStopFailure] = useState<string | null>(null);
 
   if (run.isLoading) return <Skeleton rows={4} cols={3} />;
-  if (run.isError && !run.data) return <Failed error={run.error} onRetry={() => run.refetch()} />;
+  if (run.isError && !run.data) return <Failed subject="The run" error={run.error} onRetry={() => run.refetch()} />;
   const data = run.data;
   if (!data) return null;
 
@@ -1595,13 +1610,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-      <p className="whitespace-pre-line">{formatApiError(error)}</p>
-      <button type="button" onClick={onRetry} className="mt-2 rounded py-1 text-red-900 underline">
-        Retry
-      </button>
-    </div>
-  );
+/** The shared failure state (Epic UX, U-1): no access, not found, or a failure worth retrying. */
+function Failed({ subject, error, onRetry }: { subject: string; error: unknown; onRetry: () => void }) {
+  return <LoadFailure subject={subject} error={error} retry={() => void onRetry()} />;
 }

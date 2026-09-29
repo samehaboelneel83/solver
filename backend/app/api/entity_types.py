@@ -79,6 +79,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
+from app.api import search
+from app.api.search import search_text
 from app.api.deps import get_current_user, requires
 from app.api.validation import field_error, validate_colour, validate_icon, validate_name
 from app.core.db import get_db
@@ -528,6 +530,7 @@ def _commit(db: Session, table: str) -> None:
 @router.get("/entity-types")
 def list_entity_types(
     domain_id: int | None = Query(None),
+    q: str | None = Query(None, description="name or description contains this; a number also matches the id"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -536,6 +539,9 @@ def list_entity_types(
     query = db.query(EntityType)
     if domain_id is not None:
         query = query.filter(EntityType.domain_id == domain_id)
+    searched = search.condition(q, *search_text(EntityType, "name", "description"), id_column=EntityType.id)
+    if searched is not None:
+        query = query.filter(searched)
     total = query.count()
     # `name` is unique per domain but not globally, so `id` is appended as a
     # tiebreaker -- without a total order, offset pagination can skip or

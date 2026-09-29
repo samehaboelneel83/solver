@@ -96,6 +96,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.api import search
+from app.api.search import search_text
 from app.api.deps import get_current_user, requires
 from app.api.concurrency import check_not_stale, stale_record_conflict
 from app.api.validation import field_error, reject_null, validate_name
@@ -367,6 +369,7 @@ def _cell_error(
 @router.get("/parameters")
 def list_parameters(
     domain_id: int | None = Query(None),
+    q: str | None = Query(None, description="name or description contains this; a number also matches the id"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -375,6 +378,9 @@ def list_parameters(
     query = db.query(ParameterDef)
     if domain_id is not None:
         query = query.filter(ParameterDef.domain_id == domain_id)
+    searched = search.condition(q, *search_text(ParameterDef, "name", "description"), id_column=ParameterDef.id)
+    if searched is not None:
+        query = query.filter(searched)
     total = query.count()
     # `name` is unique per domain but not globally; `id` makes the order
     # total, which offset pagination needs.

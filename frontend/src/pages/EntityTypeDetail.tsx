@@ -1,3 +1,4 @@
+import LoadFailure from "../components/LoadFailure";
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AttributeDefEditor, { ATTRIBUTE_FIELDS } from "../components/AttributeDefEditor";
@@ -69,25 +70,8 @@ export default function EntityTypeDetail() {
     );
   }
   if (fetchStatus === "paused" && !data) return <OfflineNotice subject="This entity type" />;
-  if (isError && !data) {
-    return (
-      <div>
-        <div className="mb-2 flex flex-wrap items-center gap-3">
-          <p className="text-sm text-red-600">{formatApiError(error)}</p>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-          >
-            Retry
-          </button>
-        </div>
-        <Link to="/entity-types" className={BACK_LINK}>
-          Back to entity types
-        </Link>
-      </div>
-    );
-  }
+  if (isError && !data) return <LoadFailure subject="The entity type" error={error} retry={() => void refetch()} />;
+
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
 
   return (

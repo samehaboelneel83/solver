@@ -67,6 +67,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.api.concurrency import check_not_stale
+from app.api import search
+from app.api.search import search_text
 from app.api.deps import get_current_user, requires
 from app.api.entity_types import (
     AttributeDefCreate,
@@ -339,6 +341,7 @@ def _commit(db: Session, table: str) -> None:
 def list_relationship_types(
     domain_id: int | None = Query(None),
     is_hierarchy: bool | None = Query(None),
+    q: str | None = Query(None, description="name or description contains this; a number also matches the id"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -347,6 +350,9 @@ def list_relationship_types(
     query = db.query(RelationshipType)
     if domain_id is not None:
         query = query.filter(RelationshipType.domain_id == domain_id)
+    searched = search.condition(q, *search_text(RelationshipType, "name", "description"), id_column=RelationshipType.id)
+    if searched is not None:
+        query = query.filter(searched)
     if is_hierarchy is not None:
         query = query.filter(RelationshipType.is_hierarchy.is_(is_hierarchy))
     total = query.count()
