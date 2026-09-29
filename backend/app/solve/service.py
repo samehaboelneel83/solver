@@ -878,6 +878,7 @@ def _execute(
         lns_record = None
         lagrange_record = None
         local_record = None
+        bound_record = None
         # A two-stage stochastic solve (setting `solve.stochastic_samples`,
         # app.solve.stochastic, queue R7): asked for, and a decision waits for the data.
         stochastic_wanted = bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir)
@@ -1338,6 +1339,13 @@ def _execute(
                 result, lagrange_record = _lagrangian_bound(solving_model, structure_record, backend, result,
                                                             time_limit=time_limit, seed=seed, workers=workers,
                                                             should_stop=stop.is_set)
+            starts = int({**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
+                         .get("starts", 1))
+            if backend.name == "ipopt" and starts > 1 and result.objective is not None and not stop.is_set():
+                # The best of several local optima says nothing about the rest: SCIP's
+                # global bound beside it says how far any answer could still improve.
+                result, bound_record = _global_bound(solving_model, found, result, time_limit=time_limit,
+                                                     seed=seed, workers=workers, should_stop=stop.is_set)
         except _Answered:
             pass
         except (Unsupported, sandbox.SandboxFailed, stochastic_rows.NotStochastic) as exc:
@@ -1399,6 +1407,8 @@ def _execute(
         extra["lagrangian_bound"] = lagrange_record
     if local_record is not None:
         extra["local_fallback_run"] = local_record
+    if bound_record is not None:
+        extra["global_bound_run"] = bound_record
     if stochastic_record is not None:
         extra["stochastic"] = stochastic_record
     if horizon_record is not None:
@@ -1539,6 +1549,7 @@ def _execute(
             text("UPDATE run SET optimality = :o WHERE id = :r"),
             # A stochastic plan is best for the sampled futures: an estimate, never proven best.
             {"o": "approximate" if stochastic_record is not None and result.status == "optimal"
+             else "global" if (bound_record or {}).get("proven")
              else optimality_of(backend, result.status), "r": run_id},
         )
         if points:
@@ -2014,6 +2025,43 @@ def _local_fallback(compiled, found, backend, result, *, time_limit: float, seed
                        status="optimal" if proven else "feasible", optimal=proven,
                        wall_seconds=round(result.wall_seconds + local.wall_seconds, 3))
     return polished, backend, {**record, "kept": True}
+
+
+#: SCIP's share of the time for a global bound beside IPOPT's multistart (Epic engine, E-2 follow-up).
+BOUND_SHARE = 0.25
+
+
+def _global_bound(compiled, found, result, *, time_limit: float, seed, workers: int, should_stop):
+    """`result` (IPOPT's best of several starts) with SCIP's global bound beside it, and what was tried.
+
+    SCIP gets a share of the time, starting from the answer. Its bound -- no answer can beat it -- becomes
+    the run's; when the answer meets it (within the optimality gap), the answer is proven best, by SCIP.
+    SCIP's own answer is never taken over IPOPT's: the lane asked for is the lane that answers."""
+    from app.solve.backends import SCIP
+
+    if not SCIP.is_available() or found.model_class not in SCIP.classes or (found.needs - SCIP.provides):
+        return result, {"used": False, "why": f"scip cannot take a {found.model_class} model like this"}
+    seconds = max(1.0, BOUND_SHARE * time_limit)
+    try:
+        solved, _ = sandbox.run(
+            "app.solve.sandbox:solve_in_child",
+            {"backend": "scip", "compiled": compiled, "time_limit": seconds, "seed": seed, "workers": workers,
+             "gap_rel": 0.0, "hint": result.assignments or None},
+            time_limit=seconds, workers=workers, should_stop=should_stop,
+        )
+    except (Unsupported, NotContinuous, sandbox.SandboxFailed) as exc:
+        return result, {"used": False, "why": str(exc)}
+    bound = solved.best_bound
+    if bound is None and solved.status == "optimal":
+        bound = solved.objective
+    record: dict[str, Any] = {"used": True, "seconds": seconds, "scip_status": solved.status,
+                              "scip_objective": solved.objective, "bound": bound}
+    if bound is None:
+        return result, {**record, "proven": False}
+    gap = gap_of(result.objective, bound)
+    proven = gap is not None and gap <= OPTIMAL_GAP
+    record.update(gap=gap, proven=proven)
+    return replace(result, best_bound=bound), record
 
 
 def _lagrangian_bound(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):

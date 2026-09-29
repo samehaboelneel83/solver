@@ -17,7 +17,8 @@ from app.solve.backends import IPOPT, by_name
 from app.solve.ipopt import spread
 from app.solve.params import check, parse_setting
 from app.solve.service import solve_compiled
-from tests.test_functions import NO_DATA, X, _ir, fn, plus
+from tests.test_functions import NO_DATA, X, _ir, empty_queue, fn, plus  # noqa: F401
+from tests.test_v1_problem_run import db, make_domain, make_model_version, make_problem  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not IPOPT.is_available(), reason="casadi (IPOPT) is not installed in this image")
 
@@ -75,3 +76,61 @@ def test_starts_is_a_whitelisted_option_with_whitelisted_values():
     assert parse_setting("ipopt.starts=16") == {"ipopt": {"starts": 16}}
     with pytest.raises(ValueError):
         check("ipopt", {"starts": 3})
+
+
+# -- SCIP's global bound beside the best of several starts ---------------------------------------
+
+
+def _bound(result):
+    from app.solve.classify import classify
+    from app.solve.service import _global_bound
+
+    return _global_bound(compile_model(PEAKS, NO_DATA), classify(PEAKS, NO_DATA), result, time_limit=20, seed=1,
+                         workers=2, should_stop=lambda: False)
+
+
+@pytest.mark.skipif(not by_name("scip").is_available(), reason="SCIP is not installed in this image")
+def test_scip_s_bound_proves_the_best_start_best():
+    best = _solve(8)
+    bounded, record = _bound(best)
+    assert record["used"] is True and record["proven"] is True
+    assert bounded.best_bound == pytest.approx(BEST, abs=1e-4) and record["gap"] <= 1e-4
+    # The answer is IPOPT's still: SCIP only says how far any other could be.
+    assert bounded.assignments == best.assignments and bounded.solver == best.solver
+
+
+@pytest.mark.skipif(not by_name("scip").is_available(), reason="SCIP is not installed in this image")
+def test_a_nearer_peak_is_shown_how_far_it_is_from_the_best():
+    near = _solve(None)
+    bounded, record = _bound(near)
+    assert record["proven"] is False
+    assert bounded.best_bound == pytest.approx(BEST, abs=1e-4)
+    assert record["gap"] == pytest.approx((BEST - near.objective) / near.objective, rel=1e-3)
+
+
+@pytest.mark.skipif(not by_name("scip").is_available(), reason="SCIP is not installed in this image")
+def test_a_multistart_run_proven_by_scip_s_bound_claims_the_global_optimum(db, empty_queue):  # noqa: F811
+    from sqlalchemy import text
+
+    from app.solve.service import claim_next, enqueue_run, execute_run
+
+    problem = make_problem(db, make_domain(db, "multistart-bound"))
+    version = make_model_version(db, problem, PEAKS)
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+                          {"p": problem, "v": version}).scalar_one()
+    db.execute(text("INSERT INTO setting (scope, scope_id, key, value)"
+                    " VALUES ('problem', :p, 'solve.solver_params', to_jsonb('ipopt.starts=8'::text))"), {"p": problem})
+    db.commit()
+    try:
+        run_id = enqueue_run(db, scenario, time_limit=20.0, reuse=False, solver="ipopt")
+        claim_next(db)
+        assert execute_run(db, run_id).status == "optimal"
+        row = db.execute(text("SELECT optimality, best_bound, gap, params FROM run WHERE id = :r"),
+                         {"r": run_id}).mappings().one()
+        assert row["optimality"] == "global"
+        assert float(row["best_bound"]) == pytest.approx(BEST, abs=1e-4)
+        assert row["params"]["global_bound_run"]["proven"] is True
+    finally:
+        db.execute(text("DELETE FROM setting WHERE scope = 'problem' AND scope_id = :p"), {"p": problem})
+        db.execute(text("DELETE FROM run"))
+        db.commit()

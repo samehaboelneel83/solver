@@ -35,6 +35,11 @@ WHITELIST: dict[str, dict[str, tuple[Any, ...]]] = {
         # the best local optimum kept. 1 is IPOPT as it always ran.
         "starts": (1, 4, 8, 16, 32),
     },
+    "benders": {
+        # Pareto cuts (Papadakos's Magnanti-Wong): each round also prices a core point
+        # inside the master's box and adds that cut too -- fewer rounds, one more LP each.
+        "pareto_cuts": ("off", "on"),
+    },
     "scip": {
         # SCIP's own emphasis settings for presolve and for heuristics.
         "presolving": ("default", "aggressive", "fast"),

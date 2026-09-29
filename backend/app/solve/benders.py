@@ -33,6 +33,17 @@ minimised), which is zero exactly where an answer exists::
 Both come from row duals alone -- the bounds on the continuous decisions stay
 in the subproblem and need no dual of their own.
 
+**Stronger cuts** (option `pareto_cuts=on`). The cut at `ȳ` is one of many
+with the same value there when the subproblem's duals are not unique, and a
+weak one lets the master propose nearly the same `y` again. Magnanti and Wong's
+remedy is the cut that is also deepest at a *core point* `y⁰` inside the
+master's box; Papadakos showed the subproblem solved at `y⁰` alone gives a
+cut with that strength, valid for the same reason every cut here is (`v` is
+convex, so its slope at any point bounds it everywhere). So each round also
+solves the subproblem at `y⁰` and adds that cut, then moves `y⁰` halfway to
+`ȳ`. It costs one more LP a round and usually saves rounds; it is an option,
+off until the benchmark gate measures it (`app.solve.params`).
+
 **What it takes.** A linear, mixed model -- whole-number and continuous
 decisions both, the goal and every rule linear -- with the continuous part
 bounded in the direction the goal pushes it (the master needs a floor for
@@ -107,6 +118,9 @@ def solve(
         return _blank("unknown")
     if not highs.available():
         raise RuntimeError("benders needs highs, which is not available in this build")
+    from app.solve.params import check as check_params
+
+    pareto = check_params("benders", solver_params).get("pareto_cuts", "off") == "on"
     return highs._in_child(
         {
             "mode": "benders",
@@ -116,6 +130,7 @@ def solve(
             "seed": seed,
             "gap_rel": gap_rel,
             "progress": on_progress is not None,
+            "pareto": pareto,
         },
         time_limit=time_limit,
         should_stop=should_stop,
@@ -158,6 +173,7 @@ def solve_in_process(
     seed: int | None = None,
     gap_rel: float = 0.0,
     progress: bool = False,
+    pareto: bool = False,
 ) -> Solution:
     """Called only from `highs_worker`, in a process that has never imported ortools."""
     import highspy
@@ -276,9 +292,25 @@ def solve_in_process(
                               "bound": None if bound is None or not math.isfinite(bound) else bound * sign}),
                   flush=True)
 
+    # The core point for Pareto cuts: the middle of each whole-number decision's range to start.
+    core = np.array([(lo + hi) / 2 if math.isfinite(lo) and math.isfinite(hi) else lo if math.isfinite(lo)
+                     else hi if math.isfinite(hi) else 0.0 for lo, hi in zip(ylo, yhi)])
+
+    def core_cut() -> bool:
+        """The subproblem at the core point, and its cut when it has an answer there."""
+        moved_core = shift(core)
+        if nrows:
+            sub.h.changeRowsBounds(nrows, np.arange(nrows, dtype=np.int32), row_lo - moved_core, row_hi - moved_core)
+        if sub.run(time_limit - (time.monotonic() - started)) != "optimal":
+            return False
+        g, rhs = cut(list(sub.h.getSolution().row_dual), sub.h.getObjectiveValue(), core)
+        index = np.append(np.nonzero(g)[0], ny).astype(np.int32)
+        m.addRow(rhs, inf, len(index), index, np.append(g[np.nonzero(g)[0]], 1.0))
+        return True
+
     best_ub, best_y, best_x = math.inf, None, None
     lb = -math.inf
-    rounds = optimality = feasibility = 0
+    rounds = optimality = feasibility = strengthened = 0
     status = None
     previous = signal.signal(signal.SIGTERM, signal.default_int_handler)
     tolerance = max(float(gap_rel), _GAP)
@@ -347,6 +379,10 @@ def solve_in_process(
             if best_y is not None and best_ub - lb <= tolerance * max(1.0, abs(best_ub)):
                 status = "optimal"
                 break
+            if pareto and time_limit - (time.monotonic() - started) > 0:
+                if core_cut():
+                    strengthened += 1
+                core = (core + ybar) / 2
     except KeyboardInterrupt:
         # Asked to stop (the parent's SIGTERM): keep the best answer found.
         pass
@@ -356,6 +392,8 @@ def solve_in_process(
     wall = time.monotonic() - started
     name = (f"benders (highs {_HIGHS_VERSION}): {rounds} rounds, {optimality} optimality "
             f"and {feasibility} feasibility cuts")
+    if pareto:
+        name += f", {strengthened} from the core point"
     if best_y is None:
         return _blank(status if status in ("infeasible", "unbounded") else "unknown", wall, name)
     if status == "unbounded":

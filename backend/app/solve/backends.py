@@ -512,7 +512,7 @@ def _benders_solve(
     from app.solve import benders
 
     return benders.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
-                         gap_rel=gap_rel, on_progress=on_progress)
+                         gap_rel=gap_rel, on_progress=on_progress, solver_params=solver_params)
 
 
 BENDERS = Backend(

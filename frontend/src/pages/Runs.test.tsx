@@ -993,6 +993,15 @@ describe("the learned selector's record (queue R11)", () => {
   });
 });
 
+describe("SCIP's bound beside a multistart", () => {
+  it("says how far a local optimum may be from the best, or that it is proven", () => {
+    expect(statusNote({ status: "optimal", optimality: "local", params: { global_bound_run: { used: true, proven: false, gap: 0.2 } } }))
+      .toMatch(/^The best answer from several starts -- a local optimum, at most 20% worse than the best possible, by SCIP's global bound/);
+    expect(statusNote({ status: "optimal", optimality: "global", params: { global_bound_run: { used: true, proven: true, gap: 0 } } }))
+      .toMatch(/SCIP's global bound shows no answer does better/);
+  });
+});
+
 describe("alternative plans (Epic engine E-1)", () => {
   it("says how many came within the gap, or why none were looked for", async () => {
     const { alternativesText } = await import("./Runs");

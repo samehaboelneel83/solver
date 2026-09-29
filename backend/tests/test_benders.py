@@ -132,3 +132,31 @@ def test_a_model_it_cannot_split_is_refused_with_the_reason(change, reason):
     ir = _facility(0)
     change(ir)
     assert reason in refuse(compile_model(ir, {}))
+
+
+def _rounds(result) -> int:
+    return int(result.solver.split(": ")[1].split(" rounds")[0])
+
+
+def test_pareto_cuts_prove_the_same_optimum_in_no_more_rounds():
+    fewer = 0
+    for seed in range(6):
+        compiled = compile_model(_facility(seed), {})
+        plain, _ = solve_compiled(by_name("benders"), compiled, time_limit=30, seed=1)
+        strong, _ = solve_compiled(by_name("benders"), compiled, time_limit=30, seed=1,
+                                   solver_params={"pareto_cuts": "on"})
+        assert strong.status == "optimal" and float(strong.objective) == pytest.approx(float(plain.objective), rel=1e-9)
+        assert "from the core point" in strong.solver and "core point" not in plain.solver
+        assert _rounds(strong) <= _rounds(plain), (seed, plain.solver, strong.solver)
+        fewer += _rounds(strong) < _rounds(plain)
+    # Measured on these six: seeds 3 and 5 need two rounds fewer.
+    assert fewer >= 1
+
+
+def test_pareto_cuts_are_a_whitelisted_option_off_by_default():
+    from app.solve.params import ENABLED, check
+
+    assert check("benders", {"pareto_cuts": "on"}) == {"pareto_cuts": "on"}
+    assert "benders" not in ENABLED
+    with pytest.raises(ValueError):
+        check("benders", {"pareto_cuts": "yes"})

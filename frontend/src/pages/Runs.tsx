@@ -282,6 +282,17 @@ export function statusNote(run: {
       "an exact solver proves the optimum when the model is small enough."
     );
   }
+  const bounded = (run.params as { global_bound_run?: { used?: boolean; proven?: boolean; gap?: number | null } } | undefined)
+    ?.global_bound_run;
+  if (run.status === "optimal" && run.optimality === "global" && bounded?.proven) {
+    return "Best possible answer, proven: the best of several starts, and SCIP's global bound shows no answer does better.";
+  }
+  if (run.status === "optimal" && run.optimality === "local" && bounded?.used && typeof bounded.gap === "number") {
+    return (
+      `The best answer from several starts -- a local optimum, at most ${formatGap(bounded.gap)} worse than the best possible, ` +
+      "by SCIP's global bound. A longer time limit lets SCIP narrow that."
+    );
+  }
   if (run.status === "optimal" && run.optimality === "local") {
     return "The best answer near where the search looked -- not proven the best overall. A better one may exist; solving from another start, or with a global solver, is how to find out.";
   }
