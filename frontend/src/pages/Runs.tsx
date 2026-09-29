@@ -686,10 +686,11 @@ function ScenarioRuns({
           </p>
         )}
         {can("solver.configure") && (
-        <label className="text-sm text-slate-600">
-          <span className="mr-2">Solver</span>
+        <label className="flex min-w-0 max-w-full items-center text-sm text-slate-600">
+          <span className="mr-2 shrink-0">Solver</span>
+          {/* A long "why not" option must not push the select past a phone's edge (operator trial F33). */}
           <select
-            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+            className="min-w-0 max-w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
             value={solver}
             onChange={(event) => setSolver(event.target.value)}
           >

@@ -60,6 +60,7 @@ export default function Dashboard() {
   const { hash } = useLocation();
   const templates = useTemplates();
   const apply = useApplyTemplate();
+  const [naming, setNaming] = useState<{ id: number; template: string; problem: string; domain: string } | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const {
     data: recentProblems,
@@ -185,23 +186,9 @@ export default function Dashboard() {
                         navigate(`/model?problem=${existing.id}`);
                         return;
                       }
+                      // Ask for the names first: a template makes a problem (and maybe a domain) (operator trial F3).
                       setTemplateError(null);
-                      apply.mutate(
-                        {
-                          id: row.id,
-                          body:
-                            domainId !== null
-                              ? { domain_id: domainId }
-                              : { domain_name: row.name },
-                        },
-                        {
-                          onSuccess: (created) => {
-                            setDomainId(Number(created.domain_id));
-                            navigate(`/model?problem=${created.problem_id}`);
-                          },
-                          onError: (error: unknown) => setTemplateError(formatApiError(error)),
-                        }
-                      );
+                      setNaming({ id: row.id, template: row.name, problem: row.name, domain: row.name });
                     }}
                   >
                     <span className={HOME_ICON} aria-hidden="true"><LayoutTemplate size={16} /></span>
@@ -217,6 +204,54 @@ export default function Dashboard() {
               );
             })}
           </ul>
+          {naming && (
+            <form
+              aria-label={`Start from ${naming.template}`}
+              className="mt-3 max-w-lg space-y-3 rounded-md border border-slate-200 bg-white p-3 text-sm"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const problem = naming.problem.trim() || naming.template;
+                apply.mutate(
+                  {
+                    id: naming.id,
+                    body: domainId !== null
+                      ? { domain_id: domainId, name: problem }
+                      : { domain_name: naming.domain.trim() || naming.template, name: problem },
+                  },
+                  {
+                    onSuccess: (created) => {
+                      setNaming(null);
+                      setDomainId(Number(created.domain_id));
+                      navigate(`/model?problem=${created.problem_id}`);
+                    },
+                    onError: (error: unknown) => setTemplateError(formatApiError(error)),
+                  }
+                );
+              }}
+            >
+              <p className="text-slate-700">
+                {domainId !== null
+                  ? `This makes a problem in the current domain, with ${naming.template}'s starting model and a scenario to solve.`
+                  : `This makes a domain (a business area), a problem in it with ${naming.template}'s starting model, and a scenario to solve.`}
+              </p>
+              {domainId === null && (
+                <label className="block">Name of the business area
+                  <input className="mt-1 block w-full rounded-md border border-slate-300 px-2 py-1" value={naming.domain}
+                    onChange={(e) => setNaming({ ...naming, domain: e.target.value })} />
+                </label>
+              )}
+              <label className="block">Name of the problem
+                <input className="mt-1 block w-full rounded-md border border-slate-300 px-2 py-1" value={naming.problem}
+                  onChange={(e) => setNaming({ ...naming, problem: e.target.value })} />
+              </label>
+              <div className="flex gap-2">
+                <button type="submit" disabled={apply.isPending} className="rounded-md bg-blue-700 px-3 py-1.5 text-white disabled:opacity-50">
+                  {apply.isPending ? "Creating…" : "Create"}
+                </button>
+                <button type="button" className="rounded-md border border-slate-300 px-3 py-1.5" onClick={() => setNaming(null)}>Cancel</button>
+              </div>
+            </form>
+          )}
           {templateError && (
             <p role="alert" className="mt-2 text-sm text-red-600">
               {templateError}
@@ -252,7 +287,8 @@ export default function Dashboard() {
           <p className="text-sm text-red-600">Failed to load row counts</p>
         ) : counts && counts.length > 0 ? (
           <ul aria-label="Row counts" className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-5">
-            {counts.map((c) => (
+            {/* Users, roles and permissions are the administrator's to count, not a planner's (F23). */}
+            {counts.filter((c) => c.schema !== "iam" || can("iam.manage")).map((c) => (
               <li key={`${c.schema}.${c.table}`}>
                 <Link
                   to={`/${c.schema}/${c.table}`}

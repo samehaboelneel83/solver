@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "./Dashboard";
@@ -50,7 +50,7 @@ function mockDefaultResponses() {
       return Promise.resolve({
         username: "admin",
         display_name: "Administrator",
-        capabilities: ["domain.edit", "model.publish", "run.submit"],
+        capabilities: ["domain.edit", "model.publish", "run.submit", "iam.manage"],
       });
     }
     if (path.startsWith("/api/template")) {
@@ -108,6 +108,17 @@ describe("Dashboard", () => {
     // fan-out (34 calls on a freshly migrated database).
     const countsCalls = (apiFetch as any).mock.calls.filter(([path]: [string]) => path === "/api/meta/counts");
     expect(countsCalls.length).toBe(1);
+  });
+
+  it("leaves users, roles and permissions out of a planner's counts (operator trial F23)", async () => {
+    mockDefaultResponses();
+    const base = (apiFetch as any).getMockImplementation();
+    (apiFetch as any).mockImplementation((path: string) =>
+      path.startsWith("/api/v1/me") ? Promise.resolve({ username: "planner1", capabilities: ["run.submit"] }) : base(path));
+    renderWithProviders();
+
+    expect(await screen.findByRole("link", { name: /entities/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /organizations/i })).not.toBeInTheDocument();
   });
 
   it("renders service health as a single line, not two large infrastructure cards", async () => {
@@ -176,6 +187,31 @@ describe("Dashboard", () => {
 
       expect(await screen.findByRole("button", { name: /start from weekly_rota/i })).toBeInTheDocument();
     });
+
+  it("asks what to call the domain and problem before a template makes them (operator trial F3)", async () => {
+    (apiFetch as any).mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method === "POST") return Promise.resolve({ template_id: 1, domain_id: 4, problem_id: 5, model_version_id: 6, scenario_id: 7 });
+      if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
+      if (path === "/api/meta/counts") return Promise.resolve(counts);
+      if (path.startsWith("/api/problem/")) return Promise.resolve({ items: [], total: 0 });
+      if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "admin", capabilities: ["model.publish"] });
+      if (path.startsWith("/api/template")) {
+        return Promise.resolve({ items: [{ id: 1, name: "weekly_rota", ir_version: "1", domain_seed: {}, default_ir: {} }], total: 1 });
+      }
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    renderWithProviders();
+
+    fireEvent.click(await screen.findByRole("button", { name: /start from weekly_rota/i }));
+    // Nothing is made by the click itself.
+    expect((apiFetch as any).mock.calls.some(([, init]: [string, { method?: string }?]) => init?.method === "POST")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Name of the business area"), { target: { value: "North ward" } });
+    fireEvent.change(screen.getByLabelText("Name of the problem"), { target: { value: "Night rota" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect((apiFetch as any).mock.calls.some(([p]: [string]) => p === "/api/v1/templates/1/apply")).toBe(true));
+    const [, init] = (apiFetch as any).mock.calls.find(([p]: [string]) => p === "/api/v1/templates/1/apply");
+    expect(JSON.parse(init.body)).toEqual({ domain_name: "North ward", name: "Night rota" });
+  });
 
     it("opens an existing weekly rota rather than applying the template twice", async () => {
     localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
