@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from dataclasses import dataclass
@@ -224,9 +225,47 @@ def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, wr
         column = fault.column
         if column in target_to_source:
             column = f"{target_to_source[column]} → {column}"
-        faults.append(bulk.Fault(row=0 if header_fault else fault.row - 1, column=column,
-                                 message=f"mapping: {fault.message}" if header_fault else fault.message))
+        message = f"mapping: {fault.message}" if header_fault else fault.message
+        # A required attribute no column feeds fails every row; say the fix, not only the fact (operator trial F24).
+        unfed = _REQUIRED.search(message)
+        if unfed and unfed.group(1) not in target_to_source:
+            message += f": map a column onto {unfed.group(1)} (each column feeds one target)"
+        faults.append(bulk.Fault(row=0 if header_fault else fault.row - 1, column=column, message=message))
     return report.model_copy(update={"faults": faults}), target
+
+
+_REQUIRED = re.compile(r'attribute "([^"]+)" is required')
+
+
+def _empty(value) -> bool:
+    return value is None or str(value).strip() == ""
+
+
+def _defaults_taken(db: Session, target: Target, mapping: Mapping, records: list[dict]) -> list[dict]:
+    """Where an empty or unmapped value will take a default: no fault, but not what the source said (F25)."""
+    if target.kind == "parameter":
+        parameter = db.get(ParameterDef, target.id)
+        defaults = {"value": parameter.default_value} if parameter is not None else {}
+    else:
+        attributes = (bulk._attributes(db, entity_type_id=target.id) if target.kind == "entity_type"
+                      else bulk._attributes(db, relationship_type_id=target.id))
+        defaults = {a.name: a.default_value for a in attributes if a.default_value is not None}
+    target_to_source = {t: s for s, t in mapping.columns.items()}
+    notices = []
+    for name, default in defaults.items():
+        source = target_to_source.get(name)
+        if source is None:
+            if target.kind != "parameter":
+                notices.append({"column": name, "rows": len(records), "default": default,
+                                "message": f"no column feeds {name}; new records take the default {default}"})
+            continue
+        rows = [i + 1 for i, record in enumerate(records) if _empty(record.get(source))]
+        if rows:
+            shown = ", ".join(str(r) for r in rows[:10]) + ("…" if len(rows) > 10 else "")
+            notices.append({"column": f"{source} → {name}", "rows": len(rows), "default": default,
+                            "message": f"{len(rows)} {'row is' if len(rows) == 1 else 'rows are'} empty (row {shown})"
+                                       f" and will take the default {default}"})
+    return notices
 
 
 def _target_columns(target: Target) -> dict:
@@ -240,6 +279,7 @@ def validate(job_id: int, mapping: Mapping, db: Session = Depends(get_db),
     job = _job(db, job_id, user.organization_id)
     path, manifest = _artifact(job, user.organization_id)
     report, target = _check(db, job, manifest, mapping, path, write=False)
+    notices = _defaults_taken(db, target, mapping, artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS))
     identity = db.execute(text(
         "INSERT INTO import_validation (job_id, entity_type_id, relationship_type_id, parameter_id, mapping, mapping_hash,"
         " artifact_sha256, rows, ok, faults, validated_by) VALUES (:j, :entity_type_id, :relationship_type_id,"
@@ -252,7 +292,8 @@ def validate(job_id: int, mapping: Mapping, db: Session = Depends(get_db),
     mapping_at_fault = any(f.row == 0 for f in report.faults)
     would_write = 0 if mapping_at_fault else report.rows - len({f.row for f in report.faults})
     return {"validation_id": identity, "ok": report.ok, "rows": report.rows, "would_write": would_write,
-            "faults": [f.model_dump() for f in report.faults], "target": target.as_dict(), "noun": target.noun,
+            "faults": [f.model_dump() for f in report.faults], "defaults": notices,
+            "target": target.as_dict(), "noun": target.noun,
             **({"entity_type": target.name} if target.kind == "entity_type" else {}),
             "artifact_sha256": manifest["sha256"], "mapping_hash": mapping_hash(mapping)}
 

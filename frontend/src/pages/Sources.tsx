@@ -205,6 +205,8 @@ type Preview = { columns: string[]; rows_total: number; rows: Record<string, unk
 type Fault = { row: number; column: string | null; message: string };
 type Validation = {
   validation_id: number; ok: boolean; rows: number; would_write: number; faults: Fault[];
+  /** Where a default fills an empty or unmapped value: not a fault, but not what the source said (F25). */
+  defaults?: { column: string; rows: number; default: unknown; message: string }[];
   entity_type?: string; target?: Target; noun?: string; artifact_sha256: string; mapping_hash: string;
 };
 
@@ -360,6 +362,11 @@ export function ImportWizard() {
               <td className="pr-3">{fault.row === 0 ? "mapping" : fault.row}</td><td className="pr-3 font-mono text-xs">{fault.column ?? "—"}</td><td>{fault.message}</td>
             </tr>)}</tbody></table>
         </div>)}
+      {report && (report.defaults?.length ?? 0) > 0 && <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+        <p>Defaults will fill in values the source does not give:</p>
+        <ul aria-label="Defaults applied" className="list-disc pl-5">{report.defaults!.map((d) => <li key={d.column}>
+          <span className="font-mono text-xs">{d.column}</span>: {d.message}</li>)}</ul>
+      </div>}
     </section>
 
     <section aria-labelledby="step-load">

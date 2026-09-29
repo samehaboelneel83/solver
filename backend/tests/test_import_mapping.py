@@ -217,3 +217,35 @@ def test_a_mapping_names_exactly_one_target_of_its_own_domain(extracted, db):  #
     elsewhere = client.post(f"/api/v1/ingestion-jobs/{job_id}/validate",
                             json={"relationship_type_id": 999_999_999, **MAPPING}, headers=tenants["a"])
     assert elsewhere.status_code == 422 and "relationship type of this connection" in elsewhere.text
+
+
+def test_the_check_says_where_a_default_fills_an_empty_value(extracted, db):  # noqa: F811
+    """Operator trial F25: an empty source value that takes the attribute's default is said, not silent."""
+    client, tenants, _, person, job, _ = extracted
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type, default_value)"
+                    " VALUES (:t, 'contract', 'number', '40')"), {"t": person})
+    db.commit()
+    rows = [{"staff_id": "n1", "full_name": "Ada", "hours": "37.5", "grade": 40},
+            {"staff_id": "n2", "full_name": "Ben", "hours": "20", "grade": None}]
+    job_id = job(rows)
+    report = client.post(f"/api/v1/ingestion-jobs/{job_id}/validate",
+                         json={"entity_type_id": person, "columns": {**MAPPING["columns"], "grade": "contract"}},
+                         headers=tenants["a"]).json()
+    assert report["ok"] is True
+    assert report["defaults"] == [{"column": "grade → contract", "rows": 1, "default": 40,
+                                   "message": "1 row is empty (row 2) and will take the default 40"}]
+    unmapped = client.post(f"/api/v1/ingestion-jobs/{job_id}/validate", json={"entity_type_id": person, **MAPPING},
+                           headers=tenants["a"]).json()
+    assert unmapped["defaults"][0]["message"] == "no column feeds contract; new records take the default 40"
+
+
+def test_a_required_attribute_no_column_feeds_says_the_fix(extracted, db):  # noqa: F811
+    """Operator trial F24: 'is required' on every row also says to map a column onto it."""
+    client, tenants, _, person, job, _ = extracted
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type, required)"
+                    " VALUES (:t, 'band', 'number', true)"), {"t": person})
+    db.commit()
+    report = client.post(f"/api/v1/ingestion-jobs/{job(GOOD)}/validate", json={"entity_type_id": person, **MAPPING},
+                         headers=tenants["a"]).json()
+    assert report["ok"] is False
+    assert all("map a column onto band" in f["message"] for f in report["faults"]), report["faults"]
