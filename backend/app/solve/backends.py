@@ -468,7 +468,7 @@ def _ipopt_solve(
     from app.solve import ipopt
 
     return ipopt.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
-                       gap_rel=gap_rel, on_progress=on_progress, hint=hint)
+                       gap_rel=gap_rel, on_progress=on_progress, hint=hint, solver_params=solver_params)
 
 
 def _ipopt_available() -> bool:
@@ -496,6 +496,47 @@ IPOPT = Backend(
     note="IPOPT (interior point); the best answer near where it starts -- a local optimum, never proven best",
     planner_choice="A local nonlinear solver will take this; its answer is the best nearby, not proven the best.",
 )
+
+def _benders_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+    seed: int | None = None,
+    gap_rel: float = 0.0,
+    on_progress=None,
+    hint: dict | None = None,
+    solver_params: dict | None = None,
+) -> Solution:
+    from app.solve import benders
+
+    return benders.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+                         gap_rel=gap_rel, on_progress=on_progress)
+
+
+BENDERS = Backend(
+    name="benders",
+    # A mixed model only: the whole-number decisions go to the master, the
+    # continuous ones to the subproblem (`app.solve.benders`). Curves and
+    # conditional rules arrive as linear rows (`solve_compiled` rewrites them).
+    classes=frozenset({"MILP"}),
+    provides=frozenset(
+        {"linear", "integral", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints",
+         "indicator-bounded", "pwl", "pwl-convex"}
+    ),
+    rank=8,
+    solve=_benders_solve,
+    # The loop ends when the master's bound meets the best answer: a global optimum.
+    proves="global",
+    is_available=_highs_available,
+    note="Benders decomposition over HiGHS; for a mixed model whose continuous part is large and easy once the "
+         "whole-number decisions are fixed",
+    planner_choice="A decomposition solver will take this; asked for by name.",
+    # By name only: on most mixed models HiGHS's own branch and cut is faster.
+    automatic=False,
+)
+
 
 def _evolve(method: str):
     def run(compiled: Compiled, *, time_limit: float, workers: int, should_stop: ShouldStop | None = None,
@@ -549,7 +590,7 @@ GA = Backend(
     planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
 )
 
-BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA)
+BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS)
 
 
 def _with_adapters() -> tuple[Backend, ...]:

@@ -30,6 +30,14 @@ there is no core -- the relaxation is feasible and only the whole-number
 model is not, or HiGHS cannot take the model -- the full search runs, as it
 always did.
 
+**QuickXplain on large sets** (Epic engine, E-5). The deletion filter asks
+one probe per candidate, which is hundreds on a model whose infeasibility
+spans many instances. Above `QUICK_ABOVE` candidates the filter is Junker's
+QuickXplain instead: split the candidates in halves and recurse, so a
+conflict of k members among n is found in about k log(n/k) probes. Its
+result is irreducible in the same sense, and a probe that cannot decide
+stops it the same way, reporting the whole candidate set as not minimal.
+
 **The honest part.** Each probe is a solve, so this is bounded by a budget,
 and a probe can time out without deciding. Either way the search stops early
 and reports what it has with `minimal = False`: a *superset* of a conflict,
@@ -53,6 +61,10 @@ SolveFn = Callable[..., Solution]
 #: Probes per diagnosis. A probe is a full solve, so the cost of an
 #: explanation is bounded rather than proportional to the model.
 DEFAULT_BUDGET = 200
+
+#: Above this many candidates the filter splits them (QuickXplain) instead of
+#: dropping one at a time: fewer probes when a conflict is small among many.
+QUICK_ABOVE = 12
 
 #: Per-probe seconds. A probe only asks "does any answer exist", which is far
 #: cheaper than optimising, so it gets a short clock of its own.
@@ -160,7 +172,50 @@ def explain(
     return done(needed, stopped, "deletion")
 
 
+class _Undecided(Exception):
+    """A probe could not decide: the search stops where it is."""
+
+
 def _filter(candidates: list, still_infeasible: Callable[[list], bool | None]) -> tuple[list, bool]:
+    """What survives the filter, and whether it was cut short: QuickXplain
+    above `QUICK_ABOVE` candidates, the one-at-a-time deletion filter below."""
+    if len(candidates) > QUICK_ABOVE:
+        return _quick(candidates, still_infeasible)
+    return _delete(candidates, still_infeasible)
+
+
+def _quick(candidates: list, still_infeasible: Callable[[list], bool | None]) -> tuple[list, bool]:
+    """Junker's QuickXplain over positions (not values, for the reason
+    `_delete` gives). `candidates` as a whole is infeasible -- the caller has
+    shown it -- and what comes back is an irreducible subset of them."""
+
+    def infeasible(positions: list[int]) -> bool:
+        verdict = still_infeasible([candidates[i] for i in sorted(positions)])
+        if verdict is None:
+            raise _Undecided
+        return verdict
+
+    def explain(background: list[int], added: bool, rest: list[int]) -> list[int]:
+        # Something was just added to the background and it already fails
+        # on its own: nothing of `rest` is needed.
+        if added and background and infeasible(background):
+            return []
+        if len(rest) == 1:
+            return rest
+        half = len(rest) // 2
+        first, second = rest[:half], rest[half:]
+        needed_second = explain(background + first, bool(first), second)
+        needed_first = explain(background + needed_second, bool(needed_second), first)
+        return needed_first + needed_second
+
+    try:
+        kept = sorted(explain([], False, list(range(len(candidates)))))
+    except _Undecided:
+        return list(candidates), True
+    return [candidates[i] for i in kept], False
+
+
+def _delete(candidates: list, still_infeasible: Callable[[list], bool | None]) -> tuple[list, bool]:
     """The deletion filter. Returns what survives, and whether the search was
     cut short before proving irreducibility.
 

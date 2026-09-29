@@ -18,6 +18,7 @@ useScenario,
   useSolvers,
   type ConflictItem,
   type ModelStructure,
+  type AlternativePlan,
   type ParetoPoint,
   type ConstraintOutcome,
   type Id,
@@ -118,11 +119,16 @@ export function stochasticOutlook(record: StochasticRecord): string {
 }
 
 /** The learned selector's record on a run (queue R11): its pick beside the solver that ran. */
-export type SelectorRecord = { pick: string; confidence: number; confident: boolean; like: string[]; chosen: string; agree: boolean };
+export type SelectorRecord = {
+  pick: string; confidence: number; confident: boolean; like: string[]; chosen: string; agree: boolean;
+  /** It chose the solver (setting `solve.selector_acts`, Epic engine E-4), over `rules_chose`. */
+  acted?: boolean; rules_chose?: string;
+};
 
-/** In a few words -- it records, it never chooses. */
+/** In a few words: what it would pick, or -- when allowed to act -- what it picked over the rules. */
 export function selectorText(record: SelectorRecord): string {
   const vote = `${Math.round(record.confidence * 100)}% of its nearest models`;
+  if (record.acted) return `picked ${record.pick} over the rules' ${record.rules_chose} (${vote}, like ${record.like.join(", ")})`;
   return record.agree
     ? `would also pick ${record.pick} (${vote}, like ${record.like.join(", ")})`
     : `would pick ${record.pick} instead of ${record.chosen} (${vote}, like ${record.like.join(", ")})`;
@@ -475,6 +481,10 @@ function ScenarioRuns({
   // A trade-off front needs a goal of exactly two terms (app.solve.pareto).
   const twoGoals =
     ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length === 2;
+  // Alternatives are told apart by yes-or-no decisions (app.solve.alternatives).
+  const hasChoices = Object.values(
+    ((version.data?.ir as { variables?: Record<string, { domain?: string }> } | undefined)?.variables ?? {})
+  ).some((spec) => (spec.domain ?? "binary") === "binary");
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: 0 });
@@ -523,7 +533,7 @@ function ScenarioRuns({
   const comparable = items.filter((row) => row.id !== selected);
   const against = comparable.some((row) => row.id === againstId) ? againstId : null;
 
-  function solve(how: "plain" | "front" | "robust" = "plain") {
+  function solve(how: "plain" | "front" | "robust" | "alternatives" = "plain") {
     setFailure(null);
     createRun.mutate(
       {
@@ -533,6 +543,7 @@ function ScenarioRuns({
           ...(solver ? { solver } : {}),
           ...(how === "front" ? { pareto_steps: 10 } : {}),
           ...(how === "robust" ? { robust: true } : {}),
+          ...(how === "alternatives" ? { alternatives: ALTERNATIVES, alternatives_within: 0.05 } : {}),
         },
       },
       {
@@ -581,6 +592,16 @@ function ScenarioRuns({
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Show the trade-off between its two goals
+            </button>
+          )}
+          {hasChoices && (
+            <button
+              type="button"
+              onClick={() => solve("alternatives")}
+              disabled={createRun.isPending}
+              className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+            >
+              Solve, with {ALTERNATIVES} alternative plans
             </button>
           )}
           {uncertain && (
@@ -1017,6 +1038,33 @@ function RunDetail({
         </p>
       )}
 
+      {(data.alternatives?.length || (data.params as { alternatives_result?: unknown }).alternatives_result) && (
+        <Alternatives
+          plans={data.alternatives ?? []}
+          result={(data.params as { alternatives_result?: AlternativesResult }).alternatives_result}
+          best={data.objective}
+          onOpen={onOpen}
+        />
+      )}
+      {(data.params as { alternative_of?: number }).alternative_of != null && (
+        <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">
+          Alternative plan {String((data.params as { alternative?: number }).alternative ?? "")} of run{" "}
+          {String((data.params as { alternative_of: number }).alternative_of)}.
+          {onOpen && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => onOpen((data.params as { alternative_of: number }).alternative_of)}
+              >
+                Back to the best plan
+              </button>
+            </>
+          )}
+        </p>
+      )}
+
       {data.conflict && data.conflict.length > 0 && (
         <Conflict
           runId={data.id}
@@ -1105,7 +1153,7 @@ function RunDetail({
           <Fact label="Solver" value={data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
-          {params.selector && <Fact label="Learned selector (not acting)" value={selectorText(params.selector)} />}
+          {params.selector && <Fact label={params.selector.acted ? "Learned selector (chose the solver)" : "Learned selector (not acting)"} value={selectorText(params.selector)} />}
           {params.structure && params.structure.blocks > 1 && (
             <Fact label="How it splits" value={structureText(params.structure)} />
           )}
@@ -1357,7 +1405,63 @@ const FRONT = { width: 420, height: 240, pad: 44 };
  * neither goal can improve on without the other giving way. Each point is
  * its own run -- the chart and the list under it open it.
  */
-export function TradeOff({
+export /** How many next-best plans the Solve button asks for. */
+const ALTERNATIVES = 5;
+
+/** What the worker wrote about the alternatives it looked for (Epic engine E-1). */
+export type AlternativesResult = { asked: number; within: number; found?: number; note?: string; skipped?: string };
+
+/** In a few words: how many were found within the gap, or why none were looked for. */
+export function alternativesText(result: AlternativesResult | undefined, found: number): string {
+  if (result?.skipped) return `No alternatives listed: ${result.skipped}.`;
+  const gap = result ? `${Math.round(result.within * 1000) / 10}%` : "the gap";
+  if (found === 0) return `No other plan comes within ${gap} of the best.`;
+  const asked = result && found < result.asked ? ` (of ${result.asked} asked for; no more come within ${gap})` : "";
+  return `${found} next-best ${found === 1 ? "plan" : "plans"} within ${gap} of the best${asked}, each differing from every other in at least one yes-or-no decision.`;
+}
+
+export function Alternatives({
+  plans,
+  result,
+  best,
+  onOpen,
+}: {
+  plans: AlternativePlan[];
+  result?: AlternativesResult;
+  best: number | null;
+  onOpen?: (id: Id) => void;
+}) {
+  return (
+    <section aria-label="Alternative plans" className="mb-4 rounded border border-slate-200 p-3 text-sm">
+      <h3 className="mb-1 font-medium text-slate-800">Alternative plans</h3>
+      <p className="mb-2 text-slate-600">{alternativesText(result, plans.length)}</p>
+      {plans.length > 0 && (
+        <ol className="space-y-1">
+          {plans.map((plan) => (
+            <li key={plan.seq} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">Plan {plan.seq + 1}</span>
+              <span>
+                goal {plan.objective}
+                {best != null && ` (${plan.objective - best >= 0 ? "+" : ""}${Math.round((plan.objective - best) * 1e6) / 1e6})`}
+              </span>
+              <span className="text-slate-600">
+                {plan.changed} {plan.changed === 1 ? "decision differs" : "decisions differ"} from the best
+                {plan.status === "feasible" ? "; not proven the next best" : ""}
+              </span>
+              {onOpen && plan.run_id != null && (
+                <button type="button" className="underline" onClick={() => onOpen(plan.run_id as Id)}>
+                  Open
+                </button>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function TradeOff({
   points,
   terms,
   onOpen,

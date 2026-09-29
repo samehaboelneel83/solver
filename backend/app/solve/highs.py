@@ -613,22 +613,7 @@ def _add_rows(highspy, solver, constraints: list[Constraint], position: dict) ->
     inf = highspy.kHighsInf
     lower, upper, starts, index, values, ids = [], [], [], [], [], []
     for c in constraints:
-        if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
-            raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
-        if c.when is not None:  # pragma: no cover -- `indicator` keeps it away
-            raise ValueError(f"{c.id!r} is a conditional rule, which this backend cannot take")
-        coeffs: dict = dict(c.left.coeffs)
-        for key, coeff in c.right.coeffs.items():
-            coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
-        rhs = float(c.right.const - c.left.const)
-        low, high = {
-            ">=": (rhs, inf),
-            "<=": (-inf, rhs),
-            "=": (rhs, rhs),
-            "==": (rhs, rhs),
-            "<": (-inf, rhs - 1),
-            ">": (rhs + 1, inf),
-        }[c.relation]
+        coeffs, low, high = row_of(c, inf)
         starts.append(len(index))
         for key, coeff in coeffs.items():
             if coeff:
@@ -648,6 +633,28 @@ def _add_rows(highspy, solver, constraints: list[Constraint], position: dict) ->
             np.array(values, dtype=np.float64),
         )
     return ids
+
+
+def row_of(c: Constraint, inf: float) -> tuple[dict, float, float]:
+    """A linear rule as `low <= sum(coeff * var) <= high`: both sides' terms
+    on the left, both constants on the right. Shared with `app.solve.benders`."""
+    if c.quadratic:  # pragma: no cover -- `quadratic-constraints` keeps it away
+        raise ValueError(f"{c.id!r} is a quadratic rule, which this backend cannot take")
+    if c.when is not None:  # pragma: no cover -- `indicator` keeps it away
+        raise ValueError(f"{c.id!r} is a conditional rule, which this backend cannot take")
+    coeffs: dict = dict(c.left.coeffs)
+    for key, coeff in c.right.coeffs.items():
+        coeffs[key] = coeffs.get(key, Decimal(0)) - coeff
+    rhs = float(c.right.const - c.left.const)
+    low, high = {
+        ">=": (rhs, inf),
+        "<=": (-inf, rhs),
+        "=": (rhs, rhs),
+        "==": (rhs, rhs),
+        "<": (-inf, rhs - 1),
+        ">": (rhs + 1, inf),
+    }[c.relation]
+    return coeffs, low, high
 
 
 def _set_objective(highspy, solver, compiled: Compiled, position: dict, sign: float) -> None:

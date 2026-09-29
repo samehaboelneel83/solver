@@ -381,6 +381,24 @@ def pareto_in_child(*, backend: str, compiled, steps: int, time_limit: float, se
     return front(chosen, compiled, steps=steps, time_limit=time_limit, solve=solve)
 
 
+def alternatives_in_child(*, backend: str, compiled, best, count: int, within: float, time_limit: float, seed,
+                          workers: int, gap_rel: float, should_stop, on_progress):
+    """`alternatives.find` (Epic engine, E-1), by backend name: every solve of it is `solve_compiled`,
+    in this one child."""
+    from app.solve.alternatives import find
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    chosen = by_name(backend)
+
+    def solve(model, limit):
+        return solve_compiled(chosen, model, time_limit=limit, seed=seed, should_stop=should_stop,
+                              workers=workers, gap_rel=gap_rel)[0]
+
+    return find(compiled, solve, best, count=count, within=within, time_limit=time_limit,
+                should_stop=should_stop)
+
+
 def lns_in_child(*, backend: str, compiled, time_limit: float, seed, workers: int, gap_rel: float,
                  should_stop, on_progress, symmetry=False):
     """The large-neighbourhood search (app.solve.lns) in one child: every neighbourhood's solve

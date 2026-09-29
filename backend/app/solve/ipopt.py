@@ -10,6 +10,15 @@ with a warning and never called optimal), ranked after SCIP so it is never
 chosen over a global solver on its own: it is asked for by name, or takes
 over when SCIP ends with nothing (setting `solve.local_fallback`).
 
+**Multistart** (Epic engine, E-2). IPOPT's answer depends on where it
+starts. With the whitelisted option `starts` (`ipopt.starts=8` in the setting
+`solve.solver_params`, or a run's own solver options), the time is split
+over that many starts: the first from the hint or the middle of each range
+as before, the rest spread over the bounds by Latin hypercube sampling (seeded,
+so a rerun repeats it). The best answer that keeps every rule wins. It is
+still a local optimum -- the best of several nearby ones -- and says so; the
+run records how many starts found an answer.
+
 Continuous models only -- a whole-number decision has no slope. IPOPT's
 "the problem is infeasible" is as local as its optimum (it found no way
 downhill to feasibility from where it started), so it is reported as no
@@ -71,7 +80,10 @@ def solve(
 ) -> Solution:
     import casadi as ca
 
+    from app.solve.params import check as check_params
+
     _check(compiled)
+    starts = int(check_params("ipopt", solver_params).get("starts", 1))
     started = time.monotonic()
     keys = list(compiled.variables)
     position = {key: i for i, key in enumerate(keys)}
@@ -119,44 +131,88 @@ def solve(
             value = 0.0
         return min(max(value, lower_x[i]), upper_x[i])
 
+    per_start = max(0.1, float(time_limit) / starts)
     options = {"print_time": False, "ipopt.print_level": 0, "ipopt.sb": "yes",
-               "ipopt.max_wall_time": max(0.1, float(time_limit))}
+               "ipopt.max_wall_time": per_start}
     problem = {"x": x, "f": goal}
     if rows:
         problem["g"] = ca.vertcat(*rows)
     solver = ca.nlpsol("platform", "ipopt", problem, options)
-    arguments = {"x0": [start(i) for i in range(len(keys))], "lbx": lower_x, "ubx": upper_x}
-    if rows:
-        arguments.update(lbg=lower_g, ubg=upper_g)
-    answer = solver(**arguments)
-    said = solver.stats().get("return_status", "")
-    values = [float(v) for v in ca.DM(answer["x"]).full().flatten()]
+    points = [[start(i) for i in range(len(keys))]] + spread(lower_x, upper_x, starts - 1, seed)
 
-    breach = 0.0
-    if rows:
-        for g, lo, hi in zip((float(v) for v in ca.DM(answer["g"]).full().flatten()), lower_g, upper_g):
-            breach = max(breach, lo - g, g - hi)
-    within = all(lo - FEASIBLE_TOLERANCE <= v <= hi + FEASIBLE_TOLERANCE for v, lo, hi in zip(values, lower_x, upper_x))
-    kept = breach <= FEASIBLE_TOLERANCE and within
-    if said in _LOCAL_OPTIMUM and kept:
-        status = "optimal"  # a local optimum: the backend's `proves="local"` says what it is worth
-    elif said in _STOPPED and kept:
-        status = "feasible"
-    else:
-        # Including "Infeasible_Problem_Detected": a local finding, not a proof.
+    best = None  # (rank, objective, values): an optimum outranks a stopped answer
+    found = 0
+    for x0 in points:
+        if should_stop is not None and should_stop():
+            break
+        if time.monotonic() - started > float(time_limit):
+            break
+        arguments = {"x0": x0, "lbx": lower_x, "ubx": upper_x}
+        if rows:
+            arguments.update(lbg=lower_g, ubg=upper_g)
+        answer = solver(**arguments)
+        said = solver.stats().get("return_status", "")
+        values = [float(v) for v in ca.DM(answer["x"]).full().flatten()]
+        breach = 0.0
+        if rows:
+            for g, lo, hi in zip((float(v) for v in ca.DM(answer["g"]).full().flatten()), lower_g, upper_g):
+                breach = max(breach, lo - g, g - hi)
+        within = all(lo - FEASIBLE_TOLERANCE <= v <= hi + FEASIBLE_TOLERANCE
+                     for v, lo, hi in zip(values, lower_x, upper_x))
+        kept = breach <= FEASIBLE_TOLERANCE and within
+        if not kept or not (said in _LOCAL_OPTIMUM or said in _STOPPED):
+            # Including "Infeasible_Problem_Detected": a local finding, not a proof.
+            continue
+        found += 1
+        rank = 1 if said in _LOCAL_OPTIMUM else 0
+        value = float(ca.DM(answer["f"]).full().flatten()[0])  # minimised: the sense is already folded in
+        if best is None or (rank, -value) > (best[0], -best[1]):
+            best = (rank, value, values)
+
+    if best is None:
         status = "unknown"
-    assignments = {key: round(values[i], 6) for i, key in enumerate(keys)} if status in ("optimal", "feasible") else {}
+    else:
+        status = "optimal" if best[0] == 1 else "feasible"  # a local optimum: `proves="local"` says what it is worth
+    assignments = {key: round(best[2][i], 6) for i, key in enumerate(keys)} if best is not None else {}
     objective = None
     if assignments:
         objective = float(compiled.objective.evaluated_at(assignments)) + sum(
             float(c) * assignments[a] * assignments[b] for (a, b), c in compiled.objective_quadratic.items())
         objective = round(objective, 6)
+    name = f"ipopt (casadi {ca.__version__})"
+    if starts > 1:
+        name += f", best of {found} answers from {len(points)} starts"
     return Solution(
         status=status,
         optimal=status == "optimal",
         objective=objective,
         assignments=assignments,
         wall_seconds=round(time.monotonic() - started, 3),
-        solver=f"ipopt (casadi {ca.__version__})",
+        solver=name,
         best_bound=None,
     )
+
+
+def spread(lower: list[float], upper: list[float], count: int, seed: int | None) -> list[list[float]]:
+    """`count` starting points by Latin hypercube over the bounds: each
+    variable's range cut into `count` slices, one point per slice, the slices
+    shuffled per variable. An infinite side is replaced by a box of 1,000
+    around the finite one (or around zero), which is where a model with no
+    bound usually lives."""
+    import random
+
+    if count <= 0:
+        return []
+    chooser = random.Random(0 if seed is None else int(seed))
+    columns = []
+    for lo, hi in zip(lower, upper):
+        if lo == float("-inf") and hi == float("inf"):
+            lo, hi = -1000.0, 1000.0
+        elif lo == float("-inf"):
+            lo = hi - 1000.0
+        elif hi == float("inf"):
+            hi = lo + 1000.0
+        slices = list(range(count))
+        chooser.shuffle(slices)
+        columns.append([lo + (hi - lo) * (s + chooser.random()) / count for s in slices])
+    return [list(point) for point in zip(*columns)]

@@ -629,6 +629,8 @@ export type Run = RunSummary & {
    * first term, each linked to its run; and the two terms' ids. */
   pareto?: ParetoPoint[] | null;
   pareto_terms?: string[] | null;
+  /** The next-best distinct plans, when asked for (Epic engine E-1): best first, each linked to its run. */
+  alternatives?: AlternativePlan[] | null;
   /** Rules that cannot hold together. Null unless the run was infeasible. */
   conflict: ConflictItem[] | null;
   /** True when every listed rule was shown to be needed, so removing any one
@@ -664,6 +666,18 @@ export type RunRequest = {
   robust?: boolean;
   /** False to solve even when an identical run's answer could be reused. */
   reuse?: boolean;
+  /** List this many next-best distinct plans (1-20), each within `alternatives_within` of the best. */
+  alternatives?: number;
+  alternatives_within?: number;
+};
+
+/** One next-best plan: its goal, how many yes-or-no decisions differ from the best, and its run. */
+export type AlternativePlan = {
+  seq: number;
+  objective: number;
+  changed: number;
+  status: "optimal" | "feasible";
+  run_id: number | null;
 };
 
 /** One point of a run's trade-off front, and the run that holds its answer. */

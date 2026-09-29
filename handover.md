@@ -303,6 +303,21 @@ Plan: [`docs/plans/2026-09-28-enterprise-plan-gap-analysis.md`](docs/plans/2026-
 
 Not done here: quantile forests, classification models, a Predictors page, guided-form patterns.
 
+### 3.12 Epic engine — solver engine additions (2026-09-29, branch `epic/engine`)
+
+Plan: gap analysis rows E-1…E-5. Guide: [`docs/engine.md`](docs/engine.md).
+
+| Item | What it gives | Migration |
+|---|---|---|
+| E-1 Alternative plans | `alternatives` / `alternatives_within` on a run: the k next-best distinct plans within a gap (no-good cuts under a goal bound), each a run of its own; `run_alternative`; Runs page button and list | 0088 |
+| E-2 IPOPT multistart | `ipopt.starts` (whitelisted 1–32): Latin-hypercube starts, best kept, still `local` | — |
+| E-3 Benders | backend `benders` (by name only): HiGHS master/LP subproblem, optimality and feasibility cuts from row duals, proven global optimum | — |
+| E-4 Selector acting | setting `solve.selector_acts`: a confident pick solves the run (explicit > memory > selector > rules), evidence in `why_solver` | 0088 |
+| E-5 QuickXplain | conflict filter splits in halves above 12 candidates | — |
+
+Not done here: diversity-weighted alternatives, alternatives over whole-number (non-binary) decisions,
+a SCIP bound beside multistart, Benders cut strengthening (Pareto-optimal / multi-cut).
+
 ## 4. In progress
 
 Nothing in flight. OAAS first backlog plus HELP01 and P2a (answer shaping) are on master.

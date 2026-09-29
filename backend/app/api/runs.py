@@ -78,6 +78,12 @@ class RunRequest(BaseModel):
     #: declared uncertain within a range must hold for any `gamma` of its
     #: values moving (`app.solve.robust`), and report the price.
     robust: bool = False
+    #: After the answer, list up to this many next-best distinct plans
+    #: (`app.solve.alternatives`): each differs in at least one yes-or-no
+    #: decision and is within `alternatives_within` of the best value.
+    alternatives: Annotated[int, Field(ge=1, le=20)] | None = None
+    #: The gap, as a share of the best value (0.02 is 2%). Only with `alternatives`.
+    alternatives_within: Annotated[float, Field(ge=0, le=1)] | None = None
 
 
 class ConstraintOutcome(BaseModel):
@@ -138,6 +144,17 @@ class RunSummary(BaseModel):
     verdict: dict[str, Any] | None = None
 
 
+class AlternativePlan(BaseModel):
+    """One next-best distinct plan, and the run that holds it (Epic engine)."""
+
+    seq: int
+    objective: float
+    #: How many yes-or-no decisions differ from the best answer.
+    changed: int
+    status: str
+    run_id: int | None
+
+
 class ParetoPoint(BaseModel):
     """One point of a run's trade-off front, and the run that holds it."""
 
@@ -194,6 +211,9 @@ class RunRead(RunSummary):
     # the two terms' ids. Null otherwise.
     pareto: list[ParetoPoint] | None = None
     pareto_terms: list[str] | None = None
+    # The next-best distinct plans, when they were asked for: best first, each
+    # linked to its own run. Null otherwise.
+    alternatives: list[AlternativePlan] | None = None
     # Why there is no answer: rules that cannot hold together. Null unless
     # the run was infeasible.
     conflict: list[ConflictItem] | None
@@ -261,6 +281,19 @@ def create_run(
             return _read(db, int(prior))
 
     request = payload or RunRequest()
+    if request.alternatives_within is not None and not request.alternatives:
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "value_error", "loc": ["body", "alternatives_within"],
+                     "msg": "a gap is given with `alternatives`: how many next-best plans to list", "input": None}],
+        )
+    if request.alternatives and (request.pareto_steps or request.robust):
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "value_error", "loc": ["body", "alternatives"],
+                     "msg": "alternatives are listed for one best answer, not beside a front or a robust answer",
+                     "input": request.alternatives}],
+        )
     # Naming a solver is a separate capability from solving. A planner should
     # be able to ask the question; choosing the technique it is answered with
     # is a decision about the platform, and a run's solver is part of what
@@ -293,6 +326,8 @@ def create_run(
             reuse=request.reuse,
             pareto_steps=request.pareto_steps,
             robust=request.robust,
+            alternatives=request.alternatives,
+            alternatives_within=request.alternatives_within,
             idempotency_key=key,
         )
     except IntegrityError:
@@ -568,7 +603,9 @@ def list_runs(
     # A trade-off front's points are runs of their own, opened from their
     # front's chart; the list shows the run that was asked for.
     # Why-not probes (queue R26) are asked for by `purpose`, not mixed into the plans.
-    not_a_point = and_(Run.params["pareto_of"].is_(None), Run.purpose == purpose)
+    # Alternative plans (Epic engine) are runs of their own too, listed under their run.
+    not_a_point = and_(Run.params["pareto_of"].is_(None), Run.params["alternative_of"].is_(None),
+                       Run.purpose == purpose)
     if parent_run_id is not None:
         not_a_point = and_(not_a_point, Run.parent_run_id == parent_run_id)
     stmt = select(Run).where(not_a_point)
@@ -812,6 +849,17 @@ def _front(db: Session, run: Run) -> dict[str, Any]:
     }
 
 
+def _alternatives(db: Session, run: Run) -> dict[str, Any]:
+    rows = db.execute(
+        text("SELECT seq, objective, changed, status, point_run_id FROM run_alternative WHERE run_id = :r ORDER BY seq"),
+        {"r": run.id},
+    ).all()
+    if not rows:
+        return {}
+    return {"alternatives": [AlternativePlan(seq=r[0], objective=r[1], changed=r[2], status=r[3], run_id=r[4])
+                             for r in rows]}
+
+
 def _read(db: Session, run_id: int) -> RunRead:
     run = db.get(Run, run_id)
     solution = db.scalars(select(Solution).where(Solution.run_id == run_id)).first()
@@ -836,6 +884,7 @@ def _read(db: Session, run_id: int) -> RunRead:
         amounts=solution.amounts if solution else None,
         ranges=solution.ranges if solution else None,
         **_front(db, run),
+        **_alternatives(db, run),
         conflict=run.conflict,
         conflict_minimal=run.conflict_minimal,
         assignments=solution.assignments if solution else None,

@@ -16,11 +16,14 @@ nearest-neighbour pick needs no dependency, no training step, and can say
 examples the bench gives; the roadmap's gradient-boosted classifier waits
 until `run_fact` holds enough real runs to train on.
 
-**Shadow mode.** Every run records the selector's pick beside the rules' --
-agreeing or not, and how sure -- and acts on nothing: the rules' choice
-solves the model. `CONFIDENT` is the vote share a pick needs before it could
-ever be allowed to act, which nothing does yet (`bench.selector` reports
-how often a confident pick would have beaten the rules').
+**Shadow mode, and acting.** Every run records the selector's pick beside
+the rules' -- agreeing or not, and how sure. By default it acts on nothing:
+the rules' choice solves the model. With setting `solve.selector_acts` on
+(migration 0088, Epic engine E-4) a *confident* pick -- `CONFIDENT` of the
+vote -- solves it instead, after an explicit choice and the problem's own
+history (`app.solve.memory`) and before the rules; `evidence` is the reason
+the run records (`bench.selector` reports how often a confident pick beat
+the rules').
 """
 
 from __future__ import annotations
@@ -103,3 +106,10 @@ def predict(fingerprint: dict[str, Any] | None, admissible: list[str],
     share = votes[pick] / len(nearest)
     return {"pick": pick, "confidence": round(share, 3), "confident": share >= CONFIDENT,
             "like": sorted({family for _, _, family in nearest})}
+
+
+def evidence(record: dict[str, Any], rules_chose: str) -> str:
+    """Why the selector's pick solved the run, in the words `why_solver` records."""
+    share = round(record["confidence"] * 100)
+    return (f"the learned selector picked {record['pick']}: {share}% of the {K} nearest known models "
+            f"({', '.join(record['like'])}) were solved fastest by it; the rules would have chosen {rules_chose}")

@@ -75,6 +75,9 @@ from app.settings_resolve import resolve
 logger = logging.getLogger(__name__)
 
 COMPILER_VERSION = "ir-compiler 1"
+#: How far from the best value an alternative plan may be, when a run asks for
+#: alternatives without saying (Epic engine, E-1): 2% of the best.
+DEFAULT_WITHIN = 0.02
 
 # A constraint can break in many places; the row keeps the worst few rather
 # than every instance, because a `constraint_result` is read by a person.
@@ -126,6 +129,8 @@ def enqueue_run(
     pareto_steps: int | None = None,
     robust: bool = False,
     idempotency_key: str | None = None,
+    alternatives: int | None = None,
+    alternatives_within: float | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -193,6 +198,8 @@ def enqueue_run(
     from_settings["separable"] = settings["solve.separable"].source
     memory = bool(settings["solve.memory"].value)
     from_settings["memory"] = settings["solve.memory"].source
+    selector_acts = bool(settings["solve.selector_acts"].value)
+    from_settings["selector_acts"] = settings["solve.selector_acts"].source
     probe = bool(settings["solve.probe"].value)
     from_settings["probe"] = settings["solve.probe"].source
     portfolio = bool(settings["solve.portfolio"].value)
@@ -292,6 +299,7 @@ def enqueue_run(
         "separable": separable,
         "pdlp": pdlp,
         "memory": memory,
+        "selector_acts": selector_acts,
         "probe": probe,
         "portfolio": portfolio,
         "lns": lns,
@@ -309,6 +317,10 @@ def enqueue_run(
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
         **({"pareto_steps": pareto_steps} if pareto_steps else {}),
         **({"robust": True} if robust else {}),
+        # Next-best distinct plans after the answer (Epic engine, app.solve.alternatives).
+        **({"alternatives": int(alternatives),
+            "alternatives_within": float(DEFAULT_WITHIN if alternatives_within is None else alternatives_within)}
+           if alternatives else {}),
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
         "trace": trace_carrier,
@@ -321,10 +333,11 @@ def enqueue_run(
         # is a run nobody can make faster.
         **({"from_settings": from_settings} if from_settings else {}),
     }
-    if pareto_steps or robust:
+    if pareto_steps or robust or alternatives:
         # A front is a different question from the goal's optimum, and its
         # own answer is one end of it; a robust answer is to a different
-        # question too. Neither reused nor reusable.
+        # question too. Neither reused nor reusable -- nor a run asked for
+        # alternatives, which a cached answer does not carry.
         reuse, cache_key = False, None
     if reuse:
         reused = cache_reuse(
@@ -895,6 +908,16 @@ def _execute(
                     recalled = _recall(db, run_id, found, params)
                     if recalled is not None:
                         backend, why = by_name(recalled.solver), recalled.evidence
+                if (params.get("selector_acts") and not params.get("requested_solver") and recalled is None
+                        and shadow is not None and shadow["confident"] and shadow["pick"] != backend.name):
+                    # The learned selector acts (setting `solve.selector_acts`, Epic engine E-4):
+                    # after an explicit choice and the problem's own history, before the rules.
+                    # Its pick is always one the rules admit (`_admissible`), never outside them.
+                    picked = by_name(shadow["pick"])
+                    if picked is not None and picked.is_available():
+                        why = selector_rows.evidence(shadow, backend.name)
+                        shadow = {**shadow, "acted": True, "rules_chose": backend.name}
+                        backend = picked
                 if (params.get("portfolio") and not params.get("requested_solver") and recalled is None
                         and not stochastic_wanted
                         and not params.get("pareto_steps") and not params.get("robust")):
@@ -1390,7 +1413,7 @@ def _execute(
     if search_record is not None:
         extra["metaheuristic_run"] = search_record
     if shadow is not None:
-        extra["selector"] = {**shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
+        extra["selector"] = {"acted": False, **shadow, "chosen": backend.name, "agree": shadow["pick"] == backend.name}
     applied = {**solver_param_table.ENABLED.get(backend.name, {}), **tuned.get(backend.name, {})}
     if applied:
         # The benchmark's winners, applied to every solve of this backend, and a tuning's for this problem.
@@ -1518,6 +1541,15 @@ def _execute(
         )
         if points:
             _record_front(db, run_id, compiled, backend, points)
+        if params.get("alternatives") and result.status in ("optimal", "feasible") and result.assignments:
+            # The next-best distinct plans (Epic engine, E-1): the run's own
+            # answer stands; each alternative is a finished run of its own.
+            with tracing.span("alternatives", solver=backend.name):
+                # The solve's stop event is already set here (the heartbeat
+                # has ended), so a Stop is read from the run itself.
+                _alternatives(db, run_id, compiled, solving_model, backend, result, params,
+                              time_limit=time_limit, seed=seed, workers=workers, gap_rel=gap_rel,
+                              should_stop=_asked_to_stop(run_id))
     if result.status == "infeasible":
         # "No answer exists" is true and useless on its own. Which rules
         # cannot hold together is the thing a planner can act on, and it is
@@ -2317,7 +2349,7 @@ def _recall(db: Session, run_id: int, found, params: dict | None = None):
             # about which solver proves this problem fastest.
             "   AND r.id <> :r AND r.status = 'optimal' AND r.optimality = 'global'"
             "   AND r.reused_from IS NULL AND r.wall_time_s IS NOT NULL"
-            "   AND r.params->>'pareto_of' IS NULL"
+            "   AND r.params->>'pareto_of' IS NULL AND r.params->>'alternative_of' IS NULL"
             " ORDER BY r.id DESC LIMIT :n"
         ),
         {"r": run_id, "n": RECENT},
@@ -2366,6 +2398,83 @@ def _point_solution(compiled: Compiled, point) -> Solution:
     objective = int(value) if compiled.is_integral and value == value.to_integral_value() else float(value)
     return replace(point.solution, status=point.status, optimal=point.status == "optimal",
                    objective=objective, best_bound=None)
+
+
+def _asked_to_stop(run_id: int, every: float = 2.0):
+    """A `should_stop` for work after the solve: whether the run was asked to
+    stop, read in a session of its own at most every `every` seconds."""
+    from app.core.db import SessionLocal
+
+    last = [0.0, False]
+
+    def asked() -> bool:
+        now = time.monotonic()
+        if not last[1] and now - last[0] >= every:
+            last[0] = now
+            with SessionLocal() as session:
+                last[1] = bool(session.execute(
+                    text("SELECT cancel_requested FROM run WHERE id = :r"), {"r": run_id}).scalar_one_or_none())
+        return last[1]
+
+    return asked
+
+
+def _alternatives(db: Session, run_id: int, compiled: Compiled, solving_model: Compiled, backend, result,
+                  params: dict, *, time_limit: float, seed, workers: int, gap_rel: float, should_stop) -> None:
+    """Search the alternatives in a sandbox, then record each as a finished run
+    and a `run_alternative` row. What happened is recorded on the run either
+    way -- how many were found, or why none were looked for."""
+    from app.solve import alternatives as alternative_rows
+
+    count = int(params["alternatives"])
+    within = float(params.get("alternatives_within", DEFAULT_WITHIN))
+    record: dict[str, Any] = {"asked": count, "within": within}
+    try:
+        alternative_rows.admissible(solving_model)
+        found = sandbox.run(
+            "app.solve.sandbox:alternatives_in_child",
+            {"backend": backend.name, "compiled": solving_model, "best": result, "count": count,
+             "within": within, "time_limit": time_limit, "seed": seed, "workers": workers, "gap_rel": gap_rel},
+            time_limit=time_limit, workers=workers, should_stop=should_stop,
+        )
+    except (alternative_rows.NotApplicable, Unsupported, sandbox.SandboxFailed) as exc:
+        record["skipped"] = str(exc)
+        found = []
+    record["found"] = len(found)
+    if len(found) < count and "skipped" not in record:
+        record["note"] = (f"{len(found)} of {count}: no further distinct plan is within "
+                          f"{within:.0%} of the best, or the time ran out")
+    parent = db.execute(
+        text("SELECT scenario_id, dataset_id, seed, compiler_version FROM run WHERE id = :r"), {"r": run_id}
+    ).mappings().one()
+    for alternative in found:
+        solution = alternative.solution
+        child = db.execute(
+            text(
+                "INSERT INTO run (scenario_id, dataset_id, status, solver, compiler_version, params, seed, started_at)"
+                " VALUES (:s, :d, 'running', :solver, :cv, CAST(:params AS jsonb), :seed, now())"
+                " RETURNING id"
+            ),
+            {
+                "s": parent["scenario_id"], "d": parent["dataset_id"], "solver": backend.name,
+                "cv": parent["compiler_version"], "seed": parent["seed"],
+                "params": _json({"alternative_of": run_id, "alternative": alternative.seq,
+                                 "chosen_solver": backend.name}),
+            },
+        ).scalar_one()
+        _record(db, child, compiled, solution)
+        db.execute(text("UPDATE run SET optimality = :o WHERE id = :r"),
+                   {"o": optimality_of(backend, solution.status), "r": child})
+        db.execute(
+            text(
+                "INSERT INTO run_alternative (run_id, seq, objective, changed, status, point_run_id)"
+                " VALUES (:r, :seq, :obj, :changed, :st, :child)"
+            ),
+            {"r": run_id, "seq": alternative.seq, "obj": float(solution.objective), "changed": alternative.changed,
+             "st": solution.status, "child": child},
+        )
+    db.execute(text("UPDATE run SET params = params || CAST(:p AS jsonb) WHERE id = :r"),
+               {"p": _json({"alternatives_result": record}), "r": run_id})
 
 
 def _record_front(db: Session, run_id: int, compiled: Compiled, backend, points) -> None:

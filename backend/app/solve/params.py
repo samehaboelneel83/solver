@@ -30,6 +30,11 @@ WHITELIST: dict[str, dict[str, tuple[Any, ...]]] = {
         "mip_heuristic_effort": (0.05, 0.3),
         "presolve": ("choose", "on", "off"),
     },
+    "ipopt": {
+        # Multistart (Epic engine, E-2): the time split over this many starts,
+        # the best local optimum kept. 1 is IPOPT as it always ran.
+        "starts": (1, 4, 8, 16, 32),
+    },
     "scip": {
         # SCIP's own emphasis settings for presolve and for heuristics.
         "presolving": ("default", "aggressive", "fast"),

@@ -960,12 +960,27 @@ describe("a relax-and-fix answer (queue R9)", () => {
 });
 
 describe("the learned selector's record (queue R11)", () => {
-  it("says what it would pick, how sure, and what it resembles -- never that it chose", async () => {
+  it("says what it would pick, how sure, what it resembles -- and, when allowed to act, what it chose over the rules", async () => {
     const { selectorText } = await import("./Runs");
     expect(selectorText({ pick: "scip", confidence: 0.8, confident: true, like: ["rota", "rota_teams"], chosen: "cp-sat", agree: false }))
       .toBe("would pick scip instead of cp-sat (80% of its nearest models, like rota, rota_teams)");
     expect(selectorText({ pick: "highs", confidence: 0.6, confident: false, like: ["facility"], chosen: "highs", agree: true }))
       .toBe("would also pick highs (60% of its nearest models, like facility)");
+    expect(selectorText({ pick: "scip", confidence: 1, confident: true, like: ["rota"], chosen: "scip", agree: true, acted: true, rules_chose: "cp-sat" }))
+      .toBe("picked scip over the rules' cp-sat (100% of its nearest models, like rota)");
+  });
+});
+
+describe("alternative plans (Epic engine E-1)", () => {
+  it("says how many came within the gap, or why none were looked for", async () => {
+    const { alternativesText } = await import("./Runs");
+    expect(alternativesText({ asked: 5, within: 0.05, found: 5 }, 5))
+      .toBe("5 next-best plans within 5% of the best, each differing from every other in at least one yes-or-no decision.");
+    expect(alternativesText({ asked: 5, within: 0.02, found: 2 }, 2))
+      .toBe("2 next-best plans within 2% of the best (of 5 asked for; no more come within 2%), each differing from every other in at least one yes-or-no decision.");
+    expect(alternativesText({ asked: 5, within: 0.05, found: 0 }, 0)).toBe("No other plan comes within 5% of the best.");
+    expect(alternativesText({ asked: 5, within: 0.05, skipped: "the model has no yes-or-no decisions" }, 0))
+      .toBe("No alternatives listed: the model has no yes-or-no decisions.");
   });
 });
 
