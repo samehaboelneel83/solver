@@ -1344,6 +1344,25 @@ describe("equations as drill-down diagrams", () => {
     expect(screen.queryAllByTestId("rule-diagram")).toHaveLength(0);
   });
 
+  it("reads a rule as a sentence, then edits it in boxes and publishes the change", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a sentence" }));
+    expect(screen.getByTestId("rule-sentence")).toHaveTextContent(/^For every day d, .* must be at least demand of d\./);
+    fireEvent.click(screen.getByRole("button", { name: "Change it in boxes" }));
+    const blocks = screen.getByTestId("rule-blocks");
+    expect(within(blocks).getByRole("status")).toHaveTextContent("Complete");
+    // Put the right side inside "plus something", then make the new term 1.
+    fireEvent.change(within(blocks).getByLabelText("Change right side"), { target: { value: "wrap:add" } });
+    fireEvent.change(within(blocks).getByLabelText("term 2: number"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/problems/1/versions")).toBe(true));
+    const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/problems/1/versions")!;
+    expect(JSON.parse(options.body).ir.constraints[0].right).toEqual({ add: [{ par: "demand", index: ["d"] }, { const: 1 }] });
+  });
+
   it("edits a rule through its diagram and publishes the change", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({ write });

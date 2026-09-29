@@ -41,6 +41,7 @@ import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } 
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
 import EquationField, { chipsFor } from "../model/EquationField";
 import { GoalDiagram, RuleDiagram } from "../model/EquationDiagram";
+import { GoalBlocks, GoalSentence, RuleBlocks, RuleSentence } from "../model/NestedBlocks";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
@@ -841,14 +842,23 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   );
 }
 
-export type EquationView = "equation" | "diagram";
+/** How a rule or goal is shown: in words, as nested boxes, as a drill-down diagram, or as one equation line. */
+export type EquationView = "sentence" | "boxes" | "diagram" | "equation";
+const EQUATION_VIEWS: readonly EquationView[] = ["sentence", "boxes", "diagram", "equation"];
+const VIEW_TEXT: Record<EquationView, { button: string; all: string; one: string }> = {
+  sentence: { button: "Sentence", all: "sentences", one: "a sentence" },
+  boxes: { button: "Boxes", all: "boxes", one: "boxes" },
+  diagram: { button: "Diagram", all: "diagrams", one: "a diagram" },
+  equation: { button: "Equation", all: "equations", one: "an equation" },
+};
 const EQUATION_VIEW_KEY = "solver_equation_view";
 
 /** How rules and goals are shown on this page, remembered in this browser. */
 function useEquationView(): [EquationView, (next: EquationView) => void] {
   const [view, setView] = useState<EquationView>(() => {
     try {
-      return localStorage.getItem(EQUATION_VIEW_KEY) === "diagram" ? "diagram" : "equation";
+      const stored = localStorage.getItem(EQUATION_VIEW_KEY) as EquationView | null;
+      return stored && EQUATION_VIEWS.includes(stored) ? stored : "equation";
     } catch {
       return "equation";
     }
@@ -863,7 +873,7 @@ function useEquationView(): [EquationView, (next: EquationView) => void] {
   }];
 }
 
-/** Equation | Diagram, as two pressed-state buttons. */
+/** Sentence | Boxes | Diagram | Equation, as pressed-state buttons: the simplest first. */
 function ViewToggle({ value, onChange, name, size = "sm" }: {
   value: EquationView;
   onChange: (next: EquationView) => void;
@@ -874,18 +884,16 @@ function ViewToggle({ value, onChange, name, size = "sm" }: {
   const pad = size === "sm" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
   return (
     <div role="group" aria-label={`Show ${name} as`} className="inline-flex overflow-hidden rounded-md border border-slate-300">
-      {(["equation", "diagram"] as const).map((option) => (
+      {EQUATION_VIEWS.map((option) => (
         <button
           key={option}
           type="button"
           aria-pressed={value === option}
-          aria-label={name === "all"
-            ? `Show all as ${option === "equation" ? "equations" : "diagrams"}`
-            : `Show ${name} as ${option === "equation" ? "an equation" : "a diagram"}`}
+          aria-label={name === "all" ? `Show all as ${VIEW_TEXT[option].all}` : `Show ${name} as ${VIEW_TEXT[option].one}`}
           onClick={() => onChange(option)}
           className={`${pad} ${value === option ? "bg-blue-600 font-medium text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
         >
-          {option === "equation" ? "Equation" : "Diagram"}
+          {VIEW_TEXT[option].button}
         </button>
       ))}
     </div>
@@ -1007,7 +1015,11 @@ function ConstraintCard({
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
-              {shown === "diagram" ? (
+              {shown === "sentence" ? (
+                <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} />
+              ) : shown === "boxes" ? (
+                <RuleBlocks rule={constraint} context={context} onChange={onChange} />
+              ) : shown === "diagram" ? (
                 <RuleDiagram rule={constraint} context={context} onChange={onChange} />
               ) : (
                 <EquationField
@@ -1161,8 +1173,23 @@ function ConstraintCard({
             </TreeView>
           )}
         </div>
+      ) : shown === "sentence" || shown === "boxes" ? (
+        <div className="space-y-2 px-2 py-1">
+          <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
+          {shown === "sentence" ? (
+            <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} />
+          ) : (
+            <RuleBlocks rule={constraint} context={context} onChange={onChange} />
+          )}
+          <p className="text-xs text-slate-500">
+            This rule cannot be written as one equation line yet, so Equation and Diagram open its full editor.
+          </p>
+        </div>
       ) : (
         <TreeView>
+          <div className="px-2 pb-1">
+            <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
+          </div>
           <p className="mb-1 px-2 font-mono text-xs text-slate-500">
             {describeTerm(constraint.left)} {constraint.relation} {describeTerm(constraint.right)}
             {describeWhen(constraint.when) ? `, ${describeWhen(constraint.when)}` : ""}
@@ -1358,11 +1385,27 @@ function GoalExpression({ view, goalId, expression, context, onChange }: {
   const equation = useMemo(() => goalEquation(expression, context), [expression, context]);
   const [shown, setShown] = useCardView(view);
   const builder = <TermBuilder value={expression} onChange={onChange} context={context} bound={[]} label="Count" />;
-  if (equation === null) return builder;
+  if (equation === null) {
+    // The equation line cannot write it: the words and the boxes still can.
+    return (
+      <div className="space-y-2 px-2 py-1">
+        <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
+        {shown === "sentence" ? (
+          <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} />
+        ) : shown === "boxes" ? (
+          <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
+        ) : builder}
+      </div>
+    );
+  }
   return (
     <div className="space-y-2 px-2 py-1">
       <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
-      {shown === "diagram" ? (
+      {shown === "sentence" ? (
+        <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} />
+      ) : shown === "boxes" ? (
+        <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
+      ) : shown === "diagram" ? (
         <GoalDiagram label={goalId || "goal"} expression={expression} context={context} onChange={onChange} />
       ) : <EquationField
         label={`Equation for ${goalId || "this goal"}`}

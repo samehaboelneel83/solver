@@ -401,7 +401,7 @@ export function uniqueByIndex(bound: Binding[]): Binding[] {
   });
 }
 
-function fillIndices(arity: number, wantedSets: string[], bound: Binding[]): string[] {
+export function fillIndices(arity: number, wantedSets: string[], bound: Binding[]): string[] {
   return Array.from({ length: arity }, (_, position) => {
     const set = wantedSets[position];
     return bound.find((b) => b.set === set)?.index ?? "";
