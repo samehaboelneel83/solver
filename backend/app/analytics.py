@@ -68,9 +68,10 @@ _PENDING = text(
 )
 
 
-def publish_facts(db: Session, client=None, *, batch: int = 500) -> int:
+def publish_facts(db: Session, client=None, *, batch: int = 500, raise_errors: bool = False) -> int:
     """Write up to `batch` settled runs' facts; return how many. A ClickHouse
-    failure is logged and leaves them for the next sweep."""
+    failure is logged and leaves them for the next sweep -- or, with
+    `raise_errors`, is raised for a caller that backs off (the worker)."""
     rows = db.execute(_PENDING, {"n": batch}).mappings().all()
     if not rows:
         db.rollback()
@@ -83,6 +84,8 @@ def publish_facts(db: Session, client=None, *, batch: int = 500) -> int:
         client.insert(TABLE, [_values(row) for row in rows], column_names=COLUMNS)
     except Exception:
         db.rollback()
+        if raise_errors:
+            raise
         logger.warning("could not write %d run fact(s); they wait for the next sweep", len(rows), exc_info=True)
         return 0
     db.execute(

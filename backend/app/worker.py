@@ -149,19 +149,57 @@ def _record(db, run_id: int, seconds: float) -> None:
     metrics.record_run(row["solver"], row["model_class"], row["status"], seconds, row["gap"])
 
 
-def _analytics_client():
+def _analytics_client(backoff: "Backoff | None" = None):
     """A ClickHouse client with the analytics tables in place, or None while
-    ClickHouse cannot be reached (tried again on the next pass)."""
+    ClickHouse cannot be reached (tried again once the backoff allows)."""
     from app.clickhouse_schema import create_analytics_schema
     from app.core.db import get_clickhouse_client
 
     try:
         client = get_clickhouse_client()
         create_analytics_schema(client)
+        if backoff is not None:
+            backoff.succeeded()
         return client
-    except Exception:
-        logger.warning("ClickHouse is not reachable; run facts will wait", exc_info=True)
+    except Exception as exc:
+        if backoff is None:
+            logger.warning("ClickHouse is not reachable; run facts will wait", exc_info=True)
+        else:
+            backoff.failed(exc)
         return None
+
+
+class Backoff:
+    """Try ClickHouse again after a growing wait, and say so once, not every pass (operator trial F32).
+
+    The first failure is logged with its traceback; later ones are one line each,
+    as often as the wait allows (doubling up to `ceiling` seconds). Recovery is logged too.
+    """
+
+    def __init__(self, what: str, *, first: float = 5.0, ceiling: float = 300.0, clock=time.monotonic) -> None:
+        self.what, self.first, self.ceiling, self.clock = what, first, ceiling, clock
+        self.wait = 0.0
+        self.next_at = 0.0
+        self.failures = 0
+
+    def due(self) -> bool:
+        return self.clock() >= self.next_at
+
+    def failed(self, exc: BaseException) -> None:
+        self.failures += 1
+        self.wait = self.first if self.wait == 0 else min(self.ceiling, self.wait * 2)
+        self.next_at = self.clock() + self.wait
+        if self.failures == 1:
+            logger.warning("%s is not reachable; run facts will wait (next try in %.0fs)", self.what, self.wait,
+                           exc_info=exc)
+        else:
+            logger.warning("%s is still not reachable (%d tries): %s; next try in %.0fs", self.what, self.failures,
+                           str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.wait)
+
+    def succeeded(self) -> None:
+        if self.failures:
+            logger.info("%s is reachable again after %d failed tries", self.what, self.failures)
+        self.wait, self.next_at, self.failures = 0.0, 0.0, 0
 
 
 #: How often a worker says it is alive, and how long after its last word it counts as gone.
@@ -185,7 +223,8 @@ def main() -> None:  # pragma: no cover -- the loop itself
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 
-    client = _analytics_client()
+    clickhouse = Backoff("ClickHouse")
+    client = _analytics_client(clickhouse)
     db = SessionLocal()
     try:
         reclaim_stale(db)
@@ -212,10 +251,14 @@ def main() -> None:  # pragma: no cover -- the loop itself
             solved = work_once(db)
             # Every settled run's fact, whoever settled it; a ClickHouse
             # outage leaves them for the next pass (app.analytics).
-            if client is None:
-                client = _analytics_client()
-            if client is not None:
-                publish_facts(db, client)
+            if client is None and clickhouse.due():
+                client = _analytics_client(clickhouse)
+            if client is not None and clickhouse.due():
+                try:
+                    publish_facts(db, client, raise_errors=True)
+                    clickhouse.succeeded()
+                except Exception as exc:
+                    clickhouse.failed(exc)
             if solved is None:
                 time.sleep(POLL_SECONDS)
     finally:
