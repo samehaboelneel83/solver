@@ -1669,3 +1669,63 @@ export const useCreateScenario = () => useV1Mutation(createScenario);
 export const useUpdateScenario = () =>
   useV1Mutation(({ id, body }: { id: Id; body: ScenarioUpdate }) => updateScenario(id, body));
 export const useDeleteScenario = () => useV1Mutation(deleteScenario);
+
+// predictors (Epic ML): trained models a domain holds, read by the IR's `predict` term
+
+export type PredictorMetrics = {
+  rows?: number;
+  rows_skipped?: number;
+  holdout_rows?: number;
+  evaluated_on?: string;
+  r2?: number | null;
+  mae?: number | null;
+  rmse?: number | null;
+};
+
+export type Predictor = {
+  id: Id;
+  domain_id: Id;
+  name: string;
+  note: string | null;
+  /** The model's inputs, in order: what `predict name(...)` passes. */
+  inputs: string[];
+  metrics: PredictorMetrics | null;
+  /** How it was trained, or null for an uploaded model. */
+  training: { kind?: string; entity_type?: string; features?: string[]; target?: string; trees?: number; max_depth?: number } | null;
+  summary: { inputs?: number; trees?: number; nodes?: number; leaves?: number; aggregation?: string } | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PredictorTrain = {
+  domain_id: number;
+  name: string;
+  note?: string | null;
+  entity_type: string;
+  features: string[];
+  target: string;
+  kind: "random_forest" | "gradient_boosting";
+  trees?: number;
+  max_depth?: number;
+  replace?: boolean;
+};
+
+export const listPredictors = (domainId: Id) =>
+  apiFetch<Page<Predictor>>(`/api/v1/predictors?domain_id=${domainId}&limit=200`);
+export const trainPredictor = (body: PredictorTrain) => send<Predictor>("POST", "/api/v1/predictors/train", body);
+export const uploadPredictor = (body: { domain_id: number; name: string; note?: string | null; model: unknown }) =>
+  send<Predictor>("POST", "/api/v1/predictors", body);
+export const deletePredictor = (id: Id) => remove(`/api/v1/predictors/${id}`);
+export const predictWith = (id: Id, inputs: number[][]) =>
+  send<{ predictions: number[] }>("POST", `/api/v1/predictors/${id}/predict`, { inputs });
+
+export function usePredictors(domainId: Id | null) {
+  return useQuery({
+    queryKey: [V1, "predictors", domainId],
+    queryFn: () => listPredictors(domainId!),
+    enabled: domainId !== null,
+  });
+}
+export const useTrainPredictor = () => useV1Mutation(trainPredictor);
+export const useUploadPredictor = () => useV1Mutation(uploadPredictor);
+export const useDeletePredictor = () => useV1Mutation(deletePredictor);

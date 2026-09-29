@@ -36,6 +36,7 @@ import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
 import NavigationHub from "./pages/NavigationHub";
 import { ImportWizard, SourcesPage } from "./pages/Sources";
+import Predictors from "./pages/Predictors";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="data" element={<NavigationHub kind="data" />} />
           <Route path="structure" element={<NavigationHub kind="structure" />} />
           <Route path="data/quality" element={<NavigationHub kind="quality" />} />
+          <Route path="data/predictors" element={<Predictors />} />
           <Route path="data/sources" element={<SourcesPage />} />
           <Route path="data/sources/:connectionId/jobs/:jobId/import" element={<ImportWizard />} />
           <Route path="data/records" element={<Entities />} />
@@ -140,6 +142,7 @@ export default function App() {
         <Route path="structure" element={<LegacyDomainRedirect page="structure" />} />
         <Route path="sources" element={<LegacyDomainRedirect page="sources" />} />
         <Route path="quality" element={<LegacyDomainRedirect page="quality" />} />
+        <Route path="predictors" element={<LegacyDomainRedirect page="predictors" />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
         <Route path="ops/queue" element={<OpsQueue />} />

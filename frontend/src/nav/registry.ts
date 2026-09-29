@@ -66,6 +66,7 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
   "data-structure": "/domains/:domainId/structure",
   sources: "/domains/:domainId/data/sources",
   quality: "/domains/:domainId/data/quality",
+  predictors: "/domains/:domainId/data/predictors",
 };
 
 export const DESTINATIONS: Destination[] = [
@@ -73,6 +74,7 @@ export const DESTINATIONS: Destination[] = [
   { id: "data-records", path: "/data", canonical: DOMAIN_TEMPLATES["data-records"], label: "Records & relationships", purpose: "Manage operational records, links and values.", scope: "domain", group: "data" },
   { id: "data-structure", path: "/structure", canonical: DOMAIN_TEMPLATES["data-structure"], label: "Data structure", purpose: "Define record types and relationship types.", scope: "domain", group: "data" },
   { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Sources & imports", purpose: "Set up database sources and import their rows.", scope: "domain", group: "data", capability: "integration.run" },
+  { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Predictors", purpose: "Train and keep the models a rule can read with predict.", scope: "domain", group: "data" },
   { id: "quality", path: "/quality", canonical: DOMAIN_TEMPLATES.quality, label: "Quality checks", purpose: "Review data and model validation workflows.", scope: "domain", group: "data" },
   { id: "access", path: "/administration/access", canonical: "/administration/access", label: "Access & policies", purpose: "Manage people, permissions and platform policies.", scope: "administration", group: "administration", capability: "iam.manage" },
   { id: "domain-overview", path: "/domains/:domainId/overview", canonical: "/domains/:domainId/overview",
@@ -418,7 +420,7 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
     label: "Data structure",
     itemIds: ["record-types", "relationship-types"],
   },
-  { key: "data", label: "Data", itemIds: ["data-records", "data-structure", "sources", "quality"] },
+  { key: "data", label: "Data", itemIds: ["data-records", "data-structure", "sources", "predictors", "quality"] },
   {
     key: "problems",
     label: "Problems",
@@ -501,6 +503,7 @@ export function stripDomainPrefix(pathname: string): string {
     "/data/explore": "/graph",
     "/data/sources": "/sources",
     "/data/quality": "/quality",
+    "/data/predictors": "/predictors",
     "/data": "/data",
     "/structure": "/structure",
     "/problems": "/public/problem",
@@ -574,7 +577,7 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
       .filter((d): d is Destination => d != null)
       .filter((d) => d.id !== "domain-overview" || ctx.domainId != null)
       .filter((d) => d.id !== "problem-overview" || (ctx.domainId != null && ctx.problemId != null))
-      .filter((d) => !["data-records", "data-structure", "sources", "quality"].includes(d.id) || ctx.domainId != null)
+      .filter((d) => !["data-records", "data-structure", "sources", "predictors", "quality"].includes(d.id) || ctx.domainId != null)
       .filter((d) => d.id !== "inputs" || (ctx.domainId != null && ctx.problemId != null))
       .map((d) => ({
         id: d.id,
@@ -660,7 +663,7 @@ export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {},
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
     select("domain", "This domain", ["domain-overview", "problems"]),
-    select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "quality"]),
+    select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "predictors", "quality"]),
     ...common,
   ];
   const navigate = select("context", "Navigate", ["home", "domains", "templates"]);

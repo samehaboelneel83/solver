@@ -35,6 +35,7 @@ export const DOMAIN_PAGES: Record<string, string> = {
   structure: "structure",
   sources: "data/sources",
   quality: "data/quality",
+  predictors: "data/predictors",
 };
 
 function rest(search: URLSearchParams, drop: string[]): string {
