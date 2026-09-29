@@ -537,9 +537,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             </button>
           ))}
         </div>
-        <p className="text-xs text-slate-500">
+        {(view === "forms" || view === "blocks") && <p className="text-xs text-slate-500">
           Blocks are a drag-and-drop view of the same model. The forms are the keyboard and screen-reader way to edit it.
-        </p>
+        </p>}
       </div>
 
       {!canEdit && (

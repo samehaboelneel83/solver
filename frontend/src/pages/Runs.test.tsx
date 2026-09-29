@@ -1145,7 +1145,7 @@ describe("before a run (Epic UX, U-5)", () => {
     render(<BeforeYouSolve preflight={preflight} blockers={[preflight.findings[0]]} />);
     const panel = screen.getByRole("region", { name: "Before you solve" });
     expect(panel).toHaveTextContent("This scenario cannot be solved yet.");
-    expect(panel).toHaveTextContent("A MILP model; highs will take it. No worker has been seen");
+    expect(panel).toHaveTextContent("Decisions are amounts and whole numbers, and every rule is linear; highs will take it. No worker has been seen");
     expect(panel).toHaveTextContent("c_policy has a name but no arithmetic.");
     expect(panel).toHaveTextContent("There are no depot records yet.");
     expect(panel).toHaveTextContent("glop: takes LP models, not a MILP model");

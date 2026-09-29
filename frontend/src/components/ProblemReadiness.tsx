@@ -46,6 +46,19 @@ export default function ProblemReadiness({ problemId }: { problemId: Id }) {
     return <p className="mb-4 text-sm text-slate-500">Checking readiness…</p>;
   }
 
+  // Once most steps are done the list is only in the way (operator trial F13): one line, or nothing.
+  const done = steps.filter((step) => step.done).length;
+  const next = steps.find((step) => !step.done);
+  if (!next) return null;
+  if (done >= 2) {
+    return (
+      <p aria-label="Problem readiness" role="note" className="mb-3 text-sm text-slate-600">
+        {done} of {steps.length} steps done. Next:{" "}
+        <Link to={next.href} className="font-medium text-blue-700 underline">{next.label}</Link>
+      </p>
+    );
+  }
+
   return (
     <section aria-label="Problem readiness" className="mb-6 rounded-md border border-slate-200 bg-slate-50 p-4">
       <h2 className="mb-1 text-sm font-semibold text-slate-900">Continue this problem</h2>

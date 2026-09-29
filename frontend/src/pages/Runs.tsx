@@ -717,7 +717,7 @@ function ScenarioRuns({
           <span className="text-sm text-slate-500">
             {createRun.isPending
               ? "Queueing…"
-              : `${preflight.data ? `${preflight.data.workers.says}. ` : "A worker solves it. "}This page follows along; stop a run if you asked the wrong question. The answer is kept, not recomputed.`}
+              : "A worker solves it; this page follows along. Stop a run if you asked the wrong question. The answer is kept, not recomputed."}
           </span>
         )}
       </div>
@@ -1512,7 +1512,7 @@ export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false }
       <p className="font-medium">
         {blockers.length ? "This scenario cannot be solved yet." : "Ready to solve."}{" "}
         <span className="font-normal text-slate-700">
-          A {preflight.model_class} model{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
+          <abbr title={`${preflight.model_class} model`} className="no-underline">{modelInWords(preflight.model_class)}</abbr>{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
         </span>
       </p>
       {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
@@ -1789,4 +1789,20 @@ const GOAL = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 export function formatGoal(value: number | string | null | undefined): string {
   const n = Number(value);
   return value == null || value === "" || !Number.isFinite(n) ? String(value ?? "—") : GOAL.format(n);
+}
+
+const MODEL_WORDS: Record<string, string> = {
+  LP: "Every decision is an amount and every rule is linear",
+  IP: "Every decision is yes-or-no or a whole number, and every rule is linear",
+  MILP: "Decisions are amounts and whole numbers, and every rule is linear",
+  QP: "Decisions are amounts, with a squared term in the goal",
+  MIQP: "Decisions include whole numbers, with a squared term in the goal",
+  MIQCQP: "Decisions include whole numbers, with squared terms in the rules",
+  NLP: "Decisions are amounts, with curved (non-linear) rules or goal",
+  MINLP: "Decisions include whole numbers, with curved (non-linear) rules or goal",
+};
+
+/** A model's class in a planner's words, not "an IP model" (operator trial F8). */
+export function modelInWords(modelClass: string): string {
+  return MODEL_WORDS[modelClass] ?? `A ${modelClass} model`;
 }
