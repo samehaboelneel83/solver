@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# On Windows (cmd or PowerShell), run scripts\rebuild.cmd instead.
+
 # Neither the backend nor the frontend Docker image has a bind mount, so
 # code changes under backend/ or frontend/ are invisible to the running
 # containers until their images are rebuilt and the containers recreated
@@ -38,16 +40,16 @@ wait_for_frontend() {
     return 1
 }
 
-echo "== Building backend and frontend images =="
-docker compose build backend frontend
+echo "== Building backend, worker and frontend images =="
+docker compose build backend worker frontend
 
 # New code can need new tables: bring the database to the migrations the
 # fresh backend image carries before the containers start serving it.
 echo "== Applying database migrations =="
 docker compose run --rm backend alembic upgrade head
 
-echo "== Recreating backend and frontend containers =="
-docker compose up -d --force-recreate backend frontend
+echo "== Recreating backend, worker and frontend containers =="
+docker compose up -d --force-recreate backend worker frontend
 
 echo "== Checking backend health =="
 wait_for_backend
