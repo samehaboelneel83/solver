@@ -195,6 +195,8 @@ describe("ModelEditor", () => {
     expect(cover).toBeDisabled();
     expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Blocks" })).not.toBeInTheDocument();
+    // Nothing is asked that only an editor may ask: no dry run of a draft it cannot publish.
+    expect(mockFetch.mock.calls.some(([p]) => String(p).endsWith("/versions/validate"))).toBe(false);
   });
 
   it("offers to start a model when the problem has none", async () => {

@@ -342,7 +342,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const nextIr = useMemo(() => (workingIr && draft ? publishable(withFormDraft(workingIr, draft)) : null), [workingIr, draft]);
   // Why Publish would be refused: the contract's shape rules at once, the
   // domain's own from the server's dry run a moment later (`useDraftRefusal`).
-  const refusal = useDraftRefusal(problemId, nextIr as Record<string, unknown> | null);
+  const refusal = useDraftRefusal(problemId, canEdit ? (nextIr as Record<string, unknown> | null) : null);
   const classification = useClassify(
     nextIr !== null && refusal === null ? (nextIr as Record<string, unknown>) : null,
     problemId
