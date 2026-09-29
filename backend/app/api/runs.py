@@ -606,6 +606,7 @@ def compare_runs(
 @router.get("/runs")
 def list_runs(
     scenario_id: int | None = Query(default=None),
+    problem_id: int | None = Query(default=None, description="every scenario of this problem"),
     purpose: Literal["plan", "why_not", "shadow", "suite"] = Query(default="plan"),
     parent_run_id: int | None = Query(default=None),
     q: str | None = Query(default=None, description="status or solver contains this; a number also matches the id"),
@@ -631,6 +632,9 @@ def list_runs(
     if scenario_id is not None:
         stmt = stmt.where(Run.scenario_id == scenario_id)
         count_stmt = count_stmt.where(Run.scenario_id == scenario_id)
+    if problem_id is not None:
+        of_problem = Run.scenario_id.in_(select(Scenario.id).where(Scenario.problem_id == problem_id))
+        stmt, count_stmt = stmt.where(of_problem), count_stmt.where(of_problem)
     rows = db.scalars(stmt.order_by(Run.id.desc()).limit(limit).offset(offset)).all()
     parts: dict[int, list[int]] = {}
     if rows:

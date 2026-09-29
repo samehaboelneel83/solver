@@ -861,9 +861,9 @@ export const setSetting = (body: {
   value: number | string | boolean | null;
 }) => send<Record<string, unknown>>("PUT", "/api/v1/settings", body);
 
-export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
-  const { scenarioId, limit, offset, q } = params;
-  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, q: q || undefined, limit, offset })}`);
+export function listRuns(params: { scenarioId?: Id | null; problemId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
+  const { scenarioId, problemId, limit, offset, q } = params;
+  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, problem_id: problemId, q: q || undefined, limit, offset })}`);
 }
 export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
 
@@ -1473,6 +1473,14 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
     queryKey: [V1, "runs", { scenarioId, ...page }],
     queryFn: () => listRuns({ scenarioId, ...page }),
     enabled: isId(scenarioId),
+  });
+}
+/** Whether a problem has any run yet, over all its scenarios (operator trial F10). */
+export function useProblemRuns(problemId: Id | null) {
+  return useQuery({
+    queryKey: [V1, "runs", { problemId, limit: 1 }],
+    queryFn: () => listRuns({ problemId, limit: 1, offset: 0 }),
+    enabled: isId(problemId),
   });
 }
 export const useAskWhyNot = () => useV1Mutation(askWhyNot);
