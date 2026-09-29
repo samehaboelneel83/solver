@@ -180,6 +180,9 @@ def _note(differs: list[str]) -> str:
         )
     if differs == ["patch"]:
         return "the patch is the only difference, so the change in the answer is down to it"
+    if len(differs) == 1:
+        # One difference can be named as the cause (operator trial F28).
+        return f"these runs differ only by {differs[0]}, so the change in the answer is down to it"
     return (
         "these runs differ by " + ", ".join(differs) + ", so a change in the answer "
         "cannot be attributed to any one of them"

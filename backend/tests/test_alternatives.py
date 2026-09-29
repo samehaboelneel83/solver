@@ -186,6 +186,8 @@ def test_a_run_lists_its_alternatives_each_a_run_of_its_own(db, empty_queue, aut
         client = TestClient(app)
         listed = client.get(f"/api/v1/runs?scenario_id={scenario}", headers=auth_headers).json()
         assert [item["id"] for item in listed["items"]] == [run_id]
+        # ...but says which run ids its alternatives took, so the gap in the numbering is explained (F26).
+        assert listed["items"][0]["part_runs"] == sorted(a.run_id for a in read.alternatives)
         # Alternatives are neither reused nor reusable.
         assert db.execute(text("SELECT cache_key FROM run WHERE id = :r"), {"r": run_id}).scalar_one() is None
         # A gap without a count, or alternatives beside a front, is refused.

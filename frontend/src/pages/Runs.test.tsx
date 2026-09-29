@@ -308,7 +308,7 @@ describe("Runs", () => {
     expect(await screen.findByRole("button", { name: /run 11/i })).toBeInTheDocument();
     // Reproducibility facts belong on screen, not only in the database.
     expect(screen.getAllByText(/ortools 9\.15\.6755/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("3621").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("3,621").length).toBeGreaterThan(0);
     expect(screen.getAllByText("0.009s").length).toBeGreaterThan(0);
   });
 
@@ -1171,5 +1171,17 @@ describe("expected run time", () => {
       .toBe("No time estimate yet: the run has not compiled yet; its size is known once it has.");
     expect(etaText({ run_id: 1, settled: true, seconds: 3, estimate_seconds: null })).toBeNull();
     expect(etaText(undefined)).toBeNull();
+  });
+});
+
+describe("goal values and a run's parts (operator trial F9 F26)", () => {
+  it("reads 3669.000000 as 3,669 and names the ids a run's plans took", async () => {
+    const { formatGoal, runSpan } = await import("./Runs");
+    expect(formatGoal("3669.000000")).toBe("3,669");
+    expect(formatGoal(1584.456)).toBe("1,584.46");
+    expect(formatGoal(null)).toBe("—");
+    expect(runSpan([3, 4, 5, 6, 7])).toBe("runs 3–7");
+    expect(runSpan([3])).toBe("run 3");
+    expect(runSpan([3, 5])).toBe("runs 3, 5");
   });
 });

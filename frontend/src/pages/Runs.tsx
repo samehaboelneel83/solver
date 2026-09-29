@@ -767,13 +767,18 @@ function ScenarioRuns({
                     >
                       Run {String(row.id)}
                     </button>
+                    {(row.part_runs?.length ?? 0) > 0 && (
+                      <span className="block text-xs text-slate-500">
+                        its plans are {runSpan(row.part_runs!)}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 pr-3">
                     <span className={`inline-block rounded px-2 py-1 text-xs ${STATUS_STYLE[row.status]}`}>
                       {row.status}
                     </span>
                   </td>
-                  <td className="py-2 pr-3 font-mono">{row.objective ?? "—"}</td>
+                  <td className="py-2 pr-3 font-mono">{row.objective == null ? "—" : formatGoal(row.objective)}</td>
                   <td className="py-2 pr-3">{row.wall_time_s === null ? "—" : `${row.wall_time_s}s`}</td>
                   <td className="py-2 text-slate-600">{row.solver_version ?? row.solver}</td>
                 </tr>
@@ -874,18 +879,18 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
       <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
         <Fact
           label={`Run ${String(left)} (${data.left.scenario_name})`}
-          value={`${data.left.status}${data.left.objective === null ? "" : ` — ${data.left.objective}`}`}
+          value={`${data.left.status}${data.left.objective === null ? "" : ` — ${formatGoal(data.left.objective)}`}`}
         />
         <Fact
           label={`Run ${String(right)} (${data.right.scenario_name})`}
-          value={`${data.right.status}${data.right.objective === null ? "" : ` — ${data.right.objective}`}`}
+          value={`${data.right.status}${data.right.objective === null ? "" : ` — ${formatGoal(data.right.objective)}`}`}
         />
         <Fact
-          label="Objective change"
+          label={`Objective change, run ${String(left)} → run ${String(right)}`}
           value={
             data.objective_delta === null
               ? "— (one run has no objective)"
-              : `${data.objective_delta > 0 ? "+" : ""}${data.objective_delta}`
+              : `${data.objective_delta > 0 ? "+" : ""}${formatGoal(data.objective_delta)}`
           }
         />
         <Fact label="Differs by" value={data.differs_by.length === 0 ? "nothing" : data.differs_by.join(", ")} />
@@ -898,14 +903,14 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
 
       {data.rules.length > 0 && (
         <>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">Rules that changed</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">Rules that changed, run {String(left)} &rarr; run {String(right)}</h3>
           <ul className="mb-4 space-y-1 text-sm">
             {data.rules.map((rule) => (
               <li key={rule.constraint_id} className="rounded border border-slate-200 px-3 py-2">
                 <span className="font-mono text-slate-900">{rule.constraint_id}</span>{" "}
                 <span className="text-slate-600">
-                  {rule.left_satisfied ? "held" : `short by ${rule.left_violation}`} &rarr;{" "}
-                  {rule.right_satisfied ? "held" : `short by ${rule.right_violation}`}
+                  {rule.left_satisfied ? "held" : `short by ${formatGoal(rule.left_violation)}`} &rarr;{" "}
+                  {rule.right_satisfied ? "held" : `short by ${formatGoal(rule.right_violation)}`}
                   {rule.left_penalty !== rule.right_penalty &&
                     ` (cost ${rule.left_penalty} → ${rule.right_penalty})`}
                 </span>
@@ -1762,4 +1767,19 @@ function Empty({ children }: { children: React.ReactNode }) {
 /** The shared failure state (Epic UX, U-1): no access, not found, or a failure worth retrying. */
 function Failed({ subject, error, onRetry }: { subject: string; error: unknown; onRetry: () => void }) {
   return <LoadFailure subject={subject} error={error} retry={() => void onRetry()} />;
+}
+
+/** "run 3", "runs 3–7", or "runs 3, 5, 9": the ids a run's parts took (F26). */
+export function runSpan(ids: number[]): string {
+  if (ids.length === 1) return `run ${ids[0]}`;
+  const contiguous = ids.every((id, i) => i === 0 || id === ids[i - 1] + 1);
+  return contiguous ? `runs ${ids[0]}–${ids[ids.length - 1]}` : `runs ${ids.join(", ")}`;
+}
+
+const GOAL = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
+/** A goal value or change as a planner reads it: 3669, not 3669.000000 (operator trial F9 F27). */
+export function formatGoal(value: number | string | null | undefined): string {
+  const n = Number(value);
+  return value == null || value === "" || !Number.isFinite(n) ? String(value ?? "—") : GOAL.format(n);
 }

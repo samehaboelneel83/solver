@@ -589,6 +589,8 @@ export type RunSummary = {
   purpose?: "plan" | "why_not" | "shadow" | "suite";
   parent_run_id?: number | null;
   verdict?: Verdict | null;
+  /** Runs this one made as its parts (alternative plans, a front's points), not listed as rows (F26). */
+  part_runs?: number[];
 };
 
 /** A why-not probe's answer (queue R26). */

@@ -153,7 +153,11 @@ def test_runs_over_different_data_are_compared_but_not_attributed_to_the_patch(d
 
     assert "data" in result.differs_by
     assert result.patch_is_the_only_difference is False
-    assert "cannot be attributed" in result.note
+    if len(result.differs_by) == 1:
+        # One difference is the cause (operator trial F28).
+        assert result.note == "these runs differ only by data, so the change in the answer is down to it"
+    else:
+        assert "cannot be attributed" in result.note
 
 
 def test_two_runs_of_different_problems_are_refused(db):
@@ -199,3 +203,9 @@ def test_identical_runs_say_the_difference_is_the_solvers_freedom(db):
     assert result.differs_by == []
     assert result.patch_is_the_only_difference is False
     assert "equally good answers" in result.note
+
+
+def test_one_difference_is_named_as_the_cause_and_several_are_not():
+    from app.solve.compare import _note
+    assert _note(["solver"]) == "these runs differ only by solver, so the change in the answer is down to it"
+    assert "cannot be attributed" in _note(["data", "solver"])

@@ -146,6 +146,9 @@ class RunSummary(BaseModel):
     purpose: str = "plan"
     parent_run_id: int | None = None
     verdict: dict[str, Any] | None = None
+    # The runs this one made as its own parts -- alternative plans, a front's points --
+    # which the list does not show as rows (operator trial F26: why run ids skip).
+    part_runs: list[int] = []
 
 
 class AlternativePlan(BaseModel):
@@ -629,8 +632,14 @@ def list_runs(
         stmt = stmt.where(Run.scenario_id == scenario_id)
         count_stmt = count_stmt.where(Run.scenario_id == scenario_id)
     rows = db.scalars(stmt.order_by(Run.id.desc()).limit(limit).offset(offset)).all()
+    parts: dict[int, list[int]] = {}
+    if rows:
+        owner = func.coalesce(Run.params["alternative_of"].astext, Run.params["pareto_of"].astext)
+        for part_id, of in db.execute(select(Run.id, owner).where(owner.in_([str(r.id) for r in rows]))
+                                      .order_by(Run.id)).all():
+            parts.setdefault(int(of), []).append(part_id)
     return {
-        "items": [RunSummary.model_validate(r) for r in rows],
+        "items": [RunSummary.model_validate(r).model_copy(update={"part_runs": parts.get(r.id, [])}) for r in rows],
         "total": db.scalar(count_stmt) or 0,
     }
 
