@@ -27,6 +27,27 @@ import { relativeTime } from "../lib/relativeTime";
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const NUMERIC = new Set(["integer", "number"]);
+/** What a yes-or-no model can learn: anything that may hold two values. */
+const TWO_VALUED = new Set(["boolean", "text", "enum", "integer"]);
+
+const METHODS: Record<string, string> = {
+  random_forest: "Random forest",
+  gradient_boosting: "Gradient boosting",
+  random_forest_classifier: "Random forest (yes or no)",
+};
+
+function percent(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function Tile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded bg-slate-50 px-2 py-1.5">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="font-mono text-sm text-slate-900">{value}</dd>
+    </div>
+  );
+}
 
 function score(value: number | null | undefined, digits = 3): string {
   return value === null || value === undefined ? "—" : value.toLocaleString("en", { maximumFractionDigits: digits });
@@ -53,7 +74,7 @@ function PredictorCard({ predictor, canEdit }: { predictor: Predictor; canEdit: 
           {predictor.note && <p className="mt-1 text-sm text-slate-600">{predictor.note}</p>}
           <p className="mt-1 text-xs text-slate-500">
             {trained?.entity_type
-              ? `${trained.kind === "gradient_boosting" ? "Gradient boosting" : "Random forest"} on ${trained.entity_type}, predicting ${trained.target}`
+              ? `${METHODS[trained.kind ?? ""] ?? "Random forest"} on ${trained.entity_type}, predicting ${m.predicts ?? trained.target}`
               : "Uploaded"}
             {predictor.summary?.trees ? ` · ${predictor.summary.trees} trees, ${predictor.summary.leaves ?? "?"} leaves` : ""}
             {updated ? ` · updated ${updated}` : ""}
@@ -68,11 +89,32 @@ function PredictorCard({ predictor, canEdit }: { predictor: Predictor; canEdit: 
       </div>
       {m.holdout_rows ? (
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center text-xs" aria-label={`How well ${predictor.name} predicts`}>
-          <div className="rounded bg-slate-50 px-2 py-1.5"><dt className="text-slate-500">R²</dt><dd className="font-mono text-sm text-slate-900">{score(m.r2)}</dd></div>
-          <div className="rounded bg-slate-50 px-2 py-1.5"><dt className="text-slate-500">Mean error</dt><dd className="font-mono text-sm text-slate-900">{score(m.mae)}</dd></div>
-          <div className="rounded bg-slate-50 px-2 py-1.5"><dt className="text-slate-500">RMSE</dt><dd className="font-mono text-sm text-slate-900">{score(m.rmse)}</dd></div>
+          {m.positive !== undefined ? (
+            <>
+              <Tile label="Right" value={percent(m.accuracy)} />
+              <Tile label="AUC" value={score(m.auc)} />
+              <Tile label="Brier" value={score(m.brier)} />
+            </>
+          ) : (
+            <>
+              <Tile label="R²" value={score(m.r2)} />
+              <Tile label="Mean error" value={score(m.mae)} />
+              <Tile label="RMSE" value={score(m.rmse)} />
+            </>
+          )}
         </dl>
       ) : null}
+      {m.positive !== undefined && m.holdout_rows ? (
+        <p className="mt-2 text-xs text-slate-500">
+          Right: held-out records called correctly at a 50% chance. AUC: 1 tells {m.positive} and {m.negative} apart perfectly, 0.5 is a coin toss.
+          Brier: the average squared miss of the chance, lower is better.
+        </p>
+      ) : null}
+      {m.interval_coverage !== undefined && m.interval_coverage !== null && (
+        <p className="mt-2 text-xs text-slate-500">
+          Its trees disagree too: {percent(m.interval_coverage)} of held-out values fell between their {m.interval ?? "10th and 90th percentile"}.
+        </p>
+      )}
       {m.evaluated_on && (
         <p className="mt-2 text-xs text-slate-500">
           Measured on {m.evaluated_on}{m.rows ? ` (${m.rows} rows${m.rows_skipped ? `, ${m.rows_skipped} skipped for missing numbers` : ""})` : ""}.
@@ -102,7 +144,9 @@ function TrainForm({ domainId }: { domainId: number }) {
   const [entityType, setEntityType] = useState("");
   const [target, setTarget] = useState("");
   const [features, setFeatures] = useState<string[]>([]);
-  const [kind, setKind] = useState<"random_forest" | "gradient_boosting">("random_forest");
+  const [kind, setKind] = useState<"random_forest" | "gradient_boosting" | "random_forest_classifier">("random_forest");
+  const [positive, setPositive] = useState("");
+  const yesOrNo = kind === "random_forest_classifier";
   const [trees, setTrees] = useState("50");
   const [depth, setDepth] = useState("6");
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
@@ -110,6 +154,11 @@ function TrainForm({ domainId }: { domainId: number }) {
   const typeItems = types.data?.items ?? [];
   const chosen = typeItems.find((t) => t.name === entityType);
   const numeric = useMemo(() => (chosen?.attributes ?? []).filter((a) => NUMERIC.has(a.data_type)).map((a) => a.name), [chosen]);
+  const targets = useMemo(
+    () => (yesOrNo ? (chosen?.attributes ?? []).filter((a) => TWO_VALUED.has(a.data_type)).map((a) => a.name) : numeric),
+    [chosen, numeric, yesOrNo],
+  );
+  const targetType = chosen?.attributes?.find((a) => a.name === target)?.data_type;
   const problem = !NAME.test(name)
     ? "Name it with lower-case letters, digits and underscores, starting with a letter."
     : !chosen ? "Choose the records to learn from."
@@ -126,7 +175,11 @@ function TrainForm({ domainId }: { domainId: number }) {
         if (problem) return;
         setMessage(null);
         train.mutate(
-          { domain_id: domainId, name, entity_type: entityType, target, features, kind, trees: Number(trees) || 50, max_depth: Number(depth) || 6 },
+          {
+            domain_id: domainId, name, entity_type: entityType, target, features, kind,
+            ...(yesOrNo && positive.trim() ? { positive: positive.trim() } : {}),
+            trees: Number(trees) || 50, max_depth: Number(depth) || 6,
+          },
           {
             onSuccess: (made) => setMessage({ error: false, text: `Trained ${made.name}.` }),
             onError: (e) => setMessage({ error: true, text: formatApiError(e) }),
@@ -136,7 +189,8 @@ function TrainForm({ domainId }: { domainId: number }) {
     >
       <h2 id="train-heading" className="font-sans text-base font-semibold tracking-normal text-slate-900">Train a model</h2>
       <p className="text-sm text-slate-600">
-        Learns one numeric attribute of a record type from others, with a held-out fifth of the records to say how well it predicts.
+        Learns one attribute of a record type from its numeric ones, with a held-out fifth of the records to say how well it predicts.
+        A yes-or-no model learns an attribute with two values and predicts the chance of one of them.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">Name of the model
@@ -151,16 +205,26 @@ function TrainForm({ domainId }: { domainId: number }) {
         <label className="block text-sm">Predict
           <select className={INPUT_CLASS} value={target} disabled={!chosen}
             onChange={(e) => { setTarget(e.target.value); setFeatures((f) => f.filter((x) => x !== e.target.value)); }}>
-            <option value="">{chosen && numeric.length === 0 ? "No numeric attributes" : "Choose an attribute"}</option>
-            {numeric.map((a) => <option key={a} value={a}>{a}</option>)}
+            <option value="">{chosen && targets.length === 0 ? (yesOrNo ? "No attributes to learn" : "No numeric attributes") : "Choose an attribute"}</option>
+            {targets.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </label>
         <label className="block text-sm">Method
-          <select className={INPUT_CLASS} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-            <option value="random_forest">Random forest</option>
-            <option value="gradient_boosting">Gradient boosting</option>
+          <select className={INPUT_CLASS} value={kind} onChange={(e) => {
+            const next = e.target.value as typeof kind;
+            setKind(next);
+            // What can be predicted changes with the method.
+            if ((next === "random_forest_classifier") !== yesOrNo) setTarget("");
+          }}>
+            {Object.entries(METHODS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
+        {yesOrNo && target && targetType !== "boolean" && (
+          <label className="block text-sm">Counts as yes
+            <input className={INPUT_CLASS} value={positive} onChange={(e) => setPositive(e.target.value)}
+              placeholder="one of its two values; the later one if empty" />
+          </label>
+        )}
       </div>
       {chosen && (
         <fieldset>

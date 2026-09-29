@@ -156,6 +156,27 @@ def predict(doc: dict[str, Any], x: Sequence[float]) -> float:
     return float(doc.get("base", 0)) + total
 
 
+def spread(doc: dict[str, Any], x: Sequence[float], low: float = 10, high: float = 90) -> tuple[float, float] | None:
+    """The `low`-th and `high`-th percentiles of the trees' own predictions
+    at ``x`` -- a quantile-forest style range for an averaged ensemble. None
+    for a summed one (a boosted tree is a correction, not a guess) or a
+    single tree. The spread of the trees, not a calibrated interval: training
+    measures how often it holds (`interval_coverage`)."""
+    if doc["aggregation"] != "mean" or len(doc["trees"]) < 2:
+        return None
+    base = float(doc.get("base", 0))
+    values = sorted(base + leaf_value(tree["nodes"], x) for tree in doc["trees"])
+    return _percentile(values, low), _percentile(values, high)
+
+
+def _percentile(ordered: list[float], q: float) -> float:
+    """Linear interpolation between order statistics, as numpy's default."""
+    at = (len(ordered) - 1) * q / 100
+    below = math.floor(at)
+    above = min(below + 1, len(ordered) - 1)
+    return ordered[below] + (ordered[above] - ordered[below]) * (at - below)
+
+
 def leaf_value(nodes: list[dict[str, Any]], x: Sequence[float]) -> float:
     node = nodes[0]
     while "value" not in node:
@@ -207,11 +228,21 @@ def from_sklearn(model: Any, inputs: list[str]) -> dict[str, Any]:
     Supports `DecisionTreeRegressor`, `RandomForestRegressor`,
     `ExtraTreesRegressor` (all averaged) and `GradientBoostingRegressor`
     (summed; the learning rate is folded into the leaf values and the
-    initial estimate becomes `base`). Anything else is refused by name
-    rather than exported wrongly.
+    initial estimate becomes `base`). A two-class `RandomForestClassifier`
+    trained on 0 and 1 exports as the averaged probability of class 1 --
+    what its `predict_proba(...)[:, 1]` says -- so it embeds in a model
+    exactly as a regressor does. Anything else is refused by name rather
+    than exported wrongly.
     """
     name = type(model).__name__
-    if name == "DecisionTreeRegressor":
+    positive: int | None = None
+    if name == "RandomForestClassifier":
+        classes = [int(c) for c in getattr(model, "classes_", [])]
+        if sorted(classes) != [0, 1]:
+            raise EnsembleError("a classifier is exported when it was trained on the two classes 0 and 1")
+        positive = classes.index(1)
+        estimators, aggregation, base, scale = list(model.estimators_), "mean", 0.0, 1.0
+    elif name == "DecisionTreeRegressor":
         estimators, aggregation, base, scale = [model], "mean", 0.0, 1.0
     elif name in ("RandomForestRegressor", "ExtraTreesRegressor"):
         estimators, aggregation, base, scale = list(model.estimators_), "mean", 0.0, 1.0
@@ -230,7 +261,11 @@ def from_sklearn(model: Any, inputs: list[str]) -> dict[str, Any]:
         for i in range(tree.node_count):
             left, right = int(tree.children_left[i]), int(tree.children_right[i])
             if left == -1:
-                nodes.append({"value": float(tree.value[i].ravel()[0]) * scale})
+                if positive is None:
+                    nodes.append({"value": float(tree.value[i].ravel()[0]) * scale})
+                else:
+                    counts = tree.value[i].ravel()
+                    nodes.append({"value": float(counts[positive] / counts.sum())})
             else:
                 nodes.append(
                     {"feature": int(tree.feature[i]), "threshold": float(tree.threshold[i]),

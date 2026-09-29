@@ -62,7 +62,10 @@ class TrainBody(BaseModel):
     entity_type: str = Field(pattern=_NAME, max_length=63)
     features: list[str] = Field(min_length=1, max_length=trees.MAX_INPUTS)
     target: str = Field(pattern=_NAME, max_length=63)
-    kind: str = Field(default="random_forest", pattern="^(random_forest|gradient_boosting)$")
+    kind: str = Field(default="random_forest", pattern="^(random_forest|gradient_boosting|random_forest_classifier)$")
+    #: For a yes-or-no model: which of the target's two values counts as yes
+    #: (`true` for a boolean, otherwise the later of the two by default).
+    positive: str | None = Field(default=None, max_length=200)
     trees: int = Field(default=50, ge=1, le=training.MAX_TREES)
     max_depth: int = Field(default=6, ge=1, le=training.MAX_DEPTH)
     min_samples_leaf: int = Field(default=2, ge=1, le=10_000)
@@ -229,6 +232,7 @@ def train_predictor(
         trained = training.train(
             [dict(r or {}) for r in rows], body.features, body.target, kind=body.kind, trees=body.trees,
             max_depth=body.max_depth, min_samples_leaf=body.min_samples_leaf, seed=body.seed,
+            positive=body.positive,
         )
     except training.TrainingError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -236,6 +240,7 @@ def train_predictor(
         "kind": body.kind, "entity_type": body.entity_type, "features": body.features, "target": body.target,
         "trees": body.trees, "max_depth": body.max_depth, "min_samples_leaf": body.min_samples_leaf,
         "seed": body.seed,
+        **({"positive": trained.metrics["positive"]} if "positive" in trained.metrics else {}),
     }
     return _store(
         db, user, domain_id=body.domain_id, name=body.name, note=body.note, model=trained.model,
@@ -271,7 +276,12 @@ def predict_with(
     for i, x in enumerate(body.inputs):
         if len(x) != width:
             raise HTTPException(422, f"row {i} has {len(x)} inputs; {row['name']} takes {width} ({', '.join(model['inputs'])})")
-    return {"inputs": model["inputs"], "predictions": [trees.predict(model, x) for x in body.inputs]}
+    out: dict[str, Any] = {"inputs": model["inputs"], "predictions": [trees.predict(model, x) for x in body.inputs]}
+    # An averaged ensemble also says how far its trees disagree (10th to 90th percentile).
+    ranges = [trees.spread(model, x) for x in body.inputs]
+    if all(r is not None for r in ranges):
+        out["ranges"] = [{"low": r[0], "high": r[1]} for r in ranges]  # type: ignore[index]
+    return out
 
 
 @router.delete("/predictors/{identity}", status_code=204)

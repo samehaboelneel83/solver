@@ -1708,6 +1708,16 @@ export type PredictorMetrics = {
   r2?: number | null;
   mae?: number | null;
   rmse?: number | null;
+  /** Random forests: how often held-out values fell inside the trees' 10th-90th percentile. */
+  interval?: string;
+  interval_coverage?: number | null;
+  /** Yes-or-no models: which value counts as yes, and how well it is told apart. */
+  positive?: string;
+  negative?: string;
+  predicts?: string;
+  accuracy?: number | null;
+  auc?: number | null;
+  brier?: number | null;
 };
 
 export type Predictor = {
@@ -1719,7 +1729,9 @@ export type Predictor = {
   inputs: string[];
   metrics: PredictorMetrics | null;
   /** How it was trained, or null for an uploaded model. */
-  training: { kind?: string; entity_type?: string; features?: string[]; target?: string; trees?: number; max_depth?: number } | null;
+  training: {
+    kind?: string; entity_type?: string; features?: string[]; target?: string; trees?: number; max_depth?: number; positive?: string;
+  } | null;
   summary: { inputs?: number; trees?: number; nodes?: number; leaves?: number; aggregation?: string } | null;
   created_at: string;
   updated_at: string;
@@ -1732,7 +1744,9 @@ export type PredictorTrain = {
   entity_type: string;
   features: string[];
   target: string;
-  kind: "random_forest" | "gradient_boosting";
+  kind: "random_forest" | "gradient_boosting" | "random_forest_classifier";
+  /** Yes-or-no models: the target value that counts as yes. */
+  positive?: string;
   trees?: number;
   max_depth?: number;
   replace?: boolean;
@@ -1745,7 +1759,7 @@ export const uploadPredictor = (body: { domain_id: number; name: string; note?: 
   send<Predictor>("POST", "/api/v1/predictors", body);
 export const deletePredictor = (id: Id) => remove(`/api/v1/predictors/${id}`);
 export const predictWith = (id: Id, inputs: number[][]) =>
-  send<{ predictions: number[] }>("POST", `/api/v1/predictors/${id}/predict`, { inputs });
+  send<{ predictions: number[]; ranges?: { low: number; high: number }[] }>("POST", `/api/v1/predictors/${id}/predict`, { inputs });
 
 export function usePredictors(domainId: Id | null) {
   return useQuery({

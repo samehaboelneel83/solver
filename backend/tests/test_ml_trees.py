@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from app.ml import train as training
-from app.ml.trees import EnsembleError, check_ensemble, from_sklearn, leaves, predict, summary
+from app.ml.trees import EnsembleError, check_ensemble, from_sklearn, leaf_value, leaves, predict, summary
 
 STUMP = {
     "format": "tree-ensemble/1",
@@ -151,3 +151,59 @@ def test_too_few_usable_rows_is_said_with_the_count():
 def test_a_target_among_the_features_is_refused():
     with pytest.raises(training.TrainingError, match="target"):
         training.train([{"a": 1}] * 10, ["a"], "a")
+
+
+def _churn(n=300, seed=1):
+    rng = np.random.default_rng(seed)
+    X = rng.uniform(0, 10, (n, 2))
+    left = X[:, 0] + X[:, 1] > 10
+    return [{"a": float(a), "b": float(b), "churned": bool(y)} for (a, b), y in zip(X, left)]
+
+
+def test_a_yes_or_no_model_predicts_the_probability_of_yes():
+    trained = training.train(_churn(), ["a", "b"], "churned", kind="random_forest_classifier", trees=25, max_depth=6)
+    check_ensemble(trained.model)
+    metrics = trained.metrics
+    assert metrics["positive"] == "true" and metrics["negative"] == "false"
+    assert metrics["predicts"] == "the probability that churned is true"
+    assert metrics["accuracy"] > 0.9 and metrics["auc"] > 0.95 and 0 <= metrics["brier"] < 0.1
+    assert predict(trained.model, [9, 9]) > 0.8 and predict(trained.model, [1, 1]) < 0.2
+    assert all(0 <= predict(trained.model, [a, b]) <= 1 for a in range(0, 11, 2) for b in range(0, 11, 2))
+
+
+def test_the_exported_classifier_says_what_predict_proba_says():
+    from sklearn.ensemble import RandomForestClassifier
+
+    rows = _churn()
+    X = np.array([[r["a"], r["b"]] for r in rows])
+    y = np.array([int(r["churned"]) for r in rows])
+    fitted = RandomForestClassifier(n_estimators=10, max_depth=5, random_state=0).fit(X, y)
+    doc = from_sklearn(fitted, ["a", "b"])
+    probes = np.random.default_rng(3).uniform(0, 10, (200, 2))
+    ours = np.array([predict(doc, p) for p in probes])
+    assert np.max(np.abs(ours - fitted.predict_proba(probes)[:, 1])) < 1e-9
+
+
+def test_a_yes_or_no_model_names_its_yes_and_refuses_a_third_value():
+    rows = [{**r, "churned": "stay" if not r["churned"] else "leave"} for r in _churn(60)]
+    trained = training.train(rows, ["a", "b"], "churned", kind="random_forest_classifier", trees=5, positive="stay")
+    assert trained.metrics["positive"] == "stay" and trained.metrics["negative"] == "leave"
+    with pytest.raises(training.TrainingError, match="not one of"):
+        training.train(rows, ["a", "b"], "churned", kind="random_forest_classifier", positive="maybe")
+    rows[0]["churned"] = "unsure"
+    with pytest.raises(training.TrainingError, match="exactly two values; churned has 3"):
+        training.train(rows, ["a", "b"], "churned", kind="random_forest_classifier")
+
+
+def test_a_forest_reports_how_often_its_range_held_and_the_range_is_its_trees_spread():
+    from app.ml.trees import spread
+
+    X, y = _data()
+    rows = [{"a": float(a), "b": float(b), "c": float(c), "y": float(v)} for (a, b, c), v in zip(X, y)]
+    trained = training.train(rows, ["a", "b", "c"], "y", trees=30, max_depth=6)
+    assert 0.3 < trained.metrics["interval_coverage"] <= 1
+    low, high = spread(trained.model, [5, 5, 5])
+    each = sorted(leaf_value(tree["nodes"], [5, 5, 5]) for tree in trained.model["trees"])
+    assert np.percentile(each, 10) == pytest.approx(low) and np.percentile(each, 90) == pytest.approx(high)
+    boosted = training.train(rows, ["a", "b", "c"], "y", kind="gradient_boosting", trees=10, max_depth=3)
+    assert spread(boosted.model, [5, 5, 5]) is None and "interval_coverage" not in boosted.metrics

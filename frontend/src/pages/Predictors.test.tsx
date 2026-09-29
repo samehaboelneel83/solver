@@ -114,3 +114,45 @@ it("offers no training, upload or delete without domain.edit, and explains an em
   expect(screen.queryByRole("button", { name: "Train" })).toBeNull();
   expect(screen.queryByText("Upload a model")).toBeNull();
 });
+
+const CHURN = {
+  ...TRAINED, id: 4, name: "churn_model", note: null, inputs: ["price"],
+  metrics: {
+    rows: 100, rows_skipped: 0, holdout_rows: 20, evaluated_on: "a held-out 20% of the rows",
+    positive: "true", negative: "false", predicts: "the probability that loyal is true", accuracy: 0.9, auc: 0.95, brier: 0.071,
+  },
+  training: { kind: "random_forest_classifier", entity_type: "product", features: ["price"], target: "loyal", positive: "true" },
+};
+
+it("shows a yes-or-no model by how often it is right, and a forest by how often its range held", async () => {
+  const withRange = { ...TRAINED, metrics: { ...TRAINED.metrics, interval: "10th to 90th percentile of the trees", interval_coverage: 0.78 } };
+  stub(undefined, undefined, [withRange, CHURN]);
+  renderPage();
+  const [forest, churn] = await screen.findAllByTestId("predictor");
+  expect(within(forest).getByText(/78% of held-out values fell between their 10th to 90th percentile/)).toBeInTheDocument();
+  expect(within(churn).getByText(/Random forest \(yes or no\) on product, predicting the probability that loyal is true/)).toBeInTheDocument();
+  const scores = within(churn).getByLabelText("How well churn_model predicts");
+  expect(scores).toHaveTextContent("Right90%");
+  expect(scores).toHaveTextContent("AUC0.95");
+  expect(scores).not.toHaveTextContent("R²");
+});
+
+it("trains a yes-or-no model on a two-valued attribute, naming which value is yes", async () => {
+  const write = stub();
+  renderPage();
+  await screen.findByTestId("predictor");
+  fireEvent.change(screen.getByLabelText("Name of the model"), { target: { value: "label_model" } });
+  fireEvent.change(screen.getByLabelText("Learn from records of"), { target: { value: "product" } });
+  fireEvent.change(screen.getByLabelText("Method"), { target: { value: "random_forest_classifier" } });
+  const predict = screen.getByLabelText("Predict") as HTMLSelectElement;
+  // Text and whole numbers can hold two values; plain numbers are not offered.
+  expect(Array.from(predict.options).map((o) => o.value)).toEqual(["", "promo", "label"]);
+  fireEvent.change(predict, { target: { value: "label" } });
+  fireEvent.change(screen.getByLabelText("Counts as yes"), { target: { value: "premium" } });
+  fireEvent.click(screen.getByLabelText("price"));
+  fireEvent.click(screen.getByRole("button", { name: "Train" }));
+  await waitFor(() => expect(write).toHaveBeenCalled());
+  expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+    kind: "random_forest_classifier", target: "label", positive: "premium", features: ["price"],
+  }));
+});

@@ -205,3 +205,42 @@ def test_the_estimate_never_exceeds_the_run_s_time_limit():
 def test_a_uuid_organization_key_is_a_string_in_the_cache():
     eta.clear()
     assert eta.model_for(str(uuid.uuid4()), 3, lambda: []) is None
+
+
+def test_a_yes_or_no_predictor_is_trained_and_a_forest_says_its_range(client, db):  # noqa: F811
+    http, t = client
+    domain = t["domain_a"]
+    type_id = db.execute(
+        text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'customer', CAST('resource' AS entity_role)) RETURNING id"),
+        {"d": domain},
+    ).scalar_one()
+    for name, kind in (("tenure", "number"), ("spend", "number"), ("churned", "boolean")):
+        db.execute(
+            text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, CAST(:k AS attr_type))"),
+            {"t": type_id, "n": name, "k": kind},
+        )
+    rng = np.random.default_rng(2)
+    for i in range(100):
+        tenure, spend = float(rng.uniform(0, 10)), float(rng.uniform(0, 10))
+        attrs = {"tenure": tenure, "spend": spend, "churned": tenure + spend < 8}
+        db.execute(
+            text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+            {"t": type_id, "k": f"c{i}", "a": json.dumps(attrs)},
+        )
+    db.commit()
+    body = {"domain_id": domain, "name": "churn_model", "entity_type": "customer", "features": ["tenure", "spend"],
+            "target": "churned", "kind": "random_forest_classifier", "trees": 20, "max_depth": 5}
+    trained = http.post("/api/v1/predictors/train", json=body, headers=t["a"])
+    assert trained.status_code == 201, trained.text
+    made = trained.json()
+    assert made["metrics"]["predicts"] == "the probability that churned is true"
+    assert made["metrics"]["accuracy"] > 0.8 and made["training"]["positive"] == "true"
+    predicted = http.post(f"/api/v1/predictors/{made['id']}/predict", json={"inputs": [[1, 1], [9, 9]]},
+                          headers=t["a"]).json()
+    first, second = predicted["predictions"]
+    assert first > 0.7 and second < 0.3
+    # The trees' spread; their mean may sit outside it when nearly all agree.
+    assert all(0 <= s["low"] <= s["high"] <= 1 for s in predicted["ranges"])
+    assert predicted["ranges"][0]["low"] > 0.5 and predicted["ranges"][1]["high"] < 0.5
+    wrong = http.post("/api/v1/predictors/train", json={**body, "name": "other", "positive": "maybe"}, headers=t["a"])
+    assert wrong.status_code == 422 and "not one of" in wrong.text
