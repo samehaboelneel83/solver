@@ -135,7 +135,8 @@ describe("Dashboard", () => {
     renderWithProviders();
 
     expect(await screen.findByText("No problems yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "New problem" })).toHaveAttribute("href", "/public/problem/new");
+    // No domain chosen yet: a problem needs one, so the link goes where one is chosen or made (F1).
+    expect(screen.getByRole("link", { name: "Choose or create a domain" })).toHaveAttribute("href", "/domains");
   });
 
   it("scopes recent problems to the selected domain", async () => {

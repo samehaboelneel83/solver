@@ -51,6 +51,7 @@ beforeEach(() => {
   mockFetch.mockImplementation(async (path: string, options: RequestInit = {}) => {
     const method = options.method ?? "GET";
     if (path === "/api/v1/solvers") return { items: solvers, total: solvers.length, skipped };
+    if (path === "/api/v1/workers") return { state: "ready", online: 2, solving: 1, queued: 0, last_seen: null, says: "2 workers are online; a new run starts at once" };
     if (path === "/api/v1/solver-licences" && method === "GET") return { items: licences };
     if (path === "/api/v1/solver-licences/licensed-demo" && method === "PUT") {
       licences = [{ ...DEMO_LICENCE, set: true, fingerprint: "fa365ee4fd67", set_by: "admin", set_at: "2026-09-26T09:00:00Z" }];
@@ -118,5 +119,22 @@ describe("Solvers", () => {
     const alert = await screen.findByRole("alert", { name: "Manifests not loaded" });
     expect(alert).toHaveTextContent("/opt/solver/adapters/broken");
     expect(alert).toHaveTextContent("`proves` must say");
+  });
+});
+
+describe("the Solvers page as an operator reads it (operator trial F16, F17)", () => {
+  it("shows the workers live and no offline notice when the list loads", async () => {
+    renderPage();
+    await screen.findByText("highs");
+    expect(await screen.findByText(/2 workers are online; a new run starts at once\. Solving now: 1; waiting: 0\./)).toBeInTheDocument();
+    expect(screen.queryByTestId("offline-notice")).not.toBeInTheDocument();
+  });
+
+  it("says a local solver runs only when named, however it was registered", async () => {
+    solvers = [HIGHS, { name: "ipopt", available: true, classes: ["NLP"], note: "IPOPT", origin: "built-in", automatic: true,
+      chosen_unasked: false, proves: "local", licence: "not needed" }];
+    renderPage();
+    const row = (await screen.findByText("ipopt")).closest("tr")!;
+    expect(row).toHaveTextContent("only when named (its answer is the best nearby, not proven best)");
   });
 });

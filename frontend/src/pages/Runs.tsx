@@ -13,6 +13,7 @@ import {
   useCreateRun,
   useCreateScenario,
   usePreflight,
+  useUpdateScenario,
   type Preflight,
   type PreflightFinding,
   useRun,
@@ -512,6 +513,7 @@ function ScenarioRuns({
   const [solver, setSolver] = useState<string>("");
   // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
   const preflightQuery = usePreflight(scenarioId);
+  const moveScenario = useUpdateScenario();
   // Only a whole answer is acted on; a server from before the preflight existed simply has none.
   const preflight = { data: Array.isArray(preflightQuery.data?.solvers) && Array.isArray(preflightQuery.data?.findings)
     ? preflightQuery.data : undefined };
@@ -597,7 +599,11 @@ function ScenarioRuns({
 
   return (
     <>
-      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} />}
+      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending}
+        onMoveTo={can("model.publish") ? (versionId) => moveScenario.mutate({ id: scenarioId, body: { model_version_id: versionId } }, {
+          onSuccess: () => toast.success("The scenario now solves the latest version."),
+          onError: (error: unknown) => setFailure(formatApiError(error)),
+        }) : undefined} />}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {unexpressed.length > 0 ? (
           <p role="note" className="max-w-2xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -1480,7 +1486,11 @@ const FRONT = { width: 420, height: 240, pad: 44 };
  * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
  * anything worth a look, and whether a worker will pick it up.
  */
-export function BeforeYouSolve({ preflight, blockers }: { preflight: Preflight; blockers: PreflightFinding[] }) {
+export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false }: {
+  preflight: Preflight; blockers: PreflightFinding[];
+  /** Move the scenario to a newer version (operator trial F29); without it the warning only says so. */
+  onMoveTo?: (versionId: Id) => void; moving?: boolean;
+}) {
   const warnings = preflight.findings.filter((finding) => finding.kind === "warning");
   const chosen = preflight.solvers.find((row) => row.chosen);
   const tone = blockers.length ? "border-red-300 bg-red-50" : warnings.length || preflight.workers.state === "offline"
@@ -1494,7 +1504,17 @@ export function BeforeYouSolve({ preflight, blockers }: { preflight: Preflight; 
         </span>
       </p>
       {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
-      {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
+      {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => (
+        <li key={f.code + f.says}>
+          {f.says}
+          {f.code === "newer_version" && f.latest_version_id != null && onMoveTo && (
+            <button type="button" disabled={moving} className="ml-2 rounded border border-amber-600 px-2 py-0.5 text-amber-900 disabled:opacity-50"
+              onClick={() => onMoveTo(f.latest_version_id as Id)}>
+              {moving ? "Moving…" : `Move this scenario to version ${f.latest_version}`}
+            </button>
+          )}
+        </li>
+      ))}</ul>}
       <details className="mt-2">
         <summary className="cursor-pointer">Which solvers fit, and why the others do not</summary>
         <ul className="mt-1 space-y-0.5">{preflight.solvers.map((row) => (

@@ -714,6 +714,8 @@ export type SolverInfo = {
   origin?: "built-in" | "adapter";
   /** Whether the rules may choose it unasked. */
   automatic?: boolean;
+  /** Whether the rules actually do choose it for a model it fits: never a local solver (operator trial F17). */
+  chosen_unasked?: boolean;
   /** Queue R42: whether this organization has the licence it needs. */
   licence?: "not needed" | "set" | "missing";
   kind?: "ortools-engine" | "command-line" | "python";
@@ -924,11 +926,20 @@ export type ComparedRun = {
 /** One solver against a scenario's model (Epic UX, U-5): does it fit, would the rules choose it, and why. */
 export type SolverFit = { name: string; fits: boolean; automatic: boolean; chosen: boolean; proves: string; why: string; note: string };
 export type WorkerStatus = { state: "ready" | "busy" | "offline"; online: number; solving: number; queued: number; last_seen: string | null; says: string };
-export type PreflightFinding = { kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string };
+export type PreflightFinding = {
+  kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string;
+  /** `newer_version`: the latest published version, which the scenario can be moved to. */
+  latest_version?: number; latest_version_id?: Id;
+};
 export type Preflight = {
   scenario_id: Id; version: number; ready: boolean; findings: PreflightFinding[]; model_class: string;
   planner: string[]; solvers: SolverFit[]; workers: WorkerStatus;
 };
+export const getWorkers = () => apiFetch<WorkerStatus>("/api/v1/workers");
+/** Online workers, runs solving and queued (operator trial F16): followed every 15 s. */
+export function useWorkers() {
+  return useQuery({ queryKey: [V1, "workers"], queryFn: getWorkers, refetchInterval: 15_000 });
+}
 export const getPreflight = (scenarioId: Id) => apiFetch<Preflight>(`/api/v1/scenarios/${scenarioId}/preflight`);
 export function usePreflight(scenarioId: Id | null) {
   return useQuery({ queryKey: [V1, "preflight", scenarioId], queryFn: () => getPreflight(scenarioId as Id), enabled: isId(scenarioId),
@@ -1293,8 +1304,17 @@ export const useCreateVersion = () =>
 export function useTemplates() {
   return useQuery({ queryKey: [V1, "templates"], queryFn: listTemplates, staleTime: 60_000 });
 }
-export const useApplyTemplate = () =>
-  useV1Mutation(({ id, body }: { id: Id; body: ApplyTemplateRequest }) => applyTemplate(id, body));
+/** A template can make a domain, so the domain lists (sidebar, chooser) are refreshed too (F2). */
+export function useApplyTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: Id; body: ApplyTemplateRequest }) => applyTemplate(id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [V1] });
+      void queryClient.invalidateQueries({ queryKey: ["entities"] });
+    },
+  });
+}
 
 export function useSettings(params: { problemId?: Id | null; domainId?: Id | null } = {}) {
   return useQuery({

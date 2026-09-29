@@ -549,9 +549,13 @@ def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_
                 # Whether the rules may choose it unasked: a built-in, or an added solver whose
                 # current version passed the conformance kit (queue R43).
                 "automatic": is_automatic(b),
+                # Whether the rules would actually choose it for a model it fits (operator trial F17): a
+                # local solver (IPOPT, the searches) never is -- it runs only when named or as a fallback.
+                "chosen_unasked": is_automatic(b) and b.proves != "local",
+                "proves": b.proves,
                 # Queue R42: whether this organization has the licence the solver needs.
                 "licence": licence_state(db, user.organization_id, b),
-                **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves,
+                **({"kind": b.manifest.kind, "version": b.manifest.version,
                     "conformance": _conformance_of(reports.get(b.name), b.manifest.version)}
                    if b.manifest is not None else {}),
             }

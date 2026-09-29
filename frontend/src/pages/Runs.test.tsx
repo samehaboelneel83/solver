@@ -1136,6 +1136,16 @@ describe("before a run (Epic UX, U-5)", () => {
     expect(panel).toHaveTextContent("glop: takes LP models, not a MILP model");
   });
 
+  it("offers to move the scenario when a newer version is published (F29)", async () => {
+    const { BeforeYouSolve } = await import("./Runs");
+    const onMoveTo = vi.fn();
+    const newer = { kind: "warning" as const, code: "newer_version", says: "This scenario solves version 1; version 2 is the latest published.",
+      latest_version: 2, latest_version_id: 44 };
+    render(<BeforeYouSolve preflight={{ ...preflight, ready: true, findings: [newer] }} blockers={[]} onMoveTo={onMoveTo} />);
+    fireEvent.click(screen.getByRole("button", { name: "Move this scenario to version 2" }));
+    expect(onMoveTo).toHaveBeenCalledWith(44);
+  });
+
   it("says what an answer may claim in a few words", async () => {
     const { claimText } = await import("./Runs");
     expect(claimText("global")).toBe("proven best");

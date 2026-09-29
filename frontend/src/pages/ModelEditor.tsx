@@ -206,6 +206,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toast = useToast();
 
   const [failure, setFailure] = useState<string | null>(null);
+  // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
+  const [justPublished, setJustPublished] = useState<number | null>(null);
   const [equationView, setEquationView] = useEquationView();
   // One key per publication attempt, kept across retries (see publishFromServer).
   const publishKey = useRef<{ key: string; revision: number } | null>(null);
@@ -410,6 +412,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   function published(created: { id: Id; version: number }) {
     toast.success(`Published version ${created.version}`);
+    setJustPublished(created.version);
     clearDraft(Number(problemId));
     setScratch(false);
     setSearchParams(
@@ -795,6 +798,14 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <p className="mb-2 text-sm">
           <button type="button" className="text-blue-700 underline" onClick={() => setView("review")}>Review the whole model</button>{" "}
           <span className="text-slate-600">before publishing: every rule in words, and what looks unfinished.</span>
+        </p>
+      )}
+      {justPublished !== null && (
+        <p role="status" className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          Version {justPublished} is published. Scenarios keep solving the version they were made on until they are moved:{" "}
+          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/runs`}>open Runs</Link> to move a
+          scenario from its &ldquo;Before you solve&rdquo; panel, or edit it on the{" "}
+          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/scenarios`}>Scenarios page</Link>.
         </p>
       )}
       <DraftBar

@@ -1,5 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useEntityList } from "../api/entities";
 import { useCounts } from "../api/counts";
 import { useHealth } from "../api/health";
@@ -57,6 +57,7 @@ export default function Dashboard() {
   const { domainId, setDomainId } = useDomain();
   const { can } = useCapabilities();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   const templates = useTemplates();
   const apply = useApplyTemplate();
   const [templateError, setTemplateError] = useState<string | null>(null);
@@ -80,6 +81,10 @@ export default function Dashboard() {
   const problemsOffline = problemsFetchStatus === "paused" && !recentProblems;
 
   const templateItems = templates.data?.items ?? [];
+  // "/#templates" (from the empty domain chooser) lands on the templates, once they are drawn.
+  useEffect(() => {
+    if (hash === "#templates" && templateItems.length > 0) document.getElementById("templates")?.scrollIntoView();
+  }, [hash, templateItems.length]);
 
   return (
     <div className="max-w-7xl">
@@ -142,11 +147,12 @@ export default function Dashboard() {
           <div className="rounded-lg border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
             <p>No problems yet</p>
             {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
+            {/* A problem belongs to a domain: with none chosen, go where one is chosen or made (F1). */}
             <Link
-              to="/public/problem/new"
+              to={domainId === null ? "/domains" : "/public/problem/new"}
               className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline"
             >
-              New problem
+              {domainId === null ? "Choose or create a domain" : "New problem"}
             </Link>
           </div>
         )}
