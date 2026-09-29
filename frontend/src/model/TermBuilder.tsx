@@ -481,15 +481,7 @@ export function BindingsEditor({
               }
             >
               <div className="flex flex-wrap items-end gap-2 py-1">
-                <TextField
-                  label="Index"
-                  value={binding.index}
-                  problem={indexProblem(binding.index, [
-                    ...outer,
-                    ...bindings.filter((_, i) => i !== position),
-                  ])}
-                  onChange={(next) => replace(position, { ...binding, index: next })}
-                />
+                {/* The set first, then the name its members go by: what is ranged over reads before what it is called. */}
                 <Select
                   label="Set"
                   value={binding.set}
@@ -510,6 +502,15 @@ export function BindingsEditor({
                       })
                     );
                   }}
+                />
+                <TextField
+                  label="Index"
+                  value={binding.index}
+                  problem={indexProblem(binding.index, [
+                    ...outer,
+                    ...bindings.filter((_, i) => i !== position),
+                  ])}
+                  onChange={(next) => replace(position, { ...binding, index: next })}
                 />
                 <WalkPicker
                   binding={binding}

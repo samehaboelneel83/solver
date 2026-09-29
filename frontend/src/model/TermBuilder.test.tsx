@@ -164,6 +164,17 @@ describe("TermBuilder", () => {
     expect(screen.getByLabelText("Index")).toBeInTheDocument();
   });
 
+  it("puts a binding's Set before its Index", () => {
+    renderTerm({
+      sum: { var: "assign", index: ["e", "d", "s"] },
+      over: [{ index: "d", set: "day" }],
+    } as Term);
+
+    const set = screen.getByLabelText("Set");
+    const index = screen.getByLabelText("Index");
+    expect(set.compareDocumentPosition(index) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("folds the Summed over block on its own chevron", () => {
     renderTerm({
       sum: { var: "assign", index: ["e", "d", "s"] },
