@@ -1,8 +1,10 @@
 # Authenticated ingestion service
 
 This increment adds migration 0085, authenticated connection/job endpoints and a
-separate ingestion worker. It does not yet add the connection UI, mappings,
-optimization-ready dataset publication, CDC or result write-back.
+separate ingestion worker. Epic UX (U-4, migration 0089) adds the connection UI,
+job history, preview, column mapping, row-level validation and a one-time load
+with lineage (see "From extraction to domain data" below). CDC and result
+write-back remain out of scope.
 
 ## Scope and credentials
 
@@ -90,6 +92,33 @@ and applies operator network policy. Jobs are authorized on submission; revoking
 the submitter's role/key alone does not cancel already submitted work. Disable the
 connection or cancel its jobs to revoke pending execution.
 
-Connection lists are paginated; job history listing, editing/re-enabling a
-connection, finer connection grants, UI support and live source certification
-remain follow-up work. Domain deletion is blocked while it owns connections.
+Connection lists are paginated and each connection's job history is listed
+(`GET /api/v1/connections/{id}/jobs`). Editing/re-enabling a connection, finer
+connection grants and live source certification remain follow-up work. Domain deletion is blocked while it owns connections.
+
+
+## From extraction to domain data (Epic UX, U-4)
+
+The API reads artifacts through `OAAS_INTEGRATION_OUTPUT`, mounted **read-only**
+into the backend by `deploy/compose/integrations.yml`. Without it, preview,
+validation and load answer 409 with the reason.
+
+1. `GET /api/v1/ingestion-jobs/{id}/preview?limit=20` (`integration.run`): the
+   manifest's columns and source schema, the row count and the first rows.
+2. `POST /api/v1/ingestion-jobs/{id}/validate` (`integration.run`):
+   `{"entity_type_id": 9, "columns": {"staff_id": "key", "full_name": "label", "hours": "hours"}}`.
+   Every row goes through the bulk-upload code (types, then the database's rules
+   in a savepoint), all rolled back. Faults are `{row, column, message}`: the n-th
+   extracted row, `source → target`; a mapping fault is row 0. The report is
+   stored in `import_validation` with the artifact's SHA-256 and the mapping hash.
+3. `POST /api/v1/ingestion-jobs/{id}/load` (`integration.run` and `domain.edit`):
+   `{"validation_id": 5}`. Only a clean validation; the rows are re-read and their
+   SHA-256 checked against the manifest and the validation; written in one
+   transaction with an `import_load` row (artifact SHA-256, mapping hash, rows
+   written) and an audit entry. A second load of the same job and mapping is 409.
+   If the domain changed since validation and a row no longer loads, nothing is
+   written and the faults are returned.
+
+The next run's `snapshot_dataset()` freezes the loaded records like any other;
+`import_load` says which extraction and mapping they came from. In the UI:
+Domain → Data → Sources & imports → Extractions → Import….

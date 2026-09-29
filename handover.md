@@ -318,6 +318,20 @@ Plan: gap analysis rows E-1…E-5. Guide: [`docs/engine.md`](docs/engine.md).
 Not done here: diversity-weighted alternatives, alternatives over whole-number (non-binary) decisions,
 a SCIP bound beside multistart, Benders cut strengthening (Pareto-optimal / multi-cut).
 
+### 3.13 Epic UX — the OAAS P1 product packages (2026-09-29, branch `epic/ux`)
+
+Plan: [`docs/plans/2026-09-29-ux-epic-design.md`](docs/plans/2026-09-29-ux-epic-design.md). Report: `OAAS_CUMULATIVE_WORK_REPORT.md` §12.
+
+| Item | What it gives | Migration |
+|---|---|---|
+| U-1 Navigation | `q` search on six lists + domain chooser; shared failure states (403/404/retry); capability-gated routes with a role × destination test; legacy links to scoped pages | — |
+| U-2 Graph authoring | inspectors, typed connections (drag, dialog, keyboard), dependency-aware deletion, rename following references | — |
+| U-3 Guided patterns | scheduling/routing patterns, units and mapping feedback, stable rule keys, Review tab | — |
+| U-4 Import | source setup, job history, preview, mapping, row-level validation, one-time load with lineage | 0089 |
+| U-5 Before and after a run | preflight (findings, solver fit, workers), worker heartbeat, comparison claims | 0090 |
+
+Not done here: server-side graph layout storage; imports into relationships or parameters (entity types only so far); the P2 packages.
+
 ## 4. In progress
 
 Nothing in flight. OAAS first backlog plus HELP01 and P2a (answer shaping) are on master.

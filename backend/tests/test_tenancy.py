@@ -311,7 +311,8 @@ def test_a_pooled_connection_forgets_the_tenant(tenants):
 # `public` must be a tenant table.
 # `solver_conformance` (0072): an added solver is installed for every organization, and only an
 # operator runs the kit on it -- a platform fact, like a bench result.
-SHARED = {"template", "setting_key", "setting", "alembic_version", "bench_result", "solver_conformance"}
+# worker_heartbeat (0090): the solve workers serve every organization and hold nothing of any one.
+SHARED = {"template", "setting_key", "setting", "alembic_version", "bench_result", "solver_conformance", "worker_heartbeat"}
 
 
 def test_every_table_is_a_tenant_table_or_explicitly_shared(db):
