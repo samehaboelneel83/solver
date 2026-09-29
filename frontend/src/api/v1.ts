@@ -1787,7 +1787,14 @@ export type PredictorTrain = {
 
 export const listPredictors = (domainId: Id) =>
   apiFetch<Page<Predictor>>(`/api/v1/predictors?domain_id=${domainId}&limit=200`);
-export const trainPredictor = (body: PredictorTrain) => send<Predictor>("POST", "/api/v1/predictors/train", body);
+/** Training goes on after the answer (operator trial F31): ask after it with `usePredictorTraining`. */
+export const trainPredictor = (body: PredictorTrain) =>
+  send<{ training_id: number; state: "running" }>("POST", "/api/v1/predictors/train?background=true", body);
+export type PredictorTraining = {
+  id: number; domain_id: number; state: "running" | "done" | "failed"; predictor_id: number | null;
+  error: string | null; seconds: number; request: { name: string; entity_type: string; target: string; kind: string };
+};
+export const getPredictorTraining = (id: Id) => apiFetch<PredictorTraining>(`/api/v1/predictor-trainings/${id}`);
 export const uploadPredictor = (body: { domain_id: number; name: string; note?: string | null; model: unknown }) =>
   send<Predictor>("POST", "/api/v1/predictors", body);
 export const deletePredictor = (id: Id) => remove(`/api/v1/predictors/${id}`);
@@ -1802,6 +1809,20 @@ export function usePredictors(domainId: Id | null) {
   });
 }
 export const useTrainPredictor = () => useV1Mutation(trainPredictor);
+/** Asked every second while it runs; the predictors list is asked again once it is done. */
+export function usePredictorTraining(id: Id | null) {
+  const client = useQueryClient();
+  return useQuery({
+    queryKey: [V1, "predictor-training", id],
+    queryFn: async () => {
+      const training = await getPredictorTraining(id as Id);
+      if (training.state === "done") void client.invalidateQueries({ queryKey: [V1, "predictors"] });
+      return training;
+    },
+    enabled: isId(id),
+    refetchInterval: (query) => ((query.state.data as PredictorTraining | undefined)?.state === "running" || !query.state.data ? 1000 : false),
+  });
+}
 export const useUploadPredictor = () => useV1Mutation(uploadPredictor);
 export const useDeletePredictor = () => useV1Mutation(deletePredictor);
 

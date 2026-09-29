@@ -32,9 +32,14 @@ const ENTITY_TYPES = {
   total: 1,
 };
 
-function stub(write = vi.fn().mockResolvedValue(TRAINED), capabilities = ["domain.edit"], items: unknown[] = [TRAINED]) {
+const TRAINING = { id: 9, domain_id: 7, state: "done", predictor_id: 3, error: null, seconds: 2,
+  request: { name: "sales_model", entity_type: "product", target: "demand", kind: "random_forest" } };
+
+function stub(write = vi.fn().mockResolvedValue(TRAINED), capabilities = ["domain.edit"], items: unknown[] = [TRAINED],
+  training: unknown = TRAINING) {
   mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
     if (options?.method && options.method !== "GET") return write(path, options);
+    if (path.startsWith("/api/v1/predictor-trainings/")) return Promise.resolve(typeof training === "function" ? training() : training);
     if (path.startsWith("/api/v1/predictors")) return Promise.resolve({ items, total: items.length });
     if (path.startsWith("/api/v1/entity-types")) return Promise.resolve(ENTITY_TYPES);
     if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "a", display_name: null, capabilities });
@@ -75,7 +80,7 @@ it("lists a domain's predictors with how a rule reads them and how well they pre
 });
 
 it("trains a model from numeric attributes of a record type", async () => {
-  const write = stub();
+  const write = stub(vi.fn().mockResolvedValue({ training_id: 9, state: "running" }));
   renderPage();
   await screen.findByTestId("predictor");
   fireEvent.change(screen.getByLabelText("Name of the model"), { target: { value: "sales_model" } });
@@ -90,12 +95,14 @@ it("trains a model from numeric attributes of a record type", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Train" }));
   await waitFor(() => expect(write).toHaveBeenCalled());
   const [path, options] = write.mock.calls[0];
-  expect(path).toBe("/api/v1/predictors/train");
+  // In the background (operator trial F31): answered at once, then asked after.
+  expect(path).toBe("/api/v1/predictors/train?background=true");
   expect(JSON.parse(options.body)).toEqual({
     domain_id: 7, name: "sales_model", entity_type: "product", target: "demand", features: ["price", "promo"],
     kind: "random_forest", trees: 50, max_depth: 6,
   });
-  expect(await screen.findByText("Trained demand_model.")).toBeInTheDocument();
+  expect(await screen.findByText("Trained sales_model.")).toBeInTheDocument();
+  expect(mockFetch.mock.calls.some(([p]) => p === "/api/v1/predictor-trainings/9")).toBe(true);
 });
 
 it("says why a delete was refused, and asks first", async () => {
@@ -155,4 +162,20 @@ it("trains a yes-or-no model on a two-valued attribute, naming which value is ye
   expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({
     kind: "random_forest_classifier", target: "label", positive: "premium", features: ["price"],
   }));
+});
+
+it("says why a training failed on the server, after the request was answered (operator trial F31)", async () => {
+  let state = "running";
+  stub(vi.fn().mockResolvedValue({ training_id: 9, state: "running" }), ["domain.edit"], [TRAINED],
+    () => ({ ...TRAINING, state, seconds: 4, predictor_id: null, error: state === "failed" ? "the target has 0 rows with a value" : null }));
+  renderPage();
+  await screen.findByTestId("predictor");
+  fireEvent.change(screen.getByLabelText("Name of the model"), { target: { value: "sales_model" } });
+  fireEvent.change(screen.getByLabelText("Learn from records of"), { target: { value: "product" } });
+  fireEvent.change(screen.getByLabelText("Predict"), { target: { value: "demand" } });
+  fireEvent.click(screen.getByLabelText("price"));
+  fireEvent.click(screen.getByRole("button", { name: "Train" }));
+  expect(await screen.findByText(/goes on on the server if you leave/)).toHaveTextContent("Training for 4 s");
+  state = "failed";
+  expect(await screen.findByRole("alert", {}, { timeout: 3000 })).toHaveTextContent("0 rows with a value");
 });
