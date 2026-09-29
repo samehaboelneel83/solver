@@ -874,13 +874,14 @@ export type RunMapFeature = {
   geometry: { type: "Polygon" | "MultiPolygon"; coordinates: unknown };
   properties: Record<string, unknown> & { group?: string | null; subgroup?: string | null };
 };
-export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[] };
+/** `none`: why a run asked quietly has no map (operator trial F7). */
+export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[]; none?: string };
 /** Where each member of each located set stood when a run was made (queue R17b): `{set: {key: [x, y]}}`. */
 export type RunPlaces = Record<string, Record<string, [number, number]>>;
 export const getRunPlaces = (id: Id) => apiFetch<RunPlaces>(`/api/v1/runs/${id}/places`);
 
-export const getRunMap = (id: Id, dissolve = false) =>
-  apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : ""}`);
+export const getRunMap = (id: Id, dissolve = false, quiet = false) =>
+  apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : quiet ? "?quiet=true" : ""}`);
 
 /** What moved between two runs -- and what may honestly be credited for it. */
 export type RunComparison = {

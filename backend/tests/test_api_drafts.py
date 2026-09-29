@@ -54,6 +54,9 @@ def _versions(client, headers, problem_id):
 
 def test_saves_advance_the_revision_and_stale_saves_are_refused(client, auth_headers, problem_id):
     assert client.get(f"/api/v1/problems/{problem_id}/draft", headers=auth_headers).status_code == 404
+    # Asked with `absent=null`, no draft is an ordinary answer, not a 404 (operator trial F4).
+    quiet = client.get(f"/api/v1/problems/{problem_id}/draft?absent=null", headers=auth_headers)
+    assert quiet.status_code == 200 and quiet.json() is None
     created = _save(client, auth_headers, problem_id, _ir("a"))
     assert created.status_code == 201, created.text
     assert created.json()["revision"] == 1

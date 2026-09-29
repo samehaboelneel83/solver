@@ -45,7 +45,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -166,15 +166,19 @@ def _prior_publication(db: Session, problem_id: int, actor_id, key: str, digest:
 @router.get("/problems/{problem_id}/draft")
 def get_draft(
     problem_id: int,
+    absent: Literal["404", "null"] = Query("404", description="`null`: no draft answers 200 null (F4)"),
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("model.publish")),
-) -> DraftRead:
+) -> DraftRead | None:
     _get_problem(db, problem_id)
     row = db.execute(
         text(f"SELECT {_DRAFT_COLUMNS} FROM model_draft WHERE problem_id = :p AND owner_id = :o"),
         {"p": problem_id, "o": user.id},
     ).mappings().one_or_none()
     if row is None:
+        # The editor asks on every open; having no draft is the usual answer, not an error.
+        if absent == "null":
+            return None
         raise HTTPException(status_code=404, detail="no draft")
     return DraftRead.model_validate(dict(row))
 
