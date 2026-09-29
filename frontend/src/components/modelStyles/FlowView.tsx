@@ -19,7 +19,7 @@ import { layoutModel, PART_TITLE } from "../../lib/modelLayout";
 import { reteNodes, type NodeSpec } from "../../lib/modelNodes";
 import type { ModelStyleProps } from "./types";
 
-type CardData = { spec: NodeSpec; fill: string; soft: boolean };
+type CardData = { spec: NodeSpec; fill: string; soft: boolean; editable: boolean };
 type Card = Node<CardData, "part">;
 
 const CARD_WIDTH = 230;
@@ -34,7 +34,7 @@ const HEADER: Partial<Record<ModelPart, string>> = {
 };
 
 function PartCard({ data, selected }: NodeProps<Card>) {
-  const { spec, fill, soft } = data;
+  const { spec, fill, soft, editable } = data;
   const header = HEADER[spec.part] ?? fill;
   return (
     <div
@@ -43,7 +43,7 @@ function PartCard({ data, selected }: NodeProps<Card>) {
       }`}
       style={{ width: CARD_WIDTH }}
     >
-      {spec.inputs.length > 0 && <Handle type="target" position={Position.Left} className="!h-3 !w-3 !bg-slate-500" />}
+      {(editable || spec.inputs.length > 0) && <Handle type="target" position={Position.Left} className="!h-3 !w-3 !bg-slate-500" />}
       <div className="px-3 py-1.5" style={{ background: header, color: labelForeground(header) }}>
         <div className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{PART_TITLE[spec.part]}</div>
         <div className="truncate text-sm font-semibold" title={spec.name}>
@@ -63,7 +63,7 @@ function PartCard({ data, selected }: NodeProps<Card>) {
           </div>
         )}
       </div>
-      {spec.output && <Handle type="source" position={Position.Right} className="!h-3 !w-3 !bg-slate-500" />}
+      {(editable || spec.output) && <Handle type="source" position={Position.Right} className="!h-3 !w-3 !bg-slate-500" />}
     </div>
   );
 }
@@ -86,11 +86,14 @@ function cardHeight(spec: NodeSpec): number {
  * cards (WCAG 2.5.7). `seq` makes each press a new request. */
 export type Nudge = { id: string; dx: number; dy: number; seq: number };
 
-export default function FlowView({ graph, palette, onSelect, positions, onMove, nudge }: ModelStyleProps & {
+export default function FlowView({ graph, palette, onSelect, positions, onMove, nudge, onConnect }: ModelStyleProps & {
   positions?: Record<string, { x: number; y: number }>;
   onMove?: (id: string, position: { x: number; y: number }) => void;
   nudge?: Nudge | null;
+  /** Given, cards connect (Epic UX, U-2): a drag from one card to another asks for that connection. */
+  onConnect?: (source: string, target: string) => void;
 }) {
+  const editable = onConnect !== undefined;
   const flow = useRef<ReactFlowInstance<Card, Edge> | null>(null);
   const done = useRef<number | null>(null);
   useEffect(() => {
@@ -114,8 +117,8 @@ export default function FlowView({ graph, palette, onSelect, positions, onMove, 
       id: spec.id,
       type: "part",
       position: positions?.[spec.id] ?? { x: boxes.get(spec.id)?.x ?? 0, y: boxes.get(spec.id)?.y ?? 0 },
-      data: { spec, fill: palette.nodeFill[spec.id] ?? "#e2e8f0", soft: palette.nodeData?.[spec.id]?.soft === "yes" },
-      connectable: false,
+      data: { spec, fill: palette.nodeFill[spec.id] ?? "#e2e8f0", soft: palette.nodeData?.[spec.id]?.soft === "yes", editable },
+      connectable: editable,
     }));
     const edges: Edge[] = graph.edges.map((edge) => ({
       id: edge.id,
@@ -134,7 +137,7 @@ export default function FlowView({ graph, palette, onSelect, positions, onMove, 
       labelBgStyle: { fill: "#f8fafc" },
     }));
     return { nodes, edges };
-  }, [graph, palette, positions]);
+  }, [graph, palette, positions, editable]);
 
   return (
     <div className="h-full w-full" data-testid="model-style-view-flow">
@@ -145,7 +148,10 @@ export default function FlowView({ graph, palette, onSelect, positions, onMove, 
         defaultNodes={nodes}
         defaultEdges={edges}
         nodeTypes={nodeTypes}
-        nodesConnectable={false}
+        nodesConnectable={editable}
+        onConnect={(connection) => {
+          if (connection.source && connection.target) onConnect?.(connection.source, connection.target);
+        }}
         onNodeClick={(_event, node) => onSelect(node.id)}
         onNodeDragStop={(_event, node) => onMove?.(node.id, node.position)}
         onInit={(instance) => { flow.current = instance; }}

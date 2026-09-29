@@ -33,6 +33,7 @@ import DraftBar, { DraftConflict } from "../model/DraftBar";
 import BlocksEditor from "../components/BlocksEditor";
 import type { ModelPart } from "../lib/modelGraph";
 import ModelGraphPreview from "../components/ModelGraphPreview";
+import { stableKeys } from "../model/ruleKeys";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
@@ -223,7 +224,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // Blocks dropped beside the model rather than in it: not part of it, so
   // Publish waits until they are placed or deleted.
   const [outside, setOutside] = useState(0);
-  const [graphFocus, setGraphFocus] = useState<{ part: ModelPart; id: string; rulePosition?: number } | null>(null);
+  const [graphFocus, setGraphFocus] = useState<{ part: ModelPart; id: string; ruleKey?: string } | null>(null);
   const focusedPart = view === "graph" ? graphFocus?.part : undefined;
 
   const ir = (scratch ? EMPTY_MODEL : validVersion ? latest.data?.ir : undefined) as Record<string, unknown> | undefined;
@@ -238,6 +239,18 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const conflict = stored !== null && seedKey !== null && stored.base !== seedKey;
   const workingIr = !conflict && stored ? stored.ir : ir;
   const draft: Draft | null = useMemo(() => (workingIr ? formDraftOf(workingIr) : null), [workingIr]);
+  // Stable identities for the rules (Epic UX, U-3): a rename, or deleting another rule, keeps focus and state on this one.
+  const ruleIdentity = useRef<{ ids: string[]; keys: string[] }>({ ids: [], keys: [] });
+  const ruleIds = (draft?.constraints ?? []).map((rule) => rule.id);
+  const ruleKeys = useMemo(() => {
+    const keys = stableKeys(ruleIdentity.current.ids, ruleIdentity.current.keys, ruleIds);
+    ruleIdentity.current = { ids: ruleIds, keys };
+    return keys;
+  }, [ruleIds.join("\u0000")]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A focused rule deleted (from the graph or its card) leaves nothing to focus: show every editor again.
+  useEffect(() => {
+    if (graphFocus?.ruleKey !== undefined && !ruleKeys.includes(graphFocus.ruleKey)) setGraphFocus(null);
+  }, [graphFocus, ruleKeys]);
 
   // A draft started from scratch resumes as one: without this, a reload of a
   // problem with no version would offer "Start a model" over the draft.
@@ -526,9 +539,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
         layoutKey={`problem-${problemId}`}
-        selection={graphFocus?.part === "rules" && graphFocus.rulePosition !== undefined
-          ? `model-con-${draft.constraints[graphFocus.rulePosition]?.id}` : graphFocus?.id ?? null}
-        onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { rulePosition: draft.constraints.findIndex(rule => `model-con-${rule.id}` === id) } : {}) })}
+        selection={graphFocus?.part === "rules" && graphFocus.ruleKey !== undefined
+          ? `model-con-${draft.constraints[ruleKeys.indexOf(graphFocus.ruleKey)]?.id}` : graphFocus?.id ?? null}
+        onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { ruleKey: ruleKeys[draft.constraints.findIndex(rule => `model-con-${rule.id}` === id)] } : {}) })}
+        draft={draft}
+        onEdit={(edit) => setDraft((current) => current && edit(current))}
         editorHref={part => part === "objective" ? "#objective-editor" : part === "rules" ? "#constraints-editor" : "#declarations-editor"} />}
       {view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
       : view === "blocks" && workingIr ? (
@@ -578,9 +593,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           <p className="mb-2 text-sm text-slate-600">No rules yet. Add one that must hold.</p>
         )}
         <div className="space-y-1">
-          {draft.constraints.map((constraint, position) => focusedPart === "rules" && graphFocus?.rulePosition !== position ? null : (
+          {draft.constraints.map((constraint, position) => focusedPart === "rules" && graphFocus?.ruleKey !== ruleKeys[position] ? null : (
             <ConstraintCard
-              key={position}
+              key={ruleKeys[position]}
               view={equationView}
               constraint={constraint}
               otherIds={draft.constraints
