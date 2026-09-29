@@ -74,12 +74,12 @@ const PAGE_SIZE = 50;
 const APPLY_DELAY_MS = 400;
 
 export default function Entities() {
-  useDocumentTitle("Entities");
+  useDocumentTitle("Records");
   const { domainId } = useDomain();
 
   return (
     <div className="max-w-5xl">
-      <h1 className="mb-4 text-lg font-semibold text-slate-900">Entities</h1>
+      <h1 className="mb-4 text-lg font-semibold text-slate-900">Records</h1>
       {domainId === null ? (
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           <p>

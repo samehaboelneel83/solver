@@ -69,7 +69,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
       {pending ? <p role="status" className="py-6 text-sm text-slate-600">Loading problems…</p>
         : problems.isError ? <LoadFailure subject="The problem list" error={problems.error} retry={() => void problems.refetch()} />
         : <>
-          <p className="mt-2 text-sm text-slate-500" aria-live="polite">{problems.data?.total ?? 0} problems{q ? " matching your search" : " in this domain"}</p>
+          <p className="mt-2 text-sm text-slate-500" aria-live="polite">{problems.data?.total ?? 0} {(problems.data?.total ?? 0) === 1 ? "problem" : "problems"}{q ? " matching your search" : " in this domain"}</p>
           {problems.data?.items.length ? <ul className="mt-4 divide-y divide-slate-100">
             {problems.data.items.map((problem) => <li key={String(problem.id)}>
               <Link to={`${base}/problems/${problem.id}/overview`} className="flex items-center justify-between gap-3 rounded-lg px-2 py-4 hover:bg-slate-50">

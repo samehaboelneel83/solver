@@ -1,3 +1,4 @@
+import NotFound from "./NotFound";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import DataTable from "../components/DataTable";
@@ -116,12 +117,9 @@ export default function EntityList({
   // "meta loaded, no match" is a terminal state distinct from loading --
   // keep it as an early return so it's never confused with the skeleton
   // below (which covers "meta hasn't resolved yet at all").
+  // An address that names no table is a page that does not exist (operator trial F18).
   if (tables && !table) {
-    return (
-      <p className="text-sm text-slate-500">
-        Unknown table {schemaName}.{tableName}
-      </p>
-    );
+    return <NotFound />;
   }
 
   function updateParams(mutator: (params: URLSearchParams) => void) {
