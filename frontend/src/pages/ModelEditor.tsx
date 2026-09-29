@@ -542,7 +542,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       </details>
 
       {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
-        layoutKey={`problem-${problemId}`}
+        layoutKey={`problem-${problemId}`} layoutProblemId={problemId}
         selection={graphFocus?.part === "rules" && graphFocus.ruleKey !== undefined
           ? `model-con-${draft.constraints[ruleKeys.indexOf(graphFocus.ruleKey)]?.id}` : graphFocus?.id ?? null}
         onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { ruleKey: ruleKeys[draft.constraints.findIndex(rule => `model-con-${rule.id}` === id)] } : {}) })}

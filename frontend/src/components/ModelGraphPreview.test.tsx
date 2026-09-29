@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setToken } from "../api/client";
 import ModelGraphPreview from "./ModelGraphPreview";
@@ -94,4 +94,47 @@ it("moves the selected card without dragging, one step per press", async () => {
   expect(JSON.parse(screen.getByTestId("nudge").textContent!)).toMatchObject({ dx: 40, seq: 2 });
   fireEvent.click(screen.getByRole("button", { name: /^Move staff.* up$/ }));
   expect(JSON.parse(screen.getByTestId("nudge").textContent!)).toMatchObject({ dx: 0, dy: -40, seq: 3 });
+});
+
+function serverLayout(kept: Record<string, { x: number; y: number }>) {
+  const calls: { method: string; body: unknown }[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_path, init) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : null });
+    const positions = method === "PUT" ? JSON.parse(String(init?.body)).positions : kept;
+    return new Response(JSON.stringify({ positions, updated_at: null }), { status: 200 });
+  });
+  return calls;
+}
+
+it("takes the server's layout, so it follows the person to another browser", async () => {
+  setToken(tokenFor("alice"));
+  serverLayout({ "model-var-staff": { x: 300, y: 40 } });
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-5" layoutProblemId={5} />);
+  await waitFor(() => expect(screen.getByTestId("layout")).toHaveTextContent('"x":300'));
+  expect(screen.getByText(/kept for you on the server/)).toBeInTheDocument();
+});
+
+it("saves a move to the server after a pause, and hands over a layout this browser kept", async () => {
+  setToken(tokenFor("alice"));
+  localStorage.clear();
+  const first = render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-6" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Move staff card" }));
+  first.unmount();
+
+  const calls = serverLayout({});
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-6" layoutProblemId={6} />);
+  // The server had none: this browser's layout is handed over once.
+  await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1));
+  expect(calls[1].body).toEqual({ positions: { "model-var-staff": { x: 125, y: 90 } } });
+  fireEvent.click(screen.getByRole("button", { name: "Reset graph layout" }));
+  await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(2), { timeout: 2000 });
+  expect(calls.at(-1)?.body).toEqual({ positions: {} });
+});
+
+it("says so when the server cannot keep the layout", async () => {
+  setToken(tokenFor("alice"));
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("offline"));
+  render(<ModelGraphPreview ir={STAFF} entityTypes={[]} layoutKey="problem-7" layoutProblemId={7} />);
+  expect(await screen.findByText(/server could not keep the card positions/)).toBeInTheDocument();
 });

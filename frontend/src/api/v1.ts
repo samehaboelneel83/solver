@@ -1771,3 +1771,10 @@ export function usePredictors(domainId: Id | null) {
 export const useTrainPredictor = () => useV1Mutation(trainPredictor);
 export const useUploadPredictor = () => useV1Mutation(uploadPredictor);
 export const useDeletePredictor = () => useV1Mutation(deletePredictor);
+
+/** Where a person put the cards of a problem's graph, kept on the server so
+ * it follows them to another browser. Presentation only: never in the IR. */
+export type GraphLayout = { positions: Record<string, { x: number; y: number }>; updated_at: string | null };
+export const getGraphLayout = (problemId: Id) => apiFetch<GraphLayout>(`/api/v1/problems/${problemId}/graph-layout`);
+export const saveGraphLayout = (problemId: Id, positions: GraphLayout["positions"]) =>
+  send<GraphLayout>("PUT", `/api/v1/problems/${problemId}/graph-layout`, { positions });

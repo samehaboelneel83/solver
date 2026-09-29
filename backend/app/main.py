@@ -35,6 +35,7 @@ from app.api.run_map import router as run_map_router
 from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
+from app.api.layouts import router as layouts_router
 from app.api.integrations import router as integrations_router
 from app.api.imports import router as imports_router
 from app.api.preflight import router as preflight_router
@@ -208,6 +209,7 @@ app.include_router(problems_router)
 app.include_router(runs_router)
 app.include_router(approvals_router)
 app.include_router(drafts_router)
+app.include_router(layouts_router)
 app.include_router(integrations_router)
 app.include_router(imports_router)
 app.include_router(preflight_router)

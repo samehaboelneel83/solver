@@ -1,12 +1,15 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { buildModelView, modelDetails, type ModelPart } from "../lib/modelGraph";
-import type { EntityType } from "../api/v1";
+import { getGraphLayout, saveGraphLayout, type EntityType, type Id } from "../api/v1";
 import { readLayout, writeLayout, type Positions } from "../model/graphLayout";
 import type { FormDraft } from "../model/draftIr";
 import { connect, connectionFor, type Connection } from "../model/graphCommands";
 import GraphInspector, { type GraphEdit, type GraphPart } from "./GraphInspector";
 
 const FlowView = lazy(() => import("./modelStyles/FlowView"));
+
+/** How long the graph waits after the last move before saving to the server. */
+const SAVE_AFTER_MS = 500;
 
 /** How far one press of a move button shifts a card, in canvas pixels. */
 const STEP = 40;
@@ -23,7 +26,7 @@ function partOf(node: { id: string; label?: string | null; attributes?: Record<s
   return { nodeId: node.id, part: node.attributes?.part as ModelPart, name: label.split("\n")[0], label: label.replace(/\s+/g, " ").trim() };
 }
 
-export default function ModelGraphPreview({ ir, entityTypes, editorHref, selection, onSelect, layoutKey, draft, onEdit }: {
+export default function ModelGraphPreview({ ir, entityTypes, editorHref, selection, onSelect, layoutKey, layoutProblemId, draft, onEdit }: {
   ir: Record<string, unknown>;
   entityTypes: EntityType[];
   editorHref?: (part: ModelPart) => string;
@@ -31,6 +34,8 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
   onSelect?: (id: string, part: ModelPart) => void;
   /** Where to keep card positions (per account, in this browser); without it they last as long as the graph. */
   layoutKey?: string;
+  /** Also keep the positions on the server, per account and problem, so they follow the person to another browser. */
+  layoutProblemId?: Id;
   /** With both, the graph edits the model (Epic UX, U-2): inspectors, connections, deletion, keyboard. */
   draft?: FormDraft | null;
   onEdit?: (edit: GraphEdit) => void;
@@ -53,11 +58,50 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
   const [positions, setPositions] = useState<Positions>(() => (layoutKey ? readLayout(layoutKey) : {}));
   const [unsaved, setUnsaved] = useState(false);
   const [nudge, setNudge] = useState<{ id: string; dx: number; dy: number; seq: number } | null>(null);
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  // The server copy (when there is a problem to keep it under). This browser's
+  // copy shows at once; the server's replaces it unless a card moved first.
+  const [server, setServer] = useState<"off" | "kept" | "failed">(layoutProblemId == null ? "off" : "kept");
+  const moved = useRef(false);
+  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; send: () => void } | null>(null);
+  const initial = useRef(positions);
+  useEffect(() => {
+    if (layoutProblemId == null) return;
+    let live = true;
+    getGraphLayout(layoutProblemId).then((remote) => {
+      if (!live) return;
+      const kept = remote.positions ?? {};
+      if (Object.keys(kept).length > 0 && !moved.current) {
+        setPositions(kept);
+        if (layoutKey) writeLayout(layoutKey, kept);
+        setLayoutRevision((value) => value + 1);
+      } else if (Object.keys(kept).length === 0 && Object.keys(initial.current).length > 0 && !moved.current) {
+        // A layout from before the server kept them: hand it over once.
+        void saveGraphLayout(layoutProblemId, initial.current).catch(() => live && setServer("failed"));
+      }
+    }).catch(() => live && setServer("failed"));
+    return () => {
+      live = false;
+      // Leaving the graph saves a move still waiting for its pause.
+      if (pending.current) {
+        clearTimeout(pending.current.timer);
+        pending.current.send();
+        pending.current = null;
+      }
+    };
+  }, [layoutProblemId, layoutKey]);
   const arrange = (next: Positions) => {
+    moved.current = true;
     setPositions(next);
     if (layoutKey) setUnsaved(!writeLayout(layoutKey, next));
+    if (layoutProblemId != null) {
+      if (pending.current) clearTimeout(pending.current.timer);
+      const send = () => {
+        saveGraphLayout(layoutProblemId, next).then(() => setServer("kept"), () => setServer("failed"));
+      };
+      pending.current = { send, timer: setTimeout(() => { pending.current = null; send(); }, SAVE_AFTER_MS) };
+    }
   };
-  const [layoutRevision, setLayoutRevision] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const selectedNode = view.graph.nodes.find(node => node.id === (selection === undefined ? selected : selection));
   const select = (id: string) => {
@@ -113,9 +157,11 @@ export default function ModelGraphPreview({ ir, entityTypes, editorHref, selecti
     <div className="flex items-center gap-3 text-sm">
       <button type="button" className="rounded border px-3 py-2" onClick={() => { arrange({}); setLayoutRevision(value => value + 1); }}>Reset graph layout</button>
       <span className="text-slate-600">
-        {!layoutKey ? "Card positions stay while editing this graph. They are not saved with the model."
-          : unsaved ? "This browser could not save the card positions; they last until you leave this graph."
-            : "Card positions are kept for you in this browser. They are never part of the model, and Undo edit does not move them."}
+        {server === "kept" ? "Card positions are kept for you on the server, so they follow you to another browser. They are never part of the model, and Undo edit does not move them."
+          : server === "failed" ? "The server could not keep the card positions; this browser keeps them for now."
+            : !layoutKey ? "Card positions stay while editing this graph. They are not saved with the model."
+              : unsaved ? "This browser could not save the card positions; they last until you leave this graph."
+                : "Card positions are kept for you in this browser. They are never part of the model, and Undo edit does not move them."}
       </span>
     </div>
     {said && <p role="status" className="rounded border border-slate-200 bg-slate-50 p-2 text-sm">{said}</p>}
