@@ -1,7 +1,4 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { apiFetch } from "../api/client";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -78,36 +75,5 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
   </div>;
 }
 
-type Connection = { id: number; name: string; enabled: boolean };
-export function SourcesPage() {
-  const { domainId } = useParams();
-  const { can, known } = useCapabilities();
-  useDocumentTitle("Sources & imports");
-  if (!known) return <p role="status">Checking access…</p>;
-  if (!can("integration.run")) return <p role="alert">Your account does not have access to sources and imports.</p>;
-  return <SourceList key={domainId} domainId={domainId!} />;
-}
-
-function SourceList({ domainId }: { domainId: string }) {
-  const [page, setPage] = useState(0);
-  const sources = useQuery({
-    queryKey: ["connections", domainId, page],
-    queryFn: () => apiFetch<{ items: Connection[]; total: number }>(`/api/v1/connections?domain_id=${domainId}&limit=20&offset=${page * 20}`),
-  });
-  return <div className="max-w-5xl space-y-5">
-    <h1 className="text-2xl font-semibold">Sources & imports</h1>
-    <p className="text-sm text-slate-600">Configured database sources for this domain. Connection setup and extraction remain available through the local integration API; the import wizard is not available yet.</p>
-    {sources.isError ? <div role="alert">Sources could not be loaded. <button className="p-2 text-blue-700 underline" onClick={() => void sources.refetch()}>Retry</button></div>
-      : sources.fetchStatus === "paused" ? <p role="status">Waiting for a connection to the server.</p>
-      : sources.isLoading ? <p role="status">Loading sources…</p>
-      : sources.data?.items.length ? <ul className="divide-y rounded-xl border border-slate-200 bg-white">{sources.data.items.map(source =>
-        <li key={source.id} className="flex justify-between gap-4 p-4"><span>{source.name}</span><span>{source.enabled ? "Enabled" : "Disabled"}</span></li>)}</ul>
-      : <p>No configured sources on this page.</p>}
-    <nav aria-label="Source pages" className="flex items-center gap-4">
-      <button className="p-2 disabled:opacity-50" disabled={page === 0 || sources.isLoading} onClick={() => setPage(page - 1)}>Previous</button>
-      <span>Page {page + 1}</span>
-      <button className="p-2 disabled:opacity-50" disabled={!sources.data || (page + 1) * 20 >= sources.data.total} onClick={() => setPage(page + 1)}>Next</button>
-    </nav>
-    <Link className="inline-block py-2 text-blue-700 underline" to="/help/api">Local API reference</Link>
-  </div>;
-}
+// Sources & imports moved to their own page (Epic UX, U-4); re-exported for the routes and tests that name it here.
+export { SourcesPage } from "./Sources";

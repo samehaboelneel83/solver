@@ -5,7 +5,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 import NavigationHub, { SourcesPage } from "./NavigationHub";
 import { apiFetch } from "../api/client";
 
-vi.mock("../api/client", () => ({ apiFetch: vi.fn() }));
+vi.mock("../api/client", async () => ({
+  ...await vi.importActual<typeof import("../api/client")>("../api/client"), apiFetch: vi.fn(),
+}));
 const access = vi.hoisted(() => ({ capabilities: ["integration.run"], known: true }));
 vi.mock("../hooks/useCapability", () => ({ useCapabilities: () => ({ known: access.known, can: (cap: string) => access.capabilities.includes(cap) }) }));
 

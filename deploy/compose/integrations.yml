@@ -4,8 +4,12 @@ services:
   backend:
     env_file:
       - ${OAAS_INTEGRATION_ENV_FILE:?Set a private integration environment file}
+    environment:
+      # Read-only: the API previews, validates and loads what the worker extracted (Epic UX, U-4).
+      OAAS_INTEGRATION_OUTPUT: /integration-artifacts
     volumes:
       - ${OAAS_INTEGRATION_CERT_DIR:?Set the local CA directory}:/integration-certs:ro
+      - integration_artifacts:/integration-artifacts:ro
   ingestion-worker:
     image: solver-backend:latest
     restart: unless-stopped

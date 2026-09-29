@@ -34,7 +34,8 @@ import Settings from "./pages/Settings";
 import Help from "./pages/Help";
 import ModelEditor from "./pages/ModelEditor";
 import Scenarios from "./pages/Scenarios";
-import NavigationHub, { SourcesPage } from "./pages/NavigationHub";
+import NavigationHub from "./pages/NavigationHub";
+import { ImportWizard, SourcesPage } from "./pages/Sources";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
 
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="structure" element={<NavigationHub kind="structure" />} />
           <Route path="data/quality" element={<NavigationHub kind="quality" />} />
           <Route path="data/sources" element={<SourcesPage />} />
+          <Route path="data/sources/:connectionId/jobs/:jobId/import" element={<ImportWizard />} />
           <Route path="data/records" element={<Entities />} />
           <Route path="data/records/new" element={<EntityRecord />} />
           <Route path="data/records/:id" element={<EntityRecord />} />

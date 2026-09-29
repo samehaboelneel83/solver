@@ -1,13 +1,14 @@
-import { ApiError, NetworkError } from "../api/client";
 import { formatApiError } from "../api/errors";
 
 /** Why a read failed, in the three ways a planner acts on differently (Epic UX, U-1). */
 export type FailureKind = "no-access" | "not-found" | "offline" | "failed";
 
+/** Read from the error's shape (an `ApiError`'s `status`, a `NetworkError`'s name), so it holds wherever the client is stubbed. */
 export function failureKind(error: unknown): FailureKind {
-  if (error instanceof ApiError && error.status === 403) return "no-access";
-  if (error instanceof ApiError && error.status === 404) return "not-found";
-  if (error instanceof NetworkError) return "offline";
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 403) return "no-access";
+  if (status === 404) return "not-found";
+  if ((error as { name?: unknown } | null)?.name === "NetworkError") return "offline";
   return "failed";
 }
 

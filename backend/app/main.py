@@ -36,6 +36,7 @@ from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
 from app.api.integrations import router as integrations_router
+from app.api.imports import router as imports_router
 from app.api.predictors import router as predictors_router
 from app.api.eta import router as eta_router
 from app.api.settings import router as settings_router
@@ -207,6 +208,7 @@ app.include_router(runs_router)
 app.include_router(approvals_router)
 app.include_router(drafts_router)
 app.include_router(integrations_router)
+app.include_router(imports_router)
 app.include_router(run_events_router)
 app.include_router(genui_router)
 app.include_router(grids_router)

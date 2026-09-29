@@ -261,9 +261,9 @@ def _file(name: str, columns: list[Column], rows: list[list[Any]], fmt: str) -> 
                     headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
 
 
-def _run(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
+def run_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
          clean_only: bool, dry_run: bool, *, user=None, request=None, audit_object: tuple[str, Any] | None = None,
-         ) -> UploadReport:
+         before_commit=None) -> UploadReport:
     """Parse each row, write it inside a savepoint, and keep or undo the lot."""
     faults = _check_header(header, columns)
     if faults:
@@ -322,6 +322,9 @@ def _run(db: Session, header: list[str], rows: list[list[Any]], columns: list[Co
                 object_id=oid,
                 after={"rows": written, "faults": len(faults), "clean_only": clean_only},
             )
+        if before_commit is not None:
+            # In the same transaction as the rows: an import's lineage row (Epic UX, U-4).
+            before_commit(written)
         db.commit()
     else:
         db.rollback()
@@ -350,29 +353,11 @@ def _get(db: Session, model, id_: int, what: str):
     return row
 
 
-@router.get("/entity-types/{entity_type_id}/template")
-def entity_template(entity_type_id: int, format: str = Query("csv", pattern="^(csv|xlsx)$"), rows: bool = False,
-                    db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)) -> Response:
-    entity_type = _get(db, EntityType, entity_type_id, "entity type")
-    columns, attributes = _entity_columns(db, entity_type)
-    body: list[list[Any]] = []
-    if rows:
-        for e in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)
-                            .order_by(Entity.sort_order, Entity.key)).scalars():
-            body.append([e.key, e.label, e.sort_order, e.active, *[(e.attrs or {}).get(a.name) for a in attributes]])
-    return _file(entity_type.name, columns, body, format)
-
-
-@router.post("/entity-types/{entity_type_id}/upload")
-def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
-                  dry_run: bool = False, db: Session = Depends(get_db),
-                  user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
-    entity_type = _get(db, EntityType, entity_type_id, "entity type")
-    if entity_type.is_abstract:
-        raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
+def entity_writer(db: Session, entity_type: EntityType, header: list[str]):
+    """The columns of an entity type and the function that writes one parsed row of it:
+    shared by a file upload and a database import (Epic UX, U-4), so both meet the same checks."""
     columns, attributes = _entity_columns(db, entity_type)
     names = {a.name for a in attributes}
-    header, rows = _read(file)
     seen: set[str] = set()
 
     def write(values: dict[str, Any]):
@@ -400,7 +385,32 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
             found.active = values["active"]
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run,
+    return columns, write
+
+
+@router.get("/entity-types/{entity_type_id}/template")
+def entity_template(entity_type_id: int, format: str = Query("csv", pattern="^(csv|xlsx)$"), rows: bool = False,
+                    db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)) -> Response:
+    entity_type = _get(db, EntityType, entity_type_id, "entity type")
+    columns, attributes = _entity_columns(db, entity_type)
+    body: list[list[Any]] = []
+    if rows:
+        for e in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)
+                            .order_by(Entity.sort_order, Entity.key)).scalars():
+            body.append([e.key, e.label, e.sort_order, e.active, *[(e.attrs or {}).get(a.name) for a in attributes]])
+    return _file(entity_type.name, columns, body, format)
+
+
+@router.post("/entity-types/{entity_type_id}/upload")
+def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
+                  dry_run: bool = False, db: Session = Depends(get_db),
+                  user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+    entity_type = _get(db, EntityType, entity_type_id, "entity type")
+    if entity_type.is_abstract:
+        raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
+    header, rows = _read(file)
+    columns, write = entity_writer(db, entity_type, header)
+    return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("entity_type", entity_type_id))
 
 
@@ -501,7 +511,7 @@ def relationship_upload(relationship_type_id: int, request: Request, file: Uploa
                 setattr(found, when, date.fromisoformat(values[when]) if values.get(when) else None)
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run,
+    return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("relationship_type", relationship_type_id))
 
 
@@ -592,5 +602,5 @@ def parameter_upload(parameter_id: int, request: Request, file: UploadFile = Fil
             db.execute(delete(ParameterValue).where(where))  # sparse: the default is not stored
         return None
 
-    return _run(db, header, rows, columns, write, clean_only, dry_run,
+    return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("parameter", parameter_id))
