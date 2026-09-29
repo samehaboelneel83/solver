@@ -12,6 +12,9 @@ import {
   useCancelRun,
   useCreateRun,
   useCreateScenario,
+  usePreflight,
+  type Preflight,
+  type PreflightFinding,
   useRun,
   useRunComparison,
   useRuns,
@@ -490,6 +493,16 @@ function ScenarioRuns({
   ).some((spec) => (spec.domain ?? "binary") === "binary");
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
+  // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
+  const preflightQuery = usePreflight(scenarioId);
+  // Only a whole answer is acted on; a server from before the preflight existed simply has none.
+  const preflight = { data: Array.isArray(preflightQuery.data?.solvers) && Array.isArray(preflightQuery.data?.findings)
+    ? preflightQuery.data : undefined };
+  const fits = new Map((preflight.data?.solvers ?? []).map((row) => [row.name, row]));
+  const blockers = (preflight.data?.findings ?? []).filter((finding) => finding.kind === "blocker" &&
+    // A model the rules give no solver may still be solved by one asked for by name.
+    !(finding.code === "no_solver" && solver !== "" && fits.get(solver)?.fits));
+  const blocked = blockers.length > 0;
   const [runQuery, setRunQuery] = useState("");
   const [runOffset, setRunOffset] = useState(0);
   const runs = useRuns(scenarioId, { limit: PAGE_SIZE, offset: runOffset, q: runQuery });
@@ -563,6 +576,7 @@ function ScenarioRuns({
 
   return (
     <>
+      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} />}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {unexpressed.length > 0 ? (
           <p role="note" className="max-w-2xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -584,7 +598,7 @@ function ScenarioRuns({
           <button
             type="button"
             onClick={() => solve()}
-            disabled={createRun.isPending}
+            disabled={createRun.isPending || blocked}
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
@@ -593,7 +607,7 @@ function ScenarioRuns({
             <button
               type="button"
               onClick={() => solve("front")}
-              disabled={createRun.isPending}
+              disabled={createRun.isPending || blocked}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Show the trade-off between its two goals
@@ -603,7 +617,7 @@ function ScenarioRuns({
             <button
               type="button"
               onClick={() => solve("alternatives")}
-              disabled={createRun.isPending}
+              disabled={createRun.isPending || blocked}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Solve, with {ALTERNATIVES} alternative plans
@@ -613,7 +627,7 @@ function ScenarioRuns({
             <button
               type="button"
               onClick={() => solve("robust")}
-              disabled={createRun.isPending}
+              disabled={createRun.isPending || blocked}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Solve robustly
@@ -636,7 +650,14 @@ function ScenarioRuns({
             {/* Empty means "let the platform choose", which is the default
                 and records why it chose. */}
             <option value="">chosen for me</option>
-            {(solvers.data?.items ?? [])
+            {preflight.data
+              // Every solver, with the ones that cannot take this model shown disabled and why (Epic UX, U-5).
+              ? preflight.data.solvers.map((row) => (
+                <option key={row.name} value={row.name} disabled={!row.fits}>
+                  {row.name}{row.chosen ? " (the rules' choice)" : ""}{row.fits ? "" : ` — ${row.why}`}
+                </option>
+              ))
+              : (solvers.data?.items ?? [])
               .filter((option) => option.available)
               .map((option) => (
                 <option key={option.name} value={option.name}>
@@ -650,7 +671,7 @@ function ScenarioRuns({
           <span className="text-sm text-slate-500">
             {createRun.isPending
               ? "Queueing…"
-              : "A worker solves it; this page follows along. Stop it if you asked the wrong question. The answer is kept, not recomputed."}
+              : `${preflight.data ? `${preflight.data.workers.says}. ` : "A worker solves it. "}This page follows along; stop a run if you asked the wrong question. The answer is kept, not recomputed.`}
           </span>
         )}
       </div>
@@ -809,6 +830,7 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
       >
         {data.note}
       </p>
+      {data.claims && <p role="note" className="mb-4 rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">{data.claims}</p>}
 
       <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
         <Fact
@@ -828,6 +850,11 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
           }
         />
         <Fact label="Differs by" value={data.differs_by.length === 0 ? "nothing" : data.differs_by.join(", ")} />
+        {([data.left, data.right] as const).map((side) => (
+          <Fact key={`quality-${side.id}`} label={`Run ${String(side.id)}: how good`}
+            value={[claimText(side.optimality), side.gap != null && side.gap > 0 ? `gap ${formatGap(side.gap)}` : null,
+              side.solver, side.wall_time_s != null ? `${side.wall_time_s}s` : null, side.classified_as].filter(Boolean).join(" · ")} />
+        ))}
       </dl>
 
       {data.rules.length > 0 && (
@@ -1416,11 +1443,40 @@ export function Robustness({ report, objective }: { report: RobustReport; object
 const FRONT = { width: 420, height: 240, pad: 44 };
 
 /**
- * The trade-off front: one goal across, the other up, each point an answer
- * neither goal can improve on without the other giving way. Each point is
- * its own run -- the chart and the list under it open it.
+ * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
+ * anything worth a look, and whether a worker will pick it up.
  */
-export /** How many next-best plans the Solve button asks for. */
+export function BeforeYouSolve({ preflight, blockers }: { preflight: Preflight; blockers: PreflightFinding[] }) {
+  const warnings = preflight.findings.filter((finding) => finding.kind === "warning");
+  const chosen = preflight.solvers.find((row) => row.chosen);
+  const tone = blockers.length ? "border-red-300 bg-red-50" : warnings.length || preflight.workers.state === "offline"
+    ? "border-amber-300 bg-amber-50" : "border-green-200 bg-green-50";
+  return (
+    <section aria-label="Before you solve" className={`mb-4 rounded-md border p-3 text-sm ${tone}`}>
+      <p className="font-medium">
+        {blockers.length ? "This scenario cannot be solved yet." : "Ready to solve."}{" "}
+        <span className="font-normal text-slate-700">
+          A {preflight.model_class} model{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
+        </span>
+      </p>
+      {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
+      {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
+      <details className="mt-2">
+        <summary className="cursor-pointer">Which solvers fit, and why the others do not</summary>
+        <ul className="mt-1 space-y-0.5">{preflight.solvers.map((row) => (
+          <li key={row.name}><span className={`font-mono ${row.fits ? "" : "text-slate-500"}`}>{row.name}</span>: {row.why}</li>
+        ))}</ul>
+      </details>
+    </section>
+  );
+}
+
+/** What an answer may claim, in a few words (the run's `optimality`). */
+export function claimText(optimality: string | null | undefined): string {
+  return ({ global: "proven best", local: "best nearby", approximate: "optimal to a tolerance", none: "no claim to be best" } as Record<string, string>)[optimality ?? "none"] ?? String(optimality);
+}
+
+/** How many next-best plans the Solve button asks for. */
 const ALTERNATIVES = 5;
 
 /** What the worker wrote about the alternatives it looked for (Epic engine E-1). */
@@ -1476,7 +1532,12 @@ export function Alternatives({
   );
 }
 
-function TradeOff({
+/**
+ * The trade-off front: one goal across, the other up, each point an answer
+ * neither goal can improve on without the other giving way. Each point is
+ * its own run -- the chart and the list under it open it.
+ */
+export function TradeOff({
   points,
   terms,
   onOpen,

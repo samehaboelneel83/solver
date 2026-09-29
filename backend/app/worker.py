@@ -21,7 +21,9 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import socket
 import time
+import uuid
 from types import FrameType
 
 from sqlalchemy import text
@@ -162,6 +164,20 @@ def _analytics_client():
         return None
 
 
+#: How often a worker says it is alive, and how long after its last word it counts as gone.
+BEAT_SECONDS = 15
+ONLINE_WITHIN_SECONDS = 90
+
+
+def beat(db, worker_id: str) -> None:
+    """Say this worker is alive (Epic UX, U-5): `GET /api/v1/workers` counts the recent ones."""
+    db.execute(text(
+        "INSERT INTO worker_heartbeat (worker_id, host, pid) VALUES (:w, :h, :p)"
+        " ON CONFLICT (worker_id) DO UPDATE SET last_seen = now()"),
+        {"w": worker_id, "h": socket.gethostname()[:200], "p": os.getpid()})
+    db.commit()
+
+
 def main() -> None:  # pragma: no cover -- the loop itself
     logs.configure("worker")
     tracing.configure("worker")
@@ -175,7 +191,16 @@ def main() -> None:  # pragma: no cover -- the loop itself
         reclaim_stale(db)
         logger.info("worker ready; polling every %ss", POLL_SECONDS)
         pruned_at = 0.0
+        worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        beaten_at = 0.0
         while not _stop:
+            if time.monotonic() - beaten_at >= BEAT_SECONDS:
+                try:
+                    beat(db, worker_id)
+                except Exception:
+                    db.rollback()
+                    logger.warning("could not record the worker heartbeat", exc_info=True)
+                beaten_at = time.monotonic()
             if time.monotonic() - pruned_at >= PRUNE_EVERY_SECONDS:
                 try:
                     prune_run_events(db)

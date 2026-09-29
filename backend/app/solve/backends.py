@@ -685,6 +685,49 @@ def choose(found: Classification, requested: str | None = None, *, allowed: set[
     return chosen, reason
 
 
+def fit(found: Classification, *, allowed: set[str] | None = None, denied: set[str] | None = None) -> list[dict]:
+    """Every solver in the registry against this model (Epic UX, U-5): whether it can take it,
+    whether the rules would choose it unasked, and -- when it cannot -- why, in words.
+
+    The same tests `choose()` makes, one solver at a time, so a planner sees before a run
+    which solvers fit and what keeps the others out. `chosen` marks the one `choose()` picks.
+    """
+    try:
+        picked = choose(found, allowed=allowed, denied=denied)[0].name
+    except NoBackend:
+        picked = None
+    rows = []
+    for backend in sorted(REGISTRY, key=lambda b: b.rank):
+        missing = sorted(found.needs - backend.provides)
+        if not backend.is_available():
+            why = "not installed in this build"
+        elif (kept_out := allows(backend, allowed, denied)) is not None:
+            why = kept_out
+        elif found.model_class not in backend.classes:
+            why = f"takes {', '.join(sorted(backend.classes))} models, not a {found.model_class} model"
+        elif missing:
+            why = "cannot hold what this model needs: " + ", ".join(
+                found.refusals.get(need, need) for need in missing)
+        else:
+            why = None
+        fits = why is None
+        by_name_only = fits and (backend.proves == "local" or not is_automatic(backend))
+        rows.append({
+            "name": backend.name,
+            "fits": fits,
+            "automatic": fits and not by_name_only,
+            "chosen": backend.name == picked,
+            "proves": backend.proves,
+            "why": why if not fits else (
+                "the rules' choice for this model" if backend.name == picked
+                else "fits; used only when asked for by name" + (" (its answer is the best nearby, not proven best)"
+                                                                 if backend.proves == "local" else "")
+                if by_name_only else "fits; ranked below the rules' choice"),
+            "note": backend.note,
+        })
+    return rows
+
+
 def _why_nothing_fits(found: Classification) -> str:
     """The quadratic dead ends, in words. Both are refusals on purpose: the
     alternative is solving with a method that may return an answer that is

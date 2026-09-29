@@ -899,6 +899,8 @@ export type RunComparison = {
    * answer can be laid at its door. */
   patch_is_the_only_difference: boolean;
   note: string;
+  /** When the two answers claim different things, what that means for their values (Epic UX, U-5). */
+  claims?: string | null;
 };
 
 export type ComparedRun = {
@@ -912,7 +914,25 @@ export type ComparedRun = {
   wall_time_s: number | null;
   dataset_id: Id;
   patch: Record<string, unknown>;
+  optimality?: "global" | "local" | "approximate" | "none" | null;
+  gap?: number | null;
+  classified_as?: string | null;
 };
+
+/** One solver against a scenario's model (Epic UX, U-5): does it fit, would the rules choose it, and why. */
+export type SolverFit = { name: string; fits: boolean; automatic: boolean; chosen: boolean; proves: string; why: string; note: string };
+export type WorkerStatus = { state: "ready" | "busy" | "offline"; online: number; solving: number; queued: number; last_seen: string | null; says: string };
+export type PreflightFinding = { kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string };
+export type Preflight = {
+  scenario_id: Id; version: number; ready: boolean; findings: PreflightFinding[]; model_class: string;
+  planner: string[]; solvers: SolverFit[]; workers: WorkerStatus;
+};
+export const getPreflight = (scenarioId: Id) => apiFetch<Preflight>(`/api/v1/scenarios/${scenarioId}/preflight`);
+export function usePreflight(scenarioId: Id | null) {
+  return useQuery({ queryKey: [V1, "preflight", scenarioId], queryFn: () => getPreflight(scenarioId as Id), enabled: isId(scenarioId),
+    // The data and the workers move under it; a planner looking at the page sees them move.
+    refetchInterval: 30_000 });
+}
 
 export const compareRuns = (left: Id, right: Id) =>
   apiFetch<RunComparison>(`/api/v1/runs/${left}/compare/${right}`);

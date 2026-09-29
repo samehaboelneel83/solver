@@ -1077,3 +1077,36 @@ describe("Runs: choosing the problem", () => {
     expect(await screen.findByText("This problem is not available here")).toBeInTheDocument();
   });
 });
+
+describe("before a run (Epic UX, U-5)", () => {
+  const preflight = {
+    scenario_id: 1, version: 3, ready: false, model_class: "MILP", planner: [],
+    findings: [
+      { kind: "blocker" as const, code: "rule_not_expressed", says: "c_policy has a name but no arithmetic." },
+      { kind: "warning" as const, code: "set_empty", says: "There are no depot records yet." },
+    ],
+    solvers: [
+      { name: "highs", fits: true, automatic: true, chosen: true, proves: "global", why: "the rules' choice for this model", note: "" },
+      { name: "glop", fits: false, automatic: false, chosen: false, proves: "global", why: "takes LP models, not a MILP model", note: "" },
+    ],
+    workers: { state: "offline" as const, online: 0, solving: 0, queued: 0, last_seen: null, says: "No worker has been seen in the last minute and a half" },
+  };
+
+  it("says what stops the run, what is worth a look, which solver takes it and whether a worker is there", async () => {
+    const { BeforeYouSolve } = await import("./Runs");
+    render(<BeforeYouSolve preflight={preflight} blockers={[preflight.findings[0]]} />);
+    const panel = screen.getByRole("region", { name: "Before you solve" });
+    expect(panel).toHaveTextContent("This scenario cannot be solved yet.");
+    expect(panel).toHaveTextContent("A MILP model; highs will take it. No worker has been seen");
+    expect(panel).toHaveTextContent("c_policy has a name but no arithmetic.");
+    expect(panel).toHaveTextContent("There are no depot records yet.");
+    expect(panel).toHaveTextContent("glop: takes LP models, not a MILP model");
+  });
+
+  it("says what an answer may claim in a few words", async () => {
+    const { claimText } = await import("./Runs");
+    expect(claimText("global")).toBe("proven best");
+    expect(claimText("local")).toBe("best nearby");
+    expect(claimText(null)).toBe("no claim to be best");
+  });
+});

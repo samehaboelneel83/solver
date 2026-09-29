@@ -73,12 +73,16 @@ class Comparison:
     #: answer can honestly be attributed to it.
     patch_is_the_only_difference: bool
     note: str
+    #: When the two answers claim different things (proven best against best nearby, say), what that means
+    #: for reading the difference in their values (Epic UX, U-5). None when they claim the same.
+    claims: str | None = None
 
 
 # Qualified: `run` is joined to `scenario`, and both have an `id`.
 _FIELDS = (
     "run.id, run.scenario_id, run.dataset_id, run.status, run.solver,"
-    " run.solver_version, run.seed, run.objective, run.wall_time_s"
+    " run.solver_version, run.seed, run.objective, run.wall_time_s,"
+    " run.optimality, run.gap, run.params->>'classified_as' AS classified_as"
 )
 
 
@@ -108,6 +112,7 @@ def compare(db: Session, left_id: int, right_id: int) -> Comparison:
         differs_by=differs,
         patch_is_the_only_difference=differs == ["patch"],
         note=_note(differs),
+        claims=_claims(left, right),
     )
 
 
@@ -130,6 +135,8 @@ def _public(row: dict[str, Any]) -> dict[str, Any]:
     keep = (
         "id", "scenario_id", "scenario_name", "status", "solver", "solver_version",
         "objective", "wall_time_s", "dataset_id", "patch",
+        # What each answer may claim, side by side (Epic UX, U-5).
+        "optimality", "gap", "classified_as",
     )
     return {key: row[key] for key in keep}
 
@@ -145,6 +152,23 @@ def _differences(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
         ("seed", "seed"),
     )
     return [name for name, column in checks if (left[column] or None) != (right[column] or None)]
+
+
+_CLAIM = {
+    "global": "proven the best possible",
+    "local": "the best nearby, not proven the best",
+    "approximate": "optimal to a small tolerance",
+    "none": "an answer, with no claim to be the best",
+}
+
+
+def _claims(left: dict[str, Any], right: dict[str, Any]) -> str | None:
+    """Why two goal values may not be comparable at face value."""
+    a, b = left.get("optimality") or "none", right.get("optimality") or "none"
+    if a == b:
+        return None
+    return (f"run {left['id']}'s answer is {_CLAIM.get(a, a)}; run {right['id']}'s is {_CLAIM.get(b, b)}. "
+            "A difference in their goal values may be the solvers', not the scenarios'.")
 
 
 def _note(differs: list[str]) -> str:
