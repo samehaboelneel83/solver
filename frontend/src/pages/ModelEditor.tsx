@@ -34,6 +34,8 @@ import BlocksEditor from "../components/BlocksEditor";
 import type { ModelPart } from "../lib/modelGraph";
 import ModelGraphPreview from "../components/ModelGraphPreview";
 import { stableKeys } from "../model/ruleKeys";
+import { applyPattern } from "../model/patterns";
+import ModelReview from "../model/ModelReview";
 import { catalogueFrom } from "../lib/irBlocks/catalogue";
 import { EMPTY_MODEL, formDraftOf, publishable, withFormDraft, type FormDraft } from "../model/draftIr";
 import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
@@ -210,8 +212,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [serverPublishing, setServerPublishing] = useState(false);
   // Forms | Blocks (Blockly edit mode spec §6), in the URL so a reload keeps it.
   const requestedView = searchParams.get("view");
-  const view = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" ? requestedView : "forms";
-  const setView = (next: "forms" | "blocks" | "graph" | "ir") =>
+  const view = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" || requestedView === "review" ? requestedView : "forms";
+  const setView = (next: "forms" | "blocks" | "graph" | "ir" | "review") =>
     setSearchParams(
       (current) => {
         const params = new URLSearchParams(current);
@@ -513,7 +515,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
-          {(["forms", "graph", "blocks", "ir"] as const).map((tab) => (
+          {(["forms", "graph", "blocks", "ir", "review"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -522,7 +524,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               onClick={() => setView(tab)}
               className={`px-3 py-1.5 text-sm ${view === tab ? "bg-blue-700 text-white" : "bg-white text-slate-700"}`}
             >
-              {{ forms: "Guided Form", graph: "Visual Graph", blocks: "Blocks", ir: "Exact IR" }[tab]}
+              {{ forms: "Guided Form", graph: "Visual Graph", blocks: "Blocks", ir: "Exact IR", review: "Review" }[tab]}
             </button>
           ))}
         </div>
@@ -545,7 +547,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         draft={draft}
         onEdit={(edit) => setDraft((current) => current && edit(current))}
         editorHref={part => part === "objective" ? "#objective-editor" : part === "rules" ? "#constraints-editor" : "#declarations-editor"} />}
-      {view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
+      {view === "review" && draft ? <ModelReview draft={draft}
+        units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))}
+        planner={classification.data?.planner ?? []} wouldSolve={classification.data?.would_solve ?? null} />
+      : view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
       : view === "blocks" && workingIr ? (
         <div className="mb-6">
           <BlocksEditor
@@ -565,7 +570,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
       </div>}
       <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
-        onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))} />
+        onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
+        onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
+        relationships={context?.relationships ?? []}
+        units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />
       <div hidden={focusedPart === "rules" || focusedPart === "objective"} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
       <DeclarationsEditor
         sets={draft.sets}
@@ -781,6 +789,12 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </p>
       )}
 
+      {view !== "review" && (
+        <p className="mb-2 text-sm">
+          <button type="button" className="text-blue-700 underline" onClick={() => setView("review")}>Review the whole model</button>{" "}
+          <span className="text-slate-600">before publishing: every rule in words, and what looks unfinished.</span>
+        </p>
+      )}
       <DraftBar
         draft={stored}
         publishing={createVersion.isPending || serverPublishing}

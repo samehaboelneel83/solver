@@ -4,10 +4,21 @@ import { applyGuidedCommand, type GuidedCommand, type ParameterUse } from "./gui
 import { printRule, printTerm } from "./formula";
 import type { Constraint, Term } from "./terms";
 import { INPUT_CLASS } from "../components/attrTypes";
+import PatternForm, { UnitCheck } from "./PatternForm";
+import type { PatternCommand } from "./patterns";
 
-type Props = { draft: FormDraft; availableSets: string[]; onApply: (command: GuidedCommand) => void };
+type Props = {
+  draft: FormDraft;
+  availableSets: string[];
+  onApply: (command: GuidedCommand) => void;
+  /** The scheduling and routing patterns (Epic UX, U-3); without it they are not offered. */
+  onPattern?: (command: PatternCommand) => void;
+  relationships?: { name: string; from: string; to: string }[];
+  /** Parameter name -> its unit from the domain. */
+  units?: Record<string, string | null | undefined>;
+};
 
-export default function GuidedCreation({ draft, availableSets, onApply }: Props) {
+export default function GuidedCreation({ draft, availableSets, onApply, onPattern, relationships = [], units = {} }: Props) {
   const prefix = useId();
   const [kind, setKind] = useState<GuidedCommand["kind"]>("variable");
   const [name, setName] = useState("");
@@ -84,7 +95,7 @@ export default function GuidedCreation({ draft, availableSets, onApply }: Props)
               <option value="">Choose a decision</option>{choices.map(([key, spec]) => <option key={key} value={key}>{key}{spec.index.length ? ` — by ${spec.index.join(", ")}` : " — overall"}</option>)}
             </select></label>
           {!choices.length && <p className="text-sm text-slate-600 sm:col-span-2">Create a decision variable first. Interval scheduling uses the advanced forms below.</p>}
-          <ParameterFields label="Multiply each decision by" draft={draft} decision={decision}
+          <ParameterFields label="Multiply each decision by" draft={draft} decision={decision} units={units}
             allowed={(chosen?.index ?? []).map((_, i) => i)} value={coefficient} onChange={setCoefficient} optional />
           {kind === "rule" ? <>
             {!!chosen?.index.length && <fieldset className="sm:col-span-2"><legend className="text-sm font-medium">Apply this limit separately for each</legend>
@@ -99,7 +110,8 @@ export default function GuidedCreation({ draft, availableSets, onApply }: Props)
               </select>
             </label>
             {limitSource === "number" ? field("Limit", limit, setLimit, true)
-              : <ParameterFields label="Limit parameter" draft={draft} decision={decision} allowed={separate} value={limitParameter} onChange={setLimitParameter} />}
+              : <ParameterFields label="Limit parameter" draft={draft} decision={decision} units={units} allowed={separate} value={limitParameter} onChange={setLimitParameter} />}
+            <UnitCheck units={units} a={coefficient.name || null} b={limitSource === "parameter" ? limitParameter.name || null : null} />
             <label className="block text-sm font-medium">How strict is this rule?
               <select className={input} value={preference ? "preference" : "required"} onChange={event => setPreference(event.target.value === "preference")}><option value="required">Required — every acceptable solution must obey it</option><option value="preference">Preference — may be violated at a cost</option></select></label>
             {preference && field("Penalty for violating this preference", penalty, setPenalty, true)}
@@ -136,12 +148,13 @@ export default function GuidedCreation({ draft, availableSets, onApply }: Props)
       <button type="submit" disabled={issue !== null} aria-describedby={issue ? `${prefix}-issue` : undefined} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{kind === "variable" ? "Create decision variable" : kind === "rule" ? "Create rule" : "Add objective term"}</button>
       {feedback && <p role={feedback.error ? "alert" : "status"} className={`mt-3 text-sm ${feedback.error ? "text-red-700" : "text-green-800"}`}>{feedback.text}</p>}
     </form>
+    {onPattern && <PatternForm draft={draft} availableSets={availableSets} relationships={relationships} units={units} onApply={onPattern} />}
   </section>;
 }
 
-function ParameterFields({ label, draft, decision, allowed, value, onChange, optional = false }: {
+function ParameterFields({ label, draft, decision, allowed, value, onChange, optional = false, units = {} }: {
   label: string; draft: FormDraft; decision: string; allowed: number[]; value: ParameterUse;
-  onChange: (value: ParameterUse) => void; optional?: boolean;
+  onChange: (value: ParameterUse) => void; optional?: boolean; units?: Record<string, string | null | undefined>;
 }) {
   const dimensions = draft.variables[decision]?.index ?? [];
   const options = Object.entries(draft.parameters).filter(([, spec]) => !("entity" in spec));
@@ -158,7 +171,7 @@ function ParameterFields({ label, draft, decision, allowed, value, onChange, opt
         onChange({ name, dimensions: mapped });
       }}>
         <option value="">{optional ? "No multiplier — count the decision" : "Choose a parameter"}</option>
-        {options.map(([name, parameter]) => <option key={name} value={name}>{name}{parameter.index.length ? ` [${parameter.index.join(", ")}]` : " [overall]"}</option>)}
+        {options.map(([name, parameter]) => <option key={name} value={name}>{name}{parameter.index.length ? ` [${parameter.index.join(", ")}]` : " [overall]"}{units[name] ? ` in ${units[name]}` : ""}</option>)}
       </select>
     </label>
     {!options.length && <p className="mt-2 text-xs text-slate-600">No numeric parameters selected. Choose sets and parameters in “What this model is about” below, or add domain parameters from Inputs.</p>}
@@ -170,6 +183,33 @@ function ParameterFields({ label, draft, decision, allowed, value, onChange, opt
         {allowed.filter(i => dimensions[i] === set).map(i => <option key={i} value={i}>{set} (decision dimension {i + 1})</option>)}
       </select>
     </label>)}
-    {value.name && <p className="mt-2 text-xs text-slate-600">Review the mapping order. Limit parameters can use only dimensions kept separate; multiplier parameters use dimensions before summing. Verify compatible units in your domain data.</p>}
+    {value.name && spec && <MappingPreview name={value.name} parameterIndex={spec.index} dimensions={value.dimensions}
+      decision={decision} decisionIndex={dimensions} allowed={allowed} unit={units[value.name] ?? null} />}
   </fieldset>;
+}
+
+/**
+ * The mapping, said plainly (Epic UX, U-3): `cost[nurse ← staff's nurse, shift ← staff's shift]`,
+ * and for each dimension not yet mapped, why -- rather than a refusal after the fact.
+ */
+export function MappingPreview({ name, parameterIndex, dimensions, decision, decisionIndex, allowed, unit }: {
+  name: string; parameterIndex: string[]; dimensions: number[]; decision: string; decisionIndex: string[];
+  allowed: number[]; unit: string | null;
+}) {
+  const parts = parameterIndex.map((set, i) => {
+    const d = dimensions[i];
+    return d !== undefined && d >= 0 && decisionIndex[d] === set ? `${set} ← ${decision || "the decision"}'s ${set}` : `${set} ← ?`;
+  });
+  const problems = parameterIndex.flatMap((set, i) => {
+    const d = dimensions[i];
+    if (d !== undefined && d >= 0 && decisionIndex[d] === set) return [];
+    const matching = decisionIndex.map((s, j) => (s === set ? j : -1)).filter((j) => j >= 0);
+    if (matching.length === 0) return [`${decision || "The decision"} has no ${set} dimension, so ${name}'s ${set} cannot follow it.`];
+    if (!matching.some((j) => allowed.includes(j))) return [`${decision || "The decision"}'s ${set} is added together here; a limit can only follow a dimension kept separate. Tick ${set} under "Apply this limit separately for each".`];
+    return [`Choose which of ${decision || "the decision"}'s ${set} dimensions ${name}'s ${set} follows.`];
+  });
+  return <div className="mt-2 text-xs text-slate-700" aria-label={`Mapping of ${name}`}>
+    <p className="font-mono">{name}[{parts.join(", ")}]{unit ? ` in ${unit}` : ""}</p>
+    {problems.map((problem) => <p key={problem} className="text-amber-800">{problem}</p>)}
+  </div>;
 }
