@@ -104,6 +104,8 @@ export default function EntityList({
     filters,
     orderBy,
     order,
+    // A table the schema does not have is not asked for (operator trial F18): no 404 behind "Page not found".
+    enabled: tables === undefined || Boolean(table),
   });
   const deleteEntity = useDeleteEntity(schemaName, tableName);
 

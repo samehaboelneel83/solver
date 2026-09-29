@@ -237,6 +237,15 @@ def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, wr
 _REQUIRED = re.compile(r'attribute "([^"]+)" is required')
 
 
+def _shown(value) -> str:
+    """A default as a planner reads it: yes/no, 20 not 20.0."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _empty(value) -> bool:
     return value is None or str(value).strip() == ""
 
@@ -257,14 +266,14 @@ def _defaults_taken(db: Session, target: Target, mapping: Mapping, records: list
         if source is None:
             if target.kind != "parameter":
                 notices.append({"column": name, "rows": len(records), "default": default,
-                                "message": f"no column feeds {name}; new records take the default {default}"})
+                                "message": f"no column feeds {name}; new records take the default {_shown(default)}"})
             continue
         rows = [i + 1 for i, record in enumerate(records) if _empty(record.get(source))]
         if rows:
             shown = ", ".join(str(r) for r in rows[:10]) + ("…" if len(rows) > 10 else "")
             notices.append({"column": f"{source} → {name}", "rows": len(rows), "default": default,
                             "message": f"{len(rows)} {'row is' if len(rows) == 1 else 'rows are'} empty (row {shown})"
-                                       f" and will take the default {default}"})
+                                       f" and will take the default {_shown(default)}"})
     return notices
 
 

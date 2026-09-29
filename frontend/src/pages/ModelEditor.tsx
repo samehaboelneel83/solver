@@ -537,7 +537,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             </button>
           ))}
         </div>
-        {(view === "forms" || view === "blocks") && <p className="text-xs text-slate-500">
+        {canEdit && (view === "forms" || view === "blocks") && <p className="text-xs text-slate-500">
           Blocks are a drag-and-drop view of the same model. The forms are the keyboard and screen-reader way to edit it.
         </p>}
       </div>
@@ -584,11 +584,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
       </div>}
       <fieldset disabled={!canEdit} aria-label={canEdit ? undefined : "The model, read only"} className="m-0 min-w-0 border-0 p-0">
-      <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
+      {canEdit && <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
         onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
-        units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />
+        units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
       <div hidden={focusedPart === "rules" || focusedPart === "objective"} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
       <DeclarationsEditor
         sets={draft.sets}

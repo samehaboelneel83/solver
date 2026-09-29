@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEntityList } from "../api/entities";
 import { useCounts } from "../api/counts";
 import { useHealth } from "../api/health";
@@ -61,6 +61,14 @@ export default function Dashboard() {
   const templates = useTemplates();
   const apply = useApplyTemplate();
   const [naming, setNaming] = useState<{ id: number; template: string; problem: string; domain: string } | null>(null);
+  // The form opens below the cards: bring it into view and put the cursor in its first field.
+  const namingForm = useRef<HTMLFormElement>(null);
+  const namingFor = naming?.id;
+  useEffect(() => {
+    if (namingFor === undefined) return;
+    namingForm.current?.scrollIntoView?.({ block: "center" });
+    namingForm.current?.querySelector("input")?.focus();
+  }, [namingFor]);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const {
     data: recentProblems,
@@ -206,6 +214,7 @@ export default function Dashboard() {
           </ul>
           {naming && (
             <form
+              ref={namingForm}
               aria-label={`Start from ${naming.template}`}
               className="mt-3 max-w-lg space-y-3 rounded-md border border-slate-200 bg-white p-3 text-sm"
               onSubmit={(event) => {
