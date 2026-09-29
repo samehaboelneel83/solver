@@ -132,7 +132,11 @@ export async function login(username: string, password: string): Promise<string>
     throw new NetworkError();
   }
   if (!response.ok) {
-    throw new ApiError(response.status, "invalid credentials");
+    // Only a refusal of the credentials is the person's to fix by retyping them.
+    throw new ApiError(response.status, response.status === 401 || response.status === 400
+      ? "Wrong username or password."
+      : response.status === 429 ? "Too many sign-in attempts; wait a minute and try again."
+        : "Signing in failed on the server; try again, and tell your administrator if it persists.");
   }
   const data = await response.json();
   setToken(data.access_token);

@@ -589,6 +589,8 @@ export type RunSummary = {
   purpose?: "plan" | "why_not" | "shadow" | "suite";
   parent_run_id?: number | null;
   verdict?: Verdict | null;
+  /** Runs this one made as its parts (alternative plans, a front's points), not listed as rows (F26). */
+  part_runs?: number[];
 };
 
 /** A why-not probe's answer (queue R26). */
@@ -714,6 +716,8 @@ export type SolverInfo = {
   origin?: "built-in" | "adapter";
   /** Whether the rules may choose it unasked. */
   automatic?: boolean;
+  /** Whether the rules actually do choose it for a model it fits: never a local solver (operator trial F17). */
+  chosen_unasked?: boolean;
   /** Queue R42: whether this organization has the licence it needs. */
   licence?: "not needed" | "set" | "missing";
   kind?: "ortools-engine" | "command-line" | "python";
@@ -857,9 +861,9 @@ export const setSetting = (body: {
   value: number | string | boolean | null;
 }) => send<Record<string, unknown>>("PUT", "/api/v1/settings", body);
 
-export function listRuns(params: { scenarioId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
-  const { scenarioId, limit, offset, q } = params;
-  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, q: q || undefined, limit, offset })}`);
+export function listRuns(params: { scenarioId?: Id | null; problemId?: Id | null } & PageParams = {}): Promise<Page<RunSummary>> {
+  const { scenarioId, problemId, limit, offset, q } = params;
+  return apiFetch(`/api/v1/runs${query({ scenario_id: scenarioId, problem_id: problemId, q: q || undefined, limit, offset })}`);
 }
 export const getRun = (id: Id) => apiFetch<Run>(`/api/v1/runs/${id}`);
 
@@ -870,13 +874,14 @@ export type RunMapFeature = {
   geometry: { type: "Polygon" | "MultiPolygon"; coordinates: unknown };
   properties: Record<string, unknown> & { group?: string | null; subgroup?: string | null };
 };
-export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[] };
+/** `none`: why a run asked quietly has no map (operator trial F7). */
+export type RunMap = { type: "FeatureCollection"; features: RunMapFeature[]; none?: string };
 /** Where each member of each located set stood when a run was made (queue R17b): `{set: {key: [x, y]}}`. */
 export type RunPlaces = Record<string, Record<string, [number, number]>>;
 export const getRunPlaces = (id: Id) => apiFetch<RunPlaces>(`/api/v1/runs/${id}/places`);
 
-export const getRunMap = (id: Id, dissolve = false) =>
-  apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : ""}`);
+export const getRunMap = (id: Id, dissolve = false, quiet = false) =>
+  apiFetch<RunMap>(`/api/v1/runs/${id}/map${dissolve ? "?dissolve=true" : quiet ? "?quiet=true" : ""}`);
 
 /** What moved between two runs -- and what may honestly be credited for it. */
 export type RunComparison = {
@@ -924,11 +929,20 @@ export type ComparedRun = {
 /** One solver against a scenario's model (Epic UX, U-5): does it fit, would the rules choose it, and why. */
 export type SolverFit = { name: string; fits: boolean; automatic: boolean; chosen: boolean; proves: string; why: string; note: string };
 export type WorkerStatus = { state: "ready" | "busy" | "offline"; online: number; solving: number; queued: number; last_seen: string | null; says: string };
-export type PreflightFinding = { kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string };
+export type PreflightFinding = {
+  kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string;
+  /** `newer_version`: the latest published version, which the scenario can be moved to. */
+  latest_version?: number; latest_version_id?: Id;
+};
 export type Preflight = {
   scenario_id: Id; version: number; ready: boolean; findings: PreflightFinding[]; model_class: string;
   planner: string[]; solvers: SolverFit[]; workers: WorkerStatus;
 };
+export const getWorkers = () => apiFetch<WorkerStatus>("/api/v1/workers");
+/** Online workers, runs solving and queued (operator trial F16): followed every 15 s. */
+export function useWorkers() {
+  return useQuery({ queryKey: [V1, "workers"], queryFn: getWorkers, refetchInterval: 15_000 });
+}
 export const getPreflight = (scenarioId: Id) => apiFetch<Preflight>(`/api/v1/scenarios/${scenarioId}/preflight`);
 export function usePreflight(scenarioId: Id | null) {
   return useQuery({ queryKey: [V1, "preflight", scenarioId], queryFn: () => getPreflight(scenarioId as Id), enabled: isId(scenarioId),
@@ -1293,8 +1307,17 @@ export const useCreateVersion = () =>
 export function useTemplates() {
   return useQuery({ queryKey: [V1, "templates"], queryFn: listTemplates, staleTime: 60_000 });
 }
-export const useApplyTemplate = () =>
-  useV1Mutation(({ id, body }: { id: Id; body: ApplyTemplateRequest }) => applyTemplate(id, body));
+/** A template can make a domain, so the domain lists (sidebar, chooser) are refreshed too (F2). */
+export function useApplyTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: Id; body: ApplyTemplateRequest }) => applyTemplate(id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [V1] });
+      void queryClient.invalidateQueries({ queryKey: ["entities"] });
+    },
+  });
+}
 
 export function useSettings(params: { problemId?: Id | null; domainId?: Id | null } = {}) {
   return useQuery({
@@ -1363,6 +1386,9 @@ export type AuditEvent = {
   at: string | null;
   organization_id: string;
   actor_id: string | null;
+  /** The account's username, or the API key's name (operator trial F30). */
+  actor?: string | null;
+  api_key_name?: string | null;
   api_key_id: string | null;
   action: string;
   object_type: string | null;
@@ -1451,6 +1477,14 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
     queryKey: [V1, "runs", { scenarioId, ...page }],
     queryFn: () => listRuns({ scenarioId, ...page }),
     enabled: isId(scenarioId),
+  });
+}
+/** Whether a problem has any run yet, over all its scenarios (operator trial F10). */
+export function useProblemRuns(problemId: Id | null) {
+  return useQuery({
+    queryKey: [V1, "runs", { problemId, limit: 1 }],
+    queryFn: () => listRuns({ problemId, limit: 1, offset: 0 }),
+    enabled: isId(problemId),
   });
 }
 export const useAskWhyNot = () => useV1Mutation(askWhyNot);
@@ -1754,7 +1788,14 @@ export type PredictorTrain = {
 
 export const listPredictors = (domainId: Id) =>
   apiFetch<Page<Predictor>>(`/api/v1/predictors?domain_id=${domainId}&limit=200`);
-export const trainPredictor = (body: PredictorTrain) => send<Predictor>("POST", "/api/v1/predictors/train", body);
+/** Training goes on after the answer (operator trial F31): ask after it with `usePredictorTraining`. */
+export const trainPredictor = (body: PredictorTrain) =>
+  send<{ training_id: number; state: "running" }>("POST", "/api/v1/predictors/train?background=true", body);
+export type PredictorTraining = {
+  id: number; domain_id: number; state: "running" | "done" | "failed"; predictor_id: number | null;
+  error: string | null; seconds: number; request: { name: string; entity_type: string; target: string; kind: string };
+};
+export const getPredictorTraining = (id: Id) => apiFetch<PredictorTraining>(`/api/v1/predictor-trainings/${id}`);
 export const uploadPredictor = (body: { domain_id: number; name: string; note?: string | null; model: unknown }) =>
   send<Predictor>("POST", "/api/v1/predictors", body);
 export const deletePredictor = (id: Id) => remove(`/api/v1/predictors/${id}`);
@@ -1769,6 +1810,20 @@ export function usePredictors(domainId: Id | null) {
   });
 }
 export const useTrainPredictor = () => useV1Mutation(trainPredictor);
+/** Asked every second while it runs; the predictors list is asked again once it is done. */
+export function usePredictorTraining(id: Id | null) {
+  const client = useQueryClient();
+  return useQuery({
+    queryKey: [V1, "predictor-training", id],
+    queryFn: async () => {
+      const training = await getPredictorTraining(id as Id);
+      if (training.state === "done") void client.invalidateQueries({ queryKey: [V1, "predictors"] });
+      return training;
+    },
+    enabled: isId(id),
+    refetchInterval: (query) => ((query.state.data as PredictorTraining | undefined)?.state === "running" || !query.state.data ? 1000 : false),
+  });
+}
 export const useUploadPredictor = () => useV1Mutation(uploadPredictor);
 export const useDeletePredictor = () => useV1Mutation(deletePredictor);
 

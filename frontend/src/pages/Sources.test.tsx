@@ -90,7 +90,8 @@ describe("the import wizard", () => {
         { id: 31, name: "distance", index_type_ids: [10, 10], default_value: 0, unit: "km" },
       ] };
       if (p.endsWith("/validate")) return { validation_id: 5, ok: false, rows: 3, would_write: 2, entity_type: "nurse", artifact_sha256: "ab".repeat(32), mapping_hash: "cd".repeat(32),
-        faults: [{ row: 2, column: "hours → hours", message: "must be a number, not 'x'" }] };
+        faults: [{ row: 2, column: "hours → hours", message: "must be a number, not 'x'" }],
+        defaults: [{ column: "hours → hours", rows: 1, default: 40, message: "1 row is empty (row 3) and will take the default 40" }] };
       throw new Error(`unexpected ${p}`);
     });
   });
@@ -106,6 +107,7 @@ describe("the import wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check the rows" }));
     const problems = await screen.findByRole("table", { name: "Problems found" });
     expect(problems).toHaveTextContent("2hours → hoursmust be a number, not 'x'");
+    expect(screen.getByRole("list", { name: "Defaults applied" })).toHaveTextContent("will take the default 40");
     const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/validate"))![1] as RequestInit).body));
     expect(body).toEqual({ entity_type_id: 9, columns: { id: "key", full_name: "label", hours: "hours" } });
     expect(screen.getByRole("button", { name: "Load" })).toBeDisabled();

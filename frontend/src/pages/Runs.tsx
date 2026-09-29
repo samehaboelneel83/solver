@@ -1,7 +1,7 @@
 import LoadFailure from "../components/LoadFailure";
 import Pager from "../components/Pager";
 import SearchBox, { NoMatches } from "../components/SearchBox";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
@@ -13,6 +13,7 @@ import {
   useCreateRun,
   useCreateScenario,
   usePreflight,
+  useUpdateScenario,
   type Preflight,
   type PreflightFinding,
   useRun,
@@ -512,6 +513,7 @@ function ScenarioRuns({
   const [solver, setSolver] = useState<string>("");
   // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
   const preflightQuery = usePreflight(scenarioId);
+  const moveScenario = useUpdateScenario();
   // Only a whole answer is acted on; a server from before the preflight existed simply has none.
   const preflight = { data: Array.isArray(preflightQuery.data?.solvers) && Array.isArray(preflightQuery.data?.findings)
     ? preflightQuery.data : undefined };
@@ -532,6 +534,13 @@ function ScenarioRuns({
     const timer = setInterval(() => runs.refetch(), 1000);
     return () => clearInterval(timer);
   }, [settling, runs]);
+  // When the last unfinished run settles, "1 run is waiting" is out of date at once (operator trial F6).
+  const wasSettling = useRef(settling);
+  const refetchPreflight = preflightQuery.refetch;
+  useEffect(() => {
+    if (wasSettling.current && !settling) void refetchPreflight();
+    wasSettling.current = settling;
+  }, [settling, refetchPreflight]);
   const createRun = useCreateRun();
   const toast = useToast();
   const [againstId, setAgainstId] = useState<Id | null>(null);
@@ -597,7 +606,11 @@ function ScenarioRuns({
 
   return (
     <>
-      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} />}
+      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending}
+        onMoveTo={can("model.publish") ? (versionId) => moveScenario.mutate({ id: scenarioId, body: { model_version_id: versionId } }, {
+          onSuccess: () => toast.success("The scenario now solves the latest version."),
+          onError: (error: unknown) => setFailure(formatApiError(error)),
+        }) : undefined} />}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {unexpressed.length > 0 ? (
           <p role="note" className="max-w-2xl rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -673,10 +686,11 @@ function ScenarioRuns({
           </p>
         )}
         {can("solver.configure") && (
-        <label className="text-sm text-slate-600">
-          <span className="mr-2">Solver</span>
+        <label className="flex min-w-0 max-w-full items-center text-sm text-slate-600">
+          <span className="mr-2 shrink-0">Solver</span>
+          {/* A long "why not" option must not push the select past a phone's edge (operator trial F33). */}
           <select
-            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+            className="min-w-0 max-w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
             value={solver}
             onChange={(event) => setSolver(event.target.value)}
           >
@@ -704,7 +718,7 @@ function ScenarioRuns({
           <span className="text-sm text-slate-500">
             {createRun.isPending
               ? "Queueing…"
-              : `${preflight.data ? `${preflight.data.workers.says}. ` : "A worker solves it. "}This page follows along; stop a run if you asked the wrong question. The answer is kept, not recomputed.`}
+              : "A worker solves it; this page follows along. Stop a run if you asked the wrong question. The answer is kept, not recomputed."}
           </span>
         )}
       </div>
@@ -761,13 +775,18 @@ function ScenarioRuns({
                     >
                       Run {String(row.id)}
                     </button>
+                    {(row.part_runs?.length ?? 0) > 0 && (
+                      <span className="block text-xs text-slate-500">
+                        its plans are {runSpan(row.part_runs!)}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 pr-3">
                     <span className={`inline-block rounded px-2 py-1 text-xs ${STATUS_STYLE[row.status]}`}>
                       {row.status}
                     </span>
                   </td>
-                  <td className="py-2 pr-3 font-mono">{row.objective ?? "—"}</td>
+                  <td className="py-2 pr-3 font-mono">{row.objective == null ? "—" : formatGoal(row.objective)}</td>
                   <td className="py-2 pr-3">{row.wall_time_s === null ? "—" : `${row.wall_time_s}s`}</td>
                   <td className="py-2 text-slate-600">{row.solver_version ?? row.solver}</td>
                 </tr>
@@ -868,18 +887,18 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
       <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
         <Fact
           label={`Run ${String(left)} (${data.left.scenario_name})`}
-          value={`${data.left.status}${data.left.objective === null ? "" : ` — ${data.left.objective}`}`}
+          value={`${data.left.status}${data.left.objective === null ? "" : ` — ${formatGoal(data.left.objective)}`}`}
         />
         <Fact
           label={`Run ${String(right)} (${data.right.scenario_name})`}
-          value={`${data.right.status}${data.right.objective === null ? "" : ` — ${data.right.objective}`}`}
+          value={`${data.right.status}${data.right.objective === null ? "" : ` — ${formatGoal(data.right.objective)}`}`}
         />
         <Fact
-          label="Objective change"
+          label={`Objective change, run ${String(left)} → run ${String(right)}`}
           value={
             data.objective_delta === null
               ? "— (one run has no objective)"
-              : `${data.objective_delta > 0 ? "+" : ""}${data.objective_delta}`
+              : `${data.objective_delta > 0 ? "+" : ""}${formatGoal(data.objective_delta)}`
           }
         />
         <Fact label="Differs by" value={data.differs_by.length === 0 ? "nothing" : data.differs_by.join(", ")} />
@@ -892,14 +911,14 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
 
       {data.rules.length > 0 && (
         <>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">Rules that changed</h3>
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">Rules that changed, run {String(left)} &rarr; run {String(right)}</h3>
           <ul className="mb-4 space-y-1 text-sm">
             {data.rules.map((rule) => (
               <li key={rule.constraint_id} className="rounded border border-slate-200 px-3 py-2">
                 <span className="font-mono text-slate-900">{rule.constraint_id}</span>{" "}
                 <span className="text-slate-600">
-                  {rule.left_satisfied ? "held" : `short by ${rule.left_violation}`} &rarr;{" "}
-                  {rule.right_satisfied ? "held" : `short by ${rule.right_violation}`}
+                  {rule.left_satisfied ? "held" : `short by ${formatGoal(rule.left_violation)}`} &rarr;{" "}
+                  {rule.right_satisfied ? "held" : `short by ${formatGoal(rule.right_violation)}`}
                   {rule.left_penalty !== rule.right_penalty &&
                     ` (cost ${rule.left_penalty} → ${rule.right_penalty})`}
                 </span>
@@ -1480,7 +1499,11 @@ const FRONT = { width: 420, height: 240, pad: 44 };
  * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
  * anything worth a look, and whether a worker will pick it up.
  */
-export function BeforeYouSolve({ preflight, blockers }: { preflight: Preflight; blockers: PreflightFinding[] }) {
+export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false }: {
+  preflight: Preflight; blockers: PreflightFinding[];
+  /** Move the scenario to a newer version (operator trial F29); without it the warning only says so. */
+  onMoveTo?: (versionId: Id) => void; moving?: boolean;
+}) {
   const warnings = preflight.findings.filter((finding) => finding.kind === "warning");
   const chosen = preflight.solvers.find((row) => row.chosen);
   const tone = blockers.length ? "border-red-300 bg-red-50" : warnings.length || preflight.workers.state === "offline"
@@ -1490,11 +1513,21 @@ export function BeforeYouSolve({ preflight, blockers }: { preflight: Preflight; 
       <p className="font-medium">
         {blockers.length ? "This scenario cannot be solved yet." : "Ready to solve."}{" "}
         <span className="font-normal text-slate-700">
-          A {preflight.model_class} model{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
+          <abbr title={`${preflight.model_class} model`} className="no-underline">{modelInWords(preflight.model_class)}</abbr>{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
         </span>
       </p>
       {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
-      {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
+      {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => (
+        <li key={f.code + f.says}>
+          {f.says}
+          {f.code === "newer_version" && f.latest_version_id != null && onMoveTo && (
+            <button type="button" disabled={moving} className="ml-2 rounded border border-amber-600 px-2 py-0.5 text-amber-900 disabled:opacity-50"
+              onClick={() => onMoveTo(f.latest_version_id as Id)}>
+              {moving ? "Moving…" : `Move this scenario to version ${f.latest_version}`}
+            </button>
+          )}
+        </li>
+      ))}</ul>}
       <details className="mt-2">
         <summary className="cursor-pointer">Which solvers fit, and why the others do not</summary>
         <ul className="mt-1 space-y-0.5">{preflight.solvers.map((row) => (
@@ -1742,4 +1775,35 @@ function Empty({ children }: { children: React.ReactNode }) {
 /** The shared failure state (Epic UX, U-1): no access, not found, or a failure worth retrying. */
 function Failed({ subject, error, onRetry }: { subject: string; error: unknown; onRetry: () => void }) {
   return <LoadFailure subject={subject} error={error} retry={() => void onRetry()} />;
+}
+
+/** "run 3", "runs 3–7", or "runs 3, 5, 9": the ids a run's parts took (F26). */
+export function runSpan(ids: number[]): string {
+  if (ids.length === 1) return `run ${ids[0]}`;
+  const contiguous = ids.every((id, i) => i === 0 || id === ids[i - 1] + 1);
+  return contiguous ? `runs ${ids[0]}–${ids[ids.length - 1]}` : `runs ${ids.join(", ")}`;
+}
+
+const GOAL = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
+/** A goal value or change as a planner reads it: 3669, not 3669.000000 (operator trial F9 F27). */
+export function formatGoal(value: number | string | null | undefined): string {
+  const n = Number(value);
+  return value == null || value === "" || !Number.isFinite(n) ? String(value ?? "—") : GOAL.format(n);
+}
+
+const MODEL_WORDS: Record<string, string> = {
+  LP: "Every decision is an amount and every rule is linear",
+  IP: "Every decision is yes-or-no or a whole number, and every rule is linear",
+  MILP: "Decisions are amounts and whole numbers, and every rule is linear",
+  QP: "Decisions are amounts, with a squared term in the goal",
+  MIQP: "Decisions include whole numbers, with a squared term in the goal",
+  MIQCQP: "Decisions include whole numbers, with squared terms in the rules",
+  NLP: "Decisions are amounts, with curved (non-linear) rules or goal",
+  MINLP: "Decisions include whole numbers, with curved (non-linear) rules or goal",
+};
+
+/** A model's class in a planner's words, not "an IP model" (operator trial F8). */
+export function modelInWords(modelClass: string): string {
+  return MODEL_WORDS[modelClass] ?? `A ${modelClass} model`;
 }

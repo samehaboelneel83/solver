@@ -79,6 +79,18 @@ def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount
     ir = patched(scenario["ir"], scenario["patch"] or {})
     findings: list[dict[str, Any]] = []
 
+    # A newer published version the scenario does not use (operator trial F29): publishing never
+    # moves a scenario, so without this the old model is solved and nothing says so.
+    latest = db.execute(text(
+        "SELECT id, version FROM model_version WHERE problem_id = :p ORDER BY version DESC LIMIT 1"),
+        {"p": scenario["problem_id"]}).mappings().one()
+    if latest["version"] > scenario["version"]:
+        findings.append(_finding(
+            "warning", "newer_version",
+            f"This scenario solves version {scenario['version']}; version {latest['version']} is the latest published. "
+            "Move the scenario to it to solve the model as it is now.",
+            scenario_version=scenario["version"], latest_version=latest["version"], latest_version_id=latest["id"]))
+
     unexpressed = [c.get("id") for c in ir.get("constraints", [])
                    if not any(k in c for k in ("left", "no_overlap", "cumulative", "connected", "route"))]
     if unexpressed:

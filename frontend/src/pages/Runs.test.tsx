@@ -308,7 +308,7 @@ describe("Runs", () => {
     expect(await screen.findByRole("button", { name: /run 11/i })).toBeInTheDocument();
     // Reproducibility facts belong on screen, not only in the database.
     expect(screen.getAllByText(/ortools 9\.15\.6755/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("3621").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("3,621").length).toBeGreaterThan(0);
     expect(screen.getAllByText("0.009s").length).toBeGreaterThan(0);
   });
 
@@ -724,6 +724,21 @@ describe("Runs", () => {
     expect(await screen.findByText(/best possible answer/i)).toBeInTheDocument();
   });
 
+  it("asks the preflight again as soon as the last unfinished run settles (operator trial F6)", async () => {
+    let status = "queued";
+    stub({
+      run: () => ({ ...RUN_DETAIL, status }),
+      runs: () => ({ items: [{ ...RUN_SUMMARY, status }], total: 1 }),
+    });
+    renderPage();
+    expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
+    const asked = () => mockFetch.mock.calls.filter(([p]) => String(p).endsWith("/preflight")).length;
+    const before = asked();
+    status = "optimal";
+    expect(await screen.findByText(/best possible answer/i)).toBeInTheDocument();
+    await waitFor(() => expect(asked()).toBeGreaterThan(before));
+  });
+
   it("offers to stop a queued run, and does not offer it on a finished one", async () => {
     let status = "queued";
     stub({
@@ -1130,10 +1145,20 @@ describe("before a run (Epic UX, U-5)", () => {
     render(<BeforeYouSolve preflight={preflight} blockers={[preflight.findings[0]]} />);
     const panel = screen.getByRole("region", { name: "Before you solve" });
     expect(panel).toHaveTextContent("This scenario cannot be solved yet.");
-    expect(panel).toHaveTextContent("A MILP model; highs will take it. No worker has been seen");
+    expect(panel).toHaveTextContent("Decisions are amounts and whole numbers, and every rule is linear; highs will take it. No worker has been seen");
     expect(panel).toHaveTextContent("c_policy has a name but no arithmetic.");
     expect(panel).toHaveTextContent("There are no depot records yet.");
     expect(panel).toHaveTextContent("glop: takes LP models, not a MILP model");
+  });
+
+  it("offers to move the scenario when a newer version is published (F29)", async () => {
+    const { BeforeYouSolve } = await import("./Runs");
+    const onMoveTo = vi.fn();
+    const newer = { kind: "warning" as const, code: "newer_version", says: "This scenario solves version 1; version 2 is the latest published.",
+      latest_version: 2, latest_version_id: 44 };
+    render(<BeforeYouSolve preflight={{ ...preflight, ready: true, findings: [newer] }} blockers={[]} onMoveTo={onMoveTo} />);
+    fireEvent.click(screen.getByRole("button", { name: "Move this scenario to version 2" }));
+    expect(onMoveTo).toHaveBeenCalledWith(44);
   });
 
   it("says what an answer may claim in a few words", async () => {
@@ -1161,5 +1186,17 @@ describe("expected run time", () => {
       .toBe("No time estimate yet: the run has not compiled yet; its size is known once it has.");
     expect(etaText({ run_id: 1, settled: true, seconds: 3, estimate_seconds: null })).toBeNull();
     expect(etaText(undefined)).toBeNull();
+  });
+});
+
+describe("goal values and a run's parts (operator trial F9 F26)", () => {
+  it("reads 3669.000000 as 3,669 and names the ids a run's plans took", async () => {
+    const { formatGoal, runSpan } = await import("./Runs");
+    expect(formatGoal("3669.000000")).toBe("3,669");
+    expect(formatGoal(1584.456)).toBe("1,584.46");
+    expect(formatGoal(null)).toBe("—");
+    expect(runSpan([3, 4, 5, 6, 7])).toBe("runs 3–7");
+    expect(runSpan([3])).toBe("run 3");
+    expect(runSpan([3, 5])).toBe("runs 3, 5");
   });
 });

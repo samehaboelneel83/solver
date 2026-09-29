@@ -146,6 +146,9 @@ class RunSummary(BaseModel):
     purpose: str = "plan"
     parent_run_id: int | None = None
     verdict: dict[str, Any] | None = None
+    # The runs this one made as its own parts -- alternative plans, a front's points --
+    # which the list does not show as rows (operator trial F26: why run ids skip).
+    part_runs: list[int] = []
 
 
 class AlternativePlan(BaseModel):
@@ -549,9 +552,13 @@ def list_solvers(db: Session = Depends(get_db), user: UserAccount = Depends(get_
                 # Whether the rules may choose it unasked: a built-in, or an added solver whose
                 # current version passed the conformance kit (queue R43).
                 "automatic": is_automatic(b),
+                # Whether the rules would actually choose it for a model it fits (operator trial F17): a
+                # local solver (IPOPT, the searches) never is -- it runs only when named or as a fallback.
+                "chosen_unasked": is_automatic(b) and b.proves != "local",
+                "proves": b.proves,
                 # Queue R42: whether this organization has the licence the solver needs.
                 "licence": licence_state(db, user.organization_id, b),
-                **({"kind": b.manifest.kind, "version": b.manifest.version, "proves": b.proves,
+                **({"kind": b.manifest.kind, "version": b.manifest.version,
                     "conformance": _conformance_of(reports.get(b.name), b.manifest.version)}
                    if b.manifest is not None else {}),
             }
@@ -599,6 +606,7 @@ def compare_runs(
 @router.get("/runs")
 def list_runs(
     scenario_id: int | None = Query(default=None),
+    problem_id: int | None = Query(default=None, description="every scenario of this problem"),
     purpose: Literal["plan", "why_not", "shadow", "suite"] = Query(default="plan"),
     parent_run_id: int | None = Query(default=None),
     q: str | None = Query(default=None, description="status or solver contains this; a number also matches the id"),
@@ -624,9 +632,18 @@ def list_runs(
     if scenario_id is not None:
         stmt = stmt.where(Run.scenario_id == scenario_id)
         count_stmt = count_stmt.where(Run.scenario_id == scenario_id)
+    if problem_id is not None:
+        of_problem = Run.scenario_id.in_(select(Scenario.id).where(Scenario.problem_id == problem_id))
+        stmt, count_stmt = stmt.where(of_problem), count_stmt.where(of_problem)
     rows = db.scalars(stmt.order_by(Run.id.desc()).limit(limit).offset(offset)).all()
+    parts: dict[int, list[int]] = {}
+    if rows:
+        owner = func.coalesce(Run.params["alternative_of"].astext, Run.params["pareto_of"].astext)
+        for part_id, of in db.execute(select(Run.id, owner).where(owner.in_([str(r.id) for r in rows]))
+                                      .order_by(Run.id)).all():
+            parts.setdefault(int(of), []).append(part_id)
     return {
-        "items": [RunSummary.model_validate(r) for r in rows],
+        "items": [RunSummary.model_validate(r).model_copy(update={"part_runs": parts.get(r.id, [])}) for r in rows],
         "total": db.scalar(count_stmt) or 0,
     }
 

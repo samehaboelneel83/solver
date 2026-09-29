@@ -28,7 +28,9 @@ const draftPath = (problemId: number) => `/api/v1/problems/${problemId}/draft`;
 /** The caller's server draft for this problem, or null when there is none. */
 export async function fetchServerDraft(problemId: number): Promise<ServerDraft | null> {
   try {
-    const draft = await apiFetch<unknown>(draftPath(problemId));
+    // `absent=null`: no draft is a 200 null, not a 404 in the console on every editor open (F4).
+    const draft = await apiFetch<unknown>(`${draftPath(problemId)}?absent=null`);
+    if (draft === null) return null;
     if (!isServerDraft(draft)) throw new Error("The server returned an unreadable draft.");
     return draft;
   } catch (error) {

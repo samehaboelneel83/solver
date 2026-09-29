@@ -137,6 +137,21 @@ def test_a_predictor_is_trained_from_the_domain_s_own_entities_and_retrained_in_
                         headers=t["a"])
     assert too_few.status_code == 422 and "0 rows" in too_few.text
 
+    # In the background (operator trial F31): answered at once, then asked after.
+    queued = http.post("/api/v1/predictors/train?background=true", json={**body, "name": "bg_model"}, headers=t["a"])
+    assert queued.status_code == 202, queued.text
+    job = http.get(f"/api/v1/predictor-trainings/{queued.json()['training_id']}", headers=t["a"]).json()
+    assert job["state"] == "done" and job["error"] is None and job["request"]["name"] == "bg_model"
+    made = http.get(f"/api/v1/predictors/{job['predictor_id']}", headers=t["a"]).json()
+    assert made["name"] == "bg_model" and made["metrics"]["rows"] == 120
+    assert http.get(f"/api/v1/predictor-trainings/{queued.json()['training_id']}", headers=t["b"]).status_code == 404
+    # What can be refused at once still is; what only training finds is recorded as the failure.
+    assert http.post("/api/v1/predictors/train?background=true", json=body, headers=t["a"]).status_code == 409
+    failed = http.post("/api/v1/predictors/train?background=true", json={**body, "name": "z_model", "target": "unset"},
+                       headers=t["a"]).json()
+    failed = http.get(f"/api/v1/predictor-trainings/{failed['training_id']}", headers=t["a"]).json()
+    assert failed["state"] == "failed" and "0 rows" in failed["error"]
+
 
 def test_a_predictor_a_model_version_reads_cannot_be_deleted(client, db):  # noqa: F811
     http, t = client

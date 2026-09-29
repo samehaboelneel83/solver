@@ -5,13 +5,14 @@
  * pickle), see how well it predicted rows it was not trained on, delete one
  * nothing uses.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, Trash2 } from "lucide-react";
 import { formatApiError } from "../api/errors";
 import {
   useDeletePredictor,
   useEntityTypes,
   usePredictors,
+  usePredictorTraining,
   useTrainPredictor,
   useUploadPredictor,
   type Predictor,
@@ -150,6 +151,16 @@ function TrainForm({ domainId }: { domainId: number }) {
   const [trees, setTrees] = useState("50");
   const [depth, setDepth] = useState("6");
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  // Training goes on after the request (operator trial F31): this is the one being waited for.
+  const [trainingId, setTrainingId] = useState<number | null>(null);
+  const training = usePredictorTraining(trainingId);
+  const running = train.isPending || (trainingId !== null && training.data?.state !== "done" && training.data?.state !== "failed");
+  useEffect(() => {
+    const t = training.data;
+    if (!t || t.state === "running") return;
+    setMessage(t.state === "done" ? { error: false, text: `Trained ${t.request.name}.` } : { error: true, text: t.error ?? "The training failed." });
+    setTrainingId(null);
+  }, [training.data]);
 
   const typeItems = types.data?.items ?? [];
   const chosen = typeItems.find((t) => t.name === entityType);
@@ -181,7 +192,7 @@ function TrainForm({ domainId }: { domainId: number }) {
             trees: Number(trees) || 50, max_depth: Number(depth) || 6,
           },
           {
-            onSuccess: (made) => setMessage({ error: false, text: `Trained ${made.name}.` }),
+            onSuccess: (queued) => setTrainingId(queued.training_id),
             onError: (e) => setMessage({ error: true, text: formatApiError(e) }),
           },
         );
@@ -248,10 +259,16 @@ function TrainForm({ domainId }: { domainId: number }) {
         </div>
       </details>
       {problem && name !== "" && <p className="text-sm text-slate-600">{problem}</p>}
-      <button type="submit" disabled={problem !== null || train.isPending}
+      <button type="submit" disabled={problem !== null || running}
         className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-        {train.isPending ? "Training…" : "Train"}
+        {running ? "Training…" : "Train"}
       </button>
+      {running && trainingId !== null && (
+        <p role="status" className="text-sm text-slate-600">
+          Training{training.data ? ` for ${Math.round(training.data.seconds)} s` : ""}. It goes on on the server if you leave
+          this page; the model appears in the list when it is done.
+        </p>
+      )}
       {message && <p role={message.error ? "alert" : "status"} className={`text-sm ${message.error ? "text-red-700" : "text-green-800"}`}>{message.text}</p>}
     </form>
   );

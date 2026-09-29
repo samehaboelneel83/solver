@@ -5,7 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://localhost:8010",
+      // "/api/", not "/api": a page such as /api-keys is the app's, not the server's (operator trial F15).
+      "/api/": "http://localhost:8010",
     },
   },
   test: {

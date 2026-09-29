@@ -38,14 +38,14 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  * the API's maximum page (500) and does not paginate.
  */
 export default function EntityTypes() {
-  useDocumentTitle("Entity types");
+  useDocumentTitle("Record types");
   const { domainId } = useDomain();
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
 
   return (
     <div className="max-w-4xl">
-      <h1 className="mb-4 text-lg font-semibold text-slate-900">Entity types</h1>
+      <h1 className="mb-4 text-lg font-semibold text-slate-900">Record types</h1>
       {domainId === null ? (
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           <p>
@@ -103,7 +103,7 @@ function TypeList({ domainId }: { domainId: Id }) {
     <>
     {search}
     <div className="mb-6 overflow-x-auto rounded-md border border-slate-200 bg-white">
-      <table className="w-full text-left text-sm" aria-label="Entity types">
+      <table className="w-full text-left text-sm" aria-label="Record types">
         <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
           <tr>
             <th scope="col" className="px-3 py-2 font-semibold">

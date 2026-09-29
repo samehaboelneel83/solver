@@ -69,7 +69,9 @@ def hash_user_password(data: dict, _user=None) -> dict:
 UserAccountCreate, UserAccountUpdate, UserAccountRead = make_crud_schemas(
     UserAccount,
     name="UserAccount",
-    readonly={"id"},
+    # The OIDC subject and the sign-out counter are the platform's to set (sign-in, SCIM,
+    # "sign out everywhere"), not fields of a new-user form (operator trial F20).
+    readonly={"id", "external_sub", "token_version"},
     server_default={"created_at", "updated_at"},
     hidden={"hashed_password"},
     extra_create={"password": (str, ...)},

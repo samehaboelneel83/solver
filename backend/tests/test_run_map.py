@@ -115,6 +115,10 @@ def test_a_run_without_a_map_says_so(tenants, db, empty_queue):  # noqa: F811
     run_id = _run(db, _knapsack(10), "no-map")
     missing = TestClient(app).get(f"/api/v1/runs/{run_id}/map", headers=tenants["a"])
     assert missing.status_code == 404 and "no connected rule" in missing.text
+    # Asked quietly, as the run page does, it is an empty answer with why, not an error (F7).
+    quiet = TestClient(app).get(f"/api/v1/runs/{run_id}/map?quiet=true", headers=tenants["a"])
+    assert quiet.status_code == 200 and quiet.json()["features"] == [] and "no connected rule" in quiet.json()["none"]
+    assert TestClient(app).get("/api/v1/runs/999999999/map?quiet=true", headers=tenants["a"]).status_code == 404
 
 
 def test_another_organization_cannot_read_the_map(tenants, db, empty_queue):  # noqa: F811

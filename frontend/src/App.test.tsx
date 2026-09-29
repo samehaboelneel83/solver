@@ -86,7 +86,7 @@ describe("entity type routes (Task 11)", () => {
 
   it("/entity-types renders the entity type list, not the not-found page", async () => {
     renderAt("/entity-types");
-    expect(await screen.findByRole("heading", { level: 1, name: "Entity types" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Record types" })).toBeInTheDocument();
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
   });
 
@@ -191,7 +191,7 @@ describe("entity routes (Task 12)", () => {
 
   it("/entities renders the entity list, not the generic table page for a table named 'entities'", async () => {
     renderAt("/entities");
-    expect(await screen.findByRole("heading", { level: 1, name: "Entities" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Records" })).toBeInTheDocument();
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
   });
 

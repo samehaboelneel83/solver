@@ -315,10 +315,11 @@ describe("EntityList", () => {
     expect(screen.getByRole("heading", { name: "domain.entity_type" })).toBeInTheDocument();
   });
 
-  it("renders an unknown-table message when the schema has no matching table", async () => {
+  it("renders the not-found page when the schema has no matching table (operator trial F18)", async () => {
     renderWithProviders("/domain/does_not_exist");
 
-    expect(await screen.findByText("Unknown table domain.does_not_exist")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown table/)).not.toBeInTheDocument();
   });
 
   describe("goes offline (D-7)", () => {

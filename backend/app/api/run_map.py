@@ -134,12 +134,19 @@ def dissolve(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def run_map(
     run_id: int,
     dissolve_groups: bool = Query(default=False, alias="dissolve"),
+    quiet: bool = Query(default=False, description="a run with no map answers 200, empty, with why (F7)"),
     db: Session = Depends(get_db),
     _: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
     if db.get(Run, run_id) is None:
         raise HTTPException(404, "run not found")
-    features = run_features(db, run_id)
+    try:
+        features = run_features(db, run_id)
+    except HTTPException as exc:
+        # A run page asks every answered run for its map; most have none, which is not an error.
+        if not quiet:
+            raise
+        return {"type": "FeatureCollection", "features": [], "none": exc.detail}
     return {"type": "FeatureCollection", "features": dissolve(features) if dissolve_groups else features}
 
 

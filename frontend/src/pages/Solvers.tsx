@@ -11,6 +11,7 @@ import {
   useSetSolverLicence,
   useSolverLicences,
   useSolvers,
+  useWorkers,
   type ConformanceReport,
   type SolverInfo,
   type SolverLicence,
@@ -142,6 +143,7 @@ export default function Solvers() {
   useDocumentTitle("Solvers");
   const toast = useToast();
   const solvers = useSolvers();
+  const workers = useWorkers();
   const licences = useSolverLicences();
   const remove = useRemoveSolverLicence();
   const conformance = useRunConformance();
@@ -163,7 +165,10 @@ export default function Solvers() {
       <h1 className="mb-1 text-lg font-semibold text-slate-900">Solvers</h1>
       <section aria-label="Worker availability" className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
         <h2 className="font-semibold">Worker availability</h2>
-        <p className="mt-1">Per-worker heartbeat status is not available on this screen. Review queue activity to investigate waiting or running solves.</p>
+        <p className="mt-1" role="status">
+          {workers.data ? `${workers.data.says}.` : workers.isError ? "Worker status could not be read." : "Checking the workers…"}
+          {workers.data && ` Solving now: ${workers.data.solving}; waiting: ${workers.data.queued}.`}
+        </p>
         <Link className="mt-2 inline-block py-2 text-blue-700 underline" to="/ops/queue">Open runs & queues</Link>
       </section>
       <p className="mb-4 max-w-3xl text-sm text-slate-600">
@@ -173,7 +178,8 @@ export default function Solvers() {
         <Link to="/settings" className="underline">Settings</Link> (<code>solve.allowed_solvers</code>,{" "}
         <code>solve.denied_solvers</code>).
       </p>
-      <OfflineNotice />
+      {/* Only when the list is actually waiting for a connection (operator trial F16). */}
+      {solvers.fetchStatus === "paused" && !solvers.data && <OfflineNotice subject="The solver list" />}
 
       {skipped.length > 0 && (
         <section role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm" aria-label="Manifests not loaded">
@@ -224,7 +230,9 @@ export default function Solvers() {
                     </td>
                     <td className="py-2 pr-3 text-xs">{s.classes.join(", ")}</td>
                     <td className="py-2 pr-3">{s.available ? "yes" : <span className="text-amber-800">not installed</span>}</td>
-                    <td className="py-2 pr-3">{s.automatic ? "yes" : <span className="text-slate-600">only when named</span>}</td>
+                    <td className="py-2 pr-3">{(s.chosen_unasked ?? s.automatic) ? "yes" : (
+                      <span className="text-slate-600">{s.proves === "local" ? "only when named (its answer is the best nearby, not proven best)" : "only when named"}</span>
+                    )}</td>
                     <td className="py-2 pr-3 text-xs"><Conformance solver={s} /></td>
                     <td className="py-2 pr-3 text-xs">
                       {s.licence === "set" ? (

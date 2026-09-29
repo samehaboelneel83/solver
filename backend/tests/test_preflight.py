@@ -98,3 +98,23 @@ def test_two_answers_that_claim_different_things_say_so():
     assert _claims({"id": 1, "optimality": "global"}, {"id": 2, "optimality": "global"}) is None
     said = _claims({"id": 1, "optimality": "global"}, {"id": 2, "optimality": "local"})
     assert "run 1's answer is proven the best possible; run 2's is the best nearby" in said
+
+
+def test_a_newer_published_version_is_named_with_the_way_to_move(scenario, db, auth_headers):  # noqa: F811
+    sid = scenario(_knapsack())
+    problem = db.execute(text("SELECT problem_id FROM scenario WHERE id = :s"), {"s": sid}).scalar_one()
+    newer = make_model_version(db, problem, _knapsack())
+    db.commit()
+    body = TestClient(app).get(f"/api/v1/scenarios/{sid}/preflight", headers=auth_headers).json()
+    (finding,) = [f for f in body["findings"] if f["code"] == "newer_version"]
+    assert finding["kind"] == "warning" and body["ready"] is True
+    assert finding["latest_version_id"] == newer and finding["latest_version"] == finding["scenario_version"] + 1
+    assert "Move the scenario" in finding["says"]
+
+
+def test_the_solver_list_says_which_the_rules_really_choose(auth_headers):  # noqa: F811
+    items = {s["name"]: s for s in TestClient(app).get("/api/v1/solvers", headers=auth_headers).json()["items"]}
+    assert items["cp-sat"]["chosen_unasked"] is True
+    for local in ("ipopt", "cma-es", "pso", "ga"):
+        assert items[local]["chosen_unasked"] is False, local
+    assert items["benders"]["chosen_unasked"] is False

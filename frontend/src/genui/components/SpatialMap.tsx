@@ -96,12 +96,13 @@ const notSpatial = (error: unknown) => error instanceof ApiError && error.status
 
 /** The map itself. With `quietIfNone`, a run that has no map (404) shows nothing at all. */
 export function RunMapView({ runId, title = "The partition", quietIfNone = false }: { runId: Id; title?: string; quietIfNone?: boolean }) {
-  const cells = useQuery({ queryKey: ["run-map", runId], queryFn: () => getRunMap(runId), retry: false });
+  // Quietly, a run with no map answers 200 and empty rather than 404: no console error on every run (F7).
+  const cells = useQuery({ queryKey: ["run-map", runId, quietIfNone], queryFn: () => getRunMap(runId, false, quietIfNone), retry: false });
   const zones = useQuery({
     queryKey: ["run-map", runId, "zones"],
     queryFn: () => getRunMap(runId, true),
     retry: false,
-    enabled: cells.isSuccess,
+    enabled: cells.isSuccess && !cells.data?.none,
   });
   const canvas = useRef<HTMLCanvasElement>(null);
   const { basemaps, chosen, choose } = useBasemaps();
@@ -143,6 +144,7 @@ export function RunMapView({ runId, title = "The partition", quietIfNone = false
   });
 
   if (cells.isLoading) return quietIfNone ? null : <SkeletonCard title={title} rows={6} />;
+  if (cells.data?.none) return null;
   if (cells.isError) {
     if (notSpatial(cells.error) && quietIfNone) return null;
     return (

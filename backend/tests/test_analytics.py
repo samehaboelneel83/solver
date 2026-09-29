@@ -106,3 +106,23 @@ def test_a_clickhouse_failure_leaves_the_run_for_the_next_sweep(db, empty_queue,
     assert _written(db, run_id) is None
     assert publish_facts(db, clickhouse) >= 1
     assert len(_facts(clickhouse, run_id)) == 1
+
+
+def test_the_worker_backs_off_clickhouse_and_logs_once_in_full(caplog):
+    """Operator trial F32: ClickHouse down logged a full traceback 795 times in 15 minutes."""
+    import logging
+
+    from app.worker import Backoff
+
+    now = [0.0]
+    backoff = Backoff("ClickHouse", first=5, ceiling=40, clock=lambda: now[0])
+    assert backoff.due()
+    with caplog.at_level(logging.WARNING, logger="solver.worker"):
+        for _ in range(6):
+            backoff.failed(ConnectionError("refused"))
+            assert not backoff.due()
+            now[0] = backoff.next_at
+    assert [r.exc_info is not None for r in caplog.records] == [True] + [False] * 5
+    assert backoff.wait == 40  # 5, 10, 20, 40, 40, 40
+    backoff.succeeded()
+    assert backoff.due() and backoff.failures == 0

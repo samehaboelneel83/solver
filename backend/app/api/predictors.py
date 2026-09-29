@@ -3,6 +3,8 @@
     GET    /api/v1/predictors                  ?domain_id=&limit=&offset=
     POST   /api/v1/predictors                  upload a model as `tree-ensemble/1` JSON
     POST   /api/v1/predictors/train            train one from the domain's own entities
+                                               (?background=true: 202 and a training to ask after)
+    GET    /api/v1/predictor-trainings/{id}    how that training stands: running, done or failed
     GET    /api/v1/predictors/{id}             ?include_model=true for the trees
     POST   /api/v1/predictors/{id}/predict     the model's predictions at given inputs
     DELETE /api/v1/predictors/{id}
@@ -24,9 +26,10 @@ declares cannot be deleted: its next run would find nothing to freeze.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -34,12 +37,13 @@ from sqlalchemy.orm import Session
 
 from app import audit
 from app.api.deps import get_current_user, requires
-from app.core.db import get_db
+from app.core.db import engine, enter_tenant, get_db
 from app.ml import train as training
 from app.ml import trees
 from app.models.iam import UserAccount
 
 router = APIRouter(prefix="/api/v1", tags=["predictors"])
+logger = logging.getLogger(__name__)
 
 _NAME = r"^[a-z][a-z0-9_]*$"
 MAX_PREDICT_ROWS = 1000
@@ -207,26 +211,25 @@ def upload_predictor(
     )
 
 
-@router.post("/predictors/train", status_code=201)
-def train_predictor(
-    body: TrainBody,
-    db: Session = Depends(get_db),
-    user: UserAccount = Depends(requires("domain.edit")),
-) -> dict[str, Any]:
-    _domain(db, body.domain_id, user)
+def _type_id(db: Session, body: "TrainBody") -> int:
     type_id = db.execute(
         text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
         {"d": body.domain_id, "n": body.entity_type},
     ).scalar_one_or_none()
     if type_id is None:
         raise HTTPException(422, f"The domain has no entity type called {body.entity_type!r}")
+    return type_id
+
+
+def _train(db: Session, body: "TrainBody", user: UserAccount) -> dict[str, Any]:
+    """Read the records, train, and store the predictor; the request and a background training share it."""
     rows = db.execute(
         text(
             "SELECT e.attrs FROM entity e"
             " WHERE e.active AND e.entity_type_id = ANY (entity_type_family(:t))"
             " ORDER BY e.id LIMIT :cap"
         ),
-        {"t": type_id, "cap": training.MAX_ROWS + 1},
+        {"t": _type_id(db, body), "cap": training.MAX_ROWS + 1},
     ).scalars().all()
     try:
         trained = training.train(
@@ -246,6 +249,95 @@ def train_predictor(
         db, user, domain_id=body.domain_id, name=body.name, note=body.note, model=trained.model,
         metrics=trained.metrics, source=source, replace=body.replace,
     )
+
+
+#: A training still "running" this long after it began was lost with its server (a restart).
+STALE_TRAINING_SECONDS = 3600
+
+
+def _train_in_background(job_id: int, organization_id, user_id, body: dict[str, Any]) -> None:
+    """Run one training on a connection of its own, as the user who asked, and record how it ended."""
+    connection = engine.connect()
+    db = Session(bind=connection, autoflush=False)
+    try:
+        enter_tenant(db, organization_id)
+        user = db.get(UserAccount, user_id)
+        try:
+            if user is None:
+                raise HTTPException(403, "the account that asked for this training no longer exists")
+            made = _train(db, TrainBody.model_validate(body), user)
+        except HTTPException as exc:
+            db.rollback()
+            detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+            db.execute(text("UPDATE predictor_training SET state = 'failed', error = :e, finished_at = now()"
+                            " WHERE id = :j"), {"e": detail[:4000], "j": job_id})
+        except Exception:
+            db.rollback()
+            logger.exception("predictor training %s failed", job_id)
+            db.execute(text("UPDATE predictor_training SET state = 'failed', finished_at = now(),"
+                            " error = 'the training failed on the server; see the server log' WHERE id = :j"),
+                       {"j": job_id})
+        else:
+            db.execute(text("UPDATE predictor_training SET state = 'done', predictor_id = :p, finished_at = now()"
+                            " WHERE id = :j"), {"p": made["id"], "j": job_id})
+        db.commit()
+    finally:
+        db.close()
+        connection.close()
+
+
+def _training_row(row: Any) -> dict[str, Any]:
+    out = dict(row)
+    if out["state"] == "running" and out["seconds"] > STALE_TRAINING_SECONDS:
+        out.update(state="failed", error="the server stopped while this was training; train it again")
+    out["request"] = {k: out["request"].get(k) for k in ("name", "entity_type", "target", "kind")}
+    return out
+
+
+@router.post("/predictors/train", status_code=201)
+def train_predictor(
+    body: TrainBody,
+    background_tasks: BackgroundTasks,
+    response: Response,
+    background: bool = Query(False, description="answer at once with a training to ask after (F31)"),
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("domain.edit")),
+) -> dict[str, Any]:
+    _domain(db, body.domain_id, user)
+    if not background:
+        return _train(db, body, user)
+    # What can be refused at once is refused at once; the training itself goes on after the answer.
+    _type_id(db, body)
+    taken = db.execute(text("SELECT 1 FROM predictor WHERE domain_id = :d AND name = :n"),
+                       {"d": body.domain_id, "n": body.name}).scalar_one_or_none()
+    if taken and not body.replace:
+        raise HTTPException(409, f"This domain already has a predictor called {body.name!r}; retrain it with replace")
+    job = db.execute(
+        text("INSERT INTO predictor_training (organization_id, domain_id, request, created_by)"
+             " VALUES (:o, :d, CAST(:r AS jsonb), :u) RETURNING id"),
+        {"o": user.organization_id, "d": body.domain_id, "r": body.model_dump_json(), "u": str(user.id)},
+    ).scalar_one()
+    db.commit()
+    background_tasks.add_task(_train_in_background, job, user.organization_id, user.id, body.model_dump())
+    response.status_code = 202
+    return {"training_id": job, "state": "running"}
+
+
+@router.get("/predictor-trainings/{identity}")
+def get_training(
+    identity: int,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    row = db.execute(
+        text("SELECT id, domain_id, request, state, predictor_id, error, created_at, finished_at,"
+             " extract(epoch FROM coalesce(finished_at, now()) - created_at)::float AS seconds"
+             " FROM predictor_training WHERE id = :i AND organization_id = :o"),
+        {"i": identity, "o": user.organization_id},
+    ).mappings().one_or_none()
+    if row is None:
+        raise HTTPException(404, "Training not found")
+    return _training_row(row)
 
 
 @router.get("/predictors/{identity}")

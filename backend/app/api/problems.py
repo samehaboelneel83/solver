@@ -622,6 +622,7 @@ def create_version(
 def apply_template(
     template_id: int,
     payload: ApplyTemplateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("model.publish")),
 ) -> ApplyTemplateResult:
@@ -640,6 +641,7 @@ def apply_template(
     if template is None:
         raise HTTPException(status_code=404, detail="template not found")
 
+    made_domain = False
     problem: Problem | None = None
     if payload.problem_id is not None:
         problem = _get_problem(db, payload.problem_id)
@@ -673,6 +675,7 @@ def apply_template(
             db.rollback()
             raise translate_db_error(exc, "domain") from exc
         domain_id = domain.id
+        made_domain = True
 
     plant_domain_seed(db, domain_id, template.domain_seed)
 
@@ -717,6 +720,16 @@ def apply_template(
         patch={},
     )
     db.add(scenario)
+    db.flush()
+    # A template can make a domain, a problem, a version and a scenario at once: the history says so (F34).
+    audit.write(
+        db, user, request,
+        action="template.apply",
+        object_type="problem",
+        object_id=problem.id,
+        after={"template": template.name, "domain_id": domain_id, "domain_created": made_domain,
+               "model_version_id": version_id, "scenario_id": scenario.id},
+    )
     _commit(db, "scenario")
     db.refresh(scenario)
     return ApplyTemplateResult(

@@ -1,3 +1,4 @@
+import NotFound from "./NotFound";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import EntityForm, { type ServerFieldError } from "../components/EntityForm";
@@ -130,12 +131,9 @@ export default function EntityDetail() {
     return <OfflineNotice subject="This page" />;
   }
 
+  // An address that names no table is a page that does not exist (operator trial F18).
   if (tables && !table) {
-    return (
-      <p className="text-sm text-slate-500">
-        Unknown table {schemaName}.{tableName}
-      </p>
-    );
+    return <NotFound />;
   }
 
   if (!isNew && isEntityError) {

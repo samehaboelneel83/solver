@@ -57,3 +57,16 @@ describe("apiFetch", () => {
     await expect(apiFetch("/api/health")).rejects.toBeInstanceOf(NetworkError);
   });
 });
+
+describe("the sign-in error (operator trial)", () => {
+  it("says the credentials were wrong only when they were refused", async () => {
+    const { login } = await vi.importActual<typeof import("./client")>("./client");
+    const reply = (status: number) => vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status }));
+    reply(401);
+    await expect(login("admin", "nope")).rejects.toThrow("Wrong username or password.");
+    reply(429);
+    await expect(login("admin", "nope")).rejects.toThrow(/Too many sign-in attempts/);
+    reply(502);
+    await expect(login("admin", "nope")).rejects.toThrow(/failed on the server/);
+  });
+});
