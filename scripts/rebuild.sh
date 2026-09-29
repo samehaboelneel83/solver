@@ -16,7 +16,7 @@ set -euo pipefail
 wait_for_backend() {
     local attempt
     for attempt in $(seq 1 15); do
-        if curl -fsS http://localhost:8010/api/health; then
+        if curl -fs http://localhost:8010/api/health; then
             echo
             return 0
         fi
@@ -30,7 +30,7 @@ wait_for_backend() {
 wait_for_frontend() {
     local attempt
     for attempt in $(seq 1 15); do
-        if curl -fsS -o /dev/null http://localhost:3010/; then
+        if curl -fs -o /dev/null http://localhost:3010/; then
             return 0
         fi
         echo "waiting for frontend... (${attempt}/15)"

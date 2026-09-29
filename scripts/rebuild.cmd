@@ -26,7 +26,7 @@ exit /b 0
 rem Containers start before they accept connections: try 15 times, 2 s apart.
 :wait
 for /l %%i in (1,1,15) do (
-    curl.exe -fsS -o nul %1 && exit /b 0
+    curl.exe -fs -o nul %1 && exit /b 0
     echo waiting for %2... (%%i/15^)
     timeout /t 2 /nobreak >nul
 )
