@@ -1,7 +1,7 @@
 import LoadFailure from "../components/LoadFailure";
 import Pager from "../components/Pager";
 import SearchBox, { NoMatches } from "../components/SearchBox";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
@@ -534,6 +534,13 @@ function ScenarioRuns({
     const timer = setInterval(() => runs.refetch(), 1000);
     return () => clearInterval(timer);
   }, [settling, runs]);
+  // When the last unfinished run settles, "1 run is waiting" is out of date at once (operator trial F6).
+  const wasSettling = useRef(settling);
+  const refetchPreflight = preflightQuery.refetch;
+  useEffect(() => {
+    if (wasSettling.current && !settling) void refetchPreflight();
+    wasSettling.current = settling;
+  }, [settling, refetchPreflight]);
   const createRun = useCreateRun();
   const toast = useToast();
   const [againstId, setAgainstId] = useState<Id | null>(null);

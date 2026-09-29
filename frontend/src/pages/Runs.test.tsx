@@ -724,6 +724,21 @@ describe("Runs", () => {
     expect(await screen.findByText(/best possible answer/i)).toBeInTheDocument();
   });
 
+  it("asks the preflight again as soon as the last unfinished run settles (operator trial F6)", async () => {
+    let status = "queued";
+    stub({
+      run: () => ({ ...RUN_DETAIL, status }),
+      runs: () => ({ items: [{ ...RUN_SUMMARY, status }], total: 1 }),
+    });
+    renderPage();
+    expect(await screen.findByText(/waiting to start/i)).toBeInTheDocument();
+    const asked = () => mockFetch.mock.calls.filter(([p]) => String(p).endsWith("/preflight")).length;
+    const before = asked();
+    status = "optimal";
+    expect(await screen.findByText(/best possible answer/i)).toBeInTheDocument();
+    await waitFor(() => expect(asked()).toBeGreaterThan(before));
+  });
+
   it("offers to stop a queued run, and does not offer it on a finished one", async () => {
     let status = "queued";
     stub({
