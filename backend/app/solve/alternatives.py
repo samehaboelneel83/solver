@@ -16,10 +16,20 @@ combination of the yes-or-no decisions::
 and one row holding the goal within the gap of the best. Rows the compiler
 writes itself are named `__alternative` and never reach `constraint_result`.
 
-**What it does not do.** Decisions that are quantities or whole numbers
-beyond yes-or-no have infinitely many (or very many) near neighbours, so
-distinctness is judged on the yes-or-no decisions only: a model with none is
-refused with that reason. A lexicographic goal or one that multiplies
+**How far apart.** `min_changes` asks each plan to differ from every other
+in at least that many decisions (the cut's right-hand side), so the list is
+not five copies of the best with one switch flipped.
+
+**Whole numbers.** A whole-number decision with finite bounds counts as
+changed when it moves by at least one. Each listed answer `x*` gets two
+helper switches per such decision (`__alt_up`, `__alt_dn`), each forcing
+`x >= x* + 1` or `x <= x* - 1` when on, and the cut counts them beside the
+yes-or-no terms.
+
+**What it does not do.** Quantities have infinitely many near neighbours,
+and a whole number with no bound has no big-M to write the switch with, so
+neither counts towards distinctness: a model with no yes-or-no and no
+bounded whole-number decision is refused with that reason. A lexicographic goal or one that multiplies
 decisions is refused too -- the gap row is written on a linear goal.
 """
 
@@ -29,12 +39,17 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable
 
-from app.solve.compile import Compiled, Constraint, Linear
+from app.solve.compile import Compiled, Constraint, Linear, Variable
 from app.solve.result import Solution
 
 ROW_ID = "__alternative"
+UP, DOWN = "__alt_up", "__alt_dn"
 MAX_ALTERNATIVES = 20
 MAX_WITHIN = 1.0
+MAX_MIN_CHANGES = 50
+#: A whole-number decision wider than this is left out: its switch's big-M
+#: would make the relaxation too weak to be worth solving.
+MAX_RANGE = Decimal(1_000_000)
 
 
 class NotApplicable(Exception):
@@ -45,7 +60,7 @@ class NotApplicable(Exception):
 class Alternative:
     seq: int
     solution: Solution
-    #: How many yes-or-no decisions differ from the best answer.
+    #: How many decisions (yes-or-no, or bounded whole numbers) differ from the best answer.
     changed: int
 
 
@@ -54,14 +69,26 @@ def decisions(compiled: Compiled) -> list[Any]:
     return [key for key, var in compiled.variables.items() if var.domain == "binary" and not key[0].startswith("__")]
 
 
+def whole_numbers(compiled: Compiled) -> list[Any]:
+    """The model's own whole-number decisions whose bounds give a switch its big-M."""
+    return [
+        key for key, var in compiled.variables.items()
+        if var.domain == "integer" and not key[0].startswith("__") and not var.default_upper
+        and var.lower.is_finite() and var.upper.is_finite() and var.upper - var.lower <= MAX_RANGE
+    ]
+
+
 def admissible(compiled: Compiled) -> None:
     """Raise `NotApplicable` with the reason, or return for a model it can serve."""
     if compiled.objective_mode == "lex":
         raise NotApplicable("alternatives are listed for a weighted goal; this one is solved term by term")
     if compiled.objective_quadratic:
         raise NotApplicable("the goal multiplies decisions together, and the gap is written on a linear goal")
-    if not decisions(compiled):
-        raise NotApplicable("the model has no yes-or-no decisions, so its answers are not told apart one by one")
+    if not decisions(compiled) and not whole_numbers(compiled):
+        raise NotApplicable(
+            "the model has no yes-or-no decisions and no bounded whole-number ones, "
+            "so its answers are not told apart one by one"
+        )
 
 
 def bound(best: float, within: float, sense: str) -> Decimal:
@@ -72,8 +99,13 @@ def bound(best: float, within: float, sense: str) -> Decimal:
     return value + slack if sense == "minimize" else value - slack
 
 
-def cut(keys: list[Any], answer: dict[Any, Any]) -> Constraint:
-    """The row that forbids exactly this combination of the decisions."""
+def _whole(value: Any) -> int:
+    return int(round(float(value)))
+
+
+def cut(keys: list[Any], answer: dict[Any, Any], need: int = 1) -> Constraint:
+    """The row that asks for at least `need` of the yes-or-no decisions to
+    differ from this answer; with `need` 1, it forbids exactly that combination."""
     coeffs: dict[Any, Decimal] = {}
     ones = 0
     for key in keys:
@@ -83,7 +115,40 @@ def cut(keys: list[Any], answer: dict[Any, Any]) -> Constraint:
         else:
             coeffs[key] = Decimal(1)
     # sum(1 - x) over the ones + sum(x) over the zeros >= 1
-    return Constraint(ROW_ID, {"cut": "no-good"}, Linear(coeffs=coeffs, const=Decimal(ones)), ">=", Linear(const=Decimal(1)))
+    return Constraint(ROW_ID, {"cut": "no-good"}, Linear(coeffs=coeffs, const=Decimal(ones)), ">=", Linear(const=Decimal(need)))
+
+
+def differs(
+    compiled: Compiled, keys: list[Any], integers: list[Any], answer: dict[Any, Any], need: int, tag: int,
+) -> tuple[dict[Any, Variable], list[Constraint]]:
+    """What asks the next plan to differ from `answer` in at least `need`
+    decisions: the helper switches for the whole numbers, their rows, and the
+    counting row. `tag` keeps each answer's switches apart."""
+    row = cut(keys, answer, need)
+    helpers: dict[Any, Variable] = {}
+    rows: list[Constraint] = []
+    for i, key in enumerate(integers):
+        var = compiled.variables[key]
+        value = Decimal(_whole(answer.get(key, 0)))
+        if value < var.upper:
+            up = (UP, (str(tag), str(i)))
+            helpers[up] = Variable(up, "binary", Decimal(0), Decimal(1))
+            # x >= lower + (x* + 1 - lower) * up
+            rows.append(Constraint(ROW_ID, {"cut": "moved-up"},
+                                   Linear({key: Decimal(1), up: -(value + 1 - var.lower)}), ">=", Linear(const=var.lower)))
+            row.left.coeffs[up] = Decimal(1)
+        if value > var.lower:
+            down = (DOWN, (str(tag), str(i)))
+            helpers[down] = Variable(down, "binary", Decimal(0), Decimal(1))
+            # x <= upper - (upper - x* + 1) * down
+            rows.append(Constraint(ROW_ID, {"cut": "moved-down"},
+                                   Linear({key: Decimal(1), down: var.upper - value + 1}), "<=", Linear(const=var.upper)))
+            row.left.coeffs[down] = Decimal(1)
+    return helpers, [*rows, row]
+
+
+def changed_between(keys: list[Any], a: dict[Any, Any], b: dict[Any, Any]) -> int:
+    return sum(1 for key in keys if _whole(a.get(key, 0)) != _whole(b.get(key, 0)))
 
 
 def find(
@@ -94,6 +159,7 @@ def find(
     count: int,
     within: float,
     time_limit: float,
+    min_changes: int = 1,
     should_stop: Callable[[], bool] | None = None,
 ) -> list[Alternative]:
     """Up to `count` alternatives to `best`, best first. Each solve gets an
@@ -104,15 +170,27 @@ def find(
         raise NotApplicable(f"between 1 and {MAX_ALTERNATIVES} alternatives are listed")
     if not 0 <= within <= MAX_WITHIN:
         raise NotApplicable("the gap is a share of the best value, from 0 to 1")
+    if not 1 <= min_changes <= MAX_MIN_CHANGES:
+        raise NotApplicable(f"plans differ in 1 to {MAX_MIN_CHANGES} decisions")
     if best.objective is None or not best.assignments:
         raise NotApplicable("there is no best answer to list alternatives to")
     keys = decisions(compiled)
+    integers = whole_numbers(compiled)
+    if min_changes > len(keys) + len(integers):
+        raise NotApplicable(
+            f"the model has {len(keys) + len(integers)} decisions to tell plans apart by, fewer than {min_changes}"
+        )
     limit = bound(float(best.objective), within, compiled.sense)
     relation = "<=" if compiled.sense == "minimize" else ">="
-    rows = [
-        Constraint(ROW_ID, {"cut": "gap"}, compiled.objective.copy(), relation, Linear(const=limit)),
-        cut(keys, best.assignments),
-    ]
+    variables = dict(compiled.variables)
+    rows = [Constraint(ROW_ID, {"cut": "gap"}, compiled.objective.copy(), relation, Linear(const=limit))]
+
+    def apart_from(answer: dict[Any, Any], tag: int) -> None:
+        helpers, more = differs(compiled, keys, integers, answer, min_changes, tag)
+        variables.update(helpers)
+        rows.extend(more)
+
+    apart_from(best.assignments, 0)
     import time
 
     started = time.monotonic()
@@ -124,14 +202,13 @@ def find(
         if left <= 0.5:
             break
         share = max(0.5, left / (count - seq + 1))
-        model = replace(compiled, constraints=[*compiled.constraints, *rows])
+        model = replace(compiled, variables=dict(variables), constraints=[*compiled.constraints, *rows])
         answer = solve(model, share)
         if answer.status not in ("optimal", "feasible") or not answer.assignments:
             break
-        changed = sum(
-            1 for key in keys
-            if int(round(float(answer.assignments.get(key, 0)))) != int(round(float(best.assignments.get(key, 0))))
-        )
-        found.append(Alternative(seq, answer, changed))
-        rows.append(cut(keys, answer.assignments))
+        changed = changed_between([*keys, *integers], answer.assignments, best.assignments)
+        # The helper switches are the search's own; the plan is the model's decisions.
+        plan = {key: value for key, value in answer.assignments.items() if key[0] not in (UP, DOWN)}
+        found.append(Alternative(seq, replace(answer, assignments=plan), changed))
+        apart_from(answer.assignments, seq)
     return found

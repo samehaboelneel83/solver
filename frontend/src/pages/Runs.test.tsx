@@ -498,6 +498,28 @@ describe("Runs", () => {
     expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ pareto_steps: 10 }));
   });
 
+  it("asks for alternatives further apart on a model of bounded whole numbers", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 31, status: "queued" });
+    const wholeNumbers = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: {
+        variables: { x: { index: [], domain: "integer", lower: 0, upper: 3 } },
+        constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }],
+        objective: { sense: "minimize", terms: [{ id: "o_cost", weight: 1 }] },
+      },
+    };
+    stub({ write, version: wholeNumbers });
+    renderPage();
+
+    const button = await screen.findByRole("button", { name: /with 5 alternative plans/i });
+    fireEvent.change(screen.getByLabelText(/each differing in at least/i), { target: { value: "3" } });
+    fireEvent.click(button);
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(
+      expect.objectContaining({ alternatives: 5, alternatives_within: 0.05, alternatives_min_changes: 3 }),
+    );
+  });
+
   it("offers no trade-off for a goal of one term", async () => {
     stub();
     renderPage();
@@ -975,9 +997,11 @@ describe("alternative plans (Epic engine E-1)", () => {
   it("says how many came within the gap, or why none were looked for", async () => {
     const { alternativesText } = await import("./Runs");
     expect(alternativesText({ asked: 5, within: 0.05, found: 5 }, 5))
-      .toBe("5 next-best plans within 5% of the best, each differing from every other in at least one yes-or-no decision.");
+      .toBe("5 next-best plans within 5% of the best, each differing from every other in at least one decision.");
+    expect(alternativesText({ asked: 5, within: 0.05, min_changes: 3, found: 5 }, 5))
+      .toBe("5 next-best plans within 5% of the best, each differing from every other in at least 3 decisions.");
     expect(alternativesText({ asked: 5, within: 0.02, found: 2 }, 2))
-      .toBe("2 next-best plans within 2% of the best (of 5 asked for; no more come within 2%), each differing from every other in at least one yes-or-no decision.");
+      .toBe("2 next-best plans within 2% of the best (of 5 asked for; no more come within 2%), each differing from every other in at least one decision.");
     expect(alternativesText({ asked: 5, within: 0.05, found: 0 }, 0)).toBe("No other plan comes within 5% of the best.");
     expect(alternativesText({ asked: 5, within: 0.05, skipped: "the model has no yes-or-no decisions" }, 0))
       .toBe("No alternatives listed: the model has no yes-or-no decisions.");

@@ -94,8 +94,11 @@ def test_a_no_good_cut_forbids_exactly_that_plan():
 
 
 @pytest.mark.parametrize("change, reason", [
-    (lambda ir: ir["variables"].update({f"x{i}": {"index": [], "domain": "integer", "lower": 0, "upper": 1}
+    (lambda ir: ir["variables"].update({f"x{i}": {"index": [], "domain": "continuous", "lower": 0, "upper": 1}
                                         for i in range(8)}), "no yes-or-no decisions"),
+    # A whole number with no upper bound has no big-M for its switch.
+    (lambda ir: ir["variables"].update({f"x{i}": {"index": [], "domain": "integer", "lower": 0}
+                                        for i in range(8)}), "no bounded whole-number"),
     (lambda ir: ir["objective"].update(mode="lex"), "term by term"),
 ])
 def test_a_model_it_cannot_serve_is_refused_with_the_reason(change, reason):
@@ -105,6 +108,56 @@ def test_a_model_it_cannot_serve_is_refused_with_the_reason(change, reason):
     best, _ = solve_compiled(by_name("highs"), compiled, time_limit=10, seed=1)
     with pytest.raises(NotApplicable, match=reason):
         find(compiled, lambda m, t: best, best, count=2, within=0.1, time_limit=5)
+
+
+def _plan(solution):
+    return tuple(round(float(solution.assignments[(f"x{i}", ())])) for i in range(8))
+
+
+@pytest.mark.parametrize("backend", ["highs", "scip"])
+def test_plans_can_be_asked_to_differ_in_more_decisions(backend):
+    compiled = compile_model(_knapsack(), {})
+    best, _ = solve_compiled(by_name(backend), compiled, time_limit=10, seed=1)
+    solve = lambda model, limit: solve_compiled(by_name(backend), model, time_limit=limit, seed=1)[0]  # noqa: E731
+    found = find(compiled, solve, best, count=4, within=0.5, time_limit=60, min_changes=3)
+    assert len(found) == 4
+    plans = [_plan(best), *(_plan(a.solution) for a in found)]
+    for a, b in itertools.combinations(plans, 2):
+        assert sum(x != y for x, y in zip(a, b)) >= 3, (a, b)
+    assert all(a.changed >= 3 for a in found)
+    # No helper switch leaks into a plan.
+    assert all(key[0].startswith("x") for a in found for key in a.solution.assignments)
+    # Each is the best plan that far from all the earlier ones.
+    packings = [p for p in itertools.product([0, 1], repeat=8) if sum(w * x for w, x in zip(WEIGHT, p)) <= CAPACITY]
+    listed = [plans[0]]
+    for alternative in found:
+        allowed = [p for p in packings if all(sum(x != y for x, y in zip(p, q)) >= 3 for q in listed)]
+        assert alternative.solution.objective == max(sum(v * x for v, x in zip(VALUE, p)) for p in allowed)
+        listed.append(_plan(alternative.solution))
+
+
+@pytest.mark.parametrize("backend", ["highs", "cp-sat"])
+def test_whole_number_decisions_are_told_apart(backend):
+    ir = _knapsack()
+    ir["variables"] = {f"x{i}": {"index": [], "domain": "integer", "lower": 0, "upper": 2} for i in range(8)}
+    compiled = compile_model(ir, {})
+    best, _ = solve_compiled(by_name(backend), compiled, time_limit=10, seed=1)
+    solve = lambda model, limit: solve_compiled(by_name(backend), model, time_limit=limit, seed=1)[0]  # noqa: E731
+    found = find(compiled, solve, best, count=5, within=0.5, time_limit=60)
+    packings = [p for p in itertools.product([0, 1, 2], repeat=8) if sum(w * x for w, x in zip(WEIGHT, p)) <= CAPACITY]
+    ranked = sorted((sum(v * x for v, x in zip(VALUE, p)) for p in packings), reverse=True)
+    assert best.objective == ranked[0]
+    assert [a.solution.objective for a in found] == ranked[1:6]
+    plans = [_plan(best), *(_plan(a.solution) for a in found)]
+    assert len(set(plans)) == len(plans)
+    assert all(a.changed >= 1 for a in found)
+
+
+def test_more_changes_than_decisions_is_refused():
+    compiled = compile_model(_knapsack(), {})
+    best, _ = solve_compiled(by_name("highs"), compiled, time_limit=10, seed=1)
+    with pytest.raises(NotApplicable, match="8 decisions"):
+        find(compiled, lambda m, t: best, best, count=2, within=0.1, time_limit=5, min_changes=9)
 
 
 def test_a_run_lists_its_alternatives_each_a_run_of_its_own(db, empty_queue, auth_headers):  # noqa: F811
@@ -138,6 +191,9 @@ def test_a_run_lists_its_alternatives_each_a_run_of_its_own(db, empty_queue, aut
         # A gap without a count, or alternatives beside a front, is refused.
         bad = client.post(f"/api/v1/scenarios/{scenario}/runs", json={"alternatives_within": 0.1}, headers=auth_headers)
         assert bad.status_code == 422 and "alternatives" in bad.text
+        apart = client.post(f"/api/v1/scenarios/{scenario}/runs", json={"alternatives_min_changes": 2},
+                            headers=auth_headers)
+        assert apart.status_code == 422 and "alternatives_min_changes" in apart.text
         both = client.post(f"/api/v1/scenarios/{scenario}/runs", json={"alternatives": 2, "pareto_steps": 3},
                            headers=auth_headers)
         assert both.status_code == 422
@@ -149,7 +205,7 @@ def test_a_run_lists_its_alternatives_each_a_run_of_its_own(db, empty_queue, aut
 
 def test_a_run_on_a_model_with_no_choices_says_why_it_lists_none(db, empty_queue):  # noqa: F811
     ir = _knapsack()
-    ir["variables"] = {f"x{i}": {"index": [], "domain": "integer", "lower": 0, "upper": 1} for i in range(8)}
+    ir["variables"] = {f"x{i}": {"index": [], "domain": "continuous", "lower": 0, "upper": 1} for i in range(8)}
     domain = make_domain(db, "alternatives-none")
     problem = make_problem(db, domain)
     version = make_model_version(db, problem, ir)
@@ -163,6 +219,27 @@ def test_a_run_on_a_model_with_no_choices_says_why_it_lists_none(db, empty_queue
         read = _read(db, run_id)
         assert read.alternatives is None
         assert "no yes-or-no decisions" in read.params["alternatives_result"]["skipped"]
+    finally:
+        db.execute(text("DELETE FROM run"))
+        db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+        db.commit()
+
+
+def test_a_run_asked_for_plans_further_apart_gets_them(db, empty_queue):  # noqa: F811
+    domain = make_domain(db, "alternatives-apart")
+    problem = make_problem(db, domain)
+    version = make_model_version(db, problem, _knapsack())
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+                          {"p": problem, "v": version}).scalar_one()
+    db.commit()
+    try:
+        run_id = enqueue_run(db, scenario, time_limit=20.0, alternatives=2, alternatives_within=0.5,
+                             alternatives_min_changes=3)
+        claim_next(db)
+        assert execute_run(db, run_id).status == "optimal"
+        read = _read(db, run_id)
+        assert read.params["alternatives_result"] == {"asked": 2, "within": 0.5, "min_changes": 3, "found": 2}
+        assert all(a.changed >= 3 for a in read.alternatives)
     finally:
         db.execute(text("DELETE FROM run"))
         db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})

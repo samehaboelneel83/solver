@@ -80,11 +80,14 @@ class RunRequest(BaseModel):
     #: values moving (`app.solve.robust`), and report the price.
     robust: bool = False
     #: After the answer, list up to this many next-best distinct plans
-    #: (`app.solve.alternatives`): each differs in at least one yes-or-no
-    #: decision and is within `alternatives_within` of the best value.
+    #: (`app.solve.alternatives`): each differs from every other in at least
+    #: `alternatives_min_changes` decisions (yes-or-no, or bounded whole
+    #: numbers) and is within `alternatives_within` of the best value.
     alternatives: Annotated[int, Field(ge=1, le=20)] | None = None
     #: The gap, as a share of the best value (0.02 is 2%). Only with `alternatives`.
     alternatives_within: Annotated[float, Field(ge=0, le=1)] | None = None
+    #: How many decisions each plan changes from every other (1 by default). Only with `alternatives`.
+    alternatives_min_changes: Annotated[int, Field(ge=1, le=50)] | None = None
 
 
 class ConstraintOutcome(BaseModel):
@@ -282,12 +285,14 @@ def create_run(
             return _read(db, int(prior))
 
     request = payload or RunRequest()
-    if request.alternatives_within is not None and not request.alternatives:
-        raise HTTPException(
-            status_code=422,
-            detail=[{"type": "value_error", "loc": ["body", "alternatives_within"],
-                     "msg": "a gap is given with `alternatives`: how many next-best plans to list", "input": None}],
-        )
+    for given in ("alternatives_within", "alternatives_min_changes"):
+        if getattr(request, given) is not None and not request.alternatives:
+            raise HTTPException(
+                status_code=422,
+                detail=[{"type": "value_error", "loc": ["body", given],
+                         "msg": f"`{given}` is given with `alternatives`: how many next-best plans to list",
+                         "input": None}],
+            )
     if request.alternatives and (request.pareto_steps or request.robust):
         raise HTTPException(
             status_code=422,
@@ -329,6 +334,7 @@ def create_run(
             robust=request.robust,
             alternatives=request.alternatives,
             alternatives_within=request.alternatives_within,
+            alternatives_min_changes=request.alternatives_min_changes,
             idempotency_key=key,
         )
     except IntegrityError:

@@ -670,6 +670,8 @@ export type RunRequest = {
   /** List this many next-best distinct plans (1-20), each within `alternatives_within` of the best. */
   alternatives?: number;
   alternatives_within?: number;
+  /** Each plan differs from every other in at least this many decisions (1-50). */
+  alternatives_min_changes?: number;
 };
 
 /** One next-best plan: its goal, how many yes-or-no decisions differ from the best, and its run. */

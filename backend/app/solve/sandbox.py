@@ -382,7 +382,7 @@ def pareto_in_child(*, backend: str, compiled, steps: int, time_limit: float, se
 
 
 def alternatives_in_child(*, backend: str, compiled, best, count: int, within: float, time_limit: float, seed,
-                          workers: int, gap_rel: float, should_stop, on_progress):
+                          workers: int, gap_rel: float, should_stop, on_progress, min_changes: int = 1):
     """`alternatives.find` (Epic engine, E-1), by backend name: every solve of it is `solve_compiled`,
     in this one child."""
     from app.solve.alternatives import find
@@ -396,7 +396,7 @@ def alternatives_in_child(*, backend: str, compiled, best, count: int, within: f
                               workers=workers, gap_rel=gap_rel)[0]
 
     return find(compiled, solve, best, count=count, within=within, time_limit=time_limit,
-                should_stop=should_stop)
+                min_changes=min_changes, should_stop=should_stop)
 
 
 def lns_in_child(*, backend: str, compiled, time_limit: float, seed, workers: int, gap_rel: float,

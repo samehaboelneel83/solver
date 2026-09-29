@@ -489,10 +489,14 @@ function ScenarioRuns({
   // A trade-off front needs a goal of exactly two terms (app.solve.pareto).
   const twoGoals =
     ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length === 2;
-  // Alternatives are told apart by yes-or-no decisions (app.solve.alternatives).
+  // Alternatives are told apart by yes-or-no and bounded whole-number
+  // decisions (app.solve.alternatives).
   const hasChoices = Object.values(
-    ((version.data?.ir as { variables?: Record<string, { domain?: string }> } | undefined)?.variables ?? {})
-  ).some((spec) => (spec.domain ?? "binary") === "binary");
+    ((version.data?.ir as { variables?: Record<string, { domain?: string; lower?: unknown; upper?: unknown }> } | undefined)?.variables ?? {})
+  ).some((spec) => (spec.domain ?? "binary") === "binary"
+    || (spec.domain === "integer" && typeof spec.lower === "number" && typeof spec.upper === "number"));
+  // How many decisions each alternative changes from every other plan.
+  const [apart, setApart] = useState("1");
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
@@ -563,7 +567,11 @@ function ScenarioRuns({
           ...(solver ? { solver } : {}),
           ...(how === "front" ? { pareto_steps: 10 } : {}),
           ...(how === "robust" ? { robust: true } : {}),
-          ...(how === "alternatives" ? { alternatives: ALTERNATIVES, alternatives_within: 0.05 } : {}),
+          ...(how === "alternatives" ? {
+            alternatives: ALTERNATIVES,
+            alternatives_within: 0.05,
+            ...(Number(apart) > 1 ? { alternatives_min_changes: Math.min(50, Number(apart)) } : {}),
+          } : {}),
         },
       },
       {
@@ -616,14 +624,26 @@ function ScenarioRuns({
             </button>
           )}
           {hasChoices && (
-            <button
-              type="button"
-              onClick={() => solve("alternatives")}
-              disabled={createRun.isPending || blocked}
-              className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
-            >
-              Solve, with {ALTERNATIVES} alternative plans
-            </button>
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => solve("alternatives")}
+                disabled={createRun.isPending || blocked}
+                className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+              >
+                Solve, with {ALTERNATIVES} alternative plans
+              </button>
+              <label className="inline-flex items-center gap-1 text-sm text-slate-600">
+                each differing in at least
+                <input
+                  inputMode="numeric"
+                  className="w-12 rounded border border-slate-300 px-2 py-1 text-slate-900"
+                  value={apart}
+                  onChange={(event) => setApart(event.target.value.replace(/\D/g, "").slice(0, 2))}
+                />
+                {apart === "1" ? "decision" : "decisions"}
+              </label>
+            </span>
           )}
           {uncertain && (
             <button
@@ -1483,7 +1503,14 @@ export function claimText(optimality: string | null | undefined): string {
 const ALTERNATIVES = 5;
 
 /** What the worker wrote about the alternatives it looked for (Epic engine E-1). */
-export type AlternativesResult = { asked: number; within: number; found?: number; note?: string; skipped?: string };
+export type AlternativesResult = {
+  asked: number;
+  within: number;
+  min_changes?: number;
+  found?: number;
+  note?: string;
+  skipped?: string;
+};
 
 /** In a few words: how many were found within the gap, or why none were looked for. */
 export function alternativesText(result: AlternativesResult | undefined, found: number): string {
@@ -1491,7 +1518,8 @@ export function alternativesText(result: AlternativesResult | undefined, found: 
   const gap = result ? `${Math.round(result.within * 1000) / 10}%` : "the gap";
   if (found === 0) return `No other plan comes within ${gap} of the best.`;
   const asked = result && found < result.asked ? ` (of ${result.asked} asked for; no more come within ${gap})` : "";
-  return `${found} next-best ${found === 1 ? "plan" : "plans"} within ${gap} of the best${asked}, each differing from every other in at least one yes-or-no decision.`;
+  const apart = result?.min_changes && result.min_changes > 1 ? `${result.min_changes} decisions` : "one decision";
+  return `${found} next-best ${found === 1 ? "plan" : "plans"} within ${gap} of the best${asked}, each differing from every other in at least ${apart}.`;
 }
 
 export function Alternatives({

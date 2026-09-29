@@ -131,6 +131,7 @@ def enqueue_run(
     idempotency_key: str | None = None,
     alternatives: int | None = None,
     alternatives_within: float | None = None,
+    alternatives_min_changes: int | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
 
@@ -319,7 +320,8 @@ def enqueue_run(
         **({"robust": True} if robust else {}),
         # Next-best distinct plans after the answer (Epic engine, app.solve.alternatives).
         **({"alternatives": int(alternatives),
-            "alternatives_within": float(DEFAULT_WITHIN if alternatives_within is None else alternatives_within)}
+            "alternatives_within": float(DEFAULT_WITHIN if alternatives_within is None else alternatives_within),
+            **({"alternatives_min_changes": int(alternatives_min_changes)} if alternatives_min_changes else {})}
            if alternatives else {}),
         # The trace this run belongs to: the worker continues it
         # (app.core.tracing).
@@ -2428,13 +2430,16 @@ def _alternatives(db: Session, run_id: int, compiled: Compiled, solving_model: C
 
     count = int(params["alternatives"])
     within = float(params.get("alternatives_within", DEFAULT_WITHIN))
+    min_changes = int(params.get("alternatives_min_changes", 1))
     record: dict[str, Any] = {"asked": count, "within": within}
+    if min_changes > 1:
+        record["min_changes"] = min_changes
     try:
         alternative_rows.admissible(solving_model)
         found = sandbox.run(
             "app.solve.sandbox:alternatives_in_child",
             {"backend": backend.name, "compiled": solving_model, "best": result, "count": count,
-             "within": within, "time_limit": time_limit, "seed": seed, "workers": workers, "gap_rel": gap_rel},
+             "within": within, "min_changes": min_changes, "time_limit": time_limit, "seed": seed, "workers": workers, "gap_rel": gap_rel},
             time_limit=time_limit, workers=workers, should_stop=should_stop,
         )
     except (alternative_rows.NotApplicable, Unsupported, sandbox.SandboxFailed) as exc:
