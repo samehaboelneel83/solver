@@ -204,6 +204,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
   const toast = useToast();
+  // A planner may read a model but not change it (operator trial F22): the
+  // editors are shown disabled rather than inviting edits Publish would refuse.
+  const { can, known } = useCapabilities();
+  const canEdit = !known || can("model.publish");
 
   const [failure, setFailure] = useState<string | null>(null);
   // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
@@ -520,7 +524,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
-          {(["forms", "graph", "blocks", "ir", "review"] as const).map((tab) => (
+          {(canEdit ? ["forms", "graph", "blocks", "ir", "review"] as const : ["forms", "graph", "ir", "review"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -538,6 +542,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </p>
       </div>
 
+      {!canEdit && (
+        <p role="note" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          This account may read the model but not change it. Ask someone who may publish models to make a change.
+        </p>
+      )}
       <details className="mb-4 text-sm text-slate-600">
         <summary className="cursor-pointer py-2">Advanced views</summary>
         <p className="my-2">Blocks edits the same draft. Exact IR is read-only. Legacy visualizations show published model versions.</p>
@@ -549,14 +558,14 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         selection={graphFocus?.part === "rules" && graphFocus.ruleKey !== undefined
           ? `model-con-${draft.constraints[ruleKeys.indexOf(graphFocus.ruleKey)]?.id}` : graphFocus?.id ?? null}
         onSelect={(id, part) => setGraphFocus({ id, part, ...(part === "rules" ? { ruleKey: ruleKeys[draft.constraints.findIndex(rule => `model-con-${rule.id}` === id)] } : {}) })}
-        draft={draft}
-        onEdit={(edit) => setDraft((current) => current && edit(current))}
+        draft={canEdit ? draft : null}
+        onEdit={canEdit ? (edit) => setDraft((current) => current && edit(current)) : undefined}
         editorHref={part => part === "objective" ? "#objective-editor" : part === "rules" ? "#constraints-editor" : "#declarations-editor"} />}
       {view === "review" && draft ? <ModelReview draft={draft}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))}
         planner={classification.data?.planner ?? []} wouldSolve={classification.data?.would_solve ?? null} />
       : view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
-      : view === "blocks" && workingIr ? (
+      : view === "blocks" && workingIr && canEdit ? (
         <div className="mb-6">
           <BlocksEditor
             ir={workingIr}
@@ -574,6 +583,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <p>{focusedPart === "rules" ? "Editing the selected rule" : focusedPart === "objective" ? "Editing the objective" : "Editing declarations"}. Changes update this graph and Guided Form.</p>
         <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
       </div>}
+      <fieldset disabled={!canEdit} aria-label={canEdit ? undefined : "The model, read only"} className="m-0 min-w-0 border-0 p-0">
       <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
         onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
@@ -733,6 +743,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           onChange={(objective) => setDraft((current) => current && { ...current, objective })}
         />
       </section>
+      </fieldset>
       </>
       )}
 
@@ -808,6 +819,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/scenarios`}>Scenarios page</Link>.
         </p>
       )}
+      {canEdit && <>
       <DraftBar
         draft={stored}
         publishing={createVersion.isPending || serverPublishing}
@@ -824,6 +836,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       <div className="mt-3">
         <ServerDraftSync problemId={Number(problemId)} draft={stored} disabled={createVersion.isPending || serverPublishing} />
       </div>
+      </>}
     </>
   );
 }

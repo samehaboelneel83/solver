@@ -186,6 +186,17 @@ describe("ModelEditor", () => {
     expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
   });
 
+  it("shows a planner the model read only, with no Publish (operator trial F22)", async () => {
+    stub({ me: { username: "planner1", capabilities: ["run.submit"] } });
+    renderPage();
+
+    const cover = await screen.findByDisplayValue("c_cover");
+    expect(await screen.findByText(/may read the model but not change it/i)).toBeInTheDocument();
+    expect(cover).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Blocks" })).not.toBeInTheDocument();
+  });
+
   it("offers to start a model when the problem has none", async () => {
     stub({ versions: { items: [], total: 0 } });
     renderPage();

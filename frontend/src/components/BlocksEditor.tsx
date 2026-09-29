@@ -129,6 +129,9 @@ export default function BlocksEditor({
     defineIrBlocks();
     const ws = Blockly.inject(host.current, {
       renderer: "zelos",
+      // Blockly's icons from this app, not blockly-demo.appspot.com: an offline or
+      // firewalled install has no route there (operator trial F11).
+      media: `${import.meta.env.BASE_URL}blockly-media/`,
       theme: Blockly.Themes.Classic,
       toolbox: toolboxFor(catalogue),
       trashcan: true,
