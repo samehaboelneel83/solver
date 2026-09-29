@@ -470,16 +470,12 @@ def relationship_template(relationship_type_id: int, format: str = Query("csv", 
     return _file(rel.name, columns, body, format)
 
 
-@router.post("/relationship-types/{relationship_type_id}/upload")
-def relationship_upload(relationship_type_id: int, request: Request, file: UploadFile = File(...),
-                        clean_only: bool = False, dry_run: bool = False, db: Session = Depends(get_db),
-                        user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
-    rel = _get(db, RelationshipType, relationship_type_id, "relationship type")
-    _mirror(db, rel)
+def relationship_writer(db: Session, rel: RelationshipType, header: list[str]):
+    """The columns of a relationship type and the function that writes one parsed row of it:
+    shared by a file upload and a database import, as `entity_writer`."""
     columns, attributes = _relationship_columns(db, rel)
     names = {a.name for a in attributes}
     froms, tos = _keyed(db, rel.from_type_id), _keyed(db, rel.to_type_id)
-    header, rows = _read(file)
     seen: set[tuple[int, int]] = set()
 
     def write(values: dict[str, Any]):
@@ -511,6 +507,17 @@ def relationship_upload(relationship_type_id: int, request: Request, file: Uploa
                 setattr(found, when, date.fromisoformat(values[when]) if values.get(when) else None)
         return None
 
+    return columns, write
+
+
+@router.post("/relationship-types/{relationship_type_id}/upload")
+def relationship_upload(relationship_type_id: int, request: Request, file: UploadFile = File(...),
+                        clean_only: bool = False, dry_run: bool = False, db: Session = Depends(get_db),
+                        user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+    rel = _get(db, RelationshipType, relationship_type_id, "relationship type")
+    _mirror(db, rel)
+    header, rows = _read(file)
+    columns, write = relationship_writer(db, rel, header)
     return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("relationship_type", relationship_type_id))
 
@@ -561,15 +568,12 @@ def parameter_template(parameter_id: int, format: str = Query("csv", pattern="^(
     return _file(parameter.name, columns, body, format)
 
 
-@router.post("/parameters/{parameter_id}/upload")
-def parameter_upload(parameter_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
-                     dry_run: bool = False, db: Session = Depends(get_db),
-                     user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
-    parameter = _get(db, ParameterDef, parameter_id, "parameter")
+def parameter_writer(db: Session, parameter: ParameterDef):
+    """The columns of a parameter (one per index, then `value`) and the function that
+    writes one parsed cell: shared by a file upload and a database import."""
     columns, heads = _parameter_columns(db, parameter)
     axes = [_keyed(db, t) for t in parameter.index_type_ids]
     of = _keyed(db, parameter.value_type_id) if parameter.value_type_id else None
-    header, rows = _read(file)
     seen: set[tuple[int, ...]] = set()
 
     def write(values: dict[str, Any]):
@@ -602,5 +606,15 @@ def parameter_upload(parameter_id: int, request: Request, file: UploadFile = Fil
             db.execute(delete(ParameterValue).where(where))  # sparse: the default is not stored
         return None
 
+    return columns, write
+
+
+@router.post("/parameters/{parameter_id}/upload")
+def parameter_upload(parameter_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
+                     dry_run: bool = False, db: Session = Depends(get_db),
+                     user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+    parameter = _get(db, ParameterDef, parameter_id, "parameter")
+    header, rows = _read(file)
+    columns, write = parameter_writer(db, parameter)
     return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("parameter", parameter_id))

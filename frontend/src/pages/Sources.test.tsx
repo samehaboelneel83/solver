@@ -79,7 +79,16 @@ describe("the import wizard", () => {
       const p = String(path);
       if (p.startsWith("/api/v1/ingestion-jobs/12/preview")) return { columns: ["id", "full_name", "hours"], rows_total: 3, source_object: "staff", sha256: "ab".repeat(32),
         rows: [{ id: "n1", full_name: "Ada", hours: "37.5" }, { id: "n2", full_name: "Ben", hours: "x" }] };
-      if (p.startsWith("/api/v1/entity-types")) return { total: 1, items: [{ id: 9, name: "nurse", is_abstract: false, attributes: [{ name: "hours", data_type: "number" }] }] };
+      if (p.startsWith("/api/v1/entity-types")) return { total: 2, items: [
+        { id: 9, name: "nurse", is_abstract: false, attributes: [{ name: "hours", data_type: "number" }] },
+        { id: 10, name: "ward", is_abstract: false, attributes: [] },
+      ] };
+      if (p.startsWith("/api/v1/relationship-types")) return { total: 1, items: [
+        { id: 21, name: "works_on", from_type_id: 9, to_type_id: 10, attributes: [{ name: "hours", data_type: "number" }] },
+      ] };
+      if (p.startsWith("/api/v1/parameters")) return { total: 1, items: [
+        { id: 31, name: "distance", index_type_ids: [10, 10], default_value: 0, unit: "km" },
+      ] };
       if (p.endsWith("/validate")) return { validation_id: 5, ok: false, rows: 3, would_write: 2, entity_type: "nurse", artifact_sha256: "ab".repeat(32), mapping_hash: "cd".repeat(32),
         faults: [{ row: 2, column: "hours → hours", message: "must be a number, not 'x'" }] };
       throw new Error(`unexpected ${p}`);
@@ -100,6 +109,31 @@ describe("the import wizard", () => {
     const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/validate"))![1] as RequestInit).body));
     expect(body).toEqual({ entity_type_id: 9, columns: { id: "key", full_name: "label", hours: "hours" } });
     expect(screen.getByRole("button", { name: "Load" })).toBeDisabled();
+  });
+
+  it("maps rows onto links between records, asking for both ends", async () => {
+    mount("/domains/7/data/sources/4/jobs/12/import");
+    await screen.findByRole("table", { name: "Extracted rows" });
+    fireEvent.change(screen.getByLabelText("What the rows become"), { target: { value: "relationship_type" } });
+    fireEvent.change(await screen.findByLabelText("The rows become links of"), { target: { value: "21" } });
+    expect(screen.getByLabelText("hours becomes")).toHaveValue("hours");
+    expect(screen.getByText(/they are the keys of the two records each row links/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check the rows" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("id becomes"), { target: { value: "from" } });
+    fireEvent.change(screen.getByLabelText("full_name becomes"), { target: { value: "to" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check the rows" }));
+    await screen.findByRole("table", { name: "Problems found" });
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/validate"))![1] as RequestInit).body));
+    expect(body).toEqual({ relationship_type_id: 21, columns: { id: "from", full_name: "to", hours: "hours" } });
+  });
+
+  it("names a parameter's index columns as its template does", async () => {
+    mount("/domains/7/data/sources/4/jobs/12/import");
+    await screen.findByRole("table", { name: "Extracted rows" });
+    fireEvent.change(screen.getByLabelText("What the rows become"), { target: { value: "parameter" } });
+    fireEvent.change(await screen.findByLabelText("The rows become values of"), { target: { value: "31" } });
+    const options = Array.from((screen.getByLabelText("id becomes") as HTMLSelectElement).options).map((o) => o.value);
+    expect(options).toEqual(["", "ward_1", "ward_2", "value"]);
   });
 });
 

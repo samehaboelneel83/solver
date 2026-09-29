@@ -5,9 +5,15 @@
     POST /api/v1/ingestion-jobs/{id}/validate       check it against a mapping; nothing is written
     POST /api/v1/ingestion-jobs/{id}/load           write a validated mapping; its lineage recorded
 
-A mapping names the entity type the rows become and, for each source column
-used, the target column: `key`, `label`, `sort_order`, `active` or an attribute
--- the columns of that type's upload template. Validation runs every row
+A mapping names what the rows become and, for each source column used, the
+target column -- the columns of that target's upload template:
+
+- an entity type (`entity_type_id`): `key`, `label`, `sort_order`, `active`
+  or an attribute;
+- a relationship type (`relationship_type_id`): `from` and `to` (the two
+  entities' keys), `valid_from`, `valid_to` or an attribute of the link;
+- a parameter (`parameter_id`): one key column per index, named as in its
+  template, and `value`. Validation runs every row
 through exactly the code a file upload runs (`bulk.entity_writer`,
 `bulk.run_rows`): each value parsed as its column's type, then written inside a
 savepoint so the database's own rules speak, then all of it rolled back. The
@@ -23,7 +29,9 @@ import hashlib
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -32,7 +40,7 @@ from app.api import bulk
 from app.api.deps import capabilities_of, requires
 from app.core.db import get_db
 from app.integrations import artifacts
-from app.models.v1_domain import EntityType
+from app.models.v1_domain import EntityType, ParameterDef, RelationshipType
 
 router = APIRouter(prefix="/api/v1", tags=["imports"])
 
@@ -41,9 +49,41 @@ PREVIEW_MAX = 200
 
 class Mapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    entity_type_id: int = Field(gt=0)
+    #: What the rows become: exactly one of these.
+    entity_type_id: int | None = Field(default=None, gt=0)
+    relationship_type_id: int | None = Field(default=None, gt=0)
+    parameter_id: int | None = Field(default=None, gt=0)
     #: source column -> target column, in the order the report lists them.
     columns: dict[str, str] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _one_target(self) -> "Mapping":
+        named = [v for v in (self.entity_type_id, self.relationship_type_id, self.parameter_id) if v is not None]
+        if len(named) != 1:
+            raise ValueError("name exactly one of entity_type_id, relationship_type_id or parameter_id")
+        return self
+
+    @property
+    def target(self) -> tuple[str, int]:
+        if self.entity_type_id is not None:
+            return "entity_type", self.entity_type_id
+        if self.relationship_type_id is not None:
+            return "relationship_type", self.relationship_type_id
+        return "parameter", self.parameter_id  # type: ignore[return-value]
+
+
+@dataclass(frozen=True)
+class Target:
+    """What a mapping writes into, in the words the report and the lineage use."""
+
+    kind: str  # entity_type | relationship_type | parameter
+    id: int
+    name: str
+    #: What one written row is, for "12 records written".
+    noun: str
+
+    def as_dict(self) -> dict:
+        return {"kind": self.kind, "id": self.id, "name": self.name}
 
 
 class LoadBody(BaseModel):
@@ -72,7 +112,10 @@ def _artifact(job: dict, organization_id):
 
 
 def mapping_hash(mapping: Mapping) -> str:
-    canonical = json.dumps({"entity_type_id": mapping.entity_type_id, "columns": sorted(mapping.columns.items())},
+    # An entity mapping hashes as it always has, so earlier loads still match it.
+    kind, identity = mapping.target
+    canonical = json.dumps({f"{kind}_id": identity,
+                            "columns": sorted(mapping.columns.items())},
                            sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -92,10 +135,18 @@ def list_jobs(connection_id: int, limit: int = Query(20, ge=1, le=100), offset: 
     loads = {}
     if jobs:
         for r in db.execute(text(
-                "SELECT l.id, l.job_id, l.entity_type_id, e.name AS entity_type, l.rows_written, l.artifact_sha256,"
-                " l.mapping_hash, l.created_at FROM import_load l JOIN entity_type e ON e.id = l.entity_type_id"
+                "SELECT l.id, l.job_id, l.entity_type_id, l.relationship_type_id, l.parameter_id,"
+                " e.name AS entity_type, rt.name AS relationship_type, p.name AS parameter,"
+                " l.rows_written, l.artifact_sha256, l.mapping_hash, l.created_at FROM import_load l"
+                " LEFT JOIN entity_type e ON e.id = l.entity_type_id"
+                " LEFT JOIN relationship_type rt ON rt.id = l.relationship_type_id"
+                " LEFT JOIN parameter_def p ON p.id = l.parameter_id"
                 " WHERE l.job_id = ANY(:ids) ORDER BY l.id"), {"ids": [j["id"] for j in jobs]}).mappings():
-            loads.setdefault(r["job_id"], []).append(dict(r))
+            load = dict(r)
+            kind = ("entity_type" if load["entity_type_id"] else
+                    "relationship_type" if load["relationship_type_id"] else "parameter")
+            load["target"] = {"kind": kind, "id": load[f"{kind}_id"], "name": load[kind]}
+            loads.setdefault(r["job_id"], []).append(load)
     for job in jobs:
         job["loads"] = loads.get(job["id"], [])
     return {"items": jobs, "total": total}
@@ -118,17 +169,41 @@ def preview(job_id: int, limit: int = Query(20, ge=1, le=PREVIEW_MAX), db: Sessi
     }
 
 
+def _writer(db: Session, job: dict, mapping: Mapping, header: list[str]) -> tuple[Target, list, object]:
+    """The target a mapping names, its template's columns and the writer the file upload uses for it."""
+    kind, identity = mapping.target
+    if kind == "entity_type":
+        entity_type = db.get(EntityType, identity)
+        if entity_type is None or entity_type.domain_id != job["domain_id"]:
+            raise HTTPException(422, "Choose an entity type of this connection's domain.")
+        if entity_type.is_abstract:
+            raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own.")
+        columns, writer = bulk.entity_writer(db, entity_type, header)
+        return Target(kind, identity, entity_type.name, "records"), columns, writer
+    if kind == "relationship_type":
+        rel = db.get(RelationshipType, identity)
+        if rel is None or rel.domain_id != job["domain_id"]:
+            raise HTTPException(422, "Choose a relationship type of this connection's domain.")
+        try:
+            bulk._mirror(db, rel)
+        except HTTPException as exc:
+            raise HTTPException(422, exc.detail) from None
+        columns, writer = bulk.relationship_writer(db, rel, header)
+        return Target(kind, identity, rel.name, "links"), columns, writer
+    parameter = db.get(ParameterDef, identity)
+    if parameter is None or parameter.domain_id != job["domain_id"]:
+        raise HTTPException(422, "Choose a parameter of this connection's domain.")
+    columns, writer = bulk.parameter_writer(db, parameter)
+    return Target(kind, identity, parameter.name, "values"), columns, writer
+
+
 def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, write: bool, before_commit=None,
-           user=None, request=None) -> tuple[bulk.UploadReport, EntityType]:
-    entity_type = db.get(EntityType, mapping.entity_type_id)
-    if entity_type is None or entity_type.domain_id != job["domain_id"]:
-        raise HTTPException(422, "Choose an entity type of this connection's domain.")
-    if entity_type.is_abstract:
-        raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own.")
+           user=None, request=None) -> tuple[bulk.UploadReport, Target]:
+    header = list(mapping.columns.values())
+    target, columns, writer = _writer(db, job, mapping, header)
     unknown = [c for c in mapping.columns if c not in manifest.get("columns", [])]
     if unknown:
         raise HTTPException(422, f"Not columns of this extraction: {', '.join(unknown)}.")
-    header = list(mapping.columns.values())
     sources = list(mapping.columns.keys())
     try:
         records = artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS)
@@ -137,9 +212,8 @@ def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, wr
     except artifacts.ArtifactUnavailable as exc:
         raise HTTPException(409, str(exc)) from None
     rows = [[record.get(source) for source in sources] for record in records]
-    columns, writer = bulk.entity_writer(db, entity_type, header)
     report = bulk.run_rows(db, header, rows, columns, writer, clean_only=False, dry_run=not write,
-                           user=user, request=request, audit_object=("entity_type", entity_type.id) if write else None,
+                           user=user, request=request, audit_object=(target.kind, target.id) if write else None,
                            before_commit=before_commit)
     # In the planner's terms: the n-th extracted row (a file's header is its row 1), and a mapping fault as row 0.
     target_to_source = {target: source for source, target in mapping.columns.items()}
@@ -152,7 +226,12 @@ def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, wr
             column = f"{target_to_source[column]} → {column}"
         faults.append(bulk.Fault(row=0 if header_fault else fault.row - 1, column=column,
                                  message=f"mapping: {fault.message}" if header_fault else fault.message))
-    return report.model_copy(update={"faults": faults}), entity_type
+    return report.model_copy(update={"faults": faults}), target
+
+
+def _target_columns(target: Target) -> dict:
+    return {f"{kind}_id": (target.id if kind == target.kind else None)
+            for kind in ("entity_type", "relationship_type", "parameter")}
 
 
 @router.post("/ingestion-jobs/{job_id}/validate")
@@ -160,11 +239,12 @@ def validate(job_id: int, mapping: Mapping, db: Session = Depends(get_db),
              user=Depends(requires("integration.run"))) -> dict:
     job = _job(db, job_id, user.organization_id)
     path, manifest = _artifact(job, user.organization_id)
-    report, entity_type = _check(db, job, manifest, mapping, path, write=False)
+    report, target = _check(db, job, manifest, mapping, path, write=False)
     identity = db.execute(text(
-        "INSERT INTO import_validation (job_id, entity_type_id, mapping, mapping_hash, artifact_sha256, rows, ok, faults,"
-        " validated_by) VALUES (:j, :e, CAST(:m AS jsonb), :mh, :sha, :rows, :ok, CAST(:f AS jsonb), :u) RETURNING id"),
-        {"j": job_id, "e": entity_type.id, "m": mapping.model_dump_json(), "mh": mapping_hash(mapping),
+        "INSERT INTO import_validation (job_id, entity_type_id, relationship_type_id, parameter_id, mapping, mapping_hash,"
+        " artifact_sha256, rows, ok, faults, validated_by) VALUES (:j, :entity_type_id, :relationship_type_id,"
+        " :parameter_id, CAST(:m AS jsonb), :mh, :sha, :rows, :ok, CAST(:f AS jsonb), :u) RETURNING id"),
+        {"j": job_id, **_target_columns(target), "m": mapping.model_dump_json(exclude_none=True), "mh": mapping_hash(mapping),
          "sha": manifest["sha256"], "rows": report.rows, "ok": report.ok,
          "f": json.dumps([f.model_dump() for f in report.faults]), "u": user.id}).scalar_one()
     db.commit()
@@ -172,7 +252,8 @@ def validate(job_id: int, mapping: Mapping, db: Session = Depends(get_db),
     mapping_at_fault = any(f.row == 0 for f in report.faults)
     would_write = 0 if mapping_at_fault else report.rows - len({f.row for f in report.faults})
     return {"validation_id": identity, "ok": report.ok, "rows": report.rows, "would_write": would_write,
-            "faults": [f.model_dump() for f in report.faults], "entity_type": entity_type.name,
+            "faults": [f.model_dump() for f in report.faults], "target": target.as_dict(), "noun": target.noun,
+            **({"entity_type": target.name} if target.kind == "entity_type" else {}),
             "artifact_sha256": manifest["sha256"], "mapping_hash": mapping_hash(mapping)}
 
 
@@ -183,7 +264,7 @@ def load(job_id: int, body: LoadBody, request: Request, db: Session = Depends(ge
         raise HTTPException(403, "this account does not have the 'domain.edit' capability")
     job = _job(db, job_id, user.organization_id)
     validation = db.execute(text(
-        "SELECT id, entity_type_id, mapping, mapping_hash, artifact_sha256, ok FROM import_validation"
+        "SELECT id, mapping, mapping_hash, artifact_sha256, ok FROM import_validation"
         " WHERE id = :v AND job_id = :j AND organization_id = :o"),
         {"v": body.validation_id, "j": job_id, "o": user.organization_id}).mappings().one_or_none()
     if validation is None:
@@ -198,23 +279,27 @@ def load(job_id: int, body: LoadBody, request: Request, db: Session = Depends(ge
     if manifest.get("sha256") != validation["artifact_sha256"]:
         raise HTTPException(409, "The extracted rows are not the ones validated; validate again.")
     mapping = Mapping.model_validate(validation["mapping"])
+    kind, identity = mapping.target
+    targets = {f"{k}_id": (identity if k == kind else None) for k in ("entity_type", "relationship_type", "parameter")}
     loaded: dict = {}
 
     def lineage(written: int) -> None:
         loaded["id"] = db.execute(text(
-            "INSERT INTO import_load (job_id, validation_id, entity_type_id, mapping_hash, artifact_sha256, rows_written,"
-            " loaded_by) VALUES (:j, :v, :e, :mh, :sha, :n, :u) RETURNING id"),
-            {"j": job_id, "v": validation["id"], "e": validation["entity_type_id"], "mh": validation["mapping_hash"],
+            "INSERT INTO import_load (job_id, validation_id, entity_type_id, relationship_type_id, parameter_id,"
+            " mapping_hash, artifact_sha256, rows_written, loaded_by) VALUES (:j, :v, :entity_type_id,"
+            " :relationship_type_id, :parameter_id, :mh, :sha, :n, :u) RETURNING id"),
+            {"j": job_id, "v": validation["id"], **targets, "mh": validation["mapping_hash"],
              "sha": validation["artifact_sha256"], "n": written, "u": user.id}).scalar_one()
         audit.write(db, user, request, action="import.load", object_type="ingestion_job", object_id=job_id,
-                    after={"entity_type_id": validation["entity_type_id"], "rows": written,
+                    after={f"{kind}_id": identity, "rows": written,
                            "artifact_sha256": validation["artifact_sha256"], "mapping_hash": validation["mapping_hash"]})
 
-    report, entity_type = _check(db, job, manifest, mapping, path, write=True, before_commit=lineage,
-                                 user=user, request=request)
+    report, target = _check(db, job, manifest, mapping, path, write=True, before_commit=lineage,
+                            user=user, request=request)
     if not report.ok:
         # The domain changed since validation (a key taken, a rule added): nothing was written.
         raise HTTPException(409, detail={"message": "The rows no longer load cleanly; nothing was written.",
                                          "faults": [f.model_dump() for f in report.faults]})
-    return {"load_id": loaded["id"], "rows_written": report.written, "entity_type": entity_type.name,
+    return {"load_id": loaded["id"], "rows_written": report.written, "target": target.as_dict(), "noun": target.noun,
+            **({"entity_type": target.name} if target.kind == "entity_type" else {}),
             "artifact_sha256": validation["artifact_sha256"], "mapping_hash": validation["mapping_hash"]}

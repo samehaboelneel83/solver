@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import { formatApiError } from "../api/errors";
-import { useEntityTypes } from "../api/v1";
+import { useEntityTypes, useParameters, useRelationshipTypes, type EntityType, type ParameterDef, type RelationshipType } from "../api/v1";
 import LoadFailure from "../components/LoadFailure";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -11,11 +11,25 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 /**
  * Sources & imports (Epic UX, U-4): set up a database source, run an extraction and
  * follow it, then -- in the import wizard -- preview the rows, map their columns onto
- * an entity type, check every row, and load them with their lineage recorded.
+ * an entity type, a relationship type or a parameter, check every row, and load them
+ * with their lineage recorded.
  */
 
 type Connection = { id: number; name: string; enabled: boolean; config?: { schema?: string; table?: string; columns?: string[]; host?: string } };
-type Load = { id: number; entity_type: string; rows_written: number; artifact_sha256: string; mapping_hash: string; created_at: string };
+type TargetKind = "entity_type" | "relationship_type" | "parameter";
+type Target = { kind: TargetKind; id: number; name: string };
+type Load = {
+  id: number; entity_type: string | null; target?: Target; rows_written: number; artifact_sha256: string; mapping_hash: string; created_at: string;
+};
+
+/** What one written row is, in each kind of target. */
+const NOUN: Record<TargetKind, string> = { entity_type: "records", relationship_type: "links", parameter: "values" };
+
+function loadedText(load: Load): string {
+  const kind = load.target?.kind ?? "entity_type";
+  const name = load.target?.name ?? load.entity_type ?? "";
+  return `Loaded ${load.rows_written} ${name} ${NOUN[kind]}`;
+}
 export type Job = {
   id: number; state: "queued" | "running" | "extracted" | "failed" | "cancelled"; cancel_requested: boolean;
   created_at: string; finished_at: string | null; artifact_id: string | null; error_code: string | null; loads: Load[];
@@ -178,7 +192,7 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
           </div>
           {job.state === "failed" && <p className="mt-1 text-red-800">{ERROR_TEXT[job.error_code ?? ""] ?? `The extraction failed (${job.error_code ?? "no reason recorded"}).`}</p>}
           {job.loads.map((load) => <p key={load.id} className="mt-1 text-slate-700">
-            Loaded {load.rows_written} {load.entity_type} records (import {load.id}; rows {load.artifact_sha256.slice(0, 12)}…, mapping {load.mapping_hash.slice(0, 12)}…).
+            {loadedText(load)} (import {load.id}; rows {load.artifact_sha256.slice(0, 12)}…, mapping {load.mapping_hash.slice(0, 12)}…).
           </p>)}
         </li>
       ))}</ul>}
@@ -189,9 +203,37 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
 
 type Preview = { columns: string[]; rows_total: number; rows: Record<string, unknown>[]; sha256: string; source_object: string | null };
 type Fault = { row: number; column: string | null; message: string };
-type Validation = { validation_id: number; ok: boolean; rows: number; would_write: number; faults: Fault[]; entity_type: string; artifact_sha256: string; mapping_hash: string };
+type Validation = {
+  validation_id: number; ok: boolean; rows: number; would_write: number; faults: Fault[];
+  entity_type?: string; target?: Target; noun?: string; artifact_sha256: string; mapping_hash: string;
+};
 
 const STRUCTURAL = ["key", "label", "sort_order", "active"];
+const LINK = ["from", "to", "valid_from", "valid_to"];
+
+/** A parameter's index columns, named as its upload template names them: a type
+ * that indexes twice (distance[site, site]) gets its position. */
+export function parameterHeads(parameter: ParameterDef, types: EntityType[]): string[] {
+  const names = parameter.index_type_ids.map((id) => types.find((t) => t.id === id)?.name ?? `type_${id}`);
+  return names.map((name, i) => (names.filter((n) => n === name).length > 1 ? `${name}_${i + 1}` : name));
+}
+
+/** The target's template columns, and the ones a mapping must fill. */
+function targetColumns(kind: TargetKind, chosen: EntityType | RelationshipType | ParameterDef | null, types: EntityType[]) {
+  if (!chosen) return { columns: [] as string[], required: [] as string[] };
+  if (kind === "entity_type") return { columns: [...STRUCTURAL, ...(chosen as EntityType).attributes.map((a) => a.name)], required: ["key"] };
+  if (kind === "relationship_type") {
+    return { columns: [...LINK, ...((chosen as RelationshipType).attributes ?? []).map((a) => a.name)], required: ["from", "to"] };
+  }
+  const heads = parameterHeads(chosen as ParameterDef, types);
+  return { columns: [...heads, "value"], required: [...heads, "value"] };
+}
+
+const WHY_REQUIRED: Record<TargetKind, string> = {
+  entity_type: "it is how each record is found again, so a second import updates rather than duplicates",
+  relationship_type: "they are the keys of the two records each row links",
+  parameter: "each row names its cell by one key per index, and the value to put in it",
+};
 
 /** A first guess at the mapping: a source column onto the target of the same name (or `id` onto `key`). */
 export function guessMapping(sources: string[], targets: string[]): Record<string, string> {
@@ -209,23 +251,31 @@ export function ImportWizard() {
   useDocumentTitle("Import an extraction");
   const preview = useQuery({ queryKey: ["import-preview", jobId], queryFn: () => apiFetch<Preview>(`/api/v1/ingestion-jobs/${jobId}/preview?limit=20`) });
   const types = useEntityTypes(Number(domainId), { limit: 500 });
+  const relationships = useRelationshipTypes(Number(domainId), { limit: 500 });
+  const parameters = useParameters(Number(domainId), { limit: 500 });
+  const [kind, setKind] = useState<TargetKind>("entity_type");
   const [typeId, setTypeId] = useState<number | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [report, setReport] = useState<Validation | null>(null);
-  const chosen = (types.data?.items ?? []).find((t) => t.id === typeId) ?? null;
-  const targets = chosen ? [...STRUCTURAL, ...chosen.attributes.map((a) => a.name)] : [];
+  const typeItems = types.data?.items ?? [];
+  const options: (EntityType | RelationshipType | ParameterDef)[] = kind === "entity_type" ? typeItems.filter((t) => !t.is_abstract)
+    : kind === "relationship_type" ? relationships.data?.items ?? [] : parameters.data?.items ?? [];
+  const chosen = options.find((t) => t.id === typeId) ?? null;
+  const { columns: targets, required } = targetColumns(kind, chosen, typeItems);
   const validate = useMutation({
-    mutationFn: () => post<Validation>(`/api/v1/ingestion-jobs/${jobId}/validate`, { entity_type_id: typeId, columns: mapping }),
+    mutationFn: () => post<Validation>(`/api/v1/ingestion-jobs/${jobId}/validate`, { [`${kind}_id`]: typeId, columns: mapping }),
     onSuccess: setReport,
   });
   const load = useMutation({
-    mutationFn: () => post<{ load_id: number; rows_written: number; entity_type: string }>(`/api/v1/ingestion-jobs/${jobId}/load`, { validation_id: report?.validation_id }),
+    mutationFn: () => post<{ load_id: number; rows_written: number; entity_type?: string; target?: Target }>(
+      `/api/v1/ingestion-jobs/${jobId}/load`, { validation_id: report?.validation_id }),
   });
+  const noun = NOUN[kind];
   const back = `/domains/${domainId}/data/sources`;
   if (preview.isError) return <LoadFailure subject="The extracted rows" error={preview.error} retry={() => void preview.refetch()} back={{ label: "Back to sources", to: back }} />;
   if (!preview.data) return <p role="status">Loading the extracted rows…</p>;
   const columns = preview.data.columns;
-  const noKey = !Object.values(mapping).includes("key");
+  const missing = required.filter((column) => !Object.values(mapping).includes(column));
   return <div className="max-w-6xl space-y-6">
     <h1 className="text-2xl font-semibold">Import extraction {jobId}</h1>
     <Link to={back} className="text-sm text-blue-700 underline">Back to sources</Link>
@@ -246,18 +296,32 @@ export function ImportWizard() {
 
     <section aria-labelledby="step-map">
       <h2 id="step-map" className="mb-2 text-lg font-semibold">2. Map the columns</h2>
-      <label className="block text-sm">The rows become records of
-        <select className="ml-2 rounded border border-slate-300 px-2 py-1" value={typeId ?? ""} onChange={(event) => {
-          const id = event.target.value ? Number(event.target.value) : null;
-          setTypeId(id);
-          setReport(null);
-          const type = (types.data?.items ?? []).find((t) => t.id === id);
-          setMapping(type ? guessMapping(columns, [...STRUCTURAL, ...type.attributes.map((a) => a.name)]) : {});
-        }}>
-          <option value="">Choose a record type…</option>
-          {(types.data?.items ?? []).filter((t) => !t.is_abstract).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="block text-sm">What the rows become
+          <select className="ml-2 rounded border border-slate-300 px-2 py-1" value={kind} onChange={(event) => {
+            setKind(event.target.value as TargetKind);
+            setTypeId(null);
+            setMapping({});
+            setReport(null);
+          }}>
+            <option value="entity_type">Records</option>
+            <option value="relationship_type">Links between records</option>
+            <option value="parameter">Values of a parameter</option>
+          </select>
+        </label>
+        <label className="block text-sm">The rows become {noun} of
+          <select className="ml-2 rounded border border-slate-300 px-2 py-1" value={typeId ?? ""} onChange={(event) => {
+            const id = event.target.value ? Number(event.target.value) : null;
+            setTypeId(id);
+            setReport(null);
+            const next = options.find((t) => t.id === id) ?? null;
+            setMapping(next ? guessMapping(columns, targetColumns(kind, next, typeItems).columns) : {});
+          }}>
+            <option value="">{kind === "entity_type" ? "Choose a record type…" : kind === "relationship_type" ? "Choose a link type…" : "Choose a parameter…"}</option>
+            {options.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+      </div>
       {chosen && <table className="mt-3 text-sm" aria-label="Column mapping"><tbody>{columns.map((source) => (
         <tr key={source}>
           <th scope="row" className="py-1 pr-3 text-left font-mono font-normal">{source}</th>
@@ -274,19 +338,21 @@ export function ImportWizard() {
             {targets.map((t) => <option key={t} value={t} disabled={Object.entries(mapping).some(([s, v]) => v === t && s !== source)}>{t}</option>)}
           </select></td>
         </tr>))}</tbody></table>}
-      {chosen && noKey && <p className="mt-2 text-sm text-amber-800">Map one column to <code>key</code>: it is how each record is found again, so a second import updates rather than duplicates.</p>}
+      {chosen && missing.length > 0 && <p className="mt-2 text-sm text-amber-800">
+        Map a column to {missing.map((column, i) => <span key={column}>{i > 0 ? (i === missing.length - 1 ? " and " : ", ") : ""}<code>{column}</code></span>)}: {WHY_REQUIRED[kind]}.
+      </p>}
     </section>
 
     <section aria-labelledby="step-check">
       <h2 id="step-check" className="mb-2 text-lg font-semibold">3. Check every row</h2>
       <button type="button" className="rounded bg-blue-700 px-3 py-2 text-sm text-white disabled:opacity-50"
-        disabled={!chosen || noKey || validate.isPending} onClick={() => validate.mutate()}>
+        disabled={!chosen || missing.length > 0 || validate.isPending} onClick={() => validate.mutate()}>
         {validate.isPending ? "Checking…" : "Check the rows"}
       </button>
       <span className="ml-2 text-sm text-slate-600">Nothing is written by a check.</span>
       {validate.isError && <p role="alert" className="mt-2 text-red-700">{formatApiError(validate.error)}</p>}
       {report && (report.ok
-        ? <p role="status" className="mt-2 text-green-800">All {report.rows} rows are clean: {report.would_write} {report.entity_type} records would be written.</p>
+        ? <p role="status" className="mt-2 text-green-800">All {report.rows} rows are clean: {report.would_write} {report.target?.name ?? report.entity_type} {report.noun ?? "records"} would be written.</p>
         : <div role="alert" className="mt-2">
           <p className="text-red-800">{report.faults.length} {report.faults.length === 1 ? "problem" : "problems"} in {report.rows} rows; nothing can be loaded until they are fixed at the source (and extracted again) or the mapping is changed.</p>
           <table className="mt-2 text-sm" aria-label="Problems found"><thead><tr><th scope="col" className="pr-3 text-left">Row</th><th scope="col" className="pr-3 text-left">Column</th><th scope="col" className="text-left">Problem</th></tr></thead>
@@ -300,11 +366,11 @@ export function ImportWizard() {
       <h2 id="step-load" className="mb-2 text-lg font-semibold">4. Load</h2>
       <button type="button" className="rounded bg-green-700 px-3 py-2 text-sm text-white disabled:opacity-50"
         disabled={!report?.ok || load.isPending || load.isSuccess} onClick={() => load.mutate()}>
-        {load.isPending ? "Loading…" : report?.ok ? `Load ${report.would_write} records` : "Load"}
+        {load.isPending ? "Loading…" : report?.ok ? `Load ${report.would_write} ${report.noun ?? "records"}` : "Load"}
       </button>
       {load.isError && <p role="alert" className="mt-2 text-red-700">{formatApiError(load.error)}</p>}
       {load.isSuccess && report && <p role="status" className="mt-2 text-green-800">
-        Loaded {load.data.rows_written} {load.data.entity_type} records (import {load.data.load_id}). They carry this extraction&rsquo;s fingerprint
+        Loaded {load.data.rows_written} {load.data.target?.name ?? load.data.entity_type} {report.noun ?? "records"} (import {load.data.load_id}). They carry this extraction&rsquo;s fingerprint
         ({report.artifact_sha256.slice(0, 12)}…) and the mapping&rsquo;s ({report.mapping_hash.slice(0, 12)}…); the next run freezes them in its dataset.
       </p>}
     </section>
