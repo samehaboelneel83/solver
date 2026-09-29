@@ -535,7 +535,9 @@ function AppShellContent() {
                         <li key={item.to}>
                           <NavLink
                             to={item.to}
-                            end={item.to === "/" || ["problems", "data-records", "data-structure"].includes(item.id ?? "")}
+                            // "All domains" lives at `/domains`, which prefixes every scoped page:
+                            // it is current only on the chooser itself.
+                            end={item.to === "/" || ["domains", "problems", "data-records", "data-structure"].includes(item.id ?? "")}
                             className={tableLinkClassName}
                             onClick={handleNavClick}
                             title={item.label}

@@ -61,6 +61,8 @@ describe("AppShell", () => {
     it("shows only the selected problem workflow and a link back to its domain", async () => {
       renderWithProviders(["/domains/7/problems/9/model"]);
       await settled();
+      // `/domains` prefixes this page; "All domains" is still not the current page.
+      expect(screen.getByRole("link", { name: "All domains" })).not.toHaveAttribute("aria-current");
       expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("href", "/domains/7/problems/9/model");
       expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("aria-current", "page");
       expect(screen.getByRole("link", { name: "Problems" })).not.toHaveAttribute("aria-current");
