@@ -41,6 +41,11 @@ wait_for_frontend() {
 echo "== Building backend and frontend images =="
 docker compose build backend frontend
 
+# New code can need new tables: bring the database to the migrations the
+# fresh backend image carries before the containers start serving it.
+echo "== Applying database migrations =="
+docker compose run --rm backend alembic upgrade head
+
 echo "== Recreating backend and frontend containers =="
 docker compose up -d --force-recreate backend frontend
 
