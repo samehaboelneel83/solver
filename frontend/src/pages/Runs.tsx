@@ -16,6 +16,8 @@ import {
   type Preflight,
   type PreflightFinding,
   useRun,
+  useRunEta,
+  type RunEta,
   useRunComparison,
   useRuns,
   useVersion,
@@ -980,6 +982,7 @@ function RunDetail({
         Run {String(id)}
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
+      {unfinished && <ExpectedTime runId={id} />}
       {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
       {onTab && (
         <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Run views">
@@ -1654,6 +1657,32 @@ function ConstraintRow({ outcome }: { outcome: ConstraintOutcome }) {
       )}
     </li>
   );
+}
+
+/** A duration as people say it: "about 40 s", "about 3 min". */
+export function aboutTime(seconds: number): string {
+  if (seconds < 90) return `${Math.max(1, Math.round(seconds))} s`;
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)} min`;
+  return `${(seconds / 3600).toFixed(1)} h`;
+}
+
+/** What to say about an unfinished run's expected time; null says nothing. */
+export function etaText(eta: RunEta | undefined): string | null {
+  if (!eta || eta.settled) return null;
+  if (eta.estimate_seconds == null) return eta.reason ? `No time estimate yet: ${eta.reason}.` : null;
+  const range = eta.low_seconds != null && eta.high_seconds != null && eta.high_seconds > eta.low_seconds
+    ? ` (between ${aboutTime(eta.low_seconds)} and ${aboutTime(eta.high_seconds)})` : "";
+  const runs = eta.based_on_runs ? `, judged from ${eta.based_on_runs} earlier runs` : "";
+  const left = eta.elapsed_seconds != null ? eta.estimate_seconds - eta.elapsed_seconds : null;
+  const remaining = left == null ? "" : left > 0 ? `; about ${aboutTime(left)} to go` : "; taking longer than expected";
+  return `Expected to take about ${aboutTime(eta.estimate_seconds)}${range}${runs}${remaining}.`;
+}
+
+function ExpectedTime({ runId }: { runId: Id }) {
+  const eta = useRunEta(runId, true);
+  const text = etaText(eta.data);
+  if (!text) return null;
+  return <p className="mb-4 text-sm text-slate-600" data-testid="run-eta">{text}</p>;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

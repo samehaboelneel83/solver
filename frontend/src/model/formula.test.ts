@@ -85,6 +85,35 @@ describe("equations for rules", () => {
   });
 });
 
+describe("predictions in equations", () => {
+  const WITH_MODEL: ModelContext = { ...CONTEXT, predictors: { demand_model: { inputs: 2 } } };
+
+  it("reads a trained model applied to its inputs, and writes it back the same", () => {
+    const text = "for each d in day: predict demand_model(demand[d], 2 * budget) <= 5";
+    const parsed = parseRule(text, WITH_MODEL);
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        forall: [{ index: "d", set: "day" }],
+        left: { predict: "demand_model", of: [{ par: "demand", index: ["d"] }, { mul: [{ const: 2 }, { par: "budget", index: [] }] }] },
+        relation: "<=",
+        right: { const: 5 },
+      },
+    });
+    if (parsed.ok) expect(ruleEquation({ id: "p", ...parsed.value }, WITH_MODEL)).toBe(text);
+  });
+
+  it("names an unknown model, and a wrong number of inputs", () => {
+    const unknown = parseRule("predict demand_modl(budget, budget) <= 5", WITH_MODEL);
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.message).toMatch(/“demand_modl” is not a predictor.*did you mean “demand_model”/);
+    const short = parseRule("predict demand_model(budget) <= 5", WITH_MODEL);
+    expect(short.ok).toBe(false);
+    if (!short.ok) expect(short.message).toMatch(/reads 2 inputs, got 1/);
+    expect(parseRule("predict demand_model(budget, budget) <= 5", CONTEXT).ok).toBe(false);
+  });
+});
+
 describe("parts of an equation", () => {
   it("reads a part with the indices bound around it", () => {
     const outer = [{ index: "p", set: "person" }];
@@ -136,6 +165,7 @@ function contextOf(ir: Record<string, unknown>): ModelContext {
     variables: decl("variables"),
     parameters: decl("parameters"),
     relationships: [],
+    predictors: (ir.predictors ?? {}) as ModelContext["predictors"],
   };
 }
 

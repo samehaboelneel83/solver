@@ -24,6 +24,11 @@ export function chipsFor(context: ModelContext): Chip[] {
       label: spec.index.length ? `${name}[${spec.index.join(", ")}]` : name,
       title: `Data ${name}`,
     })),
+    ...Object.entries(context.predictors ?? {}).map(([name, spec]) => ({
+      insert: `predict ${name}()`,
+      label: `predict ${name}(${spec.inputs === 1 ? "1 input" : `${spec.inputs} inputs`})`,
+      title: `Trained model ${name}`,
+    })),
     { insert: "sum( for  in )", label: "sum(… for i in set)", title: "A sum over a set" },
   ];
 }

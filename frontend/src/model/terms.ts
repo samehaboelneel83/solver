@@ -229,6 +229,8 @@ export type ModelContext = {
   /** The relationship types the IR declares, with the entity types each
    * joins -- which is what decides whether a walk is offered at all. */
   relationships: { name: string; from: string; to: string; attributes?: { name: string; data_type: string }[] }[];
+  /** The trained models the IR declares (Epic ML), with how many inputs each reads. */
+  predictors?: Record<string, { inputs: number }>;
 };
 
 export const TERM_LABELS: Record<TermKind, string> = {

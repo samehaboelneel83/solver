@@ -328,8 +328,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           attributes: (rel.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
         }))
         .filter((rel) => sets.includes(rel.from) && sets.includes(rel.to)),
+      // Declared in the IR itself; the form draft does not carry them.
+      predictors: ((workingIr as Record<string, unknown> | null)?.predictors ?? {}) as ModelContext["predictors"],
     };
-  }, [ir, draft, entityTypes.data, relationshipTypes.data]);
+  }, [ir, draft, workingIr, entityTypes.data, relationshipTypes.data]);
 
   const nextIr = useMemo(() => (workingIr && draft ? publishable(withFormDraft(workingIr, draft)) : null), [workingIr, draft]);
   // Why Publish would be refused: the contract's shape rules at once, the

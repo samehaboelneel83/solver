@@ -1524,6 +1524,32 @@ export function useProbe(id: Id | null | undefined) {
   });
 }
 
+/** How long a run is expected to take (Epic ML): an estimate from this
+ * organization's settled runs, or the reason there is none yet. */
+export type RunEta = {
+  run_id: number;
+  settled: boolean;
+  seconds?: number | null;
+  elapsed_seconds?: number | null;
+  estimate_seconds: number | null;
+  low_seconds?: number;
+  high_seconds?: number;
+  based_on_runs?: number;
+  reason?: string;
+};
+export const getRunEta = (id: Id) => apiFetch<RunEta>(`/api/v1/runs/${id}/eta`);
+
+/** Asked while the run is unfinished; the estimate changes once it compiles. */
+export function useRunEta(id: Id | null | undefined, live: boolean) {
+  return useQuery({
+    queryKey: [V1, "run-eta", id],
+    queryFn: () => getRunEta(id as Id),
+    enabled: isId(id) && live,
+    refetchInterval: live ? 5000 : false,
+    retry: false,
+  });
+}
+
 export function useRun(id: Id | null | undefined) {
   return useQuery({
     queryKey: [V1, "run", id],

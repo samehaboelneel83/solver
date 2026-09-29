@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Runs, { formatGap, howFound, statusNote, unexpressedRules } from "./Runs";
+import Runs, { aboutTime, etaText, formatGap, howFound, statusNote, unexpressedRules } from "./Runs";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY, DomainRouteProvider } from "../hooks/useDomain";
 import ProblemQueryBridge from "../components/ProblemQueryBridge";
@@ -1108,5 +1108,25 @@ describe("before a run (Epic UX, U-5)", () => {
     expect(claimText("global")).toBe("proven best");
     expect(claimText("local")).toBe("best nearby");
     expect(claimText(null)).toBe("no claim to be best");
+  });
+});
+
+describe("expected run time", () => {
+  it("says durations as people do", () => {
+    expect(aboutTime(0.2)).toBe("1 s");
+    expect(aboutTime(42.4)).toBe("42 s");
+    expect(aboutTime(600)).toBe("10 min");
+    expect(aboutTime(3 * 3600)).toBe("3.0 h");
+  });
+
+  it("gives the estimate, its spread and what is left, or why there is none", () => {
+    expect(etaText({ run_id: 1, settled: false, elapsed_seconds: 10, estimate_seconds: 40, low_seconds: 30, high_seconds: 60, based_on_runs: 25 }))
+      .toBe("Expected to take about 40 s (between 30 s and 60 s), judged from 25 earlier runs; about 30 s to go.");
+    expect(etaText({ run_id: 1, settled: false, elapsed_seconds: 50, estimate_seconds: 40 }))
+      .toBe("Expected to take about 40 s; taking longer than expected.");
+    expect(etaText({ run_id: 1, settled: false, estimate_seconds: null, reason: "the run has not compiled yet; its size is known once it has" }))
+      .toBe("No time estimate yet: the run has not compiled yet; its size is known once it has.");
+    expect(etaText({ run_id: 1, settled: true, seconds: 3, estimate_seconds: null })).toBeNull();
+    expect(etaText(undefined)).toBeNull();
   });
 });

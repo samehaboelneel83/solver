@@ -420,6 +420,38 @@ class Parser {
       this.expectOp(")", "to close the sum");
       return { sum: summed, over };
     }
+    if (name === "predict" && this.peek().kind === "name") {
+      const model = this.next();
+      const called = String(model.value);
+      const predictors = this.context.predictors ?? {};
+      if (!(called in predictors)) {
+        const near = closest(called, Object.keys(predictors));
+        throw new FormulaError(
+          `“${called}” is not a predictor this model declares${near ? `; did you mean “${near}”?` : "."}`,
+          model.at,
+          model.end,
+        );
+      }
+      this.expectOp("(", `after predict ${called}`);
+      const of: Term[] = [];
+      if (!this.isOp(")")) {
+        of.push(this.expr());
+        while (this.isOp(",")) {
+          this.next();
+          of.push(this.expr());
+        }
+      }
+      this.expectOp(")", `to close predict ${called}(…)`);
+      const inputs = predictors[called].inputs;
+      if (of.length !== inputs) {
+        throw new FormulaError(
+          `“${called}” reads ${inputs} ${inputs === 1 ? "input" : "inputs"}, got ${of.length}.`,
+          model.at,
+          model.end,
+        );
+      }
+      return { predict: called, of };
+    }
     if (name in FUNCTIONS && this.isOp("(")) {
       this.next();
       const of = this.expr();
