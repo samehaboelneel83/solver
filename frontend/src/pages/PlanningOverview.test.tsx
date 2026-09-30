@@ -66,7 +66,7 @@ describe("planning overviews", () => {
     expect(request).not.toContain("99");
     expect(screen.getByText("1 problem in this domain")).toBeInTheDocument();  // not "1 problems" (F19)
     expect(screen.getByRole("link", { name: "Records & relationships" })).toHaveAttribute("href", "/domains/7/data");
-    expect(screen.getByRole("link", { name: /New problem/ })).toHaveAttribute("href", "/public/problem/new?f_domain_id=7");
+    expect(screen.getByRole("link", { name: /New problem/ })).toHaveAttribute("href", "/domains/7/start");
   });
 
   it("searches within the same domain and resets pagination", async () => {

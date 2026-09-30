@@ -158,7 +158,7 @@ export default function Dashboard() {
             {/* H-9: was 20px tall with no padding -- py-1 clears the 24px Target Size floor. */}
             {/* A problem belongs to a domain: with none chosen, go where one is chosen or made (F1). */}
             <Link
-              to={domainId === null ? "/domains" : "/public/problem/new"}
+              to={domainId === null ? "/domains" : `/domains/${domainId}/start`}
               className="mt-2 inline-block rounded py-1 text-sm font-medium text-blue-700 hover:underline"
             >
               {domainId === null ? "Choose or create a domain" : "New problem"}

@@ -48,7 +48,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold text-slate-900">{listing ? `${name} problems` : name}</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">Shared data for this business area. Choose a problem to continue planning, or prepare its inputs.</p></div>
-      {can("domain.edit") && <Link className={link} to={`/public/problem/new?f_domain_id=${domainId}`}>New problem <ArrowRight size={16} aria-hidden /></Link>}
+      {can("domain.edit") && <Link className={link} to={`/domains/${domainId}/start`}>New problem <ArrowRight size={16} aria-hidden /></Link>}
     </header>
     {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-3">
       {[

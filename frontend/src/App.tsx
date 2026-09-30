@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
+import StartProblem from "./pages/StartProblem";
 import { DomainOverview, ProblemOverview } from "./pages/PlanningOverview";
 import GraphDemo from "./pages/GraphDemo";
 import EntityTypes from "./pages/EntityTypes";
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="structure/relationship-types" element={<RelationshipTypes />} />
           <Route path="structure/relationship-types/:id" element={<RelationshipTypeDetail />} />
           <Route path="problems" element={<DomainOverview listing />} />
+          <Route path="start" element={<StartProblem />} />
           <Route path="problems/:problemId" element={<ProblemQueryBridge />}>
             <Route index element={<ProblemOverview />} />
             <Route path="overview" element={<ProblemOverview />} />

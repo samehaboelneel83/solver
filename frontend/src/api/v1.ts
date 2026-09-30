@@ -1032,6 +1032,32 @@ export type ApplyTemplateResult = {
 export const listTemplates = () => apiFetch<Page<ModelTemplate>>("/api/template/?limit=50");
 export const applyTemplate = (id: Id, body: ApplyTemplateRequest) =>
   send<ApplyTemplateResult>("POST", `/api/v1/templates/${id}/apply`, body);
+// --- starting a problem (simplification plan, phase 3) ---------------------
+
+/** A problem with a name and nothing else: its model is built next. */
+export const createProblem = (body: { domain_id: Id; name: string }) =>
+  send<{ id: Id; domain_id: Id; name: string }>("POST", "/api/problem/", body);
+
+export type SheetField = { column: string; name: string; data_type: AttrType; enum_values: string[] | null; samples: string[]; skip: boolean };
+export type SheetLink = { column: string; name: string; to: string; skip: boolean };
+export type SheetKind = { sheet: string; name: string; key: string | null; rows: number; exists: boolean; fields: SheetField[]; links: SheetLink[]; skip: boolean };
+export type SheetProposal = { kinds: SheetKind[] };
+export type SheetImported = { made: { kinds: number; fields: number; records: number; link_types: number; links: number } };
+
+function upload(file: File, extra: Record<string, string> = {}): FormData {
+  const form = new FormData();
+  form.append("file", file);
+  Object.entries(extra).forEach(([key, value]) => form.append(key, value));
+  return form;
+}
+/** What a workbook would make: a kind of record per sheet, a field per column, links between sheets. */
+export const proposeSpreadsheet = (domainId: Id, file: File) =>
+  apiFetch<SheetProposal>(`/api/v1/domains/${domainId}/spreadsheet/propose`, { method: "POST", body: upload(file) });
+/** Make it, as the (edited) proposal says. */
+export const importSpreadsheet = (domainId: Id, file: File, proposal: SheetProposal) =>
+  apiFetch<SheetImported>(`/api/v1/domains/${domainId}/spreadsheet/import`,
+    { method: "POST", body: upload(file, { proposal: JSON.stringify(proposal) }) });
+
 export const getVersion = (id: Id) => apiFetch<ModelVersion>(`/api/v1/versions/${id}`);
 
 export function listScenarios(
