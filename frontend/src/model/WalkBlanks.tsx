@@ -166,8 +166,12 @@ export function AttrBlanks({ label, term, bound, context, className, onChange }:
       <span className="inline-flex flex-wrap items-center gap-1">
         the
         <select aria-label={label("how the links combine")} className={className} value={term.attr.along ?? ""}
-          onChange={(event) => onChange({ attr: { ...term.attr, along: event.target.value as AttrTerm["attr"]["along"] } })}>
-          {!term.attr.along && <option value="">choose…</option>}
+          onChange={(event) => {
+            const { along: _old, ...rest } = term.attr;
+            onChange({ attr: event.target.value ? { ...rest, along: event.target.value as AttrTerm["attr"]["along"] } : rest });
+          }}>
+          {/* A walk cut back to one step, or an item, has one value: nothing to combine, and this takes it off. */}
+          {(!term.attr.along || !edge?.path) && <option value="">{edge?.path ? "choose…" : "(one value, no combining)"}</option>}
           {PATH_COMBINATIONS.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         of {number} along {which}

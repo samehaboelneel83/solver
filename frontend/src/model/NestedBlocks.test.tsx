@@ -297,6 +297,15 @@ describe("walks along a relationship (a hierarchy)", () => {
     expect((ir().left as { sum: { mul: Term[] } }).sum.mul[0]).toEqual({ attr: { of: "e", name: "grade" } });
   });
 
+  it("takes the combination off when the walk is cut back to one step", () => {
+    render(<Walks initial={TEAM} boxes />);
+    fireEvent.change(screen.getByLabelText("left side: runs over: set 1: walk: how far"), { target: { value: "one" } });
+    expect(screen.getByRole("status")).toHaveTextContent("“r” is one link, so its weight has one value");
+    fireEvent.change(screen.getByLabelText("factor 1: how the links combine"), { target: { value: "" } });
+    expect((ir().left as { sum: { mul: Term[] } }).sum.mul[0]).toEqual({ attr: { of: "r", name: "weight" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Complete");
+  });
+
   it("changing the set drops the walk and conditions that were about the old one", () => {
     render(<Walks initial={TEAM} boxes />);
     fireEvent.change(screen.getByLabelText("left side: runs over: set 1"), { target: { value: "unit" } });
