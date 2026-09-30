@@ -43,6 +43,7 @@ import EquationField, { chipsFor } from "../model/EquationField";
 import { GoalDiagram, RuleDiagram } from "../model/EquationDiagram";
 import { GoalBlocks, GoalSentence, RuleBlocks, RuleSentence } from "../model/NestedBlocks";
 import { useCardView, useEquationView, ViewToggle, type EquationView } from "../model/ViewToggle";
+import { GOAL_SHAPES, goalFromShape, RULE_SHAPES, ruleFromShape, type GoalShape, type RuleShape } from "../model/shapes";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
@@ -252,6 +253,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // Stable identities for the rules (Epic UX, U-3): a rename, or deleting another rule, keeps focus and state on this one.
   const ruleIdentity = useRef<{ ids: string[]; keys: string[] }>({ ids: [], keys: [] });
   const ruleIds = (draft?.constraints ?? []).map((rule) => rule.id);
+  // Rules composed from a shape in this visit, which open in their boxes.
+  const [composed, setComposed] = useState<Set<string>>(() => new Set());
   const ruleKeys = useMemo(() => {
     const keys = stableKeys(ruleIdentity.current.ids, ruleIdentity.current.keys, ruleIds);
     ruleIdentity.current = { ids: ruleIds, keys };
@@ -626,6 +629,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             <ConstraintCard
               key={ruleKeys[position]}
               view={equationView}
+              startIn={composed.has(constraint.id) ? "boxes" : undefined}
               constraint={constraint}
               otherIds={draft.constraints
                 .filter((_, i) => i !== position)
@@ -682,6 +686,16 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         >
           Add a rule
         </button>
+        <ShapePicker
+          label="Start a rule from a shape"
+          shapes={RULE_SHAPES.map((s) => ({ value: s.shape, title: s.title, needs: s.needs(context) }))}
+          onPick={(shape) => {
+            const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
+            const rule = ruleFromShape(shape as RuleShape, id, context);
+            setComposed((current) => new Set(current).add(id));
+            setDraft((current) => current && { ...current, constraints: [...current.constraints, rule] });
+          }}
+        />
         {newSchedulingRule("c_", context) !== null && (
           <button
             type="button"
@@ -855,6 +869,7 @@ function ConstraintCard({
   context,
   onChange,
   onRemove,
+  startIn,
 }: {
   view: EquationView;
   constraint: Constraint;
@@ -862,6 +877,8 @@ function ConstraintCard({
   context: ModelContext;
   onChange: (next: Constraint) => void;
   onRemove: () => void;
+  /** Where a card just composed opens. */
+  startIn?: EquationView;
 }) {
   const idField = useId();
   const noteField = useId();
@@ -869,7 +886,7 @@ function ConstraintCard({
   // the rule already uses a chance.
   const [structure, setStructure] = useState(Boolean(constraint.chance));
   const equation = useMemo(() => ruleEquation(constraint, context), [constraint, context]);
-  const [shown, setShown] = useCardView(view);
+  const [shown, setShown] = useCardView(view, startIn);
   const bound: Binding[] = constraint.forall ?? [];
   const idProblem = !constraint.id
     ? "A rule needs a name."
@@ -957,7 +974,7 @@ function ConstraintCard({
             <div className="min-w-0 flex-1 space-y-1">
               <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
               {shown === "sentence" ? (
-                <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} />
+                <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
               ) : shown === "boxes" ? (
                 <RuleBlocks rule={constraint} context={context} onChange={onChange} />
               ) : shown === "diagram" ? (
@@ -1118,7 +1135,7 @@ function ConstraintCard({
         <div className="space-y-2 px-2 py-1">
           <ViewToggle value={shown} onChange={setShown} name={constraint.id || "this rule"} size="xs" />
           {shown === "sentence" ? (
-            <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} />
+            <RuleSentence rule={constraint} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
           ) : (
             <RuleBlocks rule={constraint} context={context} onChange={onChange} />
           )}
@@ -1315,8 +1332,10 @@ function ChanceField({
 
 /** A goal's expression as an equation, with its structure a click away; a
  * goal the equation form cannot write exactly keeps the structure editor. */
-function GoalExpression({ view, goalId, expression, context, onChange }: {
+function GoalExpression({ view, goalId, expression, context, onChange, startIn }: {
   view: EquationView;
+  /** Where a goal just composed opens. */
+  startIn?: EquationView;
   goalId: string;
   expression: Term;
   context: ModelContext;
@@ -1324,7 +1343,7 @@ function GoalExpression({ view, goalId, expression, context, onChange }: {
 }) {
   const [structure, setStructure] = useState(false);
   const equation = useMemo(() => goalEquation(expression, context), [expression, context]);
-  const [shown, setShown] = useCardView(view);
+  const [shown, setShown] = useCardView(view, startIn);
   const builder = <TermBuilder value={expression} onChange={onChange} context={context} bound={[]} label="Count" />;
   if (equation === null) {
     // The equation line cannot write it: the words and the boxes still can.
@@ -1332,7 +1351,7 @@ function GoalExpression({ view, goalId, expression, context, onChange }: {
       <div className="space-y-2 px-2 py-1">
         <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
         {shown === "sentence" ? (
-          <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} />
+          <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
         ) : shown === "boxes" ? (
           <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
         ) : builder}
@@ -1343,7 +1362,7 @@ function GoalExpression({ view, goalId, expression, context, onChange }: {
     <div className="space-y-2 px-2 py-1">
       <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
       {shown === "sentence" ? (
-        <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} />
+        <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
       ) : shown === "boxes" ? (
         <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
       ) : shown === "diagram" ? (
@@ -1381,6 +1400,8 @@ function ObjectiveEditor({
   onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
 }) {
   const lex = objective.mode === "lex";
+  // Goals composed from a shape in this visit, which open in their boxes.
+  const [composedGoals, setComposedGoals] = useState<Set<string>>(() => new Set());
 
   function moveTerm(from: number, to: number) {
     if (to < 0 || to >= objective.terms.length) return;
@@ -1560,6 +1581,7 @@ function ObjectiveEditor({
             ) : (
               <GoalExpression
                 view={view}
+                startIn={composedGoals.has(term.id) ? "boxes" : undefined}
                 goalId={term.id}
                 expression={term.expression}
                 context={context}
@@ -1578,6 +1600,15 @@ function ObjectiveEditor({
         })}
       </div>
 
+      <ShapePicker
+        label="Start a goal from a shape"
+        shapes={GOAL_SHAPES.map((s) => ({ value: s.shape, title: s.title, needs: s.needs(context) }))}
+        onPick={(shape) => {
+          const id = freeNumberedId("o_", objective.terms.map((term) => term.id));
+          setComposedGoals((current) => new Set(current).add(id));
+          onChange({ ...objective, terms: [...objective.terms, goalFromShape(shape as GoalShape, id, context)] });
+        }}
+      />
       <button
         type="button"
         className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
@@ -1718,3 +1749,25 @@ function StartFromTemplates({
 }
 
 
+
+/** "Start a rule from a shape": each shape, or why it cannot be offered yet. */
+function ShapePicker({ label, shapes, onPick }: {
+  label: string;
+  shapes: { value: string; title: string; needs: string | null }[];
+  onPick: (shape: string) => void;
+}) {
+  return (
+    <label className="ml-2 mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
+      {label}
+      <select aria-label={label} className="rounded border border-slate-300 bg-white px-2 py-2 text-sm" value=""
+        onChange={(event) => event.target.value && onPick(event.target.value)}>
+        <option value="">choose…</option>
+        {shapes.map((shape) => (
+          <option key={shape.value} value={shape.value} disabled={shape.needs !== null}>
+            {shape.title}{shape.needs ? ` (needs ${shape.needs})` : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}

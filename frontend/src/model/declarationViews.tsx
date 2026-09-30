@@ -143,6 +143,24 @@ function staticLine(kind: DeclarationKind, name: string, spec: VariableSpec | Pa
   return `data ${name}[${p.index.join(", ")}]${off}`;
 }
 
+// -- the variable's editable parts, shared by the views -----------------------------
+
+function KindSelect({ name, spec, onChange }: { name: string; spec: VariableSpec; onChange: (next: VariableSpec) => void }) {
+  return (
+    <select aria-label={`${name}: kind`} className={SELECT} value={spec.domain}
+      onChange={(event) => onChange(withStage(withDomain(spec, event.target.value as VariableDomain), spec.stage))}>
+      <option value="binary">yes or no</option>
+      <option value="integer">a whole number</option>
+      <option value="continuous">any number</option>
+    </select>
+  );
+}
+
+function setBound(spec: VariableSpec, key: "lower" | "upper", value: number | undefined): VariableSpec {
+  const { [key]: _was, ...rest } = spec;
+  return value === undefined ? rest : { ...rest, [key]: value };
+}
+
 // -- Boxes --------------------------------------------------------------------------
 
 function BoundInput({ label, value, onChange }: { label: string; value: number | undefined; onChange: (next: number | undefined) => void }) {
@@ -223,22 +241,17 @@ function DeclarationBlocks({ kind, name, spec, attributes, unit, usedBy, problem
         ) : (
           <>
             <Box role="number" title="Kind" label="what it can be" problems={problems} path={["kind"]}>
-              <select aria-label={`${name}: kind`} className={SELECT} value={v.domain}
-                onChange={(event) => onChange?.(withStage(withDomain(v, event.target.value as VariableDomain), v.stage))}>
-                <option value="binary">yes or no</option>
-                <option value="integer">a whole number</option>
-                <option value="continuous">any number</option>
-              </select>
+              <KindSelect name={name} spec={v} onChange={(next) => onChange?.(next)} />
             </Box>
             {v.domain !== "binary" && (
               <Box role="number" title="Range" label="its limits" problems={problems} path={["range"]}>
                 <div className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
                   at least
                   <BoundInput key={`lo-${v.lower}`} label={`${name}: at least`} value={v.lower}
-                    onChange={(lower) => { const { lower: _l, ...rest } = v; onChange?.(lower === undefined ? rest : { ...rest, lower }); }} />
+                    onChange={(lower) => onChange?.(setBound(v, "lower", lower))} />
                   at most
                   <BoundInput key={`hi-${v.upper}`} label={`${name}: at most`} value={v.upper}
-                    onChange={(upper) => { const { upper: _u, ...rest } = v; onChange?.(upper === undefined ? rest : { ...rest, upper }); }} />
+                    onChange={(upper) => onChange?.(setBound(v, "upper", upper))} />
                 </div>
                 {v.upper === undefined && (
                   <p className="mt-1 text-xs text-amber-800">With no upper limit, an answer may grow without limit.</p>
@@ -255,7 +268,7 @@ function DeclarationBlocks({ kind, name, spec, attributes, unit, usedBy, problem
 
 // -- Diagram ------------------------------------------------------------------------
 
-function Node({ label, kind, children }: { label: string; kind: string; children?: ReactNode[] }) {
+function Node({ label, kind, control, children }: { label: string; kind: string; control?: ReactNode; children?: ReactNode[] }) {
   const [open, setOpen] = useState(true);
   const has = (children?.length ?? 0) > 0;
   return (
@@ -269,19 +282,21 @@ function Node({ label, kind, children }: { label: string; kind: string; children
         ) : <span className="inline-block w-7" aria-hidden="true" />}
         <span className="text-xs font-semibold text-slate-700">{label}</span>
         <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-600">{kind}</span>
+        {control}
       </div>
       {open && has && <Children>{children!}</Children>}
     </div>
   );
 }
 
-function DeclarationDiagram({ kind, name, spec, attributes, unit, usedBy }: {
+function DeclarationDiagram({ kind, name, spec, attributes, unit, usedBy, onChange }: {
   kind: DeclarationKind;
   name: string;
   spec: VariableSpec | ParameterSpec | null;
   attributes: Attribute[];
   unit?: string | null;
   usedBy: string[];
+  onChange?: (next: VariableSpec) => void;
 }) {
   const users = usedBy.length ? [<Node key="used" label="read by" kind={list(usedBy)} />] : [<Node key="used" label="read by" kind="nothing yet" />];
   if (kind === "set") {
@@ -294,11 +309,17 @@ function DeclarationDiagram({ kind, name, spec, attributes, unit, usedBy }: {
       <Node key="x" label={describeUncertainty(p.uncertainty) ?? "exact"} kind="values" />, ...users]} />;
   }
   const v = spec as VariableSpec;
-  const range = v.domain === "binary" || v.domain === "interval" ? [] : [
-    <Node key="lo" label={v.lower === undefined ? "no lower limit" : `at least ${v.lower}`} kind="range" />,
-    <Node key="hi" label={v.upper === undefined ? "no upper limit" : `at most ${v.upper}`} kind="range" />,
-  ];
-  return <Node label={name} kind="decision" children={[...index, <Node key="k" label={v.domain === "interval" ? "span of time" : kindWords({ ...v, lower: undefined, upper: undefined }).replace(", with no limits", "")} kind="kind" />, ...range, ...users]} />;
+  const bound = (key: "lower" | "upper", words: string) => (onChange ? (
+    <Node key={key} label={words} kind="range"
+      control={<BoundInput key={`${key}-${v[key]}`} label={`${name}: ${words}`} value={v[key]} onChange={(value) => onChange(setBound(v, key, value))} />} />
+  ) : (
+    <Node key={key} label={v[key] === undefined ? `no ${key === "lower" ? "lower" : "upper"} limit` : `${words} ${v[key]}`} kind="range" />
+  ));
+  const range = v.domain === "binary" || v.domain === "interval" ? [] : [bound("lower", "at least"), bound("upper", "at most")];
+  const kindNode = v.domain !== "interval" && onChange
+    ? <Node key="k" label="what it can be" kind="kind" control={<KindSelect name={name} spec={v} onChange={onChange} />} />
+    : <Node key="k" label={v.domain === "interval" ? "span of time" : kindWords({ ...v, lower: undefined, upper: undefined }).replace(", with no limits", "")} kind="kind" />;
+  return <Node label={name} kind="decision" children={[...index, kindNode, ...range, ...users]} />;
 }
 
 // -- one declaration, in the view asked for ------------------------------------------
@@ -317,9 +338,25 @@ export function DeclarationView({ kind, name, spec, view, sets, attributes = [],
 }) {
   const problems = checkDeclaration(kind, spec, sets);
   if (view === "sentence") {
+    const v = spec as VariableSpec;
+    const blanks = kind === "variable" && onChange && v.domain !== "interval";
     return (
       <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="declaration-sentence">
-        <p className="text-sm leading-relaxed text-slate-900">{declarationSentence(kind, name, spec, attributes, unit)} {readBy(usedBy)}</p>
+        {blanks ? (
+          <p className="text-sm leading-loose text-slate-900">
+            The solver decides {name}{v.index.length ? ` ${everyOf(v.index)}` : ""}: <KindSelect name={name} spec={v} onChange={onChange} />
+            {v.domain !== "binary" && (
+              <>
+                {" "}from <BoundInput key={`lo-${v.lower}`} label={`${name}: at least`} value={v.lower} onChange={(value) => onChange(setBound(v, "lower", value))} />
+                {" "}to <BoundInput key={`hi-${v.upper}`} label={`${name}: at most`} value={v.upper} onChange={(value) => onChange(setBound(v, "upper", value))} />
+              </>
+            )}
+            . {readBy(usedBy)}
+          </p>
+        ) : (
+          <p className="text-sm leading-relaxed text-slate-900">{declarationSentence(kind, name, spec, attributes, unit)} {readBy(usedBy)}</p>
+        )}
+        {blanks && <p className="sr-only" data-testid="sentence-reading">{declarationSentence(kind, name, spec, attributes, unit)}</p>}
         <Summary problems={problems} />
         <button type="button" className="text-xs text-blue-700 underline" onClick={onBoxes}>See it in boxes</button>
       </div>
@@ -334,7 +371,11 @@ export function DeclarationView({ kind, name, spec, view, sets, attributes = [],
     );
   }
   if (view === "diagram") {
-    return <div data-testid="declaration-diagram"><DeclarationDiagram kind={kind} name={name} spec={spec} attributes={attributes} unit={unit} usedBy={usedBy} /></div>;
+    return (
+      <div data-testid="declaration-diagram">
+        <DeclarationDiagram kind={kind} name={name} spec={spec} attributes={attributes} unit={unit} usedBy={usedBy} onChange={onChange} />
+      </div>
+    );
   }
   if (kind === "variable" && spec && (spec as VariableSpec).domain !== "interval" && onChange) {
     const v = spec as VariableSpec;

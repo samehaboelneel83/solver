@@ -3,7 +3,7 @@
  * Diagram, Equation, simplest first -- and the switches between them: one for
  * the page (remembered in this browser), one on each card.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** How a rule, goal or declaration is shown: in words, as nested boxes, as a drill-down diagram, or as one equation line. */
 export type EquationView = "sentence" | "boxes" | "diagram" | "equation";
@@ -64,8 +64,16 @@ export function ViewToggle({ value, onChange, name, size = "sm" }: {
 }
 
 /** A card's own view: the page's until the card is switched, and the page's again when the page switches. */
-export function useCardView(page: EquationView): [EquationView, (next: EquationView) => void] {
-  const [own, setOwn] = useState<EquationView | null>(null);
-  useEffect(() => setOwn(null), [page]);
+export function useCardView(page: EquationView, initial?: EquationView): [EquationView, (next: EquationView) => void] {
+  // A card just composed opens where it is built (`initial`); the page's switch still takes it along.
+  const [own, setOwn] = useState<EquationView | null>(initial ?? null);
+  // Follow the page's switch when it changes -- not when the card first appears.
+  const followed = useRef(page);
+  useEffect(() => {
+    if (followed.current !== page) {
+      followed.current = page;
+      setOwn(null);
+    }
+  }, [page]);
   return [own ?? page, setOwn];
 }

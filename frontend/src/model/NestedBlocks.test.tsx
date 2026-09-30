@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { checkRule, explain, problemsAt } from "./blockCheck";
-import { GoalBlocks, RuleBlocks } from "./NestedBlocks";
+import { GoalBlocks, RuleBlocks, RuleSentence } from "./NestedBlocks";
 import { ruleSentence, termSentence } from "./ruleSentence";
 import type { Constraint, ModelContext, Term } from "./terms";
 
@@ -133,5 +133,32 @@ describe("the boxes", () => {
   it("shows a goal as boxes and says when it reads no decision", () => {
     render(<GoalBlocks label="o_cost" expression={{ par: "budget", index: [] }} context={CONTEXT} onChange={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent("The goal reads no decision");
+  });
+});
+
+describe("the sentence, with blanks to fill in", () => {
+  function Sentence({ initial }: { initial: Constraint }) {
+    const [rule, setRule] = useState(initial);
+    return (
+      <>
+        <RuleSentence rule={rule} context={CONTEXT} onEdit={() => {}} onChange={setRule} />
+        <pre data-testid="ir">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+
+  it("changes a leaf of the rule from its words, and reads back the change", () => {
+    render(<Sentence initial={{ ...COVER, right: { add: [{ par: "demand", index: ["d"] }, { mul: [{ const: -1 }, { const: 2 }] }] } }} />);
+    expect(screen.getByTestId("sentence-reading")).toHaveTextContent(
+      "For every day d, the total of hours of p, over every person p whose team is north, must be at least demand of d minus 2.",
+    );
+    fireEvent.change(screen.getByLabelText("right side › term 2: number"), { target: { value: "3" } });
+    expect(ir().right).toEqual({ add: [{ par: "demand", index: ["d"] }, { mul: [{ const: -1 }, { const: 3 }] }] });
+    fireEvent.change(screen.getByLabelText("comparison"), { target: { value: "<=" } });
+    fireEvent.change(screen.getByLabelText("left side › what is totalled: decision"), { target: { value: "open" } });
+    expect(ir().left).toEqual({ sum: { var: "open", index: [] }, over: [{ index: "p", set: "person", where: [{ attr: "team", op: "=", value: "north" }] }] });
+    fireEvent.change(screen.getByLabelText("for each: set 1"), { target: { value: "person" } });
+    expect(ir().forall).toEqual([{ index: "d", set: "person" }]);
+    expect(screen.getByTestId("sentence-reading")).toHaveTextContent("must be at most");
   });
 });

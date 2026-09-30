@@ -18,6 +18,7 @@ import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
 import { checkGoal, checkRule, explain, problemsAt, type Problem } from "./blockCheck";
 import { ruleSentence, termSentence } from "./ruleSentence";
+import { RuleWords, TermWords } from "./SentenceEditor";
 import {
   arithmeticAttributes,
   describeWhen,
@@ -479,24 +480,40 @@ export function GoalBlocks({ label, expression, context, onChange }: {
   );
 }
 
-/** Sentence: the rule read out in plain words, what it still needs, and the way into its boxes. */
-export function RuleSentence({ rule, context, onEdit }: { rule: Constraint; context: ModelContext; onEdit: () => void }) {
+/** Sentence: the rule read out in plain words, each changeable word a blank to fill in. */
+export function RuleSentence({ rule, context, onEdit, onChange }: {
+  rule: Constraint;
+  context: ModelContext;
+  onEdit: () => void;
+  onChange?: (next: Constraint) => void;
+}) {
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="rule-sentence">
-      <p className="text-sm leading-relaxed text-slate-900">{ruleSentence(rule)}</p>
+      <p className="text-sm leading-loose text-slate-900">
+        {onChange ? <RuleWords rule={rule} context={context} onChange={onChange} /> : ruleSentence(rule)}
+      </p>
+      {onChange && <p className="sr-only" data-testid="sentence-reading">{ruleSentence(rule)}</p>}
       <Summary problems={checkRule(rule, context)} />
-      <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change it in boxes</button>
+      <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change its shape in boxes</button>
     </div>
   );
 }
 
-export function GoalSentence({ expression, context, onEdit }: { expression: Term; context: ModelContext; onEdit: () => void }) {
-  const text = termSentence(expression);
+export function GoalSentence({ expression, context, onEdit, onChange }: {
+  expression: Term;
+  context: ModelContext;
+  onEdit: () => void;
+  onChange?: (next: Term) => void;
+}) {
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="goal-sentence">
-      <p className="text-sm leading-relaxed text-slate-900">Counts {text}.</p>
+      <p className="text-sm leading-loose text-slate-900">
+        Counts{" "}
+        {onChange ? <TermWords term={expression} path="what it counts" context={context} bound={[]} onChange={onChange} /> : termSentence(expression)}.
+      </p>
+      {onChange && <p className="sr-only" data-testid="sentence-reading">Counts {termSentence(expression)}.</p>}
       <Summary problems={checkGoal(expression, context)} />
-      <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change it in boxes</button>
+      <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change its shape in boxes</button>
     </div>
   );
 }

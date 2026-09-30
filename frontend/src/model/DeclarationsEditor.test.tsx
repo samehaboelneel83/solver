@@ -408,13 +408,15 @@ describe("declarations in the four views", () => {
   it("reads every set, parameter and variable as a sentence, with what reads it", () => {
     renderEditor({ variables: VARS, attributes: { employee: [{ name: "cap", data_type: "number" }, { name: "team", data_type: "text" }] }, units: { demand: "staff" } });
     fireEvent.click(screen.getByRole("button", { name: "Show all declarations as sentences" }));
-    const sentences = screen.getAllByTestId("declaration-sentence").map((node) => node.querySelector("p")!.textContent);
+    // A variable's sentence has blanks to fill in; its plain reading is kept beside them.
+    const sentences = screen.getAllByTestId("declaration-sentence").map((node) =>
+      (node.querySelector("[data-testid=sentence-reading]") ?? node.querySelector("p"))!.textContent);
     expect(sentences).toEqual([
       "The rules can range over every employee record of this domain. Each employee has the number cap. Read by c_cover.",
       "The rules can range over every day record of this domain. Read by c_cover.",
       "demand is data the domain holds: one number for every day, in staff. Read by c_cover.",
-      "The solver decides assign for every employee and every day: yes or no. Read by c_cover.",
-      "The solver decides overtime for every employee: any number from 0 to 20. No rule or goal reads it yet.",
+      "The solver decides assign for every employee and every day: yes or no.",
+      "The solver decides overtime for every employee: any number from 0 to 20.",
     ]);
   });
 
@@ -447,6 +449,29 @@ describe("declarations in the four views", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show all declarations as diagrams" }));
     const diagrams = screen.getAllByTestId("declaration-diagram");
     expect(diagrams).toHaveLength(5);
-    expect(diagrams[4]).toHaveTextContent(/overtimedecision.*every employeeone for.*any numberkind.*at least 0range.*at most 20range.*read bynothing yet/);
+    expect(diagrams[0]).toHaveTextContent(/employeeset.*read byc_cover/);
+    expect(diagrams[4]).toHaveTextContent(/overtimedecision.*every employeeone for.*what it can bekind.*at leastrange.*at mostrange.*read bynothing yet/);
+  });
+});
+
+describe("a variable edited from its sentence and its diagram", () => {
+  const VARS = { overtime: { index: ["employee"], domain: "continuous" as const, lower: 0, upper: 20 } };
+
+  it("fills in its kind and limits in the sentence", () => {
+    const onChange = renderEditor({ variables: VARS });
+    fireEvent.click(screen.getByRole("button", { name: "Show overtime as a sentence" }));
+    fireEvent.change(screen.getByLabelText("overtime: at most"), { target: { value: "12" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.overtime).toEqual({ index: ["employee"], domain: "continuous", lower: 0, upper: 12 });
+    fireEvent.change(screen.getByLabelText("overtime: kind"), { target: { value: "binary" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.overtime).toEqual({ index: ["employee"], domain: "binary" });
+  });
+
+  it("changes them on the diagram's nodes", () => {
+    const onChange = renderEditor({ variables: VARS });
+    fireEvent.click(screen.getByRole("button", { name: "Show overtime as a diagram" }));
+    fireEvent.change(screen.getByLabelText("overtime: at least"), { target: { value: "" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.overtime).toEqual({ index: ["employee"], domain: "continuous", upper: 20 });
+    fireEvent.change(screen.getByLabelText("overtime: kind"), { target: { value: "integer" } });
+    expect(onChange.mock.calls.at(-1)![0].variables.overtime.domain).toBe("integer");
   });
 });

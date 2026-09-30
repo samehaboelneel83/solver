@@ -1344,14 +1344,33 @@ describe("equations as drill-down diagrams", () => {
     expect(screen.queryAllByTestId("rule-diagram")).toHaveLength(0);
   });
 
+  it("composes a new rule from a shape, opened in its boxes, and a goal the same way", async () => {
+    stub();
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.change(screen.getByLabelText("Start a rule from a shape"), { target: { value: "cover_each" } });
+    const blocks = await screen.findByTestId("rule-blocks");
+    // Built from the model's own names: each day, the total of assign over employees, at least demand.
+    expect(within(blocks).getByRole("status")).toHaveTextContent("Complete");
+    expect(within(blocks).getByRole("group", { name: "Total: left side" })).toBeInTheDocument();
+    expect(within(blocks).getByLabelText("right side: which data")).toHaveValue("demand");
+    fireEvent.change(screen.getByLabelText("Start a goal from a shape"), { target: { value: "count" } });
+    expect(await screen.findByTestId("goal-blocks")).toBeInTheDocument();
+  });
+
   it("reads a rule as a sentence, then edits it in boxes and publishes the change", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({ write });
     renderPage();
     await screen.findByLabelText("Equation for c_cover");
     fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a sentence" }));
-    expect(screen.getByTestId("rule-sentence")).toHaveTextContent(/^For every day d, .* must be at least demand of d\./);
-    fireEvent.click(screen.getByRole("button", { name: "Change it in boxes" }));
+    const sentence = screen.getByTestId("rule-sentence");
+    expect(within(sentence).getByTestId("sentence-reading")).toHaveTextContent(/^For every day d, .* must be at least demand of d\./);
+    // The sentence's blanks edit the rule: its comparison, in words.
+    fireEvent.change(within(sentence).getByLabelText("comparison"), { target: { value: "=" } });
+    expect(within(sentence).getByTestId("sentence-reading")).toHaveTextContent("must be exactly demand of d");
+    fireEvent.change(within(sentence).getByLabelText("comparison"), { target: { value: ">=" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change its shape in boxes" }));
     const blocks = screen.getByTestId("rule-blocks");
     expect(within(blocks).getByRole("status")).toHaveTextContent("Complete");
     // Put the right side inside "plus something", then make the new term 1.
