@@ -1,0 +1,551 @@
+<title>Camp Site Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a surveyor's site plan -- the map is the page, a narrow schedule beside it. */
+:root {
+  --paper: #f4f6f1; --sheet: #ffffff; --ink: #1b2521; --muted: #5a6962; --rule: #d9dfd8; --grid: #e4e9e2;
+  --bed: #2c5b88; --medical: #8b3d68; --corridor: #d7a23d; --zone: #3a8a5c; --zone-max: #3a8a5c;
+  --obstacle: #3a433f; --prohibited: #c2462c; --door: #dd7419; --path: #2c5b88; --placement: #8b3d68;
+  --d1: #2c5b88; --d2: #c2462c; --d3: #3a8a5c; --d4: #8b3d68; --near: #cfe0ef; --far: #1d3f63;
+  --ok: #2f7d4f; --bad: #b3261e; --focus: #dd7419;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #121816; --sheet: #19211e; --ink: #e2eae5; --muted: #93a39b; --rule: #2b3632; --grid: #1f2926;
+  --bed: #7fb2e3; --medical: #d88bb7; --corridor: #c7983a; --zone: #5cb884; --zone-max: #5cb884;
+  --obstacle: #8f9a95; --prohibited: #e37a5e; --door: #f29a48; --path: #7fb2e3; --placement: #d88bb7;
+  --d1: #7fb2e3; --d2: #e37a5e; --d3: #5cb884; --d4: #d88bb7; --near: #2a4058; --far: #a9d0f5;
+  --ok: #5cc486; --bad: #ff7a70; --focus: #f29a48; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --paper: #121816; --sheet: #19211e; --ink: #e2eae5; --muted: #93a39b; --rule: #2b3632; --grid: #1f2926;
+  --bed: #7fb2e3; --medical: #d88bb7; --corridor: #c7983a; --zone: #5cb884; --zone-max: #5cb884;
+  --obstacle: #8f9a95; --prohibited: #e37a5e; --door: #f29a48; --path: #7fb2e3; --placement: #d88bb7;
+  --d1: #7fb2e3; --d2: #e37a5e; --d3: #5cb884; --d4: #d88bb7; --near: #2a4058; --far: #a9d0f5;
+  --ok: #5cc486; --bad: #ff7a70; --focus: #f29a48; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); padding-inline: 16px; padding-block: 12px 20px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: 0.01em; text-wrap: balance; margin: 0; }
+h1 { font-size: 1.7rem; line-height: 1.1; }
+h2 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.86em; }
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; padding-block: 4px 12px; border-bottom: 1px solid var(--rule); }
+header.top .sub { color: var(--muted); font-size: 0.92rem; margin-top: 2px; }
+.modes { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--sheet); }
+.modes button { font: 600 0.95rem var(--display); letter-spacing: 0.04em; text-transform: uppercase; padding: 8px 16px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.modes button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.modes button:focus-visible, .tool:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); font-size: 0.88rem; }
+.chip b { font-family: var(--mono); font-weight: 500; }
+.chip.ok { border-color: var(--ok); color: var(--ok); }
+.chip.bad { border-color: var(--bad); color: var(--bad); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; margin-top: 14px; }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.map { position: relative; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; height: min(78vh, 760px); min-height: 380px; overflow: hidden; }
+.map svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.map svg.dragging { cursor: grabbing; }
+.toolbar { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; gap: 6px; }
+.tool { width: 34px; height: 34px; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); border-radius: 4px; font: 600 1.1rem var(--mono); cursor: pointer; }
+.readout { position: absolute; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; pointer-events: none; }
+.scalebar { font: 0.75rem var(--mono); color: var(--ink); }
+.scalebar .bar { height: 6px; border: 1px solid var(--ink); border-top: 0; background: linear-gradient(90deg, var(--ink) 50%, transparent 50%); }
+.coords { font: 0.75rem var(--mono); color: var(--muted); background: var(--sheet); padding: 2px 6px; border: 1px solid var(--rule); border-radius: 3px; }
+.north { position: absolute; top: 10px; right: 12px; width: 34px; text-align: center; font: 600 0.85rem var(--display); color: var(--ink); pointer-events: none; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 0.82rem; padding: 6px 8px; border-radius: 4px; max-width: 260px; line-height: 1.35; }
+.tip .k { opacity: 0.7; }
+aside { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+aside section { display: flex; flex-direction: column; gap: 8px; }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.legend label { display: grid; grid-template-columns: 18px 22px 1fr auto; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.legend .sw { width: 22px; height: 14px; border-radius: 2px; }
+.legend .n { color: var(--muted); font: 0.8rem var(--mono); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+select { font: inherit; padding: 4px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+th, td { text-align: left; padding: 4px 6px 4px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.78rem var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.r, th.r { text-align: right; }
+.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.86rem; }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; }
+.checks .mark { font-family: var(--mono); }
+.checks .ok .mark { color: var(--ok); }
+.checks .bad .mark { color: var(--bad); }
+.checks .d { color: var(--muted); font-size: 0.82rem; }
+.detail { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 10px; min-height: 64px; font-size: 0.88rem; }
+.detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; font-family: var(--mono); font-size: 0.85em; }
+.note { color: var(--muted); font-size: 0.84rem; }
+.scale-key { display: flex; align-items: center; gap: 6px; font: 0.78rem var(--mono); color: var(--muted); }
+.scale-key .ramp { flex: 1; height: 8px; border-radius: 2px; }
+.tablewrap { overflow-x: auto; }
+/* map layers, all coloured from the tokens */
+.L-boundary { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+.L-grid { fill: url(#grid); }
+.L-placement_zone { fill: var(--placement); fill-opacity: 0.07; stroke: var(--placement); stroke-dasharray: 6 4; stroke-width: 1.4; }
+.L-door_zone_max { fill: none; stroke: var(--zone-max); stroke-dasharray: 3 3; stroke-width: 1.2; }
+.L-door_zone { fill: var(--zone); fill-opacity: 0.2; stroke: var(--zone); stroke-width: 1.4; }
+.L-corridor { fill: var(--corridor); fill-opacity: 0.32; stroke: var(--corridor); stroke-width: 1; }
+.L-prohibited { fill: url(#hatch-red); stroke: var(--prohibited); stroke-width: 1.2; }
+.L-obstacle { fill: url(#hatch-dark); stroke: var(--obstacle); stroke-width: 1.6; }
+.L-door { fill: var(--door); stroke: var(--door); stroke-width: 2; }
+.L-bed { stroke: var(--sheet); stroke-width: 0.8; }
+.L-path { fill: none; stroke: var(--path); stroke-opacity: 0.28; stroke-width: 1; }
+.L-path.hot { stroke: var(--focus); stroke-opacity: 1; stroke-width: 2.4; }
+.L-bed.hot, .L-obstacle.hot, .L-door_zone.hot, .L-door.hot { stroke: var(--focus); stroke-width: 2.4; }
+.label { font: 600 0.9px var(--display); fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 0.18px; pointer-events: none; }
+.hatch-dark line { stroke: var(--obstacle); stroke-width: 0.12; }
+.hatch-red line { stroke: var(--prohibited); stroke-width: 0.1; }
+.gridline { stroke: var(--grid); stroke-width: 0.03; }
+.gridline5 { stroke: var(--rule); stroke-width: 0.06; }
+@media (prefers-reduced-motion: no-preference) { .L-bed, .L-path { transition: stroke-width 120ms; } }
+</style>
+
+<header class="top">
+  <div>
+    <h1 id="camp-name">Camp site plan</h1>
+    <div class="sub" id="camp-sub"></div>
+  </div>
+  <div class="modes" role="group" aria-label="What to show">
+    <button type="button" id="mode-input" aria-pressed="false">Input</button>
+    <button type="button" id="mode-output" aria-pressed="true">Optimised layout</button>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<div class="layout">
+  <div class="map" id="map">
+    <svg id="svg" role="img" aria-label="Site plan of the camp">
+      <defs>
+        <pattern id="grid" patternUnits="userSpaceOnUse" width="5" height="5">
+          <path class="gridline" d="M1 0V5M2 0V5M3 0V5M4 0V5M0 1H5M0 2H5M0 3H5M0 4H5" />
+          <path class="gridline5" d="M0 0V5M0 0H5" />
+        </pattern>
+        <pattern id="hatch-dark" class="hatch-dark" patternUnits="userSpaceOnUse" width="0.5" height="0.5" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="0.5" />
+        </pattern>
+        <pattern id="hatch-red" class="hatch-red" patternUnits="userSpaceOnUse" width="0.7" height="0.7" patternTransform="rotate(-45)">
+          <line x1="0" y1="0" x2="0" y2="0.7" />
+        </pattern>
+      </defs>
+      <g id="world"></g>
+    </svg>
+    <div class="toolbar">
+      <button type="button" class="tool" id="zin" aria-label="Zoom in">+</button>
+      <button type="button" class="tool" id="zout" aria-label="Zoom out">−</button>
+      <button type="button" class="tool" id="zfit" aria-label="Fit the camp" title="Fit the camp">⤢</button>
+    </div>
+    <div class="north" aria-hidden="true">
+      <svg viewBox="0 0 20 28" width="22" height="30"><path d="M10 2 L16 24 L10 19 L4 24 Z" fill="currentColor" /></svg>
+      <div>N</div>
+    </div>
+    <div class="readout">
+      <div class="scalebar" id="scalebar"><div class="bar" id="scalebar-bar"></div><span id="scalebar-text"></span></div>
+      <div class="coords" id="coords">x — m, y — m</div>
+    </div>
+    <div class="tip" id="tip" hidden></div>
+  </div>
+
+  <aside>
+    <section aria-labelledby="h-layers">
+      <h2 id="h-layers">Layers</h2>
+      <ul class="legend" id="legend"></ul>
+      <div class="row" id="colour-row">
+        <label for="colour-by">Colour beds by</label>
+        <select id="colour-by">
+          <option value="type">bed type</option>
+          <option value="door">assigned door</option>
+          <option value="walk">walking distance</option>
+        </select>
+      </div>
+      <div class="scale-key" id="walk-key" hidden><span id="walk-min">0 m</span><div class="ramp" id="walk-ramp"></div><span id="walk-max"></span></div>
+    </section>
+    <section aria-labelledby="h-detail">
+      <h2 id="h-detail">Selected</h2>
+      <div class="detail" id="detail"><span class="note">Point at or tap anything on the plan.</span></div>
+    </section>
+    <section aria-labelledby="h-doors">
+      <h2 id="h-doors">Doors</h2>
+      <div class="tablewrap"><table id="doors"></table></div>
+    </section>
+    <section aria-labelledby="h-stages">
+      <h2 id="h-stages">Optimisation</h2>
+      <div class="tablewrap"><table id="stages"></table></div>
+      <p class="note" id="model-note"></p>
+    </section>
+    <section aria-labelledby="h-checks">
+      <h2 id="h-checks">Independent validation</h2>
+      <ul class="checks" id="checks"></ul>
+    </section>
+  </aside>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const rep = DATA.report;
+  const LABELS = {
+    boundary: "Camp boundary", placement_zone: "Medical placement zone", door_zone_max: "Door zone, largest allowed",
+    door_zone: "Door zone", corridor: "Corridors", prohibited: "No-bed area (walkable)", obstacle: "Closed area",
+    door: "Door", bed: "Beds", path: "Walking routes", grid: "1 m grid",
+  };
+  const ORDER = {
+    input: ["boundary", "grid", "placement_zone", "door_zone_max", "door_zone", "prohibited", "obstacle", "door"],
+    output: ["boundary", "grid", "door_zone", "corridor", "prohibited", "obstacle", "path", "bed", "door"],
+  };
+  const hiddenByDefault = new Set(["path"]);
+  let mode = "output";
+  const visible = { input: {}, output: {} };
+  for (const m of ["input", "output"]) for (const l of ORDER[m]) visible[m][l] = !hiddenByDefault.has(l);
+
+  // -- header ----------------------------------------------------------------
+  $("camp-name").textContent = rep.camp;
+  const [lon, lat] = DATA.origin;
+  const boundary = DATA.input.features.find((f) => f.properties.layer === "boundary");
+  $("camp-sub").textContent = `${boundary.properties.area_m2} m² · local metres, x east / y north · placed at ${lat.toFixed(4)}° N ${lon.toFixed(4)}° E for GIS export`;
+  const v = rep.validation;
+  const chips = [
+    [`${rep.beds}`, "beds placed", ""],
+    [Object.entries(rep.beds_by_type).map(([k, n]) => `${n} ${k}`).join(" · "), "", ""],
+    [v.valid ? "valid" : "invalid", `${v.checks.filter((c) => c.ok).length}/${v.checks.length} checks`, v.valid ? "ok" : "bad"],
+    [`${v.walk_mean_m} m`, "mean walk", ""],
+    [`${v.walk_max_m} m`, "longest walk", ""],
+  ];
+  for (const [b, t, cls] of chips) {
+    const el = document.createElement("span");
+    el.className = `chip ${cls}`;
+    el.innerHTML = `<b></b><span></span>`;
+    el.querySelector("b").textContent = b;
+    el.querySelector("span").textContent = t;
+    $("chips").append(el);
+  }
+
+  // -- geometry to SVG ---------------------------------------------------------
+  const ring = (r) => r.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(3)},${(-y).toFixed(3)}`).join("") + "Z";
+  function pathOf(g) {
+    if (g.type === "Polygon") return g.coordinates.map(ring).join("");
+    if (g.type === "MultiPolygon") return g.coordinates.map((p) => p.map(ring).join("")).join("");
+    if (g.type === "LineString") return g.coordinates.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(3)},${(-y).toFixed(3)}`).join("");
+    if (g.type === "GeometryCollection") return g.geometries.map(pathOf).join("");
+    return "";
+  }
+  function centroid(g) {
+    const pts = g.type === "Polygon" ? g.coordinates[0] : g.type === "MultiPolygon" ? g.coordinates[0][0] : g.coordinates;
+    let sx = 0, sy = 0;
+    for (const [x, y] of pts) { sx += x; sy += y; }
+    return [sx / pts.length, sy / pts.length];
+  }
+  const [bx0, by0, bx1, by1] = (() => {
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const [x, y] of boundary.geometry.coordinates[0]) { a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x); d = Math.max(d, y); }
+    return [a, b, c, d];
+  })();
+
+  const css = getComputedStyle(document.documentElement);
+  const tok = (n) => css.getPropertyValue(n).trim();
+  function hex(c) { const m = c.replace("#", ""); return [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16)); }
+  function mix(a, b, t) { const A = hex(a), B = hex(b); return `rgb(${A.map((x, i) => Math.round(x + (B[i] - x) * t)).join(",")})`; }
+
+  const world = $("world");
+  const nodes = [];
+  function draw() {
+    world.textContent = "";
+    nodes.length = 0;
+    const fc = mode === "input" ? DATA.input : DATA.output;
+    const order = ORDER[mode];
+    const byLayer = {};
+    for (const f of fc.features) (byLayer[f.properties.layer] ||= []).push(f);
+    const walks = (byLayer.bed || []).map((f) => f.properties.walk_m || 0);
+    const wmax = Math.max(1, ...walks);
+    const doorIds = [...new Set((DATA.input.features.filter((f) => f.properties.layer === "door")).map((f) => f.properties.id))];
+    const colourBy = $("colour-by").value;
+    for (const layer of order) {
+      if (!visible[mode][layer]) continue;
+      const g = document.createElementNS(NS, "g");
+      g.dataset.layer = layer;
+      if (layer === "grid") {
+        const r = document.createElementNS(NS, "path");
+        r.setAttribute("d", pathOf(boundary.geometry));
+        r.setAttribute("class", "L-grid");
+        g.append(r);
+        world.append(g);
+        continue;
+      }
+      for (const f of byLayer[layer] || []) {
+        const el = document.createElementNS(NS, "path");
+        el.setAttribute("d", pathOf(f.geometry));
+        el.setAttribute("class", `L-${layer}`);
+        el.setAttribute("vector-effect", "non-scaling-stroke");
+        el.setAttribute("fill-rule", "evenodd");
+        if (layer === "bed") {
+          let fill;
+          if (colourBy === "door") fill = tok(`--d${(doorIds.indexOf(f.properties.door) % 4) + 1}`);
+          else if (colourBy === "walk") fill = mix(tok("--near"), tok("--far"), (f.properties.walk_m || 0) / wmax);
+          else fill = tok(f.properties.bed_type === "medical" ? "--medical" : "--bed");
+          el.style.fill = fill;
+          if (f.properties.resized && colourBy === "type") el.style.fillOpacity = "0.72";
+          el.dataset.bed = f.properties.id;
+        }
+        if (layer === "path") el.dataset.bed = f.properties.bed;
+        el.__f = f;
+        g.append(el);
+        nodes.push(el);
+      }
+      world.append(g);
+    }
+    // Labels: doors and closed areas.
+    const lab = document.createElementNS(NS, "g");
+    for (const f of (byLayer.door || []).concat(byLayer.obstacle || [])) {
+      if (!visible[mode][f.properties.layer]) continue;
+      const [x, y] = centroid(f.geometry);
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("class", "label");
+      t.setAttribute("x", x);
+      t.setAttribute("y", -y + (f.properties.layer === "door" ? 0 : 0.3));
+      t.setAttribute("text-anchor", "middle");
+      t.textContent = f.properties.id;
+      lab.append(t);
+    }
+    world.append(lab);
+    buildLegend(byLayer);
+    $("walk-key").hidden = !(mode === "output" && colourBy === "walk");
+    $("walk-ramp").style.background = `linear-gradient(90deg, ${tok("--near")}, ${tok("--far")})`;
+    $("walk-max").textContent = `${wmax.toFixed(0)} m`;
+    $("colour-row").hidden = mode !== "output";
+  }
+
+  function swatch(layer) {
+    const s = document.createElement("span");
+    s.className = "sw";
+    const style = {
+      boundary: `border:2px solid ${tok("--ink")}`, grid: `background:${tok("--grid")};border:1px solid ${tok("--rule")}`,
+      placement_zone: `border:2px dashed ${tok("--placement")}`, door_zone_max: `border:2px dashed ${tok("--zone")}`,
+      door_zone: `background:${tok("--zone")};opacity:.45`, corridor: `background:${tok("--corridor")};opacity:.6`,
+      prohibited: `background:repeating-linear-gradient(-45deg,${tok("--prohibited")} 0 2px,transparent 2px 5px)`,
+      obstacle: `background:repeating-linear-gradient(45deg,${tok("--obstacle")} 0 2px,transparent 2px 5px)`,
+      door: `background:${tok("--door")}`, bed: `background:${tok("--bed")}`, path: `border-top:2px solid ${tok("--path")};height:0;margin-top:6px`,
+    }[layer] || "";
+    s.setAttribute("style", style);
+    return s;
+  }
+  function buildLegend(byLayer) {
+    const ul = $("legend");
+    ul.textContent = "";
+    for (const layer of [...ORDER[mode]].reverse()) {
+      const li = document.createElement("li");
+      const id = `lay-${mode}-${layer}`;
+      const label = document.createElement("label");
+      label.setAttribute("for", id);
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = id;
+      cb.checked = visible[mode][layer];
+      cb.addEventListener("change", () => { visible[mode][layer] = cb.checked; draw(); });
+      const name = document.createElement("span");
+      name.textContent = layer === "path" ? "Walking routes (all)" : LABELS[layer];
+      const n = document.createElement("span");
+      n.className = "n";
+      n.textContent = layer === "grid" || layer === "boundary" ? "" : String((byLayer[layer] || []).length);
+      label.append(cb, swatch(layer), name, n);
+      li.append(label);
+      ul.append(li);
+    }
+  }
+
+  // -- pan and zoom --------------------------------------------------------------
+  const svg = $("svg");
+  let view = { x: 0, y: 0, w: 1, h: 1 };
+  function fit() {
+    const pad = 2;
+    const rect = svg.getBoundingClientRect();
+    const w = bx1 - bx0 + 2 * pad, h = by1 - by0 + 2 * pad;
+    const aspect = rect.width / Math.max(rect.height, 1);
+    let vw = w, vh = h;
+    if (w / h > aspect) vh = w / aspect; else vw = h * aspect;
+    view = { x: bx0 - pad - (vw - w) / 2, y: -(by1 + pad) - (vh - h) / 2, w: vw, h: vh };
+    apply();
+  }
+  function apply() {
+    svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+    const rect = svg.getBoundingClientRect();
+    const mPerPx = view.w / Math.max(rect.width, 1);
+    const nice = [1, 2, 5, 10, 20, 50];
+    const len = nice.find((n) => n / mPerPx >= 70) || 50;
+    $("scalebar-bar").style.width = `${len / mPerPx}px`;
+    $("scalebar-text").textContent = `${len} m`;
+  }
+  function zoom(f, cx, cy) {
+    const rect = svg.getBoundingClientRect();
+    const px = cx ?? rect.width / 2, py = cy ?? rect.height / 2;
+    const wx = view.x + (px / rect.width) * view.w, wy = view.y + (py / rect.height) * view.h;
+    view.w *= f; view.h *= f;
+    view.x = wx - (px / rect.width) * view.w;
+    view.y = wy - (py / rect.height) * view.h;
+    apply();
+  }
+  svg.addEventListener("wheel", (e) => { e.preventDefault(); const r = svg.getBoundingClientRect(); zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, v: { ...view }, moved: false }; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener("pointermove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const wx = view.x + ((e.clientX - r.left) / r.width) * view.w, wy = view.y + ((e.clientY - r.top) / r.height) * view.h;
+    $("coords").textContent = `x ${wx.toFixed(1)} m, y ${(-wy).toFixed(1)} m`;
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { drag.moved = true; svg.classList.add("dragging"); $("tip").hidden = true; }
+    view.x = drag.v.x - (dx / r.width) * view.w;
+    view.y = drag.v.y - (dy / r.height) * view.h;
+    apply();
+  });
+  svg.addEventListener("pointerup", (e) => {
+    svg.classList.remove("dragging");
+    const moved = drag && drag.moved;
+    drag = null;
+    if (!moved) select(e.target.__f ? e.target : null, e);
+  });
+  $("zin").addEventListener("click", () => zoom(1 / 1.4));
+  $("zout").addEventListener("click", () => zoom(1.4));
+  $("zfit").addEventListener("click", fit);
+  new ResizeObserver(() => apply()).observe(svg);
+
+  // -- hover, select -------------------------------------------------------------
+  const PROPS = {
+    bed: [["bed_type", "Type"], ["size", "Size"], ["resized", "Resized"], ["rotated", "Along y"], ["door", "Door"], ["walk_m", "Walk, m"]],
+    door: [["capacity", "Capacity"], ["beds_served", "Beds served"], ["width_m", "Width, m"]],
+    door_zone: [["door", "Door"], ["depth_m", "Depth, m"], ["grown_m", "Grown by, m"], ["area_m2", "Area, m²"], ["beds_served", "Beds served"], ["area_per_bed_m2", "m² per bed"]],
+    door_zone_max: [["door", "Door"], ["depth_m", "Depth, m"], ["note", ""]],
+    obstacle: [["kind", "Kind"], ["area_m2", "Area, m²"]],
+    prohibited: [["note", ""]],
+    placement_zone: [["bed_types", "Bed types"]],
+    corridor: [["area_m2", "Area, m²"], ["min_width_m", "Min width, m"]],
+    path: [["bed", "Bed"], ["door", "Door"], ["walk_m", "Walk, m"]],
+    boundary: [["area_m2", "Area, m²"]],
+  };
+  function describe(f) {
+    const p = f.properties;
+    const title = p.id || p.bed || p.door || LABELS[p.layer];
+    const rows = (PROPS[p.layer] || []).filter(([k]) => p[k] !== undefined && p[k] !== null && p[k] !== "");
+    return { title: `${LABELS[p.layer]}${title && title !== LABELS[p.layer] ? ` · ${title}` : ""}`, rows: rows.map(([k, l]) => [l, p[k] === true ? "yes" : p[k] === false ? "no" : String(p[k])]) };
+  }
+  function highlight(bed) {
+    for (const el of world.querySelectorAll(".hot")) el.classList.remove("hot");
+    if (!bed) return;
+    for (const el of world.querySelectorAll(`[data-bed="${bed}"]`)) el.classList.add("hot");
+    if (!visible.output.path && mode === "output") {
+      const f = DATA.output.features.find((x) => x.properties.layer === "path" && x.properties.bed === bed);
+      if (f) {
+        const el = document.createElementNS(NS, "path");
+        el.setAttribute("d", pathOf(f.geometry));
+        el.setAttribute("class", "L-path hot");
+        el.setAttribute("vector-effect", "non-scaling-stroke");
+        world.append(el);
+      }
+    }
+  }
+  svg.addEventListener("mouseover", (e) => {
+    const f = e.target.__f;
+    const tip = $("tip");
+    if (!f) { tip.hidden = true; return; }
+    const d = describe(f);
+    tip.innerHTML = "";
+    const h = document.createElement("div");
+    h.style.fontWeight = "600";
+    h.textContent = d.title;
+    tip.append(h);
+    for (const [k, val] of d.rows.slice(0, 4)) {
+      const r = document.createElement("div");
+      r.innerHTML = `<span class="k"></span> <span></span>`;
+      r.children[0].textContent = k ? `${k}:` : "";
+      r.children[1].textContent = val;
+      tip.append(r);
+    }
+    tip.hidden = false;
+    if (f.properties.layer === "bed") highlight(f.properties.id);
+  });
+  svg.addEventListener("mousemove", (e) => {
+    const tip = $("tip");
+    if (tip.hidden) return;
+    const r = $("map").getBoundingClientRect();
+    tip.style.left = `${Math.min(e.clientX - r.left + 14, r.width - 270)}px`;
+    tip.style.top = `${e.clientY - r.top + 14}px`;
+  });
+  svg.addEventListener("mouseleave", () => { $("tip").hidden = true; });
+  function select(el) {
+    const box = $("detail");
+    box.textContent = "";
+    if (!el) { box.innerHTML = '<span class="note">Point at or tap anything on the plan.</span>'; highlight(null); return; }
+    const d = describe(el.__f);
+    const h = document.createElement("div");
+    h.style.fontWeight = "600";
+    h.style.marginBottom = "6px";
+    h.textContent = d.title;
+    const dl = document.createElement("dl");
+    for (const [k, val] of d.rows) {
+      const dt = document.createElement("dt"); dt.textContent = k || "Note";
+      const dd = document.createElement("dd"); dd.textContent = val;
+      dl.append(dt, dd);
+    }
+    box.append(h, dl);
+    if (el.__f.properties.layer === "bed") highlight(el.__f.properties.id);
+  }
+
+  // -- side tables -----------------------------------------------------------------
+  function table(el, head, rows) {
+    el.textContent = "";
+    const thead = el.createTHead().insertRow();
+    head.forEach(([t, cls]) => { const th = document.createElement("th"); th.textContent = t; if (cls) th.className = cls; thead.append(th); });
+    const tb = el.createTBody();
+    for (const r of rows) {
+      const tr = tb.insertRow();
+      r.forEach((c, i) => { const td = tr.insertCell(); td.textContent = c; if (head[i][1]) td.className = `${head[i][1]} num`; });
+    }
+  }
+  const doors = DATA.input.features.filter((f) => f.properties.layer === "door");
+  const zonesIn = Object.fromEntries(DATA.input.features.filter((f) => f.properties.layer === "door_zone").map((f) => [f.properties.door, f.properties.depth_m]));
+  table($("doors"), [["Door"], ["Capacity", "r"], ["Served", "r"], ["Zone depth", "r"]],
+    doors.map((f) => [f.properties.id, f.properties.capacity ?? "any", v.door_loads[f.properties.id] ?? 0,
+      `${zonesIn[f.properties.id]} → ${rep.zone_depth_m[f.properties.id]} m`]));
+  const unit = { beds: "beds", distance: "m walked", corridor: "m²", modifications: "m²" };
+  table($("stages"), [["Stage"], ["Result", "r"], ["Status"]],
+    [["Stage 0 (rows)", `${rep.stage0_beds} beds`, "start"]].concat(rep.stages.map((s) => [
+      s.objective, s.value == null ? "—" : `${Math.round(s.value * 10) / 10} ${unit[s.objective] || ""}`,
+      `${s.status}${s.seconds ? `, ${Math.round(s.seconds)} s` : ""}`])));
+  $("model-note").textContent = `${rep.solver} · ${rep.model.variables.toLocaleString("en")} variables, ${rep.model.constraints.toLocaleString("en")} constraints · ${rep.grid.placements.toLocaleString("en")} candidate bed positions on a 0.5 m grid. Stages are lexicographic: each keeps the one before.`;
+  const ul = $("checks");
+  for (const c of v.checks) {
+    const li = document.createElement("li");
+    li.className = c.ok ? "ok" : "bad";
+    li.innerHTML = `<span class="mark"></span><span><span class="t"></span><br><span class="d"></span></span>`;
+    li.querySelector(".mark").textContent = c.ok ? "✓" : "✗";
+    li.querySelector(".t").textContent = c.name;
+    li.querySelector(".d").textContent = c.detail;
+    ul.append(li);
+  }
+
+  // -- modes -------------------------------------------------------------------------
+  function setMode(m) {
+    mode = m;
+    $("mode-input").setAttribute("aria-pressed", String(m === "input"));
+    $("mode-output").setAttribute("aria-pressed", String(m === "output"));
+    try { localStorage.setItem("camp-mode", m); } catch (e) { /* storage may be unavailable */ }
+    draw();
+    select(null);
+  }
+  $("mode-input").addEventListener("click", () => setMode("input"));
+  $("mode-output").addEventListener("click", () => setMode("output"));
+  $("colour-by").addEventListener("change", draw);
+  if (location.hash === "#input") mode = "input";
+  else { try { mode = localStorage.getItem("camp-mode") || mode; } catch (e) { /* ignore */ } }
+  setMode(mode);
+  fit();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => setTimeout(draw, 0));
+  new MutationObserver(() => setTimeout(draw, 0)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
