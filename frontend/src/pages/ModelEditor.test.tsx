@@ -1344,6 +1344,19 @@ describe("equations as drill-down diagrams", () => {
     expect(screen.queryAllByTestId("rule-diagram")).toHaveLength(0);
   });
 
+  it("creates a record type in the domain from the declarations and uses it as a set", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 40, name: "warehouse", attributes: [] });
+    stub({ write, me: { username: "admin", display_name: null, capabilities: ["domain.edit", "model.publish"] } });
+    renderPage();
+    const form = await screen.findByRole("form", { name: "Create a new record type" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "warehouse" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create record type" }));
+    await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/entity-types")).toBe(true));
+    const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/entity-types")!;
+    expect(JSON.parse(options.body)).toMatchObject({ name: "warehouse", role: "other" });
+    expect(await within(form).findByRole("status")).toHaveTextContent("a set of this model");
+  });
+
   it("composes a new rule from a shape, opened in its boxes, and a goal the same way", async () => {
     stub();
     renderPage();

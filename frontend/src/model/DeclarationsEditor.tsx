@@ -55,6 +55,10 @@ export type DeclarationsEditorProps = {
   attributes?: Record<string, { name: string; data_type: string }[]>;
   /** Parameter name -> its unit, for the Parameters' views. */
   units?: Record<string, string | null | undefined>;
+  /** Make something new in the domain (a record type, a number on it, new data); absent where the account may not. */
+  onCreateSet?: (name: string) => Promise<void>;
+  onCreateAttribute?: (set: string, name: string, unit: string) => Promise<void>;
+  onCreateParameter?: (parameter: { name: string; index: string[]; defaultValue: number; unit: string }) => Promise<void>;
 };
 
 export default function DeclarationsEditor({
@@ -70,6 +74,9 @@ export default function DeclarationsEditor({
   onView,
   attributes = {},
   units = {},
+  onCreateSet,
+  onCreateAttribute,
+  onCreateParameter,
 }: DeclarationsEditorProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [ownView, setOwnView] = useState<EquationView>("equation");
@@ -251,6 +258,8 @@ export default function DeclarationsEditor({
         <Group title="Sets" hint="The kinds of thing the rules range over.">
           {sets.map((name) => (
             <DeclarationCard key={name} kind="set" name={name} heading={name} view={view}
+              foldDetails
+              details={onCreateAttribute ? <NewAttribute set={name} taken={(attributes[name] ?? []).map((a) => a.name)} onCreate={onCreateAttribute} /> : undefined}
               onStop={() => refuseIfStranding("set", name, () => apply({ sets: sets.filter((s) => s !== name) }))}>
               {(shown, setShown) => (
                 <DeclarationView kind="set" name={name} spec={null} view={shown} sets={sets} attributes={attributes[name] ?? []}
@@ -283,6 +292,12 @@ export default function DeclarationsEditor({
             );
           })}
           </Chooser>
+          {onCreateSet && (
+            <NewRecordType taken={entityTypeNames} onCreate={async (name) => {
+              await onCreateSet(name);
+              apply({ sets: [...sets, name] });
+            }} />
+          )}
         </Group>
 
         <Group title="Parameters" hint="Numbers the domain already holds, read by the rules.">
@@ -339,6 +354,12 @@ export default function DeclarationsEditor({
             );
           })}
           </Chooser>
+          {onCreateParameter && (
+            <NewData sets={sets} taken={[...parameterOptions.map((o) => o.name), ...Object.keys(variables)]} onCreate={async (made) => {
+              await onCreateParameter(made);
+              apply({ parameters: { ...parameters, [made.name]: { index: made.index } } });
+            }} />
+          )}
         </Group>
 
         <Group title="Variables" hint="What the solver decides.">
@@ -895,12 +916,14 @@ const KIND_TAG: Record<DeclarationKind, { text: string; style: string }> = {
  * switch, the view, and its fields -- shown with the equation, behind “More
  * options” with the simpler views.
  */
-function DeclarationCard({ kind, name, heading, view, details, onRemove, onStop, children }: {
+function DeclarationCard({ kind, name, heading, view, details, foldDetails = false, onRemove, onStop, children }: {
   kind: DeclarationKind;
   name: string;
   heading: string;
   view: EquationView;
   details?: ReactNode;
+  /** Keep the details behind “More options” in every view, the equation's too. */
+  foldDetails?: boolean;
   onRemove?: () => void;
   onStop?: () => void;
   children: (shown: EquationView, setShown: (next: EquationView) => void) => ReactNode;
@@ -930,17 +953,162 @@ function DeclarationCard({ kind, name, heading, view, details, onRemove, onStop,
         <ViewToggle value={shown} onChange={setShown} name={name} size="xs" />
         {children(shown, setShown)}
       </div>
-      {details && (shown === "equation" ? (
+      {details && (shown === "equation" && !foldDetails ? (
         <div className="mt-1">{details}</div>
       ) : (
         <>
-          <button type="button" aria-expanded={more} className="mt-1 rounded py-1 text-xs font-medium text-blue-700 underline"
-            onClick={() => setMore((open) => !open)}>
+          <button type="button" aria-expanded={more} aria-label={`${more ? "Fewer" : "More"} options for ${name}`}
+            className="mt-1 rounded py-1 text-xs font-medium text-blue-700 underline" onClick={() => setMore((open) => !open)}>
             {more ? "Fewer options" : "More options"}
           </button>
           {more && <div className="mt-1">{details}</div>}
         </>
       ))}
     </article>
+  );
+}
+
+const NAME = /^[a-z][a-z0-9_]*$/;
+const FORM_INPUT = "rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900";
+
+/** A name the database takes, and not one already used; or why not. */
+function nameProblem(name: string, taken: string[]): string | null {
+  if (!name) return null;
+  if (!NAME.test(name)) return "Use lower-case letters, digits and underscores, starting with a letter.";
+  if (taken.includes(name)) return `There is already something called ${name}.`;
+  return null;
+}
+
+/** A creation form's shell: its fields, its button, and what came of it. */
+function CreateForm({ title, button, ready, onSubmit, children }: {
+  title: string;
+  button: string;
+  ready: boolean;
+  onSubmit: () => Promise<string>;
+  children: ReactNode;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
+  return (
+    <form aria-label={title} className="space-y-2 rounded-md border border-dashed border-slate-300 bg-white px-3 py-2"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!ready || busy) return;
+        setBusy(true);
+        setSaid(null);
+        try {
+          setSaid({ error: false, text: await onSubmit() });
+        } catch (error) {
+          setSaid({ error: true, text: error instanceof Error ? error.message : String(error) });
+        } finally {
+          setBusy(false);
+        }
+      }}>
+      <p className="text-xs font-medium text-slate-700">{title}</p>
+      <div className="flex flex-wrap items-end gap-2">
+        {children}
+        <button type="submit" disabled={!ready || busy} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-50">
+          {busy ? "Creating…" : button}
+        </button>
+      </div>
+      {said && <p role={said.error ? "alert" : "status"} className={`text-xs ${said.error ? "text-red-700" : "text-emerald-800"}`}>{said.text}</p>}
+    </form>
+  );
+}
+
+/** A new record type in the domain, used as a set of this model at once. */
+function NewRecordType({ taken, onCreate }: { taken: string[]; onCreate: (name: string) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const problem = nameProblem(name, taken);
+  return (
+    <CreateForm title="Create a new record type" button="Create record type" ready={!!name && !problem}
+      onSubmit={async () => {
+        await onCreate(name);
+        const made = name;
+        setName("");
+        return `${made} is a record type of this domain now, and a set of this model. Add its records under Data.`;
+      }}>
+      <label className="text-xs text-slate-600">Name
+        <input className={`${FORM_INPUT} ml-1 w-40 font-mono`} value={name} placeholder="warehouse" onChange={(e) => setName(e.target.value.trim())} />
+      </label>
+      {problem && <p className="w-full text-xs text-red-700">{problem}</p>}
+    </CreateForm>
+  );
+}
+
+/** A number every record of a set carries (an attribute), for rules to read as “data of each”. */
+function NewAttribute({ set, taken, onCreate }: { set: string; taken: string[]; onCreate: (set: string, name: string, unit: string) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("");
+  const problem = nameProblem(name, taken);
+  return (
+    <CreateForm title={`Add a number to each ${set}`} button="Add number" ready={!!name && !problem}
+      onSubmit={async () => {
+        await onCreate(set, name, unit.trim());
+        const made = name;
+        setName("");
+        setUnit("");
+        return `Each ${set} has ${made} now; fill it in on its records.`;
+      }}>
+      <label className="text-xs text-slate-600">Name
+        <input aria-label={`New number of each ${set}`} className={`${FORM_INPUT} ml-1 w-36 font-mono`} value={name} placeholder="capacity"
+          onChange={(e) => setName(e.target.value.trim())} />
+      </label>
+      <label className="text-xs text-slate-600">Unit
+        <input aria-label={`Unit of the new number of each ${set}`} className={`${FORM_INPUT} ml-1 w-24`} value={unit} placeholder="optional"
+          onChange={(e) => setUnit(e.target.value)} />
+      </label>
+      {problem && <p className="w-full text-xs text-red-700">{problem}</p>}
+    </CreateForm>
+  );
+}
+
+/** New data in the domain -- one number per item of the sets chosen -- read by this model at once. */
+function NewData({ sets, taken, onCreate }: {
+  sets: string[];
+  taken: string[];
+  onCreate: (made: { name: string; index: string[]; defaultValue: number; unit: string }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [index, setIndex] = useState<string[]>([]);
+  const [fallback, setFallback] = useState("0");
+  const [unit, setUnit] = useState("");
+  const problem = nameProblem(name, taken);
+  const number = Number(fallback);
+  const ready = !!name && !problem && index.length > 0 && fallback.trim() !== "" && Number.isInteger(number);
+  return (
+    <CreateForm title="Create new data" button="Create data" ready={ready}
+      onSubmit={async () => {
+        await onCreate({ name, index, defaultValue: number, unit: unit.trim() });
+        const made = name;
+        setName("");
+        setIndex([]);
+        return `${made} is data of this domain now, read by this model. Fill in its values under Data › Parameters.`;
+      }}>
+      <label className="text-xs text-slate-600">Name
+        <input aria-label="New data name" className={`${FORM_INPUT} ml-1 w-36 font-mono`} value={name} placeholder="demand"
+          onChange={(e) => setName(e.target.value.trim())} />
+      </label>
+      <fieldset className="text-xs text-slate-600">
+        <legend>One number for every</legend>
+        {sets.length === 0 && <span>Choose a set first.</span>}
+        {sets.map((set) => (
+          <label key={set} className="mr-2 inline-flex items-center gap-1">
+            <input type="checkbox" checked={index.includes(set)}
+              onChange={(e) => setIndex((current) => (e.target.checked ? [...current, set] : current.filter((s) => s !== set)))} />
+            <span className="font-mono">{set}</span>
+          </label>
+        ))}
+      </fieldset>
+      <label className="text-xs text-slate-600">Where none is given
+        <input aria-label="New data default" inputMode="numeric" className={`${FORM_INPUT} ml-1 w-20 font-mono`} value={fallback}
+          onChange={(e) => setFallback(e.target.value)} />
+      </label>
+      <label className="text-xs text-slate-600">Unit
+        <input aria-label="New data unit" className={`${FORM_INPUT} ml-1 w-24`} value={unit} placeholder="optional" onChange={(e) => setUnit(e.target.value)} />
+      </label>
+      {problem && <p className="w-full text-xs text-red-700">{problem}</p>}
+      {name && !problem && index.length === 0 && <p className="w-full text-xs text-slate-600">Choose which sets it has one number for.</p>}
+    </CreateForm>
   );
 }

@@ -475,3 +475,56 @@ describe("a variable edited from its sentence and its diagram", () => {
     expect(onChange.mock.calls.at(-1)![0].variables.overtime.domain).toBe("integer");
   });
 });
+
+describe("making new record types, numbers and data from the declarations", () => {
+  it("creates a record type in the domain and uses it as a set at once", async () => {
+    const onCreateSet = vi.fn().mockResolvedValue(undefined);
+    const onChange = renderEditor({ onCreateSet });
+    const form = screen.getByRole("form", { name: "Create a new record type" });
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "shift" } });
+    expect(within(form).getByText("There is already something called shift.")).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Create record type" })).toBeDisabled();
+    fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "warehouse" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create record type" }));
+    expect(await within(form).findByRole("status")).toHaveTextContent("warehouse is a record type of this domain now");
+    expect(onCreateSet).toHaveBeenCalledWith("warehouse");
+    expect(onChange.mock.calls.at(-1)![0].sets).toEqual(["employee", "day", "warehouse"]);
+  });
+
+  it("adds a number to each record of a set, from the set's card", async () => {
+    const onCreateAttribute = vi.fn().mockResolvedValue(undefined);
+    renderEditor({ onCreateAttribute, attributes: { employee: [{ name: "cap", data_type: "number" }] } });
+    const card = screen.getAllByTestId("set-card")[0];
+    fireEvent.click(within(card).getByRole("button", { name: "More options for employee" }));
+    fireEvent.change(within(card).getByLabelText("New number of each employee"), { target: { value: "cap" } });
+    expect(within(card).getByText("There is already something called cap.")).toBeInTheDocument();
+    fireEvent.change(within(card).getByLabelText("New number of each employee"), { target: { value: "hourly_rate" } });
+    fireEvent.change(within(card).getByLabelText("Unit of the new number of each employee"), { target: { value: "EUR/h" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Add number" }));
+    expect(await within(card).findByRole("status")).toHaveTextContent("Each employee has hourly_rate now");
+    expect(onCreateAttribute).toHaveBeenCalledWith("employee", "hourly_rate", "EUR/h");
+  });
+
+  it("creates new data over the sets chosen, reads it in the model, and says why a refusal happened", async () => {
+    const onCreateParameter = vi.fn().mockRejectedValueOnce(new Error("The domain refused it: name taken")).mockResolvedValue(undefined);
+    const onChange = renderEditor({ onCreateParameter });
+    const form = screen.getByRole("form", { name: "Create new data" });
+    fireEvent.change(within(form).getByLabelText("New data name"), { target: { value: "capacity" } });
+    const create = within(form).getByRole("button", { name: "Create data" });
+    expect(create).toBeDisabled();
+    fireEvent.click(within(form).getByRole("checkbox", { name: "day" }));
+    fireEvent.change(within(form).getByLabelText("New data default"), { target: { value: "8" } });
+    fireEvent.click(create);
+    expect(await within(form).findByRole("alert")).toHaveTextContent("name taken");
+    fireEvent.click(create);
+    expect(await within(form).findByRole("status")).toHaveTextContent("capacity is data of this domain now");
+    expect(onCreateParameter).toHaveBeenLastCalledWith({ name: "capacity", index: ["day"], defaultValue: 8, unit: "" });
+    expect(onChange.mock.calls.at(-1)![0].parameters.capacity).toEqual({ index: ["day"] });
+  });
+
+  it("offers no creation where the account may not change the domain", () => {
+    renderEditor();
+    expect(screen.queryByRole("form", { name: "Create a new record type" })).toBeNull();
+    expect(screen.queryByRole("form", { name: "Create new data" })).toBeNull();
+  });
+});

@@ -10,6 +10,9 @@ import {
   useApplyTemplate,
   useCreateVersion,
   useClassify,
+  useCreateAttribute,
+  useCreateEntityType,
+  useCreateParameter,
   useEntityTypes,
   useParameters,
   useRelationshipTypes,
@@ -211,6 +214,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // editors are shown disabled rather than inviting edits Publish would refuse.
   const { can, known } = useCapabilities();
   const canEdit = !known || can("model.publish");
+  // Making new record types, numbers on them and data changes the domain, which is its own capability.
+  const canShape = canEdit && (!known || can("domain.edit"));
+  const createType = useCreateEntityType();
+  const createAttribute = useCreateAttribute();
+  const createParameterDef = useCreateParameter();
 
   const [failure, setFailure] = useState<string | null>(null);
   // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
@@ -609,6 +617,25 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onChange={(next) => setDraft((current) => current && { ...current, ...next })}
         view={equationView}
         onView={setEquationView}
+        {...(canShape ? {
+          onCreateSet: async (name: string) => {
+            await createType.mutateAsync({ domain_id: domainId as Id, name, role: "other" });
+          },
+          onCreateAttribute: async (set: string, name: string, unit: string) => {
+            const type = (entityTypes.data?.items ?? []).find((t) => t.name === set);
+            if (!type) throw new Error(`${set} is not a record type of this domain.`);
+            await createAttribute.mutateAsync({ entityTypeId: type.id, body: { name, data_type: "number", ...(unit ? { unit } : {}) } });
+          },
+          onCreateParameter: async (made: { name: string; index: string[]; defaultValue: number; unit: string }) => {
+            const types = entityTypes.data?.items ?? [];
+            const ids = made.index.map((set) => types.find((t) => t.name === set)?.id);
+            if (ids.some((id) => id === undefined)) throw new Error("Every set it is over must be a record type of this domain.");
+            await createParameterDef.mutateAsync({
+              domain_id: domainId as Id, name: made.name, index_type_ids: ids as Id[], default_value: made.defaultValue,
+              ...(made.unit ? { unit: made.unit } : {}),
+            });
+          },
+        } : {})}
         attributes={context?.attributes ?? {}}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))}
       />
