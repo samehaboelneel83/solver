@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 /**
  * Nested-block chrome for the Model editor, matching the look of
@@ -42,6 +42,8 @@ export type TreeItemProps = {
   header: ReactNode;
   /** Shown instead of `header` while closed -- a one-line summary that opens the item. */
   collapsedHeader?: ReactNode;
+  /** Each new value opens the item (a “go to it” from elsewhere on the page). */
+  openSignal?: number;
   actions?: ReactNode;
   children?: ReactNode;
   className?: string;
@@ -54,6 +56,7 @@ export function TreeItem({
   defaultOpen = true,
   header,
   collapsedHeader,
+  openSignal,
   actions,
   children,
   className,
@@ -61,6 +64,9 @@ export function TreeItem({
   const generatedId = useId();
   const panelId = itemId ?? generatedId;
   const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    if (openSignal !== undefined) setOpen(true);
+  }, [openSignal]);
   const showChildren = leaf || open;
 
   return (

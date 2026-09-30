@@ -1416,7 +1416,11 @@ describe("equations as drill-down diagrams", () => {
 });
 
 describe("the Simple level", () => {
-  beforeEach(() => localStorage.setItem("solver_editor_level", "simple"));
+  beforeEach(() => {
+    localStorage.setItem("solver_editor_level", "simple");
+    // All on one page here; step by step has its own tests below.
+    localStorage.setItem("solver_editor_steps", "all");
+  });
 
   it("is where a new person starts, with fewer tabs and no guided-forms panel, and remembers Expert", async () => {
     localStorage.removeItem("solver_editor_level");
@@ -1471,5 +1475,60 @@ describe("the Simple level", () => {
     expect(variable).toHaveTextContent("The solver decides assign for every employee and every day: yes or no.");
     fireEvent.click(screen.getByRole("button", { name: "+ Add a set" }));
     expect(within(screen.getByRole("group", { name: "Add a set" })).getByRole("checkbox", { name: "employee" })).toBeChecked();
+  });
+});
+
+describe("step by step, at the Simple level", () => {
+  const BROKEN = {
+    ...IR_V2,
+    constraints: [
+      IR_V2.constraints[0],
+      { id: "c_bad", forall: [{ index: "d", set: "day" }], left: { var: "assign", index: ["x", "d"] }, relation: "<=", right: { const: 1 }, severity: "hard" },
+    ],
+  };
+  beforeEach(() => {
+    localStorage.setItem("solver_editor_level", "simple");
+    localStorage.removeItem("solver_editor_steps");
+  });
+
+  it("shows one step at a time, marks each, and moves with Next and Back", async () => {
+    renderPage();
+    const steps = await screen.findByRole("navigation", { name: "Steps" });
+    expect(within(steps).getByRole("button", { name: "Step 1, Things involved: done" })).toHaveAttribute("aria-current", "step");
+    expect(within(steps).getByRole("button", { name: "Step 3, Decisions: done" })).toBeInTheDocument();
+    expect(within(steps).getByRole("button", { name: "Step 5, Goal: optional" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Things involved" })).toBeVisible();
+    expect(screen.getByText("What the solver decides.")).not.toBeVisible();
+    expect(screen.getByText("What must be true")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Next: Data →" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next: Decisions →" }));
+    expect(screen.getByRole("group", { name: "Decisions" })).toBeVisible();
+    fireEvent.click(within(steps).getByRole("button", { name: /Step 4, Rules/ }));
+    expect(screen.getByText("What must be true")).toBeVisible();
+    expect(screen.getByText("What the solver decides.")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "← Back: Decisions" }));
+    expect(screen.getByRole("group", { name: "Decisions" })).toBeVisible();
+    // The last step is the whole model read back.
+    fireEvent.click(within(steps).getByRole("button", { name: /Step 6, Check/ }));
+    expect(screen.getByRole("tab", { name: "Check" })).toHaveAttribute("aria-selected", "true");
+    // Everything on one page, and back to steps.
+    fireEvent.click(screen.getByRole("button", { name: "Show all steps on one page" }));
+    expect(screen.queryByRole("navigation", { name: "Steps" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Go step by step" }));
+    expect(screen.getByRole("navigation", { name: "Steps" })).toBeInTheDocument();
+  });
+
+  it("lists every thing to fix in one place, and each one opens the card that has it", async () => {
+    stub({ ir: BROKEN });
+    renderPage();
+    const list = await screen.findByRole("region", { name: "Things to fix" });
+    expect(list).toHaveTextContent("1 thing to fix before publishing");
+    expect(list).toHaveTextContent("“x” is not bound here");
+    expect(screen.getByRole("button", { name: "Step 4, Rules: something to fix" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("c_bad")).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "Rule c_bad" }));
+    // On the Rules step, with that rule open.
+    expect(screen.getByText("What must be true")).toBeVisible();
+    expect(await screen.findByDisplayValue("c_bad")).toBeInTheDocument();
   });
 });

@@ -48,7 +48,9 @@ import { GoalBlocks, GoalSentence, RuleBlocks, RuleSentence } from "../model/Nes
 import { useCardView, useEquationView, viewAt, ViewToggle, type EquationView } from "../model/ViewToggle";
 import { EditorLevelContext, useEditorLevel } from "../model/editorLevel";
 import AddMenu, { AddChoice } from "../components/AddMenu";
-import { checkGoal, checkRule } from "../model/blockCheck";
+import { checkGoal, checkRule, explain } from "../model/blockCheck";
+import { checkDeclaration } from "../model/declarationViews";
+import { StepNav, Stepper, ThingsToFix, useStepByStep, type Fix, type Step, type StepStatus } from "../model/ModelSteps";
 import { ruleSentence, termSentence } from "../model/ruleSentence";
 import { GOAL_SHAPES, goalFromShape, RULE_SHAPES, ruleFromShape, type GoalShape, type RuleShape } from "../model/shapes";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
@@ -232,6 +234,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [level, setLevel] = useEditorLevel();
   const simple = level === "simple";
   const equationView = viewAt(storedView, simple);
+  // Step by step at Simple (ModelSteps.tsx): which step is on screen, or all of them.
+  const [stepsOn, setStepsOn] = useStepByStep();
+  const [step, setStep] = useState<Step>("sets");
+  // “Go to it” from the list of things to fix: which card to open; `seq` changes each time.
+  const [opening, setOpening] = useState<{ kind: "rule" | "goal" | "variable" | "parameter"; id: string; seq: number } | null>(null);
   // One key per publication attempt, kept across retries (see publishFromServer).
   const publishKey = useRef<{ key: string; revision: number } | null>(null);
   const [serverPublishing, setServerPublishing] = useState(false);
@@ -511,6 +518,47 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     clearDraft(Number(problemId));
   }
 
+  const stepByStep = simple && stepsOn;
+  const currentStep: Step = view === "review" ? "check" : step;
+  function goToStep(next: Step) {
+    if (next === "check") {
+      setView("review");
+      return;
+    }
+    setStep(next);
+    if (view !== "forms") setView("forms");
+  }
+  function goTo(kind: "rule" | "goal" | "variable" | "parameter", id: string) {
+    goToStep(kind === "rule" ? "rules" : kind === "goal" ? "goal" : kind === "variable" ? "decisions" : "data");
+    setOpening((current) => ({ kind, id, seq: (current?.seq ?? 0) + 1 }));
+    // After the card has opened: bring it into view.
+    window.setTimeout(() => {
+      const target = document.getElementById(kind === "rule" ? `rule-card-${id}` : kind === "goal" ? "objective-editor" : `${kind}-card-${id}`);
+      target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    }, 0);
+  }
+  const ruleFixes: Fix[] = draft.constraints.flatMap((rule) => checkRule(rule, context).map((problem, i) => ({
+    key: `rule-${rule.id}-${i}`, where: `Rule ${rule.id || "(unnamed)"}`, message: explain(problem), go: () => goTo("rule", rule.id),
+  })));
+  const goalFixes: Fix[] = draft.objective.terms.flatMap((term) => (term.expression ? checkGoal(term.expression, context) : []).map((problem, i) => ({
+    key: `goal-${term.id}-${i}`, where: `Goal ${term.id || "(unnamed)"}`, message: explain(problem), go: () => goTo("goal", term.id),
+  })));
+  const variableFixes: Fix[] = Object.entries(draft.variables).flatMap(([name, spec]) => checkDeclaration("variable", spec, draft.sets).map((problem, i) => ({
+    key: `variable-${name}-${i}`, where: `Decision ${name}`, message: explain(problem), go: () => goTo("variable", name),
+  })));
+  const parameterFixes: Fix[] = Object.entries(draft.parameters).flatMap(([name, spec]) => checkDeclaration("parameter", spec, draft.sets).map((problem, i) => ({
+    key: `parameter-${name}-${i}`, where: `Data ${name}`, message: explain(problem), go: () => goTo("parameter", name),
+  })));
+  const fixes = [...parameterFixes, ...variableFixes, ...ruleFixes, ...goalFixes];
+  const stepStatus: Record<Step, StepStatus> = {
+    sets: draft.sets.length ? "done" : "todo",
+    data: parameterFixes.length ? "fix" : Object.keys(draft.parameters).length ? "done" : "optional",
+    decisions: variableFixes.length ? "fix" : Object.keys(draft.variables).length ? "done" : "todo",
+    rules: ruleFixes.length ? "fix" : draft.constraints.length ? "done" : "todo",
+    goal: goalFixes.length ? "fix" : draft.objective.terms.length ? "done" : "optional",
+    check: refusal !== null || fixes.length ? "fix" : "todo",
+  };
+
   return (
     <EditorLevelContext.Provider value={level}>
       {versionItems.length > 0 && !scratch ? (
@@ -585,6 +633,15 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <Link className="inline-block py-2 text-blue-700 underline" to={`/domains/${domainId}/data/explore?mode=model&problem=${problemId}`}>Open legacy visualizations</Link>
       </details>}
 
+      {canEdit && simple && <ThingsToFix items={fixes} />}
+      {stepByStep && (
+        <Stepper current={currentStep} status={stepStatus} onStep={goToStep} onAll={() => setStepsOn(false)} />
+      )}
+      {simple && !stepsOn && (
+        <p className="mb-3 text-xs">
+          <button type="button" className="text-blue-700 underline" onClick={() => setStepsOn(true)}>Go step by step</button>
+        </p>
+      )}
       {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
         layoutKey={`problem-${problemId}`} layoutProblemId={problemId}
         selection={graphFocus?.part === "rules" && graphFocus.ruleKey !== undefined
@@ -621,7 +678,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
-      <div hidden={focusedPart === "rules" || focusedPart === "objective"} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
+      <div hidden={focusedPart === "rules" || focusedPart === "objective" || (stepByStep && !["sets", "data", "decisions"].includes(step))} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
       <DeclarationsEditor
         sets={draft.sets}
         parameters={draft.parameters}
@@ -637,6 +694,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         view={equationView}
         onView={setEquationView}
         simple={simple}
+        onlyGroup={stepByStep && (step === "sets" || step === "data" || step === "decisions") ? step : undefined}
+        opening={opening && (opening.kind === "variable" || opening.kind === "parameter") ? { name: opening.id, seq: opening.seq } : null}
         {...(canShape ? {
           onCreateSet: async (name: string) => {
             await createType.mutateAsync({ domain_id: domainId as Id, name, role: "other" });
@@ -661,7 +720,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       />
 
       </div>
-      <section hidden={focusedPart !== undefined && focusedPart !== "rules"} id="constraints-editor" tabIndex={-1} aria-labelledby="constraints-heading" className="mb-6">
+      <section hidden={(focusedPart !== undefined && focusedPart !== "rules") || (stepByStep && step !== "rules")} id="constraints-editor" tabIndex={-1} aria-labelledby="constraints-heading" className="mb-6">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 id="constraints-heading" className="text-base font-semibold text-slate-900">
             What must be true
@@ -678,6 +737,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               view={equationView}
               startIn={composed.has(constraint.id) ? "boxes" : undefined}
               simple={simple}
+              openSignal={opening?.kind === "rule" && opening.id === constraint.id ? opening.seq : undefined}
               constraint={constraint}
               otherIds={draft.constraints
                 .filter((_, i) => i !== position)
@@ -836,21 +896,24 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         )}
       </section>
 
-      <section hidden={focusedPart !== undefined && focusedPart !== "objective"} id="objective-editor" tabIndex={-1} aria-labelledby="objective-heading" className="mb-6">
+      <section hidden={(focusedPart !== undefined && focusedPart !== "objective") || (stepByStep && step !== "goal")} id="objective-editor" tabIndex={-1} aria-labelledby="objective-heading" className="mb-6">
         <h2 id="objective-heading" className="mb-2 text-base font-semibold text-slate-900">
           What to make best
         </h2>
         <ObjectiveEditor
           view={equationView}
           simple={simple}
+          openGoal={opening?.kind === "goal" ? { id: opening.id, seq: opening.seq } : null}
           objective={draft.objective}
           context={context}
           onChange={(objective) => setDraft((current) => current && { ...current, objective })}
         />
       </section>
       </fieldset>
+      {stepByStep && <StepNav current={currentStep} onStep={goToStep} />}
       </>
       )}
+      {stepByStep && view === "review" && <StepNav current={currentStep} onStep={goToStep} />}
 
       {refusal === null && classification.data && (
         <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -956,6 +1019,7 @@ function ConstraintCard({
   onRemove,
   startIn,
   simple = false,
+  openSignal,
 }: {
   view: EquationView;
   constraint: Constraint;
@@ -967,6 +1031,8 @@ function ConstraintCard({
   startIn?: EquationView;
   /** Simple: the card is one line -- its sentence and whether it checks out -- until opened. */
   simple?: boolean;
+  /** Each new value opens the card (a “go to it” from the list of things to fix). */
+  openSignal?: number;
 }) {
   const idField = useId();
   const noteField = useId();
@@ -985,10 +1051,11 @@ function ConstraintCard({
         : null;
 
   return (
-    <article className="rounded-md border border-slate-200 bg-white p-2">
+    <article id={`rule-card-${constraint.id}`} className="rounded-md border border-slate-200 bg-white p-2">
     <TreeItem
       name={constraint.id || "rule"}
       defaultOpen={!simple || startIn !== undefined}
+      openSignal={openSignal}
       collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={ruleSentence(constraint)} problems={checkRule(constraint, context).length} /> : undefined}
       header={
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
@@ -1481,6 +1548,7 @@ function GoalExpression({ view, goalId, expression, context, onChange, startIn }
 function ObjectiveEditor({
   view,
   simple = false,
+  openGoal = null,
   objective,
   context,
   onChange,
@@ -1488,6 +1556,8 @@ function ObjectiveEditor({
   view: EquationView;
   /** Simple: goals collapse to a line, and one “+ Add a goal” menu. */
   simple?: boolean;
+  /** Open this goal's card (a “go to it” from the list of things to fix). */
+  openGoal?: { id: string; seq: number } | null;
   objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
   context: ModelContext;
   onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
@@ -1556,6 +1626,7 @@ function ObjectiveEditor({
             key={position}
             name={term.id || "objective term"}
             defaultOpen={!simple || composedGoals.has(term.id)}
+            openSignal={openGoal?.id === term.id ? openGoal.seq : undefined}
             collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={term.expression ? `Counts ${termSentence(term.expression)}.` : "Counts nothing yet."}
               problems={term.expression ? checkGoal(term.expression, context).length : 1} /> : undefined}
             header={

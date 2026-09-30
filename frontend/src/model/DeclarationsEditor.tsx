@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import RangePicture from "./RangePicture";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { VARIABLE_DOMAINS, type VariableDomain } from "../ir/contract";
@@ -62,6 +62,10 @@ export type DeclarationsEditorProps = {
   onCreateParameter?: (parameter: { name: string; index: string[]; defaultValue: number; unit: string }) => Promise<void>;
   /** Simple: plain group names, cards closed to one line, and one “+ Add” per group. */
   simple?: boolean;
+  /** Step by step: show this group only. */
+  onlyGroup?: "sets" | "data" | "decisions";
+  /** Open this declaration's card (a “go to it” from the list of things to fix); `seq` changes each time. */
+  opening?: { name: string; seq: number } | null;
 };
 
 export default function DeclarationsEditor({
@@ -81,6 +85,8 @@ export default function DeclarationsEditor({
   onCreateAttribute,
   onCreateParameter,
   simple = false,
+  onlyGroup,
+  opening = null,
 }: DeclarationsEditorProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [ownView, setOwnView] = useState<EquationView>("equation");
@@ -259,9 +265,9 @@ export default function DeclarationsEditor({
       )}
 
       <div className="space-y-4">
-        <Group title={simple ? "Things involved" : "Sets"} hint="The kinds of thing the rules range over.">
+        <Group hidden={onlyGroup !== undefined && onlyGroup !== "sets"} title={simple ? "Things involved" : "Sets"} hint="The kinds of thing the rules range over.">
           {sets.map((name) => (
-            <DeclarationCard key={name} kind="set" name={name} heading={name} view={view} simple={simple}
+            <DeclarationCard key={name} kind="set" name={name} openSignal={opening?.name === name ? opening.seq : undefined} heading={name} view={view} simple={simple}
               summary={declarationSentence("set", name, null, attributes[name] ?? [], undefined)}
               foldDetails
               details={onCreateAttribute ? <NewAttribute set={name} taken={(attributes[name] ?? []).map((a) => a.name)} onCreate={onCreateAttribute} /> : undefined}
@@ -345,9 +351,9 @@ export default function DeclarationsEditor({
           )}
         </Group>
 
-        <Group title={simple ? "Data" : "Parameters"} hint="Numbers the domain already holds, read by the rules.">
+        <Group hidden={onlyGroup !== undefined && onlyGroup !== "data"} title={simple ? "Data" : "Parameters"} hint="Numbers the domain already holds, read by the rules.">
           {Object.entries(parameters).map(([name, spec]) => (
-            <DeclarationCard key={name} kind="parameter" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
+            <DeclarationCard key={name} kind="parameter" name={name} openSignal={opening?.name === name ? opening.seq : undefined} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
               summary={declarationSentence("parameter", name, spec, [], units[name])}
               details={parameterDetails(name)}
               onStop={() => refuseIfStranding("parameter", name, () => {
@@ -462,9 +468,9 @@ export default function DeclarationsEditor({
           )}
         </Group>
 
-        <Group title={simple ? "Decisions" : "Variables"} hint="What the solver decides.">
+        <Group hidden={onlyGroup !== undefined && onlyGroup !== "decisions"} title={simple ? "Decisions" : "Variables"} hint="What the solver decides.">
           {Object.entries(variables).map(([name, spec]) => (
-            <DeclarationCard key={name} kind="variable" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
+            <DeclarationCard key={name} kind="variable" name={name} openSignal={opening?.name === name ? opening.seq : undefined} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
               summary={declarationSentence("variable", name, spec, [], undefined)} problems={checkDeclaration("variable", spec, sets).length}
               details={variableDetails(name, spec)}
               onRemove={() =>
@@ -1027,12 +1033,12 @@ function Muted({ children }: { children: React.ReactNode }) {
 }
 
 /** One of the three groups -- Sets, Parameters, Variables -- as a named group of cards. */
-function Group({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+function Group({ title, hint, hidden = false, children }: { title: string; hint: string; hidden?: boolean; children: ReactNode }) {
   return (
     // A named group, because "day" appears both as a set and as an index of a
     // variable being built: without the grouping the two are one ambiguous
     // control to anyone navigating by name.
-    <div role="group" aria-label={title} className="space-y-1">
+    <div role="group" aria-label={title} className="space-y-1" hidden={hidden}>
       <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
       <p className="mb-1 text-xs text-slate-500">{hint}</p>
       {children}
@@ -1061,7 +1067,7 @@ const KIND_TAG: Record<DeclarationKind, { text: string; style: string }> = {
  * switch, the view, and its fields -- shown with the equation, behind “More
  * options” with the simpler views.
  */
-function DeclarationCard({ kind, name, heading, view, details, foldDetails = false, onRemove, onStop, simple = false, summary, problems = 0, children }: {
+function DeclarationCard({ kind, name, heading, view, details, foldDetails = false, onRemove, onStop, simple = false, summary, problems = 0, openSignal, children }: {
   kind: DeclarationKind;
   name: string;
   heading: string;
@@ -1075,11 +1081,15 @@ function DeclarationCard({ kind, name, heading, view, details, foldDetails = fal
   simple?: boolean;
   summary?: string;
   problems?: number;
+  openSignal?: number;
   children: (shown: EquationView, setShown: (next: EquationView) => void) => ReactNode;
 }) {
   const [shown, setShown] = useCardView(view);
   const [more, setMore] = useState(false);
   const [open, setOpen] = useState(!simple);
+  useEffect(() => {
+    if (openSignal !== undefined) setOpen(true);
+  }, [openSignal]);
   const tag = KIND_TAG[kind];
   if (simple && !open) {
     return (
@@ -1093,7 +1103,7 @@ function DeclarationCard({ kind, name, heading, view, details, foldDetails = fal
     );
   }
   return (
-    <article className="rounded-md border border-slate-200 bg-white p-2" data-testid={`${kind}-card`}>
+    <article id={`${kind}-card-${name}`} className="rounded-md border border-slate-200 bg-white p-2" data-testid={`${kind}-card`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs">{heading}</span>
         <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tag.style}`}>{tag.text}</span>
