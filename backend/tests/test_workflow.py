@@ -117,3 +117,37 @@ def test_the_scenario_preflight_names_missing_values_in_place_of_the_compiler_re
     db.commit()
     body = TestClient(app).get(f"/api/v1/scenarios/{sid}/preflight", headers=auth_headers).json()
     assert [f["code"] for f in body["findings"]] == ["missing_values"]
+
+
+def test_a_hard_rule_that_sums_over_nobody_and_so_cannot_hold_stops_the_solve(world, db, auth_headers):  # noqa: F811
+    """feed_blend on a user's screen: c_protein was pointed at a set with no
+    records, so its sum counted as 0 and "0 >= 20" could never hold. The check
+    said "Ready to solve" with a warning, and every run came back infeasible."""
+    make_entity_type(db, world["domain"], "em", "resource")
+    ir = {**IR, "sets": ["employee", "em"], "constraints": [*IR["constraints"], {
+        "id": "c_protein",
+        "left": {"sum": {"mul": [{"const": 2}, {"var": "pick", "index": ["e"]}]}, "over": [{"index": "x", "set": "em"}, {"index": "e", "set": "employee"}]},
+        "relation": ">=", "right": {"const": 20}, "severity": "hard"}]}
+    make_model_version(db, world["problem"], ir)
+    db.execute(text("UPDATE entity SET attrs = attrs || '{\"hours_per_week\": 30}' WHERE id = :id"), {"id": world["ahmed"]})
+    db.commit()
+    check = TestClient(app).get(f"/api/v1/problems/{world['problem']}/readiness", headers=auth_headers).json()["check"]
+    assert check["ready"] is False
+    blockers = [f for f in check["findings"] if f["kind"] == "blocker"]
+    assert [f["code"] for f in blockers] == ["rule_never_holds"]
+    assert blockers[0]["rule"] == "c_protein"
+    assert "c_protein can never hold: on today's data it reads 0 >= 20" in blockers[0]["says"]
+    # The warnings that were all it said before are still there.
+    assert {"set_empty", "empty_range"} <= {f["code"] for f in check["findings"]}
+
+
+def test_a_soft_rule_that_cannot_hold_is_only_paid_for_not_a_blocker(world, db, auth_headers):  # noqa: F811
+    make_entity_type(db, world["domain"], "em", "resource")
+    ir = {**IR, "sets": ["employee", "em"], "constraints": [*IR["constraints"], {
+        "id": "c_soft", "left": {"sum": {"var": "pick", "index": ["e"]}, "over": [{"index": "x", "set": "em"}, {"index": "e", "set": "employee"}]},
+        "relation": ">=", "right": {"const": 20}, "severity": "soft", "penalty": 5}]}
+    make_model_version(db, world["problem"], ir)
+    db.execute(text("UPDATE entity SET attrs = attrs || '{\"hours_per_week\": 30}' WHERE id = :id"), {"id": world["ahmed"]})
+    db.commit()
+    check = TestClient(app).get(f"/api/v1/problems/{world['problem']}/readiness", headers=auth_headers).json()["check"]
+    assert "rule_never_holds" not in {f["code"] for f in check["findings"]}

@@ -59,6 +59,28 @@ def _finding(kind: str, code: str, says: str, **extra: Any) -> dict[str, Any]:
     return {"kind": kind, "code": code, "says": says, **extra}
 
 
+_HOLDS = {"<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b, "=": lambda a, b: a == b}
+
+
+def _never_holds(compiled: Any) -> dict[str, list[Any]]:
+    """Hard, unconditional rule instances with no decision left in either side
+    whose numbers break the relation, by rule id. Soft rules carry a violation
+    variable, so they are never constant and never listed."""
+    out: dict[str, list[Any]] = {}
+    for rule in compiled.constraints:
+        if (rule.schedule is not None or rule.when is not None or rule.chance is not None or rule.quadratic
+                or not rule.left.is_constant or not rule.right.is_constant):
+            continue
+        holds = _HOLDS.get(rule.relation)
+        if holds is not None and not holds(rule.left.const, rule.right.const):
+            out.setdefault(rule.id, []).append(rule)
+    return out
+
+
+def _num(value: Any) -> str:
+    return format(value.normalize(), "f") if hasattr(value, "normalize") else str(value)
+
+
 def missing_details(db: Session, domain_id: int, missing: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The gaps `app.solve.missing` found, with what a form needs to fill them
     in place: each record's id, label and version stamp, and the attribute's
@@ -144,6 +166,21 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
                                  f"{empty.get('constraint_id', 'A rule')} has a {empty.get('kind', 'range')} that matches nobody"
                                  f"{f' (at {where})' if where else ''}: it holds vacuously or counts as zero, often a data gap.",
                                  detail=empty))
+
+    # A hard rule that, on today's data, comes to numbers alone -- a sum that matched
+    # nobody counts as 0, so "protein >= 20" reads 0 >= 20 -- and those numbers break it.
+    # No plan can meet it, so a solve would only come back infeasible: say so first.
+    for rule_id, broken in (_never_holds(compiled) if compiled is not None else {}).items():
+        first = broken[0]
+        where = ", ".join(f"{k} = {v}" for k, v in first.index.items())
+        findings.append(_finding(
+            "blocker", "rule_never_holds",
+            f"{rule_id} can never hold{f' (at {where})' if where else ''}: on today's data it reads "
+            f"{_num(first.left.const)} {first.relation} {_num(first.right.const)}, with no decision left in it"
+            f"{'' if len(broken) == 1 else f', and so do {len(broken) - 1} more of its instances'}. "
+            "No plan can meet it, so solving would only report infeasible. Usually a range that matches "
+            "nobody: add the records it counts, or fix what the rule sums over.",
+            rule=rule_id, instances=len(broken)))
 
     found = classify(ir, data)
     if compiled is not None:
