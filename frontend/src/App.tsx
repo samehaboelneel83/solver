@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
+import Health from "./pages/Health";
 import StartProblem from "./pages/StartProblem";
 import { DomainOverview, ProblemOverview } from "./pages/PlanningOverview";
 import GraphDemo from "./pages/GraphDemo";
@@ -70,6 +71,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/health" element={<Health />} />
       <Route
         path="/"
         element={

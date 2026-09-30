@@ -20,7 +20,14 @@ call :wait http://localhost:8010/api/health backend || goto :failed
 echo == Checking frontend is serving ==
 call :wait http://localhost:3010/ frontend || goto :failed
 
-echo == Rebuild complete: open http://localhost:3010 and press Ctrl+F5 ==
+echo == Checking every part: database, its version, worker, analytics ==
+rem The worker says it is alive a few seconds after it starts: give it up to 30 s.
+rem Anything still down is printed below with its fix; the rebuild itself is done.
+call :wait "http://localhost:8010/api/health/details?strict=true" "every part" >nul
+curl.exe -s "http://localhost:8010/api/health/details?format=text"
+
+echo == Rebuild complete: opening http://localhost:3010/health (press Ctrl+F5 there) ==
+start "" http://localhost:3010/health
 exit /b 0
 
 rem Containers start before they accept connections: try 15 times, 2 s apart.

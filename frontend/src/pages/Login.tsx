@@ -1,5 +1,5 @@
 import { FormEvent, useId, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { login } from "../api/client";
 import { formatApiError } from "../api/errors";
 
@@ -105,6 +105,9 @@ export default function Login() {
           Sign in
         </button>
       </form>
+      <p className="mt-4 text-center text-xs text-slate-500">
+        Cannot sign in? <Link className="underline" to="/health">See whether the platform is working</Link>
+      </p>
     </main>
   );
 }

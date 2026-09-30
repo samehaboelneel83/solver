@@ -10,3 +10,15 @@ export function useHealth() {
     refetchInterval: 30000,
   });
 }
+
+/** One part of the platform: whether it works and, when not, the command that brings it back. */
+export type HealthCheck = { name: string; ok: boolean; needed: boolean; says: string; fix: string | null };
+export type HealthDetails = { ready: boolean; checks: HealthCheck[] };
+
+export function useHealthDetails() {
+  return useQuery({
+    queryKey: ["health", "details"],
+    queryFn: () => apiFetch<HealthDetails>("/api/health/details"),
+    refetchInterval: 5000,
+  });
+}

@@ -36,7 +36,8 @@ export default function ReachabilityBanner() {
         data-testid="degraded-notice"
         className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
       >
-        The {parts.join(" and ")} reported an error. Planning may still work; check operator runbooks if it persists.
+        The {parts.join(" and ")} reported an error. Planning may still work.{" "}
+        <a className="underline" href="/health">See what to do</a>
       </div>
     );
   }

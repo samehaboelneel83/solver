@@ -57,4 +57,16 @@ wait_for_backend
 echo "== Checking frontend is serving =="
 wait_for_frontend
 
-echo "== Rebuild complete =="
+# The worker says it is alive a few seconds after it starts: give it up to
+# 30 s. Anything still down is printed with its fix; the rebuild is done.
+echo "== Checking every part: database, its version, worker, analytics =="
+for attempt in $(seq 1 15); do
+    curl -fs -o /dev/null "http://localhost:8010/api/health/details?strict=true" && break
+    sleep 2
+done
+curl -s "http://localhost:8010/api/health/details?format=text"
+
+echo "== Rebuild complete: http://localhost:3010/health =="
+if command -v xdg-open >/dev/null 2>&1; then xdg-open http://localhost:3010/health >/dev/null 2>&1 || true
+elif command -v open >/dev/null 2>&1; then open http://localhost:3010/health || true
+fi
