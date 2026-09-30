@@ -4,10 +4,16 @@
  * the page (remembered in this browser), one on each card.
  */
 import { useEffect, useRef, useState } from "react";
+import { useLevel } from "./editorLevel";
 
 /** How a rule, goal or declaration is shown: in words, as nested boxes, as a drill-down diagram, or as one equation line. */
 export type EquationView = "sentence" | "boxes" | "diagram" | "equation";
 const EQUATION_VIEWS: readonly EquationView[] = ["sentence", "boxes", "diagram", "equation"];
+/** What the Simple level offers. */
+export const SIMPLE_VIEWS: readonly EquationView[] = ["sentence", "boxes"];
+/** The view shown at a level: Simple reads Diagram and Equation as Sentence. */
+export const viewAt = (view: EquationView, simple: boolean): EquationView =>
+  simple && !SIMPLE_VIEWS.includes(view) ? "sentence" : view;
 const VIEW_TEXT: Record<EquationView, { button: string; all: string; one: string }> = {
   sentence: { button: "Sentence", all: "sentences", one: "a sentence" },
   boxes: { button: "Boxes", all: "boxes", one: "boxes" },
@@ -45,9 +51,14 @@ export function ViewToggle({ value, onChange, name, size = "sm" }: {
   size?: "sm" | "xs";
 }) {
   const pad = size === "sm" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
+  // Simple: one switch for the page (not one per card), between the two plain views.
+  const simple = useLevel() === "simple";
+  const pageSwitch = name === "all" || name.startsWith("all ");
+  if (simple && !pageSwitch) return null;
+  const options = simple ? SIMPLE_VIEWS : EQUATION_VIEWS;
   return (
     <div role="group" aria-label={`Show ${name} as`} className="inline-flex overflow-hidden rounded-md border border-slate-300">
-      {EQUATION_VIEWS.map((option) => (
+      {options.map((option) => (
         <button
           key={option}
           type="button"

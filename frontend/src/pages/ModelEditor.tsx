@@ -45,7 +45,11 @@ import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
 import EquationField, { chipsFor } from "../model/EquationField";
 import { GoalDiagram, RuleDiagram } from "../model/EquationDiagram";
 import { GoalBlocks, GoalSentence, RuleBlocks, RuleSentence } from "../model/NestedBlocks";
-import { useCardView, useEquationView, ViewToggle, type EquationView } from "../model/ViewToggle";
+import { useCardView, useEquationView, viewAt, ViewToggle, type EquationView } from "../model/ViewToggle";
+import { EditorLevelContext, useEditorLevel } from "../model/editorLevel";
+import AddMenu, { AddChoice } from "../components/AddMenu";
+import { checkGoal, checkRule } from "../model/blockCheck";
+import { ruleSentence, termSentence } from "../model/ruleSentence";
 import { GOAL_SHAPES, goalFromShape, RULE_SHAPES, ruleFromShape, type GoalShape, type RuleShape } from "../model/shapes";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
@@ -223,13 +227,19 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [failure, setFailure] = useState<string | null>(null);
   // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
   const [justPublished, setJustPublished] = useState<number | null>(null);
-  const [equationView, setEquationView] = useEquationView();
+  const [storedView, setEquationView] = useEquationView();
+  // Simple or Expert (editorLevel.ts): Simple shows the plain views, one card open at a time, one “+ Add” per section.
+  const [level, setLevel] = useEditorLevel();
+  const simple = level === "simple";
+  const equationView = viewAt(storedView, simple);
   // One key per publication attempt, kept across retries (see publishFromServer).
   const publishKey = useRef<{ key: string; revision: number } | null>(null);
   const [serverPublishing, setServerPublishing] = useState(false);
   // Forms | Blocks (Blockly edit mode spec §6), in the URL so a reload keeps it.
   const requestedView = searchParams.get("view");
-  const view = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" || requestedView === "review" ? requestedView : "forms";
+  const asked = requestedView === "blocks" || requestedView === "graph" || requestedView === "ir" || requestedView === "review" ? requestedView : "forms";
+  // Simple builds in the forms and checks in Review; the other tabs are Expert's.
+  const view = simple && asked !== "review" ? "forms" : asked;
   const setView = (next: "forms" | "blocks" | "graph" | "ir" | "review") =>
     setSearchParams(
       (current) => {
@@ -502,7 +512,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   }
 
   return (
-    <>
+    <EditorLevelContext.Provider value={level}>
       {versionItems.length > 0 && !scratch ? (
         <div className="mb-4">
           <label htmlFor="model-base" className="block text-sm font-medium text-slate-700">
@@ -536,8 +546,17 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="How much to show" className="flex overflow-hidden rounded-md border border-slate-300"
+          title="Simple shows the model in plain words and boxes; Expert adds equations, diagrams, Blocks, the graph and the exact IR.">
+          {(["simple", "expert"] as const).map((option) => (
+            <button key={option} type="button" aria-pressed={level === option} onClick={() => setLevel(option)}
+              className={`px-3 py-1.5 text-sm ${level === option ? "bg-slate-800 text-white" : "bg-white text-slate-700"}`}>
+              {option === "simple" ? "Simple" : "Expert"}
+            </button>
+          ))}
+        </div>
         <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
-          {(canEdit ? ["forms", "graph", "blocks", "ir", "review"] as const : ["forms", "graph", "ir", "review"] as const).map((tab) => (
+          {(simple ? ["forms", "review"] as const : canEdit ? ["forms", "graph", "blocks", "ir", "review"] as const : ["forms", "graph", "ir", "review"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -546,11 +565,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               onClick={() => setView(tab)}
               className={`px-3 py-1.5 text-sm ${view === tab ? "bg-blue-700 text-white" : "bg-white text-slate-700"}`}
             >
-              {{ forms: "Guided Form", graph: "Visual Graph", blocks: "Blocks", ir: "Exact IR", review: "Review" }[tab]}
+              {{ forms: simple ? "Build" : "Guided Form", graph: "Visual Graph", blocks: "Blocks", ir: "Exact IR", review: simple ? "Check" : "Review" }[tab]}
             </button>
           ))}
         </div>
-        {canEdit && (view === "forms" || view === "blocks") && <p className="text-xs text-slate-500">
+        {canEdit && !simple && (view === "forms" || view === "blocks") && <p className="text-xs text-slate-500">
           Blocks are a drag-and-drop view of the same model. The forms are the keyboard and screen-reader way to edit it.
         </p>}
       </div>
@@ -560,11 +579,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           This account may read the model but not change it. Ask someone who may publish models to make a change.
         </p>
       )}
-      <details className="mb-4 text-sm text-slate-600">
+      {!simple && <details className="mb-4 text-sm text-slate-600">
         <summary className="cursor-pointer py-2">Advanced views</summary>
         <p className="my-2">Blocks edits the same draft. Exact IR is read-only. Legacy visualizations show published model versions.</p>
         <Link className="inline-block py-2 text-blue-700 underline" to={`/domains/${domainId}/data/explore?mode=model&problem=${problemId}`}>Open legacy visualizations</Link>
-      </details>
+      </details>}
 
       {view === "graph" && workingIr && <ModelGraphPreview ir={workingIr} entityTypes={entityTypes.data?.items ?? []}
         layoutKey={`problem-${problemId}`} layoutProblemId={problemId}
@@ -597,7 +616,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
       </div>}
       <fieldset disabled={!canEdit} aria-label={canEdit ? undefined : "The model, read only"} className="m-0 min-w-0 border-0 p-0">
-      {canEdit && <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
+      {canEdit && !simple && <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
         onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
@@ -617,6 +636,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onChange={(next) => setDraft((current) => current && { ...current, ...next })}
         view={equationView}
         onView={setEquationView}
+        simple={simple}
         {...(canShape ? {
           onCreateSet: async (name: string) => {
             await createType.mutateAsync({ domain_id: domainId as Id, name, role: "other" });
@@ -657,6 +677,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               key={ruleKeys[position]}
               view={equationView}
               startIn={composed.has(constraint.id) ? "boxes" : undefined}
+              simple={simple}
               constraint={constraint}
               otherIds={draft.constraints
                 .filter((_, i) => i !== position)
@@ -682,6 +703,40 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             />
           ))}
         </div>
+        {simple ? (
+          <AddMenu label="Add a rule">
+            {(close) => (
+              <>
+                {RULE_SHAPES.map((shape) => (
+                  <AddChoice key={shape.shape} title={shape.title} disabledReason={shape.needs(context)}
+                    hint="Filled in from this model's names; change any part afterwards."
+                    onPick={() => {
+                      const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
+                      setComposed((current) => new Set(current).add(id));
+                      setDraft((current) => current && { ...current, constraints: [...current.constraints, ruleFromShape(shape.shape, id, context)] });
+                      close();
+                    }} />
+                ))}
+                <AddChoice title="A blank rule" hint="Start from “0 is at most 0” and build it in boxes."
+                  onPick={() => {
+                    const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
+                    setComposed((current) => new Set(current).add(id));
+                    setDraft((current) => current && {
+                      ...current,
+                      constraints: [...current.constraints, {
+                        id,
+                        ...(context.sets.length > 0 ? { forall: [nextBinding([], context)] } : {}),
+                        left: { const: 0 }, relation: "<=", right: { const: 0 }, severity: "hard",
+                      } as Constraint],
+                    });
+                    close();
+                  }} />
+                <p className="text-xs text-slate-500">Scheduling, connected and route rules are under Expert.</p>
+              </>
+            )}
+          </AddMenu>
+        ) : (
+          <>
         <button
           type="button"
           className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
@@ -777,6 +832,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             Add a route rule
           </button>
         )}
+          </>
+        )}
       </section>
 
       <section hidden={focusedPart !== undefined && focusedPart !== "objective"} id="objective-editor" tabIndex={-1} aria-labelledby="objective-heading" className="mb-6">
@@ -785,6 +842,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         </h2>
         <ObjectiveEditor
           view={equationView}
+          simple={simple}
           objective={draft.objective}
           context={context}
           onChange={(objective) => setDraft((current) => current && { ...current, objective })}
@@ -884,7 +942,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <ServerDraftSync problemId={Number(problemId)} draft={stored} disabled={createVersion.isPending || serverPublishing} />
       </div>
       </>}
-    </>
+    </EditorLevelContext.Provider>
   );
 }
 
@@ -897,6 +955,7 @@ function ConstraintCard({
   onChange,
   onRemove,
   startIn,
+  simple = false,
 }: {
   view: EquationView;
   constraint: Constraint;
@@ -906,6 +965,8 @@ function ConstraintCard({
   onRemove: () => void;
   /** Where a card just composed opens. */
   startIn?: EquationView;
+  /** Simple: the card is one line -- its sentence and whether it checks out -- until opened. */
+  simple?: boolean;
 }) {
   const idField = useId();
   const noteField = useId();
@@ -927,6 +988,8 @@ function ConstraintCard({
     <article className="rounded-md border border-slate-200 bg-white p-2">
     <TreeItem
       name={constraint.id || "rule"}
+      defaultOpen={!simple || startIn !== undefined}
+      collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={ruleSentence(constraint)} problems={checkRule(constraint, context).length} /> : undefined}
       header={
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
           <div>
@@ -1417,11 +1480,14 @@ function GoalExpression({ view, goalId, expression, context, onChange, startIn }
 
 function ObjectiveEditor({
   view,
+  simple = false,
   objective,
   context,
   onChange,
 }: {
   view: EquationView;
+  /** Simple: goals collapse to a line, and one “+ Add a goal” menu. */
+  simple?: boolean;
   objective: { sense: string; mode: string; terms: ObjectiveTerm[] };
   context: ModelContext;
   onChange: (next: { sense: string; mode: string; terms: ObjectiveTerm[] }) => void;
@@ -1462,7 +1528,7 @@ function ObjectiveEditor({
             No goals yet. Leave it empty for a feasibility problem, or add one.
           </p>
         )}
-        {objective.terms.length > 0 && (() => {
+        {objective.terms.length > 0 && !simple && (() => {
           const parts = objective.terms.map((term) => goalEquation(term.expression, context));
           if (parts.some((part) => part === null)) return null;
           const joined = objective.mode === "lex"
@@ -1489,6 +1555,9 @@ function ObjectiveEditor({
           <TreeItem
             key={position}
             name={term.id || "objective term"}
+            defaultOpen={!simple || composedGoals.has(term.id)}
+            collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={term.expression ? `Counts ${termSentence(term.expression)}.` : "Counts nothing yet."}
+              problems={term.expression ? checkGoal(term.expression, context).length : 1} /> : undefined}
             header={
               <div className="flex flex-wrap items-end gap-3">
                 <div>
@@ -1627,7 +1696,33 @@ function ObjectiveEditor({
         })}
       </div>
 
-      <ShapePicker
+{simple ? (
+        <AddMenu label="Add a goal">
+          {(close) => (
+            <>
+              {GOAL_SHAPES.map((shape) => (
+                <AddChoice key={shape.shape} title={shape.title} disabledReason={shape.needs(context)}
+                  hint="Filled in from this model's names; change any part afterwards."
+                  onPick={() => {
+                    const id = freeNumberedId("o_", objective.terms.map((term) => term.id));
+                    setComposedGoals((current) => new Set(current).add(id));
+                    onChange({ ...objective, terms: [...objective.terms, goalFromShape(shape.shape, id, context)] });
+                    close();
+                  }} />
+              ))}
+              <AddChoice title="A blank goal" hint="Start from nothing counted and build it in boxes."
+                onPick={() => {
+                  const id = freeNumberedId("o_", objective.terms.map((term) => term.id));
+                  setComposedGoals((current) => new Set(current).add(id));
+                  onChange({ ...objective, terms: [...objective.terms, { id, weight: 1, expression: { const: 0 } as Term }] });
+                  close();
+                }} />
+            </>
+          )}
+        </AddMenu>
+      ) : (
+        <>
+            <ShapePicker
         label="Start a goal from a shape"
         shapes={GOAL_SHAPES.map((s) => ({ value: s.shape, title: s.title, needs: s.needs(context) }))}
         onPick={(shape) => {
@@ -1658,6 +1753,8 @@ function ObjectiveEditor({
       >
         Add something to count
       </button>
+        </>
+      )}
     </div>
   );
 }
@@ -1796,5 +1893,17 @@ function ShapePicker({ label, shapes, onPick }: {
         ))}
       </select>
     </label>
+  );
+}
+
+/** A card closed to one line: its name, its sentence, and a mark for whether it checks out. */
+function OneLine({ name, text, problems }: { name: string; text: string; problems: number }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-sm">
+      <span aria-hidden="true" className={problems ? "text-rose-600" : "text-emerald-600"}>{problems ? "●" : "✓"}</span>
+      <span className="shrink-0 font-mono text-xs text-slate-500">{name}</span>
+      <span className="min-w-0 truncate text-slate-900" title={text}>{text}</span>
+      {problems > 0 && <span className="shrink-0 text-xs text-rose-700">{problems} to fix</span>}
+    </span>
   );
 }

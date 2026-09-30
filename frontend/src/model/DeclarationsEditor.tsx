@@ -15,7 +15,8 @@ import {
   type Uncertainty,
 } from "./declarations";
 import type { Constraint, ObjectiveTerm } from "./terms";
-import { DeclarationView, type DeclarationKind } from "./declarationViews";
+import { checkDeclaration, declarationSentence, DeclarationView, type DeclarationKind } from "./declarationViews";
+import AddMenu from "../components/AddMenu";
 import { useCardView, ViewToggle, type EquationView } from "./ViewToggle";
 
 /**
@@ -59,6 +60,8 @@ export type DeclarationsEditorProps = {
   onCreateSet?: (name: string) => Promise<void>;
   onCreateAttribute?: (set: string, name: string, unit: string) => Promise<void>;
   onCreateParameter?: (parameter: { name: string; index: string[]; defaultValue: number; unit: string }) => Promise<void>;
+  /** Simple: plain group names, cards closed to one line, and one “+ Add” per group. */
+  simple?: boolean;
 };
 
 export default function DeclarationsEditor({
@@ -77,6 +80,7 @@ export default function DeclarationsEditor({
   onCreateSet,
   onCreateAttribute,
   onCreateParameter,
+  simple = false,
 }: DeclarationsEditorProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [ownView, setOwnView] = useState<EquationView>("equation");
@@ -255,9 +259,10 @@ export default function DeclarationsEditor({
       )}
 
       <div className="space-y-4">
-        <Group title="Sets" hint="The kinds of thing the rules range over.">
+        <Group title={simple ? "Things involved" : "Sets"} hint="The kinds of thing the rules range over.">
           {sets.map((name) => (
-            <DeclarationCard key={name} kind="set" name={name} heading={name} view={view}
+            <DeclarationCard key={name} kind="set" name={name} heading={name} view={view} simple={simple}
+              summary={declarationSentence("set", name, null, attributes[name] ?? [], undefined)}
               foldDetails
               details={onCreateAttribute ? <NewAttribute set={name} taken={(attributes[name] ?? []).map((a) => a.name)} onCreate={onCreateAttribute} /> : undefined}
               onStop={() => refuseIfStranding("set", name, () => apply({ sets: sets.filter((s) => s !== name) }))}>
@@ -267,6 +272,9 @@ export default function DeclarationsEditor({
               )}
             </DeclarationCard>
           ))}
+          {simple ? (
+            <AddMenu label="Add a set">{() => (
+              <>
           <Chooser label="Record types this model uses">
           {entityTypeNames.length === 0 && <Muted>This domain has no entity types yet.</Muted>}
           {entityTypeNames.map((name) => {
@@ -298,11 +306,49 @@ export default function DeclarationsEditor({
               apply({ sets: [...sets, name] });
             }} />
           )}
+              </>
+            )}</AddMenu>
+          ) : (
+            <>
+          <Chooser label="Record types this model uses">
+          {entityTypeNames.length === 0 && <Muted>This domain has no entity types yet.</Muted>}
+          {entityTypeNames.map((name) => {
+            const checked = sets.includes(name);
+            return (
+              <label key={name} className="flex items-center gap-2 py-1 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={checked}
+                  onChange={() => {
+                    if (checked) {
+                      refuseIfStranding("set", name, () =>
+                        apply({ sets: sets.filter((s) => s !== name) })
+                      );
+                    } else {
+                      apply({ sets: [...sets, name] });
+                    }
+                  }}
+                />
+                <span className="font-mono text-xs">{name}</span>
+              </label>
+            );
+          })}
+          </Chooser>
+          {onCreateSet && (
+            <NewRecordType taken={entityTypeNames} onCreate={async (name) => {
+              await onCreateSet(name);
+              apply({ sets: [...sets, name] });
+            }} />
+          )}
+            </>
+          )}
         </Group>
 
-        <Group title="Parameters" hint="Numbers the domain already holds, read by the rules.">
+        <Group title={simple ? "Data" : "Parameters"} hint="Numbers the domain already holds, read by the rules.">
           {Object.entries(parameters).map(([name, spec]) => (
-            <DeclarationCard key={name} kind="parameter" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view}
+            <DeclarationCard key={name} kind="parameter" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
+              summary={declarationSentence("parameter", name, spec, [], units[name])}
               details={parameterDetails(name)}
               onStop={() => refuseIfStranding("parameter", name, () => {
                 const next = { ...parameters };
@@ -315,6 +361,9 @@ export default function DeclarationsEditor({
               )}
             </DeclarationCard>
           ))}
+          {simple ? (
+            <AddMenu label="Add data">{() => (
+              <>
           <Chooser label="Data this model reads">
           {parameterOptions.length === 0 && <Muted>This domain defines no parameters.</Muted>}
           {parameterOptions.map((option) => {
@@ -360,11 +409,63 @@ export default function DeclarationsEditor({
               apply({ parameters: { ...parameters, [made.name]: { index: made.index } } });
             }} />
           )}
+              </>
+            )}</AddMenu>
+          ) : (
+            <>
+          <Chooser label="Data this model reads">
+          {parameterOptions.length === 0 && <Muted>This domain defines no parameters.</Muted>}
+          {parameterOptions.map((option) => {
+            const declared = option.name in parameters;
+            const { usable, reason } = parameterIsUsable(option, sets);
+            return (
+              <div key={option.name} className="py-1">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={declared}
+                    disabled={!declared && !usable}
+                    onChange={() => {
+                      if (declared) {
+                        refuseIfStranding("parameter", option.name, () => {
+                          const next = { ...parameters };
+                          delete next[option.name];
+                          apply({ parameters: next });
+                        });
+                      } else {
+                        apply({
+                          parameters: {
+                            ...parameters,
+                            [option.name]: { index: option.index, ...(option.entity ? { entity: option.entity } : {}) },
+                          },
+                        });
+                      }
+                    }}
+                  />
+                  <span className="font-mono text-xs">
+                    {option.name}[{option.index.join(", ")}]
+                  </span>
+                </label>
+                {!declared && !usable && <Muted>{reason}</Muted>}
+              </div>
+            );
+          })}
+          </Chooser>
+          {onCreateParameter && (
+            <NewData sets={sets} taken={[...parameterOptions.map((o) => o.name), ...Object.keys(variables)]} onCreate={async (made) => {
+              await onCreateParameter(made);
+              apply({ parameters: { ...parameters, [made.name]: { index: made.index } } });
+            }} />
+          )}
+            </>
+          )}
         </Group>
 
-        <Group title="Variables" hint="What the solver decides.">
+        <Group title={simple ? "Decisions" : "Variables"} hint="What the solver decides.">
           {Object.entries(variables).map(([name, spec]) => (
-            <DeclarationCard key={name} kind="variable" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view}
+            <DeclarationCard key={name} kind="variable" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
+              summary={declarationSentence("variable", name, spec, [], undefined)} problems={checkDeclaration("variable", spec, sets).length}
               details={variableDetails(name, spec)}
               onRemove={() =>
                 refuseIfStranding("variable", name, () => {
@@ -380,6 +481,9 @@ export default function DeclarationsEditor({
               )}
             </DeclarationCard>
           ))}
+          {simple ? (
+            <AddMenu label="Add a decision">{() => (
+              <>
           <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2">
             <p className="mb-1 text-xs font-medium text-slate-700">Add a variable</p>
           <AddVariable
@@ -415,6 +519,47 @@ export default function DeclarationsEditor({
             }}
           />
           </div>
+              </>
+            )}</AddMenu>
+          ) : (
+            <>
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2">
+            <p className="mb-1 text-xs font-medium text-slate-700">Add a variable</p>
+          <AddVariable
+            sets={sets}
+            taken={[...Object.keys(variables), ...Object.keys(parameters)]}
+            onAdd={(variable) => {
+              if (variable.domain !== "interval") {
+                apply({
+                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain } },
+                });
+                return;
+              }
+              // An interval is a start and an end: make them with it, so the
+              // new declaration is whole from the first render.
+              const taken = new Set([...Object.keys(variables), ...Object.keys(parameters), variable.name]);
+              const free = (stem: string) => {
+                let candidate = stem;
+                for (let n = 2; taken.has(candidate); n += 1) candidate = `${stem}_${n}`;
+                taken.add(candidate);
+                return candidate;
+              };
+              const start = free(`${variable.name}_start`);
+              const end = free(`${variable.name}_end`);
+              const part = { index: variable.index, domain: "integer" as const, lower: 0 };
+              apply({
+                variables: {
+                  ...variables,
+                  [start]: part,
+                  [end]: part,
+                  [variable.name]: { index: variable.index, domain: "interval", start, end, size: 1 },
+                },
+              });
+            }}
+          />
+          </div>
+            </>
+          )}
         </Group>
       </div>
     </section>
@@ -916,7 +1061,7 @@ const KIND_TAG: Record<DeclarationKind, { text: string; style: string }> = {
  * switch, the view, and its fields -- shown with the equation, behind “More
  * options” with the simpler views.
  */
-function DeclarationCard({ kind, name, heading, view, details, foldDetails = false, onRemove, onStop, children }: {
+function DeclarationCard({ kind, name, heading, view, details, foldDetails = false, onRemove, onStop, simple = false, summary, problems = 0, children }: {
   kind: DeclarationKind;
   name: string;
   heading: string;
@@ -926,17 +1071,38 @@ function DeclarationCard({ kind, name, heading, view, details, foldDetails = fal
   foldDetails?: boolean;
   onRemove?: () => void;
   onStop?: () => void;
+  /** Simple: closed to one line (its sentence) until opened. */
+  simple?: boolean;
+  summary?: string;
+  problems?: number;
   children: (shown: EquationView, setShown: (next: EquationView) => void) => ReactNode;
 }) {
   const [shown, setShown] = useCardView(view);
   const [more, setMore] = useState(false);
+  const [open, setOpen] = useState(!simple);
   const tag = KIND_TAG[kind];
+  if (simple && !open) {
+    return (
+      <button type="button" data-testid={`${kind}-card`} onClick={() => setOpen(true)}
+        className="flex w-full min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-blue-300">
+        <span aria-hidden="true" className={problems ? "text-rose-600" : "text-emerald-600"}>{problems ? "●" : "✓"}</span>
+        <span className="shrink-0 font-mono text-xs text-slate-500">{heading}</span>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${tag.style}`}>{tag.text}</span>
+        <span className="min-w-0 truncate text-slate-900" title={summary}>{summary}</span>
+      </button>
+    );
+  }
   return (
     <article className="rounded-md border border-slate-200 bg-white p-2" data-testid={`${kind}-card`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs">{heading}</span>
         <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tag.style}`}>{tag.text}</span>
         <span className="ml-auto flex gap-1">
+          {simple && (
+            <button type="button" className="rounded px-2 py-1 text-xs text-slate-600 underline" onClick={() => setOpen(false)}>
+              Close
+            </button>
+          )}
           {onStop && (
             <button type="button" className="rounded px-2 py-1 text-xs text-red-700 underline" onClick={onStop}>
               Stop using {name}

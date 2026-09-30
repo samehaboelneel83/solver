@@ -40,6 +40,8 @@ export type TreeItemProps = {
   leaf?: boolean;
   defaultOpen?: boolean;
   header: ReactNode;
+  /** Shown instead of `header` while closed -- a one-line summary that opens the item. */
+  collapsedHeader?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
   className?: string;
@@ -51,6 +53,7 @@ export function TreeItem({
   leaf = false,
   defaultOpen = true,
   header,
+  collapsedHeader,
   actions,
   children,
   className,
@@ -86,7 +89,13 @@ export function TreeItem({
             />
           </button>
         )}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{header}</div>
+        {!leaf && !open && collapsedHeader != null ? (
+          <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen(true)}>
+            {collapsedHeader}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{header}</div>
+        )}
         {actions != null && <div className="ml-auto shrink-0">{actions}</div>}
       </div>
       {showChildren && children != null && (

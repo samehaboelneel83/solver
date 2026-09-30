@@ -175,6 +175,8 @@ beforeEach(() => {
   clearDraft(1);
   vi.restoreAllMocks();
   localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
+  // These tests describe the whole editor: the Expert level. The Simple level has its own below.
+  localStorage.setItem("solver_editor_level", "expert");
   stub();
 });
 
@@ -1410,5 +1412,64 @@ describe("equations as drill-down diagrams", () => {
     await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/problems/1/versions")).toBe(true));
     const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/problems/1/versions")!;
     expect(JSON.parse(options.body).ir.constraints[0].right).toEqual({ add: [{ par: "demand", index: ["d"] }, { const: 1 }] });
+  });
+});
+
+describe("the Simple level", () => {
+  beforeEach(() => localStorage.setItem("solver_editor_level", "simple"));
+
+  it("is where a new person starts, with fewer tabs and no guided-forms panel, and remembers Expert", async () => {
+    localStorage.removeItem("solver_editor_level");
+    const first = renderPage();
+    await screen.findByText("What must be true");
+    expect(screen.getByRole("button", { name: "Simple" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Build", "Check"]);
+    expect(screen.queryByText("Create with guided forms")).toBeNull();
+    expect(screen.queryByText("Advanced views")).toBeNull();
+    // One switch for the page, between the two plain views; none on each card.
+    expect(screen.getByRole("button", { name: "Show all as sentences" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show all as equations" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show c_cover as boxes" })).toBeNull();
+    // The goal's equation line is Expert's.
+    expect(screen.queryByTestId("objective-equation")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expert" }));
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    first.unmount();
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Expert" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("closes each rule to one line -- its sentence and whether it checks out -- and opens it on a click", async () => {
+    renderPage();
+    const line = await screen.findByRole("button", { name: /c_cover.*must be at least demand of d/ });
+    expect(line).toHaveTextContent("✓");
+    expect(screen.queryByDisplayValue("c_cover")).toBeNull();
+    fireEvent.click(line);
+    expect(screen.getByDisplayValue("c_cover")).toBeInTheDocument();
+    expect(screen.getByTestId("rule-sentence")).toBeInTheDocument();
+  });
+
+  it("adds a rule from one menu, opened in its boxes", async () => {
+    renderPage();
+    await screen.findByText("What must be true");
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a rule" }));
+    const menu = screen.getByRole("group", { name: "Add a rule" });
+    expect(within(menu).getByText("Scheduling, connected and route rules are under Expert.")).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("button", { name: /For each item, a total covers what is needed/ }));
+    expect(screen.queryByRole("group", { name: "Add a rule" })).toBeNull();
+    const blocks = await screen.findByTestId("rule-blocks");
+    expect(within(blocks).getByRole("status")).toHaveTextContent("Complete");
+  });
+
+  it("names the declarations plainly, closes them to a line, and keeps choosing and creating behind + Add", async () => {
+    renderPage();
+    await screen.findByText("What must be true");
+    expect(screen.getByRole("group", { name: "Things involved" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Decisions" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "employee" })).toBeNull();
+    const variable = screen.getByTestId("variable-card");
+    expect(variable).toHaveTextContent("The solver decides assign for every employee and every day: yes or no.");
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a set" }));
+    expect(within(screen.getByRole("group", { name: "Add a set" })).getByRole("checkbox", { name: "employee" })).toBeChecked();
   });
 });
