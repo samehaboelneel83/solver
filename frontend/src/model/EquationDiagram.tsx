@@ -38,7 +38,7 @@ const ICON_BUTTON =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-slate-600 hover:bg-slate-100 hover:text-slate-900";
 
 /** Parts side by side under their parent, each hanging from a joining line. */
-function Children({ children }: { children: ReactNode[] }) {
+export function Children({ children }: { children: ReactNode[] }) {
   return (
     <div className="relative mt-2 flex flex-wrap items-start gap-3 border-t border-slate-300 px-2 pb-2 pt-3">
       {children.map((child, i) => (

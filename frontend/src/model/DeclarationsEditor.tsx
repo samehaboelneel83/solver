@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import RangePicture from "./RangePicture";
 import { INPUT_CLASS } from "../components/attrTypes";
 import { VARIABLE_DOMAINS, type VariableDomain } from "../ir/contract";
@@ -15,6 +15,8 @@ import {
   type Uncertainty,
 } from "./declarations";
 import type { Constraint, ObjectiveTerm } from "./terms";
+import { DeclarationView, type DeclarationKind } from "./declarationViews";
+import { useCardView, ViewToggle, type EquationView } from "./ViewToggle";
 
 /**
  * What a model declares: its sets, the domain parameters it reads, and the
@@ -46,6 +48,13 @@ export type DeclarationsEditorProps = {
     parameters: Record<string, ParameterSpec>;
     variables: Record<string, VariableSpec>;
   }) => void;
+  /** How each declaration is shown (the page's switch); this editor keeps its own without one. */
+  view?: EquationView;
+  onView?: (next: EquationView) => void;
+  /** Set name -> its attributes, for the Sets' views. */
+  attributes?: Record<string, { name: string; data_type: string }[]>;
+  /** Parameter name -> its unit, for the Parameters' views. */
+  units?: Record<string, string | null | undefined>;
 };
 
 export default function DeclarationsEditor({
@@ -57,8 +66,15 @@ export default function DeclarationsEditor({
   constraints,
   objectiveTerms,
   onChange,
+  view: pageView,
+  onView,
+  attributes = {},
+  units = {},
 }: DeclarationsEditorProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [ownView, setOwnView] = useState<EquationView>("equation");
+  const view = pageView ?? ownView;
+  const setView = onView ?? setOwnView;
 
   function apply(next: Partial<Parameters<DeclarationsEditorProps["onChange"]>[0]>) {
     setRefusal(null);
@@ -82,11 +98,148 @@ export default function DeclarationsEditor({
     then();
   }
 
+  const usedBy = (kind: "set" | "parameter" | "variable", name: string) =>
+    strandedBy({ kind, name }, constraints, objectiveTerms, variables);
+
+  /** A variable's own fields: what it decides, when, and its bounds -- or an interval's parts. */
+  const variableDetails = (name: string, spec: VariableSpec) => (
+    <>
+    {spec.domain === "interval" ? (
+      <IntervalFields
+        name={name}
+        spec={spec}
+        variables={variables}
+        parameters={parameters}
+        onChange={(next) => apply({ variables: { ...variables, [name]: next } })}
+      />
+    ) : (
+    <>
+    <div className="mt-1">
+      <label className="block text-xs text-slate-600" htmlFor={`var-domain-${name}`}>
+        {name} decides
+      </label>
+      <select
+        id={`var-domain-${name}`}
+        className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
+        value={spec.domain}
+        onChange={(event) =>
+          apply({
+            variables: {
+              ...variables,
+              [name]: withStage(
+                withDomain(spec, event.target.value as VariableDomain),
+                spec.stage
+              ),
+            },
+          })
+        }
+      >
+        {SETTABLE_DOMAINS.map((option) => (
+          <option key={option} value={option}>
+            {domainPhrase(option)}
+          </option>
+        ))}
+      </select>
+    </div>
+    <div className="mt-1">
+      <label className="block text-xs text-slate-600" htmlFor={`var-stage-${name}`}>
+        {name} is decided
+      </label>
+      <select
+        id={`var-stage-${name}`}
+        className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
+        value={spec.stage === undefined ? "" : String(spec.stage)}
+        onChange={(event) =>
+          apply({
+            variables: {
+              ...variables,
+              [name]: withStage(spec, event.target.value === "" ? undefined : (Number(event.target.value) as 1 | 2)),
+            },
+          })
+        }
+        title="For a two-stage stochastic solve: what is decided now, and what waits until the uncertain data is known"
+      >
+        <option value="">whenever (one stage)</option>
+        <option value="1">now, before the data is known</option>
+        <option value="2">once the uncertain data is known</option>
+      </select>
+    </div>
+    {spec.domain !== "binary" && (
+      <div className="mt-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <BoundField
+            id={`var-lower-${name}`}
+            label={`${name} no less than`}
+            value={spec.lower}
+            integer={spec.domain === "integer"}
+            onChange={(lower) =>
+              apply({
+                variables: {
+                  ...variables,
+                  [name]: boundPatch(spec, "lower", lower),
+                },
+              })
+            }
+          />
+          <BoundField
+            id={`var-upper-${name}`}
+            label={`${name} no more than`}
+            value={spec.upper}
+            integer={spec.domain === "integer"}
+            onChange={(upper) =>
+              apply({
+                variables: {
+                  ...variables,
+                  [name]: boundPatch(spec, "upper", upper),
+                },
+              })
+            }
+          />
+        </div>
+        {spec.lower !== undefined &&
+          spec.upper !== undefined &&
+          spec.lower > spec.upper && (
+            <p role="alert" className="mt-1 text-xs text-red-600">
+              {name}: no less than {spec.lower} is above no more than {spec.upper}, so
+              it has no admissible value.
+            </p>
+          )}
+      </div>
+    )}
+    </>
+    )}
+    </>
+  );
+
+  /** A parameter's own fields: whether its values are exact. */
+  const parameterDetails = (name: string) => {
+    const option = parameterOptions.find((o) => o.name === name) ?? { name, index: parameters[name].index };
+    return (
+      <UncertaintyFields
+        name={option.name}
+        parameterId={option.id}
+        value={parameters[option.name].uncertainty}
+        onChange={(uncertainty) => {
+          const { uncertainty: _was, ...rest } = parameters[option.name];
+          apply({
+            parameters: {
+              ...parameters,
+              [option.name]: uncertainty ? { ...rest, uncertainty } : rest,
+            },
+          });
+        }}
+      />
+    );
+  };
+
   return (
     <section aria-labelledby="declarations-heading" className="mb-6">
-      <h2 id="declarations-heading" className="mb-2 text-base font-semibold text-slate-900">
-        What this model is about
-      </h2>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 id="declarations-heading" className="text-base font-semibold text-slate-900">
+          What this model is about
+        </h2>
+        <ViewToggle value={view} onChange={setView} name="all declarations" />
+      </div>
 
       {refusal && (
         <p role="alert" className="mb-3 text-sm text-red-600">
@@ -94,8 +247,18 @@ export default function DeclarationsEditor({
         </p>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card title="Sets" hint="The kinds of thing the rules range over.">
+      <div className="space-y-4">
+        <Group title="Sets" hint="The kinds of thing the rules range over.">
+          {sets.map((name) => (
+            <DeclarationCard key={name} kind="set" name={name} heading={name} view={view}
+              onStop={() => refuseIfStranding("set", name, () => apply({ sets: sets.filter((s) => s !== name) }))}>
+              {(shown, setShown) => (
+                <DeclarationView kind="set" name={name} spec={null} view={shown} sets={sets} attributes={attributes[name] ?? []}
+                  usedBy={usedBy("set", name)} onBoxes={() => setShown("boxes")} />
+              )}
+            </DeclarationCard>
+          ))}
+          <Chooser label="Record types this model uses">
           {entityTypeNames.length === 0 && <Muted>This domain has no entity types yet.</Muted>}
           {entityTypeNames.map((name) => {
             const checked = sets.includes(name);
@@ -119,9 +282,25 @@ export default function DeclarationsEditor({
               </label>
             );
           })}
-        </Card>
+          </Chooser>
+        </Group>
 
-        <Card title="Parameters" hint="Numbers the domain already holds, read by the rules.">
+        <Group title="Parameters" hint="Numbers the domain already holds, read by the rules.">
+          {Object.entries(parameters).map(([name, spec]) => (
+            <DeclarationCard key={name} kind="parameter" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view}
+              details={parameterDetails(name)}
+              onStop={() => refuseIfStranding("parameter", name, () => {
+                const next = { ...parameters };
+                delete next[name];
+                apply({ parameters: next });
+              })}>
+              {(shown, setShown) => (
+                <DeclarationView kind="parameter" name={name} spec={spec} view={shown} sets={sets} unit={units[name]}
+                  usedBy={usedBy("parameter", name)} onBoxes={() => setShown("boxes")} />
+              )}
+            </DeclarationCard>
+          ))}
+          <Chooser label="Data this model reads">
           {parameterOptions.length === 0 && <Muted>This domain defines no parameters.</Muted>}
           {parameterOptions.map((option) => {
             const declared = option.name in parameters;
@@ -156,154 +335,32 @@ export default function DeclarationsEditor({
                   </span>
                 </label>
                 {!declared && !usable && <Muted>{reason}</Muted>}
-                {declared && (
-                  <UncertaintyFields
-                    name={option.name}
-                    parameterId={option.id}
-                    value={parameters[option.name].uncertainty}
-                    onChange={(uncertainty) => {
-                      const { uncertainty: _was, ...rest } = parameters[option.name];
-                      apply({
-                        parameters: {
-                          ...parameters,
-                          [option.name]: uncertainty ? { ...rest, uncertainty } : rest,
-                        },
-                      });
-                    }}
-                  />
-                )}
               </div>
             );
           })}
-        </Card>
+          </Chooser>
+        </Group>
 
-        <Card title="Variables" hint="What the solver decides.">
+        <Group title="Variables" hint="What the solver decides.">
           {Object.entries(variables).map(([name, spec]) => (
-            <div key={name} className="mb-2 rounded border border-slate-200 p-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs">
-                  {name}[{spec.index.join(", ")}]
-                </span>
-                <button
-                  type="button"
-                  className="rounded px-2 py-1 text-xs text-red-700 underline"
-                  onClick={() =>
-                    refuseIfStranding("variable", name, () => {
-                      const next = { ...variables };
-                      delete next[name];
-                      apply({ variables: next });
-                    })
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-              {spec.domain === "interval" ? (
-                <IntervalFields
-                  name={name}
-                  spec={spec}
-                  variables={variables}
-                  parameters={parameters}
-                  onChange={(next) => apply({ variables: { ...variables, [name]: next } })}
-                />
-              ) : (
-              <>
-              <div className="mt-1">
-                <label className="block text-xs text-slate-600" htmlFor={`var-domain-${name}`}>
-                  {name} decides
-                </label>
-                <select
-                  id={`var-domain-${name}`}
-                  className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
-                  value={spec.domain}
-                  onChange={(event) =>
-                    apply({
-                      variables: {
-                        ...variables,
-                        [name]: withStage(
-                          withDomain(spec, event.target.value as VariableDomain),
-                          spec.stage
-                        ),
-                      },
-                    })
-                  }
-                >
-                  {SETTABLE_DOMAINS.map((option) => (
-                    <option key={option} value={option}>
-                      {domainPhrase(option)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="mt-1">
-                <label className="block text-xs text-slate-600" htmlFor={`var-stage-${name}`}>
-                  {name} is decided
-                </label>
-                <select
-                  id={`var-stage-${name}`}
-                  className={`${INPUT_CLASS} mt-0.5 w-auto text-xs`}
-                  value={spec.stage === undefined ? "" : String(spec.stage)}
-                  onChange={(event) =>
-                    apply({
-                      variables: {
-                        ...variables,
-                        [name]: withStage(spec, event.target.value === "" ? undefined : (Number(event.target.value) as 1 | 2)),
-                      },
-                    })
-                  }
-                  title="For a two-stage stochastic solve: what is decided now, and what waits until the uncertain data is known"
-                >
-                  <option value="">whenever (one stage)</option>
-                  <option value="1">now, before the data is known</option>
-                  <option value="2">once the uncertain data is known</option>
-                </select>
-              </div>
-              {spec.domain !== "binary" && (
-                <div className="mt-2">
-                  <div className="flex flex-wrap items-end gap-2">
-                    <BoundField
-                      id={`var-lower-${name}`}
-                      label={`${name} no less than`}
-                      value={spec.lower}
-                      integer={spec.domain === "integer"}
-                      onChange={(lower) =>
-                        apply({
-                          variables: {
-                            ...variables,
-                            [name]: boundPatch(spec, "lower", lower),
-                          },
-                        })
-                      }
-                    />
-                    <BoundField
-                      id={`var-upper-${name}`}
-                      label={`${name} no more than`}
-                      value={spec.upper}
-                      integer={spec.domain === "integer"}
-                      onChange={(upper) =>
-                        apply({
-                          variables: {
-                            ...variables,
-                            [name]: boundPatch(spec, "upper", upper),
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                  {spec.lower !== undefined &&
-                    spec.upper !== undefined &&
-                    spec.lower > spec.upper && (
-                      <p role="alert" className="mt-1 text-xs text-red-600">
-                        {name}: no less than {spec.lower} is above no more than {spec.upper}, so
-                        it has no admissible value.
-                      </p>
-                    )}
-                </div>
+            <DeclarationCard key={name} kind="variable" name={name} heading={`${name}[${spec.index.join(", ")}]`} view={view}
+              details={variableDetails(name, spec)}
+              onRemove={() =>
+                refuseIfStranding("variable", name, () => {
+                  const next = { ...variables };
+                  delete next[name];
+                  apply({ variables: next });
+                })
+              }>
+              {(shown, setShown) => (
+                <DeclarationView kind="variable" name={name} spec={spec} view={shown} sets={sets}
+                  usedBy={usedBy("variable", name)} onBoxes={() => setShown("boxes")}
+                  onChange={(next) => apply({ variables: { ...variables, [name]: next } })} />
               )}
-              </>
-              )}
-            </div>
+            </DeclarationCard>
           ))}
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2">
+            <p className="mb-1 text-xs font-medium text-slate-700">Add a variable</p>
           <AddVariable
             sets={sets}
             taken={[...Object.keys(variables), ...Object.keys(parameters)]}
@@ -336,7 +393,8 @@ export default function DeclarationsEditor({
               });
             }}
           />
-        </Card>
+          </div>
+        </Group>
       </div>
     </section>
   );
@@ -797,19 +855,92 @@ function AddVariable({
   );
 }
 
-function Card({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
+
+function Muted({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs text-slate-500">{children}</p>;
+}
+
+/** One of the three groups -- Sets, Parameters, Variables -- as a named group of cards. */
+function Group({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   return (
     // A named group, because "day" appears both as a set and as an index of a
     // variable being built: without the grouping the two are one ambiguous
     // control to anyone navigating by name.
-    <div role="group" aria-label={title} className="rounded-md border border-slate-200 bg-white p-3">
+    <div role="group" aria-label={title} className="space-y-1">
       <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-      <p className="mb-2 text-xs text-slate-500">{hint}</p>
+      <p className="mb-1 text-xs text-slate-500">{hint}</p>
       {children}
     </div>
   );
 }
 
-function Muted({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-slate-500">{children}</p>;
+/** What the domain offers, ticked for what the model uses. */
+function Chooser({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2" open>
+      <summary className="cursor-pointer text-xs font-medium text-slate-700">{label}</summary>
+      <div className="mt-1">{children}</div>
+    </details>
+  );
+}
+
+const KIND_TAG: Record<DeclarationKind, { text: string; style: string }> = {
+  set: { text: "set", style: "bg-teal-100 text-teal-800" },
+  parameter: { text: "data", style: "bg-emerald-100 text-emerald-800" },
+  variable: { text: "decision", style: "bg-sky-100 text-sky-800" },
+};
+
+/**
+ * One declaration as a card, as rules and goals are: its name, its own view
+ * switch, the view, and its fields -- shown with the equation, behind “More
+ * options” with the simpler views.
+ */
+function DeclarationCard({ kind, name, heading, view, details, onRemove, onStop, children }: {
+  kind: DeclarationKind;
+  name: string;
+  heading: string;
+  view: EquationView;
+  details?: ReactNode;
+  onRemove?: () => void;
+  onStop?: () => void;
+  children: (shown: EquationView, setShown: (next: EquationView) => void) => ReactNode;
+}) {
+  const [shown, setShown] = useCardView(view);
+  const [more, setMore] = useState(false);
+  const tag = KIND_TAG[kind];
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-2" data-testid={`${kind}-card`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-xs">{heading}</span>
+        <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tag.style}`}>{tag.text}</span>
+        <span className="ml-auto flex gap-1">
+          {onStop && (
+            <button type="button" className="rounded px-2 py-1 text-xs text-red-700 underline" onClick={onStop}>
+              Stop using {name}
+            </button>
+          )}
+          {onRemove && (
+            <button type="button" className="rounded px-2 py-1 text-xs text-red-700 underline" onClick={onRemove}>
+              Remove
+            </button>
+          )}
+        </span>
+      </div>
+      <div className="mt-1 space-y-1">
+        <ViewToggle value={shown} onChange={setShown} name={name} size="xs" />
+        {children(shown, setShown)}
+      </div>
+      {details && (shown === "equation" ? (
+        <div className="mt-1">{details}</div>
+      ) : (
+        <>
+          <button type="button" aria-expanded={more} className="mt-1 rounded py-1 text-xs font-medium text-blue-700 underline"
+            onClick={() => setMore((open) => !open)}>
+            {more ? "Fewer options" : "More options"}
+          </button>
+          {more && <div className="mt-1">{details}</div>}
+        </>
+      ))}
+    </article>
+  );
 }

@@ -30,7 +30,7 @@ import {
   type Term,
 } from "./terms";
 
-type Role = "decision" | "data" | "number" | "operation" | "total" | "comparison" | "scope" | "rule";
+export type Role = "decision" | "data" | "number" | "operation" | "total" | "comparison" | "scope" | "rule";
 
 /** One colour per kind of thing, the same in every box. */
 const ROLE_STYLE: Record<Role, { box: string; tag: string }> = {
@@ -70,7 +70,7 @@ function titleOf(term: Term): string {
 }
 
 /** A box: its kind, its own problems, a quiet count of the problems inside, and its parts. */
-function Box({ role, title, label, problems, path, actions, children }: {
+export function Box({ role, title, label, problems, path, actions, children }: {
   role: Role;
   title: string;
   label: string;
@@ -395,7 +395,7 @@ export function TermBlock({ term, label, path, problems, context, bound, onChang
 }
 
 /** What a rule or goal has to fix, in plain words -- or that it reads cleanly. */
-function Summary({ problems }: { problems: Problem[] }) {
+export function Summary({ problems }: { problems: Problem[] }) {
   if (problems.length === 0) {
     return <p className="text-xs text-emerald-800" role="status">✓ Complete: every part checks out.</p>;
   }
