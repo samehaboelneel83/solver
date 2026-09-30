@@ -34,6 +34,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
@@ -986,3 +987,38 @@ def test_a_default_reaches_the_records_made_before_it(auth_headers, domain_id):
     # A new attribute that comes with a default reaches the existing records too.
     _make_attribute(client, auth_headers, employee["id"], "on_call", "boolean", default_value=False)
     assert client.get(f"/api/v1/entities/{made['ahmed']}", headers=auth_headers).json()["attrs"]["on_call"] is False
+
+
+def test_a_default_skips_a_record_already_missing_a_required_value(auth_headers, domain_id):
+    """rebuild.cmd stopped at migration 0094: 'entity ahmed: attribute "full_name"
+    is required'. Ahmed was made before full_name became required, so writing any
+    default into him was refused -- and that refusal failed the whole fill. Such a
+    record is now skipped; the others still get the default."""
+    client = TestClient(app)
+    employee = _make_entity_type(client, auth_headers, domain_id, "employee")
+    grade = _make_attribute(client, auth_headers, employee["id"], "grade", "text")
+    made = {}
+    for key in ("ahmed", "sara"):
+        response = client.post(
+            "/api/v1/entities", json={"entity_type_id": employee["id"], "key": key, "attrs": {}}, headers=auth_headers)
+        assert response.status_code == 201, response.text
+        made[key] = response.json()["id"]
+    db = SessionLocal()
+    try:
+        # A required attribute added straight to the table, as an old migration or import might.
+        db.add(AttributeDef(entity_type_id=employee["id"], name="full_name", data_type="text", required=True))
+        db.flush()
+        db.execute(text("UPDATE entity SET attrs = attrs || '{\"full_name\": \"Sara\"}' WHERE id = :id"), {"id": made["sara"]})
+        db.commit()
+        # The migration's own fill, over every default, runs clean too.
+        db.execute(text("UPDATE attribute_def SET default_value = '\"mid\"' WHERE id = :id"), {"id": grade["id"]})
+        assert db.execute(text("SELECT fill_attribute_default(:id)"), {"id": grade["id"]}).scalar_one() == 1
+        db.rollback()
+    finally:
+        db.close()
+
+    response = client.patch(f"/api/v1/attributes/{grade['id']}", json={"default_value": "mid"}, headers=auth_headers)
+    assert response.status_code == 200, response.text
+    attrs = {key: client.get(f"/api/v1/entities/{id_}", headers=auth_headers).json()["attrs"] for key, id_ in made.items()}
+    assert attrs["sara"]["grade"] == "mid"
+    assert "grade" not in attrs["ahmed"]

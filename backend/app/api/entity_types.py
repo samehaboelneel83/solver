@@ -69,7 +69,6 @@ dropped later. The request-layer rules are deliberately at least as strict
 as the CHECKs they shadow (see `app.api.validation.validate_name`).
 """
 
-import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -657,27 +656,14 @@ def fill_default(db: Session, attribute: AttributeDef) -> None:
     'hours_per_week'") even though a default was there. A value someone
     entered is never overwritten. The attribute row must be flushed first:
     the validate trigger refuses a key no attribute_def declares.
+
+    A record the checks already refuse for another reason (a required value
+    missing) is skipped, not allowed to fail the save: see migration 0094's
+    `fill_attribute_default`.
     """
     if attribute.default_value is None:
         return
-    value = json.dumps(attribute.default_value)
-    missing = "coalesce(attrs -> :name, 'null'::jsonb) = 'null'::jsonb"
-    if attribute.entity_type_id is not None:
-        db.execute(
-            text(
-                "UPDATE entity SET attrs = attrs || jsonb_build_object(:name, CAST(:value AS jsonb)) "
-                f"WHERE entity_type_id = ANY (entity_type_family(:owner)) AND {missing}"
-            ),
-            {"name": attribute.name, "value": value, "owner": attribute.entity_type_id},
-        )
-    elif attribute.relationship_type_id is not None:
-        db.execute(
-            text(
-                "UPDATE relationship SET attrs = attrs || jsonb_build_object(:name, CAST(:value AS jsonb)) "
-                f"WHERE relationship_type_id = :owner AND {missing}"
-            ),
-            {"name": attribute.name, "value": value, "owner": attribute.relationship_type_id},
-        )
+    db.execute(text("SELECT fill_attribute_default(:id)"), {"id": attribute.id})
 
 
 @router.post("/entity-types/{entity_type_id}/attributes", status_code=201)
