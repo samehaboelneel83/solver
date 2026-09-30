@@ -346,6 +346,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           (types.find((t) => t.name === name)?.attributes ?? []).map((a) => ({
             name: a.name,
             data_type: a.data_type,
+            enum_values: a.enum_values ?? null,
           })),
         ])
       ),
@@ -361,6 +362,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           name: rel.name,
           from: types.find((t) => t.id === rel.from_type_id)?.name ?? "",
           to: types.find((t) => t.id === rel.to_type_id)?.name ?? "",
+          hierarchy: rel.is_hierarchy,
           attributes: (rel.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
         }))
         .filter((rel) => sets.includes(rel.from) && sets.includes(rel.to)),
@@ -1056,7 +1058,7 @@ function ConstraintCard({
       name={constraint.id || "rule"}
       defaultOpen={!simple || startIn !== undefined}
       openSignal={openSignal}
-      collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={ruleSentence(constraint)} problems={checkRule(constraint, context).length} /> : undefined}
+      collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={ruleSentence(constraint, context.relationships)} problems={checkRule(constraint, context).length} /> : undefined}
       header={
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
           <div>
@@ -1627,7 +1629,7 @@ function ObjectiveEditor({
             name={term.id || "objective term"}
             defaultOpen={!simple || composedGoals.has(term.id)}
             openSignal={openGoal?.id === term.id ? openGoal.seq : undefined}
-            collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={term.expression ? `Counts ${termSentence(term.expression)}.` : "Counts nothing yet."}
+            collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={term.expression ? `Counts ${termSentence(term.expression, context.relationships)}.` : "Counts nothing yet."}
               problems={term.expression ? checkGoal(term.expression, context).length : 1} /> : undefined}
             header={
               <div className="flex flex-wrap items-end gap-3">

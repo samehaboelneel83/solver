@@ -40,7 +40,49 @@ describe("starting shapes", () => {
 
   it("offers a shape only when the model has what it needs, and says what", () => {
     const empty: ModelContext = { ...CONTEXT, variables: {} };
-    expect(RULE_SHAPES.map((s) => s.needs(empty))).toEqual(["a decision", "a decision over a set", "a decision over two sets"]);
-    expect(RULE_SHAPES.every((s) => s.needs(CONTEXT) === null)).toBe(true);
+    expect(RULE_SHAPES.map((s) => s.needs(empty))).toEqual(["a decision", "a decision over a set", "a decision over two sets",
+      "a decision over a set that a relationship reaches"]);
+    // A model with no relationships has no walk to offer; everything else is.
+    expect(RULE_SHAPES.filter((s) => s.needs(CONTEXT) !== null).map((s) => s.shape)).toEqual(["cap_linked"]);
+  });
+});
+
+describe("a rule shape with a walk", () => {
+  const ORG: ModelContext = {
+    sets: ["employee", "unit"],
+    setIds: {},
+    attributes: {},
+    variables: { pick: { index: ["employee"], domain: "binary" } },
+    parameters: {},
+    relationships: [{ name: "manages", from: "employee", to: "employee" }],
+  };
+
+  it("walks a hierarchy down from each item to everything under it", () => {
+    expect(RULE_SHAPES.find((s) => s.shape === "cap_linked")!.needs(ORG)).toBeNull();
+    const rule = ruleFromShape("cap_linked", "c_1", ORG);
+    expect(rule).toEqual({
+      id: "c_1",
+      forall: [{ index: "e", set: "employee" }],
+      left: { sum: { var: "pick", index: ["e2"] }, over: [{ index: "e2", set: "employee", via: { rel: "manages", from: "e", depth: "any" } }] },
+      relation: "<=",
+      right: { const: 1 },
+      severity: "hard",
+    });
+    expect(checkRule(rule, ORG)).toEqual([]);
+  });
+
+  it("walks back from each unit to the people in it, one step", () => {
+    const rule = ruleFromShape("cap_linked", "c_2", { ...ORG, relationships: [{ name: "belongs_to", from: "employee", to: "unit" }] });
+    expect(rule.forall).toEqual([{ index: "u", set: "unit" }]);
+    expect(rule.left).toEqual({ sum: { var: "pick", index: ["e"] }, over: [{ index: "e", set: "employee", via: { rel: "belongs_to", to: "u" } }] });
+  });
+
+  it("prefers a hierarchy when there is one", () => {
+    const both = { ...ORG, relationships: [{ name: "belongs_to", from: "employee", to: "unit" }, { name: "manages", from: "employee", to: "employee", hierarchy: true }] };
+    expect((ruleFromShape("cap_linked", "c_3", both).left as { over: { via: { rel: string } }[] }).over[0].via.rel).toBe("manages");
+  });
+
+  it("is not offered without a relationship", () => {
+    expect(RULE_SHAPES.find((s) => s.shape === "cap_linked")!.needs({ ...ORG, relationships: [] })).toBe("a decision over a set that a relationship reaches");
   });
 });

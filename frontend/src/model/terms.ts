@@ -29,6 +29,33 @@ export type IrFilter = { attr: string; op: string; value: unknown };
 export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth; as?: string };
 export type Binding = { index: string; set: string; where?: IrFilter[]; via?: Via };
 
+/**
+ * The binding moved to another set, keeping what still fits it: a condition
+ * on an attribute the new set also has (of the same type), and a walk the
+ * new set can still be reached by from the same item. Whatever does not fit
+ * is dropped -- the caller can offer to undo.
+ */
+export function rebindSet(binding: Binding, set: string, context: ModelContext, earlier: Binding[]): Binding {
+  const next: Binding = { index: binding.index, set };
+  const attrs = context.attributes[set] ?? [];
+  const oldAttrs = context.attributes[binding.set] ?? [];
+  const where = (binding.where ?? []).filter((f) => {
+    const now = attrs.find((a) => a.name === f.attr);
+    return now && now.data_type === oldAttrs.find((a) => a.name === f.attr)?.data_type;
+  });
+  if (where.length) next.where = where;
+  const walk = viaOf(binding);
+  if (walk && walksAvailable(context, set, earlier).some((o) => o.rel === walk.rel && o.anchorEnd === walk.anchorEnd && o.anchors.includes(walk.anchor))) {
+    next.via = binding.via;
+  }
+  return next;
+}
+
+/** Whether moving a binding dropped any of its conditions or its walk. */
+export function lost(before: Binding, after: Binding): boolean {
+  return (before.where?.length ?? 0) > (after.where?.length ?? 0) || (!!before.via && !after.via);
+}
+
 /** The binding with these conditions, or with none (no empty `where` left behind). */
 export function withWhere(binding: Binding, where: IrFilter[] | undefined): Binding {
   const { where: _old, ...rest } = binding;
@@ -229,12 +256,14 @@ export type ModelContext = {
   /** Set name -> entity type id, for the filter catalogue. */
   setIds: Record<string, number>;
   /** Set name -> its attributes. */
-  attributes: Record<string, { name: string; data_type: string }[]>;
+  /** `enum_values`: the choices a list-of-choices attribute takes. */
+  attributes: Record<string, { name: string; data_type: string; enum_values?: string[] | null }[]>;
   variables: Record<string, { index: string[]; domain: string }>;
   parameters: Record<string, { index: string[] }>;
   /** The relationship types the IR declares, with the entity types each
    * joins -- which is what decides whether a walk is offered at all. */
-  relationships: { name: string; from: string; to: string; attributes?: { name: string; data_type: string }[] }[];
+  /** `hierarchy`: a tree read from parent (the from end) to child, so a walk goes "below" or "above". */
+  relationships: { name: string; from: string; to: string; hierarchy?: boolean; attributes?: { name: string; data_type: string }[] }[];
   /** The trained models the IR declares (Epic ML), with how many inputs each reads. */
   predictors?: Record<string, { inputs: number }>;
 };

@@ -16,6 +16,7 @@
  * Only walks the model can take are offered (`walksAvailable`): a declared
  * relationship with an end at this binding's set, from an item already bound.
  */
+import { useState } from "react";
 import { PATH_COMBINATIONS } from "../ir";
 import {
   arithmeticAttributes,
@@ -49,7 +50,7 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
   };
 
   if (!current) {
-    if (offers.length === 0) return null;
+    if (offers.length === 0) return <WalkHint label={label} set={binding.set} context={context} />;
     return (
       <button type="button" className="ml-1 text-xs text-blue-700 underline" aria-label={`Reach ${binding.set} through a relationship: ${label}`}
         onClick={() => onChange({ ...binding, via: { rel: offers[0].rel, [offers[0].anchorEnd]: offers[0].anchors[0] } as Via })}>
@@ -62,12 +63,16 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
   const offer = offers.find((o) => o.rel === current.rel && o.anchorEnd === current.anchorEnd);
   const loops = context.relationships.some((r) => r.name === current.rel && r.from === r.to);
   const keep = () => ({ ...(via.depth && loops ? { depth: via.depth } : {}), ...(via.as ? { as: via.as } : {}) });
-  const direction = (end: "from" | "to", self: boolean) => (self ? (end === "from" ? ", going down" : ", going up") : "");
+  const isTree = (rel: string) => context.relationships.some((r) => r.name === rel && r.hierarchy);
+  const tree = isTree(current.rel);
+  // Down or up a hierarchy; along or against any other link from a set to itself.
+  const direction = (rel: string, end: "from" | "to", self: boolean) =>
+    !self ? "" : isTree(rel) ? (end === "from" ? ", going down" : ", going up") : end === "from" ? ", forwards" : ", backwards";
   const anchors = offer?.anchors ?? [];
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1" data-testid="walk">
-      <span className="text-slate-600">{binding.where?.length ? "," : ""} linked {current.anchorEnd === "from" ? "from" : "to"}</span>
+      <span className="text-slate-600">{binding.where?.length ? "," : ""} {tree ? (current.anchorEnd === "from" ? "below" : "above") : `linked ${current.anchorEnd === "from" ? "from" : "to"}`}</span>
       <select aria-label={`${name}: starting at`} className={className} value={current.anchor}
         onChange={(event) => onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: event.target.value, ...keep() } as Via })}>
         {!anchors.includes(current.anchor) && <option value={current.anchor}>{current.anchor || "choose…"}</option>}
@@ -75,6 +80,7 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
       </select>
       <span className="text-slate-600">by</span>
       <select aria-label={`${name}: relationship`} className={className} value={walkKey(current.rel, current.anchorEnd)}
+        title="Every link of the relationship counts, whatever dates it carries: a run does not read “valid from” and “valid to” yet."
         onChange={(event) => {
           const picked = offers.find((o) => walkKey(o.rel, o.anchorEnd) === event.target.value);
           if (!picked) return;
@@ -84,7 +90,7 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
         }}>
         {!offer && <option value={walkKey(current.rel, current.anchorEnd)}>{current.rel || "choose…"}</option>}
         {offers.map((o) => (
-          <option key={walkKey(o.rel, o.anchorEnd)} value={walkKey(o.rel, o.anchorEnd)}>{o.rel}{direction(o.anchorEnd, o.loops)}</option>
+          <option key={walkKey(o.rel, o.anchorEnd)} value={walkKey(o.rel, o.anchorEnd)}>{o.rel}{direction(o.rel, o.anchorEnd, o.loops)}</option>
         ))}
       </select>
       {(loops || (via.depth && via.depth !== "one")) && (
@@ -107,6 +113,48 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
       <button type="button" className="text-xs text-rose-700" aria-label={`Remove ${name}`} title="Range over all of them again" onClick={clear}>
         ✕
       </button>
+    </span>
+  );
+}
+
+/**
+ * Why no walk is offered here, when the model has a relationship that could
+ * reach this set: a walk starts at an item picked before it, and none is.
+ */
+function WalkHint({ label, set, context }: { label: string; set: string; context: ModelContext }) {
+  const [open, setOpen] = useState(false);
+  const starts = context.relationships
+    .flatMap((r) => [
+      ...(r.to === set ? [{ rel: r.name, from: r.from }] : []),
+      ...(r.from === set && r.to !== set ? [{ rel: r.name, from: r.to }] : []),
+    ]);
+  if (starts.length === 0) return null;
+  return (
+    <>
+      <button type="button" className="ml-1 text-xs text-slate-500 underline decoration-dotted" aria-expanded={open}
+        aria-label={`Why no link: ${label}`} onClick={() => setOpen(!open)}>
+        linked through…?
+      </button>
+      {open && (
+        <span role="note" className="ml-1 text-xs text-slate-600">
+          A link starts at an item picked before this one. To reach {set} through{" "}
+          {starts.map((s, i) => <span key={i}>{i > 0 && " or "}{s.rel} (from its {s.from} end)</span>)}, first add “every{" "}
+          {starts[0].from}” in “For each”, or before this one.
+        </span>
+      )}
+    </>
+  );
+}
+
+/** After a change of set dropped a binding's conditions or walk: say what went, and bring it back. */
+export function UndoSetChange({ label, before, onUndo }: { label: string; before: Binding; onUndo: () => void }) {
+  const what = [before.where?.length ? "its conditions" : "", before.via ? `the link by ${before.via.rel}` : ""].filter(Boolean).join(" and ");
+  return (
+    <span role="status" className="ml-1 text-xs text-amber-800">
+      ({what} did not fit the new set;{" "}
+      <button type="button" className="underline" aria-label={`Undo the change of set: ${label}`} onClick={onUndo}>
+        undo
+      </button>)
     </span>
   );
 }

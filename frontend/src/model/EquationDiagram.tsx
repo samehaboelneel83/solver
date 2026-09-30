@@ -14,6 +14,7 @@ import EquationField, { chipsFor } from "./EquationField";
 import { parseBindings, parseTermIn, printBinding, printTerm } from "./formula";
 import { cellText } from "../lib/irBlocks/catalogue";
 import type { Binding, Constraint, ModelContext, Term } from "./terms";
+import { walkWords } from "./walkWords";
 
 /** "Open all" / "Close all": a request every box follows once. */
 type OpenAll = { open: boolean; seq: number } | null;
@@ -145,6 +146,7 @@ function BindingsBox({ label, bindings, bound, context, onChange }: {
           {bindings.map((binding) => (
             <li key={binding.index} className="font-mono text-slate-800">
               {binding.index} <span className="text-slate-500">in</span> {binding.set}
+              {binding.via && <span className="block pl-4 text-slate-600">{walkWords(binding.via, context.relationships.some((r) => r.name === binding.via?.rel && r.hierarchy))}</span>}
               {binding.where?.map((filter, i) => (
                 <span key={i} className="block pl-4 text-slate-600">
                   {i === 0 ? "where" : "and"} {filter.attr} {filter.op === "notIn" ? "not in" : filter.op} {typeof filter.value === "object" && filter.value !== null && !Array.isArray(filter.value) ? cellText(filter.value) : JSON.stringify(filter.value)}

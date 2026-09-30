@@ -205,3 +205,62 @@ describe.skipIf(!existsSync(TEMPLATES))("every template's rules and goals", () =
     expect(printRule((ir.constraints as Constraint[])[0])).toBe(texts[0]);
   });
 });
+
+describe("walks along a relationship in equations", () => {
+  const ORG: ModelContext = {
+    sets: ["employee", "unit"],
+    setIds: {},
+    attributes: { employee: [{ name: "grade", data_type: "number" }] },
+    variables: { pick: { index: ["employee"], domain: "binary" } },
+    parameters: {},
+    relationships: [
+      { name: "manages", from: "employee", to: "employee", attributes: [{ name: "weight", data_type: "number" }] },
+      { name: "belongs_to", from: "employee", to: "unit" },
+    ],
+  };
+  const chain: Constraint = {
+    id: "c_chain",
+    forall: [{ index: "m", set: "employee" }],
+    left: {
+      sum: { mul: [{ attr: { of: "r", name: "weight", along: "max" } }, { var: "pick", index: ["e"] }] },
+      over: [{ index: "e", set: "employee", via: { rel: "manages", from: "m", depth: "any", as: "r" }, where: [{ attr: "grade", op: ">=", value: 2 }] }],
+    },
+    relation: "<=",
+    right: { const: 6 },
+  };
+
+  it("writes a recursive walk, its links and a number combined along them, and reads it back exactly", () => {
+    const text = ruleEquation(chain, ORG);
+    expect(text).toBe("for each m in employee: sum(path_max(weight[r]) * pick[e] for e in employee from m by manages depth any as r where grade >= 2) <= 6");
+    const back = parseRule(text!, ORG);
+    expect(back.ok && withEquation(chain, back.value)).toEqual(chain);
+  });
+
+  it("writes a walk between two sets, and one link's own number", () => {
+    const unit: Constraint = {
+      id: "c_unit",
+      forall: [{ index: "u", set: "unit" }],
+      left: { sum: { var: "pick", index: ["e"] }, over: [{ index: "e", set: "employee", via: { rel: "belongs_to", to: "u" } }] },
+      relation: ">=",
+      right: { const: 1 },
+    };
+    expect(ruleEquation(unit, ORG)).toBe("for each u in unit: sum(pick[e] for e in employee to u by belongs_to) >= 1");
+    const direct: Constraint = {
+      id: "c_direct",
+      forall: [{ index: "m", set: "employee" }],
+      left: { sum: { mul: [{ attr: { of: "r", name: "weight" } }, { var: "pick", index: ["e"] }] }, over: [{ index: "e", set: "employee", via: { rel: "manages", from: "m", as: "r" } }] },
+      relation: "<=",
+      right: { const: 4 },
+    };
+    expect(ruleEquation(direct, ORG)).toBe("for each m in employee: sum(weight[r] * pick[e] for e in employee from m by manages as r) <= 4");
+  });
+
+  it("says what is wrong with a walk that cannot be taken", () => {
+    const message = (text: string) => (parseRule(text, ORG) as { message: string }).message;
+    expect(message("sum(pick[e] for e in employee from x by manages) <= 1")).toMatch(/starts at an index bound before it/);
+    expect(message("for each m in employee: sum(pick[e] for e in employee from m by reports) <= 1")).toMatch(/“reports” is not a relationship of this model \(manages, belongs_to\)/);
+    expect(message("for each m in employee: sum(pick[e] for e in employee from m by belongs_to) <= 1")).toBe("Walking belongs_to from its employee reaches unit, not employee.");
+    expect(message("for each m in employee: sum(path_sum(weight[r]) * pick[e] for e in employee from m by manages as r) <= 1")).toMatch(/nothing to combine/);
+    expect(message("for each m in employee: sum(pick[r] for e in employee from m by manages as r) <= 1")).toMatch(/names the links of a walk/);
+  });
+});

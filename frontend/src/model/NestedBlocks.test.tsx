@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { checkRule, explain, problemsAt } from "./blockCheck";
 import { GoalBlocks, RuleBlocks, RuleSentence } from "./NestedBlocks";
 import { ruleSentence, termSentence } from "./ruleSentence";
-import type { Binding, Constraint, ModelContext, Term } from "./terms";
+import { rebindSet, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
 
 const CONTEXT: ModelContext = {
   sets: ["person", "day"],
@@ -229,7 +229,7 @@ describe("walks along a relationship (a hierarchy)", () => {
     parameters: {},
     predictors: {},
     relationships: [
-      { name: "manages", from: "employee", to: "employee", attributes: [{ name: "weight", data_type: "number" }] },
+      { name: "manages", from: "employee", to: "employee", hierarchy: true, attributes: [{ name: "weight", data_type: "number" }] },
       { name: "belongs", from: "employee", to: "unit" },
     ],
   };
@@ -261,10 +261,43 @@ describe("walks along a relationship (a hierarchy)", () => {
 
   it("reads start, relationship, direction, depth, condition and the links' numbers, and checks out", () => {
     expect(checkRule(TEAM, ORG)).toEqual([]);
-    expect(ruleSentence(TEAM)).toBe(
+    expect(ruleSentence(TEAM, ORG.relationships)).toBe(
       "For every employee m, the total of the sum of weight along r times assign of e, over every employee e whose grade is at least 2, " +
-        "linked from m by manages in 1 or more steps (each link called r), must be at most 5.",
+        "below m by manages in 1 or more steps (each link called r), must be at most 5.",
     );
+    // Not a hierarchy: no "below", and a link from a set to itself goes forwards or backwards.
+    const flat = ORG.relationships.map((r) => ({ ...r, hierarchy: false }));
+    expect(ruleSentence(TEAM, flat)).toContain("linked from m by manages in 1 or more steps");
+    render(<RuleSentence rule={TEAM} context={{ ...ORG, relationships: flat }} onEdit={() => {}} onChange={() => {}} />);
+    expect(Array.from((screen.getByLabelText("left side: runs over: set 1: walk: relationship") as HTMLSelectElement).options).map((o) => o.textContent))
+      .toEqual(["manages, forwards", "manages, backwards"]);
+  });
+
+  it("says why no link is offered, where the model has one that could reach the set", () => {
+    render(<Walks initial={{ ...TEAM, forall: [], left: { sum: { var: "assign", index: ["e"] }, over: [{ index: "e", set: "employee" }] } }} />);
+    expect(screen.queryByRole("button", { name: /Reach employee through a relationship/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Why no link: left side: runs over: set 1" }));
+    expect(screen.getByRole("note")).toHaveTextContent("A link starts at an item picked before this one. To reach employee through manages (from its employee end)");
+  });
+
+  it("keeps what still fits when a set changes, and can undo what did not", () => {
+    render(<Walks initial={TEAM} boxes />);
+    fireEvent.change(screen.getByLabelText("left side: runs over: set 1"), { target: { value: "unit" } });
+    expect(over()).toEqual({ index: "e", set: "unit" });
+    expect(screen.getByText(/its conditions and the link by manages did not fit the new set/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo the change of set: left side: runs over: set 1" }));
+    expect(over()).toEqual(TEAM.left && (TEAM.left as { over: Binding[] }).over[0]);
+  });
+
+  it("keeps a condition the new set can also take, and a walk that still reaches it", () => {
+    const both: ModelContext = { ...ORG, attributes: { ...ORG.attributes, unit: [{ name: "grade", data_type: "number" }] } };
+    const moved = rebindSet({ index: "e", set: "employee", where: [{ attr: "grade", op: ">=", value: 2 }], via: { rel: "belongs", from: "m" } }, "unit", both, [{ index: "m", set: "employee" }]);
+    expect(moved).toEqual({ index: "e", set: "unit", where: [{ attr: "grade", op: ">=", value: 2 }], via: { rel: "belongs", from: "m" } });
+  });
+
+  it("names a link's number as data of a link", () => {
+    render(<Walks initial={TEAM} boxes />);
+    expect(screen.getByRole("group", { name: "Data along the links: factor 1" })).toBeInTheDocument();
   });
 
   it("edits the walk in the sentence: how far, which way, and removing it", () => {
@@ -272,6 +305,7 @@ describe("walks along a relationship (a hierarchy)", () => {
     const walk = "left side: runs over: set 1: walk";
     expect(Array.from((screen.getByLabelText(`${walk}: relationship`) as HTMLSelectElement).options).map((o) => o.textContent))
       .toEqual(["manages, going down", "manages, going up"]);
+    expect(screen.getByTestId("sentence-reading")).toHaveTextContent("below m by manages");
     fireEvent.change(screen.getByLabelText(`${walk}: how far`), { target: { value: "any_or_self" } });
     expect(over().via).toEqual({ rel: "manages", from: "m", depth: "any_or_self", as: "r" });
     fireEvent.change(screen.getByLabelText(`${walk}: relationship`), { target: { value: "manages:to" } });
@@ -321,5 +355,49 @@ describe("walks along a relationship (a hierarchy)", () => {
     expect(bad({ rel: "belongs", from: "m", depth: "any" }, "unit").at(-1))
       .toBe("only a relationship from a set to itself can be walked more than one step; belongs links employee to unit");
     expect(bad({ rel: "manages", from: "m", as: "m" })).toEqual(["“m” already names something here; pick another name for the links"]);
+  });
+});
+
+describe("condition values that are picked, not typed", () => {
+  const SHOP: ModelContext = {
+    ...CONTEXT,
+    attributes: { person: [
+      { name: "team", data_type: "enum", enum_values: ["north", "south", "east"] },
+      { name: "joined", data_type: "date" },
+    ] },
+  };
+  function Picked({ initial }: { initial: Constraint }) {
+    const [rule, setRule] = useState(initial);
+    return (
+      <>
+        <RuleBlocks rule={rule} context={SHOP} onChange={setRule} />
+        <pre data-testid="ir">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+  const where = () => (ir().left as { over: Binding[] }).over[0].where;
+  const name = "left side: runs over: set 1: condition 1";
+
+  it("offers a list's choices, one or several, and a date as a date", () => {
+    render(<Picked initial={COVER} />);
+    const value = screen.getByLabelText(`${name}: value`) as HTMLSelectElement;
+    expect(Array.from(value.options).map((o) => o.value)).toEqual(["north", "south", "east"]);
+    fireEvent.change(value, { target: { value: "east" } });
+    expect(where()).toEqual([{ attr: "team", op: "=", value: "east" }]);
+    fireEvent.change(screen.getByLabelText(`${name}: comparison`), { target: { value: "in" } });
+    const several = screen.getByRole("group", { name: `${name}: value` });
+    fireEvent.click(within(several).getByLabelText("north"));
+    expect(where()).toEqual([{ attr: "team", op: "in", value: ["north", "east"] }]);
+    fireEvent.change(screen.getByLabelText(`${name}: attribute`), { target: { value: "joined" } });
+    fireEvent.change(screen.getByLabelText(`${name}: comparison`), { target: { value: ">=" } });
+    const date = screen.getByLabelText(`${name}: value`) as HTMLInputElement;
+    expect(date.type).toBe("date");
+    fireEvent.change(date, { target: { value: "2026-01-31" } });
+    expect(where()).toEqual([{ attr: "joined", op: ">=", value: "2026-01-31" }]);
+  });
+
+  it("names a value that is not one of the choices", () => {
+    const rule: Constraint = { ...COVER, forall: [{ index: "q", set: "person", where: [{ attr: "team", op: "in", value: ["north", "west"] }] }] };
+    expect(checkRule(rule, SHOP).map((p) => p.message)).toContain("“west” is not one of team’s choices (north, south, east)");
   });
 });

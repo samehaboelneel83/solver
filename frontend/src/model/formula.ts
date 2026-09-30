@@ -12,9 +12,9 @@
  *
  * Not every IR shape has an equation. `ruleEquation` and `goalEquation` offer
  * the text only when parsing the printed text gives back the very same IR, so
- * the equation view can never quietly change a model. Walks along
- * relationships, attributes read along a path, curves, conditional rules and
- * scheduling, connected and route rules stay in the structure editor.
+ * the equation view can never quietly change a model. Curves, conditional
+ * rules and scheduling, connected and route rules stay in the structure
+ * editor.
  *
  * Grammar (one-to-one with the IR term kinds):
  *
@@ -26,12 +26,19 @@
  *     atom     := number | "(" expr ")" | "sum(" expr "for" bindings ")"
  *              |  function "(" expr ")" | name "[" cells "]" | name
  *     bindings := binding { "," binding }
- *     binding  := index "in" set [ "where" filter { "and" filter } ]
+ *     binding  := index "in" set [ walk ] [ "where" filter { "and" filter } ]
+ *     walk     := ("from" | "to") index "by" relationship [ "depth" ("any" | "any_or_self") ] [ "as" name ]
  *     filter   := attribute op value      op: = != < <= > >= in "not in"
+ *     atom     |= "path_" combination "(" attribute "[" link "]" ")"   combination: sum min max product count
+ *
+ * A walk: `e in employee from m by manages depth any as r` is every employee
+ * below m along manages, in one or more steps, each link named r;
+ * `weight[r]` reads one link's number and `path_sum(weight[r])` adds them up
+ * along a walk of many steps.
  */
-import { FUNCTIONS, FILTER_OPERATORS, RELATIONS, type Relation } from "../ir";
+import { FUNCTIONS, FILTER_OPERATORS, PATH_COMBINATIONS, RELATIONS, TRAVERSAL_DEPTHS, type PathCombination, type Relation, type TraversalDepth } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import type { Binding, Constraint, IrFilter, ModelContext, Term } from "./terms";
+import { edgeAttributes, type Binding, type Constraint, type IrFilter, type ModelContext, type Term, type Via } from "./terms";
 
 // --- printing ----------------------------------------------------------------
 
@@ -45,9 +52,16 @@ function printFilter(filter: IrFilter): string {
   return `${filter.attr} ${op} ${printValue(filter.value)}`;
 }
 
+function printWalk(via: Via): string {
+  const from = via.from !== undefined;
+  const depth = via.depth && via.depth !== "one" ? ` depth ${via.depth}` : "";
+  const edge = via.as ? ` as ${via.as}` : "";
+  return ` ${from ? "from" : "to"} ${from ? via.from : via.to} by ${via.rel}${depth}${edge}`;
+}
+
 export function printBinding(binding: Binding): string {
   const where = binding.where?.length ? ` where ${binding.where.map(printFilter).join(" and ")}` : "";
-  return `${binding.index} in ${binding.set}${where}`;
+  return `${binding.index} in ${binding.set}${binding.via ? printWalk(binding.via) : ""}${where}`;
 }
 
 function printNumber(value: number): string {
@@ -60,7 +74,10 @@ export function printTerm(term: Term): string {
   if ("const" in term) return printNumber(term.const);
   if ("var" in term) return term.index.length ? `${term.var}[${term.index.map(cellText).join(", ")}]` : term.var;
   if ("par" in term) return term.index.length ? `${term.par}[${term.index.map(cellText).join(", ")}]` : term.par;
-  if ("attr" in term) return `${term.attr.name}[${term.attr.of}]`;
+  if ("attr" in term) {
+    const read = `${term.attr.name}[${term.attr.of}]`;
+    return term.attr.along ? `path_${term.attr.along}(${read})` : read;
+  }
   if ("sum" in term) return `sum(${printTerm(term.sum)} for ${term.over.map(printBinding).join(", ")})`;
   if ("fn" in term) return `${term.fn}(${printTerm(term.of)})`;
   if ("predict" in term) return `predict ${term.predict}(${term.of.map(printTerm).join(", ")})`;
@@ -287,6 +304,7 @@ class Parser {
       );
     }
     const binding: Binding = { index: index.value, set: set.value };
+    if (this.isWord("from") || this.isWord("to")) binding.via = this.walk(set.value);
     if (this.isWord("where")) {
       this.next();
       const where: IrFilter[] = [this.filter(set.value)];
@@ -297,6 +315,61 @@ class Parser {
       binding.where = where;
     }
     return binding;
+  }
+
+  /** `from m by manages depth any as r`: which item it starts at, along which relationship, how far, and the links' name. */
+  private walk(set: string): Via {
+    const end = this.next().value as "from" | "to";
+    const anchor = this.next();
+    if (anchor.kind !== "name" || !this.bound(anchor.value)) {
+      throw new FormulaError(
+        `A walk starts at an index bound before it, such as “m” in “for each m in employee”; “${String(anchor.value)}” is not.`,
+        anchor.at,
+        anchor.end,
+      );
+    }
+    this.expectWord("by", `after “${end} ${anchor.value}”`);
+    const rel = this.next();
+    const known = this.context.relationships.find((r) => r.name === rel.value);
+    if (rel.kind !== "name" || !known) {
+      const names = this.context.relationships.map((r) => r.name);
+      throw new FormulaError(
+        `“${String(rel.value)}” is not a relationship of this model${names.length ? ` (${names.join(", ")})` : ""}.`,
+        rel.at,
+        rel.end,
+      );
+    }
+    const reached = end === "from" ? known.to : known.from;
+    if (reached !== set) {
+      throw new FormulaError(`Walking ${known.name} ${end === "from" ? "from" : "back to"} its ${end === "from" ? known.from : known.to} reaches ${reached}, not ${set}.`, rel.at, rel.end);
+    }
+    const via: Via = { rel: known.name, [end]: anchor.value } as Via;
+    if (this.isWord("depth")) {
+      this.next();
+      const depth = this.next();
+      if (depth.kind !== "name" || !(TRAVERSAL_DEPTHS as readonly string[]).includes(depth.value)) {
+        throw new FormulaError("A walk goes depth one, any or any_or_self.", depth.at, depth.end);
+      }
+      if (depth.value !== "one") via.depth = depth.value as TraversalDepth;
+    }
+    if (this.isWord("as")) {
+      this.next();
+      const edge = this.next();
+      if (edge.kind !== "name" || !/^[a-z][a-z0-9_]*$/.test(edge.value) || this.bound(edge.value)) {
+        throw new FormulaError("Name the links with a new name, such as “as r”.", edge.at, edge.end);
+      }
+      via.as = edge.value;
+    }
+    return via;
+  }
+
+  /** The link a walk in scope names with `as`. */
+  private edge(name: string): { rel: string; path: boolean } | undefined {
+    for (let level = this.scope.length - 1; level >= 0; level -= 1) {
+      const found = this.scope[level].find((binding) => binding.via?.as === name);
+      if (found?.via) return { rel: found.via.rel, path: (found.via.depth ?? "one") !== "one" };
+    }
+    return undefined;
   }
 
   private filter(set: string): IrFilter {
@@ -452,6 +525,21 @@ class Parser {
       }
       return { predict: called, of };
     }
+    const combination = name.startsWith("path_") ? name.slice(5) : null;
+    if (combination !== null && this.isOp("(")) {
+      if (!(PATH_COMBINATIONS as readonly string[]).includes(combination)) {
+        throw new FormulaError(`Along a path, a number is combined by ${PATH_COMBINATIONS.map((c) => `path_${c}`).join(", ")}.`, token.at, token.end);
+      }
+      this.next();
+      const read = this.atom();
+      if (!("attr" in read)) throw new FormulaError(`${name}(…) reads a link's number, such as ${name}(weight[r]).`, token.at, token.end);
+      const link = this.edge(read.attr.of);
+      if (!link?.path) {
+        throw new FormulaError(`“${read.attr.of}” is not the links of a walk of many steps, so there is nothing to combine.`, token.at, token.end);
+      }
+      this.expectOp(")", `to close ${name}(…)`);
+      return { attr: { ...read.attr, along: combination as PathCombination } };
+    }
     if (name in FUNCTIONS && this.isOp("(")) {
       this.next();
       const of = this.expr();
@@ -460,7 +548,9 @@ class Parser {
     }
     const variable = this.context.variables[name];
     const parameter = this.context.parameters[name];
-    const attribute = Object.values(this.context.attributes).some((list) => list.some((a) => a.name === name));
+    const attribute =
+      Object.values(this.context.attributes).some((list) => list.some((a) => a.name === name)) ||
+      this.context.relationships.some((r) => (r.attributes ?? []).some((a) => a.name === name));
     if (!variable && !parameter && !attribute) {
       // Name the unknown word before anything inside its brackets.
       const near = closest(name, [...Object.keys(this.context.variables), ...Object.keys(this.context.parameters)]);
@@ -472,6 +562,10 @@ class Parser {
     }
     const indexed = this.isOp("[");
     const index = indexed ? (this.next(), this.cells(name)) : [];
+    const link = index.find((cell) => typeof cell === "string" && !this.bound(cell) && this.edge(cell));
+    if ((variable || parameter) && link) {
+      throw new FormulaError(`“${link}” names the links of a walk: read their numbers, such as weight[${link}], not ${name}[…].`, token.at, token.end);
+    }
     if (variable) {
       this.checkArity(name, variable.index, index, token);
       return { var: name, index };
@@ -481,6 +575,10 @@ class Parser {
       return { par: name, index };
     }
     if (indexed && index.length === 1 && typeof index[0] === "string") {
+      const link = this.edge(index[0]);
+      if (link && edgeAttributes(this.context, link.rel).some((a) => a.name === name)) {
+        return { attr: { of: index[0], name } };
+      }
       const binding = this.bound(index[0]);
       if (binding && (this.context.attributes[binding.set] ?? []).some((a) => a.name === name)) {
         return { attr: { of: index[0], name } };
@@ -515,7 +613,7 @@ class Parser {
       this.next();
       return { par: token.value, index: this.cells(token.value) };
     }
-    if (!this.bound(token.value)) {
+    if (!this.bound(token.value) && !this.edge(token.value)) {
       throw new FormulaError(
         `“${token.value}” is not bound here: add “for ${token.value} in <set>” to a sum or to “for each”.`,
         token.at,

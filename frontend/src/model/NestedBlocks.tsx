@@ -19,14 +19,16 @@ import { cellText } from "../lib/irBlocks/catalogue";
 import { checkGoal, checkRule, explain, problemsAt, type Problem } from "./blockCheck";
 import { ruleSentence, termSentence } from "./ruleSentence";
 import { RuleWords, TermWords } from "./SentenceEditor";
-import { AttrBlanks, WalkBlanks } from "./WalkBlanks";
+import { AttrBlanks, UndoSetChange, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 import {
   arithmeticAttributes,
   describeWhen,
   emptyTerm,
   fillIndices,
+  lost,
   nextBinding,
+  rebindSet,
   withWhere,
   type Binding,
   type Constraint,
@@ -60,11 +62,15 @@ function roleOf(term: Term): Role {
   return "operation";
 }
 
-function titleOf(term: Term): string {
+function titleOf(term: Term, bound: Binding[] = []): string {
   if ("const" in term) return "Number";
   if ("var" in term) return "Decision";
   if ("par" in term) return "Data";
-  if ("attr" in term) return "Data of an item";
+  if ("attr" in term) {
+    // A walk's links (`as r`) carry their own numbers.
+    const link = bound.some((b) => b.via?.as === term.attr.of && !bound.some((o) => o.index === term.attr.of));
+    return link ? (term.attr.along ? "Data along the links" : "Data of a link") : "Data of an item";
+  }
   if ("sum" in term) return "Total";
   if ("add" in term) return "Add up";
   if ("mul" in term) return "Multiply";
@@ -227,13 +233,18 @@ function BindingsEditor({ label, bindings, bound, context, onChange, removable }
   onChange: (next: Binding[]) => void;
   removable: boolean;
 }) {
+  const [undo, setUndo] = useState<{ i: number; before: Binding; set: string } | null>(null);
   return (
     <div className="flex flex-col gap-1">
       {bindings.map((binding, i) => (
         <div key={i} className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
           <span>every</span>
           <select aria-label={`${label}: set ${i + 1}`} className={SELECT} value={binding.set}
-            onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { index: b.index, set: event.target.value } : b)))}>
+            onChange={(event) => {
+              const next = rebindSet(binding, event.target.value, context, [...bound, ...bindings.slice(0, i)]);
+              setUndo(lost(binding, next) ? { i, before: binding, set: next.set } : null);
+              onChange(bindings.map((b, j) => (j === i ? next : b)));
+            }}>
             {!context.sets.includes(binding.set) && <option value={binding.set}>{binding.set || "choose…"}</option>}
             {context.sets.map((set) => <option key={set} value={set}>{set}</option>)}
           </select>
@@ -244,6 +255,10 @@ function BindingsEditor({ label, bindings, bound, context, onChange, removable }
             onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
           <WalkBlanks label={`${label}: set ${i + 1}`} binding={binding} earlier={[...bound, ...bindings.slice(0, i)]} context={context} className={SELECT}
             onChange={(next) => onChange(bindings.map((b, j) => (j === i ? next : b)))} />
+          {undo?.i === i && binding.set === undo.set && (
+            <UndoSetChange label={`${label}: set ${i + 1}`} before={undo.before}
+              onUndo={() => { onChange(bindings.map((b, j) => (j === i ? undo.before : b))); setUndo(null); }} />
+          )}
           {(removable || bindings.length > 1) && (
             <button type="button" className="text-xs text-rose-700 underline" aria-label={`Remove ${binding.index || "this set"} from ${label}`}
               onClick={() => onChange(bindings.filter((_, j) => j !== i))}>
@@ -377,7 +392,7 @@ export function TermBlock({ term, label, path, problems, context, bound, onChang
   }
 
   return (
-    <Box role={roleOf(term)} title={titleOf(term)} label={label} problems={problems} path={path} actions={actions}>
+    <Box role={roleOf(term)} title={titleOf(term, bound)} label={label} problems={problems} path={path} actions={actions}>
       {body}
     </Box>
   );
@@ -478,9 +493,9 @@ export function RuleSentence({ rule, context, onEdit, onChange }: {
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="rule-sentence">
       <p className="text-sm leading-loose text-slate-900">
-        {onChange ? <RuleWords rule={rule} context={context} onChange={onChange} /> : ruleSentence(rule)}
+        {onChange ? <RuleWords rule={rule} context={context} onChange={onChange} /> : ruleSentence(rule, context.relationships)}
       </p>
-      {onChange && <p className="sr-only" data-testid="sentence-reading">{ruleSentence(rule)}</p>}
+      {onChange && <p className="sr-only" data-testid="sentence-reading">{ruleSentence(rule, context.relationships)}</p>}
       <Summary problems={checkRule(rule, context)} />
       <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change its shape in boxes</button>
     </div>
@@ -497,9 +512,9 @@ export function GoalSentence({ expression, context, onEdit, onChange }: {
     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="goal-sentence">
       <p className="text-sm leading-loose text-slate-900">
         Counts{" "}
-        {onChange ? <TermWords term={expression} path="what it counts" context={context} bound={[]} onChange={onChange} /> : termSentence(expression)}.
+        {onChange ? <TermWords term={expression} path="what it counts" context={context} bound={[]} onChange={onChange} /> : termSentence(expression, context.relationships)}.
       </p>
-      {onChange && <p className="sr-only" data-testid="sentence-reading">Counts {termSentence(expression)}.</p>}
+      {onChange && <p className="sr-only" data-testid="sentence-reading">Counts {termSentence(expression, context.relationships)}.</p>}
       <Summary problems={checkGoal(expression, context)} />
       <button type="button" className="text-xs text-blue-700 underline" onClick={onEdit}>Change its shape in boxes</button>
     </div>

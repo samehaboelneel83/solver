@@ -13,8 +13,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { fillIndices, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
-import { AttrBlanks, WalkBlanks } from "./WalkBlanks";
+import { fillIndices, lost, rebindSet, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { AttrBlanks, UndoSetChange, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 
 const BLANK = "mx-0.5 inline-block rounded border border-slate-300 bg-white px-1 py-0 align-baseline text-sm text-slate-900";
@@ -55,19 +55,28 @@ export function BindingBlanks({ label, bindings, bound = [], context, onChange }
   context: ModelContext;
   onChange: (next: Binding[]) => void;
 }) {
+  const [undo, setUndo] = useState<{ i: number; before: Binding; set: string } | null>(null);
   return (
     <>
       {bindings.map((binding, i) => (
         <span key={i}>
           {i > 0 && " and "}every
           <Choice label={`${label}: set ${i + 1}`} value={binding.set} options={context.sets.map((s) => [s, s])}
-            onChange={(set) => onChange(bindings.map((b, j) => (j === i ? { index: b.index, set } : b)))} />
+            onChange={(set) => {
+              const next = rebindSet(binding, set, context, [...bound, ...bindings.slice(0, i)]);
+              setUndo(lost(binding, next) ? { i, before: binding, set } : null);
+              onChange(bindings.map((b, j) => (j === i ? next : b)));
+            }} />
           <input aria-label={`${label}: name ${i + 1}`} className={`${BLANK} w-10 font-mono`} value={binding.index}
             onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, index: event.target.value.trim() } : b)))} />
           <WhereBlanks label={`${label}: set ${i + 1}`} set={binding.set} where={binding.where} context={context} className={BLANK}
             onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
           <WalkBlanks label={`${label}: set ${i + 1}`} binding={binding} earlier={[...bound, ...bindings.slice(0, i)]} context={context} className={BLANK}
             onChange={(next) => onChange(bindings.map((b, j) => (j === i ? next : b)))} />
+          {undo?.i === i && binding.set === undo.set && (
+            <UndoSetChange label={`${label}: set ${i + 1}`} before={undo.before}
+              onUndo={() => { onChange(bindings.map((b, j) => (j === i ? undo.before : b))); setUndo(null); }} />
+          )}
         </span>
       ))}
     </>

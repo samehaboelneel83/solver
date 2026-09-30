@@ -22,16 +22,47 @@ function parseOne(text: string, dataType: string | undefined): unknown {
   return text;
 }
 
-function ValueBlank({ label, filter, dataType, className, onChange }: {
+function ValueBlank({ label, filter, dataType, choices, className, onChange }: {
   label: string;
   filter: IrFilter;
   dataType: string | undefined;
+  /** A list-of-choices attribute's choices: picked, not typed. */
+  choices?: string[] | null;
   className: string;
   onChange: (value: unknown) => void;
 }) {
   const shown = Array.isArray(filter.value) ? filter.value.map(valueWords).join(", ") : valueWords(filter.value);
   const [text, setText] = useState(shown);
   useEffect(() => setText(shown), [shown]);
+  if (choices && choices.length > 0) {
+    if (isList(filter.op)) {
+      const picked = Array.isArray(filter.value) ? filter.value.map(String) : [];
+      return (
+        <span role="group" aria-label={label} className="inline-flex flex-wrap items-center gap-2 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-sm">
+          {choices.map((choice) => (
+            <label key={choice} className="inline-flex items-center gap-1">
+              <input type="checkbox" checked={picked.includes(choice)}
+                onChange={(event) => onChange(event.target.checked ? choices.filter((c) => c === choice || picked.includes(c)) : picked.filter((c) => c !== choice))} />
+              {choice}
+            </label>
+          ))}
+        </span>
+      );
+    }
+    const value = String(filter.value ?? "");
+    return (
+      <select aria-label={label} className={className} value={value} onChange={(event) => onChange(event.target.value)}>
+        {!choices.includes(value) && <option value={value}>{value || "choose…"}</option>}
+        {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+      </select>
+    );
+  }
+  if ((dataType === "date" || dataType === "time") && !isList(filter.op)) {
+    return (
+      <input type={dataType} aria-label={label} className={className} value={typeof filter.value === "string" ? filter.value : ""}
+        onChange={(event) => onChange(event.target.value)} />
+    );
+  }
   if (dataType === "boolean" && !isList(filter.op)) {
     return (
       <select aria-label={label} className={className} value={filter.value === false ? "no" : "yes"}
@@ -73,6 +104,12 @@ export function WhereBlanks({ label, set, where, context, onChange, className, l
   const attributes = context.attributes[set] ?? [];
   const filters = where ?? [];
   const typeOf = (attr: string) => attributes.find((a) => a.name === attr)?.data_type;
+  const choicesOf = (attr: string) => attributes.find((a) => a.name === attr)?.enum_values;
+  /** A starting value; a list of choices starts at its first choice. */
+  const startValue = (attr: string, op: string) => {
+    const choices = choicesOf(attr);
+    return choices?.length && !isList(op) ? choices[0] : defaultValue(typeOf(attr), op);
+  };
   const setAll = (next: IrFilter[]) => onChange(next.length > 0 ? next : undefined);
   const replace = (i: number, next: IrFilter) => setAll(filters.map((f, j) => (j === i ? next : f)));
 
@@ -90,7 +127,7 @@ export function WhereBlanks({ label, set, where, context, onChange, className, l
                 const attr = event.target.value;
                 const type = typeOf(attr);
                 const op = opsFor(type).includes(filter.op) ? filter.op : "=";
-                replace(i, { attr, op, value: defaultValue(type, op) });
+                replace(i, { attr, op, value: startValue(attr, op) });
               }}>
               {!attributes.some((a) => a.name === filter.attr) && <option value={filter.attr}>{filter.attr || "choose…"}</option>}
               {attributes.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
@@ -103,13 +140,13 @@ export function WhereBlanks({ label, set, where, context, onChange, className, l
                   ? filter.value
                   : isList(op)
                     ? (filter.value === "" ? [] : [filter.value])
-                    : (Array.isArray(filter.value) && filter.value.length > 0 ? filter.value[0] : defaultValue(dataType, op));
+                    : (Array.isArray(filter.value) && filter.value.length > 0 ? filter.value[0] : startValue(filter.attr, op));
                 replace(i, { ...filter, op, value });
               }}>
               {!ops.includes(filter.op) && <option value={filter.op}>{OP_WORDS[filter.op] ?? filter.op}</option>}
               {ops.map((op) => <option key={op} value={op}>{OP_WORDS[op]}</option>)}
             </select>
-            <ValueBlank label={`${name}: value`} filter={filter} dataType={dataType} className={className}
+            <ValueBlank label={`${name}: value`} filter={filter} dataType={dataType} choices={choicesOf(filter.attr)} className={className}
               onChange={(value) => replace(i, { ...filter, value })} />
             <button type="button" className="text-xs text-rose-700" aria-label={`Remove ${name}`} title="Remove this condition"
               onClick={() => setAll(filters.filter((_, j) => j !== i))}>
@@ -122,7 +159,7 @@ export function WhereBlanks({ label, set, where, context, onChange, className, l
         <button type="button" className="ml-1 text-xs text-blue-700 underline" aria-label={`Only some of ${set}: add a condition to ${label}`}
           onClick={() => {
             const first = attributes[0];
-            setAll([...filters, { attr: first.name, op: "=", value: defaultValue(first.data_type, "=") }]);
+            setAll([...filters, { attr: first.name, op: "=", value: startValue(first.name, "=") }]);
           }}>
           {filters.length === 0 ? "+ only some of them" : "+ and"}
         </button>

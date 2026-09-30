@@ -208,6 +208,12 @@ export function checkWhere(binding: Binding, context: ModelContext): string[] {
     } else if ((attribute.data_type === "number" || attribute.data_type === "integer") && typeof filter.value !== "number") {
       out.push(`${filter.attr} is a number, so compare it with a number`);
     }
+    const choices = attribute.enum_values;
+    if (choices?.length) {
+      const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+      const stray = values.find((v) => !choices.includes(String(v)));
+      if (stray !== undefined) out.push(`“${String(stray)}” is not one of ${filter.attr}’s choices (${choices.join(", ")})`);
+    }
   }
   return out;
 }
