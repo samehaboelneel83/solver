@@ -728,7 +728,9 @@ export function buildSidebarGroups(
   }
   if (back) {
     const scope = { domainId: back.domainId, problemId: null };
-    return [navigate, recentGroup(simple ? "Recent workspace" : "Recent domain", scope, [["domain-overview", null], ["problems", null]]), ...tail];
+    return [navigate, simple
+      ? recentGroup("Recent workspace", scope, [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"]])
+      : recentGroup("Recent domain", scope, [["domain-overview", null], ["problems", null]]), ...tail];
   }
   return [navigate, ...tail];
 }
