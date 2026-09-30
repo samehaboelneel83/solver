@@ -84,7 +84,7 @@ def test_applying_a_template_creates_a_problem_with_the_starting_model(seeded, a
     scenario = client.get(
         f"/api/v1/scenarios/{body['scenario_id']}", headers=auth_headers
     ).json()
-    assert scenario["name"] == "as modelled"
+    assert scenario["name"] == "Base"
     assert scenario["patch"] == {}
 
 

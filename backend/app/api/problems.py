@@ -716,7 +716,8 @@ def apply_template(
     scenario = Scenario(
         problem_id=problem.id,
         model_version_id=version_id,
-        name="as modelled",
+        # The scenario one-click Solve keeps (app.api.workflow.BASE), not a second one beside it.
+        name="Base",
         patch={},
     )
     db.add(scenario)
