@@ -128,11 +128,42 @@ describe("Entities: choosing what to show", () => {
     expect(((await screen.findByLabelText(/^Entity type/)) as HTMLSelectElement).value).toBe("9");
   });
 
-  it("points at the entity types page when the domain has none", async () => {
-    serve({ "/api/v1/entity-types": { items: [], total: 0 } });
+  it("offers the first kind of record in place when the domain has none", async () => {
+    serve({
+      "/api/v1/entity-types": { items: [], total: 0 },
+      "/api/v1/me": { username: "modeller", capabilities: ["domain.edit"] },
+    });
     renderPage();
-    expect(await screen.findByRole("link", { name: /entity type/i })).toHaveAttribute("href", "/entity-types");
+    expect(await screen.findByText(/no kinds of record yet/)).toBeInTheDocument();
+    expect(await screen.findByRole("form", { name: "New kind of record" })).toBeInTheDocument();
     expect(paths().some((p) => p.startsWith("/api/v1/entities"))).toBe(false);
+  });
+
+  it("makes a new kind of record, and a field on one, from the records page", async () => {
+    serve({ "/api/v1/me": { username: "modeller", capabilities: ["domain.edit"] } });
+    const writes: [string, unknown][] = [];
+    const served = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
+      if (options?.method === "POST") {
+        writes.push([path, JSON.parse(options.body ?? "{}")]);
+        return Promise.resolve(path.endsWith("/attributes") ? { id: 90 } : { id: 88, name: "shift", attributes: [] });
+      }
+      return served(path, options);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /\+ Add a field to/ }));
+    fireEvent.change(screen.getByPlaceholderText("hours per week"), { target: { value: "Hours per week" } });
+    expect(screen.getByText("hours_per_week")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: /which is/ }), { target: { value: "integer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0][1]).toEqual({ name: "hours_per_week", data_type: "integer" });
+
+    fireEvent.click(screen.getByRole("button", { name: "+ New kind of record" }));
+    fireEvent.change(screen.getByPlaceholderText("employee"), { target: { value: "Shift" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1]).toEqual(["/api/v1/entity-types", { domain_id: 7, name: "shift" }]);
   });
 });
 

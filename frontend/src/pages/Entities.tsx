@@ -1,4 +1,6 @@
-import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+
+import QuickStructure, { NewKindForm } from "../components/QuickStructure";
 import EntityPicture from "../components/EntityPicture";
 import { Link, useSearchParams } from "react-router-dom";
 import { formatAttrValue } from "../components/AttrsForm";
@@ -103,6 +105,7 @@ export default function Entities() {
 
 function ForDomain({ domainId }: { domainId: Id }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { can } = useCapabilities();
   const types = useEntityTypes(domainId, { limit: 500 });
   // For `count(<relationship type>, direction)`. Its failure is not this
   // page's failure: without it the builder simply offers no counts, which
@@ -119,16 +122,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
     return <Failed error={types.error} onRetry={() => types.refetch()} />;
   }
 
+  const select = (id: Id) => setSearchParams({ type: String(id) }, { replace: true });
+
   if (items.length === 0) {
     return (
       <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <p>This domain has no entity types yet, and every entity belongs to one.</p>
-        <p className="mt-1">
-          <Link to="/entity-types" className="inline-block rounded py-1 text-blue-600 underline">
-            Define an entity type first
-          </Link>
-          .
-        </p>
+        <p>This domain has no kinds of record yet, and every record is of one kind.</p>
+        {can("domain.edit") ? (
+          <div className="mt-2"><NewKindForm domainId={domainId} onMade={(made) => select(made.id)} /></div>
+        ) : (
+          <p className="mt-1">Someone who may edit this domain can add one.</p>
+        )}
       </div>
     );
   }
@@ -138,8 +142,10 @@ function ForDomain({ domainId }: { domainId: Id }) {
       <TypeChooser
         types={items}
         selected={selected}
-        onSelect={(id) => setSearchParams({ type: String(id) }, { replace: true })}
+        onSelect={select}
       />
+      {/* Data and structure together: a new kind of record, or a field, without leaving the records. */}
+      {can("domain.edit") && <QuickStructure domainId={domainId} type={selected} onMade={(made) => select(made.id)} />}
       {selected && (
         <EntityTable
           key={selected.id}

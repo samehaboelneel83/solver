@@ -231,7 +231,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [justPublished, setJustPublished] = useState<number | null>(null);
   const [storedView, setEquationView] = useEquationView();
   // Simple or Expert (editorLevel.ts): Simple shows the plain views, one card open at a time, one “+ Add” per section.
-  const [level, setLevel] = useEditorLevel();
+  const [level] = useEditorLevel();
   const simple = level === "simple";
   const equationView = viewAt(storedView, simple);
   // Step by step at Simple (ModelSteps.tsx): which step is on screen, or all of them.
@@ -596,15 +596,6 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div role="group" aria-label="How much to show" className="flex overflow-hidden rounded-md border border-slate-300"
-          title="Simple shows the model in plain words and boxes; Expert adds equations, diagrams, Blocks, the graph and the exact IR.">
-          {(["simple", "expert"] as const).map((option) => (
-            <button key={option} type="button" aria-pressed={level === option} onClick={() => setLevel(option)}
-              className={`px-3 py-1.5 text-sm ${level === option ? "bg-slate-800 text-white" : "bg-white text-slate-700"}`}>
-              {option === "simple" ? "Simple" : "Expert"}
-            </button>
-          ))}
-        </div>
         <div role="tablist" aria-label="How to edit the model" className="flex overflow-hidden rounded-md border border-slate-300">
           {(simple ? ["forms", "review"] as const : canEdit ? ["forms", "graph", "blocks", "ir", "review"] as const : ["forms", "graph", "ir", "review"] as const).map((tab) => (
             <button

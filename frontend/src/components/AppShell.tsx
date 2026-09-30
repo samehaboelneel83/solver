@@ -15,6 +15,8 @@ import ReachabilityBanner from "./ReachabilityBanner";
 import { useCapabilities } from "../hooks/useCapability";
 import { UnsavedChangesProvider, useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import DomainSelector from "./DomainSelector";
+import { useEditorLevel } from "../model/editorLevel";
+import LevelSwitch from "./LevelSwitch";
 import { buildNavGroups, buildSidebarGroups, destinationForPath, scopeOfPath, stripDomainPrefix, type RecentScope } from "../nav/registry";
 import { lastProblemIn, readRecentScope, rememberScope } from "../nav/recentScope";
 import { DomainRouteProvider, useDomain } from "../hooks/useDomain";
@@ -214,7 +216,8 @@ function AppShellContent() {
   // problem when one was opened there, else the domain itself.
   const shortcut = scoped ?? (recent && recent.domainId === domainId ? recent
     : domainId !== null ? { domainId, problemId: lastProblemIn(domainId) } : null);
-  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId }, shortcut);
+  const [level] = useEditorLevel();
+  const navGroups = buildSidebarGroups(location.pathname, { domainId, problemId }, shortcut, level);
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => loadOpenGroups());
   const [filterText, setFilterText] = useState("");
@@ -610,6 +613,7 @@ function AppShellContent() {
           <span className="w-32 text-start">Go to page…</span>
           <kbd className="rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500">Ctrl K</kbd>
         </button>
+        <LevelSwitch />
         <span title="The platform is in English" className="hidden items-center gap-1 rounded px-2 py-1.5 text-xs font-semibold text-slate-600 md:inline-flex">
           <Languages className="h-4 w-4" aria-hidden /> EN
         </span>

@@ -50,7 +50,39 @@ describe("AppShell", () => {
     });
   });
 
+  describe("the Simple level (simplification plan, phase 2)", () => {
+    it("is where a person starts: a short menu in a planner's words, and a switch to Expert in the top bar", async () => {
+      localStorage.removeItem("solver_editor_level");
+      renderWithProviders(["/domains/7/problems/9/overview"]);
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
+        "Overview & solve", "Data", "Model", "Results", "Other problems", "All domains", "Getting started", "Modeling guide",
+      ]);
+      expect(within(nav).getByRole("link", { name: "Data" })).toHaveAttribute("href", "/domains/7/data/records");
+      expect(within(nav).queryByRole("link", { name: "Versions" })).toBeNull();
+      expect(within(nav).queryByText("Operations")).toBeNull();
+      const level = screen.getByRole("group", { name: "How much to show" });
+      expect(within(level).getByRole("button", { name: "Simple" })).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(within(level).getByRole("button", { name: "Expert" }));
+      expect(within(nav).getByRole("link", { name: "Versions" })).toBeInTheDocument();
+      expect(within(nav).getByText("Operations")).toBeInTheDocument();
+      expect(localStorage.getItem("solver_editor_level")).toBe("expert");
+    });
+
+    it("keeps a domain to its overview, problems and records", async () => {
+      localStorage.removeItem("solver_editor_level");
+      renderWithProviders(["/domains/7/overview"]);
+      await settled();
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim()).slice(0, 3)).toEqual(["Overview", "Problems", "Records"]);
+      expect(within(nav).queryByRole("link", { name: /Sources|Predictors|Data structure/ })).toBeNull();
+    });
+  });
+
   describe("legacy navigation compatibility", () => {
+    beforeEach(() => localStorage.setItem("solver_editor_level", "expert"));
+
     it("keeps Home independent of the remembered domain", async () => {
       renderWithProviders(["/"]);
       await settled();

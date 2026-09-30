@@ -175,6 +175,8 @@ function renderPage(entry = "/runs") {
 }
 
 beforeEach(() => {
+  // These pages' tests cover every control: Expert. The Simple level has its own test below.
+  localStorage.setItem("solver_editor_level", "expert");
   mockFetch.mockReset();
   localStorage.setItem(DOMAIN_STORAGE_KEY, "1");
   stub();
@@ -792,6 +794,14 @@ describe("Runs", () => {
     // selection rather than being quietly given to another.
     expect(offered).not.toContain("gone");
     expect(picker).toHaveValue("");
+  });
+
+  it("offers one Solve and no solver to pick at the Simple level", async () => {
+    localStorage.setItem("solver_editor_level", "simple");
+    renderPage();
+    expect(await screen.findByRole("button", { name: /^solve/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^solver$/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /alternative plans/ })).toBeNull();
   });
 
   it("asks for a named solver when one is chosen", async () => {

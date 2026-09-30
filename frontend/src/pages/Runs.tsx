@@ -1,4 +1,5 @@
 import LoadFailure from "../components/LoadFailure";
+import { useEditorLevel } from "../model/editorLevel";
 import MissingValues from "../components/MissingValues";
 import Pager from "../components/Pager";
 import SearchBox, { NoMatches } from "../components/SearchBox";
@@ -493,6 +494,9 @@ function ScenarioRuns({
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
   const { domainId } = useDomain();
+  // Simple (simplification plan, phase 2): one Solve button, the solver chosen for you.
+  const [level] = useEditorLevel();
+  const simple = level === "simple";
   const version = useVersion(modelVersionId);
   const unexpressed = unexpressedRules(version.data?.ir);
   // A robust solve needs a parameter declared uncertain within a range.
@@ -608,7 +612,7 @@ function ScenarioRuns({
 
   return (
     <>
-      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending} domainId={domainId ?? undefined}
+      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending} domainId={domainId ?? undefined} simple={simple}
         onMoveTo={can("model.publish") ? (versionId) => moveScenario.mutate({ id: scenarioId, body: { model_version_id: versionId } }, {
           onSuccess: () => toast.success("The scenario now solves the latest version."),
           onError: (error: unknown) => setFailure(formatApiError(error)),
@@ -639,7 +643,7 @@ function ScenarioRuns({
           >
             {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
           </button>
-          {twoGoals && (
+          {!simple && twoGoals && (
             <button
               type="button"
               onClick={() => solve("front")}
@@ -649,7 +653,7 @@ function ScenarioRuns({
               Show the trade-off between its two goals
             </button>
           )}
-          {hasChoices && (
+          {!simple && hasChoices && (
             <span className="inline-flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -671,7 +675,7 @@ function ScenarioRuns({
               </label>
             </span>
           )}
-          {uncertain && (
+          {!simple && uncertain && (
             <button
               type="button"
               onClick={() => solve("robust")}
@@ -687,7 +691,7 @@ function ScenarioRuns({
             This account may read runs but not start them. Past answers are below.
           </p>
         )}
-        {can("solver.configure") && (
+        {!simple && can("solver.configure") && (
         <label className="flex min-w-0 max-w-full items-center text-sm text-slate-600">
           <span className="mr-2 shrink-0">Solver</span>
           {/* A long "why not" option must not push the select past a phone's edge (operator trial F33). */}
@@ -1501,10 +1505,12 @@ const FRONT = { width: 420, height: 240, pad: 44 };
  * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
  * anything worth a look, and whether a worker will pick it up.
  */
-export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false, domainId }: {
+export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false, domainId, simple = false }: {
   preflight: Preflight; blockers: PreflightFinding[];
   /** Missing values are filled in place, with links to their records in this domain. */
   domainId?: Id;
+  /** Simple: the solver's name and a closed "Why this solver?" rather than every solver's case. */
+  simple?: boolean;
   /** Move the scenario to a newer version (operator trial F29); without it the warning only says so. */
   onMoveTo?: (versionId: Id) => void; moving?: boolean;
 }) {
@@ -1539,8 +1545,8 @@ export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false, 
         </li>
       ))}</ul>}
       <details className="mt-2">
-        <summary className="cursor-pointer">Which solvers fit, and why the others do not</summary>
-        <ul className="mt-1 space-y-0.5">{preflight.solvers.map((row) => (
+        <summary className="cursor-pointer">{simple ? "Why this solver?" : "Which solvers fit, and why the others do not"}</summary>
+        <ul className="mt-1 space-y-0.5">{preflight.solvers.filter((row) => !simple || row.chosen).map((row) => (
           <li key={row.name}><span className={`font-mono ${row.fits ? "" : "text-slate-500"}`}>{row.name}</span>: {row.why}</li>
         ))}</ul>
       </details>

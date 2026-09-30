@@ -1,3 +1,4 @@
+import LevelSwitch from "../components/LevelSwitch";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -166,6 +167,8 @@ function renderPage(entry = "/model") {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={[entry]}>
+          {/* The Simple / Expert switch lives in the top bar, for the whole platform. */}
+          <LevelSwitch />
           <ModelEditor />
         </MemoryRouter>
       </ToastProvider>

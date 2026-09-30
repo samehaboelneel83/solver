@@ -634,7 +634,13 @@ export function domainSwitchTarget(pathname: string, next: number, lastProblem: 
  * open -- is offered there as its own group of links back to it, when it is
  * in the domain still selected.
  */
-export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {}, recent: RecentScope | null = null): ReturnType<typeof buildNavGroups> {
+export function buildSidebarGroups(
+  pathname: string,
+  ctx: ScopedNavContext = {},
+  recent: RecentScope | null = null,
+  /** Simple (simplification plan, phase 2): the few pages a planner needs, in their words. */
+  level: "simple" | "expert" = "expert",
+): ReturnType<typeof buildNavGroups> {
   // Route context is authoritative, even before stored selection has caught up.
   const route = pathname.match(/^\/domains\/(\d+)(?:\/problems\/(\d+))?(?:\/|$)/);
   if (route) ctx = { domainId: Number(route[1]), problemId: route[2] ? Number(route[2]) : null };
@@ -655,6 +661,26 @@ export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {},
     { ...select("administration", "Administration", ["access", "ops-audit", "settings"]), footer: true },
     select("help", "Help", ["help-start", "help-modeling", "help-coverage"]),
   ];
+  if (level === "simple") {
+    // A planner's pages, named for what they are for. Everything else stays one switch away (Expert).
+    const named = (key: string, label: string, pairs: [string, string][]) => ({
+      key, label, items: pairs.map(([id, text]) => {
+        const d = byId.get(id)!;
+        return { id, to: scopedPath(id, ctx), label: text, capability: d.capability };
+      }),
+    });
+    const help = select("help", "Help", ["help-start", "help-modeling"]);
+    if (inProblem) return [
+      named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"]]),
+      named("context", "Navigate", [["problems", "Other problems"], ["domains", "All domains"]]),
+      help,
+    ];
+    if (inDomain) return [
+      named("domain", "This domain", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"]]),
+      named("context", "Navigate", [["domains", "All domains"], ["templates", "Templates"]]),
+      help,
+    ];
+  }
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
     select("planning", "This problem", ["problem-overview", "inputs", "model", "versions", "scenarios", "runs"]),
@@ -667,6 +693,7 @@ export function buildSidebarGroups(pathname: string, ctx: ScopedNavContext = {},
     ...common,
   ];
   const navigate = select("context", "Navigate", ["home", "domains", "templates"]);
+  if (level === "simple") common.splice(0, 2);
   const back = recent && ctx.domainId != null && recent.domainId === ctx.domainId ? recent : null;
   if (back?.problemId != null) {
     const scope = { domainId: back.domainId, problemId: back.problemId };
