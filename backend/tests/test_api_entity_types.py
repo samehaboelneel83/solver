@@ -956,3 +956,33 @@ def test_database_check_still_rejects_a_mismatched_default_on_a_direct_insert(
     finally:
         db.rollback()
         db.close()
+
+
+def test_a_default_reaches_the_records_made_before_it(auth_headers, domain_id):
+    """"employee 'ahmed' has no 'hours_per_week'": a default set after the
+    records existed reached none of them, so the solver still found no value.
+    Setting it now fills every record without a value, and keeps the entered ones."""
+    client = TestClient(app)
+    employee = _make_entity_type(client, auth_headers, domain_id, "employee")
+    hours = _make_attribute(client, auth_headers, employee["id"], "hours_per_week", "integer")
+    made = {}
+    for key, attrs in (("ahmed", {}), ("sara", {"hours_per_week": 20})):
+        response = client.post(
+            "/api/v1/entities",
+            json={"entity_type_id": employee["id"], "key": key, "attrs": attrs},
+            headers=auth_headers,
+        )
+        assert response.status_code == 201, response.text
+        made[key] = response.json()["id"]
+    assert "hours_per_week" not in client.get(f"/api/v1/entities/{made['ahmed']}", headers=auth_headers).json()["attrs"]
+
+    response = client.patch(f"/api/v1/attributes/{hours['id']}", json={"default_value": 40}, headers=auth_headers)
+    assert response.status_code == 200, response.text
+
+    attrs = {key: client.get(f"/api/v1/entities/{id_}", headers=auth_headers).json()["attrs"] for key, id_ in made.items()}
+    assert attrs["ahmed"]["hours_per_week"] == 40
+    assert attrs["sara"]["hours_per_week"] == 20
+
+    # A new attribute that comes with a default reaches the existing records too.
+    _make_attribute(client, auth_headers, employee["id"], "on_call", "boolean", default_value=False)
+    assert client.get(f"/api/v1/entities/{made['ahmed']}", headers=auth_headers).json()["attrs"]["on_call"] is False

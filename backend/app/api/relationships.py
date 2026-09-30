@@ -77,6 +77,7 @@ from app.api.entity_types import (
     next_attribute_position,
     reorder_attributes,
     _check_default_value,
+    _flush_then_fill,
     _check_enum_pairing,
 )
 from app.api.validation import NAME_PATTERN, field_error, validate_colour, validate_name
@@ -480,6 +481,7 @@ def create_relationship_attribute(
         )
     attribute = AttributeDef(relationship_type_id=relationship_type_id, **fields)
     db.add(attribute)
+    _flush_then_fill(db, attribute)
     _commit(db, "attribute_def")
     db.refresh(attribute)
     return AttributeDefRead.model_validate(attribute)

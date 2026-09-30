@@ -69,6 +69,7 @@ dropped later. The request-layer rules are deliberately at least as strict
 as the CHECKs they shadow (see `app.api.validation.validate_name`).
 """
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -635,6 +636,50 @@ def list_attributes(
     ]
 
 
+def _flush_then_fill(db: Session, attribute: AttributeDef) -> None:
+    """Write the attribute, then its default into the records without a value;
+    a refusal of either is answered like the attribute's own (see `_commit`)."""
+    try:
+        db.flush()
+        fill_default(db, attribute)
+    except DBAPIError as exc:
+        db.rollback()
+        raise translate_db_error(exc, "attribute_def") from exc
+
+
+def fill_default(db: Session, attribute: AttributeDef) -> None:
+    """Give every existing record (or link) with no value for `attribute` its
+    default -- the value the write trigger gives a new one.
+
+    Without this a default reached only records saved after it was set, so a
+    record made before it read as having no value, and a model reading the
+    attribute as a number was refused ("employee 'ahmed' has no
+    'hours_per_week'") even though a default was there. A value someone
+    entered is never overwritten. The attribute row must be flushed first:
+    the validate trigger refuses a key no attribute_def declares.
+    """
+    if attribute.default_value is None:
+        return
+    value = json.dumps(attribute.default_value)
+    missing = "coalesce(attrs -> :name, 'null'::jsonb) = 'null'::jsonb"
+    if attribute.entity_type_id is not None:
+        db.execute(
+            text(
+                "UPDATE entity SET attrs = attrs || jsonb_build_object(:name, CAST(:value AS jsonb)) "
+                f"WHERE entity_type_id = ANY (entity_type_family(:owner)) AND {missing}"
+            ),
+            {"name": attribute.name, "value": value, "owner": attribute.entity_type_id},
+        )
+    elif attribute.relationship_type_id is not None:
+        db.execute(
+            text(
+                "UPDATE relationship SET attrs = attrs || jsonb_build_object(:name, CAST(:value AS jsonb)) "
+                f"WHERE relationship_type_id = :owner AND {missing}"
+            ),
+            {"name": attribute.name, "value": value, "owner": attribute.relationship_type_id},
+        )
+
+
 @router.post("/entity-types/{entity_type_id}/attributes", status_code=201)
 def create_attribute(
     entity_type_id: int,
@@ -677,6 +722,7 @@ def create_attribute(
         fields["references_id"] = mirror.id
     attribute = AttributeDef(entity_type_id=entity_type_id, **fields)
     db.add(attribute)
+    _flush_then_fill(db, attribute)
     _commit(db, "attribute_def")
     db.refresh(attribute)
     return AttributeDefRead.model_validate(attribute)
@@ -727,6 +773,8 @@ def update_attribute(
         db.get(RelationshipType, attribute.references_id).name = changes["name"]
     for field, value in changes.items():
         setattr(attribute, field, value)
+    if "default_value" in changes:
+        _flush_then_fill(db, attribute)
     _commit(db, "attribute_def")
     db.refresh(attribute)
     return AttributeDefRead.model_validate(attribute)
