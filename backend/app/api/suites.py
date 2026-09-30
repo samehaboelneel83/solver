@@ -52,7 +52,9 @@ class CaseUpdate(BaseModel):
 
 
 class CaseRun(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # `model_version_id` is the platform's name for it; pydantic reserves the
+    # `model_` prefix and warns at every start-up unless told the name is ours.
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
     model_version_id: int | None = None
 
 
