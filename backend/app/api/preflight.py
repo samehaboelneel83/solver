@@ -59,15 +59,115 @@ def _finding(kind: str, code: str, says: str, **extra: Any) -> dict[str, Any]:
     return {"kind": kind, "code": code, "says": says, **extra}
 
 
-@router.get("/scenarios/{scenario_id}/preflight")
-def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+def missing_details(db: Session, domain_id: int, missing: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The gaps `app.solve.missing` found, with what a form needs to fill them
+    in place: each record's id, label and version stamp, and the attribute's
+    id, type, choices and default."""
+    out = []
+    for gap in missing:
+        attribute = db.execute(text(
+            "SELECT a.id, a.data_type, a.enum_values, a.default_value, t.id AS type_id"
+            "  FROM entity_type t JOIN attribute_def a ON a.entity_type_id = ANY (entity_type_lineage(t.id))"
+            " WHERE t.domain_id = :d AND t.name = :t AND a.name = :a LIMIT 1"),
+            {"d": domain_id, "t": gap["set"], "a": gap["attribute"]}).mappings().one_or_none()
+        records = db.execute(text(
+            "SELECT e.id, e.key, e.label, e.updated_at FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+            " WHERE t.domain_id = :d AND e.key = ANY (:keys)"
+            "   AND t.id = ANY (entity_type_family((SELECT id FROM entity_type WHERE domain_id = :d AND name = :t)))"
+            " ORDER BY e.sort_order, e.key"),
+            {"d": domain_id, "t": gap["set"], "keys": gap["records"]}).mappings().all()
+        out.append({
+            "set": gap["set"],
+            "attribute": gap["attribute"],
+            "attribute_id": attribute["id"] if attribute else None,
+            "entity_type_id": attribute["type_id"] if attribute else None,
+            "data_type": attribute["data_type"] if attribute else None,
+            "enum_values": attribute["enum_values"] if attribute else None,
+            "default_value": attribute["default_value"] if attribute else None,
+            "records": [
+                {"id": r["id"], "key": r["key"], "label": r["label"], "updated_at": r["updated_at"]} for r in records
+            ],
+        })
+    return out
+
+
+def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, Any]) -> dict[str, Any]:
+    """What would stop a model solving on today's data, and what it is: the
+    part of a preflight that does not depend on a scenario, so a problem's
+    readiness can ask it of the latest version before any scenario exists."""
     from app.settings_resolve import resolve
-    from app.solve.licences import solver_list
     from app.solve.backends import fit
     from app.solve.classify import classify
     from app.solve.compile import Unsupported, compile_model
     from app.solve.convexity import refine
+    from app.solve.licences import solver_list
+    from app.solve.missing import missing_values
     from app.solve.preview import live_data
+
+    findings: list[dict[str, Any]] = []
+    unexpressed = [c.get("id") for c in ir.get("constraints", [])
+                   if not any(k in c for k in ("left", "no_overlap", "cumulative", "connected", "route"))]
+    if unexpressed:
+        findings.append(_finding("blocker", "rule_not_expressed",
+                                 f"{', '.join(map(str, unexpressed))} {'has' if len(unexpressed) == 1 else 'have'} a name but no arithmetic, "
+                                 "so nothing can check them. Express them in the Model editor and publish a new version.",
+                                 rules=unexpressed))
+
+    data = live_data(db, domain_id, ir)
+    for name in ir.get("sets", []):
+        if not data.get("sets", {}).get(name):
+            findings.append(_finding("warning", "set_empty",
+                                     f"There are no {name} records yet, so every rule and decision over {name} is empty.", set=name))
+
+    # Every record without a number the model reads, at once and with what it takes to fill
+    # them in place -- rather than the compiler's refusal of the first one it meets.
+    missing = missing_values(ir, data)
+    for gap in missing_details(db, domain_id, missing):
+        count = len(gap["records"])
+        findings.append(_finding(
+            "blocker", "missing_values",
+            f"{count} {gap['set']} {'record has' if count == 1 else 'records have'} no {gap['attribute']}, which the model reads as a number.",
+            missing=gap))
+
+    compiled = None
+    try:
+        compiled = compile_model(ir, data)
+    except Unsupported as exc:
+        if not (missing and "so the term has no value" in str(exc)):
+            findings.append(_finding("blocker", "does_not_compile", str(exc)))
+    except Exception as exc:  # pragma: no cover -- a compiler bug is still a finding, not a 500
+        findings.append(_finding("blocker", "does_not_compile", f"The model could not be built: {exc}"))
+
+    for empty in (compiled.empty_ranges if compiled is not None else []):
+        where = ", ".join(f"{k} = {v}" for k, v in (empty.get("index") or {}).items())
+        findings.append(_finding("warning", "empty_range",
+                                 f"{empty.get('constraint_id', 'A rule')} has a {empty.get('kind', 'range')} that matches nobody"
+                                 f"{f' (at {where})' if where else ''}: it holds vacuously or counts as zero, often a data gap.",
+                                 detail=empty))
+
+    found = classify(ir, data)
+    if compiled is not None:
+        found = refine(found, compiled)
+    settings = resolve(db, problem_id=problem_id)
+    allowed = set(solver_list(settings["solve.allowed_solvers"].value)) or None
+    denied = set(solver_list(settings["solve.denied_solvers"].value)) or None
+    solvers = fit(found, allowed=allowed, denied=denied)
+    if not any(s["automatic"] for s in solvers):
+        findings.append(_finding("blocker", "no_solver",
+                                 f"No solver here takes this {found.model_class} model unasked. "
+                                 + ("Some fit when asked for by name: " + ", ".join(s["name"] for s in solvers if s["fits"]) + "."
+                                    if any(s["fits"] for s in solvers) else "See why each is kept out below.")))
+    return {
+        "findings": findings,
+        "model_class": found.model_class,
+        "planner": list(found.planner),
+        "solvers": solvers,
+        "sets": {name: len(data.get("sets", {}).get(name) or []) for name in ir.get("sets", [])},
+    }
+
+
+@router.get("/scenarios/{scenario_id}/preflight")
+def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
     from app.solve.service import patched
 
     scenario = db.execute(text(
@@ -91,54 +191,15 @@ def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount
             "Move the scenario to it to solve the model as it is now.",
             scenario_version=scenario["version"], latest_version=latest["version"], latest_version_id=latest["id"]))
 
-    unexpressed = [c.get("id") for c in ir.get("constraints", [])
-                   if not any(k in c for k in ("left", "no_overlap", "cumulative", "connected", "route"))]
-    if unexpressed:
-        findings.append(_finding("blocker", "rule_not_expressed",
-                                 f"{', '.join(map(str, unexpressed))} {'has' if len(unexpressed) == 1 else 'have'} a name but no arithmetic, "
-                                 "so nothing can check them. Express them in the Model editor and publish a new version.",
-                                 rules=unexpressed))
-
-    data = live_data(db, scenario["domain_id"], ir)
-    for name in ir.get("sets", []):
-        if not data.get("sets", {}).get(name):
-            findings.append(_finding("warning", "set_empty",
-                                     f"There are no {name} records yet, so every rule and decision over {name} is empty.", set=name))
-
-    compiled = None
-    try:
-        compiled = compile_model(ir, data)
-    except Unsupported as exc:
-        findings.append(_finding("blocker", "does_not_compile", str(exc)))
-    except Exception as exc:  # pragma: no cover -- a compiler bug is still a finding, not a 500
-        findings.append(_finding("blocker", "does_not_compile", f"The model could not be built: {exc}"))
-
-    for empty in (compiled.empty_ranges if compiled is not None else []):
-        where = ", ".join(f"{k} = {v}" for k, v in (empty.get("index") or {}).items())
-        findings.append(_finding("warning", "empty_range",
-                                 f"{empty.get('constraint_id', 'A rule')} has a {empty.get('kind', 'range')} that matches nobody"
-                                 f"{f' (at {where})' if where else ''}: it holds vacuously or counts as zero, often a data gap.",
-                                 detail=empty))
-
-    found = classify(ir, data)
-    if compiled is not None:
-        found = refine(found, compiled)
-    settings = resolve(db, problem_id=scenario["problem_id"])
-    allowed = set(solver_list(settings["solve.allowed_solvers"].value)) or None
-    denied = set(solver_list(settings["solve.denied_solvers"].value)) or None
-    solvers = fit(found, allowed=allowed, denied=denied)
-    if not any(s["automatic"] for s in solvers):
-        findings.append(_finding("blocker", "no_solver",
-                                 f"No solver here takes this {found.model_class} model unasked. "
-                                 + ("Some fit when asked for by name: " + ", ".join(s["name"] for s in solvers if s["fits"]) + "."
-                                    if any(s["fits"] for s in solvers) else "See why each is kept out below.")))
+    checked = model_findings(db, scenario["domain_id"], scenario["problem_id"], ir)
+    findings.extend(checked["findings"])
     return {
         "scenario_id": scenario_id,
         "version": scenario["version"],
         "ready": not any(f["kind"] == "blocker" for f in findings),
         "findings": findings,
-        "model_class": found.model_class,
-        "planner": list(found.planner),
-        "solvers": solvers,
+        "model_class": checked["model_class"],
+        "planner": checked["planner"],
+        "solvers": checked["solvers"],
         "workers": worker_status(db),
     }

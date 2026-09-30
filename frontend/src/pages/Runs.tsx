@@ -1,4 +1,5 @@
 import LoadFailure from "../components/LoadFailure";
+import MissingValues from "../components/MissingValues";
 import Pager from "../components/Pager";
 import SearchBox, { NoMatches } from "../components/SearchBox";
 import { useEffect, useId, useRef, useState } from "react";
@@ -491,6 +492,7 @@ function ScenarioRuns({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
+  const { domainId } = useDomain();
   const version = useVersion(modelVersionId);
   const unexpressed = unexpressedRules(version.data?.ir);
   // A robust solve needs a parameter declared uncertain within a range.
@@ -606,7 +608,7 @@ function ScenarioRuns({
 
   return (
     <>
-      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending}
+      {preflight.data && <BeforeYouSolve preflight={preflight.data} blockers={blockers} moving={moveScenario.isPending} domainId={domainId ?? undefined}
         onMoveTo={can("model.publish") ? (versionId) => moveScenario.mutate({ id: scenarioId, body: { model_version_id: versionId } }, {
           onSuccess: () => toast.success("The scenario now solves the latest version."),
           onError: (error: unknown) => setFailure(formatApiError(error)),
@@ -1499,8 +1501,10 @@ const FRONT = { width: 420, height: 240, pad: 44 };
  * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
  * anything worth a look, and whether a worker will pick it up.
  */
-export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false }: {
+export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false, domainId }: {
   preflight: Preflight; blockers: PreflightFinding[];
+  /** Missing values are filled in place, with links to their records in this domain. */
+  domainId?: Id;
   /** Move the scenario to a newer version (operator trial F29); without it the warning only says so. */
   onMoveTo?: (versionId: Id) => void; moving?: boolean;
 }) {
@@ -1516,7 +1520,13 @@ export function BeforeYouSolve({ preflight, blockers, onMoveTo, moving = false }
           <abbr title={`${preflight.model_class} model`} className="no-underline">{modelInWords(preflight.model_class)}</abbr>{chosen ? `; ${chosen.name} will take it` : ""}. {preflight.workers.says}.
         </span>
       </p>
-      {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => <li key={f.code + f.says}>{f.says}</li>)}</ul>}
+      {blockers.length > 0 && <ul className="mt-2 list-disc pl-5 text-red-900">{blockers.map((f) => (
+        // A missing value's words carry a count that a save changes; its table must stay.
+        <li key={f.missing ? `${f.code}.${f.missing.set}.${f.missing.attribute}` : f.code + f.says}>
+          {f.says}
+          {f.code === "missing_values" && f.missing && domainId !== undefined && <MissingValues gap={f.missing} domainId={domainId} />}
+        </li>
+      ))}</ul>}
       {warnings.length > 0 && <ul className="mt-2 list-disc pl-5 text-amber-900">{warnings.map((f) => (
         <li key={f.code + f.says}>
           {f.says}

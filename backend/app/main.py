@@ -39,6 +39,7 @@ from app.api.layouts import router as layouts_router
 from app.api.integrations import router as integrations_router
 from app.api.imports import router as imports_router
 from app.api.preflight import router as preflight_router
+from app.api.workflow import router as workflow_router
 from app.api.predictors import router as predictors_router
 from app.api.eta import router as eta_router
 from app.api.settings import router as settings_router
@@ -213,6 +214,7 @@ app.include_router(layouts_router)
 app.include_router(integrations_router)
 app.include_router(imports_router)
 app.include_router(preflight_router)
+app.include_router(workflow_router)
 app.include_router(run_events_router)
 app.include_router(genui_router)
 app.include_router(grids_router)

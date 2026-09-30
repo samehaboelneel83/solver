@@ -929,10 +929,18 @@ export type ComparedRun = {
 /** One solver against a scenario's model (Epic UX, U-5): does it fit, would the rules choose it, and why. */
 export type SolverFit = { name: string; fits: boolean; automatic: boolean; chosen: boolean; proves: string; why: string; note: string };
 export type WorkerStatus = { state: "ready" | "busy" | "offline"; online: number; solving: number; queued: number; last_seen: string | null; says: string };
+/** Records without a value the model reads as a number, with what a form needs to fill them in place. */
+export type MissingGap = {
+  set: string; attribute: string; attribute_id: Id | null; entity_type_id: Id | null;
+  data_type: string | null; enum_values: string[] | null; default_value: unknown;
+  records: { id: Id; key: string; label: string | null; updated_at: string }[];
+};
 export type PreflightFinding = {
   kind: "blocker" | "warning"; code: string; says: string; rules?: string[]; set?: string;
   /** `newer_version`: the latest published version, which the scenario can be moved to. */
   latest_version?: number; latest_version_id?: Id;
+  /** `missing_values`: the records to fill in. */
+  missing?: MissingGap;
 };
 export type Preflight = {
   scenario_id: Id; version: number; ready: boolean; findings: PreflightFinding[]; model_class: string;
@@ -949,6 +957,31 @@ export function usePreflight(scenarioId: Id | null) {
     // The data and the workers move under it; a planner looking at the page sees them move.
     refetchInterval: 30_000 });
 }
+
+/** Where a problem stands, step by step (simplification plan, phase 1). */
+export type Readiness = {
+  problem: { id: Id; domain_id: Id; name: string };
+  latest_version: { id: Id; version: number; created_at: string } | null;
+  draft: { revision: number; updated_at: string; unpublished: boolean } | null;
+  check: { ready: boolean; findings: PreflightFinding[]; model_class: string; sets: Record<string, number> } | null;
+  base_scenario: { id: Id; version: number } | null;
+  last_run: {
+    id: Id; status: RunStatus; optimality: string | null; objective: number | null;
+    queued_at: string; finished_at: string | null; scenario_id: Id; scenario: string;
+  } | null;
+  workers: WorkerStatus;
+};
+export const getReadiness = (problemId: Id) => apiFetch<Readiness>(`/api/v1/problems/${problemId}/readiness`);
+export function useReadiness(problemId: Id | null) {
+  return useQuery({ queryKey: [V1, "readiness", problemId], queryFn: () => getReadiness(problemId as Id), enabled: isId(problemId),
+    // A run settles, a worker comes and goes: the page follows.
+    refetchInterval: 10_000 });
+}
+/** Solve the latest published version on the problem's "Base" scenario, made or moved forward first. */
+export const solveProblem = (problemId: Id) => send<Run>("POST", `/api/v1/problems/${problemId}/solve`, {});
+/** Publish the caller's draft as the next version. */
+export const publishDraft = (problemId: Id, expectedRevision: number, note: string) =>
+  send<ModelVersionSummary>("POST", `/api/v1/problems/${problemId}/draft/publish`, { expected_revision: expectedRevision, note });
 
 export const compareRuns = (left: Id, right: Id) =>
   apiFetch<RunComparison>(`/api/v1/runs/${left}/compare/${right}`);
