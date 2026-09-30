@@ -11,6 +11,7 @@
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
 import { describeWhen, type Binding, type Constraint, type Term } from "./terms";
+import { walkWords } from "./walkWords";
 import { OP_WORDS } from "./whereWords";
 
 const RELATION_WORDS: Record<string, string> = { "<=": "must be at most", ">=": "must be at least", "=": "must be exactly" };
@@ -24,8 +25,8 @@ function where(binding: Binding): string {
     const op = OP_WORDS[f.op] ?? f.op;
     return `${f.attr} ${op} ${Array.isArray(f.value) ? f.value.join(", ") : typeof f.value === "object" && f.value !== null ? cellText(f.value) : String(f.value)}`;
   });
-  const walk = binding.via ? ` linked by ${binding.via.rel}` : "";
-  return `every ${binding.set} ${binding.index}${walk}${filters.length ? ` whose ${filters.join(" and ")}` : ""}`;
+  const walk = binding.via ? ` ${walkWords(binding.via)}` : "";
+  return `every ${binding.set} ${binding.index}${filters.length ? ` whose ${filters.join(" and ")}${walk ? "," : ""}` : ""}${walk}`;
 }
 
 /** `-1 × x` reads as "minus x" inside a sum of terms. */

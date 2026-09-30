@@ -13,7 +13,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { arithmeticAttributes, fillIndices, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { fillIndices, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { AttrBlanks, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 
 const BLANK = "mx-0.5 inline-block rounded border border-slate-300 bg-white px-1 py-0 align-baseline text-sm text-slate-900";
@@ -46,9 +47,11 @@ function Choice({ label, value, options, onChange }: {
 }
 
 /** "every [employee ▾] [e]", for each binding, joined with "and". */
-export function BindingBlanks({ label, bindings, context, onChange }: {
+export function BindingBlanks({ label, bindings, bound = [], context, onChange }: {
   label: string;
   bindings: Binding[];
+  /** What is bound around these bindings: where a walk can start. */
+  bound?: Binding[];
   context: ModelContext;
   onChange: (next: Binding[]) => void;
 }) {
@@ -58,11 +61,13 @@ export function BindingBlanks({ label, bindings, context, onChange }: {
         <span key={i}>
           {i > 0 && " and "}every
           <Choice label={`${label}: set ${i + 1}`} value={binding.set} options={context.sets.map((s) => [s, s])}
-            onChange={(set) => onChange(bindings.map((b, j) => (j === i ? withWhere({ ...b, set }, undefined) : b)))} />
+            onChange={(set) => onChange(bindings.map((b, j) => (j === i ? { index: b.index, set } : b)))} />
           <input aria-label={`${label}: name ${i + 1}`} className={`${BLANK} w-10 font-mono`} value={binding.index}
             onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, index: event.target.value.trim() } : b)))} />
           <WhereBlanks label={`${label}: set ${i + 1}`} set={binding.set} where={binding.where} context={context} className={BLANK}
             onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
+          <WalkBlanks label={`${label}: set ${i + 1}`} binding={binding} earlier={[...bound, ...bindings.slice(0, i)]} context={context} className={BLANK}
+            onChange={(next) => onChange(bindings.map((b, j) => (j === i ? next : b)))} />
         </span>
       ))}
     </>
@@ -121,24 +126,13 @@ export function TermWords({ term, path, context, bound, onChange, grouped = fals
     );
   }
   if ("attr" in term) {
-    const binding = bound.find((b) => b.index === term.attr.of);
-    const attrs = binding ? arithmeticAttributes(context, binding.set) : [];
-    if (term.attr.along) return <span>the {term.attr.along} of {term.attr.name} along {term.attr.of}</span>;
-    return (
-      <span>
-        <Choice label={label("which number")} value={term.attr.name} options={attrs.map((a) => [a.name, a.name])}
-          onChange={(name) => onChange({ attr: { ...term.attr, name } })} />
-        {" of "}
-        <Choice label={label("of which item")} value={term.attr.of} options={bound.map((b) => [b.index, b.index])}
-          onChange={(of) => onChange({ attr: { ...term.attr, of } })} />
-      </span>
-    );
+    return <AttrBlanks label={label} term={term} bound={bound} context={context} className={BLANK} onChange={onChange} />;
   }
   if ("sum" in term) {
     return (
       <span>
         the total of {words(term.sum, "what is totalled", (sum) => onChange({ ...term, sum }), [...bound, ...term.over])}, over{" "}
-        <BindingBlanks label={label("runs over")} bindings={term.over} context={context} onChange={(over) => onChange({ ...term, over })} />
+        <BindingBlanks label={label("runs over")} bindings={term.over} bound={bound} context={context} onChange={(over) => onChange({ ...term, over })} />
       </span>
     );
   }

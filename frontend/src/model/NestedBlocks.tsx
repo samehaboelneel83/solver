@@ -19,6 +19,7 @@ import { cellText } from "../lib/irBlocks/catalogue";
 import { checkGoal, checkRule, explain, problemsAt, type Problem } from "./blockCheck";
 import { ruleSentence, termSentence } from "./ruleSentence";
 import { RuleWords, TermWords } from "./SentenceEditor";
+import { AttrBlanks, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 import {
   arithmeticAttributes,
@@ -232,7 +233,7 @@ function BindingsEditor({ label, bindings, bound, context, onChange, removable }
         <div key={i} className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
           <span>every</span>
           <select aria-label={`${label}: set ${i + 1}`} className={SELECT} value={binding.set}
-            onChange={(event) => onChange(bindings.map((b, j) => (j === i ? withWhere({ ...b, set: event.target.value }, undefined) : b)))}>
+            onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { index: b.index, set: event.target.value } : b)))}>
             {!context.sets.includes(binding.set) && <option value={binding.set}>{binding.set || "choose…"}</option>}
             {context.sets.map((set) => <option key={set} value={set}>{set}</option>)}
           </select>
@@ -241,6 +242,8 @@ function BindingsEditor({ label, bindings, bound, context, onChange, removable }
             onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, index: event.target.value.trim() } : b)))} />
           <WhereBlanks label={`${label}: set ${i + 1}`} set={binding.set} where={binding.where} context={context} className={SELECT} lead="where"
             onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
+          <WalkBlanks label={`${label}: set ${i + 1}`} binding={binding} earlier={[...bound, ...bindings.slice(0, i)]} context={context} className={SELECT}
+            onChange={(next) => onChange(bindings.map((b, j) => (j === i ? next : b)))} />
           {(removable || bindings.length > 1) && (
             <button type="button" className="text-xs text-rose-700 underline" aria-label={`Remove ${binding.index || "this set"} from ${label}`}
               onClick={() => onChange(bindings.filter((_, j) => j !== i))}>
@@ -303,23 +306,9 @@ export function TermBlock({ term, label, path, problems, context, bound, onChang
       </div>
     );
   } else if ("attr" in term) {
-    const binding = bound.find((b) => b.index === term.attr.of);
-    const attrs = binding ? arithmeticAttributes(context, binding.set) : [];
-    body = term.attr.along ? (
-      <code className="font-mono text-sm">{term.attr.along} of {term.attr.name} along {term.attr.of}</code>
-    ) : (
-      <div className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
-        <select aria-label={`${label}: which number`} className={SELECT} value={term.attr.name}
-          onChange={(event) => onChange({ attr: { ...term.attr, name: event.target.value } })}>
-          {!attrs.some((a) => a.name === term.attr.name) && <option value={term.attr.name}>{term.attr.name || "choose…"}</option>}
-          {attrs.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-        </select>
-        <span>of</span>
-        <select aria-label={`${label}: of which item`} className={SELECT} value={term.attr.of}
-          onChange={(event) => onChange({ attr: { ...term.attr, of: event.target.value } })}>
-          {!binding && <option value={term.attr.of}>{term.attr.of || "choose…"}</option>}
-          {bound.map((b) => <option key={b.index} value={b.index}>{b.index} ({b.set})</option>)}
-        </select>
+    body = (
+      <div className="text-sm text-slate-700">
+        <AttrBlanks label={(what) => `${label}: ${what}`} term={term} bound={bound} context={context} className={SELECT} onChange={onChange} />
       </div>
     );
   } else if ("add" in term) {

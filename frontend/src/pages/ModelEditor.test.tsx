@@ -114,6 +114,13 @@ function stub(overrides: Record<string, unknown> = {}) {
             : "A combinatorial solver will take this by default.",
       });
     }
+    // The background check of a draft has its own stub, so `write` sees only
+    // what the page publishes or saves: a check that happened to fire before
+    // the publish used to be write's first call, and a test read it instead.
+    if (path.endsWith("/versions/validate")) {
+      const validate = overrides.validate as ((p: string, o: typeof options) => Promise<unknown>) | undefined;
+      return validate ? validate(path, options) : Promise.resolve({ id: 23, version: 3 });
+    }
     if (options?.method && options.method !== "GET") {
       const write = overrides.write as ((p: string, o: typeof options) => Promise<unknown>) | undefined;
       if (write) return write(path, options);
@@ -1122,10 +1129,8 @@ describe("the domain's check of the draft (Blocks 4)", () => {
   it("a refusal only the domain can make, from the validate route, holds Publish and is shown", async () => {
     const { ApiError } = await import("../api/client");
     stub({
-      write: (path: string) =>
-        path.endsWith("/versions/validate")
-          ? Promise.reject(new ApiError(422, JSON.stringify({ detail: [{ loc: ["body", "ir", "sets", 1], msg: "the domain has no entity type 'day'" }] })))
-          : Promise.resolve({ id: 23, version: 3 }),
+      validate: () =>
+        Promise.reject(new ApiError(422, JSON.stringify({ detail: [{ loc: ["body", "ir", "sets", 1], msg: "the domain has no entity type 'day'" }] }))),
     });
     renderPage();
     const publish = await screen.findByRole("button", { name: /publish a new version/i });

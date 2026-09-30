@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { checkRule, explain, problemsAt } from "./blockCheck";
 import { GoalBlocks, RuleBlocks, RuleSentence } from "./NestedBlocks";
 import { ruleSentence, termSentence } from "./ruleSentence";
-import type { Constraint, ModelContext, Term } from "./terms";
+import type { Binding, Constraint, ModelContext, Term } from "./terms";
 
 const CONTEXT: ModelContext = {
   sets: ["person", "day"],
@@ -219,3 +219,98 @@ describe("only some of them: a binding's conditions", () => {
   });
 });
 
+
+describe("walks along a relationship (a hierarchy)", () => {
+  const ORG: ModelContext = {
+    sets: ["employee", "unit"],
+    setIds: {},
+    attributes: { employee: [{ name: "grade", data_type: "number" }], unit: [] },
+    variables: { assign: { index: ["employee"], domain: "binary" } },
+    parameters: {},
+    predictors: {},
+    relationships: [
+      { name: "manages", from: "employee", to: "employee", attributes: [{ name: "weight", data_type: "number" }] },
+      { name: "belongs", from: "employee", to: "unit" },
+    ],
+  };
+  // TRAVERSE: start m, relation manages, going down, 1 or more steps, grade >= 2, body: weight along the path × assign.
+  const TEAM: Constraint = {
+    id: "c_team",
+    forall: [{ index: "m", set: "employee" }],
+    left: {
+      sum: { mul: [{ attr: { of: "r", name: "weight", along: "sum" } }, { var: "assign", index: ["e"] }] },
+      over: [{ index: "e", set: "employee", where: [{ attr: "grade", op: ">=", value: 2 }], via: { rel: "manages", from: "m", depth: "any", as: "r" } }],
+    },
+    relation: "<=",
+    right: { const: 5 },
+    severity: "hard",
+  };
+
+  function Walks({ initial, boxes = false }: { initial: Constraint; boxes?: boolean }) {
+    const [rule, setRule] = useState(initial);
+    return (
+      <>
+        {boxes
+          ? <RuleBlocks rule={rule} context={ORG} onChange={setRule} />
+          : <RuleSentence rule={rule} context={ORG} onEdit={() => {}} onChange={setRule} />}
+        <pre data-testid="ir">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+  const over = () => (ir().left as { over: Binding[] }).over[0];
+
+  it("reads start, relationship, direction, depth, condition and the links' numbers, and checks out", () => {
+    expect(checkRule(TEAM, ORG)).toEqual([]);
+    expect(ruleSentence(TEAM)).toBe(
+      "For every employee m, the total of the sum of weight along r times assign of e, over every employee e whose grade is at least 2, " +
+        "linked from m by manages in 1 or more steps (each link called r), must be at most 5.",
+    );
+  });
+
+  it("edits the walk in the sentence: how far, which way, and removing it", () => {
+    render(<Walks initial={TEAM} />);
+    const walk = "left side: runs over: set 1: walk";
+    expect(Array.from((screen.getByLabelText(`${walk}: relationship`) as HTMLSelectElement).options).map((o) => o.textContent))
+      .toEqual(["manages, going down", "manages, going up"]);
+    fireEvent.change(screen.getByLabelText(`${walk}: how far`), { target: { value: "any_or_self" } });
+    expect(over().via).toEqual({ rel: "manages", from: "m", depth: "any_or_self", as: "r" });
+    fireEvent.change(screen.getByLabelText(`${walk}: relationship`), { target: { value: "manages:to" } });
+    expect(over().via).toEqual({ rel: "manages", to: "m", depth: "any_or_self", as: "r" });
+    fireEvent.change(screen.getByLabelText(`${walk}: how far`), { target: { value: "one" } });
+    expect(over().via).toEqual({ rel: "manages", to: "m", as: "r" });
+    // One link has one weight: the check asks to drop "the sum of".
+    expect(screen.getByRole("status")).toHaveTextContent("“r” is one link, so its weight has one value");
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${walk}` }));
+    expect(over().via).toBeUndefined();
+    // And a walk can be added back where one is possible.
+    fireEvent.click(screen.getByRole("button", { name: "Reach employee through a relationship: left side: runs over: set 1" }));
+    expect(over().via).toEqual({ rel: "manages", from: "m" });
+  });
+
+  it("offers the links as something to read a number from, and says how the links of a path combine", () => {
+    render(<Walks initial={TEAM} boxes />);
+    const which = screen.getByLabelText("factor 1: of which item") as HTMLSelectElement;
+    expect(Array.from(which.options).map((o) => o.textContent)).toEqual(["m (employee)", "e (employee)", "r (links by manages)"]);
+    fireEvent.change(screen.getByLabelText("factor 1: how the links combine"), { target: { value: "max" } });
+    expect((ir().left as { sum: { mul: Term[] } }).sum.mul[0]).toEqual({ attr: { of: "r", name: "weight", along: "max" } });
+    fireEvent.change(which, { target: { value: "e" } });
+    expect((ir().left as { sum: { mul: Term[] } }).sum.mul[0]).toEqual({ attr: { of: "e", name: "grade" } });
+  });
+
+  it("changing the set drops the walk and conditions that were about the old one", () => {
+    render(<Walks initial={TEAM} boxes />);
+    fireEvent.change(screen.getByLabelText("left side: runs over: set 1"), { target: { value: "unit" } });
+    expect(over()).toEqual({ index: "e", set: "unit" });
+  });
+
+  it("names a walk that cannot be taken", () => {
+    const bad = (via: Binding["via"], set = "employee"): string[] =>
+      checkRule({ ...TEAM, left: { sum: { var: "assign", index: ["e"] }, over: [{ index: "e", set, via }] } }, ORG).map((p) => p.message);
+    expect(bad({ rel: "reports", from: "m" })).toEqual(["“reports” is not a relationship of this model"]);
+    expect(bad({ rel: "manages", from: "x" })).toEqual(["the walk starts at “x”, which is not bound before it"]);
+    expect(bad({ rel: "belongs", from: "m" })).toEqual(["walking belongs from employee reaches unit, not employee"]);
+    expect(bad({ rel: "belongs", from: "m", depth: "any" }, "unit").at(-1))
+      .toBe("only a relationship from a set to itself can be walked more than one step; belongs links employee to unit");
+    expect(bad({ rel: "manages", from: "m", as: "m" })).toEqual(["“m” already names something here; pick another name for the links"]);
+  });
+});

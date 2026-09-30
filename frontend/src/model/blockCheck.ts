@@ -16,7 +16,7 @@
  */
 import { FUNCTIONS } from "../ir";
 import { opsFor, OP_WORDS } from "./whereWords";
-import { arithmeticAttributes, degree, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { arithmeticAttributes, degree, edgeAttributes, viaOf, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
 
 /** Where in the hierarchy a problem sits (the design's validation levels). */
 export type Level = "primitive" | "operation" | "aggregation" | "comparison" | "rule";
@@ -33,6 +33,52 @@ function isBound(name: string, bound: Binding[]): Binding | undefined {
     if (bound[i].index === name) return bound[i];
   }
   return undefined;
+}
+
+/** The link a walk around here names with `as`, and whether it is one link or every link of a path. */
+function edgeOf(name: string, bound: Binding[]): { rel: string; path: boolean } | undefined {
+  for (let i = bound.length - 1; i >= 0; i -= 1) {
+    const via = bound[i].via;
+    if (via?.as === name) return { rel: via.rel, path: (via.depth ?? "one") !== "one" };
+  }
+  return undefined;
+}
+
+const DEPTHS = ["one", "any", "any_or_self"];
+
+/**
+ * A walk along a relationship ("reached through"): the relationship is
+ * declared, it starts at an item bound before it, its ends match the sets on
+ * both sides, it repeats only along a relationship from a set to itself, and
+ * the name it gives its links is free. `earlier` is everything bound before
+ * this binding.
+ */
+export function checkWalk(binding: Binding, context: ModelContext, earlier: Binding[]): string[] {
+  const walk = viaOf(binding);
+  if (!walk || !binding.via) return [];
+  const rel = context.relationships.find((r) => r.name === walk.rel);
+  if (!rel) return [`“${walk.rel || "?"}” is not a relationship of this model`];
+  const out: string[] = [];
+  const anchor = isBound(walk.anchor, earlier);
+  const anchorSet = walk.anchorEnd === "from" ? rel.from : rel.to;
+  const reachedSet = walk.anchorEnd === "from" ? rel.to : rel.from;
+  if (!anchor) out.push(`the walk starts at “${walk.anchor || "?"}”, which is not bound before it`);
+  if (reachedSet !== binding.set) {
+    out.push(`walking ${rel.name} from ${anchorSet} reaches ${reachedSet}, not ${binding.set}`);
+  } else if (anchor && anchor.set !== anchorSet) {
+    out.push(`the walk starts at “${walk.anchor}”, a ${anchor.set}, but ${rel.name} starts from a ${anchorSet}`);
+  }
+  const depth = binding.via.depth;
+  if (depth !== undefined && !DEPTHS.includes(depth)) out.push(`“${depth}” is not how far a walk can go`);
+  else if (depth && depth !== "one" && rel.from !== rel.to) {
+    out.push(`only a relationship from a set to itself can be walked more than one step; ${rel.name} links ${rel.from} to ${rel.to}`);
+  }
+  const edge = binding.via.as;
+  if (edge !== undefined) {
+    if (!/^[a-z][a-z0-9_]*$/.test(edge)) out.push(`“${edge}” is not a usable name for the links`);
+    else if (edge === binding.index || isBound(edge, earlier) || edgeOf(edge, earlier)) out.push(`“${edge}” already names something here; pick another name for the links`);
+  }
+  return out;
 }
 
 /** An index cell is a bound name, or a parameter read at bound names (next_day[d]). */
@@ -81,11 +127,24 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
     arity(term.par || "The data", spec?.index, term.index, path, out);
     checkCells(term.par, term.index, bound, path, out);
   } else if ("attr" in term) {
-    const binding = isBound(term.attr.of, bound);
-    if (!term.attr.along) {
-      if (!binding) out.push({ path, level: "primitive", message: `“${term.attr.of || "?"}” is not bound here` });
-      else if (!arithmeticAttributes(context, binding.set).some((a) => a.name === term.attr.name)) {
-        out.push({ path, level: "primitive", message: `${binding.set} has no number called “${term.attr.name || "?"}”` });
+    const { of, name, along } = term.attr;
+    const edge = edgeOf(of, bound);
+    if (edge) {
+      // A link a walk names: its attributes are the relationship's.
+      if (!edgeAttributes(context, edge.rel).some((a) => a.name === name)) {
+        out.push({ path, level: "primitive", message: `a ${edge.rel} link has no number called “${name || "?"}”` });
+      }
+      if (edge.path && !along) {
+        out.push({ path, level: "primitive", message: `“${of}” is every link along a walk of many steps, so say how the ${name} of its links combine (sum, min, max, product or count)` });
+      } else if (!edge.path && along) {
+        out.push({ path, level: "primitive", message: `“${of}” is one link, so its ${name} has one value and nothing to combine` });
+      }
+    } else {
+      const binding = isBound(of, bound);
+      if (!binding) out.push({ path, level: "primitive", message: `“${of || "?"}” is not bound here` });
+      else if (along) out.push({ path, level: "primitive", message: `“${of}” is one ${binding.set}, so its ${name} has one value and nothing to combine` });
+      else if (!arithmeticAttributes(context, binding.set).some((a) => a.name === name)) {
+        out.push({ path, level: "primitive", message: `${binding.set} has no number called “${name || "?"}”` });
       }
     }
   } else if ("sum" in term) {
@@ -93,7 +152,7 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
       out.push({ path, level: "aggregation", message: "a total says what it runs over" });
     }
     const seen = new Set<string>();
-    for (const binding of term.over) {
+    term.over.forEach((binding, i) => {
       if (!context.sets.includes(binding.set)) {
         out.push({ path, level: "aggregation", message: `“${binding.set || "?"}” is not a set of this model` });
       }
@@ -104,7 +163,8 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
       }
       seen.add(binding.index);
       for (const message of checkWhere(binding, context)) out.push({ path, level: "aggregation", message });
-    }
+      for (const message of checkWalk(binding, context, [...bound, ...term.over.slice(0, i)])) out.push({ path, level: "aggregation", message });
+    });
     out.push(...checkTerm(term.sum, context, [...bound, ...term.over], at("what is totalled")));
   } else if ("add" in term) {
     if (term.add.length < 2) out.push({ path, level: "operation", message: "adding needs at least two terms" });
@@ -164,6 +224,7 @@ export function checkRule(rule: Constraint, context: ModelContext): Problem[] {
       out.push({ path: ["for each"], level: "rule", message: `“${binding.index}” is used twice; each item needs its own letter` });
     }
     for (const message of checkWhere(binding, context)) out.push({ path: ["for each"], level: "rule", message });
+    for (const message of checkWalk(binding, context, forall.slice(0, i))) out.push({ path: ["for each"], level: "rule", message });
   });
   if (rule.left == null || rule.right == null) {
     out.push({ path: [], level: "rule", message: "the rule does not compare anything yet" });
