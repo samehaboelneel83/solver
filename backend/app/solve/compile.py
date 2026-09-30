@@ -1081,12 +1081,18 @@ class _Compiler:
             of, attr_name = term["attr"]["of"], term["attr"]["name"]
             if env[of][0] == EDGE:
                 return Linear(const=_along(env[of][1], attr_name, term["attr"].get("along")))
-            row = env[of][1]
+            set_name, row = env[of]
             if attr_name not in row:
                 # Absent because the attribute has no default and this entity
-                # never set it. Zero would be a silent wrong answer.
+                # never set it. Zero would be a silent wrong answer. Name every
+                # item that lacks it, not just the first, and where to fix it,
+                # so one pass through the data is enough.
+                lacking = [r["id"] for r in self.sets.get(set_name, []) if attr_name not in r]
+                shown = ", ".join(repr(k) for k in lacking[:5]) + (f" and {len(lacking) - 5} more" if len(lacking) > 5 else "")
                 raise Unsupported(
-                    f"entity {row['id']!r} carries no {attr_name!r}, so the term has no value"
+                    f"{set_name} {shown} {'has' if len(lacking) == 1 else 'have'} no {attr_name!r}, "
+                    "so the term has no value: fill it in under Data > Records, or give "
+                    f"{attr_name!r} a default under Structure > Record types > {set_name}"
                 )
             return Linear(const=number(row[attr_name]))
 

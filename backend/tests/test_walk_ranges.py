@@ -151,3 +151,17 @@ def test_it_solves():
     ir = _ir({"from": "top", "steps": {"min": 2}, "where": [{"attr": "share", "op": ">=", "value": 0}]})
     result = by_name("highs").solve(compile_model(ir, _data()), time_limit=10, workers=1, seed=1)
     assert result.status == "optimal" and float(result.objective) == pytest.approx(2)
+
+
+def test_a_missing_number_names_every_item_without_it_and_where_to_fix_it():
+    ir = {
+        "version": 2, "sets": ["unit"], "parameters": {},
+        "variables": {"pick": {"index": ["unit"], "domain": "binary"}},
+        "constraints": [],
+        "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+            "sum": {"mul": [{"attr": {"of": "u", "name": "size"}}, {"var": "pick", "index": ["u"]}]},
+            "over": [{"index": "u", "set": "unit"}]}}]},
+    }
+    units = [{"id": "a", "size": 3}, {"id": "b"}, {"id": "c"}]
+    with pytest.raises(Unsupported, match=r"unit 'b', 'c' have no 'size'.*Data > Records.*Record types > unit"):
+        compile_model(ir, {"sets": {"unit": units}, "parameters": {}, "parameter_defaults": {}})
