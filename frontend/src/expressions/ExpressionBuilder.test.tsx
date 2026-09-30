@@ -341,3 +341,14 @@ describe("ExpressionBuilder — accessibility", () => {
     expect(screen.getByTestId("expression-builder")).toHaveAttribute("aria-label");
   });
 });
+
+describe("ExpressionBuilder — and only", () => {
+  it("offers no groups and no “or” where conditions can only be joined with “and”", () => {
+    render(<ExpressionBuilder catalogue={catalogue} value={docWith({ field: CAPACITY, operator: ">", value: 3 }, { field: CODE, operator: "=", value: "a" })} onChange={vi.fn()} andOnly />);
+    expect(screen.queryByTestId("expression-add-group")).toBeNull();
+    expect(screen.getByTestId("expression-add-rule")).toBeInTheDocument();
+    const joiner = screen.getByTestId("expression-combinator");
+    expect(joiner.tagName).toBe("SPAN");
+    expect(joiner).toHaveTextContent("and");
+  });
+});

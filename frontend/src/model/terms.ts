@@ -29,6 +29,12 @@ export type IrFilter = { attr: string; op: string; value: unknown };
 export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth; as?: string };
 export type Binding = { index: string; set: string; where?: IrFilter[]; via?: Via };
 
+/** The binding with these conditions, or with none (no empty `where` left behind). */
+export function withWhere(binding: Binding, where: IrFilter[] | undefined): Binding {
+  const { where: _old, ...rest } = binding;
+  return where && where.length > 0 ? { ...rest, where } : rest;
+}
+
 export type Term =
   | { const: number }
   | { par: string; index: string[] }

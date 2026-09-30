@@ -162,3 +162,60 @@ describe("the sentence, with blanks to fill in", () => {
     expect(screen.getByTestId("sentence-reading")).toHaveTextContent("must be at most");
   });
 });
+
+describe("only some of them: a binding's conditions", () => {
+  function Sentence({ initial }: { initial: Constraint }) {
+    const [rule, setRule] = useState(initial);
+    return (
+      <>
+        <RuleSentence rule={rule} context={CONTEXT} onEdit={() => {}} onChange={setRule} />
+        <pre data-testid="ir">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+
+  it("edits a condition in the sentence: attribute, comparison in words, and a value that fits", () => {
+    render(<Sentence initial={COVER} />);
+    const name = "left side: runs over: set 1: condition 1";
+    const comparison = screen.getByLabelText(`${name}: comparison`) as HTMLSelectElement;
+    // Text is compared for equality or membership, not ordered.
+    expect(Array.from(comparison.options).map((o) => o.textContent)).toEqual(["is", "is not", "is one of", "is not one of"]);
+    fireEvent.change(comparison, { target: { value: "in" } });
+    fireEvent.change(screen.getByLabelText(`${name}: value`), { target: { value: "north, south" } });
+    expect(ir().left).toMatchObject({ over: [{ where: [{ attr: "team", op: "in", value: ["north", "south"] }] }] });
+    expect(screen.getByTestId("sentence-reading")).toHaveTextContent("whose team is one of north, south");
+
+    // A number attribute offers every comparison, and reads its value as a number.
+    fireEvent.change(screen.getByLabelText(`${name}: attribute`), { target: { value: "cap" } });
+    expect(Array.from((screen.getByLabelText(`${name}: comparison`) as HTMLSelectElement).options).map((o) => o.value))
+      .toEqual(["=", "!=", "<", "<=", ">", ">=", "in", "notIn"]);
+    fireEvent.change(screen.getByLabelText(`${name}: comparison`), { target: { value: ">=" } });
+    fireEvent.change(screen.getByLabelText(`${name}: value`), { target: { value: "2" } });
+    expect(ir().left).toMatchObject({ over: [{ where: [{ attr: "cap", op: ">=", value: 2 }] }] });
+
+    // Removing the last condition takes `where` off the binding.
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${name}` }));
+    expect((ir().left as { over: object[] }).over[0]).toEqual({ index: "p", set: "person" });
+  });
+
+  it("adds a condition in the boxes, and the check names one that no longer fits", () => {
+    render(<Harness initial={{ ...COVER, left: { sum: { var: "hours", index: ["p"] }, over: [{ index: "p", set: "person" }] } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Only some of person: add a condition to left side: runs over: set 1" }));
+    expect(ir().left).toMatchObject({ over: [{ where: [{ attr: "cap", op: "=", value: 0 }] }] });
+    expect(screen.getByRole("status")).toHaveTextContent("Complete");
+    fireEvent.change(screen.getByLabelText("left side: runs over: set 1: condition 1: value"), { target: { value: "lots" } });
+    expect(screen.getByRole("status")).toHaveTextContent("left side: Cap is a number, so compare it with a number");
+    // A day has no attributes: changing the set drops conditions that were about a person.
+    fireEvent.change(screen.getByLabelText("left side: runs over: set 1"), { target: { value: "day" } });
+    expect((ir().left as { over: object[] }).over[0]).toEqual({ index: "p", set: "day" });
+  });
+
+  it("checks conditions against the set's attributes", () => {
+    const rule: Constraint = { ...COVER, forall: [{ index: "d", set: "person", where: [{ attr: "age", op: "=", value: 1 }, { attr: "team", op: "<", value: "a" }] }] };
+    expect(checkRule(rule, CONTEXT).map(explain)).toEqual([
+      "for each: Person has nothing called “age” to compare.",
+      "for each: Team cannot be compared with “is below”.",
+    ]);
+  });
+});
+

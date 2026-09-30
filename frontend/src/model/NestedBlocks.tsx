@@ -19,12 +19,14 @@ import { cellText } from "../lib/irBlocks/catalogue";
 import { checkGoal, checkRule, explain, problemsAt, type Problem } from "./blockCheck";
 import { ruleSentence, termSentence } from "./ruleSentence";
 import { RuleWords, TermWords } from "./SentenceEditor";
+import { WhereBlanks } from "./WhereBlanks";
 import {
   arithmeticAttributes,
   describeWhen,
   emptyTerm,
   fillIndices,
   nextBinding,
+  withWhere,
   type Binding,
   type Constraint,
   type ModelContext,
@@ -230,18 +232,15 @@ function BindingsEditor({ label, bindings, bound, context, onChange, removable }
         <div key={i} className="flex flex-wrap items-center gap-1 text-sm text-slate-700">
           <span>every</span>
           <select aria-label={`${label}: set ${i + 1}`} className={SELECT} value={binding.set}
-            onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, set: event.target.value } : b)))}>
+            onChange={(event) => onChange(bindings.map((b, j) => (j === i ? withWhere({ ...b, set: event.target.value }, undefined) : b)))}>
             {!context.sets.includes(binding.set) && <option value={binding.set}>{binding.set || "choose…"}</option>}
             {context.sets.map((set) => <option key={set} value={set}>{set}</option>)}
           </select>
           <span>called</span>
           <input aria-label={`${label}: name ${i + 1}`} className={`${SELECT} w-16 font-mono`} value={binding.index}
             onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, index: event.target.value.trim() } : b)))} />
-          {(binding.where?.length ?? 0) > 0 && (
-            <span className="text-xs text-slate-500">
-              where {binding.where!.map((f) => `${f.attr} ${f.op} ${typeof f.value === "object" ? JSON.stringify(f.value) : String(f.value)}`).join(" and ")}
-            </span>
-          )}
+          <WhereBlanks label={`${label}: set ${i + 1}`} set={binding.set} where={binding.where} context={context} className={SELECT} lead="where"
+            onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
           {(removable || bindings.length > 1) && (
             <button type="button" className="text-xs text-rose-700 underline" aria-label={`Remove ${binding.index || "this set"} from ${label}`}
               onClick={() => onChange(bindings.filter((_, j) => j !== i))}>

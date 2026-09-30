@@ -15,6 +15,7 @@
  * Publish; nothing here lets through what that refuses.
  */
 import { FUNCTIONS } from "../ir";
+import { opsFor, OP_WORDS } from "./whereWords";
 import { arithmeticAttributes, degree, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
 
 /** Where in the hierarchy a problem sits (the design's validation levels). */
@@ -102,6 +103,7 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
         out.push({ path, level: "aggregation", message: `“${binding.index}” already names something here; pick another letter` });
       }
       seen.add(binding.index);
+      for (const message of checkWhere(binding, context)) out.push({ path, level: "aggregation", message });
     }
     out.push(...checkTerm(term.sum, context, [...bound, ...term.over], at("what is totalled")));
   } else if ("add" in term) {
@@ -128,6 +130,28 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
   return out;
 }
 
+/** The conditions on one binding ("only some of them"), against its set's attributes. */
+export function checkWhere(binding: Binding, context: ModelContext): string[] {
+  const attributes = context.attributes[binding.set];
+  if (!attributes || !binding.where) return [];
+  const out: string[] = [];
+  for (const filter of binding.where) {
+    const attribute = attributes.find((a) => a.name === filter.attr);
+    if (!attribute) {
+      out.push(`${binding.set} has nothing called “${filter.attr || "?"}” to compare`);
+      continue;
+    }
+    if (!opsFor(attribute.data_type).includes(filter.op)) {
+      out.push(`${filter.attr} cannot be compared with “${OP_WORDS[filter.op] ?? filter.op}”`);
+    } else if (filter.op === "in" || filter.op === "notIn") {
+      if (!Array.isArray(filter.value) || filter.value.length === 0) out.push(`“${filter.attr} ${OP_WORDS[filter.op]}” needs at least one value`);
+    } else if ((attribute.data_type === "number" || attribute.data_type === "integer") && typeof filter.value !== "number") {
+      out.push(`${filter.attr} is a number, so compare it with a number`);
+    }
+  }
+  return out;
+}
+
 /** A rule: what it runs over, both sides, and what the comparison as a whole asks. */
 export function checkRule(rule: Constraint, context: ModelContext): Problem[] {
   const out: Problem[] = [];
@@ -139,6 +163,7 @@ export function checkRule(rule: Constraint, context: ModelContext): Problem[] {
     if (forall.findIndex((other) => other.index === binding.index) !== i) {
       out.push({ path: ["for each"], level: "rule", message: `“${binding.index}” is used twice; each item needs its own letter` });
     }
+    for (const message of checkWhere(binding, context)) out.push({ path: ["for each"], level: "rule", message });
   });
   if (rule.left == null || rule.right == null) {
     out.push({ path: [], level: "rule", message: "the rule does not compare anything yet" });

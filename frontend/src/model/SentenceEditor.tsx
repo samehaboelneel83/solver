@@ -13,7 +13,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { arithmeticAttributes, fillIndices, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { arithmeticAttributes, fillIndices, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { WhereBlanks } from "./WhereBlanks";
 
 const BLANK = "mx-0.5 inline-block rounded border border-slate-300 bg-white px-1 py-0 align-baseline text-sm text-slate-900";
 
@@ -57,12 +58,11 @@ export function BindingBlanks({ label, bindings, context, onChange }: {
         <span key={i}>
           {i > 0 && " and "}every
           <Choice label={`${label}: set ${i + 1}`} value={binding.set} options={context.sets.map((s) => [s, s])}
-            onChange={(set) => onChange(bindings.map((b, j) => (j === i ? { ...b, set } : b)))} />
+            onChange={(set) => onChange(bindings.map((b, j) => (j === i ? withWhere({ ...b, set }, undefined) : b)))} />
           <input aria-label={`${label}: name ${i + 1}`} className={`${BLANK} w-10 font-mono`} value={binding.index}
             onChange={(event) => onChange(bindings.map((b, j) => (j === i ? { ...b, index: event.target.value.trim() } : b)))} />
-          {(binding.where ?? []).length > 0 && (
-            <span className="text-slate-600"> whose {binding.where!.map((f) => `${f.attr} ${f.op === "=" ? "is" : f.op} ${typeof f.value === "object" ? JSON.stringify(f.value) : String(f.value)}`).join(" and ")}</span>
-          )}
+          <WhereBlanks label={`${label}: set ${i + 1}`} set={binding.set} where={binding.where} context={context} className={BLANK}
+            onChange={(where) => onChange(bindings.map((b, j) => (j === i ? withWhere(b, where) : b)))} />
         </span>
       ))}
     </>

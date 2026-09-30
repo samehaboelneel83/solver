@@ -11,6 +11,7 @@
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
 import { describeWhen, type Binding, type Constraint, type Term } from "./terms";
+import { OP_WORDS } from "./whereWords";
 
 const RELATION_WORDS: Record<string, string> = { "<=": "must be at most", ">=": "must be at least", "=": "must be exactly" };
 
@@ -20,7 +21,7 @@ function of(name: string, index: unknown[]): string {
 
 function where(binding: Binding): string {
   const filters = (binding.where ?? []).map((f) => {
-    const op = f.op === "=" ? "is" : f.op === "!=" ? "is not" : f.op === "in" ? "is one of" : f.op === "notIn" ? "is not one of" : f.op;
+    const op = OP_WORDS[f.op] ?? f.op;
     return `${f.attr} ${op} ${Array.isArray(f.value) ? f.value.join(", ") : typeof f.value === "object" && f.value !== null ? cellText(f.value) : String(f.value)}`;
   });
   const walk = binding.via ? ` linked by ${binding.via.rel}` : "";

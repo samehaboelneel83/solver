@@ -526,7 +526,8 @@ export function BindingsEditor({
                 {hasFilter ? (
                   <div className="min-w-[16rem] flex-1">
                     <p className="mb-1 text-xs text-slate-600">
-                      Only some of {binding.set} (optional)
+                      Only some of {binding.set} (optional). Every condition must hold; for
+                      “this or that”, use “is one of”.
                     </p>
                     <ExpressionBuilder
                       catalogue={buildFieldCatalogue({
@@ -549,6 +550,7 @@ export function BindingsEditor({
                         columns: [],
                       })}
                       label={`Filter for ${binding.index} in ${binding.set}`}
+                      andOnly
                       value={fromIrWhere(binding.where, setId)}
                       onChange={(document) => {
                         const converted = toIrWhere(document);
