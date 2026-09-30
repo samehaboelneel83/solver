@@ -324,7 +324,7 @@ export default function Runs() {
 
   return (
     <div className="max-w-5xl">
-      <h1 className="mb-1 text-lg font-semibold text-slate-900">Runs</h1>
+      <h1 className="mb-1 text-lg font-semibold text-slate-900">Runs &amp; results</h1>
       <p className="mb-4 text-sm text-slate-500">
         Solving a scenario freezes its data, runs the solver, and keeps the answer. Runs are never changed:
         solving again makes a new one, which is what lets two be compared.
@@ -767,7 +767,7 @@ function ScenarioRuns({
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th scope="col" className="py-2 pr-3 font-medium">Run</th>
                 <th scope="col" className="py-2 pr-3 font-medium">Status</th>
-                <th scope="col" className="py-2 pr-3 font-medium">{w("Objective")}</th>
+                <th scope="col" className="py-2 pr-3 font-medium">Goal</th>
                 <th scope="col" className="py-2 pr-3 font-medium">Time</th>
                 <th scope="col" className="py-2 font-medium">Solver</th>
               </tr>

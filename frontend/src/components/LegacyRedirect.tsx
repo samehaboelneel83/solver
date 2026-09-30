@@ -3,6 +3,7 @@ import { useEntity } from "../api/entities";
 import { useDomain } from "../hooks/useDomain";
 import { parseRouteId } from "../lib/routeId";
 import LoadFailure from "./LoadFailure";
+import { readRecentScope } from "../nav/recentScope";
 
 /**
  * An old, unscoped link landing on its canonical page in one step (Epic UX, U-1).
@@ -49,7 +50,8 @@ function rest(search: URLSearchParams, drop: string[]): string {
 export function LegacyProblemRedirect({ page, fallback }: { page: string; fallback: JSX.Element }) {
   const location = useLocation();
   const search = new URLSearchParams(location.search);
-  const problemId = parseRouteId(search.get("problem"));
+  // No problem named: the one last opened (UX audit C-5), not the first problem by name.
+  const problemId = parseRouteId(search.get("problem")) ?? readRecentScope()?.problemId ?? null;
   const problem = useEntity("public", "problem", problemId === null ? undefined : String(problemId));
   if (problemId === null) return fallback;
   if (problem.isError) {

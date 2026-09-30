@@ -36,7 +36,7 @@ function RunCards({ rows, alert }: { rows: RunSummary[]; alert?: boolean }) {
                   </span>
                 </span>
                 <span className="mt-1 block truncate text-xs text-slate-500">
-                  {run.objective !== null && run.objective !== undefined ? `Objective ${run.objective.toLocaleString("en")}` : run.solver}
+                  {run.objective !== null && run.objective !== undefined ? `Goal ${run.objective.toLocaleString("en")}` : run.solver}
                   {when ? ` · ${when}` : ""}
                 </span>
               </span>

@@ -36,6 +36,8 @@ async function settled() {
 describe("AppShell", () => {
   beforeEach(() => {
     localStorage.clear();
+    // Most of these are about the shell itself, not Simple's short menu: Expert shows every group.
+    localStorage.setItem("solver_editor_level", "expert");
     (apiFetch as any).mockImplementation((path: string) => {
       if (path.startsWith("/api/domain/")) return Promise.resolve({ items: DOMAINS, total: DOMAINS.length });
       if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
@@ -99,16 +101,16 @@ describe("AppShell", () => {
       expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("aria-current", "page");
       expect(screen.getByRole("link", { name: "Problems" })).not.toHaveAttribute("aria-current");
       expect(screen.getByRole("link", { name: "Domain overview" })).toHaveAttribute("href", "/domains/7/overview");
-      expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute("href", "/domains/7/data/records");
     });
     it("keeps the problem one click away after opening a platform page", async () => {
       renderWithProviders(["/domains/7/problems/9/runs"]);
       await settled();
-      fireEvent.click(screen.getByRole("link", { name: "Runs & queues" }));
+      fireEvent.click(screen.getByRole("link", { name: "Run queue" }));
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getByText("Recent problem")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/domains/7/problems/9/runs");
-      expect(screen.getByRole("link", { name: "Runs & queues" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("link", { name: "Run queue" })).toHaveAttribute("aria-current", "page");
       expect(within(nav).getByText("Navigate")).toBeInTheDocument();
     });
     it("switches domains on a problem page to the same page of that domain's last problem", async () => {
@@ -124,9 +126,9 @@ describe("AppShell", () => {
     it("keeps a platform page and its menu when the domain changes", async () => {
       renderWithProviders(["/domains/7/problems/9/runs"]);
       await settled();
-      fireEvent.click(screen.getByRole("link", { name: "Runs & queues" }));
+      fireEvent.click(screen.getByRole("link", { name: "Run queue" }));
       fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "3" } });
-      expect(screen.getByRole("link", { name: "Runs & queues" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("link", { name: "Run queue" })).toHaveAttribute("aria-current", "page");
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getByText("Navigate")).toBeInTheDocument();
       // Domain 3 has no problem opened yet: the shortcut is the domain itself.

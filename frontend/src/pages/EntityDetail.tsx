@@ -258,6 +258,15 @@ export default function EntityDetail() {
           {table ? tableLabelPlural(table) : `${schemaName}.${tableName}`}
         </Link>
       </nav>
+      {/* A problem's own page is its checklist overview (UX audit N-5): this form is only its details. */}
+      {!isNew && schemaName === "public" && tableName === "problem" && existing?.domain_id != null && (
+        <p role="note" className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-slate-800">
+          This is the problem&rsquo;s details form (its name and owner).{" "}
+          <Link className="font-medium text-blue-700 underline"
+            to={`/domains/${String(existing.domain_id)}/problems/${String(id)}/overview`}>Open the problem&rsquo;s overview</Link>{" "}
+          to fill in data, build the model and solve.
+        </p>
+      )}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-slate-900">{pageTitle}</h1>
         {/* B-1: same "Show identifiers" flag as the list page's DataTable, so this page's own

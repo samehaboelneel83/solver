@@ -226,7 +226,7 @@ export const DESTINATIONS: Destination[] = [
     id: "ops-queue",
     path: "/ops/queue",
     canonical: "/ops/queue",
-    label: "Runs & queues",
+    label: "Run queue",
     purpose: "Queued and running solves per organization.",
     scope: "operations",
     group: "operations",
@@ -515,7 +515,16 @@ export function stripDomainPrefix(pathname: string): string {
   return pathname;
 }
 
+/** Pages with no sidebar entry of their own, named for the breadcrumb (UX audit B-1: "Start a problem" read "All domains"). */
+const UNLISTED: [RegExp, Destination][] = [
+  [/^\/domains\/\d+\/start\/?$/, { id: "start-problem", path: "/domains/:domainId/start", canonical: "/domains/:domainId/start",
+    label: "Start a problem", purpose: "From a ready example, a spreadsheet, or from scratch.", scope: "domain", group: "problems" } as Destination],
+  [/^\/health\/?$/, { id: "health", path: "/health", canonical: "/health", label: "Health",
+    purpose: "Whether each part of the platform is working.", scope: "global", group: "home" } as Destination],
+];
+
 export function destinationForPath(pathname: string): Destination | undefined {
+  for (const [pattern, destination] of UNLISTED) if (pattern.test(pathname)) return destination;
   if (/^\/domains\/\d+(?:\/overview)?\/?$/.test(pathname)) return byId.get("domain-overview");
   if (/^\/domains\/\d+\/problems\/\d+(?:\/overview)?\/?$/.test(pathname)) return byId.get("problem-overview");
   const normalized = stripDomainPrefix(pathname);
@@ -647,9 +656,10 @@ export function buildSidebarGroups(
   const groups = buildNavGroups(ctx);
   const inDomain = /^\/domains\/\d+(?:\/|$)/.test(pathname) && ctx.domainId != null;
   const inProblem = inDomain && /^\/domains\/\d+\/problems\/\d+(?:\/|$)/.test(pathname) && ctx.problemId != null;
-  // Legacy pages retain their navigation until their canonical migration finishes.
+  // Legacy pages retain their navigation until their canonical migration finishes -- in
+  // Expert. Simple stays Simple on them too (UX audit N-3: /runs showed the whole Expert menu).
   const legacy = destinationForPath(pathname);
-  if (!inDomain && legacy && ["domain", "problem"].includes(legacy.scope) && !["domains"].includes(legacy.id)) return groups;
+  if (level === "expert" && !inDomain && legacy && ["domain", "problem"].includes(legacy.scope) && !["domains"].includes(legacy.id)) return groups;
   const select = (key: string, label: string, ids: string[]) => ({
     key, label, items: ids.map((id) => {
       const d = byId.get(id)!;
@@ -658,7 +668,8 @@ export function buildSidebarGroups(
   });
   const common = [
     select("operations", "Operations", ["ops-queue", "solvers"]),
-    { ...select("administration", "Administration", ["access", "ops-audit", "settings"]), footer: true },
+    // The real pages, not a hub of links to them (UX audit N-2); the hubs stay in the palette.
+    { ...select("administration", "Administration", ["users", "api-keys", "ops-audit", "settings"]), footer: true },
     select("help", "Help", ["help-start", "help-modeling", "help-coverage"]),
   ];
   if (level === "simple") {
@@ -683,39 +694,43 @@ export function buildSidebarGroups(
   }
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
-    select("planning", "This problem", ["problem-overview", "inputs", "model", "versions", "scenarios", "runs"]),
+    select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
+    select("data", "Data", ["records", "relationships", "parameters"]),
     ...common,
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
     select("domain", "This domain", ["domain-overview", "problems"]),
-    select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "predictors", "quality"]),
+    select("data", "Data", ["records", "relationships", "parameters", "record-types", "relationship-types", "map-graph", "sources", "predictors"]),
     ...common,
   ];
-  const navigate = select("context", "Navigate", ["home", "domains", "templates"]);
-  if (level === "simple") common.splice(0, 2);
+  const simple = level === "simple";
+  const navigate = simple
+    ? { key: "context", label: "Navigate", items: [["home", "Home"], ["domains", "All workspaces"], ["templates", "Templates"]].map(([id, text]) => {
+        const d = byId.get(id)!;
+        return { id, to: scopedPath(id, ctx), label: text, capability: d.capability };
+      }) }
+    : select("context", "Navigate", ["home", "domains", "templates"]);
+  const tail = simple ? [select("help", "Help", ["help-start", "help-modeling"])] : common;
   const back = recent && ctx.domainId != null && recent.domainId === ctx.domainId ? recent : null;
+  const recentGroup = (label: string, scope: ScopedNavContext, pairs: [string, string | null][]) => ({
+    key: "recent", label, items: pairs.map(([id, text]) => {
+      const d = byId.get(id)!;
+      return { id, to: scopedPath(id, scope), label: text ?? d.label, capability: d.capability };
+    }),
+  });
   if (back?.problemId != null) {
     const scope = { domainId: back.domainId, problemId: back.problemId };
-    return [navigate, {
-      key: "recent", label: "Recent problem",
-      items: ["problem-overview", "inputs", "model", "versions", "scenarios", "runs"].map((id) => {
-        const d = byId.get(id)!;
-        return { id, to: scopedPath(id, scope), label: d.label, capability: d.capability };
-      }),
-    }, ...common];
+    return [navigate, simple
+      ? recentGroup("Recent problem", scope, [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"]])
+      : recentGroup("Recent problem", scope, [["problem-overview", null], ["inputs", null], ["model", null], ["versions", null], ["scenarios", null], ["runs", null]]),
+    ...tail];
   }
   if (back) {
     const scope = { domainId: back.domainId, problemId: null };
-    return [navigate, {
-      key: "recent", label: "Recent domain",
-      items: ["domain-overview", "problems"].map((id) => {
-        const d = byId.get(id)!;
-        return { id, to: scopedPath(id, scope), label: d.label, capability: d.capability };
-      }),
-    }, ...common];
+    return [navigate, recentGroup(simple ? "Recent workspace" : "Recent domain", scope, [["domain-overview", null], ["problems", null]]), ...tail];
   }
-  return [navigate, ...common];
+  return [navigate, ...tail];
 }
 
 /** Resolve a compatibility alias to the path AppShell already serves. */

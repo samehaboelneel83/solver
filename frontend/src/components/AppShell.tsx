@@ -109,6 +109,9 @@ export function whereAmI(pathname: string): { group: string | null; page: string
     return { group: group?.label ?? null, page: dest.label, purpose: dest.purpose };
   }
   if (pathname === "/" || pathname === "/home") return { group: null, page: "Home" };
+  // A table page with no entry of its own (/public/domain): name the table, not "Page" (UX audit A-4).
+  const table = pathname.match(/^\/[a-z_]+\/([a-z_]+)(?:\/|$)/);
+  if (table) return { group: null, page: table[1].replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) };
   return { group: null, page: "Page" };
 }
 

@@ -13,7 +13,6 @@ export const WORDS = {
   "Entity type": ["Entity type", "Kind of record"],
   "New entity": ["New entity", "New record"],
   Parameters: ["Parameters", "Data values"],
-  Objective: ["Objective", "Goal"],
 } as const;
 
 export type Term = keyof typeof WORDS;
