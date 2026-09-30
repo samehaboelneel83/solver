@@ -444,7 +444,7 @@ describe("Entities: a filtered list is a link", () => {
     renderPage(`/entities?type=5&expr=${encodeURIComponent(JSON.stringify(GRADE_EQUALS_FOUR))}`);
     await screen.findByTestId("expression-builder");
 
-    fireEvent.change(screen.getByLabelText(/entity type/i), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText(/kind of record/i), { target: { value: "9" } });
     await waitFor(() => {
       const params = new URLSearchParams(screen.getByTestId("entities-search").textContent ?? "");
       expect(params.get("type")).toBe("9");

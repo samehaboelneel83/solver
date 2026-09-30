@@ -6,6 +6,7 @@ import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 import OfflineNotice from "./OfflineNotice";
 import { domainSwitchTarget } from "../nav/registry";
 import { lastProblemIn } from "../nav/recentScope";
+import { useWords } from "../lib/words";
 
 /**
  * The sidebar's domain picker. Everything domain-scoped reads the choice
@@ -77,15 +78,16 @@ export default function DomainSelector() {
 
   // The label is only associated when there is a <select> to label; the
   // loading/empty/error lines sit under the same visible heading.
+  const w = useWords();
   const hasSelect = !paused && !isLoading && domains !== undefined && domains.length > 0;
   return (
     <div className="mb-4" data-testid="domain-selector">
       {hasSelect ? (
         <label htmlFor={selectId} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Domain
+          {w("Domain")}
         </label>
       ) : (
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Domain</p>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{w("Domain")}</p>
       )}
       {body}
     </div>

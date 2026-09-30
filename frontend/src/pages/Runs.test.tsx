@@ -317,8 +317,7 @@ describe("Runs", () => {
   it("leads with whether the mandatory rules held, not the solver name", async () => {
     renderPage();
 
-    expect(await screen.findByText(/all mandatory rules held/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 preference bent, at cost 3600/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Every required rule holds; 1 preference could not be met, at a cost of 3,600\./)).toBeInTheDocument();
     // Solver facts stay available, under Technical rather than in the header.
     expect(screen.getByText("Technical")).toBeInTheDocument();
     expect(screen.getByText(/no room left/i)).toBeInTheDocument();
@@ -473,6 +472,25 @@ describe("Runs", () => {
         "Found from CP-SAT's own reasoning about why no answer exists, then each rule checked by solving again with CP-SAT (3 checks, under 0.01 s)."
       )
     ).toBeInTheDocument();
+  });
+
+  it("leads an infeasible run with the fact, and reads a rule with no note as a sentence of the model", async () => {
+    const infeasible = {
+      ...RUN_DETAIL, status: "infeasible", objective: null, assignments: null, constraints: [], rule_notes: {},
+      conflict: [{ constraint_id: "c_protein", instance: [] }], conflict_minimal: true,
+    };
+    const version = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: { constraints: [{ id: "c_protein", left: { sum: { var: "use", index: ["f"] }, over: [{ index: "f", set: "feed" }] },
+        relation: ">=", right: { const: 20 }, severity: "hard" }] },
+    };
+    stub({ run: infeasible, version, runs: { items: [{ ...RUN_SUMMARY, status: "infeasible", objective: null }], total: 1 } });
+    renderPage();
+    const summary = await screen.findByTestId("plan-summary");
+    expect(summary).toHaveTextContent("No plan can meet every rule.");
+    const panel = (await screen.findByRole("heading", { name: /why there is no answer/i })).closest("section") as HTMLElement;
+    expect(await within(panel).findByText(/the total of use of f, over every feed f, must be at least 20/i)).toBeInTheDocument();
+    expect(within(panel).getByText("(c_protein)")).toBeInTheDocument();
   });
 
   it("says when an answer was reused rather than solved", async () => {

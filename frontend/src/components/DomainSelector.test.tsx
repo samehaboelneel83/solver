@@ -49,7 +49,7 @@ function renderSelector() {
 }
 
 async function selectedDomain(): Promise<HTMLSelectElement> {
-  const select = (await screen.findByRole("combobox", { name: "Domain" })) as HTMLSelectElement;
+  const select = (await screen.findByRole("combobox", { name: "Workspace" })) as HTMLSelectElement;
   return select;
 }
 

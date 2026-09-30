@@ -29,6 +29,8 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { useWords } from "../lib/words";
+import { useEditorLevel } from "../model/editorLevel";
 
 // Lazy, like the graph's filter bar. The builder is the only module that
 // imports react-querybuilder, which Task 14c measured at +47.6 kB gz on a
@@ -169,12 +171,13 @@ function TypeChooser({
   onSelect: (id: Id) => void;
 }) {
   const { can } = useCapabilities();
+  const w = useWords();
   const id = useId();
   return (
     <div className="mb-4 flex flex-wrap items-end gap-4">
       <div>
         <label htmlFor={id} className="block text-sm font-medium text-slate-700">
-          Entity type
+          {w("Entity type")}
         </label>
         <select
           id={id}
@@ -199,7 +202,7 @@ function TypeChooser({
           to={`/entities/new?type=${selected.id}`}
           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
         >
-          New entity
+          {w("New entity")}
         </Link>
       )}
     </div>
@@ -308,6 +311,9 @@ function EntityTable({
   type: EntityType;
   relationshipTypes: RelationshipType[];
 }) {
+  const [level] = useEditorLevel();
+  // Simple shows what a planner reads: the order records are listed in is a setting for Expert.
+  const simple = level === "simple";
   const [searchParams, setSearchParams] = useSearchParams();
   const fromUrl = parseExprParam(searchParams.get("expr"));
   const qFromUrl = searchParams.get("q") ?? "";
@@ -446,9 +452,11 @@ function EntityTable({
       <p className="text-sm text-slate-600">
         {filtered
           ? q
-            ? `No entities of this type match "${q}".`
-            : "No entities of this type match these conditions."
-          : "No entities of this type yet. Create the first one with “New entity” above."}
+            ? simple ? `No ${type.name} records match "${q}".` : `No entities of this type match "${q}".`
+            : simple ? `No ${type.name} records match these conditions.` : "No entities of this type match these conditions."
+          : simple
+            ? `No ${type.name} records yet. Add the first with “New record” above.`
+            : "No entities of this type yet. Create the first one with “New entity” above."}
       </p>
     );
   } else {
@@ -464,9 +472,11 @@ function EntityTable({
                 <th scope="col" className="px-3 py-2 font-semibold">
                   Label
                 </th>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Sort order
-                </th>
+                {!simple && (
+                  <th scope="col" className="px-3 py-2 font-semibold">
+                    Sort order
+                  </th>
+                )}
                 <th scope="col" className="px-3 py-2 font-semibold">
                   Active
                 </th>
@@ -486,7 +496,7 @@ function EntityTable({
                     </Link>
                   </th>
                   <td className="px-3 py-2 text-slate-700">{entity.label ?? "—"}</td>
-                  <td className="px-3 py-2 text-slate-700">{entity.sort_order}</td>
+                  {!simple && <td className="px-3 py-2 text-slate-700">{entity.sort_order}</td>}
                   <td className="px-3 py-2 text-slate-700">{entity.active ? "Yes" : "No"}</td>
                   {type.attributes.map((attribute) => (
                     <td key={attribute.id} className="px-3 py-2 text-slate-700">

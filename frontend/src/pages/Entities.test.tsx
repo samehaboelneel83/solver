@@ -97,7 +97,7 @@ describe("Entities: choosing what to show", () => {
   it("offers the domain's entity types, because entities have no domain filter of their own", async () => {
     serve();
     renderPage();
-    const chooser = (await screen.findByLabelText(/^Entity type/)) as HTMLSelectElement;
+    const chooser = (await screen.findByLabelText(/^Kind of record/)) as HTMLSelectElement;
     expect(within(chooser).getAllByRole("option").map((o) => (o as HTMLOptionElement).textContent)).toEqual([
       "employee",
       "shift",
@@ -116,16 +116,16 @@ describe("Entities: choosing what to show", () => {
   it("switches list and deep link when another type is chosen", async () => {
     serve();
     renderPage();
-    fireEvent.change(await screen.findByLabelText(/^Entity type/), { target: { value: "9" } });
+    fireEvent.change(await screen.findByLabelText(/^Kind of record/), { target: { value: "9" } });
     await waitFor(() => expect(paths().some((p) => p.includes("entity_type_id=9"))).toBe(true));
-    expect(screen.getByRole("link", { name: /new entity/i })).toHaveAttribute("href", "/entities/new?type=9");
+    expect(screen.getByRole("link", { name: /new record/i })).toHaveAttribute("href", "/entities/new?type=9");
   });
 
   it("honours a type given in the query string, so a list can be linked to", async () => {
     serve();
     renderPage("/entities?type=9");
     await waitFor(() => expect(paths().some((p) => p.includes("entity_type_id=9"))).toBe(true));
-    expect(((await screen.findByLabelText(/^Entity type/)) as HTMLSelectElement).value).toBe("9");
+    expect(((await screen.findByLabelText(/^Kind of record/)) as HTMLSelectElement).value).toBe("9");
   });
 
   it("offers the first kind of record in place when the domain has none", async () => {
@@ -207,7 +207,7 @@ describe("Entities: the list", () => {
   it("says the type has no entities yet rather than showing an empty table", async () => {
     serve({ "/api/v1/entities": { items: [], total: 0 } });
     renderPage();
-    expect(await screen.findByText(/no entities/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no \w+ records yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
@@ -223,7 +223,7 @@ describe("Entities: the list", () => {
   it("offers a link to create an entity of the chosen type", async () => {
     serve();
     renderPage();
-    expect(await screen.findByRole("link", { name: /new entity/i })).toHaveAttribute("href", "/entities/new?type=5");
+    expect(await screen.findByRole("link", { name: /new record/i })).toHaveAttribute("href", "/entities/new?type=5");
   });
 
   it("reports a failed list with a retry", async () => {

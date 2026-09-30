@@ -11,6 +11,7 @@ import { missingOf, nextAction, problemSteps, type StepKey, type StepState } fro
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
+import { useWords } from "../lib/words";
 
 const card = "rounded-2xl border border-slate-200 bg-white p-5";
 const link = "inline-flex items-center gap-2 rounded-md py-2 text-sm font-semibold text-blue-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
@@ -23,6 +24,7 @@ export function DomainOverview({ listing = false }: { listing?: boolean }) {
 }
 
 function DomainContent({ domainId, listing }: { domainId: number; listing: boolean }) {
+  const w = useWords();
   const domains = useDomains();
   const listed = domains.data?.items.find((item) => item.id === domainId);
   const detail = useDomainDetail(domains.data && !listed ? domainId : null);
@@ -44,7 +46,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     setSearch(next);
   }
   return <div className="max-w-6xl space-y-6">
-    <Link className={link} to="/domains">All domains</Link>
+    <Link className={link} to="/domains">{w("All domains")}</Link>
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold text-slate-900">{listing ? `${name} problems` : name}</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">Shared data for this business area. Choose a problem to continue planning, or prepare its inputs.</p></div>
@@ -53,7 +55,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-3">
       {[
         { label: "Records & relationships", detail: "People, places, resources and other operational data.", href: "data", Icon: Database },
-        { label: "Parameters", detail: "Demand, capacities, costs and other model inputs.", href: "data/parameters", Icon: FileStack },
+        { label: w("Parameters"), detail: "Demand, capacities, costs and other model inputs.", href: "data/parameters", Icon: FileStack },
         { label: "Data relationships (graph)", detail: "Explore locations and connections in your data.", href: "data/explore", Icon: GitBranch },
       ].map(({ label, detail, href, Icon }) => <article key={href} className={card}>
         <Icon className="mb-3 h-5 w-5 text-blue-700" aria-hidden />

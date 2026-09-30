@@ -7,6 +7,7 @@ import { useDomain } from "../hooks/useDomain";
 import LoadFailure from "../components/LoadFailure";
 import SearchBox, { NoMatches } from "../components/SearchBox";
 import { DOMAIN_PAGES } from "../components/LegacyRedirect";
+import { useWords } from "../lib/words";
 
 export const DOMAIN_PAGE_SIZE = 24;
 
@@ -26,11 +27,12 @@ export default function DomainChooser() {
   const domains = useEntityList("public", "domain", { limit: DOMAIN_PAGE_SIZE, offset, q, orderBy: "name", order: "asc" });
   const items = domains.data?.items ?? [];
   const total = domains.data?.total ?? 0;
+  const w = useWords();
   return (
     <section className="mx-auto max-w-4xl p-4">
-      <h1 className="mb-1 text-xl font-semibold">Choose a domain</h1>
+      <h1 className="mb-1 text-xl font-semibold">Choose a {w("domain")}</h1>
       <p className="mb-4 text-sm text-slate-600">
-        A domain is the shared data for a business area; its problems are planned on it.
+        A {w("domain")} is the shared data for a business area; its problems are planned on it.
         {next !== "overview" && " You will go on to the page you asked for."}
       </p>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">

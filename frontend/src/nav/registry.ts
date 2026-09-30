@@ -672,12 +672,12 @@ export function buildSidebarGroups(
     const help = select("help", "Help", ["help-start", "help-modeling"]);
     if (inProblem) return [
       named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"]]),
-      named("context", "Navigate", [["problems", "Other problems"], ["domains", "All domains"]]),
+      named("context", "Navigate", [["problems", "Other problems"], ["domains", "All workspaces"]]),
       help,
     ];
     if (inDomain) return [
-      named("domain", "This domain", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"]]),
-      named("context", "Navigate", [["domains", "All domains"], ["templates", "Templates"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"]]),
+      named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
   }

@@ -51,6 +51,10 @@ import SpreadView from "../components/SpreadView";
 import GuidedRunView from "../components/GuidedRunView";
 import ApprovePlanPanel from "../components/ApprovePlanPanel";
 import { RunMapView } from "../genui/components/SpatialMap";
+import { planWords, type PlanWords } from "../lib/planWords";
+import { ruleSentence } from "../model/ruleSentence";
+import type { Constraint } from "../model/terms";
+import { useWords } from "../lib/words";
 
 /**
  * Solving, and what came of it.
@@ -493,6 +497,7 @@ function ScenarioRuns({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
+  const w = useWords();
   const { domainId } = useDomain();
   // Simple (simplification plan, phase 2): one Solve button, the solver chosen for you.
   const [level] = useEditorLevel();
@@ -762,7 +767,7 @@ function ScenarioRuns({
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th scope="col" className="py-2 pr-3 font-medium">Run</th>
                 <th scope="col" className="py-2 pr-3 font-medium">Status</th>
-                <th scope="col" className="py-2 pr-3 font-medium">Objective</th>
+                <th scope="col" className="py-2 pr-3 font-medium">{w("Objective")}</th>
                 <th scope="col" className="py-2 pr-3 font-medium">Time</th>
                 <th scope="col" className="py-2 font-medium">Solver</th>
               </tr>
@@ -994,6 +999,9 @@ function RunDetail({
   onTab?: (tab: "summary" | "guided") => void;
 }) {
   const run = useRun(id);
+  // The model the run solved: what its answer is said in (lib/planWords) and what a clash reads as.
+  const runScenario = useScenario(run.data?.scenario_id);
+  const solvedVersion = useVersion(runScenario.data?.model_version_id);
   const { can } = useCapabilities();
   const cancelRun = useCancelRun();
   const toast = useToast();
@@ -1008,6 +1016,7 @@ function RunDetail({
   const broken = data.constraints.filter((c) => !c.satisfied);
   const emptyRanges = (data.params as { empty_ranges?: EmptyRange[] }).empty_ranges ?? [];
   const lead = outcomeLead(data);
+  const said = planWords(data, solvedVersion.data?.ir);
   const params = data.params as {
     stopped_by_request?: boolean;
     why_solver?: string;
@@ -1039,7 +1048,7 @@ function RunDetail({
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
       {unfinished && <ExpectedTime runId={id} />}
-      {lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
+      {said ? <PlanSummary said={said} /> : lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
       {onTab && (
         <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="Run views">
           <button
@@ -1177,6 +1186,7 @@ function RunDetail({
           notes={data.rule_notes ?? {}}
           found={data.params as ConflictFinding}
           solver={data.solver}
+          ir={solvedVersion.data?.ir}
         />
       )}
 
@@ -1283,6 +1293,26 @@ function RunDetail({
 
 type EmptyRange = { constraint_id: string; kind: string; index: Record<string, string> };
 
+const SUMMARY_TONE = {
+  good: "border-emerald-200 bg-emerald-50",
+  fair: "border-sky-200 bg-sky-50",
+  bad: "border-amber-300 bg-amber-50",
+} as const;
+
+/** The answer in plain words, first: whether there is a plan, the goal, what was decided, the rules. */
+function PlanSummary({ said }: { said: PlanWords }) {
+  return (
+    <div className={`mb-4 rounded-md border p-3 ${SUMMARY_TONE[said.tone]}`} data-testid="plan-summary">
+      <p className="text-sm font-semibold text-slate-900">{said.headline}</p>
+      {said.lines.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-sm text-slate-800">
+          {said.lines.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function emptyRangeWhere(item: EmptyRange, labels: Run["labels"]): string {
   const keys = Object.values(item.index);
   if (keys.length === 0) return "";
@@ -1369,6 +1399,7 @@ function Conflict({
   notes,
   found,
   solver,
+  ir,
 }: {
   runId: Id;
   scenarioId: Id;
@@ -1379,9 +1410,11 @@ function Conflict({
   notes: Record<string, string>;
   found: ConflictFinding;
   solver: string | null;
+  ir?: Record<string, unknown>;
 }) {
   const { can } = useCapabilities();
   const scenario = useScenario(scenarioId);
+  const rules = new Map(((ir?.constraints ?? []) as Constraint[]).map((rule) => [rule.id, rule]));
   const create = useCreateScenario();
   const toast = useToast();
   const byRule = new Map<string, string[][]>();
@@ -1425,6 +1458,11 @@ function Conflict({
             {notes[rule] ? (
               <>
                 <span className="font-medium text-amber-950">{notes[rule]}</span>{" "}
+                <span className="font-mono text-xs text-amber-800">({rule})</span>
+              </>
+            ) : rules.get(rule)?.left ? (
+              <>
+                <span className="font-medium text-amber-950">{ruleSentence(rules.get(rule)!)}</span>{" "}
                 <span className="font-mono text-xs text-amber-800">({rule})</span>
               </>
             ) : (

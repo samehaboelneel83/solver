@@ -66,7 +66,7 @@ describe("navigation context", () => {
 
   it("switches to the new domain's problem list and drops the old child context", async () => {
     mount("/domains/7/problems/9/model?version=20");
-    fireEvent.change(await screen.findByRole("combobox", { name: "Domain" }), { target: { value: "3" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Workspace" }), { target: { value: "3" } });
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/domains\/3\/problems$/);
     expect(screen.getByTestId("domain")).toHaveTextContent("3");
   });
@@ -76,14 +76,14 @@ describe("navigation context", () => {
       ? { id: 9, domain_id: 7, name: "Weekly staffing" }
       : { items: [{ id: 7, name: "Workforce" }], total: 1 });
     mount("/domains/7/problems/9/model");
-    await waitFor(() => expect(screen.getByTestId("context-header")).toHaveTextContent("Domain: Workforce / Problem: Weekly staffing"));
+    await waitFor(() => expect(screen.getByTestId("context-header")).toHaveTextContent("Workspace: Workforce / Problem: Weekly staffing"));
   });
 
   it("keeps the URL and preference when a dirty domain change is cancelled", async () => {
     localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
     vi.spyOn(window, "confirm").mockReturnValue(false);
     mount("/domains/7/problems/9/model", { dirty: true });
-    fireEvent.change(await screen.findByRole("combobox", { name: "Domain" }), { target: { value: "3" } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Workspace" }), { target: { value: "3" } });
     expect(screen.getByTestId("location")).toHaveTextContent("/domains/7/problems/9/model");
     expect(localStorage.getItem(DOMAIN_STORAGE_KEY)).toBe("7");
   });
