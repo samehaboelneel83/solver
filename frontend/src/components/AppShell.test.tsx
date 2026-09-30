@@ -213,7 +213,7 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
 
-      expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/iam/user_account");
+      expect(screen.getByRole("link", { name: "People & roles" })).toHaveAttribute("href", "/administration/people");
       expect(screen.getByRole("link", { name: "Roles & permissions" })).toHaveAttribute("href", "/iam/role");
       expect(screen.queryByRole("link", { name: "User roles" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Role capabilities" })).not.toBeInTheDocument();

@@ -183,13 +183,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
     <>
       <LegacyDraftRecovery problemId={problemId} />
       <ProblemReadiness problemId={problemId} />
-      <ProblemPicker
-        domainId={domainId}
-        current={problem}
-        firstPage={firstPage}
-        total={total}
-        onChoose={chooseProblem}
-      />
+      {/* Inside a problem's own pages the problem is already chosen: a switch here would
+          leave with a draft in hand (UX audit B-2). The sidebar's "Other problems" still goes. */}
+      {!route.problemId && (
+        <ProblemPicker
+          domainId={domainId}
+          current={problem}
+          firstPage={firstPage}
+          total={total}
+          onChoose={chooseProblem}
+        />
+      )}
       <Editor key={problemId} problemId={problemId} domainId={domainId} />
     </>
   );

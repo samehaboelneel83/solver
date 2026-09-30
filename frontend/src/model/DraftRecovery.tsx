@@ -48,6 +48,6 @@ export default function DraftRecovery({ draft, disabled }: { draft: ModelDraft; 
       <button type="button" className="ml-2 rounded px-3 py-2 underline" onClick={() => setPending(null)}>Cancel restoration</button>
     </div>}
     {message && <p role="status">{message}</p>}
-    <p className="text-xs text-slate-500">Undo history keeps the last 30 edits in this tab. Download a backup before closing the browser; drafts are not yet saved on the server.</p>
+    <p className="text-xs text-slate-500">Undo history keeps the last 30 edits in this tab. The draft saves itself to the server as you edit; a backup file is a copy you keep yourself.</p>
   </div>;
 }
