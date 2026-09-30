@@ -121,7 +121,24 @@ export function formatAttrValue(value: unknown): string {
   if (value === false) return "No";
   if (typeof value === "string") return value === "" ? "(empty)" : value;
   if (typeof value === "number") return String(value);
+  const shape = shapeWords(value);
+  if (shape) return shape;
   return JSON.stringify(value);
+}
+
+/** A map shape in a word or two, not its GeoJSON (UX audit A-4): "Point (31.2357, 30.0444)", "Area, 6 corners". */
+export function shapeWords(value: unknown): string | null {
+  const geo = value as { type?: unknown; coordinates?: unknown } | null;
+  if (!geo || typeof geo !== "object" || !Array.isArray(geo.coordinates)) return null;
+  const round = (n: unknown) => (typeof n === "number" ? String(Math.round(n * 10000) / 10000) : "?");
+  if (geo.type === "Point") return `Point (${round(geo.coordinates[0])}, ${round(geo.coordinates[1])})`;
+  if (geo.type === "Polygon") {
+    const ring = geo.coordinates[0];
+    const corners = Array.isArray(ring) ? Math.max(ring.length - 1, 0) : 0;
+    return `Area, ${corners} ${corners === 1 ? "corner" : "corners"}`;
+  }
+  if (geo.type === "MultiPolygon") return `Area in ${geo.coordinates.length} ${geo.coordinates.length === 1 ? "part" : "parts"}`;
+  return null;
 }
 
 const TYPE_HINT: Record<AttrType, string> = {

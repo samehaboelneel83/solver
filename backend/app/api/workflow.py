@@ -74,7 +74,11 @@ def readiness(problem_id: int, db: Session = Depends(get_db), user: UserAccount 
     last_run = db.execute(text(
         "SELECT r.id, r.status, r.optimality, r.objective, r.queued_at, r.finished_at, r.scenario_id, s.name AS scenario"
         "  FROM run r JOIN scenario s ON s.id = r.scenario_id"
-        " WHERE s.problem_id = :p ORDER BY r.id DESC LIMIT 1"),
+        # A plan, not a question asked of one (why-not probes) nor a point or alternative of
+        # another run: those are opened from their run (UX audit C-2).
+        " WHERE s.problem_id = :p AND r.purpose = 'plan'"
+        "   AND r.params->'pareto_of' IS NULL AND r.params->'alternative_of' IS NULL"
+        " ORDER BY r.id DESC LIMIT 1"),
         {"p": problem_id}).mappings().one_or_none()
     base = _base(db, problem_id)
     return {

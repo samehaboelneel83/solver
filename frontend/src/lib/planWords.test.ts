@@ -50,6 +50,15 @@ describe("a plan in plain words", () => {
     expect(planWords({ ...base, status: "running" } as Run, ir)).toBeNull();
   });
 
+  it("says what a goal adds up when its name does not (UX audit C-1: 'Morning came to 0')", () => {
+    const lectures = { objective: { sense: "minimize", terms: [{ id: "o_morning",
+      expression: { sum: { mul: [{ par: "late", index: ["p"] }, { var: "assign", index: ["s", "p"] }] }, over: [] } }] } };
+    expect(planWords({ ...base, objective: 0, amounts: {}, assignments: {} } as unknown as Run, lectures)?.lines[0])
+      .toBe("Morning, the total of late, came to 0, as low as it can go.");
+    const feed = { objective: { sense: "minimize", terms: [{ id: "o_cost", expression: { mul: [{ par: "cost", index: ["f"] }, { var: "use", index: ["f"] }] } }] } };
+    expect(planWords(base, feed)?.lines[0]).toBe("Cost came to 43.53, as low as it can go.");
+  });
+
   it("reads names plainly", () => {
     expect(plain("o_total_cost")).toBe("total cost");
     expect(plain("hours_per_week")).toBe("hours per week");

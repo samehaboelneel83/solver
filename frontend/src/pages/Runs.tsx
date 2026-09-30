@@ -54,7 +54,6 @@ import { RunMapView } from "../genui/components/SpatialMap";
 import { planWords, type PlanWords } from "../lib/planWords";
 import { ruleSentence } from "../model/ruleSentence";
 import type { Constraint } from "../model/terms";
-import { useWords } from "../lib/words";
 
 /**
  * Solving, and what came of it.
@@ -497,7 +496,6 @@ function ScenarioRuns({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
-  const w = useWords();
   const { domainId } = useDomain();
   // Simple (simplification plan, phase 2): one Solve button, the solver chosen for you.
   const [level] = useEditorLevel();
@@ -646,7 +644,7 @@ function ScenarioRuns({
             disabled={createRun.isPending || blocked}
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {createRun.isPending ? "Queueing…" : `Solve ${scenarioName}`}
+            {createRun.isPending ? "Queueing…" : `Solve (${scenarioName} scenario)`}
           </button>
           {!simple && twoGoals && (
             <button
@@ -1765,7 +1763,7 @@ function ConstraintRow({ outcome }: { outcome: ConstraintOutcome }) {
         )}
         {outcome.slack != null && outcome.satisfied && (
           <span className="text-xs text-slate-500">
-            {outcome.slack === 0 ? "no room left" : `room ${outcome.slack}`}
+            {outcome.slack === 0 ? "at its limit" : `${outcome.slack} to spare`}
           </span>
         )}
         {outcome.dual != null && outcome.dual !== 0 && (

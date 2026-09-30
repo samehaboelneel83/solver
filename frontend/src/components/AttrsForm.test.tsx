@@ -426,3 +426,12 @@ describe("AttrsForm: the help under a numeric control", () => {
     expect(hintFor("hourly_rate")).toContain("2.5");
   });
 });
+
+describe("a map shape in a records cell (UX audit A-4)", () => {
+  it("reads as words, not GeoJSON", () => {
+    expect(formatAttrValue({ type: "Point", coordinates: [31.235712, 30.044420] })).toBe("Point (31.2357, 30.0444)");
+    expect(formatAttrValue({ type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] })).toBe("Area, 4 corners");
+    expect(formatAttrValue({ type: "MultiPolygon", coordinates: [[[[0, 0]]], [[[1, 1]]]] })).toBe("Area in 2 parts");
+    expect(formatAttrValue({ a: 1 })).toBe('{"a":1}');
+  });
+});

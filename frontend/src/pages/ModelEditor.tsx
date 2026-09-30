@@ -9,6 +9,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import {
   useApplyTemplate,
   useCreateVersion,
+  solveProblem,
   useClassify,
   useCreateAttribute,
   useCreateEntityType,
@@ -233,6 +234,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [failure, setFailure] = useState<string | null>(null);
   // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
   const [justPublished, setJustPublished] = useState<number | null>(null);
+  const [solvingNow, setSolvingNow] = useState(false);
+  const navigate = useNavigate();
   const [storedView, setEquationView] = useEquationView();
   // Simple or Expert (editorLevel.ts): Simple shows the plain views, one card open at a time, one “+ Add” per section.
   const [level] = useEditorLevel();
@@ -571,6 +574,35 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   return (
     <EditorLevelContext.Provider value={level}>
+      {justPublished !== null && (
+        // Where the page lands after publishing, with the next step on it (UX audit B-7).
+        <div role="status" className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <p>
+            Version {justPublished} is published.{" "}
+            <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/versions`}>See the versions</Link>.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {can("run.submit") && (
+              <button type="button" disabled={solvingNow}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                onClick={async () => {
+                  setSolvingNow(true);
+                  try {
+                    const run = await solveProblem(Number(problemId));
+                    navigate(`/domains/${domainId}/problems/${problemId}/runs/${run.id}`);
+                  } catch (error) {
+                    setFailure(formatApiError(error));
+                  } finally {
+                    setSolvingNow(false);
+                  }
+                }}>
+                {solvingNow ? "Starting…" : `Solve version ${justPublished} now`}
+              </button>
+            )}
+            <span className="text-xs text-blue-800">It solves on the Base scenario; other scenarios keep their version until moved on the Scenarios page.</span>
+          </div>
+        </div>
+      )}
       {versionItems.length > 0 && !scratch ? (
         <div className="mb-4">
           <label htmlFor="model-base" className="block text-sm font-medium text-slate-700">
@@ -919,7 +951,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       )}
       {stepByStep && view === "review" && <StepNav current={currentStep} onStep={goToStep} />}
 
-      {refusal === null && classification.data && (
+      {/* The review says this itself, under "How it will be solved" (UX audit B-7: shown twice). */}
+      {refusal === null && classification.data && view !== "review" && (
         <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
           <h2 className="mb-1 text-sm font-semibold text-slate-900">What this model is</h2>
           {classification.data.planner.length > 0 && (
@@ -981,14 +1014,6 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <p className="mb-2 text-sm">
           <button type="button" className="text-blue-700 underline" onClick={() => setView("review")}>Review the whole model</button>{" "}
           <span className="text-slate-600">before publishing: every rule in words, and what looks unfinished.</span>
-        </p>
-      )}
-      {justPublished !== null && (
-        <p role="status" className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          Version {justPublished} is published. Scenarios keep solving the version they were made on until they are moved:{" "}
-          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/runs`}>open Runs</Link> to move a
-          scenario from its &ldquo;Before you solve&rdquo; panel, or edit it on the{" "}
-          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/scenarios`}>Scenarios page</Link>.
         </p>
       )}
       {canEdit && <>

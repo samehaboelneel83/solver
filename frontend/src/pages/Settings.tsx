@@ -77,8 +77,6 @@ export default function Settings() {
         platform; where nothing is set, the built-in default applies.
       </p>
 
-      <AccountForm />
-
       <div className="mb-4 flex flex-wrap items-end gap-4">
         <label className="text-sm text-slate-700">
           <span className="mr-2 font-medium">Level</span>
@@ -126,18 +124,68 @@ export default function Settings() {
       ) : settings.isError && !settings.data ? (
         <LoadFailure subject="Settings" error={settings.error} retry={() => void settings.refetch()} />
       ) : (
-        <ul className="space-y-3">
-          {(settings.data?.items ?? []).map((item) => (
-            <SettingRow
-              key={item.key}
-              setting={item}
-              scope={scope}
-              scopeId={scope === "platform" ? null : scope === "domain" ? domainId : problem}
-            />
-          ))}
-        </ul>
+        <Grouped items={settings.data?.items ?? []} scope={scope}
+          scopeId={scope === "platform" ? null : scope === "domain" ? domainId : problem} />
       )}
+
+      {/* Your own password is not a platform setting (UX audit A-3): kept here, folded away. */}
+      <details className="mt-8">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-900">Your account (display name and password)</summary>
+        <div className="mt-3"><AccountForm /></div>
+      </details>
     </div>
+  );
+}
+
+/** What each family of keys is about, for its heading. */
+const FAMILIES: Record<string, string> = {
+  solve: "Solving and solver choice",
+  retention: "How long things are kept",
+  spatial: "Maps",
+  shadow: "Shadow runs",
+  governance: "Governance and approvals",
+  audit: "Audit",
+  run: "Runs",
+  ml: "Learned models",
+};
+
+function family(key: string): string {
+  const prefix = key.split(".")[0];
+  return FAMILIES[prefix] ?? prefix.charAt(0).toUpperCase() + prefix.slice(1).replace(/_/g, " ");
+}
+
+/** The settings in families, findable by words, and narrowable to those set at this level (UX audit A-3). */
+function Grouped({ items, scope, scopeId }: { items: SettingValue[]; scope: SettingScope; scopeId: Id | null }) {
+  const [q, setQ] = useState("");
+  const [changedOnly, setChangedOnly] = useState(false);
+  const words = q.trim().toLowerCase();
+  const shown = items.filter((item) => (!changedOnly || item.source === scope)
+    && (!words || item.key.toLowerCase().includes(words) || (item.description ?? "").toLowerCase().includes(words)));
+  const families = [...new Set(shown.map((item) => family(item.key)))];
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <label className="text-sm text-slate-700">Find a setting{" "}
+          <input type="search" className="ms-2 rounded-md border border-slate-300 px-2 py-1 text-sm" value={q}
+            onChange={(event) => setQ(event.target.value)} placeholder="retention, solver…" />
+        </label>
+        <label className="text-sm text-slate-700">
+          <input type="checkbox" checked={changedOnly} onChange={(event) => setChangedOnly(event.target.checked)} />{" "}
+          Only those set at this level
+        </label>
+      </div>
+      {shown.length === 0 && <Note>No setting matches.</Note>}
+      {families.map((name) => (
+        <section key={name} aria-label={name} className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">{name}</h2>
+          <ul className="space-y-3">
+            {shown.filter((item) => family(item.key) === name).map((item) => (
+              <SettingRow key={item.key} setting={item} scope={scope} scopeId={scopeId} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </>
   );
 }
 
@@ -247,7 +295,9 @@ function SettingRow({
   const { can } = useCapabilities();
   const save = useSetSetting();
   const toast = useToast();
-  const [draft, setDraft] = useState<string>(setting.value === null ? "" : String(setting.value));
+  // A yes/no setting that is only inherited starts on "inherited", so picking Yes or No shows.
+  const [draft, setDraft] = useState<string>(
+    setting.value === null || (setting.value_type === "boolean" && setting.source !== scope) ? "" : String(setting.value));
   const [failure, setFailure] = useState<string | null>(null);
 
   // Set here, or inherited from somewhere else? Only the first can be unset
@@ -286,14 +336,29 @@ function SettingRow({
           <p className="text-xs text-slate-500">{setting.description}</p>
         </div>
         <div className="flex items-center gap-2">
-          <input
-            aria-label={setting.key}
-            className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm"
-            value={draft}
-            disabled={!can("settings.edit")}
-            placeholder={setHere ? "" : "inherited"}
-            onChange={(event) => setDraft(event.target.value)}
-          />
+          {setting.value_type === "boolean" ? (
+            // Yes or no, not a text box to type "true" into (UX audit A-3).
+            <select
+              aria-label={setting.key}
+              className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+              value={draft}
+              disabled={!can("settings.edit")}
+              onChange={(event) => setDraft(event.target.value)}
+            >
+              <option value="">{setHere ? "unset (inherit)" : `inherited: ${setting.value ? "yes" : "no"}`}</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          ) : (
+            <input
+              aria-label={setting.key}
+              className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              value={draft}
+              disabled={!can("settings.edit")}
+              placeholder={setHere ? "" : "inherited"}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          )}
           {can("settings.edit") && (
             <button
               type="button"

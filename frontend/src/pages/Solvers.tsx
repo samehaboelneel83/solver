@@ -173,7 +173,7 @@ export default function Solvers() {
       </section>
       <p className="mb-4 max-w-3xl text-sm text-slate-600">
         The built-in solvers, and any added from a manifest -- Gurobi, Xpress, CPLEX or your own, with your licence
-        (see <code className="rounded bg-slate-100 px-1">docs/solver-adapters.md</code>). An added solver runs only when
+        (an administrator adds one; see <Link to="/help/install" className="underline">Install</Link>). An added solver runs only when
         named until its current version passes the conformance kit. Which solvers may run at all is set on{" "}
         <Link to="/settings" className="underline">Settings</Link> (<code>solve.allowed_solvers</code>,{" "}
         <code>solve.denied_solvers</code>).

@@ -12,7 +12,8 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  */
 
 function when(value: string | null): string {
-  return value ? new Date(value).toLocaleString() : "—";
+  // The app's one date format, "Sep 30, 2026, 7:22 PM" (UX audit A-5).
+  return value ? new Date(value).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
 export default function OpsAudit() {

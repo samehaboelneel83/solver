@@ -26,8 +26,7 @@ export default function OpsQueue() {
       <h1 className="text-2xl font-semibold text-slate-900">Run queue</h1>
       <p className="mt-1 text-sm text-slate-600">
         Depth, running solves and oldest wait per organization. Refreshes every ten seconds.
-        Scale workers with <code className="text-xs">docker compose up --scale worker=N</code>
-        {" "}(see the workers runbook).
+        When runs wait here for long, an administrator can add workers (the workers runbook says how).
       </p>
 
       {metrics.isError ? (

@@ -562,15 +562,6 @@ function AppShellContent() {
             );
           })}
         </nav>
-        <button
-          type="button"
-          onClick={toggleDirection}
-          title={direction === "rtl" ? "Left to right" : "Right to left"}
-          className="mt-2 flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-        >
-          <Languages className="h-4 w-4 shrink-0" aria-hidden />
-          <span className={collapsed ? "sr-only" : ""}>{direction === "rtl" ? "Left to right" : "Right to left"}</span>
-        </button>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -617,9 +608,19 @@ function AppShellContent() {
           <kbd className="rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500">Ctrl K</kbd>
         </button>
         <LevelSwitch />
-        <span title="The platform is in English" className="hidden items-center gap-1 rounded px-2 py-1.5 text-xs font-semibold text-slate-600 md:inline-flex">
-          <Languages className="h-4 w-4" aria-hidden /> EN
-        </span>
+        {/* Language and text direction together (UX audit N-7: direction was its own sidebar item). */}
+        <details className="relative hidden md:block">
+          <summary aria-label="Language and direction" className="flex cursor-pointer list-none items-center gap-1 rounded px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100">
+            <Languages className="h-4 w-4" aria-hidden /> EN
+          </summary>
+          <div className="absolute end-0 z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white p-2 text-sm shadow-lg">
+            <p className="px-2 py-1 text-slate-600">English — the platform&rsquo;s only language so far.</p>
+            <button type="button" onClick={toggleDirection}
+              className="w-full rounded px-2 py-1.5 text-start text-slate-800 hover:bg-slate-100">
+              {direction === "rtl" ? "Left to right" : "Right to left"}
+            </button>
+          </div>
+        </details>
         <button
           type="button"
           onClick={toggleTheme}
