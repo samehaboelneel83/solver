@@ -266,6 +266,21 @@ export const IR_RULES: readonly IrRule[] = [
     where: "shape",
     text: "a `via`'s `depth` is one this version walks",
   },
+  {
+    code: "binding_via_steps_invalid",
+    where: "shape",
+    text: "a `via`'s `steps` is {min, max}: whole numbers, 0 <= min <= max, max at least 1 (no max: no limit), and never beside `depth`",
+  },
+  {
+    code: "binding_via_on_invalid",
+    where: "shape",
+    text: "a `via`'s `on` is a date, YYYY-MM-DD: only the links valid that day are walked",
+  },
+  {
+    code: "where_group_malformed",
+    where: "shape",
+    text: "a `where` entry that is a group is {\"any\": [two or more filters]}, one level deep, and holds when any of them does",
+  },
   { code: "where_not_array", where: "shape", text: "a binding's `where` is an array of filters" },
   {
     code: "where_filter_malformed",
@@ -373,6 +388,11 @@ export const IR_RULES: readonly IrRule[] = [
     code: "binding_via_depth_not_transitive",
     where: "domain",
     text: "a repeated `via` walks a relationship whose two ends are the same entity type",
+  },
+  {
+    code: "binding_via_both_not_self",
+    where: "domain",
+    text: "a `via` that walks `both` ways walks a relationship whose two ends are the same entity type",
   },
   {
     code: "parameter_not_in_domain",

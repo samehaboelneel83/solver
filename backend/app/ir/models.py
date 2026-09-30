@@ -74,25 +74,65 @@ class Filter(_Model):
     value: Any
 
 
+class FilterGroup(_Model):
+    """Filters of which any one holding is enough ("this or that"), one level deep."""
+
+    any: list[Filter] = Field(min_length=2)
+
+
+WhereEntry = Union[Filter, FilterGroup]
+
+
+class Steps(_Model):
+    """How many steps away a walk lands: from `min` to `max`, no `max` for no limit."""
+
+    min: StrictInt = Field(ge=0)
+    max: Optional[StrictInt] = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "Steps":
+        if self.max is not None and self.max < self.min:
+            raise ValueError("steps: min is never above max")
+        return self
+
+
 class Via(_Model):
     rel: Name
     from_: Optional[Name] = Field(default=None, alias="from")
     to: Optional[Name] = None
+    # Either end: the links of a relationship from a type to itself, walked either way.
+    both: Optional[Name] = None
     depth: Optional[TraversalDepth] = None
+    steps: Optional[Steps] = None
+    # Conditions on the links themselves: a walk follows only the links that pass.
+    where: Optional[list[WhereEntry]] = None
+    # Only the links valid that day (YYYY-MM-DD).
+    on: Optional[str] = None
     # Queue R19: the edge this walk takes, read with `attr of <as>`.
     as_: Optional[Name] = Field(default=None, alias="as")
 
     @model_validator(mode="after")
     def _one_anchor(self) -> "Via":
-        if (self.from_ is None) == (self.to is None):
-            raise ValueError("a via anchors at exactly one end: `from` or `to`")
+        if sum(end is not None for end in (self.from_, self.to, self.both)) != 1:
+            raise ValueError("a via anchors at exactly one end: `from`, `to` or `both`")
+        if self.depth is not None and self.steps is not None:
+            raise ValueError("a via says how far with `depth` or `steps`, not both")
+        if self.on is not None:
+            import datetime
+
+            try:
+                ok = len(self.on) == 10 and datetime.date.fromisoformat(self.on) is not None
+            except ValueError:
+                ok = False
+            if not ok:
+                raise ValueError("a via's `on` is a date, YYYY-MM-DD")
         return self
 
 
 class Binding(_Model):
     index: Name
     set: Name
-    where: Optional[list[Filter]] = None
+    where: Optional[list[WhereEntry]] = None
     via: Optional[Via] = None
 
 

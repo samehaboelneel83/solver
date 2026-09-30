@@ -23,10 +23,12 @@ import {
   viaOf,
   walkKey,
   walksAvailable,
+  isGroup,
   type Binding,
   type ModelContext,
   type Term,
 } from "./terms";
+import { entryWords } from "./whereWords";
 import { fromIrWhere, toIrWhere } from "./whereFilter";
 import { cellText, parseCell } from "../lib/irBlocks/catalogue";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
@@ -452,7 +454,7 @@ export function BindingsEditor({
           const attributes = context.attributes[binding.set] ?? [];
           // A filter on the row's own key (queue R20b: `id = preferred_shift[e, d]`) is not
           // an attribute the builder offers; it is shown as written and kept as it is.
-          const keyed = (binding.where ?? []).some((f) => f.attr === "id");
+          const keyed = (binding.where ?? []).some((f) => !isGroup(f) && f.attr === "id");
           const hasFilter = setId !== undefined && attributes.length > 0 && !keyed;
           const overName = `Over ${binding.index} in ${binding.set}`;
           return (
@@ -527,7 +529,7 @@ export function BindingsEditor({
                   <div className="min-w-[16rem] flex-1">
                     <p className="mb-1 text-xs text-slate-600">
                       Only some of {binding.set} (optional). Every condition must hold; for
-                      “this or that”, use “is one of”.
+                      “this or that”, add a group.
                     </p>
                     <ExpressionBuilder
                       catalogue={buildFieldCatalogue({
@@ -550,7 +552,7 @@ export function BindingsEditor({
                         columns: [],
                       })}
                       label={`Filter for ${binding.index} in ${binding.set}`}
-                      andOnly
+                      bindingFilter
                       value={fromIrWhere(binding.where, setId)}
                       onChange={(document) => {
                         const converted = toIrWhere(document);
@@ -584,7 +586,7 @@ export function BindingsEditor({
                 <p className="text-xs text-slate-600">
                   Only where{" "}
                   {(binding.where ?? [])
-                    .map((f) => `${f.attr} ${f.op} ${typeof f.value === "object" && f.value !== null && !Array.isArray(f.value) ? cellText(f.value) : JSON.stringify(f.value)}`)
+                    .map((entry) => entryWords(entry, (f) => `${f.attr} ${f.op} ${typeof f.value === "object" && f.value !== null && !Array.isArray(f.value) ? cellText(f.value) : JSON.stringify(f.value)}`))
                     .join(" and ")}{" "}
                   (kept as written; edit it in the block view)
                 </p>
@@ -674,20 +676,15 @@ function WalkPicker({
     });
   }
 
+  /** The walk without its start: how far, which links, which day and the links' name all stay. */
+  function rest() {
+    const { from: _f, to: _t, both: _b, ...others } = binding.via as NonNullable<Binding["via"]>;
+    return others;
+  }
+
   function anchor(index: string) {
     if (!current) return;
-    onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: index, ...depthPart(), ...edgePart() } });
-  }
-
-  function depthPart() {
-    const depth = binding.via?.depth;
-    return depth ? { depth } : {};
-  }
-
-  /** The edge's name (queue R19) survives a change of anchor or depth. */
-  function edgePart() {
-    const edge = binding.via?.as;
-    return edge ? { as: edge } : {};
+    onChange({ ...binding, via: { ...rest(), [current.anchorEnd]: index } as Binding["via"] });
   }
 
   return (
@@ -705,7 +702,7 @@ function WalkPicker({
             // enough — "along"/"against" was a direction the document
             // does not store.
             label: o.loops
-              ? `${o.rel} ${o.anchorEnd === "from" ? "down the tree" : "up the tree"}`
+              ? `${o.rel} ${o.anchorEnd === "from" ? "down the tree" : o.anchorEnd === "both" ? "either way" : "up the tree"}`
               : o.rel,
           })),
         ]}
@@ -734,17 +731,14 @@ function WalkPicker({
             { value: "any", label: "everything under it" },
             { value: "any_or_self", label: "itself and everything under it" },
           ]}
-          onChange={(depth) =>
+          onChange={(depth) => {
+            // A depth picked here replaces a range of steps written elsewhere.
+            const { depth: _d, steps: _s, ...others } = binding.via as NonNullable<Binding["via"]>;
             onChange({
               ...binding,
-              via: {
-                rel: current.rel,
-                [current.anchorEnd]: current.anchor,
-                ...(depth === "one" ? {} : { depth: depth as TraversalDepth }),
-                ...edgePart(),
-              },
-            })
-          }
+              via: { ...others, ...(depth === "one" ? {} : { depth: depth as TraversalDepth }) },
+            });
+          }}
         />
       )}
       {current && (

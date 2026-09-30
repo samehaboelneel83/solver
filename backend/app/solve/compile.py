@@ -18,6 +18,7 @@ wrong answer.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -430,8 +431,9 @@ class _Compiler:
         #: different question each time the org chart changed, which is the
         #: reproducibility guarantee the whole RUN half is built on.
         self.edges: dict[str, list[dict[str, Any]]] = data.get("relationships", {})
-        self._reach: dict[tuple[str, str, str, str], set[str]] = {}
-        self._path_cache: dict[tuple[str, str, str, str], dict[str, list[dict[str, Any]]]] = {}
+        self._reach: dict[tuple[str, str, str], set[str]] = {}
+        self._path_cache: dict[tuple[str, str, str], dict[str, list[dict[str, Any]]]] = {}
+        self._adjacency: dict[tuple[Any, ...], dict[str, list[tuple[str, dict[str, Any]]]]] = {}
         self.variables: dict[VarKey, Variable] = {}
         self.constraints: list[Constraint] = []
         self._params: dict[str, dict[tuple[str, ...], int]] = {}
@@ -907,7 +909,7 @@ class _Compiler:
             # `where` is a property of a row, and reachability is a
             # property of a row *and* the anchor.
             via = binding["via"]
-            anchor_end = "from" if "from" in via else "to"
+            anchor_end = "from" if "from" in via else "both" if "both" in via else "to"
             grown: list[dict[str, tuple[str, dict]]] = []
             for env in envs:
                 anchor = env[via[anchor_end]][1]["id"]
@@ -944,6 +946,33 @@ class _Compiler:
         same = held is not None and row.get(f["attr"]) == held
         return same if f["op"] in ("=", "==") else not same
 
+    def _adjacent(self, via: dict[str, Any], anchor_end: str) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+        """Each key's next steps along the walk: (the key a link leads to, the link). Only the
+        links valid on the walk's `on` day and passing its conditions on the links are walked;
+        `both` walks each link either way."""
+        rel = via["rel"]
+        on = via.get("on")
+        where = via.get("where") or []
+        cache_key = (rel, anchor_end, on, json.dumps(where, sort_keys=True))
+        cached = self._adjacency.get(cache_key)
+        if cached is not None:
+            return cached
+        steps: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for edge in self.edges.get(rel, []):
+            if on is not None and not (
+                (edge.get("valid_from") is None or str(edge["valid_from"]) <= on)
+                and (edge.get("valid_to") is None or on <= str(edge["valid_to"]))
+            ):
+                continue
+            if where and not _passes(edge.get("attrs") or {}, where):
+                continue
+            if anchor_end in ("from", "both"):
+                steps.setdefault(edge["from"], []).append((edge["to"], edge))
+            if anchor_end in ("to", "both"):
+                steps.setdefault(edge["to"], []).append((edge["from"], edge))
+        self._adjacency[cache_key] = steps
+        return steps
+
     def _paths(self, via: dict[str, Any], anchor_end: str, anchor: str) -> dict[str, list[dict[str, Any]]]:
         """The edges from `anchor` to each key the walk lands on. One edge on
         a one-step walk; on a repeated walk, the one path there -- which is a
@@ -951,80 +980,90 @@ class _Compiler:
         a diamond below the anchor reaches a key more than one way, and an
         edge attribute "along the path" then has no single value: refused,
         with the key reached twice, rather than one path picked in silence.
+        Walking `both` ways never steps straight back along the link it came by.
         """
         rel = via["rel"]
-        depth = via.get("depth", "one")
-        far_end = "to" if anchor_end == "from" else "from"
-        cache_key = (rel, anchor_end, depth, anchor)
+        low, high = _walk_range(via)
+        cache_key = (json.dumps(via, sort_keys=True), anchor_end, anchor)
         cached = self._path_cache.get(cache_key)
         if cached is not None:
             return cached
-        steps: dict[str, list[dict[str, Any]]] = {}
-        for edge in self.edges.get(rel, []):
-            steps.setdefault(edge[anchor_end], []).append(edge)
+        steps = self._adjacent(via, anchor_end)
         found: dict[str, list[dict[str, Any]]] = {}
-        if depth == "one":
-            for edge in steps.get(anchor, ()):
-                found[edge[far_end]] = [edge]
+        if (low, high) == (1, 1):
+            for other, edge in steps.get(anchor, ()):
+                found[other] = [edge]
         else:
-            if depth == "any_or_self":
-                found[anchor] = []
-            frontier = [(anchor, [])]
+            seen: dict[str, list[dict[str, Any]]] = {anchor: []}
+            frontier = [(anchor, [], None)]
             while frontier:
                 nxt = []
-                for key, path in frontier:
-                    for edge in steps.get(key, ()):
-                        other = edge[far_end]
-                        if other in found or other == anchor:
+                for key, path, came_by in frontier:
+                    if high is not None and len(path) >= high:
+                        continue
+                    for other, edge in steps.get(key, ()):
+                        if edge is came_by:
+                            continue
+                        if other in seen:
                             raise Unsupported(
                                 f"{rel!r} reaches {other!r} from {anchor!r} more than one way (a cycle "
                                 "or two routes), so an edge attribute along the path has no single "
                                 "value; read it one step at a time (depth one), or keep the "
                                 "relationship a hierarchy"
                             )
-                        found[other] = [*path, edge]
-                        nxt.append((other, found[other]))
+                        seen[other] = [*path, edge]
+                        nxt.append((other, seen[other], edge))
                 frontier = nxt
+            found = {key: path for key, path in seen.items() if len(path) >= low}
         self._path_cache[cache_key] = found
         return found
 
     def _reachable(self, via: dict[str, Any], anchor_end: str, anchor: str) -> set[str]:
-        """The keys a walk from `anchor` lands on, over the frozen edges.
+        """The keys a walk from `anchor` lands on, over the frozen edges: every
+        key some walk of `min` to `max` steps reaches (`_walk_range`).
 
         `from` in the document means the anchor sits at the from end, so the
-        walk reads each edge in that direction and returns the other end.
+        walk reads each edge in that direction and returns the other end;
+        `to` the other way round, and `both` either.
+
+        A walk of at least `min` steps is one of exactly `min` steps and then
+        any number more, so the keys are the ones exactly `min` steps away and
+        everything reachable from them -- step by step up to `max` when there
+        is one. Every layer is a set with a seen check, so a relationship that
+        happens to hold a cycle terminates instead of hanging the worker.
         """
-        rel = via["rel"]
-        depth = via.get("depth", "one")
-        far_end = "to" if anchor_end == "from" else "from"
-        cache_key = (rel, anchor_end, depth, anchor)
+        low, high = _walk_range(via)
+        cache_key = (json.dumps(via, sort_keys=True), anchor_end, anchor)
         cached = self._reach.get(cache_key)
         if cached is not None:
             return cached
+        steps = self._adjacent(via, anchor_end)
+        # A walk both ways never steps straight back along the link it came
+        # by -- otherwise every key would be two steps from itself -- so it
+        # moves between (key, link it came by) states; the other walks
+        # between keys, the link they came by making no difference.
+        back = anchor_end == "both"
 
-        steps: dict[str, list[str]] = {}
-        for edge in self.edges.get(rel, []):
-            steps.setdefault(edge[anchor_end], []).append(edge[far_end])
+        def forward(states: set[tuple[str, int]]) -> set[tuple[str, int]]:
+            return {
+                (other, id(edge) if back else 0)
+                for key, came_by in states
+                for other, edge in steps.get(key, ())
+                if not (back and id(edge) == came_by)
+            }
 
-        if depth == "one":
-            found = set(steps.get(anchor, ()))
-        else:
-            # Breadth-first with a seen set, so a relationship that happens
-            # to hold a cycle terminates instead of hanging the worker.
-            # `is_hierarchy` forbids one, but the contract admits any
-            # self-referential type here and a dataset is not re-validated.
-            found = set()
-            frontier = [anchor]
-            while frontier:
-                nxt = []
-                for key in frontier:
-                    for other in steps.get(key, ()):
-                        if other not in found:
-                            found.add(other)
-                            nxt.append(other)
-                frontier = nxt
-            if depth == "any_or_self":
-                found.add(anchor)
+        layer = {(anchor, 0)}
+        for _ in range(low):
+            layer = forward(layer)
+        # Then outward from those, each state once: a key some walk reaches in
+        # `min` to `max` steps is at most `max - min` steps from that layer.
+        seen = set(layer)
+        taken = low
+        while layer and (high is None or taken < high):
+            layer = forward(layer) - seen
+            seen |= layer
+            taken += 1
+        found = {key for key, _ in seen}
         self._reach[cache_key] = found
         return found
 
@@ -1269,8 +1308,21 @@ def _along(walk: dict[str, Any], name: str, along: str | None) -> Decimal:
     return min(values) if along == "min" else max(values)
 
 
+def _walk_range(via: dict[str, Any]) -> tuple[int, int | None]:
+    """How many steps a walk takes: (fewest, most), most None for no limit."""
+    steps = via.get("steps")
+    if steps is not None:
+        return steps["min"], steps.get("max")
+    return {"one": (1, 1), "any": (1, None), "any_or_self": (0, None)}[via.get("depth", "one")]
+
+
 def _passes(row: dict[str, Any], filters: list[dict[str, Any]]) -> bool:
     for f in filters:
+        if "any" in f:
+            # A group: this or that.
+            if not any(_passes(row, [g]) for g in f["any"]):
+                return False
+            continue
         value, wanted, op = row.get(f["attr"]), f.get("value"), f["op"]
         if op in ("=", "=="):
             ok = value == wanted

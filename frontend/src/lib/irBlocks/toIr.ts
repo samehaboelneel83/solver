@@ -68,10 +68,11 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
   };
   const outside = tops.filter((b) => b !== root).length;
 
-  function binding(b: SerialBlock, loc: IrLoc): Json {
-    mark(b, loc);
-    const where = [...stackOf(b.inputs?.WHERE)].map((f, k) => {
-      mark(f, [...loc, "where", k]);
+  /** A stack of filter blocks as a `where` list: "any of" blocks become groups. */
+  function filters(first: { block: SerialBlock } | undefined, loc: IrLoc): Json[] {
+    return [...stackOf(first)].map((f, k) => {
+      mark(f, [...loc, k]);
+      if (f.type === "ir_filter_any") return { any: filters(f.inputs?.ANY, [...loc, k, "any"]) };
       let value: unknown;
       try {
         value = JSON.parse(fieldOf(f, "VALUE"));
@@ -80,15 +81,37 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
       }
       return { attr: fieldOf(f, "ATTR"), op: fieldOf(f, "OP"), value };
     });
+  }
+
+  function binding(b: SerialBlock, loc: IrLoc): Json {
+    mark(b, loc);
+    const where = filters(b.inputs?.WHERE, [...loc, "where"]);
     const rel = fieldOf(b, "VIA_REL");
     const depth = fieldOf(b, "VIA_DEPTH");
     const edge = fieldOf(b, "VIA_AS");
+    const end = fieldOf(b, "VIA_END");
+    const low = fieldOf(b, "VIA_MIN");
+    const high = fieldOf(b, "VIA_MAX");
+    const on = fieldOf(b, "VIA_ON");
+    const through = filters(b.inputs?.VIA_WHERE, [...loc, "via", "where"]);
+    // Steps are whole numbers; anything else is carried as written, for the validator to name.
+    const count = (text: string) => (/^\d+$/.test(text) ? Number(text) : text);
     return {
       index: fieldOf(b, "INDEX"),
       set: fieldOf(b, "SET"),
       ...(where.length ? { where } : {}),
       ...(rel
-        ? { via: { rel, [fieldOf(b, "VIA_END") === "to" ? "to" : "from"]: fieldOf(b, "VIA_ANCHOR"), ...(depth ? { depth } : {}), ...(edge ? { as: edge } : {}) } }
+        ? {
+            via: {
+              rel,
+              [end === "to" ? "to" : end === "both" ? "both" : "from"]: fieldOf(b, "VIA_ANCHOR"),
+              ...(depth ? { depth } : {}),
+              ...(low !== "" ? { steps: { min: count(low), ...(high !== "" ? { max: count(high) } : {}) } } : {}),
+              ...(through.length ? { where: through } : {}),
+              ...(on ? { on } : {}),
+              ...(edge ? { as: edge } : {}),
+            },
+          }
         : {}),
     };
   }

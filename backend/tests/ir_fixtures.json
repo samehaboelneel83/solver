@@ -3745,6 +3745,136 @@
           ]
         }
       }
+    },
+    {
+      "name": "walks_with_ranges_links_dates_and_groups",
+      "why": "every way a walk can be narrowed: two to three levels below each unit, only through links valid on a day and passing a condition on the links, into units whose cost centre is one or the other; and cells adjacent either way",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell",
+          "unit"
+        ],
+        "relationships": [
+          "adjacent",
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          },
+          "use": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_levels",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "steps": {
+                      "min": 2,
+                      "max": 3
+                    },
+                    "on": "2026-10-01",
+                    "where": [
+                      {
+                        "attr": "share",
+                        "op": ">",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "where": [
+                    {
+                      "any": [
+                        {
+                          "attr": "cost_centre",
+                          "op": "=",
+                          "value": "OPS-100"
+                        },
+                        {
+                          "attr": "cost_centre",
+                          "op": "=",
+                          "value": "OPS-200"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 2
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "c_near",
+            "forall": [
+              {
+                "index": "c",
+                "set": "cell"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "use",
+                "index": [
+                  "n"
+                ]
+              },
+              "over": [
+                {
+                  "index": "n",
+                  "set": "cell",
+                  "via": {
+                    "rel": "adjacent",
+                    "both": "c",
+                    "steps": {
+                      "min": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "var": "use",
+              "index": [
+                "c"
+              ]
+            },
+            "severity": "hard"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -16070,6 +16200,406 @@
             }
           ]
         }
+      }
+    },
+    {
+      "code": "binding_via_steps_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "steps"
+      ],
+      "why": "a walk cannot land at least three steps away and at most two: min is never above max",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "steps": {
+                      "min": 3,
+                      "max": 2
+                    }
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_steps_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "steps"
+      ],
+      "why": "depth and steps both say how far a walk goes; a walk says it once",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "depth": "any",
+                    "steps": {
+                      "min": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_on_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "on"
+      ],
+      "why": "there is no thirteenth month, so no link is valid on that day",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "relationships": [
+          "reports_to"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "unit",
+                  "via": {
+                    "rel": "reports_to",
+                    "from": "u",
+                    "on": "2026-13-01"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_group_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        0,
+        "where",
+        0
+      ],
+      "why": "a group of one filter is that filter; any-of needs two or more",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "unit"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "unit"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit",
+                "where": [
+                  {
+                    "any": [
+                      {
+                        "attr": "cost_centre",
+                        "op": "=",
+                        "value": "OPS-100"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "var": "open",
+              "index": [
+                "u"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_both_not_self",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "both"
+      ],
+      "why": "works_in joins an employee to a unit; walking it both ways from a unit would look for units at the employee end",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "both": "u"
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "binding_via_depth_not_transitive",
+      "loc": [
+        "constraints",
+        0,
+        "left",
+        "over",
+        0,
+        "via",
+        "steps"
+      ],
+      "why": "steps of two or more along works_in land nowhere, as a repeated depth does",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "unit"
+        ],
+        "relationships": [
+          "works_in"
+        ],
+        "parameters": {},
+        "variables": {
+          "pick": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_one",
+            "forall": [
+              {
+                "index": "u",
+                "set": "unit"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "pick",
+                "index": [
+                  "e"
+                ]
+              },
+              "over": [
+                {
+                  "index": "e",
+                  "set": "employee",
+                  "via": {
+                    "rel": "works_in",
+                    "to": "u",
+                    "steps": {
+                      "min": 1,
+                      "max": 2
+                    }
+                  }
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
       }
     }
   ]

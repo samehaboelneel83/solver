@@ -83,26 +83,41 @@ export function irToBlocks(
   const opaque = (kind: "declaration" | "rule" | "term", loc: IrLoc, json: unknown, label: string) =>
     block(loc, { type: `ir_opaque_${kind}`, fields: { LABEL: label }, extraState: { json } });
 
+  /** A `where` list as a stack: a filter block each, and an "any of" block for a group. */
+  function filters(list: unknown[], loc: IrLoc): { block: SerialBlock } | undefined {
+    return stack(
+      (list as Json[]).map((f, k): SerialBlock =>
+        "any" in f
+          ? block([...loc, k], {
+              type: "ir_filter_any",
+              inputs: inputs({ ANY: filters(f.any as unknown[], [...loc, k, "any"]) }),
+            })
+          : block([...loc, k], { type: "ir_filter", fields: { ATTR: String(f.attr), OP: String(f.op), VALUE: JSON.stringify(f.value) } })
+      )
+    );
+  }
+
   function binding(b: Binding, loc: IrLoc): SerialBlock {
-    const via = b.via as { rel: string; from?: string; to?: string; depth?: string; as?: string } | undefined;
-    const where = (b.where ?? []) as { attr: string; op: string; value: unknown }[];
+    const via = b.via as
+      | { rel: string; from?: string; to?: string; both?: string; depth?: string; steps?: { min: number; max?: number }; where?: unknown[]; on?: string; as?: string }
+      | undefined;
     return block(loc, {
       type: "ir_binding",
       fields: {
         INDEX: b.index,
         SET: b.set,
         VIA_REL: via?.rel ?? "",
-        VIA_END: via?.to !== undefined ? "to" : "from",
-        VIA_ANCHOR: via?.from ?? via?.to ?? "",
+        VIA_END: via?.to !== undefined ? "to" : via?.both !== undefined ? "both" : "from",
+        VIA_ANCHOR: via?.from ?? via?.to ?? via?.both ?? "",
         VIA_DEPTH: via?.depth ?? "",
+        VIA_MIN: via?.steps ? String(via.steps.min) : "",
+        VIA_MAX: via?.steps?.max !== undefined ? String(via.steps.max) : "",
+        VIA_ON: via?.on ?? "",
         VIA_AS: via?.as ?? "",
       },
       inputs: inputs({
-        WHERE: stack(
-          where.map((f, k) =>
-            block([...loc, "where", k], { type: "ir_filter", fields: { ATTR: f.attr, OP: f.op, VALUE: JSON.stringify(f.value) } })
-          )
-        ),
+        VIA_WHERE: filters(via?.where ?? [], [...loc, "via", "where"]),
+        WHERE: filters(b.where ?? [], [...loc, "where"]),
       }),
     });
   }

@@ -46,12 +46,12 @@ import { validateExpression } from "./validate";
  * and for Task 14d.
  */
 
-type CatalogueContext = { catalogue: FieldCatalogue; invalidPaths: ReadonlySet<string>; query: RuleGroupType | null; andOnly: boolean };
+type CatalogueContext = { catalogue: FieldCatalogue; invalidPaths: ReadonlySet<string>; query: RuleGroupType | null; bindingFilter: boolean };
 const BuilderContext = createContext<CatalogueContext>({
   catalogue: { fields: [], get: () => undefined },
   invalidPaths: new Set(),
   query: null,
-  andOnly: false,
+  bindingFilter: false,
 });
 
 /** The children of the group at `path` in `query` ([] = the root). */
@@ -298,10 +298,12 @@ function OperatorSelector(props: ValueSelectorProps) {
 }
 
 function CombinatorSelector(props: ValueSelectorProps) {
-  // A filter that only joins with "and" says so, rather than offering an
-  // "or" it would refuse.
-  if (useContext(BuilderContext).andOnly) {
-    return <span data-testid="expression-combinator" className="text-xs text-slate-600">and</span>;
+  // A binding's filter joins its conditions with "and", and a group directly
+  // under it with "or": each says so rather than offering a choice it would refuse.
+  // Joiners sit between rules, at the path of the rule after them: one deep
+  // is the top level, two deep inside a group.
+  if (useContext(BuilderContext).bindingFilter) {
+    return <span data-testid="expression-combinator" className="text-xs text-slate-600">{props.path.length <= 1 ? "and" : "or"}</span>;
   }
   return (
     <select
@@ -355,9 +357,9 @@ const AddRule = action("expression-add-rule", "+ Condition", (path) =>
 const AddGroupButton = action("expression-add-group", "+ Group", (path) =>
   path.length === 0 ? "Add a group of conditions" : `Add a group inside group ${pathLabel(path)}`
 , true);
-/** No group button where groups are not allowed (see `andOnly`). */
+/** A binding's filter has groups only at its top level (see `bindingFilter`). */
 function AddGroup(props: ActionProps) {
-  return useContext(BuilderContext).andOnly ? null : <AddGroupButton {...props} />;
+  return useContext(BuilderContext).bindingFilter && props.path.length > 0 ? null : <AddGroupButton {...props} />;
 }
 
 const ICON_CLASS =
@@ -368,7 +370,7 @@ const RemoveGroup = action("expression-remove-group", "Remove group", (path) => 
 /** The default rule, wrapped so the row can say whether the validator
  * objected to it. */
 function InvalidAwareRule(props: RuleProps) {
-  const { invalidPaths, catalogue, query, andOnly } = useContext(BuilderContext);
+  const { invalidPaths, catalogue, query, bindingFilter } = useContext(BuilderContext);
   const invalid = invalidPaths.has(pathKey(props.path));
   const parent = props.path.slice(0, -1);
   const isLast = props.path[props.path.length - 1] === childrenAt(query, parent).length - 1;
@@ -397,7 +399,7 @@ function InvalidAwareRule(props: RuleProps) {
           >
             <Plus size={14} aria-hidden="true" />
           </button>
-          {!andOnly && <button
+          {(!bindingFilter || parent.length === 0) && <button
             type="button"
             data-testid="expression-add-group"
             aria-label={parent.length === 0 ? "Add a group of conditions" : `Add a group inside group ${pathLabel(parent)}`}
@@ -405,7 +407,7 @@ function InvalidAwareRule(props: RuleProps) {
             className={ICON_CLASS}
             style={ACTION_SIZE}
             disabled={props.disabled}
-            onClick={() => props.actions.onGroupAdd({ combinator: "and", rules: [] } as never, parent)}
+            onClick={() => props.actions.onGroupAdd({ combinator: bindingFilter ? "or" : "and", rules: [] } as never, parent)}
           >
             <ListPlus size={14} aria-hidden="true" />
           </button>}
@@ -458,12 +460,12 @@ export type ExpressionBuilderProps = {
    */
   label?: string;
   /**
-   * Conditions joined by "and" only: no groups, no "or". A model's binding
-   * filter is a flat list of conditions that must all hold, so offering a
-   * group or an "or" there only led to a refusal after it was built. "is one
-   * of" still says "this or that" for a single attribute.
+   * A model's binding filter: conditions joined by "and", and groups directly
+   * under them joined by "or" -- "(A or B) and C" -- one level deep, which is
+   * all a binding's `where` says. Offering more (a group in a group, an
+   * "and" group) only led to a refusal after it was built.
    */
-  andOnly?: boolean;
+  bindingFilter?: boolean;
 };
 
 export default function ExpressionBuilder({
@@ -472,7 +474,7 @@ export default function ExpressionBuilder({
   onChange,
   extraProblems,
   label,
-  andOnly = false,
+  bindingFilter = false,
 }: ExpressionBuilderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   // react-querybuilder gives its root `role="form"`, which is a **landmark**.
@@ -511,8 +513,8 @@ export default function ExpressionBuilder({
     [validation, extraProblems]
   );
   const context = useMemo<CatalogueContext>(
-    () => ({ catalogue, invalidPaths: new Set(result.problems.map((p) => pathKey(p.path))), query, andOnly }),
-    [catalogue, result, query, andOnly]
+    () => ({ catalogue, invalidPaths: new Set(result.problems.map((p) => pathKey(p.path))), query, bindingFilter }),
+    [catalogue, result, query, bindingFilter]
   );
 
   const fields = useMemo(
@@ -555,6 +557,8 @@ export default function ExpressionBuilder({
             const field = catalogue.get(fieldName);
             return field ? operatorsForField(field).map((o) => ({ name: o.name, label: o.label })) : null;
           }}
+          // A binding filter's groups say "or", and sit only at its top level.
+          onAddGroup={bindingFilter ? (group: RuleGroupType, parentPath: number[]) => (parentPath.length === 0 ? { ...group, combinator: "or" } : false) : undefined}
           controlElements={CONTROL_ELEMENTS}
           controlClassnames={CONTROL_CLASSNAMES}
           // No `listsAsArrays`: the library's flag only governs ITS value

@@ -342,13 +342,17 @@ describe("ExpressionBuilder — accessibility", () => {
   });
 });
 
-describe("ExpressionBuilder — and only", () => {
-  it("offers no groups and no “or” where conditions can only be joined with “and”", () => {
-    render(<ExpressionBuilder catalogue={catalogue} value={docWith({ field: CAPACITY, operator: ">", value: 3 }, { field: CODE, operator: "=", value: "a" })} onChange={vi.fn()} andOnly />);
-    expect(screen.queryByTestId("expression-add-group")).toBeNull();
-    expect(screen.getByTestId("expression-add-rule")).toBeInTheDocument();
-    const joiner = screen.getByTestId("expression-combinator");
-    expect(joiner.tagName).toBe("SPAN");
-    expect(joiner).toHaveTextContent("and");
+describe("ExpressionBuilder — a binding's filter", () => {
+  it("joins with “and” at the top and “or” in a group, and offers groups only at the top", () => {
+    const doc = { version: EXPRESSION_VERSION, query: { combinator: "and", rules: [
+      { field: CAPACITY, operator: ">", value: 3 },
+      { combinator: "or", rules: [{ field: CODE, operator: "=", value: "a" }, { field: CODE, operator: "=", value: "b" }] },
+    ] } } as ExpressionDocument;
+    render(<ExpressionBuilder catalogue={catalogue} value={doc} onChange={vi.fn()} bindingFilter />);
+    const joiners = screen.getAllByTestId("expression-combinator");
+    expect(joiners.every((j) => j.tagName === "SPAN")).toBe(true);
+    expect(joiners.map((j) => j.textContent)).toEqual(expect.arrayContaining(["and", "or"]));
+    // One "add a group" in all: beside the top level's last condition, none inside the group.
+    expect(screen.getAllByTestId("expression-add-group")).toHaveLength(1);
   });
 });

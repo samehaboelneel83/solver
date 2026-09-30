@@ -49,7 +49,12 @@ function bound(b: Blockly.Block): [string, string][] {
   const out: [string, string][] = [[b.getFieldValue("INDEX"), b.getFieldValue("SET")]];
   const rel = b.getFieldValue("VIA_REL");
   const edge = b.getFieldValue("VIA_AS");
-  if (rel && edge) out.push([edge, `@${rel}/${b.getFieldValue("VIA_DEPTH") || "one"}`]);
+  if (rel && edge) {
+    // One link, or the links of a path: a range of steps is one only from 1 to 1.
+    const low = b.getFieldValue("VIA_MIN") ?? "";
+    const single = low !== "" ? low === "1" && b.getFieldValue("VIA_MAX") === "1" : (b.getFieldValue("VIA_DEPTH") || "one") === "one";
+    out.push([edge, `@${rel}/${single ? "one" : "path"}`]);
+  }
   return out;
 }
 

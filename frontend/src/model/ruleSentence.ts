@@ -10,9 +10,9 @@
  */
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { describeWhen, type Binding, type Constraint, type Term } from "./terms";
+import { describeWhen, type Binding, type Constraint, type IrFilter, type Term } from "./terms";
 import { walkWords } from "./walkWords";
-import { OP_WORDS } from "./whereWords";
+import { entryWords, OP_WORDS } from "./whereWords";
 
 const RELATION_WORDS: Record<string, string> = { "<=": "must be at most", ">=": "must be at least", "=": "must be exactly" };
 
@@ -24,10 +24,11 @@ function of(name: string, index: unknown[]): string {
 type Rels = readonly { name: string; hierarchy?: boolean }[];
 
 function where(binding: Binding, rels: Rels): string {
-  const filters = (binding.where ?? []).map((f) => {
+  const said = (f: IrFilter) => {
     const op = OP_WORDS[f.op] ?? f.op;
     return `${f.attr} ${op} ${Array.isArray(f.value) ? f.value.join(", ") : typeof f.value === "object" && f.value !== null ? cellText(f.value) : String(f.value)}`;
-  });
+  };
+  const filters = (binding.where ?? []).map((entry) => entryWords(entry, said));
   const tree = rels.some((r) => r.name === binding.via?.rel && r.hierarchy);
   const walk = binding.via ? ` ${walkWords(binding.via, tree)}` : "";
   return `every ${binding.set} ${binding.index}${filters.length ? ` whose ${filters.join(" and ")}${walk ? "," : ""}` : ""}${walk}`;

@@ -147,7 +147,7 @@ function contextOf(ir: Record<string, unknown>): ModelContext {
     for (const key of ["forall", "over"]) {
       for (const binding of (record[key] as Binding[] | undefined) ?? []) {
         inner[binding.index] = binding.set;
-        for (const filter of binding.where ?? []) add(binding.set, filter.attr);
+        for (const entry of binding.where ?? []) for (const filter of "any" in entry ? entry.any : [entry]) add(binding.set, filter.attr);
       }
     }
     const attr = record.attr as { of?: string; name?: string } | undefined;
@@ -262,5 +262,45 @@ describe("walks along a relationship in equations", () => {
     expect(message("for each m in employee: sum(pick[e] for e in employee from m by belongs_to) <= 1")).toBe("Walking belongs_to from its employee reaches unit, not employee.");
     expect(message("for each m in employee: sum(path_sum(weight[r]) * pick[e] for e in employee from m by manages as r) <= 1")).toMatch(/nothing to combine/);
     expect(message("for each m in employee: sum(pick[r] for e in employee from m by manages as r) <= 1")).toMatch(/names the links of a walk/);
+  });
+});
+
+describe("walks narrowed four ways, and groups of conditions, in equations", () => {
+  const ORG: ModelContext = {
+    sets: ["employee"],
+    setIds: {},
+    attributes: { employee: [{ name: "grade", data_type: "number" }, { name: "band", data_type: "text" }] },
+    variables: { pick: { index: ["employee"], domain: "binary" } },
+    parameters: {},
+    relationships: [{ name: "manages", from: "employee", to: "employee", attributes: [{ name: "weight", data_type: "number" }] }],
+  };
+  const rule = (over: Binding): Constraint => ({
+    id: "c", forall: [{ index: "m", set: "employee" }],
+    left: { sum: { var: "pick", index: ["e"] }, over: [over] }, relation: "<=", right: { const: 1 },
+  });
+
+  it("writes steps, either way, conditions on the links, a day and an or-group, and reads them back exactly", () => {
+    const walk = rule({
+      index: "e", set: "employee",
+      via: { rel: "manages", both: "m", steps: { min: 2, max: 3 }, where: [{ any: [{ attr: "weight", op: ">", value: 0 }, { attr: "weight", op: "<", value: -5 }] }], on: "2026-10-01" },
+      where: [{ any: [{ attr: "band", op: "=", value: "senior" }, { attr: "grade", op: ">=", value: 4 }] }, { attr: "grade", op: "!=", value: 9 }],
+    });
+    const text = ruleEquation(walk, ORG);
+    expect(text).toBe(
+      'for each m in employee: sum(pick[e] for e in employee both m by manages steps 2 to 3 through (weight > 0 or weight < -5) on "2026-10-01" ' +
+        'where (band = "senior" or grade >= 4) and grade != 9) <= 1',
+    );
+    const back = parseRule(text!, ORG);
+    expect(back.ok && withEquation(walk, back.value)).toEqual(walk);
+    expect(ruleEquation(rule({ index: "e", set: "employee", via: { rel: "manages", from: "m", steps: { min: 2 } } }), ORG))
+      .toContain("from m by manages steps 2 to any");
+  });
+
+  it("says what is wrong with steps, a day or a group", () => {
+    const message = (tail: string) => (parseRule(`for each m in employee: sum(pick[e] for e in employee ${tail}) <= 1`, ORG) as { message: string }).message;
+    expect(message("from m by manages steps 3 to 2")).toMatch(/whole number no smaller/);
+    expect(message("from m by manages on \"tomorrow\"")).toMatch(/YYYY-MM-DD/);
+    expect(message("where (grade = 1)")).toMatch(/two or more conditions with or/);
+    expect(message("from m by manages through colour = 1")).toMatch(/not an attribute of a manages link \(weight\)/);
   });
 });

@@ -16,7 +16,7 @@
  */
 import { FUNCTIONS } from "../ir";
 import { opsFor, OP_WORDS } from "./whereWords";
-import { arithmeticAttributes, degree, edgeAttributes, viaOf, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { arithmeticAttributes, degree, edgeAttributes, isGroup, singleStep, viaOf, type IrFilter, type WhereEntry, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
 
 /** Where in the hierarchy a problem sits (the design's validation levels). */
 export type Level = "primitive" | "operation" | "aggregation" | "comparison" | "rule";
@@ -39,7 +39,7 @@ function isBound(name: string, bound: Binding[]): Binding | undefined {
 function edgeOf(name: string, bound: Binding[]): { rel: string; path: boolean } | undefined {
   for (let i = bound.length - 1; i >= 0; i -= 1) {
     const via = bound[i].via;
-    if (via?.as === name) return { rel: via.rel, path: (via.depth ?? "one") !== "one" };
+    if (via?.as === name) return { rel: via.rel, path: !singleStep(via) };
   }
   return undefined;
 }
@@ -59,19 +59,33 @@ export function checkWalk(binding: Binding, context: ModelContext, earlier: Bind
   const rel = context.relationships.find((r) => r.name === walk.rel);
   if (!rel) return [`“${walk.rel || "?"}” is not a relationship of this model`];
   const out: string[] = [];
+  const via = binding.via;
   const anchor = isBound(walk.anchor, earlier);
-  const anchorSet = walk.anchorEnd === "from" ? rel.from : rel.to;
-  const reachedSet = walk.anchorEnd === "from" ? rel.to : rel.from;
+  const both = walk.anchorEnd === "both";
+  const anchorSet = walk.anchorEnd === "to" ? rel.to : rel.from;
+  const reachedSet = walk.anchorEnd === "to" ? rel.from : rel.to;
   if (!anchor) out.push(`the walk starts at “${walk.anchor || "?"}”, which is not bound before it`);
-  if (reachedSet !== binding.set) {
+  if (both && rel.from !== rel.to) {
+    out.push(`${rel.name} links ${rel.from} to ${rel.to}, so it cannot be walked either way; only a relationship from a set to itself can`);
+  } else if (reachedSet !== binding.set) {
     out.push(`walking ${rel.name} from ${anchorSet} reaches ${reachedSet}, not ${binding.set}`);
   } else if (anchor && anchor.set !== anchorSet) {
     out.push(`the walk starts at “${walk.anchor}”, a ${anchor.set}, but ${rel.name} starts from a ${anchorSet}`);
   }
-  const depth = binding.via.depth;
+  const depth = via.depth;
+  const steps = via.steps;
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n);
   if (depth !== undefined && !DEPTHS.includes(depth)) out.push(`“${depth}” is not how far a walk can go`);
-  else if (depth && depth !== "one" && rel.from !== rel.to) {
+  else if (depth !== undefined && steps !== undefined) out.push("a walk says how far once: a depth or a number of steps, not both");
+  else if (steps && (!whole(steps.min) || steps.min < 0 || (steps.max !== undefined && (!whole(steps.max) || steps.max < Math.max(steps.min, 1))))) {
+    out.push("steps go from a whole number to a whole number no smaller, and at least 1");
+  } else if (!singleStep(via) && rel.from !== rel.to) {
     out.push(`only a relationship from a set to itself can be walked more than one step; ${rel.name} links ${rel.from} to ${rel.to}`);
+  }
+  if (via.on !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(via.on)) out.push(`“${via.on}” is not a day; write it YYYY-MM-DD`);
+  if (via.where?.length && rel.attributes?.length) {
+    // Against what the relationship declares for its links; one that declares none carries anything.
+    out.push(...checkFilters(via.where, rel.attributes, `a ${rel.name} link`));
   }
   const edge = binding.via.as;
   if (edge !== undefined) {
@@ -194,11 +208,23 @@ export function checkTerm(term: Term, context: ModelContext, bound: Binding[], p
 export function checkWhere(binding: Binding, context: ModelContext): string[] {
   const attributes = context.attributes[binding.set];
   if (!attributes || !binding.where) return [];
+  return checkFilters(binding.where, attributes, binding.set);
+}
+
+/** Filters (and groups of them) against the attributes of what they filter: a set's items, or a relationship's links. */
+function checkFilters(entries: WhereEntry[], attributes: { name: string; data_type: string; enum_values?: string[] | null }[], owner: string): string[] {
   const out: string[] = [];
-  for (const filter of binding.where) {
+  const filters: IrFilter[] = [];
+  for (const entry of entries) {
+    if (isGroup(entry)) {
+      if (entry.any.length < 2) out.push("an “or” needs two or more conditions");
+      filters.push(...entry.any);
+    } else filters.push(entry);
+  }
+  for (const filter of filters) {
     const attribute = attributes.find((a) => a.name === filter.attr);
     if (!attribute) {
-      out.push(`${binding.set} has nothing called “${filter.attr || "?"}” to compare`);
+      out.push(`${owner} has nothing called “${filter.attr || "?"}” to compare`);
       continue;
     }
     if (!opsFor(attribute.data_type).includes(filter.op)) {

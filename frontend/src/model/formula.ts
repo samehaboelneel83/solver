@@ -26,8 +26,12 @@
  *     atom     := number | "(" expr ")" | "sum(" expr "for" bindings ")"
  *              |  function "(" expr ")" | name "[" cells "]" | name
  *     bindings := binding { "," binding }
- *     binding  := index "in" set [ walk ] [ "where" filter { "and" filter } ]
- *     walk     := ("from" | "to") index "by" relationship [ "depth" ("any" | "any_or_self") ] [ "as" name ]
+ *     binding  := index "in" set [ walk ] [ "where" entries ]
+ *     walk     := ("from" | "to" | "both") index "by" relationship
+ *                 [ "depth" ("any" | "any_or_self") | "steps" n "to" (n | "any") ]
+ *                 [ "through" entries ] [ "on" "YYYY-MM-DD" ] [ "as" name ]
+ *     entries  := entry { "and" entry }
+ *     entry    := filter | "(" filter "or" filter { "or" filter } ")"
  *     filter   := attribute op value      op: = != < <= > >= in "not in"
  *     atom     |= "path_" combination "(" attribute "[" link "]" ")"   combination: sum min max product count
  *
@@ -38,7 +42,7 @@
  */
 import { FUNCTIONS, FILTER_OPERATORS, PATH_COMBINATIONS, RELATIONS, TRAVERSAL_DEPTHS, type PathCombination, type Relation, type TraversalDepth } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { edgeAttributes, type Binding, type Constraint, type IrFilter, type ModelContext, type Term, type Via } from "./terms";
+import { edgeAttributes, isGroup, type Binding, type Constraint, type IrFilter, type ModelContext, type Term, type Via, type WhereEntry } from "./terms";
 
 // --- printing ----------------------------------------------------------------
 
@@ -52,15 +56,25 @@ function printFilter(filter: IrFilter): string {
   return `${filter.attr} ${op} ${printValue(filter.value)}`;
 }
 
+/** A filter, or a group of them: `(grade = "senior" or hours >= 40)`. */
+function printEntry(entry: WhereEntry): string {
+  return isGroup(entry) ? `(${entry.any.map(printFilter).join(" or ")})` : printFilter(entry);
+}
+
 function printWalk(via: Via): string {
-  const from = via.from !== undefined;
-  const depth = via.depth && via.depth !== "one" ? ` depth ${via.depth}` : "";
+  const end = via.from !== undefined ? "from" : via.both !== undefined ? "both" : "to";
+  const anchor = via.from ?? via.both ?? via.to;
+  const depth = via.steps
+    ? ` steps ${via.steps.min} to ${via.steps.max ?? "any"}`
+    : via.depth && via.depth !== "one" ? ` depth ${via.depth}` : "";
+  const through = via.where?.length ? ` through ${via.where.map(printEntry).join(" and ")}` : "";
+  const on = via.on ? ` on ${JSON.stringify(via.on)}` : "";
   const edge = via.as ? ` as ${via.as}` : "";
-  return ` ${from ? "from" : "to"} ${from ? via.from : via.to} by ${via.rel}${depth}${edge}`;
+  return ` ${end} ${anchor} by ${via.rel}${depth}${through}${on}${edge}`;
 }
 
 export function printBinding(binding: Binding): string {
-  const where = binding.where?.length ? ` where ${binding.where.map(printFilter).join(" and ")}` : "";
+  const where = binding.where?.length ? ` where ${binding.where.map(printEntry).join(" and ")}` : "";
   return `${binding.index} in ${binding.set}${binding.via ? printWalk(binding.via) : ""}${where}`;
 }
 
@@ -304,22 +318,17 @@ class Parser {
       );
     }
     const binding: Binding = { index: index.value, set: set.value };
-    if (this.isWord("from") || this.isWord("to")) binding.via = this.walk(set.value);
+    if (this.isWord("from") || this.isWord("to") || this.isWord("both")) binding.via = this.walk(set.value);
     if (this.isWord("where")) {
       this.next();
-      const where: IrFilter[] = [this.filter(set.value)];
-      while (this.isWord("and")) {
-        this.next();
-        where.push(this.filter(set.value));
-      }
-      binding.where = where;
+      binding.where = this.entries(set.value, this.context.attributes[set.value] ?? []);
     }
     return binding;
   }
 
   /** `from m by manages depth any as r`: which item it starts at, along which relationship, how far, and the links' name. */
   private walk(set: string): Via {
-    const end = this.next().value as "from" | "to";
+    const end = this.next().value as "from" | "to" | "both";
     const anchor = this.next();
     if (anchor.kind !== "name" || !this.bound(anchor.value)) {
       throw new FormulaError(
@@ -339,9 +348,12 @@ class Parser {
         rel.end,
       );
     }
-    const reached = end === "from" ? known.to : known.from;
+    if (end === "both" && known.from !== known.to) {
+      throw new FormulaError(`${known.name} joins ${known.from} to ${known.to}; only a relationship from a set to itself is walked both ways.`, rel.at, rel.end);
+    }
+    const reached = end === "to" ? known.from : known.to;
     if (reached !== set) {
-      throw new FormulaError(`Walking ${known.name} ${end === "from" ? "from" : "back to"} its ${end === "from" ? known.from : known.to} reaches ${reached}, not ${set}.`, rel.at, rel.end);
+      throw new FormulaError(`Walking ${known.name} ${end === "to" ? "back to" : "from"} its ${end === "to" ? known.to : known.from} reaches ${reached}, not ${set}.`, rel.at, rel.end);
     }
     const via: Via = { rel: known.name, [end]: anchor.value } as Via;
     if (this.isWord("depth")) {
@@ -351,6 +363,31 @@ class Parser {
         throw new FormulaError("A walk goes depth one, any or any_or_self.", depth.at, depth.end);
       }
       if (depth.value !== "one") via.depth = depth.value as TraversalDepth;
+    } else if (this.isWord("steps")) {
+      // `steps 2 to 3`, or `steps 2 to any` for no limit.
+      const word = this.next();
+      const low = this.next();
+      this.expectWord("to", "between the fewest and the most steps");
+      const high = this.next();
+      const whole = (t: Token) => t.kind === "num" && Number.isInteger(t.value) && (t.value as number) >= 0;
+      const unbounded = high.kind === "name" && high.value === "any";
+      if (!whole(low) || (!unbounded && (!whole(high) || (high.value as number) < Math.max(low.value as number, 1)))) {
+        throw new FormulaError("Steps go from a whole number to a whole number no smaller (at least 1), or to any: steps 2 to 3, steps 1 to any.", word.at, high.end);
+      }
+      via.steps = unbounded ? { min: low.value as number } : { min: low.value as number, max: high.value as number };
+    }
+    if (this.isWord("through")) {
+      // Conditions on the links themselves.
+      this.next();
+      via.where = this.entries(`a ${known.name} link`, known.attributes ?? []);
+    }
+    if (this.isWord("on")) {
+      this.next();
+      const day = this.next();
+      if (day.kind !== "str" || !/^\d{4}-\d{2}-\d{2}$/.test(day.value)) {
+        throw new FormulaError('A walk is on a day written "YYYY-MM-DD".', day.at, day.end);
+      }
+      via.on = day.value;
     }
     if (this.isWord("as")) {
       this.next();
@@ -372,12 +409,34 @@ class Parser {
     return undefined;
   }
 
-  private filter(set: string): IrFilter {
+  /** Filters joined by "and", each one a filter or a group in brackets joined by "or". */
+  private entries(owner: string, known: readonly { name: string }[]): WhereEntry[] {
+    const entries: WhereEntry[] = [this.entry(owner, known)];
+    while (this.isWord("and")) {
+      this.next();
+      entries.push(this.entry(owner, known));
+    }
+    return entries;
+  }
+
+  private entry(owner: string, known: readonly { name: string }[]): WhereEntry {
+    if (!this.isOp("(")) return this.filter(owner, known);
+    const open = this.next();
+    const any: IrFilter[] = [this.filter(owner, known)];
+    while (this.isWord("or")) {
+      this.next();
+      any.push(this.filter(owner, known));
+    }
+    this.expectOp(")", "to close the group");
+    if (any.length < 2) throw new FormulaError("A group in brackets joins two or more conditions with or.", open.at, open.end);
+    return { any };
+  }
+
+  private filter(owner: string, known: readonly { name: string }[]): IrFilter {
     const attr = this.next();
-    const known = this.context.attributes[set] ?? [];
     if (attr.kind !== "name" || !known.some((a) => a.name === attr.value)) {
       throw new FormulaError(
-        `“${String(attr.value)}” is not an attribute of ${set}${known.length ? ` (${known.map((a) => a.name).join(", ")})` : ""}.`,
+        `“${String(attr.value)}” is not an attribute of ${owner}${known.length ? ` (${known.map((a) => a.name).join(", ")})` : ""}.`,
         attr.at,
         attr.end,
       );

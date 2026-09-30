@@ -461,9 +461,20 @@ entities. That is *derived*; the term itself is *invented*.
 ```
 
 A binding names an index and the set it ranges over, optionally filtered.
-`where` is a flat AND-list of filters over attributes of **that binding's own
-set**. There are no groups and no `or` in v1: the full boolean tree already
-exists in the expression core and can be lifted here in v2 if a real model
+`where` is an AND-list of filters over attributes of **that binding's own
+set**. An entry may instead be a **group**, `{"any": [filter, filter, …]}`
+(version 2), which holds when any of its filters does — "this or that":
+
+```json
+"where": [{ "any": [{ "attr": "grade", "op": "=", "value": "senior" },
+                    { "attr": "hours_per_week", "op": ">=", "value": 40 }] },
+          { "attr": "on_call", "op": "=", "value": false }]
+```
+
+A group has two or more filters, each comparing with a value (not a
+parameter), and is one level deep: there are no groups inside groups
+(`where_group_malformed`). That is enough for "(A or B) and C"; a deeper tree
+already exists in the expression core and can be lifted here if a real model
 needs it.
 
 `op` comes from `filterOperators` in `contract.json`, which is a **subset of the
@@ -489,14 +500,23 @@ A binding with a `via` ranges not over its whole set but over the members
 | key | required | what it is |
 |---|---|---|
 | `rel` | yes | A relationship type named in `relationships`. |
-| `from` *or* `to` | exactly one | The index the walk starts at, and **which end of the edge that index sits at**. The binding takes the other end. |
+| `from`, `to` *or* `both` | exactly one | The index the walk starts at, and **which end of the edge that index sits at**. The binding takes the other end. `both` (version 2): either end — the links are walked either way; only on a relationship from a type to itself (`binding_via_both_not_self`). |
 | `depth` | no | `one` (the default), `any`, or `any_or_self`. |
+| `steps` | no | Version 2: how far, as a range — `{"min": m, "max": n}`, whole numbers, `0 <= m <= n`, `n >= 1`; no `max` for no limit. Never beside `depth` (`binding_via_steps_invalid`). `one`, `any` and `any_or_self` are `{1,1}`, `{1}` and `{0}`. |
+| `where` | no | Version 2: conditions on **the links themselves**, against the relationship's edge attributes — the walk follows only the links that pass, so everything beyond a failing link is out of reach too. Same filters and groups as a binding's `where`. |
+| `on` | no | Version 2: a date, `YYYY-MM-DD`: only the links valid that day (`valid_from` on or before it, `valid_to` on or after it; either missing is open) are walked (`binding_via_on_invalid`). Without `on` every link counts, whatever its dates. |
 | `as` | no | Version 2 (queue R19): a name for **the edge the walk takes**, so a term can read the edge's own attributes. |
 
 `from: "r"` therefore reads *"r is at the from end; bind the to end"*. Naming
 the anchor's end rather than a direction means there is nothing to get
 backwards: for `reports_to`, whose `from` is the parent, `from` walks down and
 `to` walks up, and both are the same key doing the same thing.
+
+**Which items a range of steps lands on.** Every item some walk of `min` to
+`max` steps reaches — on a hierarchy, the items exactly that many levels away.
+A walk `both` ways never steps straight back along the link it came by, so on
+a tree it lands on the items that many links away, and an item's siblings are
+two steps from it.
 
 **`any_or_self` includes the anchor; `any` does not.** `entity_descendants()`
 has always returned "node + everything beneath it", and that reflexive shape

@@ -270,7 +270,7 @@ describe("walks along a relationship (a hierarchy)", () => {
     expect(ruleSentence(TEAM, flat)).toContain("linked from m by manages in 1 or more steps");
     render(<RuleSentence rule={TEAM} context={{ ...ORG, relationships: flat }} onEdit={() => {}} onChange={() => {}} />);
     expect(Array.from((screen.getByLabelText("left side: runs over: set 1: walk: relationship") as HTMLSelectElement).options).map((o) => o.textContent))
-      .toEqual(["manages, forwards", "manages, backwards"]);
+      .toEqual(["manages, forwards", "manages, backwards", "manages, either way"]);
   });
 
   it("says why no link is offered, where the model has one that could reach the set", () => {
@@ -304,7 +304,7 @@ describe("walks along a relationship (a hierarchy)", () => {
     render(<Walks initial={TEAM} />);
     const walk = "left side: runs over: set 1: walk";
     expect(Array.from((screen.getByLabelText(`${walk}: relationship`) as HTMLSelectElement).options).map((o) => o.textContent))
-      .toEqual(["manages, going down", "manages, going up"]);
+      .toEqual(["manages, going down", "manages, going up", "manages, either way"]);
     expect(screen.getByTestId("sentence-reading")).toHaveTextContent("below m by manages");
     fireEvent.change(screen.getByLabelText(`${walk}: how far`), { target: { value: "any_or_self" } });
     expect(over().via).toEqual({ rel: "manages", from: "m", depth: "any_or_self", as: "r" });
@@ -399,5 +399,90 @@ describe("condition values that are picked, not typed", () => {
   it("names a value that is not one of the choices", () => {
     const rule: Constraint = { ...COVER, forall: [{ index: "q", set: "person", where: [{ attr: "team", op: "in", value: ["north", "west"] }] }] };
     expect(checkRule(rule, SHOP).map((p) => p.message)).toContain("“west” is not one of team’s choices (north, south, east)");
+  });
+});
+
+describe("walks narrowed further, and conditions joined with or", () => {
+  const ORG: ModelContext = {
+    sets: ["employee", "unit"],
+    setIds: {},
+    attributes: { employee: [{ name: "grade", data_type: "number" }, { name: "band", data_type: "text" }], unit: [] },
+    variables: { pick: { index: ["employee"], domain: "binary" } },
+    parameters: {},
+    predictors: {},
+    relationships: [
+      { name: "manages", from: "employee", to: "employee", hierarchy: true, attributes: [{ name: "weight", data_type: "number" }] },
+      { name: "belongs", from: "employee", to: "unit" },
+    ],
+  };
+  const START: Constraint = {
+    id: "c",
+    forall: [{ index: "m", set: "employee" }],
+    left: { sum: { var: "pick", index: ["e"] }, over: [{ index: "e", set: "employee", via: { rel: "manages", from: "m" } }] },
+    relation: "<=",
+    right: { const: 1 },
+    severity: "hard",
+  };
+  function Edit({ boxes = false }: { boxes?: boolean }) {
+    const [rule, setRule] = useState(START);
+    return (
+      <>
+        {boxes
+          ? <RuleBlocks rule={rule} context={ORG} onChange={setRule} />
+          : <RuleSentence rule={rule} context={ORG} onEdit={() => {}} onChange={setRule} />}
+        <pre data-testid="ir">{JSON.stringify(rule)}</pre>
+      </>
+    );
+  }
+  const walk = "left side: runs over: set 1: walk";
+  const over = () => (ir().left as { over: Binding[] }).over[0];
+
+  it("walks a number of steps, either way, through some links only, on a day", () => {
+    render(<Edit />);
+    fireEvent.change(screen.getByLabelText(`${walk}: how far`), { target: { value: "range" } });
+    fireEvent.change(screen.getByLabelText(`${walk}: fewest steps`), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(`${walk}: most steps`), { target: { value: "3" } });
+    expect(over().via).toEqual({ rel: "manages", from: "m", steps: { min: 2, max: 3 } });
+    fireEvent.change(screen.getByLabelText(`${walk}: most steps`), { target: { value: "" } });
+    expect(over().via?.steps).toEqual({ min: 2 });
+
+    fireEvent.change(screen.getByLabelText(`${walk}: relationship`), { target: { value: "manages:both" } });
+    expect(over().via).toEqual({ rel: "manages", both: "m", steps: { min: 2 } });
+
+    fireEvent.click(screen.getByRole("button", { name: `Only some of manages links: add a condition to ${walk} links` }));
+    fireEvent.change(screen.getByLabelText(`${walk} links: condition 1: comparison`), { target: { value: ">" } });
+    expect(over().via?.where).toEqual([{ attr: "weight", op: ">", value: 0 }]);
+
+    fireEvent.click(screen.getByRole("button", { name: `Only the links valid on a day: ${walk}` }));
+    fireEvent.change(screen.getByLabelText(`${walk}: on the day`), { target: { value: "2026-10-01" } });
+    expect(over().via?.on).toBe("2026-10-01");
+    expect(screen.getByTestId("sentence-reading")).toHaveTextContent(
+      "over every employee e linked either way to m by manages in 2 or more steps through links whose weight is above 0 on 2026-10-01",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Complete");
+    fireEvent.click(screen.getByRole("button", { name: `Any day: ${walk}` }));
+    expect(over().via?.on).toBeUndefined();
+  });
+
+  it("turns a condition into “this or that”, and back when one is left", () => {
+    render(<Edit boxes />);
+    const set = "left side: runs over: set 1";
+    fireEvent.click(screen.getByRole("button", { name: `Only some of employee: add a condition to ${set}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Or: another way for ${set}: condition 1` }));
+    fireEvent.change(screen.getByLabelText(`${set}: condition 1 or 2: attribute`), { target: { value: "band" } });
+    fireEvent.change(screen.getByLabelText(`${set}: condition 1 or 2: value`), { target: { value: "senior" } });
+    expect(over().where).toEqual([{ any: [{ attr: "grade", op: "=", value: 0 }, { attr: "band", op: "=", value: "senior" }] }]);
+    expect(screen.getByRole("group", { name: `${set}: condition 1: any of` })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${set}: condition 1 or 1` }));
+    expect(over().where).toEqual([{ attr: "band", op: "=", value: "senior" }]);
+  });
+
+  it("names what cannot be walked: either way between two sets, a bad range, a link condition on nothing", () => {
+    const bad = (via: Binding["via"], set = "employee") =>
+      checkRule({ ...START, left: { sum: { var: "pick", index: ["e"] }, over: [{ index: "e", set, via }] } }, ORG).map((p) => p.message);
+    expect(bad({ rel: "belongs", both: "m" }, "unit")[0]).toMatch(/cannot be walked either way/);
+    expect(bad({ rel: "manages", from: "m", steps: { min: 3, max: 2 } })).toEqual(["steps go from a whole number to a whole number no smaller, and at least 1"]);
+    expect(bad({ rel: "manages", from: "m", where: [{ attr: "colour", op: "=", value: 1 }] })).toEqual(["a manages link has nothing called “colour” to compare"]);
+    expect(bad({ rel: "manages", from: "m", on: "soon" })).toEqual(["“soon” is not a day; write it YYYY-MM-DD"]);
   });
 });

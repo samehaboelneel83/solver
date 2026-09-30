@@ -20,14 +20,34 @@ import { cellText } from "../lib/irBlocks/catalogue";
 import type { PathCombination, Relation, Severity, TermKind, TraversalDepth } from "../ir";
 
 export type IrFilter = { attr: string; op: string; value: unknown };
+/** "This or that": filters of which any one holding is enough, one level deep. */
+export type FilterGroup = { any: IrFilter[] };
+/** One entry of a `where`: a filter, or a group of them. */
+export type WhereEntry = IrFilter | FilterGroup;
+
+export const isGroup = (entry: WhereEntry): entry is FilterGroup => "any" in entry;
+
+/** How far a walk goes: from `min` to `max` steps, no `max` for no limit. */
+export type Steps = { min: number; max?: number };
 
 /**
  * A traversal. `from`/`to` name the end the **anchor** sits at, so the
  * index being bound takes the other one -- which is why exactly one of
- * them is ever present.
+ * them (or `both`, either end) is ever present. `depth` or `steps` say how
+ * far; `where` narrows the links walked, `on` to the links valid that day.
  */
-export type Via = { rel: string; from?: string; to?: string; depth?: TraversalDepth; as?: string };
-export type Binding = { index: string; set: string; where?: IrFilter[]; via?: Via };
+export type Via = {
+  rel: string;
+  from?: string;
+  to?: string;
+  both?: string;
+  depth?: TraversalDepth;
+  steps?: Steps;
+  where?: WhereEntry[];
+  on?: string;
+  as?: string;
+};
+export type Binding = { index: string; set: string; where?: WhereEntry[]; via?: Via };
 
 /**
  * The binding moved to another set, keeping what still fits it: a condition
@@ -39,10 +59,11 @@ export function rebindSet(binding: Binding, set: string, context: ModelContext, 
   const next: Binding = { index: binding.index, set };
   const attrs = context.attributes[set] ?? [];
   const oldAttrs = context.attributes[binding.set] ?? [];
-  const where = (binding.where ?? []).filter((f) => {
+  const fits = (f: IrFilter) => {
     const now = attrs.find((a) => a.name === f.attr);
-    return now && now.data_type === oldAttrs.find((a) => a.name === f.attr)?.data_type;
-  });
+    return !!now && now.data_type === oldAttrs.find((a) => a.name === f.attr)?.data_type;
+  };
+  const where = (binding.where ?? []).filter((entry) => (isGroup(entry) ? entry.any.every(fits) : fits(entry)));
   if (where.length) next.where = where;
   const walk = viaOf(binding);
   if (walk && walksAvailable(context, set, earlier).some((o) => o.rel === walk.rel && o.anchorEnd === walk.anchorEnd && o.anchors.includes(walk.anchor))) {
@@ -57,7 +78,7 @@ export function lost(before: Binding, after: Binding): boolean {
 }
 
 /** The binding with these conditions, or with none (no empty `where` left behind). */
-export function withWhere(binding: Binding, where: IrFilter[] | undefined): Binding {
+export function withWhere(binding: Binding, where: WhereEntry[] | undefined): Binding {
   const { where: _old, ...rest } = binding;
   return where && where.length > 0 ? { ...rest, where } : rest;
 }
@@ -364,7 +385,13 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
 export function edgesInScope(bound: Binding[]): { name: string; rel: string; path: boolean }[] {
   return bound
     .filter((b) => b.via?.as)
-    .map((b) => ({ name: b.via!.as as string, rel: b.via!.rel, path: (b.via!.depth ?? "one") !== "one" }));
+    .map((b) => ({ name: b.via!.as as string, rel: b.via!.rel, path: !singleStep(b.via!) }));
+}
+
+/** Whether a walk takes exactly one step, so a link it names is one link rather than a path. */
+export function singleStep(via: Via): boolean {
+  if (via.steps) return via.steps.min === 1 && via.steps.max === 1;
+  return (via.depth ?? "one") === "one";
 }
 
 /** The numbers a relationship type declares for its edges. */
@@ -389,8 +416,10 @@ export function arithmeticAttributes(context: ModelContext, set: string) {
  * a `via` the validator would refuse -- `binding_via_endpoint_mismatch`
  * and `binding_via_anchor_not_bound` are unreachable from this UI.
  */
+export type WalkEnd = "from" | "to" | "both";
+
 export function walksAvailable(context: ModelContext, set: string, bound: Binding[]) {
-  const offers: { rel: string; anchorEnd: "from" | "to"; anchors: string[]; loops: boolean }[] = [];
+  const offers: { rel: string; anchorEnd: WalkEnd; anchors: string[]; loops: boolean }[] = [];
   for (const rel of context.relationships) {
     for (const anchorEnd of ["from", "to"] as const) {
       const boundEnd = anchorEnd === "from" ? rel.to : rel.from;
@@ -400,6 +429,11 @@ export function walksAvailable(context: ModelContext, set: string, bound: Bindin
       if (anchors.length === 0) continue;
       offers.push({ rel: rel.name, anchorEnd, anchors, loops: rel.from === rel.to });
     }
+    // A relationship from a set to itself can also be walked either way.
+    if (rel.from === rel.to && rel.to === set) {
+      const anchors = uniqueByIndex(bound.filter((b) => b.set === set)).map((b) => b.index);
+      if (anchors.length > 0) offers.push({ rel: rel.name, anchorEnd: "both", anchors, loops: true });
+    }
   }
   return offers;
 }
@@ -407,15 +441,15 @@ export function walksAvailable(context: ModelContext, set: string, bound: Bindin
 /** `reports_to:from` -- one select carries both, because a self-joining
  * type offers the same name at both ends and the pair is what identifies
  * the walk. */
-export function walkKey(rel: string, anchorEnd: "from" | "to") {
+export function walkKey(rel: string, anchorEnd: WalkEnd) {
   return `${rel}:${anchorEnd}`;
 }
 
-export function viaOf(binding: Binding): { rel: string; anchorEnd: "from" | "to"; anchor: string } | null {
+export function viaOf(binding: Binding): { rel: string; anchorEnd: WalkEnd; anchor: string } | null {
   const via = binding.via;
   if (!via) return null;
-  const anchorEnd = via.from !== undefined ? "from" : "to";
-  return { rel: via.rel, anchorEnd, anchor: (via.from ?? via.to) as string };
+  const anchorEnd: WalkEnd = via.from !== undefined ? "from" : via.both !== undefined ? "both" : "to";
+  return { rel: via.rel, anchorEnd, anchor: (via.from ?? via.both ?? via.to) as string };
 }
 
 /** Indices bound at a point in the tree: the constraint's `forall` plus

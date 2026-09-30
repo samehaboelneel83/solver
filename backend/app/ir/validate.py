@@ -95,7 +95,33 @@ _BINDING_KEYS = frozenset({"index", "set", "where", "via"})
 #: walk. `from` and `to` are the anchor's end, so the index being bound takes
 #: the other one -- which is why exactly one of them appears and neither is
 #: the new index's own name.
-_VIA_KEYS = frozenset({"rel", "from", "to", "depth", "as"})
+_VIA_KEYS = frozenset({"rel", "from", "to", "both", "depth", "steps", "where", "on", "as"})
+_VIA_ENDS = ("from", "to", "both")
+_STEPS_KEYS = frozenset({"min", "max"})
+
+
+def _single_step(via: dict[str, Any]) -> bool:
+    """Whether a walk takes exactly one step, so a link it names is one link rather than a path."""
+    steps = via.get("steps")
+    if isinstance(steps, dict):
+        return steps.get("min") == 1 and steps.get("max") == 1
+    return via.get("depth", "one") == "one"
+
+
+def _edge_mark(via: dict[str, Any]) -> str:
+    """The scope entry for the links a walk names with `as`: one link, or the links of a path."""
+    return f"{EDGE_MARK}{via['rel']}/{'one' if _single_step(via) else 'path'}"
+
+
+def _is_date(value: Any) -> bool:
+    import datetime as _dt
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INTERVAL_KEYS
 _PARAMETER_KEYS = frozenset({"index", "uncertainty", "entity"})
@@ -1235,13 +1261,14 @@ class _ShapeChecker:
                 "relationships, so no dataset would carry its edges",
             )
 
-        ends = [end for end in ("from", "to") if end in via]
+        ends = [end for end in _VIA_ENDS if end in via]
         if len(ends) != 1 or not _is_name(via[ends[0]]):
             return Refusal(
                 "binding_via_anchor_invalid",
                 here,
-                "a via names exactly one of from or to, and it is the index the walk starts "
-                "at; the end named is where that index sits, so this binding takes the other",
+                "a via names exactly one of from, to or both, and it is the index the walk "
+                "starts at; the end named is where that index sits, so this binding takes the "
+                "other (both: either end, the links walked either way)",
             )
         anchor = via[ends[0]]
         if _is_edge(scope.get(anchor)):
@@ -1264,6 +1291,37 @@ class _ShapeChecker:
                 f"{json.dumps(via['depth'])} is not a depth version {IR_VERSION} walks; it "
                 f"has {', '.join(sorted(TRAVERSAL_DEPTHS))}",
             )
+        if "steps" in via:
+            steps = via["steps"]
+            low = steps.get("min") if isinstance(steps, dict) else None
+            high = steps.get("max") if isinstance(steps, dict) else None
+            if (
+                "depth" in via
+                or not isinstance(steps, dict)
+                or set(steps) - _STEPS_KEYS
+                or not _is_int(low)
+                or low < 0
+                or ("max" in steps and (not _is_int(high) or high < max(low, 1)))
+            ):
+                return Refusal(
+                    "binding_via_steps_invalid",
+                    [*here, "steps"],
+                    "steps is {\"min\": m, \"max\": n}: whole numbers with 0 <= m <= n and n at "
+                    "least 1, or no max for no limit; it says how far a walk goes, so it is "
+                    "never beside depth",
+                )
+        if "on" in via and not _is_date(via["on"]):
+            return Refusal(
+                "binding_via_on_invalid",
+                [*here, "on"],
+                f"{json.dumps(via['on'])} is not a date; on is YYYY-MM-DD, and only the links "
+                "valid that day are walked",
+            )
+        if "where" in via:
+            # Conditions on the links themselves: a walk follows only the links that pass.
+            problem = self._check_filters(via["where"], [*here, "where"], None, {})
+            if problem:
+                return problem
         return None
 
     def _check_edge(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]):
@@ -1288,87 +1346,114 @@ class _ShapeChecker:
                 f"{json.dumps(name)} cannot name this edge: it is "
                 + ("already bound here" if _is_name(name) else "not a name (^[a-z][a-z0-9_]*$)"),
             )
-        scope[name] = f"{EDGE_MARK}{via['rel']}/{via.get('depth', 'one')}"
+        scope[name] = _edge_mark(via)
         return None
 
     def _check_where(self, binding: dict[str, Any], at: Loc, scope: dict[str, str] | None = None):
         if "where" not in binding:
             return None
-        filters = binding["where"]
+        return self._check_filters(binding["where"], [*at, "where"], binding.get("set"), scope or {})
+
+    def _check_filters(self, filters: Any, at: Loc, set_name: str | None, scope: dict[str, str]):
+        """A `where` list -- a binding's own, or a walk's conditions on its links (`set_name`
+        None). Each entry is a filter, or a group {"any": [...]} that holds when one of its
+        filters does."""
         if not isinstance(filters, list):
             return Refusal(
                 "where_not_array",
-                [*at, "where"],
-                "where is an array of filters, combined with and; version "
-                f"{IR_VERSION} has no groups and no or",
+                at,
+                "where is an array of filters, combined with and; a group {\"any\": [...]} "
+                "among them holds when any of its filters does",
             )
         for k, entry in enumerate(filters):
-            here: Loc = [*at, "where", k]
-            if not isinstance(entry, dict):
-                return Refusal("where_filter_malformed", here, "each filter must be an object")
-            problem = _unknown_key(entry, _FILTER_KEYS, here, "filter")
+            here: Loc = [*at, k]
+            if isinstance(entry, dict) and "any" in entry:
+                group = entry["any"]
+                if (
+                    set(entry) != {"any"}
+                    or not isinstance(group, list)
+                    or len(group) < 2
+                    or not all(isinstance(g, dict) and "any" not in g and not isinstance(g.get("value"), dict) for g in group)
+                ):
+                    return Refusal(
+                        "where_group_malformed",
+                        here,
+                        "a group is {\"any\": [two or more filters]}, one level deep, each "
+                        "comparing with a value; it holds when any of its filters does",
+                    )
+                for g, inner in enumerate(group):
+                    problem = self._check_filter(inner, [*here, "any", g], set_name, scope)
+                    if problem:
+                        return problem
+                continue
+            problem = self._check_filter(entry, here, set_name, scope)
             if problem:
                 return problem
-            if not _is_name(entry.get("attr")):
-                return Refusal(
-                    "where_filter_malformed",
-                    [*here, "attr"],
-                    "a filter names an attribute of the set its binding ranges over",
-                )
-            operator = entry.get("op")
-            if not isinstance(operator, str):
-                return Refusal(
-                    "where_filter_malformed",
-                    [*here, "op"],
-                    "a filter names a comparison; version "
-                    f"{IR_VERSION} has no unary filters, so op is never absent",
-                )
-            if operator not in FILTER_OPERATORS:
-                return Refusal(
-                    "where_operator_unknown",
-                    [*here, "op"],
-                    f"{json.dumps(operator)} is not a filter comparison; the vocabulary is the "
-                    "expression catalogue's, narrowed to "
-                    f"{', '.join(sorted(FILTER_OPERATORS))}",
-                )
-            if "value" not in entry:
-                return Refusal(
-                    "where_filter_malformed", [*here, "value"], "a filter carries a value"
-                )
-            value = entry["value"]
-            if isinstance(value, dict):
-                # Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
-                ok = (
-                    entry["attr"] == "id" and operator in ("=", "!=")
-                    and set(value) == {"par", "index"} and value.get("par") in self.entity_parameters
-                    and self.entity_parameters[value["par"]] == binding.get("set")
-                )
-                if not ok:
-                    return Refusal(
-                        "where_parameter_invalid",
-                        [*here, "value"],
-                        "a filter compares with a parameter only as id = or != a parameter whose values "
-                        f"are entities of {binding.get('set')!r}",
-                    )
-                problem = self._reference(value, [*here, "value"], scope or {}, "par", self.parameters)
-                if problem:
-                    return problem
-                continue
-            if operator in _LIST_OPERATORS:
-                ok = isinstance(value, list) and value and all(_is_scalar(v) for v in value)
-            else:
-                ok = _is_scalar(value)
+        return None
+
+    def _check_filter(self, entry: Any, here: Loc, set_name: str | None, scope: dict[str, str]):
+        if not isinstance(entry, dict):
+            return Refusal("where_filter_malformed", here, "each filter must be an object")
+        problem = _unknown_key(entry, _FILTER_KEYS, here, "filter")
+        if problem:
+            return problem
+        if not _is_name(entry.get("attr")):
+            return Refusal(
+                "where_filter_malformed",
+                [*here, "attr"],
+                "a filter names an attribute of the set its binding ranges over",
+            )
+        operator = entry.get("op")
+        if not isinstance(operator, str):
+            return Refusal(
+                "where_filter_malformed",
+                [*here, "op"],
+                "a filter names a comparison; version "
+                f"{IR_VERSION} has no unary filters, so op is never absent",
+            )
+        if operator not in FILTER_OPERATORS:
+            return Refusal(
+                "where_operator_unknown",
+                [*here, "op"],
+                f"{json.dumps(operator)} is not a filter comparison; the vocabulary is the "
+                "expression catalogue's, narrowed to "
+                f"{', '.join(sorted(FILTER_OPERATORS))}",
+            )
+        if "value" not in entry:
+            return Refusal(
+                "where_filter_malformed", [*here, "value"], "a filter carries a value"
+            )
+        value = entry["value"]
+        if isinstance(value, dict):
+            # Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
+            ok = (
+                entry["attr"] == "id" and operator in ("=", "!=")
+                and set(value) == {"par", "index"} and value.get("par") in self.entity_parameters
+                and set_name is not None and self.entity_parameters[value["par"]] == set_name
+            )
             if not ok:
                 return Refusal(
-                    "where_filter_malformed",
+                    "where_parameter_invalid",
                     [*here, "value"],
-                    f"{json.dumps(operator)} takes "
-                    + (
-                        "a non-empty array of values"
-                        if operator in _LIST_OPERATORS
-                        else "a single value"
-                    ),
+                    "a filter compares with a parameter only as id = or != a parameter whose values "
+                    f"are entities of {set_name!r}",
                 )
+            return self._reference(value, [*here, "value"], scope or {}, "par", self.parameters)
+        if operator in _LIST_OPERATORS:
+            ok = isinstance(value, list) and value and all(_is_scalar(v) for v in value)
+        else:
+            ok = _is_scalar(value)
+        if not ok:
+            return Refusal(
+                "where_filter_malformed",
+                [*here, "value"],
+                f"{json.dumps(operator)} takes "
+                + (
+                    "a non-empty array of values"
+                    if operator in _LIST_OPERATORS
+                    else "a single value"
+                ),
+            )
         return None
 
     # -- terms ------------------------------------------------------------
@@ -2176,47 +2261,73 @@ class _DomainChecker:
             scope[binding["index"]] = binding["set"]
             via = binding.get("via") or {}
             if "as" in via:
-                scope[via["as"]] = f"{EDGE_MARK}{via['rel']}/{via.get('depth', 'one')}"
-            for k, entry in enumerate(binding.get("where", [])):
-                here: Loc = [*loc, j, "where", k]
-                declared = self.world.attributes.get((binding["set"], entry["attr"]))
-                if entry["attr"] == "id":
-                    # Every row's key (queue R20b): compared like a reference.
-                    declared = {"data_type": "reference", "required": True, "enum_values": []}
-                if declared is None:
+                scope[via["as"]] = _edge_mark(via)
+            problem = self._domain_filters(
+                binding.get("where", []), [*loc, j, "where"], binding["set"],
+                lambda attr, set_name=binding["set"]: self.world.attributes.get((set_name, attr)),
+            )
+            if problem:
+                return problem
+            if via.get("where") and self.world.edge_attributes.get(via["rel"]):
+                # Conditions on the links, against what the relationship declares for them.
+                # A relationship that declares none carries free-form attrs: the frozen edges
+                # decide, as they do for an `attr of` a link.
+                problem = self._domain_filters(
+                    via["where"], [*loc, j, "via", "where"], via["rel"],
+                    lambda attr, rel=via["rel"]: self.world.edge_attributes[rel].get(attr),
+                )
+                if problem:
+                    return problem
+        return None
+
+    def _domain_filters(self, filters: list[Any], at: Loc, owner: str, lookup) -> Refusal | None:
+        """Each filter (and each filter of a group) names an attribute `owner` declares, with a
+        comparison its type offers and values of that type."""
+        for k, entry in enumerate(filters):
+            if "any" in entry:
+                problem = self._domain_filters(entry["any"], [*at, k, "any"], owner, lookup)
+                if problem:
+                    return problem
+                continue
+            here: Loc = [*at, k]
+            declared = lookup(entry["attr"])
+            if entry["attr"] == "id":
+                # Every row's key (queue R20b): compared like a reference.
+                declared = {"data_type": "reference", "required": True, "enum_values": []}
+            if declared is None:
+                return Refusal(
+                    "attribute_not_declared",
+                    [*here, "attr"],
+                    f"{owner!r} declares no attribute {entry['attr']!r}, so no "
+                    "snapshot row would carry one",
+                )
+            # `nullable=False`: the IR's filter vocabulary is the
+            # expression catalogue's MINUS the two null operators (a
+            # test asserts the two sets are disjoint), and those are
+            # the only operators `operators_for` adds for a nullable
+            # field. Passing the attribute's real nullability would
+            # therefore be a value that can never change the answer,
+            # and unpinnable by any fixture.
+            offered = operators_for(declared["data_type"], False)
+            if entry["op"] not in offered:
+                return Refusal(
+                    "where_operator_not_offered",
+                    [*here, "op"],
+                    f"a {declared['data_type']} attribute offers "
+                    f"{', '.join(offered)}, not {entry['op']!r}",
+                )
+            if isinstance(entry["value"], dict):
+                continue  # a parameter's cell, judged by its declaration (queue R20b)
+            values = entry["value"] if isinstance(entry["value"], list) else [entry["value"]]
+            for value in values:
+                if not _value_is_of_type(value, declared):
                     return Refusal(
-                        "attribute_not_declared",
-                        [*here, "attr"],
-                        f"{binding['set']!r} declares no attribute {entry['attr']!r}, so no "
-                        "snapshot row would carry one",
+                        "where_value_not_of_type",
+                        [*here, "value"],
+                        f"{json.dumps(value)} is not a value of "
+                        f"{owner}.{entry['attr']}, which is "
+                        f"{declared['data_type']}",
                     )
-                # `nullable=False`: the IR's filter vocabulary is the
-                # expression catalogue's MINUS the two null operators (a
-                # test asserts the two sets are disjoint), and those are
-                # the only operators `operators_for` adds for a nullable
-                # field. Passing the attribute's real nullability would
-                # therefore be a value that can never change the answer,
-                # and unpinnable by any fixture.
-                offered = operators_for(declared["data_type"], False)
-                if entry["op"] not in offered:
-                    return Refusal(
-                        "where_operator_not_offered",
-                        [*here, "op"],
-                        f"a {declared['data_type']} attribute offers "
-                        f"{', '.join(offered)}, not {entry['op']!r}",
-                    )
-                if isinstance(entry["value"], dict):
-                    continue  # a parameter's cell, judged by its declaration (queue R20b)
-                values = entry["value"] if isinstance(entry["value"], list) else [entry["value"]]
-                for value in values:
-                    if not _value_is_of_type(value, declared):
-                        return Refusal(
-                            "where_value_not_of_type",
-                            [*here, "value"],
-                            f"{json.dumps(value)} is not a value of "
-                            f"{binding['set']}.{entry['attr']}, which is "
-                            f"{declared['data_type']}",
-                        )
         return None
 
     def _via(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]) -> Refusal | None:
@@ -2237,8 +2348,20 @@ class _DomainChecker:
         from_set, to_set = self.world.relationship_ends[name]
         # `from` in the document means "the anchor sits at the from end", so
         # the index being bound takes the `to` end, and vice versa.
-        anchor_end, bound_end = ("from", to_set) if "from" in via else ("to", from_set)
-        anchor_set = from_set if anchor_end == "from" else to_set
+        if "both" in via:
+            # Either end: only a relationship from a type to itself has two ends a walk can
+            # swap between.
+            if from_set != to_set:
+                return Refusal(
+                    "binding_via_both_not_self",
+                    here + ["both"],
+                    f"{name!r} joins {from_set} to {to_set}, which are different, so there is no "
+                    "walking it both ways; walk it from or to the index instead",
+                )
+            anchor_end, bound_end, anchor_set = "both", from_set, from_set
+        else:
+            anchor_end, bound_end = ("from", to_set) if "from" in via else ("to", from_set)
+            anchor_set = from_set if anchor_end == "from" else to_set
         actual_anchor = scope.get(via[anchor_end])
         # A type that inherits from an end's type stands in for it (queue R18).
         if not self.world.is_a(actual_anchor, anchor_set) or not self.world.is_a(binding["set"], bound_end):
@@ -2250,13 +2373,13 @@ class _DomainChecker:
                 f"{anchor_set} and this one to {bound_end}, not {actual_anchor} and "
                 f"{binding['set']}",
             )
-        if via.get("depth", "one") != "one" and from_set != to_set:
+        if not _single_step(via) and from_set != to_set:
             return Refusal(
                 "binding_via_depth_not_transitive",
-                [*here, "depth"],
+                [*here, "steps" if "steps" in via else "depth"],
                 f"{name!r} joins {from_set} to {to_set}, which are different, so walking it "
                 "more than once lands nowhere; only a relationship whose two ends are the "
-                f"same entity type has a {via['depth']!r} depth",
+                f"same entity type has a {json.dumps(via.get('steps', via.get('depth')))} depth",
             )
         return None
 

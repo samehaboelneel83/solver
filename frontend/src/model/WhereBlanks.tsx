@@ -4,14 +4,14 @@
  *
  *   every [person ▾] [p] whose [team ▾] [is ▾] [north] and [cap ▾] [is at least ▾] [2] ✕
  *
- * A binding's `where` is a flat list of conditions that must all hold (the
- * IR has no groups and no "or"), so that is all this offers; "is one of"
+ * A binding's `where` is a list of conditions that must all hold, each one a
+ * condition or a group of alternatives ("or"), one level deep; "is one of"
  * covers "this or that" for one attribute. The comparisons offered follow the
  * attribute's type, and the value box fits it: a number, yes/no, text, or a
  * comma-separated list for "is one of".
  */
 import { useEffect, useState } from "react";
-import type { IrFilter, ModelContext } from "./terms";
+import { isGroup, type IrFilter, type ModelContext, type WhereEntry } from "./terms";
 import { defaultValue, isList, NUMBER_TYPES, opsFor, OP_WORDS, valueWords } from "./whereWords";
 
 function parseOne(text: string, dataType: string | undefined): unknown {
@@ -87,81 +87,139 @@ function ValueBlank({ label, filter, dataType, choices, className, onChange }: {
   );
 }
 
-/**
- * The conditions of one binding. `label` names the binding ("for each: set
- * 1"); each control is named from it ("for each: set 1: condition 2: value").
- * An empty list is reported as `undefined`, so `where` leaves the binding.
- */
-export function WhereBlanks({ label, set, where, context, onChange, className, lead = "whose" }: {
-  label: string;
-  set: string;
-  where: IrFilter[] | undefined;
-  context: ModelContext;
-  onChange: (next: IrFilter[] | undefined) => void;
+type Attribute = { name: string; data_type: string; enum_values?: string[] | null };
+
+/** One condition: [attribute ▾] [comparison ▾] [value] ✕, and "or…" to add an alternative. */
+function ConditionBlanks({ name, filter, attributes, className, onChange, onRemove, onOr }: {
+  name: string;
+  filter: IrFilter;
+  attributes: Attribute[];
   className: string;
-  lead?: string;
+  onChange: (next: IrFilter) => void;
+  onRemove: () => void;
+  onOr?: () => void;
 }) {
-  const attributes = context.attributes[set] ?? [];
-  const filters = where ?? [];
   const typeOf = (attr: string) => attributes.find((a) => a.name === attr)?.data_type;
   const choicesOf = (attr: string) => attributes.find((a) => a.name === attr)?.enum_values;
-  /** A starting value; a list of choices starts at its first choice. */
-  const startValue = (attr: string, op: string) => {
-    const choices = choicesOf(attr);
-    return choices?.length && !isList(op) ? choices[0] : defaultValue(typeOf(attr), op);
-  };
-  const setAll = (next: IrFilter[]) => onChange(next.length > 0 ? next : undefined);
-  const replace = (i: number, next: IrFilter) => setAll(filters.map((f, j) => (j === i ? next : f)));
+  const start = (attr: string, op: string) => startValue(attributes, attr, op);
+  const dataType = typeOf(filter.attr);
+  const ops = opsFor(dataType);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" data-testid="where-condition">
+      <select aria-label={`${name}: attribute`} className={className} value={filter.attr}
+        onChange={(event) => {
+          const attr = event.target.value;
+          const op = opsFor(typeOf(attr)).includes(filter.op) ? filter.op : "=";
+          onChange({ attr, op, value: start(attr, op) });
+        }}>
+        {!attributes.some((a) => a.name === filter.attr) && <option value={filter.attr}>{filter.attr || "choose…"}</option>}
+        {attributes.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+      </select>
+      <select aria-label={`${name}: comparison`} className={className} value={filter.op}
+        onChange={(event) => {
+          const op = event.target.value;
+          // Moving between one value and a list keeps what was typed.
+          const value = isList(op) === isList(filter.op)
+            ? filter.value
+            : isList(op)
+              ? (filter.value === "" ? [] : [filter.value])
+              : (Array.isArray(filter.value) && filter.value.length > 0 ? filter.value[0] : start(filter.attr, op));
+          onChange({ ...filter, op, value });
+        }}>
+        {!ops.includes(filter.op) && <option value={filter.op}>{OP_WORDS[filter.op] ?? filter.op}</option>}
+        {ops.map((op) => <option key={op} value={op}>{OP_WORDS[op]}</option>)}
+      </select>
+      <ValueBlank label={`${name}: value`} filter={filter} dataType={dataType} choices={choicesOf(filter.attr)} className={className}
+        onChange={(value) => onChange({ ...filter, value })} />
+      <button type="button" className="text-xs text-rose-700" aria-label={`Remove ${name}`} title="Remove this condition" onClick={onRemove}>
+        ✕
+      </button>
+      {onOr && (
+        <button type="button" className="text-xs text-blue-700 underline" aria-label={`Or: another way for ${name}`} title="Another way this condition can hold" onClick={onOr}>
+          or…
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** A starting value; a list of choices starts at its first choice. */
+function startValue(attributes: Attribute[], attr: string, op: string): unknown {
+  const found = attributes.find((a) => a.name === attr);
+  return found?.enum_values?.length && !isList(op) ? found.enum_values[0] : defaultValue(found?.data_type, op);
+}
+
+/**
+ * The conditions of one binding. `label` names the binding ("for each: set
+ * 1"); each control is named from it ("for each: set 1: condition 2: value",
+ * and in a group "…: condition 2 or 1: value"). An empty list is reported as
+ * `undefined`, so `where` leaves the binding.
+ *
+ * Conditions are joined with "and"; "or…" beside one turns it into a group,
+ * "(team is north or cap is at least 2)", that holds when any of its
+ * conditions does. A group left with one condition is that condition again.
+ *
+ * `attributes` overrides the set's own (a walk's conditions on its links use
+ * the relationship's); `addText` names the add button.
+ */
+export function WhereBlanks({ label, set, where, context, onChange, className, lead = "whose", attributes: given, addText }: {
+  label: string;
+  set: string;
+  where: WhereEntry[] | undefined;
+  context: ModelContext;
+  onChange: (next: WhereEntry[] | undefined) => void;
+  className: string;
+  lead?: string;
+  attributes?: Attribute[];
+  addText?: [string, string];
+}) {
+  const attributes = given ?? context.attributes[set] ?? [];
+  const entries = where ?? [];
+  const setAll = (next: WhereEntry[]) => onChange(next.length > 0 ? next : undefined);
+  const replace = (i: number, next: WhereEntry) => setAll(entries.map((e, j) => (j === i ? next : e)));
+  const fresh = (): IrFilter => ({ attr: attributes[0].name, op: "=", value: startValue(attributes, attributes[0].name, "=") });
 
   return (
     <>
-      {filters.map((filter, i) => {
+      {entries.map((entry, i) => {
         const name = `${label}: condition ${i + 1}`;
-        const dataType = typeOf(filter.attr);
-        const ops = opsFor(dataType);
+        const joiner = <span className="text-slate-600">{i === 0 ? ` ${lead} ` : " and "}</span>;
+        if (!isGroup(entry)) {
+          return (
+            <span key={i} className="inline-flex flex-wrap items-center gap-1">
+              {joiner}
+              <ConditionBlanks name={name} filter={entry} attributes={attributes} className={className}
+                onChange={(next) => replace(i, next)}
+                onRemove={() => setAll(entries.filter((_, j) => j !== i))}
+                onOr={() => replace(i, { any: [entry, fresh()] })} />
+            </span>
+          );
+        }
+        const setGroup = (any: IrFilter[]) => replace(i, any.length === 1 ? any[0] : { any });
         return (
-          <span key={i} className="inline-flex flex-wrap items-center gap-1" data-testid="where-condition">
-            <span className="text-slate-600">{i === 0 ? ` ${lead} ` : " and "}</span>
-            <select aria-label={`${name}: attribute`} className={className} value={filter.attr}
-              onChange={(event) => {
-                const attr = event.target.value;
-                const type = typeOf(attr);
-                const op = opsFor(type).includes(filter.op) ? filter.op : "=";
-                replace(i, { attr, op, value: startValue(attr, op) });
-              }}>
-              {!attributes.some((a) => a.name === filter.attr) && <option value={filter.attr}>{filter.attr || "choose…"}</option>}
-              {attributes.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-            </select>
-            <select aria-label={`${name}: comparison`} className={className} value={filter.op}
-              onChange={(event) => {
-                const op = event.target.value;
-                // Moving between one value and a list keeps what was typed.
-                const value = isList(op) === isList(filter.op)
-                  ? filter.value
-                  : isList(op)
-                    ? (filter.value === "" ? [] : [filter.value])
-                    : (Array.isArray(filter.value) && filter.value.length > 0 ? filter.value[0] : startValue(filter.attr, op));
-                replace(i, { ...filter, op, value });
-              }}>
-              {!ops.includes(filter.op) && <option value={filter.op}>{OP_WORDS[filter.op] ?? filter.op}</option>}
-              {ops.map((op) => <option key={op} value={op}>{OP_WORDS[op]}</option>)}
-            </select>
-            <ValueBlank label={`${name}: value`} filter={filter} dataType={dataType} choices={choicesOf(filter.attr)} className={className}
-              onChange={(value) => replace(i, { ...filter, value })} />
-            <button type="button" className="text-xs text-rose-700" aria-label={`Remove ${name}`} title="Remove this condition"
-              onClick={() => setAll(filters.filter((_, j) => j !== i))}>
-              ✕
+          <span key={i} className="inline-flex flex-wrap items-center gap-1" role="group" aria-label={`${name}: any of`}>
+            {joiner}
+            <span className="text-slate-500">(</span>
+            {entry.any.map((filter, g) => (
+              <span key={g} className="inline-flex flex-wrap items-center gap-1">
+                {g > 0 && <span className="text-slate-600">or</span>}
+                <ConditionBlanks name={`${name} or ${g + 1}`} filter={filter} attributes={attributes} className={className}
+                  onChange={(next) => setGroup(entry.any.map((f, k) => (k === g ? next : f)))}
+                  onRemove={() => setGroup(entry.any.filter((_, k) => k !== g))} />
+              </span>
+            ))}
+            <button type="button" className="text-xs text-blue-700 underline" aria-label={`Or: another way for ${name}`}
+              onClick={() => setGroup([...entry.any, fresh()])}>
+              + or
             </button>
+            <span className="text-slate-500">)</span>
           </span>
         );
       })}
       {attributes.length > 0 && (
         <button type="button" className="ml-1 text-xs text-blue-700 underline" aria-label={`Only some of ${set}: add a condition to ${label}`}
-          onClick={() => {
-            const first = attributes[0];
-            setAll([...filters, { attr: first.name, op: "=", value: startValue(first.name, "=") }]);
-          }}>
-          {filters.length === 0 ? "+ only some of them" : "+ and"}
+          onClick={() => setAll([...entries, fresh()])}>
+          {entries.length === 0 ? (addText?.[0] ?? "+ only some of them") : (addText?.[1] ?? "+ and")}
         </button>
       )}
     </>

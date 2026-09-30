@@ -572,8 +572,11 @@ export function defineIrBlocks(): void {
         )
         .appendField("in")
         .appendField(dynamic((b) => declared(b.workspace).sets, choose), "SET");
+      const walkFields = ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH", "VIA_AS", "VIA_MIN", "VIA_MAX", "VIA_ON"];
       const walks = (value: string) => {
-        for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH", "VIA_AS"]) this.getField(name)?.setVisible(value !== NONE);
+        for (const name of walkFields) this.getField(name)?.setVisible(value !== NONE);
+        this.getInput("VIA_MORE")?.setVisible(value !== NONE);
+        this.getInput("VIA_WHERE")?.setVisible(value !== NONE);
         rerender(this);
         return value;
       };
@@ -589,7 +592,7 @@ export function defineIrBlocks(): void {
           ),
           "VIA_REL"
         )
-        .appendField(fixed(["from", "to"], (e) => (e === "from" ? "from" : "back to")), "VIA_END")
+        .appendField(fixed(["from", "to", "both"], (e) => ({ from: "from", to: "back to", both: "either way from" })[e] ?? e), "VIA_END")
         .appendField(
           dynamic((b) => {
             const rel = catalogueOf(b.workspace).relationships.find((r) => r.name === b.getFieldValue("VIA_REL"));
@@ -604,8 +607,20 @@ export function defineIrBlocks(): void {
           new Blockly.FieldTextInput("", (text: string) => (loading || text === "" || NAME.test(text) ? text : null)),
           "VIA_AS"
         );
+      // How far as a range of steps (empty: the depth above), and on which day (empty: any).
+      const whole = (text: string) => (loading || text === "" || /^\d+$/.test(text) ? text : null);
+      this.appendDummyInput("VIA_MORE")
+        .appendField("steps")
+        .appendField(new Blockly.FieldTextInput("", whole), "VIA_MIN")
+        .appendField("to")
+        .appendField(new Blockly.FieldTextInput("", whole), "VIA_MAX")
+        .appendField("on")
+        .appendField(new Blockly.FieldTextInput("", (text: string) => (loading || text === "" || /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null)), "VIA_ON");
+      this.appendStatementInput("VIA_WHERE").setCheck("filter").appendField("only through links where");
       this.appendStatementInput("WHERE").setCheck("filter").appendField("only where");
-      for (const name of ["VIA_END", "VIA_ANCHOR", "VIA_DEPTH", "VIA_AS"]) this.getField(name)!.setVisible(false);
+      for (const name of walkFields) this.getField(name)!.setVisible(false);
+      this.getInput("VIA_MORE")!.setVisible(false);
+      this.getInput("VIA_WHERE")!.setVisible(false);
       this.setPreviousStatement(true, "binding");
       this.setNextStatement(true, "binding");
       this.setColour(COLOUR.binding);
@@ -618,8 +633,23 @@ export function defineIrBlocks(): void {
       this.appendDummyInput()
         .appendField(
           dynamic((b) => {
-            const set = b.getSurroundParent()?.getFieldValue("SET");
-            return (catalogueOf(b.workspace).entityTypes.find((t) => t.name === set)?.attributes ?? []).map((a) => a.name);
+            // A filter of a set's items, or -- under "only through links where" -- of a walk's links;
+            // one inside an "any of" block filters whatever that block does.
+            let parent = b.getSurroundParent();
+            let child: B = b;
+            while (parent && parent.type === "ir_filter_any") {
+              child = parent;
+              parent = parent.getSurroundParent();
+            }
+            let first = child;
+            for (let p = first.getPreviousBlock(); p && p.getNextBlock() === first; p = p.getPreviousBlock()) first = p;
+            const catalogue = catalogueOf(b.workspace);
+            if (parent && parent.getInputWithBlock(first)?.name === "VIA_WHERE") {
+              const rel = parent.getFieldValue("VIA_REL");
+              return (catalogue.relationships.find((r) => r.name === rel)?.attributes ?? []).map((a) => a.name);
+            }
+            const set = parent?.getFieldValue("SET");
+            return (catalogue.entityTypes.find((t) => t.name === set)?.attributes ?? []).map((a) => a.name);
           }, choose),
           "ATTR"
         )
@@ -640,6 +670,17 @@ export function defineIrBlocks(): void {
       this.setNextStatement(true, "filter");
       this.setColour(COLOUR.binding);
       this.setTooltip('A value as written in JSON: 3, "north", true, or a list ["a", "b"] for "is one of"');
+    },
+  };
+
+  // "This or that": filters of which any one holding is enough, one level deep.
+  Blockly.Blocks.ir_filter_any = {
+    init(this: B) {
+      this.appendStatementInput("ANY").setCheck("filter").appendField("any of");
+      this.setPreviousStatement(true, "filter");
+      this.setNextStatement(true, "filter");
+      this.setColour(COLOUR.binding);
+      this.setTooltip("Holds when any one of the conditions inside holds");
     },
   };
 
@@ -1065,7 +1106,7 @@ export function defineIrBlocks(): void {
 export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route"] as const;
 
 export const IR_BLOCK_TYPES = [
-  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_goal_term",
+  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_filter_any", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
   "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn", "ir_predict",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
@@ -1091,7 +1132,7 @@ export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
         kind: "category",
         name: "Rules",
         colour: "#334155",
-        contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter", "ir_when"]),
+        contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter", hasAttributes && "ir_filter_any", "ir_when"]),
       },
       {
         kind: "category",

@@ -27,9 +27,12 @@ import {
   walksAvailable,
   type Binding,
   type ModelContext,
+  type Steps,
   type Term,
   type Via,
+  type WalkEnd,
 } from "./terms";
+import { WhereBlanks } from "./WhereBlanks";
 import { DEPTH_WORDS } from "./walkWords";
 
 export function WalkBlanks({ label, binding, earlier, context, className, onChange }: {
@@ -61,46 +64,94 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
 
   const via = binding.via as Via;
   const offer = offers.find((o) => o.rel === current.rel && o.anchorEnd === current.anchorEnd);
-  const loops = context.relationships.some((r) => r.name === current.rel && r.from === r.to);
-  const keep = () => ({ ...(via.depth && loops ? { depth: via.depth } : {}), ...(via.as ? { as: via.as } : {}) });
+  const relationship = context.relationships.find((r) => r.name === current.rel);
+  const loops = !!relationship && relationship.from === relationship.to;
   const isTree = (rel: string) => context.relationships.some((r) => r.name === rel && r.hierarchy);
   const tree = isTree(current.rel);
-  // Down or up a hierarchy; along or against any other link from a set to itself.
-  const direction = (rel: string, end: "from" | "to", self: boolean) =>
-    !self ? "" : isTree(rel) ? (end === "from" ? ", going down" : ", going up") : end === "from" ? ", forwards" : ", backwards";
+  /** The walk re-anchored, keeping how far, which links, which day and the links' name. */
+  const moved = (rel: string, end: WalkEnd, anchor: string, self: boolean): Via => {
+    const { rel: _r, from: _f, to: _t, both: _b, depth, steps, where, ...rest } = via;
+    return {
+      rel,
+      [end]: anchor,
+      ...(self && depth ? { depth } : {}),
+      ...(self && steps ? { steps } : {}),
+      ...(rel === via.rel && where ? { where } : {}),
+      ...rest,
+    } as Via;
+  };
+  // Down or up a hierarchy; along or against any other link from a set to itself; or either way.
+  const direction = (rel: string, end: WalkEnd, self: boolean) =>
+    !self ? "" : end === "both" ? ", either way" : isTree(rel) ? (end === "from" ? ", going down" : ", going up") : end === "from" ? ", forwards" : ", backwards";
   const anchors = offer?.anchors ?? [];
+  const lead = current.anchorEnd === "both" ? "linked either way to" : tree ? (current.anchorEnd === "from" ? "below" : "above") : `linked ${current.anchorEnd}`;
+  const far = via.steps ? "range" : (via.depth ?? "one");
+  const setVia = (next: Via) => onChange({ ...binding, via: next });
+  const linkAttributes = relationship?.attributes ?? [];
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1" data-testid="walk">
-      <span className="text-slate-600">{binding.where?.length ? "," : ""} {tree ? (current.anchorEnd === "from" ? "below" : "above") : `linked ${current.anchorEnd === "from" ? "from" : "to"}`}</span>
+      <span className="text-slate-600">{binding.where?.length ? "," : ""} {lead}</span>
       <select aria-label={`${name}: starting at`} className={className} value={current.anchor}
-        onChange={(event) => onChange({ ...binding, via: { rel: current.rel, [current.anchorEnd]: event.target.value, ...keep() } as Via })}>
+        onChange={(event) => setVia(moved(current.rel, current.anchorEnd, event.target.value, loops))}>
         {!anchors.includes(current.anchor) && <option value={current.anchor}>{current.anchor || "choose…"}</option>}
         {anchors.map((a) => <option key={a} value={a}>{a} ({earlier.find((b) => b.index === a)?.set})</option>)}
       </select>
       <span className="text-slate-600">by</span>
       <select aria-label={`${name}: relationship`} className={className} value={walkKey(current.rel, current.anchorEnd)}
-        title="Every link of the relationship counts, whatever dates it carries: a run does not read “valid from” and “valid to” yet."
         onChange={(event) => {
           const picked = offers.find((o) => walkKey(o.rel, o.anchorEnd) === event.target.value);
           if (!picked) return;
           const anchor = picked.anchors.includes(current.anchor) ? current.anchor : picked.anchors[0];
-          const depth = picked.loops && via.depth ? { depth: via.depth } : {};
-          onChange({ ...binding, via: { rel: picked.rel, [picked.anchorEnd]: anchor, ...depth, ...(via.as ? { as: via.as } : {}) } as Via });
+          setVia(moved(picked.rel, picked.anchorEnd, anchor, picked.loops));
         }}>
         {!offer && <option value={walkKey(current.rel, current.anchorEnd)}>{current.rel || "choose…"}</option>}
         {offers.map((o) => (
           <option key={walkKey(o.rel, o.anchorEnd)} value={walkKey(o.rel, o.anchorEnd)}>{o.rel}{direction(o.rel, o.anchorEnd, o.loops)}</option>
         ))}
       </select>
-      {(loops || (via.depth && via.depth !== "one")) && (
-        <select aria-label={`${name}: how far`} className={className} value={via.depth ?? "one"}
+      {(loops || far !== "one") && (
+        <select aria-label={`${name}: how far`} className={className} value={far}
           onChange={(event) => {
-            const { depth: _old, ...rest } = via;
-            onChange({ ...binding, via: event.target.value === "one" ? rest : { ...rest, depth: event.target.value as Via["depth"] } });
+            const { depth: _d, steps: _s, ...rest } = via;
+            const value = event.target.value;
+            setVia(value === "one" ? rest : value === "range" ? { ...rest, steps: { min: 1, max: 2 } } : { ...rest, depth: value as Via["depth"] });
           }}>
           {Object.entries(DEPTH_WORDS).map(([value, words]) => <option key={value} value={value}>{words}</option>)}
+          <option value="range">a number of steps…</option>
         </select>
+      )}
+      {via.steps && (
+        <StepsBlanks name={name} steps={via.steps} className={className} onChange={(steps) => setVia({ ...via, steps })} />
+      )}
+      {linkAttributes.length > 0 && (
+        <WhereBlanks label={`${name} links`} set={`${current.rel} links`} where={via.where} context={context} className={className}
+          attributes={linkAttributes} lead="through links whose" addText={["+ only through some links", "+ and"]}
+          onChange={(where) => {
+            const { where: _old, ...rest } = via;
+            setVia(where ? { ...rest, where } : rest);
+          }} />
+      )}
+      {via.on !== undefined ? (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-slate-600">on</span>
+          <input type="date" aria-label={`${name}: on the day`} className={className} value={via.on}
+            title="Only the links valid that day: from their “valid from” to their “valid to”"
+            onChange={(event) => setVia({ ...via, on: event.target.value })} />
+          <button type="button" className="text-xs text-rose-700" aria-label={`Any day: ${name}`} title="Every link, whatever its dates"
+            onClick={() => {
+              const { on: _old, ...rest } = via;
+              setVia(rest);
+            }}>
+            ✕
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="text-xs text-blue-700 underline" aria-label={`Only the links valid on a day: ${name}`}
+          title="Without a day, every link counts, whatever its dates"
+          onClick={() => setVia({ ...via, on: new Date().toISOString().slice(0, 10) })}>
+          + on a day
+        </button>
       )}
       <span className="text-slate-600">, links called</span>
       <input aria-label={`${name}: name of each link`} className={`${className} w-14 font-mono`} placeholder="—" value={via.as ?? ""}
@@ -108,11 +159,36 @@ export function WalkBlanks({ label, binding, earlier, context, className, onChan
         onChange={(event) => {
           const { as: _old, ...rest } = via;
           const next = event.target.value.trim();
-          onChange({ ...binding, via: next ? { ...rest, as: next } : rest });
+          setVia(next ? { ...rest, as: next } : rest);
         }} />
       <button type="button" className="text-xs text-rose-700" aria-label={`Remove ${name}`} title="Range over all of them again" onClick={clear}>
         ✕
       </button>
+    </span>
+  );
+}
+
+/** "from [2] to [3] steps", the most left empty for no limit. */
+function StepsBlanks({ name, steps, className, onChange }: { name: string; steps: Steps; className: string; onChange: (next: Steps) => void }) {
+  const whole = (text: string) => (/^\d+$/.test(text.trim()) ? Number(text) : null);
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-slate-600">from</span>
+      <input aria-label={`${name}: fewest steps`} inputMode="numeric" className={`${className} w-12 font-mono`} value={String(steps.min)}
+        onChange={(event) => {
+          const min = whole(event.target.value);
+          if (min !== null) onChange({ ...steps, min });
+        }} />
+      <span className="text-slate-600">to</span>
+      <input aria-label={`${name}: most steps`} inputMode="numeric" placeholder="any" className={`${className} w-12 font-mono`}
+        value={steps.max === undefined ? "" : String(steps.max)}
+        onChange={(event) => {
+          const text = event.target.value.trim();
+          const max = whole(text);
+          if (text === "") onChange({ min: steps.min });
+          else if (max !== null) onChange({ ...steps, max });
+        }} />
+      <span className="text-slate-600">steps</span>
     </span>
   );
 }

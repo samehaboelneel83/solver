@@ -1,5 +1,5 @@
 /** The words for a binding's conditions ("team is north"), and what each attribute type can be compared with. */
-import type { IrFilter } from "./terms";
+import { isGroup, type IrFilter, type WhereEntry } from "./terms";
 
 export const OP_WORDS: Record<string, string> = {
   "=": "is",
@@ -43,4 +43,9 @@ export function valueWords(value: unknown): string {
 /** One condition in words: "team is north". */
 export function filterWords(filter: IrFilter): string {
   return `${filter.attr} ${OP_WORDS[filter.op] ?? filter.op} ${valueWords(filter.value)}`;
+}
+
+/** A `where` entry in words: a filter, or a group read "(team is north or cap is at least 2)". */
+export function entryWords(entry: WhereEntry, words: (filter: IrFilter) => string = filterWords): string {
+  return isGroup(entry) ? `(${entry.any.map(words).join(" or ")})` : words(entry);
 }

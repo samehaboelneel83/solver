@@ -9,6 +9,11 @@
  * expression core and can be lifted into the IR in v2 if a real model needs
  * it.
  *
+ * Version 2 lets `where` hold "or" groups one level deep ({"any": [...]}),
+ * so the builder's top level joins with and, and a group directly under it
+ * joins with or. Anything else -- a group joined with and, a group in a
+ * group, negation -- is still more than a binding can say.
+ *
  * So a document can be perfectly valid *as a filter* and still be more than
  * a constraint binding can say. That must be refused with the reason, never
  * flattened: silently turning `a OR b` into `a AND b` would change which
@@ -19,11 +24,13 @@
 import type { ExpressionDocument, ExpressionGroup, ExpressionRule } from "../expressions";
 import { FILTER_OPERATORS } from "../ir/contract";
 
-/** One entry of an IR binding's `where`. */
+/** One filter of an IR binding's `where`. */
 export type IrFilter = { attr: string; op: string; value: unknown };
+/** One entry of a `where`: a filter, or a group of filters any one of which is enough. */
+export type IrWhereEntry = IrFilter | { any: IrFilter[] };
 
 export type ToIrResult =
-  | { ok: true; where: IrFilter[] }
+  | { ok: true; where: IrWhereEntry[] }
   | { ok: false; problems: string[] };
 
 const FILTER_OPS: ReadonlySet<string> = new Set<string>(FILTER_OPERATORS);
@@ -45,7 +52,7 @@ export function attributeName(fieldId: string): string | null {
 export function toIrWhere(document: ExpressionDocument | null): ToIrResult {
   if (!document) return { ok: true, where: [] };
   const problems: string[] = [];
-  const where: IrFilter[] = [];
+  const where: IrWhereEntry[] = [];
   const root = document.query;
 
   if (root.not) {
@@ -53,27 +60,37 @@ export function toIrWhere(document: ExpressionDocument | null): ToIrResult {
   }
   if (root.combinator === "or") {
     problems.push(
-      "A binding filter joins its conditions with and. Use one condition per line, or widen the set."
+      "A binding filter joins its conditions with and. For “this or that”, put them in a group."
     );
   }
 
-  for (const node of root.rules ?? []) {
-    if (isGroup(node)) {
-      problems.push("A binding filter has no groups: every condition sits at the top level.");
-      continue;
-    }
+  const filter = (node: ExpressionRule): IrFilter | null => {
     const name = attributeName(node.field);
     if (name === null) {
       problems.push(
         `${node.field} is not an attribute of this set. A binding filters on its own set's attributes.`
       );
-      continue;
+      return null;
     }
     if (!FILTER_OPS.has(node.operator)) {
       problems.push(`${name}: ${node.operator} is not a comparison a binding filter offers.`);
+      return null;
+    }
+    return { attr: name, op: node.operator, value: node.value };
+  };
+
+  for (const node of root.rules ?? []) {
+    if (isGroup(node)) {
+      if (node.not) problems.push("A group cannot be negated here. Invert each condition instead.");
+      if (node.combinator !== "or") problems.push("Conditions in a group are joined with or.");
+      if ((node.rules ?? []).some(isGroup)) problems.push("A group holds conditions, not other groups.");
+      const any = (node.rules ?? []).filter((r): r is ExpressionRule => !isGroup(r)).map(filter);
+      if (any.length < 2) problems.push("An “or” group needs two or more conditions.");
+      if (any.every((f): f is IrFilter => f !== null)) where.push({ any });
       continue;
     }
-    where.push({ attr: name, op: node.operator, value: node.value });
+    const one = filter(node);
+    if (one) where.push(one);
   }
 
   return problems.length > 0 ? { ok: false, problems } : { ok: true, where };
@@ -85,18 +102,21 @@ export function toIrWhere(document: ExpressionDocument | null): ToIrResult {
  * while the IR — whose binding already names the set — does not carry it.
  */
 export function fromIrWhere(
-  where: readonly IrFilter[] | undefined,
+  where: readonly IrWhereEntry[] | undefined,
   entityTypeId: number | string
 ): ExpressionDocument {
+  const rule = (filter: IrFilter) => ({
+    field: `attr:${entityTypeId}:${filter.attr}`,
+    operator: filter.op,
+    value: filter.value,
+  });
   return {
     version: 1,
     query: {
       combinator: "and",
-      rules: (where ?? []).map((filter) => ({
-        field: `attr:${entityTypeId}:${filter.attr}`,
-        operator: filter.op,
-        value: filter.value,
-      })) as ExpressionRule[],
+      rules: (where ?? []).map((entry) =>
+        "any" in entry ? { combinator: "or", rules: entry.any.map(rule) } : rule(entry)
+      ) as ExpressionRule[],
     },
   } as ExpressionDocument;
 }

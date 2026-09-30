@@ -44,19 +44,41 @@ describe("toIrWhere", () => {
     expect(result.ok === false && result.problems[0]).toMatch(/joins its conditions with and/i);
   });
 
-  it("refuses a nested group", () => {
+  it("takes a group joined with or, one level deep, as “any of”", () => {
+    const result = toIrWhere(
+      doc({
+        combinator: "and",
+        rules: [
+          { field: "attr:5:rank", operator: ">=", value: 3 },
+          { combinator: "or", rules: [{ field: "attr:5:rank", operator: "<=", value: 9 }, { field: "attr:5:rank", operator: "=", value: 20 }] },
+        ],
+      })
+    );
+    expect(result).toEqual({ ok: true, where: [
+      { attr: "rank", op: ">=", value: 3 },
+      { any: [{ attr: "rank", op: "<=", value: 9 }, { attr: "rank", op: "=", value: 20 }] },
+    ] });
+    // And back again.
+    expect(toIrWhere(fromIrWhere(result.ok ? result.where : [], 5))).toEqual(result);
+  });
+
+  it("refuses a group joined with and, one of one condition, and a group in a group", () => {
     const result = toIrWhere(
       doc({
         combinator: "and",
         rules: [
           { field: "attr:5:rank", operator: ">=", value: 3 },
           { combinator: "and", rules: [{ field: "attr:5:rank", operator: "<=", value: 9 }] },
+          { combinator: "or", rules: [{ field: "attr:5:rank", operator: "<=", value: 9 }, { combinator: "or", rules: [] }] },
         ],
       })
     );
 
     expect(result.ok).toBe(false);
-    expect(result.ok === false && result.problems.join(" ")).toMatch(/no groups/i);
+    const said = result.ok === false ? result.problems.join(" ") : "";
+    expect(said).toMatch(/joined with or/i);
+    expect(said).toMatch(/two or more conditions/i);
+    expect(said).toMatch(/not other groups/i);
   });
 
   it("refuses a negated filter", () => {

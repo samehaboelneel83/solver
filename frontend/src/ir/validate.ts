@@ -64,7 +64,23 @@ const BINDING_KEYS: ReadonlySet<string> = new Set(["index", "set", "where", "via
  * the other one -- which is why exactly one of them appears and neither is
  * the new index's own name.
  */
-const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "depth", "as"]);
+const VIA_KEYS: ReadonlySet<string> = new Set(["rel", "from", "to", "both", "depth", "steps", "where", "on", "as"]);
+const VIA_ENDS = ["from", "to", "both"] as const;
+const STEPS_KEYS: ReadonlySet<string> = new Set(["min", "max"]);
+
+/** Whether a walk takes exactly one step, so a link it names is one link rather than a path. */
+function singleStep(via: Json): boolean {
+  const steps = via.steps;
+  if (isObject(steps)) return steps.min === 1 && steps.max === 1;
+  return (via.depth ?? "one") === "one";
+}
+
+function isDate(value: unknown): boolean {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
 
 /** A scope entry that is an edge a `via` names (queue R19), not a set. */
 const isEdge = (bound: string | undefined): boolean => typeof bound === "string" && bound.startsWith(EDGE_MARK);
@@ -1271,7 +1287,7 @@ class ShapeChecker {
           (isName(name) ? "already bound here" : "not a name (^[a-z][a-z0-9_]*$)")
       );
     }
-    scope.set(name as string, `${EDGE_MARK}${String(via.rel)}/${String(via.depth ?? "one")}`);
+    scope.set(name as string, `${EDGE_MARK}${String(via.rel)}/${singleStep(via) ? "one" : "path"}`);
     return null;
   }
 
@@ -1299,13 +1315,14 @@ class ShapeChecker {
       );
     }
 
-    const ends = (["from", "to"] as const).filter((end) => end in via);
+    const ends = VIA_ENDS.filter((end) => end in via);
     if (ends.length !== 1 || !isName(via[ends[0]])) {
       return refusal(
         "binding_via_anchor_invalid",
         here,
-        "a via names exactly one of from or to, and it is the index the walk starts at; the " +
-          "end named is where that index sits, so this binding takes the other"
+        "a via names exactly one of from, to or both, and it is the index the walk starts at; " +
+          "the end named is where that index sits, so this binding takes the other (both: " +
+          "either end, the links walked either way)"
       );
     }
     const anchor = via[ends[0]] as string;
@@ -1332,88 +1349,151 @@ class ShapeChecker {
           `${[...TRAVERSAL_DEPTHS].sort().join(", ")}`
       );
     }
+    if ("steps" in via) {
+      const steps = via.steps;
+      const low = isObject(steps) ? steps.min : undefined;
+      const high = isObject(steps) ? steps.max : undefined;
+      if (
+        "depth" in via ||
+        !isObject(steps) ||
+        Object.keys(steps).some((key) => !STEPS_KEYS.has(key)) ||
+        !isInt(low) ||
+        low < 0 ||
+        ("max" in steps && (!isInt(high) || high < Math.max(low, 1)))
+      ) {
+        return refusal(
+          "binding_via_steps_invalid",
+          [...here, "steps"],
+          'steps is {"min": m, "max": n}: whole numbers with 0 <= m <= n and n at least 1, or no ' +
+            "max for no limit; it says how far a walk goes, so it is never beside depth"
+        );
+      }
+    }
+    if ("on" in via && !isDate(via.on)) {
+      return refusal(
+        "binding_via_on_invalid",
+        [...here, "on"],
+        `${show(via.on)} is not a date; on is YYYY-MM-DD, and only the links valid that day are walked`
+      );
+    }
+    if ("where" in via) {
+      // Conditions on the links themselves: a walk follows only the links that pass.
+      const problem = this.checkFilters(via.where, [...here, "where"], undefined, new Map());
+      if (problem) return problem;
+    }
     return null;
   }
 
   private checkWhere(binding: Json, at: IrLoc, scope: Map<string, string> = new Map()): IrRefusal | null {
     if (!("where" in binding)) return null;
-    const filters = binding.where;
+    return this.checkFilters(binding.where, [...at, "where"], binding.set as string | undefined, scope);
+  }
+
+  /** A `where` list -- a binding's own, or a walk's conditions on its links (`set` undefined).
+   * Each entry is a filter, or a group {"any": [...]} that holds when one of its filters does. */
+  private checkFilters(filters: unknown, at: IrLoc, set: string | undefined, scope: Map<string, string>): IrRefusal | null {
     if (!Array.isArray(filters)) {
       return refusal(
         "where_not_array",
-        [...at, "where"],
-        `where is an array of filters, combined with and; version ${IR_VERSION} has no groups ` +
-          "and no or"
+        at,
+        'where is an array of filters, combined with and; a group {"any": [...]} among them holds ' +
+          "when any of its filters does"
       );
     }
     for (let k = 0; k < filters.length; k += 1) {
       const entry = filters[k];
-      const here: IrLoc = [...at, "where", k];
-      if (!isObject(entry)) {
-        return refusal("where_filter_malformed", here, "each filter must be an object");
-      }
-      const unknown = unknownKey(entry, FILTER_KEYS, here, "filter");
-      if (unknown) return unknown;
-      if (!isName(entry.attr)) {
-        return refusal(
-          "where_filter_malformed",
-          [...here, "attr"],
-          "a filter names an attribute of the set its binding ranges over"
-        );
-      }
-      const operator = entry.op;
-      if (typeof operator !== "string") {
-        return refusal(
-          "where_filter_malformed",
-          [...here, "op"],
-          `a filter names a comparison; version ${IR_VERSION} has no unary filters, so op is ` +
-            "never absent"
-        );
-      }
-      if (!(FILTER_OPERATORS as readonly string[]).includes(operator)) {
-        return refusal(
-          "where_operator_unknown",
-          [...here, "op"],
-          `${show(operator)} is not a filter comparison; the vocabulary is the expression ` +
-            `catalogue's, narrowed to ${[...FILTER_OPERATORS].sort().join(", ")}`
-        );
-      }
-      if (!("value" in entry)) {
-        return refusal("where_filter_malformed", [...here, "value"], "a filter carries a value");
-      }
-      const value = entry.value;
-      if (isObject(value)) {
-        // Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
-        const fits =
-          entry.attr === "id" &&
-          (operator === "=" || operator === "!=") &&
-          Object.keys(value).length === 2 &&
-          "par" in value &&
-          "index" in value &&
-          this.entityParameters.get(value.par as string) === binding.set;
-        if (!fits) {
+      const here: IrLoc = [...at, k];
+      if (isObject(entry) && "any" in entry) {
+        const group = entry.any;
+        if (
+          Object.keys(entry).length !== 1 ||
+          !Array.isArray(group) ||
+          group.length < 2 ||
+          !group.every((g) => isObject(g) && !("any" in g) && !isObject(g.value))
+        ) {
           return refusal(
-            "where_parameter_invalid",
-            [...here, "value"],
-            "a filter compares with a parameter only as id = or != a parameter whose values are entities of " +
-              `'${String(binding.set)}'`
+            "where_group_malformed",
+            here,
+            'a group is {"any": [two or more filters]}, one level deep, each comparing with a ' +
+              "value; it holds when any of its filters does"
           );
         }
-        const problem = this.reference(value, [...here, "value"], scope, "par", this.parameters);
-        if (problem) return problem;
+        for (let g = 0; g < group.length; g += 1) {
+          const problem = this.checkFilter(group[g], [...here, "any", g], set, scope);
+          if (problem) return problem;
+        }
         continue;
       }
-      const ok = LIST_OPERATORS.has(operator)
-        ? Array.isArray(value) && value.length > 0 && value.every(isScalar)
-        : isScalar(value);
-      if (!ok) {
+      const problem = this.checkFilter(entry, here, set, scope);
+      if (problem) return problem;
+    }
+    return null;
+  }
+
+  private checkFilter(entry: unknown, here: IrLoc, set: string | undefined, scope: Map<string, string>): IrRefusal | null {
+    if (!isObject(entry)) {
+      return refusal("where_filter_malformed", here, "each filter must be an object");
+    }
+    const unknown = unknownKey(entry, FILTER_KEYS, here, "filter");
+    if (unknown) return unknown;
+    if (!isName(entry.attr)) {
+      return refusal(
+        "where_filter_malformed",
+        [...here, "attr"],
+        "a filter names an attribute of the set its binding ranges over"
+      );
+    }
+    const operator = entry.op;
+    if (typeof operator !== "string") {
+      return refusal(
+        "where_filter_malformed",
+        [...here, "op"],
+        `a filter names a comparison; version ${IR_VERSION} has no unary filters, so op is ` +
+          "never absent"
+      );
+    }
+    if (!(FILTER_OPERATORS as readonly string[]).includes(operator)) {
+      return refusal(
+        "where_operator_unknown",
+        [...here, "op"],
+        `${show(operator)} is not a filter comparison; the vocabulary is the expression ` +
+          `catalogue's, narrowed to ${[...FILTER_OPERATORS].sort().join(", ")}`
+      );
+    }
+    if (!("value" in entry)) {
+      return refusal("where_filter_malformed", [...here, "value"], "a filter carries a value");
+    }
+    const value = entry.value;
+    if (isObject(value)) {
+      // Queue R20b: `id = preferred_shift[e, d]`, the row being the entity that cell holds.
+      const fits =
+        entry.attr === "id" &&
+        (operator === "=" || operator === "!=") &&
+        Object.keys(value).length === 2 &&
+        "par" in value &&
+        "index" in value &&
+        set !== undefined &&
+        this.entityParameters.get(value.par as string) === set;
+      if (!fits) {
         return refusal(
-          "where_filter_malformed",
+          "where_parameter_invalid",
           [...here, "value"],
-          `${show(operator)} takes ` +
-            (LIST_OPERATORS.has(operator) ? "a non-empty array of values" : "a single value")
+          "a filter compares with a parameter only as id = or != a parameter whose values are entities of " +
+            `'${String(set)}'`
         );
       }
+      return this.reference(value, [...here, "value"], scope, "par", this.parameters);
+    }
+    const ok = LIST_OPERATORS.has(operator)
+      ? Array.isArray(value) && value.length > 0 && value.every(isScalar)
+      : isScalar(value);
+    if (!ok) {
+      return refusal(
+        "where_filter_malformed",
+        [...here, "value"],
+        `${show(operator)} takes ` +
+          (LIST_OPERATORS.has(operator) ? "a non-empty array of values" : "a single value")
+      );
     }
     return null;
   }
