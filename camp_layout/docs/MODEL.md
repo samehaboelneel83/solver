@@ -240,6 +240,13 @@ constructive heuristic, and validated by exact geometry.** Concretely:
   Reported by the validator; bounded as an extension.
 - **Non-axis-aligned beds** (rotation other than 0/90°): a second grid
   rotated to the wall, or a continuous polish.
+- **Grid access versus real access.** A bed's access tile is centred on the
+  middle of its slot's long side; for a slot of an odd number of cells the
+  tile's centre line runs half a cell (0.25 m) off the bed's own middle. The
+  validator counts a walker beside the middle half of the long side as able to
+  use the bed; an earlier version looked only straight out from the exact
+  middle and rejected 21 of 172 beds that a person could in fact reach -- a
+  reminder that the validator's definitions need the same care as the model's.
 - **The LP bound on the bed count is weak**, because a fractional corridor can
   "reach" many beds at once. Stages can therefore stop at "feasible, gap x%";
   the report says so and never claims "optimal" that was not proved.
@@ -351,8 +358,8 @@ function VALIDATE(problem, layout):
     walker     ← disc of diameter w (−1 cm tolerance)
     for region in {free floor, corridors ∪ zones ∪ door frames}:
         centres ← region eroded by w/2
-        every bed: some point within reach of the middle of a long side lies in a piece of centres
-                   that also holds a door's entry point
+        every bed: some point beside the middle half of a long side (out to w/2 + 0.2 m) lies in a
+                   piece of centres that also holds a door's entry point
     distances ← Dijkstra on a 0.1 m raster of the corridor centre region
     capacities ← max-flow of beds → reachable doors → sink(capacity) must place every bed
 ```

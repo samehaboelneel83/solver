@@ -62,3 +62,24 @@ def layout_from_values(grid: Grid, builder, values, objectives: dict[str, float]
     loads = {door: int(round(values[var.index])) for door, var in builder.load.items()}
     return LayoutResult(grid.problem.name, beds, squares, depth, loads, objectives,
                         [s if isinstance(s, dict) else s.__dict__ for s in stages], solver)
+
+
+def to_json(layout: LayoutResult) -> dict:
+    """Everything needed to validate or draw the layout again, without the solver."""
+    rect = lambda poly: [round(v, 6) for v in poly.bounds]
+    return {
+        "problem": layout.problem_name, "solver": layout.solver,
+        "beds": [{"id": b.id, "type": b.bed_type, "length": b.length, "width": b.width, "rotated": b.rotated,
+                  "bed": rect(b.polygon), "slot": rect(b.slot)} for b in layout.beds],
+        "corridor_squares": [rect(sq) for sq in layout.corridor_squares],
+        "zone_depth": layout.zone_depth, "door_load_model": layout.door_load_model,
+        "objectives": layout.objectives, "stages": layout.stages,
+    }
+
+
+def from_json(data: dict) -> LayoutResult:
+    beds = [PlacedBed(b["id"], b["type"], b["length"], b["width"], b["rotated"], box(*b["bed"]), box(*b["slot"]))
+            for b in data["beds"]]
+    return LayoutResult(data["problem"], beds, [box(*r) for r in data["corridor_squares"]], data["zone_depth"],
+                        data.get("door_load_model", {}), data.get("objectives", {}), data.get("stages", []),
+                        data.get("solver", ""))

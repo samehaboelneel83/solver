@@ -16,7 +16,18 @@ def main() -> None:
     ap.add_argument("--seconds", type=float, default=60.0, help="time limit per later stage")
     ap.add_argument("--beds-seconds", type=float, default=180.0, help="time limit for the bed-count stage")
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--validate", default=None, metavar="LAYOUT_JSON",
+                    help="only re-validate a saved layout.json against the example, and print the checks")
     a = ap.parse_args()
+    if a.validate:
+        from .result import from_json
+        from .validate import validate
+        problem = examples.complex_camp() if a.example == "complex" else examples.small_camp()
+        v = validate(problem, from_json(json.loads(open(a.validate).read())))
+        for c in v.checks:
+            print("ok " if c.ok else "BAD", c.name, "-", c.detail)
+        print(json.dumps({k: x for k, x in v.summary().items() if k != "checks"}))
+        return
     problem = examples.complex_camp() if a.example == "complex" else examples.small_camp()
     run = solve(problem, a.solver, time_limit=a.seconds, threads=a.threads, stage_limits={"beds": a.beds_seconds})
     folder = a.out or f"examples/{a.example}"

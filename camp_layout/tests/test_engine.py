@@ -139,3 +139,26 @@ def test_gis_export_writes_both_crs_and_the_viewer(good, tmp_path):
     assert abs(lon - 31.60) < 0.01 and abs(lat - 30.10) < 0.01
     html = files["viewer"].read_text()
     assert "/*__DATA__*/null" not in html and '"beds":30' in html
+
+
+def test_a_saved_layout_validates_the_same_without_the_solver(good, tmp_path):
+    from camp_layout.result import from_json, to_json
+    again = validate(good.problem, from_json(json.loads(json.dumps(to_json(good.layout)))))
+    assert again.ok and again.walk == good.validation.walk
+
+
+def test_a_corridor_stub_off_the_bed_middle_still_gives_access():
+    """What CP-SAT built in the complex camp: a 2.2 m bed in a 5-cell slot, and
+    one 1 m corridor column beside it whose centre line runs 0.25 m off the
+    bed's middle, down into the door zone. A person standing there can use the
+    bed; the validator must agree with the model's access rule."""
+    from camp_layout.result import LayoutResult
+    problem = small_camp(bed_types=(BedType("cot", 2.2, 0.9, rotation=False, side_gap=0.1),))
+    bed = PlacedBed("B1", "cot", 2.2, 0.9, False, box(5.15, 4.05, 7.35, 4.95), box(5.0, 4.0, 7.5, 5.0))
+    column = [box(5.5, 3.0, 6.5, 4.0), box(5.5, 2.0, 6.5, 3.0)]
+    layout = LayoutResult(problem.name, [bed], column, {"D1": 2.0}, {"D1": 1}, {})
+    v = validate(problem, layout)
+    assert v.ok, [c for c in v.checks if not c.ok]
+    assert 3.0 < v.walk["B1"] < 5.0
+    # Only the exact middle would miss it: the column's centre is at x 6.0, the bed's at 6.25.
+    assert abs(bed.polygon.centroid.x - 6.25) < 1e-9

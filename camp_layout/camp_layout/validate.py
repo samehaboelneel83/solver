@@ -24,7 +24,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra, maximum_flow
 from shapely import STRtree, contains_xy
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 
 from .geometry import Geometry
@@ -76,16 +76,30 @@ def _pieces(geom) -> list[Polygon]:
     return [g for g in getattr(geom, "geoms", []) if isinstance(g, Polygon)]
 
 
-def _access_reach(bed, w: float, reach: float = REACH) -> list[LineString]:
-    """Where a walker's centre may stand to use the bed: along the outward
-    normal from the middle of each long side, from touching the bed out to
-    w/2 + `reach` (the side gap a bed keeps is within reach)."""
+def _access_reach(bed, w: float, reach: float = REACH) -> list:
+    """Where a walker's centre may stand to use the bed: beside the middle half
+    of each long side, from touching the bed out to w/2 + `reach` (the side
+    gap a bed keeps is within reach). A person steps in anywhere along the
+    middle of the bed, not only at its exact centre."""
     minx, miny, maxx, maxy = bed.polygon.bounds
-    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
     far = w / 2 + reach
     if (maxx - minx) >= (maxy - miny):
-        return [LineString([(cx, miny), (cx, miny - far)]), LineString([(cx, maxy), (cx, maxy + far)])]
-    return [LineString([(minx, cy), (minx - far, cy)]), LineString([(maxx, cy), (maxx + far, cy)])]
+        q = (maxx - minx) / 4
+        cx = (minx + maxx) / 2
+        return [box(cx - q, miny - far, cx + q, miny), box(cx - q, maxy, cx + q, maxy + far)]
+    q = (maxy - miny) / 4
+    cy = (miny + maxy) / 2
+    return [box(minx - far, cy - q, minx, cy + q), box(maxx, cy - q, maxx + far, cy + q)]
+
+
+def _stand_point(bed, side, w: float) -> Point:
+    """The point w/2 off the middle of a long side: where distances are measured from."""
+    minx, miny, maxx, maxy = side.bounds
+    bminx, bminy, bmaxx, bmaxy = bed.polygon.bounds
+    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+    if (bmaxx - bminx) >= (bmaxy - bminy):
+        return Point(cx, bminy - w / 2 if maxy <= bminy + 1e-9 else bmaxy + w / 2)
+    return Point(bminx - w / 2 if maxx <= bminx + 1e-9 else bmaxx + w / 2, cy)
 
 
 def validate(problem: CampProblem, layout: LayoutResult, raster: float = 0.1) -> Validation:
@@ -180,7 +194,7 @@ def validate(problem: CampProblem, layout: LayoutResult, raster: float = 0.1) ->
         reachable = {k for k in door_piece.values() if k is not None}
         bad = []
         for b in beds:
-            if not any(pieces[k].intersects(seg) for seg in _access_reach(b, w) for k in reachable):
+            if not any(pieces[k].intersects(side) for side in _access_reach(b, w) for k in reachable):
                 bad.append(b.id)
         v.add(label, bad, f"all {len(beds)} beds reach a door with {w} m clearance (±{CLEARANCE_TOL * 100:.0f} cm)",
               len(beds))
@@ -229,7 +243,15 @@ def _distances(v: Validation, problem, geo, beds, network, door_pts, zones, rast
     dist, pred = dijkstra(graph, indices=door_nodes, return_predecessors=True)
     # Every side a bed may be used from, for every door: a bed between two
     # corridors may be served from either.
-    sides = {b.id: [nearest(seg.interpolate(w / 2)) for seg in _access_reach(b, w)] for b in beds}
+    def stand(b, side):
+        # The nearest corridor centre point beside the middle half of this side.
+        inside = np.flatnonzero(contains_xy(side.buffer(w / 2), coords[:, 0], coords[:, 1]))
+        if inside.size:
+            p = _stand_point(b, side, w)
+            return int(inside[np.argmin((coords[inside, 0] - p.x) ** 2 + (coords[inside, 1] - p.y) ** 2)])
+        return nearest(_stand_point(b, side, w))
+
+    sides = {b.id: [stand(b, side) for side in _access_reach(b, w)] for b in beds}
     best = {b.id: [min(sides[b.id], key=lambda k: dist[j, k]) for j in range(len(doors))] for b in beds}
 
     # Capacity: beds -> doors they can reach, max flow must place every bed.

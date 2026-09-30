@@ -133,12 +133,15 @@ def write(run: Run, folder: str | Path) -> dict[str, Path]:
         "input_wgs84": folder / "input_wgs84.geojson",
         "output_wgs84": folder / "output_wgs84.geojson",
         "report": folder / "report.json",
+        "layout": folder / "layout.json",
         "viewer": folder / "viewer.html",
     }
     files["input_local"].write_text(json.dumps(_collection(inp, "camp input, local metres")))
     files["output_local"].write_text(json.dumps(_collection(out, "camp layout, local metres")))
     files["input_wgs84"].write_text(json.dumps(_collection(to_wgs84(inp, run.problem.origin_lonlat), "camp input, WGS84")))
     files["output_wgs84"].write_text(json.dumps(_collection(to_wgs84(out, run.problem.origin_lonlat), "camp layout, WGS84")))
+    from .result import to_json
+    files["layout"].write_text(json.dumps(to_json(run.layout)))
     rep = report(run)
     files["report"].write_text(json.dumps(rep, indent=2, default=str))
     template = (Path(__file__).parent / "viewer_template.html").read_text()
