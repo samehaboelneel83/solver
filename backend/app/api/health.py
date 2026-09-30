@@ -71,8 +71,10 @@ def checks() -> list[dict[str, Any]]:
         db = None
 
     if db is not None:
+        # Each check rolls back when it fails: one failed statement must not take the
+        # next check down with it ("current transaction is aborted").
         try:
-            current = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+            current = db.execute(text("SELECT schema_version()")).scalar_one_or_none()
             head = _migrations_head()
             out.append(_check(
                 "Database version", current == head,
@@ -80,14 +82,20 @@ def checks() -> list[dict[str, Any]]:
                 else f"The database is at migration {current}; this version of the platform expects {head}.",
                 "Run scripts\\rebuild.cmd: it applies the missing migrations. If a migration fails, its message says which record stops it."))
         except Exception as exc:  # noqa: BLE001 -- any failure here is the same advice
-            out.append(_check("Database version", False, f"The migration version could not be read ({type(exc).__name__}).",
-                              "Run scripts\\rebuild.cmd: it applies the migrations."))
+            db.rollback()
+            missing = "schema_version" in str(exc) and "does not exist" in str(exc)
+            out.append(_check(
+                "Database version", False,
+                "The database is older than this version of the platform expects." if missing
+                else f"The migration version could not be read ({type(exc).__name__}).",
+                "Run scripts\\rebuild.cmd: it applies the missing migrations."))
         try:
             worker = worker_status(db)
             ok = worker["state"] != "offline"
             out.append(_check("Worker", ok, worker["says"] if ok else "No worker has been seen in the last minute and a half, so runs wait in the queue.",
                               "Start it with: docker compose up -d worker -- and if it stops again, docker compose logs worker says why."))
         except Exception:
+            db.rollback()
             out.append(_check("Worker", False, "The worker's heartbeat could not be read.",
                               "Run scripts\\rebuild.cmd so the database is up to date, then check again."))
         finally:
