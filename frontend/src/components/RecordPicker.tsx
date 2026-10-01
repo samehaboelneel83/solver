@@ -20,6 +20,8 @@ export type RecordPickerProps = {
   "data-testid"?: string;
   "aria-invalid"?: boolean | "true" | "false";
   "aria-describedby"?: string;
+  /** For a picker with no visible label (a grid cell). */
+  "aria-label"?: string;
   /** Keys that may not be chosen here, each with the reason shown beside it (a cycle, the record itself). */
   blocked?: ReadonlyMap<string, string>;
   /** Offer to create a record with the typed key when none matches (the reader may edit records). */
@@ -51,6 +53,7 @@ export default function RecordPicker({
   "data-testid": testId,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
   blocked,
   allowCreate,
   kindName,
@@ -138,6 +141,7 @@ export default function RecordPicker({
           aria-autocomplete="list"
           aria-invalid={ariaInvalid}
           aria-describedby={ariaDescribedBy}
+          aria-label={ariaLabel}
           aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
           className={className}
           autoComplete="off"

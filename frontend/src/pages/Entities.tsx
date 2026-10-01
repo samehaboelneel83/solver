@@ -1,6 +1,7 @@
 import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
 import RecordsMap, { geometryFields } from "../components/map/RecordsMap";
 import BulkPanel from "../components/BulkPanel";
+import RecordGrid from "../components/RecordGrid";
 
 import QuickStructure, { NewKindForm } from "../components/QuickStructure";
 import EntityPicture from "../components/EntityPicture";
@@ -322,6 +323,9 @@ function EntityTable({
   const [draft, setDraft] = useState(qFromUrl);
   const [q, setQ] = useState(qFromUrl);
   const [offset, setOffset] = useState(0);
+  const { can } = useCapabilities();
+  // Editing a page of records in place, spreadsheet-style.
+  const [grid, setGrid] = useState(false);
   const [expression, setExpression] = useState<ExpressionDocument | null>(fromUrl);
   const [applied, setApplied] = useState<ExpressionDocument | null>(fromUrl);
   const searchId = useId();
@@ -568,7 +572,25 @@ function EntityTable({
           ))}
         </div>
       )}
-      {placed && view === "map" ? <RecordsMap type={type} /> : body}
+      {can("domain.edit") && !(placed && view === "map") && (
+        <div className="mb-3">
+          <button
+            type="button"
+            aria-pressed={grid}
+            onClick={() => setGrid(!grid)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            {grid ? "Back to the list" : "Edit as grid"}
+          </button>
+        </div>
+      )}
+      {placed && view === "map" ? (
+        <RecordsMap type={type} />
+      ) : grid && can("domain.edit") && data ? (
+        <RecordGrid key={`${type.id}-${offset}`} type={type} records={rows} onDone={() => setGrid(false)} />
+      ) : (
+        body
+      )}
     </>
   );
 }

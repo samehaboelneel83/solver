@@ -177,6 +177,16 @@ describe("Entities: the list", () => {
     expect(rows[1].textContent).toContain("ahmed");
   });
 
+  it("switches the page of records to an editable grid and back", async () => {
+    serve();
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit as grid" }));
+    expect(await screen.findByTestId("record-grid")).toBeInTheDocument();
+    expect(screen.getByLabelText("zoe: key")).toHaveValue("zoe");
+    fireEvent.click(screen.getByRole("button", { name: "Back to the list" }));
+    expect(screen.queryByTestId("record-grid")).toBeNull();
+  });
+
   it("gives every entity a link to its own record", async () => {
     serve();
     renderPage();
