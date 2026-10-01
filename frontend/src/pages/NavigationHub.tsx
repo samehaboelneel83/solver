@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import DataChecks from "../components/DataChecks";
+import WorkbookPanel from "../components/WorkbookPanel";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -71,6 +72,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
         </Link>)}
     </div>
     {kind === "quality" && domainId && <DataChecks domainId={Number(domainId)} />}
+    {kind === "data" && domainId && <WorkbookPanel domainId={Number(domainId)} />}
     <Link className="inline-block py-2 text-sm text-blue-700 underline" to={kind === "access" ? "/help/getting-started" : problemId ? `${problem}/overview` : `${domain}/overview`}>
       {kind === "access" ? "Local help" : problemId ? "Problem overview" : "Domain overview"}
     </Link>

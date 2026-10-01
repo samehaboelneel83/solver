@@ -261,18 +261,19 @@ def _file(name: str, columns: list[Column], rows: list[list[Any]], fmt: str) -> 
                     headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
 
 
-def run_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
-         clean_only: bool, dry_run: bool, *, user=None, request=None, audit_object: tuple[str, Any] | None = None,
-         before_commit=None) -> UploadReport:
-    """Parse each row, write it inside a savepoint, and keep or undo the lot."""
+def write_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
+               *, first_row: int = 2) -> tuple[int, list[Fault], set[int]]:
+    """Parse each row and write it inside a savepoint; nothing is committed here. Returns the rows
+    written, the faults and the numbers of the rows that had any. Several files (a workbook's
+    sheets) can share one transaction this way."""
     faults = _check_header(header, columns)
     if faults:
-        return UploadReport(ok=False, rows=len(rows), written=0, skipped=len(rows), dry_run=dry_run, faults=faults)
+        return 0, faults, set(range(first_row, first_row + len(rows)))
     kinds = {c.name: c for c in columns}
     written = 0
     bad_rows: set[int] = set()
     for offset, raw in enumerate(rows):
-        number = offset + 2  # the header is row 1
+        number = offset + first_row  # the header is row 1
         if all(v is None or str(v).strip() == "" for v in raw):
             continue
         values: dict[str, Any] = {}
@@ -311,6 +312,17 @@ def run_rows(db: Session, header: list[str], rows: list[list[Any]], columns: lis
             bad_rows.add(number)
         else:
             written += 1
+    return written, faults, bad_rows
+
+
+def run_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
+         clean_only: bool, dry_run: bool, *, user=None, request=None, audit_object: tuple[str, Any] | None = None,
+         before_commit=None) -> UploadReport:
+    """Parse each row, write it inside a savepoint, and keep or undo the lot."""
+    header_faults = _check_header(header, columns)
+    if header_faults:
+        return UploadReport(ok=False, rows=len(rows), written=0, skipped=len(rows), dry_run=dry_run, faults=header_faults)
+    written, faults, bad_rows = write_rows(db, header, rows, columns, write_row)
     keep = not dry_run and (not faults or clean_only)
     if keep:
         if user is not None and audit_object is not None and written:
