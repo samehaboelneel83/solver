@@ -41,6 +41,16 @@ Egypt in UTM zone 36N, in the Pacific in zone 1N, and nowhere at all as
 degrees. So the system is **chosen by where the drawing lands**, previewed
 over imagery before anything is stored:
 
+- **Roughly where the site is**, the first question of the import: a country of the Middle East and
+  North Africa (Egypt, Saudi Arabia, the UAE, Qatar, Kuwait, Bahrain, Oman, Yemen, Jordan, Iraq,
+  Syria, Lebanon, Palestine, Israel, Turkey, Iran, Libya, Sudan, Cyprus), or a position. Every
+  regional system in the EPSG registry whose area meets that place is tried — national grids such as
+  Qatar National Grid, Dubai Local TM, Jordan TM, the Iraq National Grids, KSA-GRF17, TUREF, the
+  Egyptian belts, and the UTM zones on local datums — and only those that put the drawing there are
+  offered, one entry per place (datums that land within 3 km of each other are listed together, WGS 84
+  first). When one place is left, or one lies near a given position, it is chosen; when the numbers fit
+  two places in a country (Egypt spans UTM 35N and 36N), the person chooses on the map. The answer is
+  remembered in the browser for the next import.
 - **The drawing's own geographic location** (AutoCAD GEODATA), when present.
 - **The domain's usual drawing CRS**: the setting `spatial.drawing_crs` (an
   EPSG code; 0 means ask). Setting it once, e.g. to 32636, makes it the

@@ -45,7 +45,12 @@ export type CrsCandidate = {
   centre: LonLat;
   fits: boolean;
   score: number;
+  /** Other systems (other datums) that put the drawing within 3 km of the same place. */
+  also?: string[];
+  /** Unambiguous: a form may choose it without asking. */
+  sure?: boolean;
 };
+export type SiteWhere = { region: string | null; point: LonLat | null };
 export type GisUpload = {
   upload_id: string;
   filename: string;
@@ -101,11 +106,18 @@ export type CrsInfo = { code: number; name: string; area: string | null; type?: 
 const GIS = "gis";
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 
-export function uploadDrawing(file: File, domainId: number): Promise<GisUpload> {
+export function uploadDrawing(file: File, domainId: number, region: string | null = null): Promise<GisUpload> {
   const form = new FormData();
   form.append("file", file);
   form.append("domain_id", String(domainId));
+  form.append("region", region ?? "");
   return apiFetch<GisUpload>("/api/v1/gis/uploads", { method: "POST", body: form });
+}
+export const uploadCandidates = (id: string, where: SiteWhere) =>
+  apiFetch<{ candidates: CrsCandidate[] }>(`/api/v1/gis/uploads/${id}/candidates`, { method: "POST", ...json(where) });
+export const listRegions = () => apiFetch<{ items: { name: string; bbox: number[] }[] }>("/api/v1/gis/regions");
+export function useRegions() {
+  return useQuery({ queryKey: [GIS, "regions"], queryFn: listRegions, staleTime: Infinity });
 }
 export const previewUpload = (id: string, body: { placement: GisPlacement; units?: number | null; layers?: string[] }) =>
   apiFetch<GisPreview>(`/api/v1/gis/uploads/${id}/preview`, { method: "POST", ...json(body) });
@@ -119,9 +131,13 @@ export const getFeatures = (id: number) =>
   apiFetch<{ type: "FeatureCollection"; truncated: boolean; features: GisFeature[] }>(`/api/v1/gis/datasets/${id}/features`);
 export const placeDataset = (id: number, placement: GisPlacement, units?: number | null) =>
   apiFetch<GisDataset>(`/api/v1/gis/datasets/${id}/placement`, { method: "PUT", ...json({ placement, units }) });
-export const datasetCandidates = (id: number) =>
-  apiFetch<{ candidates: CrsCandidate[]; utm_zones: GisUpload["utm_zones"]; extent: [number, number, number, number] | null; units: string | null }>(
-    `/api/v1/gis/datasets/${id}/candidates`);
+export const datasetCandidates = (id: number, where: SiteWhere = { region: null, point: null }) => {
+  const q = new URLSearchParams();
+  if (where.region) q.set("region", where.region);
+  if (where.point) { q.set("lon", String(where.point[0])); q.set("lat", String(where.point[1])); }
+  return apiFetch<{ candidates: CrsCandidate[]; utm_zones: GisUpload["utm_zones"]; extent: [number, number, number, number] | null; units: string | null }>(
+    `/api/v1/gis/datasets/${id}/candidates?${q}`);
+};
 export const renameDataset = (id: number, name: string) =>
   apiFetch<GisDataset>(`/api/v1/gis/datasets/${id}`, { method: "PATCH", ...json({ name }) });
 export const deleteDataset = (id: number) => apiFetch<void>(`/api/v1/gis/datasets/${id}`, { method: "DELETE" });

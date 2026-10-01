@@ -11,14 +11,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Crosshair, Download, Maximize2, Search, Trash2 } from "lucide-react";
 import { formatApiError } from "../api/errors";
 import {
-  datasetCandidates, deleteDataset, editLayer, placeDataset, useDataset, useFeatures, type GisDataset,
+  datasetCandidates, deleteDataset, editLayer, placeDataset, useDataset, useFeatures, type GisDataset, type SiteWhere,
 } from "../api/gis";
 import { downloadFrom, type Pt } from "../api/camps";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
 import SiteMap, { fitRings, useSiteBasemap, type At, type MapView as View } from "../components/map/SiteMap";
-import PlacementPicker, { type PickerState } from "../components/map/PlacementPicker";
+import PlacementPicker, { SiteWherePicker, storedWhere, type PickerState } from "../components/map/PlacementPicker";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -71,7 +71,8 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
   const [pick, setPick] = useState<PickerState>({ placement: dataset.placement, units: dataset.placement.units ?? null });
   const [message, setMessage] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const candidates = useQuery({ queryKey: ["gis", "candidates", dataset.id], queryFn: () => datasetCandidates(dataset.id), enabled: placing });
+  const [where, setWhere] = useState<SiteWhere>(storedWhere);
+  const candidates = useQuery({ queryKey: ["gis", "candidates", dataset.id, where], queryFn: () => datasetCandidates(dataset.id, where), enabled: placing });
 
   const fitTo = useCallback((list: Prepared[]) => {
     const e = extentOf(list);
@@ -272,6 +273,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
                         className="rounded border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50">In the wrong place? Choose another coordinate system</button>
                     ) : (
                       <div className="space-y-2 rounded border border-blue-200 bg-blue-50/40 p-2">
+                        <SiteWherePicker value={where} onChange={setWhere} />
                         <PlacementPicker value={pick} onChange={setPick} candidates={candidates.data?.candidates ?? []}
                           zones={candidates.data?.utm_zones ?? []} extent={candidates.data?.extent ?? null} drawingUnits={candidates.data?.units ?? null} />
                         <div className="flex gap-2">

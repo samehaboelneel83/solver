@@ -62,6 +62,16 @@ def test_an_upload_lists_layers_and_where_each_crs_would_put_it(client, drawing_
     # Another organization cannot use the upload.
     assert http.post(f"/api/v1/gis/uploads/{up['upload_id']}/preview", json={"placement": UTM36},
                      headers=t["b"]).status_code == 404
+    # Said to be in Egypt, the drawing's numbers name the UTM zones that put it there, one entry per place.
+    egypt = http.post(f"/api/v1/gis/uploads/{up['upload_id']}/candidates", json={"region": "Egypt"}, headers=t["a"]).json()
+    places = {c["placement"]["code"]: c for c in egypt["candidates"]}
+    assert 32636 in places and 31 < places[32636]["centre"][0] < 32.5 and places[32636]["also"]
+    assert all(24.4 < c["centre"][0] < 37.2 for c in egypt["candidates"])
+    near = http.post(f"/api/v1/gis/uploads/{up['upload_id']}/candidates", json={"point": [31.3, 30.0]}, headers=t["a"]).json()
+    assert near["candidates"][0]["placement"]["code"] == 32636 and "km from the position" in near["candidates"][0]["reason"]
+    assert http.post(f"/api/v1/gis/uploads/{up['upload_id']}/candidates", json={"region": "Atlantis"},
+                     headers=t["a"]).status_code == 422
+    assert "Qatar" in [r["name"] for r in http.get("/api/v1/gis/regions", headers=t["a"]).json()["items"]]
     refused = http.post("/api/v1/gis/uploads", files={"file": ("plan.dwg", io.BytesIO(b"AC1032"))},
                         data={"domain_id": str(t["domain_a"])}, headers=t["a"])
     assert refused.status_code == 415 and "DXF" in refused.text

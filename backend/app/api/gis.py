@@ -2,7 +2,9 @@
 
     POST   /api/v1/gis/uploads                       a .dxf (multipart `file`, `domain_id`) -> its layers,
                                                      extent, units and the likely coordinate systems
+    POST   /api/v1/gis/uploads/{id}/candidates       {region?, point?} -> the likely systems for a site roughly there
     POST   /api/v1/gis/uploads/{id}/preview          {placement, units?, layers?} -> where it lands, as GeoJSON
+    GET    /api/v1/gis/regions                       the countries a site can be said to be in
     POST   /api/v1/gis/datasets                      {upload_id, domain_id, name, placement, units?, layers?}
     GET    /api/v1/gis/datasets?domain_id=
     GET    /api/v1/gis/datasets/{id}                 the dataset and its layers
@@ -57,6 +59,21 @@ class PreviewBody(BaseModel):
     placement: dict[str, Any]
     units: float | None = Field(default=None, gt=0)
     layers: list[str] | None = None
+
+
+class WhereBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    region: str | None = Field(default=None, max_length=60)
+    #: [lon, lat]: a position near the site, more precise than a country.
+    point: tuple[float, float] | None = None
+
+
+def _where(region: str | None, point) -> tuple[str | None, tuple[float, float] | None]:
+    if region and region not in crs.REGIONS:
+        raise HTTPException(422, f"no region called {region!r}; see GET /api/v1/gis/regions")
+    if point is not None and not (-180 <= point[0] <= 180 and -90 <= point[1] <= 90):
+        raise HTTPException(422, "point is [longitude, latitude]")
+    return region or None, (float(point[0]), float(point[1])) if point is not None else None
 
 
 class ImportBody(BaseModel):
@@ -139,10 +156,16 @@ def _hints(db: Session, domain_id: int) -> tuple[int | None, tuple[float, float]
     return usual, ((near[0] + near[2]) / 2, (near[1] + near[3]) / 2) if near else None
 
 
+@router.get("/regions")
+def regions(user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    return {"items": [{"name": k, "bbox": list(v)} for k, v in crs.REGIONS.items()]}
+
+
 @router.post("/uploads", status_code=201)
 def upload(
     file: UploadFile = File(...),
     domain_id: int = Form(..., gt=0),
+    region: str = Form("", max_length=60),
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("domain.edit")),
 ) -> dict[str, Any]:
@@ -161,18 +184,36 @@ def upload(
         raise HTTPException(422, "the drawing's model space has nothing we can show on a map")
     summary = drawing.summary()
     usual, near = _hints(db, domain_id)
-    offered = crs.candidates(drawing.extent, drawing.unit_metres, geodata=drawing.geodata, usual=usual, near=near)
+    where_region, _ = _where(region or None, None)
+    offered = crs.candidates(drawing.extent, drawing.unit_metres, geodata=drawing.geodata, usual=usual, near=near,
+                             region=where_region)
     db.execute(text("DELETE FROM gis_upload WHERE created_at < now() - make_interval(days => :d)"),
                {"d": store.UPLOAD_DAYS})
     upload_id = db.execute(text(
         "INSERT INTO gis_upload (organization_id, created_by, filename, size_bytes, data, summary)"
         " VALUES (:o, :u, :f, :s, :d, CAST(:sm AS jsonb)) RETURNING id"),
         {"o": user.organization_id, "u": str(user.id), "f": name, "s": len(data), "d": data,
-         "sm": json.dumps({**summary, "sha256": hashlib.sha256(data).hexdigest()})}).scalar_one()
+         "sm": json.dumps({**summary, "sha256": hashlib.sha256(data).hexdigest(), "domain_id": domain_id})}).scalar_one()
     db.commit()
     return {"upload_id": str(upload_id), "filename": name, "size_bytes": len(data), "summary": summary,
             "candidates": offered, "utm_zones": crs.utm_zones(drawing.extent, drawing.unit_metres),
             "unit_choices": cad.UNIT_CHOICES}
+
+
+@router.post("/uploads/{upload_id}/candidates")
+def upload_candidates(
+    upload_id: str,
+    body: WhereBody,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    """The likely coordinate systems again, for a site said to be in `region` or near `point`."""
+    row = _upload(db, upload_id, user)
+    s = row["summary"]
+    region, point = _where(body.region, body.point)
+    usual, near = _hints(db, s["domain_id"]) if s.get("domain_id") else (None, None)
+    return {"candidates": crs.candidates(s.get("extent"), s.get("unit_metres"), geodata=s.get("geodata"), usual=usual,
+                                         near=near, region=region, point=point)}
 
 
 @router.post("/uploads/{upload_id}/preview")
@@ -332,6 +373,9 @@ def features(
 @router.get("/datasets/{dataset_id}/candidates")
 def dataset_candidates(
     dataset_id: int,
+    region: str | None = Query(None, max_length=60),
+    lon: float | None = Query(None, ge=-180, le=180),
+    lat: float | None = Query(None, ge=-90, le=90),
     db: Session = Depends(get_db),
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -339,7 +383,9 @@ def dataset_candidates(
     source = row["source"] or {}
     extent = source.get("extent")
     usual, _ = _hints(db, row["domain_id"])
-    return {"candidates": crs.candidates(extent, source.get("unit_metres"), geodata=source.get("geodata"), usual=usual),
+    where_region, point = _where(region, (lon, lat) if lon is not None and lat is not None else None)
+    return {"candidates": crs.candidates(extent, source.get("unit_metres"), geodata=source.get("geodata"), usual=usual,
+                                         region=where_region, point=point),
             "utm_zones": crs.utm_zones(extent, source.get("unit_metres")), "extent": extent, "units": source.get("units")}
 
 

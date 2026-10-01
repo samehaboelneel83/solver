@@ -11,9 +11,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, FileUp, MapPinned } from "lucide-react";
 import { formatApiError } from "../api/errors";
-import { importDataset, previewUpload, uploadDrawing, type GisPreview, type GisUpload } from "../api/gis";
+import { importDataset, previewUpload, uploadCandidates, uploadDrawing, type GisPreview, type GisUpload, type SiteWhere } from "../api/gis";
 import SiteMap, { fitRings, useSiteBasemap, type MapView } from "../components/map/SiteMap";
-import PlacementPicker, { type PickerState } from "../components/map/PlacementPicker";
+import PlacementPicker, { SiteWherePicker, storedWhere, type PickerState } from "../components/map/PlacementPicker";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -33,6 +33,7 @@ export default function MapImport() {
   const [error, setError] = useState<string | null>(null);
   const [layers, setLayers] = useState<Set<string>>(new Set());
   const [pick, setPick] = useState<PickerState>({ placement: null, units: null });
+  const [where, setWhere] = useState<SiteWhere>(storedWhere);
   const [preview, setPreview] = useState<GisPreview | null>(null);
   const [name, setName] = useState("");
   const [view, setView] = useState<MapView>({ cx: 0, cy: 0, mpp: 1 });
@@ -45,13 +46,14 @@ export default function MapImport() {
     setBusy(`Reading ${f.name}…`);
     setError(null);
     try {
-      const got = await uploadDrawing(f, domainId);
+      const got = await uploadDrawing(f, domainId, where.point ? null : where.region);
+      if (where.point) got.candidates = (await uploadCandidates(got.upload_id, where)).candidates;
       setUpload(got);
       // AutoCAD's Defpoints never prints: left out unless chosen.
       setLayers(new Set(got.summary.layers.filter((l) => l.features > 0 && l.on && !l.frozen && l.name.toLowerCase() !== "defpoints").map((l) => l.name)));
       setName(f.name.replace(/\.dxf$/i, "").replace(/[_]+/g, " "));
       // Chosen for the person only when the evidence is good: a world-wide system that merely fits is not.
-      const sure = got.candidates.find((c) => c.fits && c.score >= 4);
+      const sure = got.candidates.find((c) => c.sure);
       setPick({ placement: sure?.placement ?? null, units: null });
     } catch (e) {
       setError(formatApiError(e));
@@ -226,6 +228,14 @@ export default function MapImport() {
               The drawing's numbers run from {s.extent ? `${s.extent[0].toFixed(1)}, ${s.extent[1].toFixed(1)} to ${s.extent[2].toFixed(1)}, ${s.extent[3].toFixed(1)}` : "—"}.
               A DXF rarely says which coordinate system they are in; choose the one that puts it in the right place.
             </p>
+            <SiteWherePicker value={where} onChange={(w) => {
+              setWhere(w);
+              void uploadCandidates(upload.upload_id, w).then((got) => {
+                setUpload({ ...upload, candidates: got.candidates });
+                const sure = got.candidates.find((c) => c.sure);
+                if (sure && (!pick.placement || pick.placement.kind === "epsg")) setPick({ ...pick, placement: sure.placement });
+              }).catch((e) => setError(formatApiError(e)));
+            }} />
             <PlacementPicker value={pick} onChange={setPick} candidates={upload.candidates} zones={upload.utm_zones}
               extent={s.extent} drawingUnits={s.units_name} />
             <h2 className="pt-2 text-sm font-semibold text-slate-900">3. Name and import</h2>

@@ -44,6 +44,113 @@ CURATED = [
 ]
 
 
+#: Roughly where a site is: a country's box (west, south, east, north). The CRSs whose area of use
+#: meets it -- national grids, UTM zones on the local datums -- are tried, and those that put the
+#: drawing inside the country are offered. A position given instead is a box 1.5° around it.
+REGIONS: dict[str, tuple[float, float, float, float]] = {
+    "Bahrain": (50.3, 25.8, 50.7, 26.3),
+    "Cyprus": (32.2, 34.5, 34.6, 35.7),
+    "Egypt": (24.7, 22.0, 36.9, 31.7),
+    "Iran": (44.0, 25.0, 63.4, 39.8),
+    "Iraq": (38.8, 29.0, 48.6, 37.4),
+    "Israel": (34.2, 29.4, 35.9, 33.4),
+    "Jordan": (34.9, 29.2, 39.3, 33.4),
+    "Kuwait": (46.5, 28.5, 48.5, 30.1),
+    "Lebanon": (35.1, 33.0, 36.7, 34.7),
+    "Libya": (9.3, 19.5, 25.2, 33.2),
+    "Oman": (52.0, 16.6, 59.9, 26.4),
+    "Palestine": (34.2, 31.2, 35.6, 32.6),
+    "Qatar": (50.7, 24.5, 51.7, 26.2),
+    "Saudi Arabia": (34.5, 16.3, 55.7, 32.2),
+    "Sudan": (21.8, 8.6, 38.6, 22.3),
+    "Syria": (35.7, 32.3, 42.4, 37.3),
+    "Turkey": (25.6, 35.8, 44.8, 42.1),
+    "United Arab Emirates": (51.5, 22.6, 56.4, 26.1),
+    "Yemen": (42.5, 12.1, 54.0, 19.0),
+}
+
+
+def region_box(region: str | None = None, point: tuple[float, float] | None = None):
+    """The box to search: a named country's, or 1.5° around a position (lon, lat)."""
+    if point is not None:
+        lon, lat = point
+        return (lon - 1.5, lat - 1.5, lon + 1.5, lat + 1.5)
+    return REGIONS.get(region or "")
+
+
+def regional(extent, unit_metres: float | None, box, point: tuple[float, float] | None = None,
+             label: str = "there", limit: int = 15, point_label: str = "the position given") -> list[dict[str, Any]]:
+    """Every projected CRS whose area of use meets `box` that puts the drawing inside it, best first.
+
+    Best: nearest the given position (when there is one), then not on a superseded datum (WGS 72),
+    then the most local (smallest area of use)."""
+    if extent is None or box is None:
+        return []
+    from pyproj.aoi import AreaOfInterest
+    from pyproj.database import query_crs_info
+    from pyproj.enums import PJType
+
+    cx, cy = (extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2
+    units = unit_metres or 1.0
+    w, s, e, n = box
+    found = []
+    for info in query_crs_info(auth_name="EPSG", pj_types=[PJType.PROJECTED_CRS],
+                               area_of_interest=AreaOfInterest(w, s, e, n), contains=False):
+        area = info.area_of_use
+        if info.deprecated or area is None:
+            continue
+        # Regional systems only: a continent-wide one fits anything (an area across the antimeridian is wide).
+        width = area.east - area.west + (360 if area.west > area.east else 0)
+        if width > 40:
+            continue
+        code = int(info.code)
+        at = where(code, cx, cy, units)
+        if at is None or not _inside(at[0], at[1], box, margin=0.3) or \
+                not _inside(at[0], at[1], (area.west, area.south, area.east, area.north), margin=0.1):
+            continue
+        # Modern WGS 84 first, a superseded datum (WGS 72) last.
+        datum = 0 if "WGS 84" in info.name else 3 if "WGS 72" in info.name else 1
+        far = _km(at, point) if point else 0.0
+        found.append(((round(far / 25), datum, width), code, info.name, area.name, at, far))
+    found.sort(key=lambda f: f[0])
+    # One entry per place: systems that put the drawing within 3 km of each other differ by datum,
+    # not by where the site is; the best is offered, the others named beside it.
+    groups: list[dict[str, Any]] = []
+    for _, code, name, area, at, far in found:
+        home = next((g for g in groups if _km(g["at"], at) < 3), None)
+        if home is not None:
+            home["also"].append(f"{name} (EPSG:{code})")
+            continue
+        short = area if len(area) <= 70 else area[:67] + "..."
+        groups.append({"at": at, "also": [], "offer": {
+            "placement": {"kind": "epsg", "code": code}, "name": name, "area": area,
+            "reason": (f"lands {far:.0f} km from {point_label}" if point else f"lands in {label}")
+                      + f", inside its area of use ({short})",
+            "centre": [round(at[0], 6), round(at[1], 6)], "fits": True, "score": 7 - len(groups) * 0.01}})
+    # Sure, so a form may choose it unasked: the only place in the region, or the nearest to a position when
+    # that is close (50 km) and the next is not.
+    if groups:
+        first = groups[0]["offer"]
+        lone = len(groups) == 1
+        near_one = point is not None and _km(groups[0]["at"], point) < 50 and \
+            (len(groups) == 1 or _km(groups[1]["at"], point) >= 50)
+        first["sure"] = lone or near_one
+    out = []
+    for g in groups[:limit]:
+        offer = g["offer"]
+        if g["also"]:
+            offer["also"] = g["also"]
+            offer["reason"] += f"; {len(g['also'])} other datum{'s' if len(g['also']) > 1 else ''} put it within 3 km"
+        out.append(offer)
+    return out
+
+
+def _km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lon1, lat1, lon2, lat2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(min(1.0, h)))
+
+
 class PlacementError(ValueError):
     """The placement is not one we can use; the message says why."""
 
@@ -118,7 +225,7 @@ class Placement:
         return run
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=2048)
 def _to_wgs84(code: int):
     from pyproj import Transformer
 
@@ -188,10 +295,26 @@ def where(code: int, x: float, y: float, units: float = 1.0) -> tuple[float, flo
 
 
 def candidates(extent, unit_metres: float | None, *, geodata: dict[str, Any] | None = None,
-               usual: int | None = None, near: tuple[float, float] | None = None) -> list[dict[str, Any]]:
-    """The likely placements of a drawing, best first, each with where it would land."""
+               usual: int | None = None, near: tuple[float, float] | None = None,
+               region: str | None = None, point: tuple[float, float] | None = None) -> list[dict[str, Any]]:
+    """The likely placements of a drawing, best first, each with where it would land.
+    `region` (a country of REGIONS) or `point` (lon, lat) says roughly where the site is."""
     if extent is None:
         return []
+    box = region_box(region, point)
+    if box is not None:
+        # A position given wins; else the domain's other maps break a tie between places in the country.
+        if near is not None and not _inside(near[0], near[1], box, margin=0.5):
+            near = None  # the domain's other maps are elsewhere: no help here
+        hint, hint_label = (point, "the position given") if point else (near, "this domain's other maps")
+        local = regional(extent, unit_metres, box, hint, label=region or "the place given", point_label=hint_label)
+        seen_codes = {c["placement"]["code"] for c in local}
+        # Beside them: the drawing's own GEODATA and the domain's usual system, and others only if they
+        # too put the drawing in the place given.
+        rest = [c for c in candidates(extent, unit_metres, geodata=geodata, usual=usual, near=near)
+                if c["placement"]["code"] not in seen_codes
+                and (c["score"] >= 8 or _inside(c["centre"][0], c["centre"][1], box, margin=0.3))]
+        return sorted(rest + local, key=lambda c: -c["score"])
     cx, cy = (extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2
     units = unit_metres or 1.0
     out: list[dict[str, Any]] = []
@@ -211,7 +334,8 @@ def candidates(extent, unit_metres: float | None, *, geodata: dict[str, Any] | N
         fits = _inside(at[0], at[1], info["bounds"])
         out.append({"placement": {"kind": "epsg", "code": code}, "name": info["name"], "area": info["area"],
                     "reason": reason if fits else f"{reason}; but the drawing would fall outside its area of use",
-                    "centre": [round(at[0], 6), round(at[1], 6)], "fits": fits, "score": score + (1 if fits else -2)})
+                    "centre": [round(at[0], 6), round(at[1], 6)], "fits": fits, "score": score + (1 if fits else -2),
+                    "sure": fits and score >= 6})
 
     if geodata and geodata.get("epsg"):
         offer(int(geodata["epsg"]), "the drawing's own geographic location (GEODATA) names it", 10)
