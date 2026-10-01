@@ -37,6 +37,7 @@ from app.api.answer_map import router as answer_map_router
 from app.api.run_export import router as run_export_router
 from app.api.time_ops import router as time_ops_router
 from app.api.run_promote import router as run_promote_router
+from app.api.hierarchies import router as hierarchies_router
 from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
@@ -237,6 +238,7 @@ app.include_router(answer_map_router)
 app.include_router(run_export_router)
 app.include_router(time_ops_router)
 app.include_router(run_promote_router)
+app.include_router(hierarchies_router)
 app.include_router(quota_router)
 app.include_router(metrics_router)
 app.include_router(audit_router)

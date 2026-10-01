@@ -1184,6 +1184,26 @@ export function useEntities(
 export function useEntityRecord(id: Id | null | undefined) {
   return useQuery({ queryKey: [V1, "entity", id], queryFn: () => getEntity(id as Id), enabled: isId(id) });
 }
+/** One relationship that nests a record's kind inside itself (`app/api/hierarchies.py`). */
+export type TreeNode = { id: Id; key: string; label: string | null; entity_type_id: Id; depth: number; parent_id?: Id };
+export type EntityTree = {
+  relationship_type_id: Id;
+  name: string;
+  is_hierarchy: boolean;
+  /** Set when the relationship is a reference attribute's mirror: the attribute names the parent. */
+  via_attribute: string | null;
+  /** Nearest first. */
+  ancestors: TreeNode[];
+  descendants: TreeNode[];
+  loop: boolean;
+  truncated: boolean;
+  /** Keys this record may not take as its parent: itself and everything below it. */
+  blocked: string[];
+};
+export const getEntityTrees = (id: Id) => apiFetch<{ entity_id: Id; trees: EntityTree[] }>(`/api/v1/entities/${id}/trees`);
+export function useEntityTrees(id: Id | null | undefined) {
+  return useQuery({ queryKey: [V1, "entity-trees", id], queryFn: () => getEntityTrees(id as Id), enabled: isId(id) });
+}
 export const useCreateEntity = () => useV1Mutation(createEntity);
 export const useUpdateEntity = () =>
   useV1Mutation(({ id, body }: { id: Id; body: EntityUpdate }) => updateEntity(id, body));

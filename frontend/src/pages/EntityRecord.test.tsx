@@ -167,6 +167,9 @@ function answerEntity(value: unknown) {
   entityAnswer = value;
 }
 
+// The record's place in self-nesting relationships: none unless a test gives one.
+let treesAnswer: unknown = { entity_id: 42, trees: [] };
+
 function reads(path: string) {
   mockFetch.mockImplementation((p: string, init?: RequestInit) => {
     if (init?.method && init.method !== "GET") {
@@ -181,6 +184,7 @@ function reads(path: string) {
     }
     if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
     if (p === "/api/v1/entities/42") return Promise.resolve(entityAnswer ?? ENTITY);
+    if (p === "/api/v1/entities/42/trees") return Promise.resolve(treesAnswer);
     if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
     if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: REL_TYPES, total: 1 });
     if (p.startsWith("/api/v1/relationships")) {
@@ -209,6 +213,7 @@ beforeEach(() => {
   mockFetch.mockReset();
   writeAnswer = null;
   entityAnswer = null;
+  treesAnswer = { entity_id: 42, trees: [] };
   window.confirm = vi.fn(() => true);
 });
 
@@ -792,6 +797,7 @@ describe("EntityRecord: the entity's relationships", () => {
     mockFetch.mockImplementation((p: string) => {
       if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
       if (p === "/api/v1/entities/42") return Promise.resolve(ENTITY);
+      if (p === "/api/v1/entities/42/trees") return Promise.resolve({ entity_id: 42, trees: [] });
       if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
       if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: REL_TYPES, total: 1 });
       if (p.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
@@ -806,6 +812,7 @@ describe("EntityRecord: the entity's relationships", () => {
     mockFetch.mockImplementation((p: string) => {
       if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
       if (p === "/api/v1/entities/42") return Promise.resolve(ENTITY);
+      if (p === "/api/v1/entities/42/trees") return Promise.resolve({ entity_id: 42, trees: [] });
       if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
       if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: [], total: 0 });
       if (p.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
@@ -891,5 +898,78 @@ describe("entityServerErrors", () => {
     const result = entityServerErrors(err(500, { detail: "boom" }), names);
     expect(result.fields).toStrictEqual({});
     expect(result.general).toBeTruthy();
+  });
+});
+
+/**
+ * A kind nested in itself: Ahmed's `manager` names another employee. The page shows the chain
+ * above and the tree below, and the manager field will not take Ahmed or anyone under him.
+ */
+describe("EntityRecord: a record nested in its own kind", () => {
+  const MANAGER = { id: 18, entity_type_id: 5, name: "manager", data_type: "reference", required: false, unit: null,
+    enum_values: null, default_value: null, target_type_id: 5 };
+  const STAFF = [
+    { ...ENTITY, id: 40, key: "sara", label: "Sara", attrs: {} },
+    { ...ENTITY, id: 43, key: "omar", label: "Omar", attrs: {} },
+  ];
+  const TREE = {
+    relationship_type_id: 8, name: "employee_manager", is_hierarchy: false, via_attribute: "manager",
+    ancestors: [{ id: 40, key: "sara", label: "Sara", entity_type_id: 5, depth: 1 }],
+    descendants: [{ id: 43, key: "omar", label: "Omar", entity_type_id: 5, depth: 1, parent_id: 42 }],
+    loop: false, truncated: false, blocked: ["ahmed", "omar"],
+  };
+
+  function serve(tree: object, relTypes: object[] = []) {
+    mockFetch.mockImplementation((p: string) => {
+      if (p === "/api/v1/entity-types/5") return Promise.resolve({ ...TYPE, attributes: [...TYPE.attributes, MANAGER] });
+      if (p === "/api/v1/entities/42") return Promise.resolve({ ...ENTITY, attrs: { ...ENTITY.attrs, manager: "sara" } });
+      if (p === "/api/v1/entities/42/trees") return Promise.resolve({ entity_id: 42, trees: [tree] });
+      if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
+      if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: relTypes, total: relTypes.length });
+      if (p.startsWith("/api/v1/relationships")) return Promise.resolve({ items: [], total: 0 });
+      if (p.startsWith("/api/v1/entities")) return Promise.resolve({ items: [...STAFF, ENTITY], total: 3 });
+      return Promise.reject(new Error(`unexpected ${p}`));
+    });
+  }
+
+  it("shows the chain above and the records below", async () => {
+    serve(TREE);
+    renderAt("/entities/42");
+    const tree = await screen.findByTestId("tree-employee_manager");
+    expect(within(tree).getByRole("navigation", { name: "Above in employee_manager" })).toHaveTextContent("Sara (sara)›Ahmed (ahmed)");
+    expect(within(tree).getByRole("link", { name: "Omar (omar)" })).toHaveAttribute("href", "/entities/43");
+    expect(within(tree).queryByRole("alert")).toBeNull();
+  });
+
+  it("greys out the record itself and those below it as its manager", async () => {
+    serve(TREE);
+    renderAt("/entities/42");
+    await screen.findByTestId("tree-employee_manager");
+    fireEvent.focus(screen.getByTestId("attr-manager"));
+    expect(await screen.findByRole("option", { name: /omar — Omar \(below this one: a loop\)/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: /ahmed — Ahmed \(this record\)/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: "sara — Sara" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("warns when the chain already loops", async () => {
+    serve({ ...TREE, loop: true });
+    renderAt("/entities/42");
+    const tree = await screen.findByTestId("tree-employee_manager");
+    expect(within(tree).getByRole("alert")).toHaveTextContent(/comes back on itself/);
+  });
+
+  it("will not offer someone below as the parent in a hierarchy, nor someone above as the child", async () => {
+    const MENTORS = { id: 9, domain_id: 7, name: "mentors", from_type_id: 5, to_type_id: 5, cardinality: "one_to_many",
+      is_hierarchy: true, colour: null, updated_at: "t" };
+    serve({ ...TREE, relationship_type_id: 9, name: "mentors", is_hierarchy: true, via_attribute: null }, [MENTORS]);
+    renderAt("/entities/42");
+    const kind = await screen.findByTestId("relationship-type-select");
+    fireEvent.change(kind, { target: { value: "9:to" } });
+    const other = () => within(screen.getByTestId("relationship-other-select"));
+    await waitFor(() => expect(other().getByRole("option", { name: /Omar.*below it: a loop/ })).toBeDisabled());
+    expect(other().getByRole("option", { name: /Sara/ })).not.toBeDisabled();
+    fireEvent.change(kind, { target: { value: "9:from" } });
+    await waitFor(() => expect(other().getByRole("option", { name: /Sara.*above it: a loop/ })).toBeDisabled());
+    expect(other().getByRole("option", { name: /Omar/ })).not.toBeDisabled();
   });
 });

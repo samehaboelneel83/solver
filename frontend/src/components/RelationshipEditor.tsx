@@ -6,6 +6,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { formatApiError } from "../api/errors";
 import {
   useCreateRelationship,
+  useEntityTrees,
   useDeleteRelationship,
   type Entity,
   type Id,
@@ -291,6 +292,14 @@ export function NewRelationshipForm({
   const typeName = (typeId: Id) => entityTypeNames.get(typeId) ?? `#${typeId}`;
   const choicesFor = (typeId: Id) => entitiesByType.get(typeId) ?? [];
 
+  // A relationship nesting the subject's kind in itself: offering the subject's own descendants
+  // as its parent (or its ancestors as its child) would close a loop, which a hierarchy refuses.
+  const trees = useEntityTrees(subject?.id);
+  const tree = trees.data?.trees.find((t) => t.relationship_type_id === option?.type.id && !t.via_attribute);
+  const loopIds = new Set<Id>(
+    !tree ? [] : option?.role === "to" ? tree.descendants.map((n) => n.id) : tree.ancestors.map((n) => n.id)
+  );
+
   if (!can("domain.edit")) return null;
 
   if (options.length === 0) {
@@ -414,8 +423,9 @@ export function NewRelationshipForm({
                   // is never what was meant.
                   .filter((entity) => entity.id !== subject.id)
                   .map((entity) => (
-                    <option key={entity.id} value={entity.id}>
+                    <option key={entity.id} value={entity.id} disabled={loopIds.has(entity.id)}>
                       {entityOptionLabel(entity)}
+                      {loopIds.has(entity.id) ? (option?.role === "to" ? " (below it: a loop)" : " (above it: a loop)") : ""}
                     </option>
                   ))}
               </select>

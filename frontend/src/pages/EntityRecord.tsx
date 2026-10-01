@@ -3,6 +3,7 @@ import { FormEvent, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
 import EntityRelationships from "../components/EntityRelationships";
+import RecordTrees from "../components/RecordTrees";
 import OfflineNotice from "../components/OfflineNotice";
 import StaleRecordNotice from "../components/StaleRecordNotice";
 import { useToast } from "../components/ToastProvider";
@@ -23,6 +24,7 @@ import {
   useDeleteEntity,
   useEntityRecord,
   useEntityType,
+  useEntityTrees,
   useUpdateEntity,
   validationErrors,
   type AttributeDef,
@@ -241,6 +243,12 @@ function RecordForm({
   const createEntity = useCreateEntity();
   const updateEntity = useUpdateEntity();
   const deleteEntity = useDeleteEntity();
+  // A reference that nests this kind in itself may not name this record or anything below it.
+  const trees = useEntityTrees(entity?.id);
+  const loopBlocked = (attributeName: string): ReadonlyMap<string, string> | undefined => {
+    const tree = trees.data?.trees.find((t) => t.via_attribute === attributeName);
+    return tree ? new Map(tree.blocked.map((key) => [key, key === entity?.key ? "this record" : "below this one: a loop"])) : undefined;
+  };
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -542,6 +550,7 @@ function RecordForm({
               drafts={drafts}
               errors={errors}
               staleKeys={staleKeys}
+              blocked={loopBlocked}
               onChange={(name, value) => {
                 setDrafts((prev) => ({ ...prev, [name]: value }));
                 clearError(attrField(name));
@@ -570,6 +579,8 @@ function RecordForm({
           entity's page never showed which unit they work in, or which unit
           a unit sits under -- while the delete warning below counted those
           very rows. */}
+      {entity && <RecordTrees entity={entity} />}
+
       {entity && <EntityRelationships entity={entity} entityType={type} />}
 
       {entity && canEdit && (

@@ -178,9 +178,11 @@ type AttrsFormProps = {
   /** Stored keys with no definition left (see `staleAttrKeys`). */
   staleKeys?: string[];
   onChange: (name: string, value: string) => void;
+  /** Per reference attribute: keys it may not name, with why (a loop through this record). */
+  blocked?: (attributeName: string) => ReadonlyMap<string, string> | undefined;
 };
 
-export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], onChange }: AttrsFormProps) {
+export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], onChange, blocked }: AttrsFormProps) {
   const baseId = useId();
 
   if (attributes.length === 0) {
@@ -224,7 +226,7 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
                 <span className="font-mono">{attribute.name}</span>
                 {attribute.unit ? ` (${attribute.unit})` : ""}
               </FieldLabel>
-              <Control attribute={attribute} draft={draft} common={common} />
+              <Control attribute={attribute} draft={draft} common={common} blocked={blocked?.(attribute.name)} />
               {hint && (
                 <p id={hintId} className="mt-1 text-xs text-slate-500">
                   {hint}
@@ -240,7 +242,17 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
 }
 
  
-function Control({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
+function Control({
+  attribute,
+  draft,
+  common,
+  blocked,
+}: {
+  attribute: AttributeDef;
+  draft: string;
+  common: any;
+  blocked?: ReadonlyMap<string, string>;
+}) {
   if (attribute.data_type === "geometry") {
     // GeoJSON typed or pasted, drawn beside it as it is written.
     const shape = (() => {
@@ -258,7 +270,7 @@ function Control({ attribute, draft, common }: { attribute: AttributeDef; draft:
     );
   }
   if (attribute.data_type === "reference") {
-    return <ReferenceControl attribute={attribute} draft={draft} common={common} />;
+    return <ReferenceControl attribute={attribute} draft={draft} common={common} blocked={blocked} />;
   }
   if (attribute.data_type === "boolean" || attribute.data_type === "enum") {
     const options =
@@ -300,7 +312,17 @@ function Control({ attribute, draft, common }: { attribute: AttributeDef; draft:
 }
 
 /** A reference (queue R20a): one entity of the target type or a type inheriting from it, by key. */
-function ReferenceControl({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
+function ReferenceControl({
+  attribute,
+  draft,
+  common,
+  blocked,
+}: {
+  attribute: AttributeDef;
+  draft: string;
+  common: any;
+  blocked?: ReadonlyMap<string, string>;
+}) {
   return (
     <RecordPicker
       typeId={(attribute.target_type_id as Id | null) ?? null}
@@ -312,6 +334,7 @@ function ReferenceControl({ attribute, draft, common }: { attribute: AttributeDe
       aria-describedby={common["aria-describedby"]}
       className={common.className}
       required={attribute.required}
+      blocked={blocked}
     />
   );
 }
