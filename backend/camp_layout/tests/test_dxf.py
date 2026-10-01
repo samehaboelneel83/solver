@@ -57,7 +57,7 @@ def test_a_surveyed_drawing_in_millimetres_reads_in_local_metres(tmp_path):
     doors = {x.id: (x.a, x.b) for x in d.doors}
     assert doors["D1"] == ((4.0, 0.0), (5.8, 0.0))  # the block's opening, on the south wall
     assert doors["D2"] == ((20.0, 4.0), (20.0, 5.5))
-    assert [o.id for o in d.obstacles] == ["water-tank"] and abs(d.obstacles[0].polygon.area - 3.1416 * 1.44) < 0.05
+    assert [o.id for o in d.obstacles] == ["Water-tank"] and abs(d.obstacles[0].polygon.area - 3.1416 * 1.44) < 0.05
     assert len(d.prohibited) == 1 and abs(d.prohibited[0].polygon.area - 3.0) < 1e-6
     assert any("Furniture" in n for n in d.notes)
 

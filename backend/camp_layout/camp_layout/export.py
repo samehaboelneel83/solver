@@ -144,8 +144,13 @@ def write(run: Run, folder: str | Path) -> dict[str, Path]:
     files["layout"].write_text(json.dumps(to_json(run.layout)))
     rep = report(run)
     files["report"].write_text(json.dumps(rep, indent=2, default=str))
+    files["viewer"].write_text(viewer_html(inp, out, rep, run.problem.origin_lonlat))
+    return files
+
+
+def viewer_html(inp: list[dict], out: list[dict], rep: dict, origin_lonlat) -> str:
+    """The self-contained site plan, from the features and report alone (a stored result is enough)."""
     template = (Path(__file__).parent / "viewer_template.html").read_text()
     data = {"input": _collection(inp, "input"), "output": _collection(out, "output"), "report": rep,
-            "origin": list(run.problem.origin_lonlat)}
-    files["viewer"].write_text(template.replace("/*__DATA__*/null", json.dumps(data, default=str, separators=(",", ":"))))
-    return files
+            "origin": list(origin_lonlat)}
+    return template.replace("/*__DATA__*/null", json.dumps(data, default=str, separators=(",", ":")))

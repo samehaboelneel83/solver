@@ -16,7 +16,7 @@ geometry before it counts.
 ## Run
 
 ```bash
-pip install -e .            # ortools, shapely, numpy, scipy, pyproj, ezdxf, openpyxl
+pip install -e .            # ortools, shapely, numpy, scipy, pyproj, ezdxf, openpyxl (in backend/camp_layout)
 python -m camp_layout complex --solver cpsat --beds-seconds 300 --seconds 120 --out examples/complex
 python -m camp_layout small --solver scip          # the same model on a MILP solver
 python -m camp_layout complex --solver heuristic   # Stage 0 only, about a second
@@ -32,6 +32,35 @@ export.write(run, "out/")
 
 Solvers: `cpsat` (OR-Tools CP-SAT), `scip`, `highs`, `cbc` (MILP through
 OR-Tools), `heuristic`. A new solver is one file in `camp_layout/adapters/`.
+
+## In the platform
+
+Each domain has **Camp layouts** in the sidebar (`/domains/:id/camps`):
+
+- **Draw** on the map, over satellite or street imagery: the camp boundary
+  (polygon or rectangle), doors (a click on a horizontal or vertical wall),
+  closed areas (polygon, rectangle or circle), no-beds areas and bed zones.
+  Select a shape to drag its corners, insert a corner from the dot between
+  two, slide a door along its wall, or type every coordinate in the panel.
+  Snap to 0.1-1 m; Shift keeps walls straight; Ctrl+Z / Ctrl+Y undo and redo.
+- **Set** what a drawing cannot show: door capacities and clear zones, bed
+  types (sizes, ranges, counts, zones, priority), corridor width, the goals
+  and their order, and where the camp is (type or paste a position, or drag
+  it over the imagery with *Place on map*).
+- **Check** as you draw: the server (`POST /api/v1/camps/check`) names the
+  shape at fault and the door zones are drawn before any solve.
+- **Lay out** in the worker (`app/camp/jobs.py`, one child process per solve)
+  and see the answer on the same map: beds coloured by type, door or walk,
+  corridors, grown door zones, the route of the bed under the pointer, door
+  loads against capacities, the 18 independent checks, and downloads:
+  GeoJSON in WGS84 and local metres, the report, and a standalone map.
+- **Import** a `.dxf` or `.xlsx` into the editor; **export** the camp as a
+  workbook, a DXF or JSON.
+
+Imagery comes from the tile index named by the `spatial.tiles_index` setting,
+and otherwise from Esri World Imagery and OpenStreetMap, which the viewer's
+browser must be able to reach. Without them the drawing works on a plain
+background.
 
 ## From a CAD drawing
 

@@ -266,7 +266,8 @@ def read_dxf(path: str, *, units: str | None = None, crs: str | None = None, sna
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-") or "unnamed"
+    """A name as written, with spaces and punctuation made dashes: `D1` stays `D1`, `Water tank` is `Water-tank`."""
+    return re.sub(r"[^A-Za-z0-9_]+", "-", text.strip()).strip("-") or "unnamed"
 
 
 def _door_segment(entity, scale: float, offset) -> LineString | Polygon | None:

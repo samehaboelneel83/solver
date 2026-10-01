@@ -398,7 +398,8 @@ camp_layout/
   pipeline.py        the chain of §11: solve(problem, solver=…)
   examples.py        small_camp, complex_camp
   dxf.py             CAD drawing (layers, units, surveyed offset, door blocks) → Drawing; problem → template DXF
-  workbook.py        the problem as an .xlsx to review (defaults shaded) and read back; dxf_to_workbook
+  workbook.py        the problem as an .xlsx to review (defaults shaded) and read back; dxf_to_problem, dxf_to_workbook
+  serial.py          the problem as `camp-problem/1` JSON: what the platform stores and the map editor edits
 ```
 
 The CAD input enters before `problem.py`: `plan.dxf → dxf.py → camp.xlsx →

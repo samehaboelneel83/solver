@@ -249,6 +249,14 @@ def main() -> None:  # pragma: no cover -- the loop itself
                     logger.warning("could not prune run events", exc_info=True)
                 pruned_at = time.monotonic()
             solved = work_once(db)
+            if solved is None:
+                # Camp layouts (app.camp.jobs) when no run is waiting.
+                try:
+                    from app.camp import jobs as camp_jobs
+                    solved = camp_jobs.work_once(db, heartbeat=lambda: beat(db, worker_id))
+                except Exception:
+                    db.rollback()
+                    logger.warning("could not take a camp solve", exc_info=True)
             # Every settled run's fact, whoever settled it; a ClickHouse
             # outage leaves them for the next pass (app.analytics).
             if client is None and clickhouse.due():

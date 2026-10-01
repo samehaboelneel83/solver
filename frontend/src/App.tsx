@@ -14,6 +14,8 @@ import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import Health from "./pages/Health";
 import StartProblem from "./pages/StartProblem";
+import CampList from "./pages/CampList";
+import CampEditor from "./pages/CampEditor";
 import { DomainOverview, ProblemOverview } from "./pages/PlanningOverview";
 import GraphDemo from "./pages/GraphDemo";
 import EntityTypes from "./pages/EntityTypes";
@@ -108,6 +110,8 @@ export default function App() {
           <Route path="structure/relationship-types/:id" element={<RelationshipTypeDetail />} />
           <Route path="problems" element={<DomainOverview listing />} />
           <Route path="start" element={<StartProblem />} />
+          <Route path="camps" element={<CampList />} />
+          <Route path="camps/:campId" element={<CampEditor />} />
           <Route path="problems/:problemId" element={<ProblemQueryBridge />}>
             <Route index element={<ProblemOverview />} />
             <Route path="overview" element={<ProblemOverview />} />

@@ -207,10 +207,10 @@ def read_workbook(path: str | Path) -> CampProblem:
     )
 
 
-def dxf_to_workbook(dxf_path: str, xlsx_path: str, *, name: str | None = None, units: str | None = None,
-                    crs: str | None = None, bed_types=None, door_capacity: int | None = None) -> tuple[Path, list[str]]:
-    """Read a drawing and write the workbook to review: geometry from the
-    drawing, rules from the defaults (shaded)."""
+def dxf_to_problem(dxf_path: str, *, name: str | None = None, units: str | None = None, crs: str | None = None,
+                   bed_types=None, door_capacity: int | None = None) -> tuple[CampProblem, tuple[float, float], list[str]]:
+    """A drawing as a problem: geometry from the drawing, rules from the defaults.
+    Returns the problem, the offset the drawing was moved by, and the notes."""
     from .dxf import read_dxf
 
     d = read_dxf(dxf_path, units=units, crs=crs)
@@ -227,5 +227,15 @@ def dxf_to_workbook(dxf_path: str, xlsx_path: str, *, name: str | None = None, u
         origin_lonlat=d.origin_lonlat or (31.60, 30.10),
     )
     notes = list(d.notes) + [f"read {len(d.doors)} doors, {len(d.obstacles)} obstacles, {len(d.prohibited)} no-bed areas, "
-                             f"{len(d.zones)} zones; shaded cells are defaults to review"]
-    return write_workbook(problem, xlsx_path, offset=d.offset, notes=notes), notes
+                             f"{len(d.zones)} zones"]
+    return problem, d.offset, notes
+
+
+def dxf_to_workbook(dxf_path: str, xlsx_path: str, *, name: str | None = None, units: str | None = None,
+                    crs: str | None = None, bed_types=None, door_capacity: int | None = None) -> tuple[Path, list[str]]:
+    """Read a drawing and write the workbook to review: geometry from the
+    drawing, rules from the defaults (shaded)."""
+    problem, offset, notes = dxf_to_problem(dxf_path, name=name, units=units, crs=crs, bed_types=bed_types,
+                                            door_capacity=door_capacity)
+    notes[-1] += "; shaded cells are defaults to review"
+    return write_workbook(problem, xlsx_path, offset=offset, notes=notes), notes
