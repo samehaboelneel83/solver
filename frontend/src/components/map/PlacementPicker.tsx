@@ -35,14 +35,17 @@ function storeWhere(where: SiteWhere) {
   try { localStorage.setItem(WHERE_KEY, JSON.stringify(where)); } catch { /* this page only */ }
 }
 
-/** "Roughly where is the site?": a country, or a position; the coordinate systems are searched there. */
+/** "Roughly where is the site?": a country, and in a large one the city it is near, or a position;
+ * the coordinate systems are searched there. */
 export function SiteWherePicker({ value, onChange }: { value: SiteWhere; onChange: (w: SiteWhere) => void }) {
   const regions = useRegions();
-  const [text, setText] = useState(value.point ? `${value.point[1]}, ${value.point[0]}` : "");
-  const [byPoint, setByPoint] = useState(value.point !== null);
+  const [text, setText] = useState(value.point && !value.region ? `${value.point[1]}, ${value.point[0]}` : "");
+  const [byPoint, setByPoint] = useState(value.point !== null && !value.region);
   const set = (w: SiteWhere) => { storeWhere(w); onChange(w); };
+  const places = regions.data?.items.find((r) => r.name === value.region)?.places ?? [];
+  const placeAt = places.find((p) => value.point && p.lonlat[0] === value.point[0] && p.lonlat[1] === value.point[1]);
   return (
-    <div className="rounded border border-slate-200 bg-slate-50 p-2">
+    <div className="space-y-1 rounded border border-slate-200 bg-slate-50 p-2">
       <label className="block text-xs font-semibold text-slate-700">
         Roughly where is the site?
         <select className={`mt-0.5 ${FIELD} font-normal`} aria-label="Country of the site"
@@ -57,16 +60,30 @@ export function SiteWherePicker({ value, onChange }: { value: SiteWhere; onChang
           <option value="@point">near a position…</option>
         </select>
       </label>
+      {!byPoint && places.length > 0 && (
+        <label className="block text-xs text-slate-700">
+          Near
+          <select className={`mt-0.5 ${FIELD}`} aria-label="City the site is near" value={placeAt?.name ?? ""}
+            onChange={(e) => {
+              const p = places.find((x) => x.name === e.target.value);
+              set({ region: value.region, point: p ? p.lonlat : null });
+            }}>
+            <option value="">anywhere in {value.region}</option>
+            {places.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+        </label>
+      )}
       {byPoint && (
-        <span className="mt-1 flex gap-1">
-          <input className={FIELD} value={text} onChange={(e) => setText(e.target.value)} placeholder="latitude, longitude e.g. 25.29, 51.53"
+        <span className="flex gap-1">
+          <input className={FIELD} value={text} onChange={(e) => setText(e.target.value)} placeholder="latitude, longitude e.g. 24.71, 46.68"
             aria-label="Position near the site" />
           <button type="button" className="rounded border border-slate-300 bg-white px-2 text-xs"
             onClick={() => { const q = parseLatLon(text); if (q) set({ region: null, point: q }); }}>Use</button>
         </span>
       )}
-      <p className="mt-1 text-[11px] text-slate-500">
+      <p className="text-[11px] text-slate-500">
         The country's own grids and UTM zones are tried; only those that put the drawing there are offered.
+        {places.length > 0 && !value.point ? " In a large country the same numbers fit several zones: the nearest city settles it." : ""}
       </p>
     </div>
   );
@@ -95,6 +112,7 @@ export default function PlacementPicker({
     kind: "local", anchor: extent ? [extent[0], extent[1]] : [0, 0], lonlat: [31.2357, 30.0444], rotation: 0, scale: 1,
   };
   const zoneFor = zones.find((z) => z.code === code);
+  const mine = (c: CrsCandidate) => code === c.placement.code || (c.also ?? []).some((a) => a.endsWith(`(EPSG:${code})`));
 
   return (
     <div className="space-y-3 text-sm">
@@ -119,16 +137,28 @@ export default function PlacementPicker({
           <ul className="mt-1 space-y-1">
             {candidates.map((c) => (
               <li key={c.placement.code}>
-                <label className={`flex cursor-pointer gap-2 rounded border px-2 py-1.5 ${code === c.placement.code ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}>
-                  <input type="radio" name="crs" checked={code === c.placement.code} onChange={() => set(c.placement)} />
+                <label className={`flex cursor-pointer gap-2 rounded border px-2 py-1.5 ${mine(c) ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <input type="radio" name="crs" checked={mine(c)} onChange={() => set(c.placement)} />
                   <span>
                     <span className="font-medium text-slate-900">{c.name}</span> <span className="text-xs text-slate-500">EPSG:{c.placement.code}</span>
                     <span className="block text-xs text-slate-600">{c.reason}; lands at {at(c.centre)}</span>
-                    {c.also && c.also.length > 0 && (
-                      <span className="block text-[11px] text-slate-400" title={c.also.join("\n")}>
+                    {c.also && c.also.length > 0 && (code === c.placement.code || c.also.some((a) => a.endsWith(`(EPSG:${code})`))) ? (
+                      <span className="mt-1 block text-[11px] text-slate-600">
+                        Datum (the same place within 3 km; they differ by metres):
+                        <select className="ml-1 rounded border border-slate-300 bg-white px-1 py-0.5" aria-label="Datum"
+                          value={code ?? c.placement.code} onChange={(e) => set({ kind: "epsg", code: Number(e.target.value) })}>
+                          <option value={c.placement.code}>{c.name}</option>
+                          {c.also.map((a) => {
+                            const m = /\(EPSG:(\d+)\)$/.exec(a);
+                            return m ? <option key={a} value={Number(m[1])}>{a.replace(/ \(EPSG:\d+\)$/, "")}</option> : null;
+                          })}
+                        </select>
+                      </span>
+                    ) : c.also && c.also.length > 0 ? (
+                      <span className="block text-[11px] text-slate-400">
                         Same place within 3 km: {c.also.slice(0, 3).join(", ")}{c.also.length > 3 ? `, +${c.also.length - 3} more` : ""}
                       </span>
-                    )}
+                    ) : null}
                   </span>
                 </label>
               </li>
@@ -165,7 +195,7 @@ export default function PlacementPicker({
             ))}
           </ul>
         )}
-        {code !== null && !candidates.some((c) => c.placement.code === code) && !zoneFor && (
+        {code !== null && !candidates.some(mine) && !zoneFor && (
           <p className="mt-1 text-xs text-slate-700">Chosen: EPSG:{code}{p?.kind === "epsg" && p.name ? ` ${p.name}` : ""}</p>
         )}
       </div>

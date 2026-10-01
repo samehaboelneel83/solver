@@ -115,7 +115,8 @@ export function uploadDrawing(file: File, domainId: number, region: string | nul
 }
 export const uploadCandidates = (id: string, where: SiteWhere) =>
   apiFetch<{ candidates: CrsCandidate[] }>(`/api/v1/gis/uploads/${id}/candidates`, { method: "POST", ...json(where) });
-export const listRegions = () => apiFetch<{ items: { name: string; bbox: number[] }[] }>("/api/v1/gis/regions");
+export type SiteRegion = { name: string; bbox: number[]; places: { name: string; lonlat: LonLat }[] };
+export const listRegions = () => apiFetch<{ items: SiteRegion[] }>("/api/v1/gis/regions");
 export function useRegions() {
   return useQuery({ queryKey: [GIS, "regions"], queryFn: listRegions, staleTime: Infinity });
 }

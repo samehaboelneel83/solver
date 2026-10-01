@@ -70,12 +70,46 @@ REGIONS: dict[str, tuple[float, float, float, float]] = {
 }
 
 
+#: Places to say a site is near, in the larger countries, where one country's numbers fit several
+#: UTM zones (Saudi Arabia spans 36N to 40N): (name, lon, lat).
+PLACES: dict[str, list[tuple[str, float, float]]] = {
+    "Saudi Arabia": [
+        ("Riyadh", 46.68, 24.71), ("Jeddah", 39.17, 21.54), ("Makkah", 39.83, 21.42), ("Madinah", 39.61, 24.47),
+        ("Taif", 40.42, 21.27), ("Yanbu", 38.06, 24.09), ("Dammam", 50.10, 26.43), ("Al Khobar / Dhahran", 50.21, 26.28),
+        ("Jubail", 49.66, 27.01), ("Al Ahsa (Hofuf)", 49.59, 25.38), ("Hafr Al Batin", 45.97, 28.43),
+        ("Buraidah (Qassim)", 43.97, 26.33), ("Hail", 41.69, 27.52), ("Tabuk", 36.57, 28.38), ("NEOM", 35.20, 28.00),
+        ("AlUla", 37.92, 26.61), ("Sakaka (Al Jouf)", 40.21, 29.97), ("Arar", 41.04, 30.98), ("Abha", 42.50, 18.22),
+        ("Jizan", 42.55, 16.89), ("Najran", 44.13, 17.49)],
+    "Egypt": [
+        ("Cairo / Giza", 31.24, 30.04), ("New Administrative Capital", 31.76, 30.02), ("Alexandria", 29.92, 31.20),
+        ("Port Said", 32.30, 31.26), ("Suez / Ain Sokhna", 32.53, 29.97), ("Ismailia", 32.27, 30.60),
+        ("Marsa Matrouh", 27.24, 31.35), ("El Alamein", 28.95, 30.83), ("Hurghada", 33.81, 27.26),
+        ("Sharm El Sheikh", 34.33, 27.91), ("Luxor", 32.64, 25.69), ("Aswan", 32.90, 24.09), ("Asyut", 31.18, 27.18)],
+    "United Arab Emirates": [("Abu Dhabi", 54.37, 24.45), ("Dubai", 55.27, 25.20), ("Sharjah", 55.42, 25.35),
+                             ("Al Ain", 55.76, 24.21), ("Ras Al Khaimah", 55.94, 25.79), ("Ruwais", 52.73, 24.11)],
+    "Oman": [("Muscat", 58.41, 23.59), ("Sohar", 56.71, 24.36), ("Duqm", 57.70, 19.66), ("Salalah", 54.09, 17.02)],
+    "Iraq": [("Baghdad", 44.37, 33.31), ("Basra", 47.78, 30.51), ("Erbil", 44.01, 36.19), ("Mosul", 43.13, 36.34),
+             ("Najaf / Karbala", 44.24, 32.30)],
+    "Iran": [("Tehran", 51.39, 35.69), ("Isfahan", 51.67, 32.65), ("Shiraz", 52.53, 29.59), ("Tabriz", 46.29, 38.08),
+             ("Mashhad", 59.61, 36.30), ("Bandar Abbas", 56.27, 27.18), ("Ahvaz", 48.67, 31.32)],
+    "Turkey": [("Istanbul", 28.98, 41.01), ("Ankara", 32.86, 39.93), ("Izmir", 27.14, 38.42), ("Antalya", 30.71, 36.90),
+               ("Gaziantep", 37.38, 37.07), ("Diyarbakir", 40.23, 37.91), ("Erzurum", 41.27, 39.90)],
+    "Jordan": [("Amman", 35.93, 31.95), ("Aqaba", 35.01, 29.53), ("Irbid", 35.85, 32.56), ("Zarqa / Mafraq", 36.21, 32.34)],
+    "Syria": [("Damascus", 36.29, 33.51), ("Aleppo", 37.16, 36.20), ("Homs", 36.72, 34.73), ("Latakia", 35.79, 35.52)],
+    "Yemen": [("Sanaa", 44.21, 15.37), ("Aden", 45.03, 12.79), ("Mukalla", 49.12, 14.54), ("Hodeidah", 42.95, 14.80)],
+    "Libya": [("Tripoli", 13.19, 32.89), ("Benghazi", 20.07, 32.12), ("Misrata", 15.09, 32.38), ("Sabha", 14.43, 27.04)],
+    "Sudan": [("Khartoum", 32.53, 15.50), ("Port Sudan", 37.22, 19.62), ("Kassala", 36.40, 15.45), ("El Obeid", 30.22, 13.18)],
+}
+
+
 def region_box(region: str | None = None, point: tuple[float, float] | None = None):
-    """The box to search: a named country's, or 1.5° around a position (lon, lat)."""
+    """The box to search: a named country's, else 1.5° around a position (lon, lat)."""
+    if region in REGIONS:
+        return REGIONS[region]
     if point is not None:
         lon, lat = point
         return (lon - 1.5, lat - 1.5, lon + 1.5, lat + 1.5)
-    return REGIONS.get(region or "")
+    return None
 
 
 def regional(extent, unit_metres: float | None, box, point: tuple[float, float] | None = None,
@@ -111,7 +145,7 @@ def regional(extent, unit_metres: float | None, box, point: tuple[float, float] 
         # Modern WGS 84 first, a superseded datum (WGS 72) last.
         datum = 0 if "WGS 84" in info.name else 3 if "WGS 72" in info.name else 1
         far = _km(at, point) if point else 0.0
-        found.append(((round(far / 25), datum, width), code, info.name, area.name, at, far))
+        found.append(((int(far // 50), datum, width), code, info.name, area.name, at, far))
     found.sort(key=lambda f: f[0])
     # One entry per place: systems that put the drawing within 3 km of each other differ by datum,
     # not by where the site is; the best is offered, the others named beside it.
@@ -132,8 +166,10 @@ def regional(extent, unit_metres: float | None, box, point: tuple[float, float] 
     if groups:
         first = groups[0]["offer"]
         lone = len(groups) == 1
-        near_one = point is not None and _km(groups[0]["at"], point) < 50 and \
-            (len(groups) == 1 or _km(groups[1]["at"], point) >= 50)
+        # Near a place: the nearest within 200 km, and the next far further (another zone is ~600 km off).
+        d1 = _km(groups[0]["at"], point) if point is not None else None
+        d2 = _km(groups[1]["at"], point) if point is not None and len(groups) > 1 else None
+        near_one = d1 is not None and d1 < 200 and (d2 is None or d2 > max(300.0, 3 * d1))
         first["sure"] = lone or near_one
     out = []
     for g in groups[:limit]:
@@ -311,9 +347,15 @@ def candidates(extent, unit_metres: float | None, *, geodata: dict[str, Any] | N
         seen_codes = {c["placement"]["code"] for c in local}
         # Beside them: the drawing's own GEODATA and the domain's usual system, and others only if they
         # too put the drawing in the place given.
-        rest = [c for c in candidates(extent, unit_metres, geodata=geodata, usual=usual, near=near)
-                if c["placement"]["code"] not in seen_codes
-                and (c["score"] >= 8 or _inside(c["centre"][0], c["centre"][1], box, margin=0.3))]
+        rest = []
+        for c in candidates(extent, unit_metres, geodata=geodata, usual=usual, near=near):
+            if c["placement"]["code"] in seen_codes:
+                continue
+            same = next((l for l in local if _km(tuple(l["centre"]), tuple(c["centre"])) < 3), None)
+            if same is not None and c["score"] < 8:
+                same.setdefault("also", []).append(f"{c['name']} (EPSG:{c['placement']['code']})")
+            elif c["score"] >= 8 or _inside(c["centre"][0], c["centre"][1], box, margin=0.3):
+                rest.append(c)
         return sorted(rest + local, key=lambda c: -c["score"])
     cx, cy = (extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2
     units = unit_metres or 1.0

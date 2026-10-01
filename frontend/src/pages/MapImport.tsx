@@ -233,7 +233,8 @@ export default function MapImport() {
               void uploadCandidates(upload.upload_id, w).then((got) => {
                 setUpload({ ...upload, candidates: got.candidates });
                 const sure = got.candidates.find((c) => c.sure);
-                if (sure && (!pick.placement || pick.placement.kind === "epsg")) setPick({ ...pick, placement: sure.placement });
+                // A new place answers afresh: the sure choice there, or none -- never a zone left from before.
+                setPick((current) => (current.placement?.kind === "local" ? current : { ...current, placement: sure?.placement ?? null }));
               }).catch((e) => setError(formatApiError(e)));
             }} />
             <PlacementPicker value={pick} onChange={setPick} candidates={upload.candidates} zones={upload.utm_zones}

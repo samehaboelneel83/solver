@@ -158,7 +158,9 @@ def _hints(db: Session, domain_id: int) -> tuple[int | None, tuple[float, float]
 
 @router.get("/regions")
 def regions(user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
-    return {"items": [{"name": k, "bbox": list(v)} for k, v in crs.REGIONS.items()]}
+    return {"items": [{"name": k, "bbox": list(v),
+                       "places": [{"name": n, "lonlat": [lon, lat]} for n, lon, lat in crs.PLACES.get(k, [])]}
+                      for k, v in crs.REGIONS.items()]}
 
 
 @router.post("/uploads", status_code=201)

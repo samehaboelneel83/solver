@@ -110,3 +110,21 @@ def test_a_file_that_is_not_a_drawing_is_refused(tmp_path):
     bad.write_bytes(b"%PDF-1.4 not a drawing")
     with pytest.raises(cad.CadError):
         cad.read(bad)
+
+
+def test_in_saudi_arabia_the_nearest_city_settles_the_utm_zone():
+    """KSA spans UTM 36N-40N: a drawing's numbers fit several zones; the city it is near picks one."""
+    from pyproj import Transformer
+
+    x, y = Transformer.from_crs("EPSG:4326", "EPSG:32638", always_xy=True).transform(46.75, 24.80)
+    extent = (x, y, x + 50, y + 50)
+    anywhere = crs.candidates(extent, 1.0, region="Saudi Arabia")
+    assert len(anywhere) >= 3 and not any(c.get("sure") for c in anywhere)
+    riyadh = next(lonlat for name, *lonlat in [(n, lo, la) for n, lo, la in crs.PLACES["Saudi Arabia"]] if name == "Riyadh")
+    near = crs.candidates(extent, 1.0, region="Saudi Arabia", point=tuple(riyadh))
+    assert near[0]["placement"]["code"] == 32638 and near[0]["sure"]
+    assert any("KSA-GRF17" in a for a in near[0]["also"])
+    # Aramco Lambert numbers are their own: one place, chosen.
+    ax, ay = Transformer.from_crs("EPSG:4326", "EPSG:2318", always_xy=True).transform(46.68, 24.71)
+    aramco = crs.candidates((ax, ay, ax + 50, ay + 50), 1.0, region="Saudi Arabia")
+    assert aramco[0]["placement"]["code"] == 2318 and aramco[0]["sure"]

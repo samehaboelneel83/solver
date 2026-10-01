@@ -51,6 +51,14 @@ over imagery before anything is stored:
   first). When one place is left, or one lies near a given position, it is chosen; when the numbers fit
   two places in a country (Egypt spans UTM 35N and 36N), the person chooses on the map. The answer is
   remembered in the browser for the next import.
+- **Near which city**, in the larger countries. Saudi Arabia spans UTM zones 36N to 40N, so the same
+  numbers fit three or four places across the kingdom; choosing the nearest city (Riyadh, Jeddah,
+  Makkah, Madinah, Dammam, Jubail, NEOM, Tabuk, Abha...) picks the zone. The same lists exist for
+  Egypt, the UAE, Oman, Iraq, Iran, Turkey, Jordan, Syria, Yemen, Libya and Sudan.
+- **The datum**: systems that land within 3 km of each other differ only by datum (in Saudi Arabia
+  WGS 84, KSA-GRF17, MTRF-2000, Ain el Abd, ED50), by metres to a few hundred metres, which matters
+  on a site plan. The entry offers them in a list; the drawing's surveyor's note or title block says
+  which. Aramco Lambert (EPSG:2318) drawings are recognised by their own numbers.
 - **The drawing's own geographic location** (AutoCAD GEODATA), when present.
 - **The domain's usual drawing CRS**: the setting `spatial.drawing_crs` (an
   EPSG code; 0 means ask). Setting it once, e.g. to 32636, makes it the
