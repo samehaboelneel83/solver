@@ -17,6 +17,9 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
 import { relativeTime } from "../lib/relativeTime";
 
+/** The engine's complex example: it arrives already laid out (169 beds). */
+const EXAMPLE = "Irregular camp, four doors";
+
 const STATUS: Record<string, string> = {
   queued: "Waiting to be laid out",
   running: "Being laid out",
@@ -136,7 +139,7 @@ export default function CampList() {
             <fieldset className="text-sm text-slate-700">
               <legend>Start from</legend>
               <div className="mt-1 flex flex-wrap gap-3">
-                {([["blank", "A blank 30 × 20 m camp"], ["small", "Small example"], ["complex", "Complex example"]] as const).map(([v, label]) => (
+                {([["blank", "A blank 30 × 20 m camp"], ["small", "Small example"], ["complex", `Complex example (${EXAMPLE})`]] as const).map(([v, label]) => (
                   <label key={v} className="flex items-center gap-1.5">
                     <input type="radio" name="start" checked={start === v} onChange={() => setStart(v)} /> {label}
                   </label>
@@ -146,7 +149,7 @@ export default function CampList() {
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button type="button" disabled={create.isPending}
-              onClick={() => void make({ domain_id: domainId, name: name.trim() || (start === "blank" ? "New camp" : start === "small" ? "Small camp" : "Irregular camp"), start })}
+              onClick={() => void make({ domain_id: domainId, name: name.trim() || (start === "blank" ? "New camp" : start === "small" ? "Small camp" : EXAMPLE), start })}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
               <MapPinned className="h-4 w-4" aria-hidden /> Create and draw
             </button>
@@ -188,9 +191,17 @@ export default function CampList() {
       <section aria-label="Camps">
         {camps.isLoading ? <Skeleton /> : camps.isError ? <LoadFailure subject="The camps" error={camps.error} retry={() => void camps.refetch()} /> : (
           camps.data!.items.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
-              No camps in this domain yet.
-            </p>
+            <div className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+              <p>No camps in this domain yet.</p>
+              {canEdit && (
+                <button type="button" disabled={create.isPending}
+                  onClick={() => void make({ domain_id: domainId, name: EXAMPLE, start: "complex" })}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60">
+                  <Tent className="h-4 w-4" aria-hidden /> {create.isPending ? "Adding…" : `Add the example: ${EXAMPLE}`}
+                </button>
+              )}
+              {canEdit && <p className="mt-1 text-xs">Nine sides, four doors, 169 beds already laid out — open it to see the layout on the map.</p>}
+            </div>
           ) : (
             <ul className="space-y-3">
               {camps.data!.items.map((c) => <CampRow key={c.id} camp={c} domainId={domainId} canEdit={canEdit} />)}

@@ -72,6 +72,47 @@ def solve_problem(problem_data: dict[str, Any], options: dict[str, Any], log) ->
     }
 
 
+def example_result(problem_data: dict[str, Any]) -> dict[str, Any] | None:
+    """The complex example's layout as shipped with the engine (examples/complex,
+    169 beds from a long CP-SAT run), checked again on this camp; None when the
+    camp's shapes are no longer the example's or the layout no longer passes."""
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import camp_layout
+    from app.camp.engine import serial
+    from app.camp.service import normalised
+    from camp_layout import export
+    from camp_layout.result import from_json, to_json
+    from camp_layout.validate import validate
+
+    folder = Path(camp_layout.__file__).resolve().parent.parent / "examples" / "complex"
+    try:
+        layout = from_json(json.loads((folder / "layout.json").read_text()))
+        report = json.loads((folder / "report.json").read_text())
+    except OSError:
+        return None
+    problem = serial.from_dict(normalised(problem_data))
+    try:
+        validation = validate(problem, layout)
+    except Exception:  # noqa: BLE001 -- shapes that no longer fit the stored layout
+        return None
+    if not validation.ok:
+        return None
+    run = SimpleNamespace(problem=problem, layout=layout, validation=validation)
+    return {
+        "input": {"type": "FeatureCollection", "features": export.input_features(run)},
+        "output": {"type": "FeatureCollection", "features": export.output_features(run)},
+        "report": {**report, "camp": problem.name, "validation": validation.summary()},
+        "layout": to_json(layout),
+        "origin_lonlat": list(problem.origin_lonlat),
+        "bearing": problem.bearing,
+        "beds": len(layout.beds),
+        "valid": True,
+    }
+
+
 def _child(problem_data, options, out) -> None:  # pragma: no cover -- runs in the child process
     import json
 

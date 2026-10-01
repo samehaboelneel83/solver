@@ -108,7 +108,7 @@ it("lists the domain's camps with their latest layout and starts a new one", asy
   expect(within(row).getByText("North camp")).toBeInTheDocument();
   expect(row).toHaveTextContent("Latest layout: 2 beds, every check passed");
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "South camp" } });
-  fireEvent.click(screen.getByLabelText("Complex example"));
+  fireEvent.click(screen.getByLabelText(/Complex example/));
   fireEvent.click(screen.getByRole("button", { name: /Create and draw/ }));
   await waitFor(() => expect(write).toHaveBeenCalled());
   expect(JSON.parse(write.mock.calls[0][1].body)).toEqual({ domain_id: 7, name: "South camp", start: "complex" });
@@ -147,4 +147,15 @@ it("draws the latest layout on the map with its counts and downloads", async () 
   expect(within(panel).getByRole("button", { name: /Layout — GeoJSON \(WGS84/ })).toBeInTheDocument();
   fireEvent.pointerEnter(screen.getAllByTestId("layout-bed")[0]);
   expect(await within(panel).findByText(/to door D1, 4.5 m walk/)).toBeInTheDocument();
+});
+
+it("offers the laid-out example when the domain has no camps", async () => {
+  const write = stub(vi.fn().mockResolvedValue({ ...PLAN, id: 12 }));
+  const base = mockFetch.getMockImplementation()!;
+  mockFetch.mockImplementation((path: string, options?: { method?: string }) =>
+    path.startsWith("/api/v1/camps?domain_id=") ? Promise.resolve({ items: [] }) : base(path, options));
+  renderAt("/domains/7/map-data/camps");
+  fireEvent.click(await screen.findByRole("button", { name: "Add the example: Irregular camp, four doors" }));
+  await waitFor(() => expect(write).toHaveBeenCalled());
+  expect(JSON.parse(write.mock.calls[0][1].body)).toEqual({ domain_id: 7, name: "Irregular camp, four doors", start: "complex" });
 });

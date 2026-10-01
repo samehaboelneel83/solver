@@ -206,3 +206,17 @@ def test_a_camp_turned_on_the_ground_keeps_its_walls_straight(client):
     # On the Earth the first wall (east along the grid) runs 30° clockwise from east, i.e. towards south-east.
     (lon0, lat0), (lon1, lat1) = ring[0], ring[1]
     assert lon1 > lon0 and lat1 < lat0
+
+
+def test_the_complex_example_arrives_laid_out(client):
+    """Irregular camp, four doors: its layout ships with the engine, so the camp opens with 169 beds
+    without waiting for a long solve."""
+    http, t = client
+    camp = _create(http, t, start="complex", name="Irregular camp, four doors")
+    (solve,) = camp["solves"]
+    assert solve["status"] == "done" and solve["beds"] == 169 and solve["valid"]
+    got = http.get(f"/api/v1/camp-solves/{solve['id']}", headers=t["a"]).json()
+    beds = [f for f in got["result"]["output"]["features"] if f["properties"]["layer"] == "bed"]
+    assert len(beds) == 169 and got["result"]["report"]["camp"] == "Irregular camp, four doors"
+    listed = http.get("/api/v1/camps", params={"domain_id": t["domain_a"]}, headers=t["a"]).json()["items"]
+    assert listed[0]["status"] == "done" and listed[0]["beds"] == 169

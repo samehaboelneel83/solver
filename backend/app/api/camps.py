@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -200,6 +201,20 @@ def create_camp(
         if body.origin_lonlat:
             problem["origin_lonlat"] = list(body.origin_lonlat)
     camp_id = _write(db, body.domain_id, problem, options=jobs.DEFAULT_OPTIONS)
+    if body.problem is None and body.start == "complex":
+        # The example arrives laid out: its layout ships with the engine, so it shows at once.
+        done = jobs.example_result(problem)
+        if done is not None:
+            db.execute(text(
+                "INSERT INTO camp_solve (organization_id, domain_id, camp_entity_id, camp_name, problem, options,"
+                " created_by, status, progress, result, beds, valid, started_at, finished_at)"
+                " VALUES (:o, :d, :c, :n, CAST(:pr AS jsonb), CAST(:opt AS jsonb), :u, 'done', CAST(:pg AS jsonb),"
+                " CAST(:r AS jsonb), :b, true, now(), now())"),
+                {"o": user.organization_id, "d": body.domain_id, "c": camp_id, "n": problem["name"],
+                 "pr": json.dumps(problem), "opt": json.dumps(jobs.DEFAULT_OPTIONS), "u": str(user.id),
+                 "pg": json.dumps([{"at": round(time.time(), 1),
+                                    "line": "the example's layout, as shipped with the engine (a long CP-SAT run)"}]),
+                 "r": json.dumps(done, default=str), "b": done["beds"]})
     _audit(db, user, "camp.create", camp_id)
     db.commit()
     return get_camp(camp_id, db, user)
