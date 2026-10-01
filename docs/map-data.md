@@ -118,7 +118,9 @@ without that column, and the platform works the same.
   references show as points. Click a feature for everything the drawing says
   about it. Search text, block names and attributes. Zoom to a layer.
 - **Export**: GeoJSON (WGS 84), or CSV with WKT geometry.
-- **Camps from map data**: *Camp layouts → Or from map data*. Choose the
+- **Camps** are a tab of Map data, and kept as records of the domain (see
+  `backend/camp_layout/README.md`).
+- **Camps from map data**: *Map data → Camps → Or from map data*. Choose the
   boundary layer and the layers holding doors, closed areas, no-bed areas and
   bed zones; roles are guessed from layer names. The camp is laid out in the
   drawing's own grid, so straight walls stay straight. Touching door pieces
@@ -136,6 +138,6 @@ be able to reach.
 
 - 50 MB per drawing, and 250,000 features per import (the rest are noted).
 - The viewer shows up to 100,000 features at once.
-- A camp built from map data is shown north-up on its map. The drawing's
-  grid can differ from true north by the projection's convergence (under 3°
-  in a UTM zone).
+- A camp built from map data keeps the drawing's grid: its bearing is the
+  grid's turn from true north (a UTM zone's convergence, or a local grid's
+  rotation), so it sits on the imagery exactly as drawn.

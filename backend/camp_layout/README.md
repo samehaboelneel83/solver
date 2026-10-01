@@ -35,7 +35,25 @@ OR-Tools), `heuristic`. A new solver is one file in `camp_layout/adapters/`.
 
 ## In the platform
 
-Each domain has **Camp layouts** in the sidebar (`/domains/:id/camps`):
+Camps are **map data**: each domain's *Map data* page has two tabs, *Drawings*
+(imported CAD drawings) and *Camps* (`/domains/:id/map-data/camps`).
+
+**A camp is records of its domain** (`app/camp/domain.py`), planted the first
+time a camp is made there:
+
+| Kind | What |
+|---|---|
+| record types | `camp` (boundary, origin, bearing, goals, solve settings), `door` (location, width_m, frame_depth_m), `closed_area`, `no_beds_area`, `bed_zone` (shape), `bed_type` (sizes, ranges, may_rotate, side_gap_m) |
+| relationships | `door_of`, `closed_area_of`, `no_beds_area_of`, `bed_zone_of` (to the camp), `camp_uses` (camp -> bed types), `must_go_in` (bed type -> zone) |
+| parameters | `corridor_width_m[camp]`, `grid_m[camp]`, `door_capacity[door]`, `zone_depth_m`, `zone_max_depth_m`, `zone_step_m`, `zone_margin_m`, `zone_area_per_bed_m2[door]`, `min_beds` / `max_beds[camp, bed_type]`, `bed_priority[bed_type]` |
+
+The Records, Relationships and Parameters pages show and edit them, and the
+next solve reads what they say. Shapes are stored on the Earth; the camp's
+`origin` and `bearing` (how far its grid is turned from north) put them back
+on the camp's own grid, so a camp drawn at an angle keeps straight walls.
+Only the layouts asked for are kept outside the records (`camp_solve`).
+
+In the camp editor:
 
 - **Draw** on the map, over satellite or street imagery: the camp boundary
   (polygon or rectangle), doors (a click on a horizontal or vertical wall),

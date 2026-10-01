@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.camp import jobs
 from app.core.db import SessionLocal
 from app.main import app
+from tests.camp_records import clear_camps
 from tests.test_tenancy import tenants  # noqa: F401
 from tests.test_v1_problem_run import db  # noqa: F401
 
@@ -24,8 +25,7 @@ from tests.test_v1_problem_run import db  # noqa: F401
 def client(tenants):  # noqa: F811
     yield TestClient(app), tenants
     with SessionLocal() as session:
-        session.execute(text("DELETE FROM camp_plan"))
-        session.commit()
+        clear_camps(session)
 
 
 def _create(http, t, start="blank", name="North camp"):
@@ -146,3 +146,63 @@ def test_a_queued_solve_can_be_stopped_and_a_broken_camp_is_not_queued(client):
     assert not saved["check"]["ok"]
     refused = http.post(f"/api/v1/camps/{camp['id']}/solves", json={}, headers=t["a"])
     assert refused.status_code == 422 and "door" in refused.text
+
+
+def test_a_camp_is_records_of_its_domain_that_the_records_pages_edit(client):
+    """The camp, its doors, areas, zones and bed types are records with relationships and parameters;
+    a change made on the Parameters page is what the camp reads next."""
+    http, t = client
+    camp = _create(http, t, start="complex", name="Records camp")
+    with SessionLocal() as session:
+        kinds = dict(session.execute(text(
+            "SELECT t.name, count(*) FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+            " WHERE t.domain_id = :d GROUP BY t.name"), {"d": t["domain_a"]}).all())
+        assert kinds["camp"] == 1 and kinds["door"] == 4 and kinds["closed_area"] == 5
+        assert kinds["no_beds_area"] == 2 and kinds["bed_zone"] == 1 and kinds["bed_type"] == 2
+        links = dict(session.execute(text(
+            "SELECT rt.name, count(*) FROM relationship r JOIN relationship_type rt ON rt.id = r.relationship_type_id"
+            " WHERE rt.domain_id = :d GROUP BY rt.name"), {"d": t["domain_a"]}).all())
+        assert links["door_of"] == 4 and links["camp_uses"] == 2 and links["must_go_in"] == 1
+        cap = session.execute(text(
+            "SELECT d.id, v.entity_ids FROM parameter_def d JOIN parameter_value v ON v.parameter_def_id = d.id"
+            " JOIN entity e ON e.id = v.entity_ids[1] WHERE d.domain_id = :dom AND d.name = 'door_capacity'"
+            " AND e.label = 'D2-east'"), {"dom": t["domain_a"]}).one()
+    # The door's evacuation capacity, changed on the Parameters page.
+    put = http.put(f"/api/v1/parameters/{cap[0]}/values", json={"cells": [{"entity_ids": cap[1], "value": 75}]},
+                   headers=t["a"])
+    assert put.status_code == 200, put.text
+    again = http.get(f"/api/v1/camps/{camp['id']}", headers=t["a"]).json()
+    assert next(d for d in again["problem"]["doors"] if d["id"] == "D2-east")["capacity"] == 75
+    # What was drawn reads back exactly: walls straight, doors on them.
+    assert again["problem"]["boundary"] == camp["problem"]["boundary"]
+    assert [(d["a"], d["b"]) for d in again["problem"]["doors"]] == [(d["a"], d["b"]) for d in camp["problem"]["doors"]]
+    assert again["check"]["ok"]
+    # Removing a closed area in the editor removes its record.
+    problem = again["problem"]
+    problem["obstacles"] = [o for o in problem["obstacles"] if o["id"] != "trees"]
+    http.put(f"/api/v1/camps/{camp['id']}", json={"problem": problem}, headers=t["a"])
+    with SessionLocal() as session:
+        left = session.execute(text("SELECT count(*) FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+                                    " WHERE t.domain_id = :d AND t.name = 'closed_area'"), {"d": t["domain_a"]}).scalar_one()
+    assert left == 4
+    # Deleting the camp deletes its records.
+    assert http.delete(f"/api/v1/camps/{camp['id']}", headers=t["a"]).status_code == 204
+    with SessionLocal() as session:
+        assert session.execute(text("SELECT count(*) FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+                                    " WHERE t.domain_id = :d AND t.name <> 'bed_type'"), {"d": t["domain_a"]}).scalar_one() == 0
+
+
+def test_a_camp_turned_on_the_ground_keeps_its_walls_straight(client):
+    """A camp on a grid turned 30° from north: stored on the Earth, read back on its own grid."""
+    http, t = client
+    camp = _create(http, t, start="small")
+    problem = {**camp["problem"], "bearing": 30.0}
+    saved = http.put(f"/api/v1/camps/{camp['id']}", json={"problem": problem}, headers=t["a"]).json()
+    assert saved["problem"]["bearing"] == 30.0
+    assert saved["problem"]["boundary"] == camp["problem"]["boundary"] and saved["check"]["ok"]
+    with SessionLocal() as session:
+        ring = session.execute(text("SELECT attrs -> 'boundary' -> 'coordinates' -> 0 FROM entity WHERE id = :i"),
+                               {"i": camp["id"]}).scalar_one()
+    # On the Earth the first wall (east along the grid) runs 30° clockwise from east, i.e. towards south-east.
+    (lon0, lat0), (lon1, lat1) = ring[0], ring[1]
+    assert lon1 > lon0 and lat1 < lat0

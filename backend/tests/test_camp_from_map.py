@@ -14,6 +14,7 @@ from app.camp.engine import camp_layout  # noqa: F401 -- the engine on the path
 from app.core.db import SessionLocal
 from app.main import app
 from tests.cad_fixtures import E0, N0
+from tests.camp_records import clear_camps
 from tests.test_tenancy import tenants  # noqa: F401
 from tests.test_v1_problem_run import db  # noqa: F401
 
@@ -22,7 +23,7 @@ from tests.test_v1_problem_run import db  # noqa: F401
 def client(tenants):  # noqa: F811
     yield TestClient(app), tenants
     with SessionLocal() as session:
-        session.execute(text("DELETE FROM camp_plan"))
+        clear_camps(session)
         session.execute(text("DELETE FROM gis_dataset"))
         session.commit()
 

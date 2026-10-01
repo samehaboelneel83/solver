@@ -307,6 +307,9 @@ export function SettingsPanel({
               onClick={() => { const p = parseLatLon(where); if (p) { onChange({ ...problem, origin_lonlat: p }); setWhere(""); } }}>Go</button>
           </span>
         </label>
+        <NumberField label="Grid turned from north" unit="°" step={0.1} value={problem.bearing ?? 0}
+          hint="How far the camp's walls (its +y axis) are turned clockwise from north: a camp drawn at an angle keeps its walls on its grid"
+          onChange={(v) => v !== null && Math.abs(v) <= 180 && onChange({ ...problem, bearing: v })} className="mt-2" />
         <p className="mt-1 text-xs text-slate-500">Or choose “Place on map” in the toolbar and drag the camp over the imagery.</p>
       </fieldset>
       <fieldset className="rounded border border-slate-200 p-2">

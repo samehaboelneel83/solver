@@ -34,6 +34,7 @@ def to_dict(problem: CampProblem) -> dict[str, Any]:
         "name": problem.name,
         "grid": problem.grid,
         "origin_lonlat": _pt(problem.origin_lonlat),
+        "bearing": problem.bearing,
         "boundary": _ring(problem.boundary),
         "doors": [{"id": d.id, "a": _pt(d.a), "b": _pt(d.b), "depth": d.depth, "capacity": d.capacity}
                   for d in problem.doors],
@@ -117,6 +118,7 @@ def from_dict(data: dict[str, Any]) -> CampProblem:
             objectives=_build(ObjectiveSpec, objectives, "objectives"),
             grid=float(data.get("grid", 0.5)),
             origin_lonlat=_point(data.get("origin_lonlat", (31.60, 30.10))),
+            bearing=float(data.get("bearing", 0.0) or 0.0),
         )
     except ValueError as exc:
         if isinstance(exc, ProblemFormatError):

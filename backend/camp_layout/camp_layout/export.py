@@ -107,14 +107,18 @@ def report(run: Run) -> dict:
     }
 
 
-def to_wgs84(features: list[dict], origin_lonlat) -> list[dict]:
+def to_wgs84(features: list[dict], origin_lonlat, bearing: float = 0.0) -> list[dict]:
+    """Local metres to longitude and latitude: turned by `bearing` (the local +y axis, clockwise
+    from north), then an azimuthal equidistant projection at the origin."""
+    import math
     lon0, lat0 = origin_lonlat
     t = Transformer.from_crs(f"+proj=aeqd +lat_0={lat0} +lon_0={lon0} +x_0=0 +y_0=0 +units=m +ellps=WGS84",
                              "EPSG:4326", always_xy=True)
+    c, s = math.cos(math.radians(bearing)), math.sin(math.radians(bearing))
     from shapely.geometry import shape
     out = []
     for f in features:
-        g = transform(lambda x, y, z=None: t.transform(x, y), shape(f["geometry"]))
+        g = transform(lambda x, y, z=None: t.transform(x * c + y * s, -x * s + y * c), shape(f["geometry"]))
         out.append({**f, "geometry": mapping(g)})
     return out
 
@@ -138,8 +142,8 @@ def write(run: Run, folder: str | Path) -> dict[str, Path]:
     }
     files["input_local"].write_text(json.dumps(_collection(inp, "camp input, local metres")))
     files["output_local"].write_text(json.dumps(_collection(out, "camp layout, local metres")))
-    files["input_wgs84"].write_text(json.dumps(_collection(to_wgs84(inp, run.problem.origin_lonlat), "camp input, WGS84")))
-    files["output_wgs84"].write_text(json.dumps(_collection(to_wgs84(out, run.problem.origin_lonlat), "camp layout, WGS84")))
+    files["input_wgs84"].write_text(json.dumps(_collection(to_wgs84(inp, run.problem.origin_lonlat, run.problem.bearing), "camp input, WGS84")))
+    files["output_wgs84"].write_text(json.dumps(_collection(to_wgs84(out, run.problem.origin_lonlat, run.problem.bearing), "camp layout, WGS84")))
     from .result import to_json
     files["layout"].write_text(json.dumps(to_json(run.layout)))
     rep = report(run)

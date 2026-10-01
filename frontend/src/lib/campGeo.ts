@@ -18,14 +18,19 @@ export function metresPerDegree(lat: number): [number, number] {
   return [perLat, perLon];
 }
 
-export function toLonLat(p: Pt, origin: Pt): Pt {
+/** Local metres to longitude and latitude. `bearing`: how far the local +y axis is turned clockwise from north. */
+export function toLonLat(p: Pt, origin: Pt, bearing = 0): Pt {
   const [perLat, perLon] = metresPerDegree(origin[1]);
-  return [origin[0] + p[0] / perLon, origin[1] + p[1] / perLat];
+  const c = Math.cos(bearing * RAD), s = Math.sin(bearing * RAD);
+  const east = p[0] * c + p[1] * s, north = -p[0] * s + p[1] * c;
+  return [origin[0] + east / perLon, origin[1] + north / perLat];
 }
 
-export function toLocal(lonlat: Pt, origin: Pt): Pt {
+export function toLocal(lonlat: Pt, origin: Pt, bearing = 0): Pt {
   const [perLat, perLon] = metresPerDegree(origin[1]);
-  return [(lonlat[0] - origin[0]) * perLon, (lonlat[1] - origin[1]) * perLat];
+  const east = (lonlat[0] - origin[0]) * perLon, north = (lonlat[1] - origin[1]) * perLat;
+  const c = Math.cos(bearing * RAD), s = Math.sin(bearing * RAD);
+  return [east * c - north * s, east * s + north * c];
 }
 
 export const round = (v: number, step = 0.001) => Math.round(v / step) * step;

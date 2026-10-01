@@ -67,7 +67,7 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
   sources: "/domains/:domainId/data/sources",
   quality: "/domains/:domainId/data/quality",
   predictors: "/domains/:domainId/data/predictors",
-  camps: "/domains/:domainId/camps",
+  camps: "/domains/:domainId/map-data/camps",
   "map-data": "/domains/:domainId/map-data",
 };
 
@@ -78,7 +78,8 @@ export const DESTINATIONS: Destination[] = [
   { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Sources & imports", purpose: "Set up database sources and import their rows.", scope: "domain", group: "data", capability: "integration.run" },
   { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Predictors", purpose: "Train and keep the models a rule can read with predict.", scope: "domain", group: "data" },
   { id: "map-data", path: "/map-data", canonical: DOMAIN_TEMPLATES["map-data"], label: "Map data", purpose: "Bring CAD drawings onto the map as GIS layers.", scope: "domain", group: "domains" },
-  { id: "camps", path: "/camps", canonical: DOMAIN_TEMPLATES.camps, label: "Camp layouts", purpose: "Draw a camp on the map and lay out its beds and corridors.", scope: "domain", group: "domains" },
+  // Camps are map data (a tab of Map data), not a page of the sidebar; kept for the command palette.
+  { id: "camps", path: "/map-data/camps", canonical: DOMAIN_TEMPLATES.camps, label: "Camps (map data)", purpose: "Draw a camp on the map and lay out its beds and corridors.", scope: "domain", group: "domains" },
   { id: "quality", path: "/quality", canonical: DOMAIN_TEMPLATES.quality, label: "Quality checks", purpose: "Review data and model validation workflows.", scope: "domain", group: "data" },
   { id: "access", path: "/administration/access", canonical: "/administration/access", label: "Access & policies", purpose: "Manage people, permissions and platform policies.", scope: "administration", group: "administration", capability: "iam.manage" },
   { id: "domain-overview", path: "/domains/:domainId/overview", canonical: "/domains/:domainId/overview",
@@ -508,7 +509,6 @@ export function stripDomainPrefix(pathname: string): string {
     "/data/sources": "/sources",
     "/data/quality": "/quality",
     "/data/predictors": "/predictors",
-    "/camps": "/camps",
     "/map-data": "/map-data",
     "/data": "/data",
     "/structure": "/structure",
@@ -682,7 +682,7 @@ export function buildSidebarGroups(
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"], ["camps", "Camp layouts"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
@@ -694,7 +694,7 @@ export function buildSidebarGroups(
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
-    select("domain", "This domain", ["domain-overview", "problems", "map-data", "camps"]),
+    select("domain", "This domain", ["domain-overview", "problems", "map-data"]),
     select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "predictors", "quality"]),
     ...common,
   ];

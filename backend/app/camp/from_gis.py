@@ -8,10 +8,10 @@ bed zones, and this builds the problem from those layers' features.
 its coordinates times the placement's units (and scale) -- with (0, 0) at
 the boundary's lower-left corner, so walls the drawing drew straight stay
 straight and doors can sit on them. The origin's longitude and latitude
-come from the dataset's placement. (A drawing in degrees is put into metres
-around that corner instead.) The grid may differ from true north by the
-projection's convergence (under 3° in a UTM zone); the camp's map shows it
-north-up.
+come from the dataset's placement, and so does the camp's bearing: how far
+the drawing's grid north is turned from true north (a UTM grid's convergence,
+or a local grid's rotation), so the camp sits on the map exactly as drawn.
+(A drawing in degrees is put into metres around that corner instead.)
 
 - boundary: the largest closed shape in its layer (or the largest area its lines enclose)
 - doors: features in door layers that touch each other form one door (a
@@ -118,12 +118,18 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
         from shapely.ops import transform as shp_transform
         local = lambda g: shp_transform(lambda x, y, z=None: to_m.transform(x, y), g)
         origin = (lon0, lat0)
+        bearing = 0.0
         notes.append("the drawing is in degrees: the camp is laid out in metres around its south-west corner")
     else:
         from shapely.affinity import translate
         local = lambda g: translate(g, -minx, -miny)
-        lon, lat = placement.transformer()(minx / k, miny / k)
-        origin = (round(float(lon), 7), round(float(lat), 7))
+        place = placement.transformer()
+        lon, lat = place(minx / k, miny / k)
+        origin = (round(float(lon), 9), round(float(lat), 9))
+        # Grid north on the Earth: the azimuth from the corner to a point 100 m up the drawing's grid.
+        from pyproj import Geod
+        lon_up, lat_up = place(minx / k, (miny + 100) / k)
+        bearing = round(float(Geod(ellps="WGS84").inv(float(lon), float(lat), float(lon_up), float(lat_up))[0]), 6)
 
     def ring(p) -> list[tuple[float, float]]:
         pts = [(round(x, 3), round(y, 3)) for x, y in list(p.exterior.coords)[:-1]]
@@ -206,6 +212,7 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
         placement_zones=tuple(PlacementZone(i, r) for i, r in shapes("zones", "zone")),
         bed_types=tuple(DEFAULT_BEDS),
         origin_lonlat=origin,
+        bearing=bearing,
     )
     notes.insert(0, f"{len(doors)} doors, {len(problem.obstacles)} closed areas, {len(problem.prohibited)} no-bed areas, "
                     f"{len(problem.placement_zones)} bed zones from the map data; review the beds and door settings")

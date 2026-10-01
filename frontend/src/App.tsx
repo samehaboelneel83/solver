@@ -15,7 +15,7 @@ import Dashboard from "./pages/Dashboard";
 import Health from "./pages/Health";
 import StartProblem from "./pages/StartProblem";
 import CampList from "./pages/CampList";
-import CampEditor from "./pages/CampEditor";
+import CampEditor, { CampRedirect } from "./pages/CampEditor";
 import MapData from "./pages/MapData";
 import MapImport from "./pages/MapImport";
 import MapView from "./pages/MapView";
@@ -113,9 +113,11 @@ export default function App() {
           <Route path="structure/relationship-types/:id" element={<RelationshipTypeDetail />} />
           <Route path="problems" element={<DomainOverview listing />} />
           <Route path="start" element={<StartProblem />} />
-          <Route path="camps" element={<CampList />} />
-          <Route path="camps/:campId" element={<CampEditor />} />
+          <Route path="camps" element={<Navigate to="../map-data/camps" relative="path" replace />} />
+          <Route path="camps/:campId" element={<CampRedirect />} />
           <Route path="map-data" element={<MapData />} />
+          <Route path="map-data/camps" element={<CampList />} />
+          <Route path="map-data/camps/:campId" element={<CampEditor />} />
           <Route path="map-data/import" element={<MapImport />} />
           <Route path="map-data/:datasetId" element={<MapView />} />
           <Route path="problems/:problemId" element={<ProblemQueryBridge />}>

@@ -16,7 +16,7 @@
  * (or a solve, which saves first).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import {
   Circle as CircleIcon, DoorOpen, Download, FileUp, Hexagon, Layers, Map as MapIcon, Maximize2, MousePointer2, Move,
   Pentagon, Play, Redo2, Save, Square, Undo2,
@@ -87,6 +87,12 @@ function sameSel(a: Selection | null, b: Selection | null): boolean {
   return a.kind === "boundary" || (a as { id: string }).id === (b as { id: string }).id;
 }
 
+/** An old camp address (`/domains/:id/camps/:campId`): camps are under Map data now. */
+export function CampRedirect() {
+  const { domainId, campId } = useParams();
+  return <Navigate to={`/domains/${domainId}/map-data/camps/${campId}`} replace />;
+}
+
 export default function CampEditor() {
   const { campId } = useParams();
   const id = Number(campId);
@@ -96,7 +102,7 @@ export default function CampEditor() {
   if (plan.isLoading) return <Skeleton rows={8} />;
   if (plan.isError || !plan.data)
     return <LoadFailure subject="This camp" error={plan.error} retry={() => void plan.refetch()}
-      back={domainId ? { label: "All camps", to: `/domains/${domainId}/camps` } : undefined} />;
+      back={domainId ? { label: "All camps", to: `/domains/${domainId}/map-data/camps` } : undefined} />;
   return <CampWorkspace key={plan.data.id} plan={plan.data} />;
 }
 
@@ -414,7 +420,7 @@ function CampWorkspace({ plan }: { plan: CampPlan }) {
     if (d.type === "place") {
       // The camp follows the pointer over the imagery: the origin moves with it, the view with it.
       const dx = (e.clientX - d.x) * d.view.mpp, dy = -(e.clientY - d.y) * d.view.mpp;
-      const origin = toLonLat([-dx, -dy], d.origin);
+      const origin = toLonLat([-dx, -dy], d.origin, problem.bearing ?? 0);
       setProblemState((q) => ({ ...q, origin_lonlat: [Number(origin[0].toFixed(7)), Number(origin[1].toFixed(7))] }));
       setView({ ...d.view, cx: d.view.cx - dx, cy: d.view.cy - dy });
       return;
@@ -664,7 +670,9 @@ function CampWorkspace({ plan }: { plan: CampPlan }) {
   return (
     <div className="flex h-[calc(100vh-7rem)] min-h-[560px] flex-col gap-2">
       <header className="flex flex-wrap items-center gap-2">
-        <Link to={`/domains/${plan.domain_id}/camps`} className="text-sm text-blue-700 hover:underline">Camps</Link>
+        <Link to={`/domains/${plan.domain_id}/map-data`} className="text-sm text-blue-700 hover:underline">Map data</Link>
+        <span className="text-slate-400">/</span>
+        <Link to={`/domains/${plan.domain_id}/map-data/camps`} className="text-sm text-blue-700 hover:underline">Camps</Link>
         <span className="text-slate-400">/</span>
         <h1 className="text-lg font-semibold text-slate-900">{name}</h1>
         <span className={`rounded-full px-2 py-0.5 text-xs ${check.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
@@ -781,6 +789,7 @@ function CampWorkspace({ plan }: { plan: CampPlan }) {
         <div className="relative min-w-0 flex-1">
           <CampMap
             origin={drawnProblem.origin_lonlat}
+            bearing={drawnProblem.bearing ?? 0}
             view={view}
             onView={setView}
             basemap={basemap.chosen}
@@ -890,6 +899,7 @@ function CampWorkspace({ plan }: { plan: CampPlan }) {
                 <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => setSel({ kind: "boundary" })}>
                   Camp boundary: {problem.boundary.length} corners, {area(problem.boundary).toFixed(1)} m²
                 </button>
+                <CampRecords plan={plan} />
               </div>
             )}
             {tab === "beds" && (
@@ -946,6 +956,37 @@ function ShapeList({ title, items, selected, onPick, empty, swatch }: {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+const RECORD_WORDS: [string, string][] = [
+  ["camp", "camp"], ["door", "doors"], ["closed_area", "closed areas"], ["no_beds_area", "no-beds areas"],
+  ["bed_zone", "bed zones"], ["bed_type", "bed types"],
+];
+
+/** Where this camp lives in the domain: its records, linked to the Records page by type. */
+function CampRecords({ plan }: { plan: CampPlan }) {
+  if (!plan.records) return null;
+  const { types, counts } = plan.records;
+  return (
+    <section className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700" aria-label="This camp's records">
+      <h3 className="font-semibold text-slate-800">Kept as records of this domain</h3>
+      <p className="mt-0.5 text-slate-500">
+        Saved, the camp is records you can also edit on the Records, Relationships and Parameters pages
+        (door capacities, zone depths and bed counts are parameters).
+      </p>
+      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+        {RECORD_WORDS.filter(([t]) => types[t]).map(([t, words]) => (
+          <li key={t}>
+            <Link className="text-blue-700 hover:underline" to={`/domains/${plan.domain_id}/data/records?type=${types[t]}`}>
+              {counts[t] ?? 0} {words}
+            </Link>
+          </li>
+        ))}
+        <li><Link className="text-blue-700 hover:underline" to={`/domains/${plan.domain_id}/data/parameters`}>parameters</Link></li>
+        <li><Link className="text-blue-700 hover:underline" to={`/domains/${plan.domain_id}/data/relationships`}>relationships</Link></li>
+      </ul>
     </section>
   );
 }

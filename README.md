@@ -177,7 +177,7 @@ table and some are the generic metadata-driven ones.
 | `/runs` | Solve a scenario and read the answer (below) |
 | `/graph` | The Graph Editor (below) |
 | `/domains/:id/map-data`, `/domains/:id/map-data/import`, `/domains/:id/map-data/:datasetId` | Map data: any DXF drawing imported as GIS layers (points, lines, areas, text, blocks), placed with a chosen coordinate system previewed over imagery, stored in PostGIS, viewed and exported. See `docs/map-data.md` |
-| `/domains/:id/camps`, `/domains/:id/camps/:campId` | Camp layouts: draw a camp on the map (boundary, doors, closed and no-bed areas, bed zones), set doors, bed types and goals, lay it out in the worker and see the beds, corridors and routes on the map, with GeoJSON downloads. See `backend/camp_layout/README.md` |
+| `/domains/:id/map-data/camps`, `/domains/:id/map-data/camps/:campId` (camps are map data, kept as records) | Camp layouts: draw a camp on the map (boundary, doors, closed and no-bed areas, bed zones), set doors, bed types and goals, lay it out in the worker and see the beds, corridors and routes on the map, with GeoJSON downloads. See `backend/camp_layout/README.md` |
 
 ### Generic screens
 

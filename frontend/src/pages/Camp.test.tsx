@@ -88,8 +88,8 @@ function renderAt(url: string) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>
         <Routes>
-          <Route path="/domains/:domainId/camps" element={<DomainRouteProvider><CampList /></DomainRouteProvider>} />
-          <Route path="/domains/:domainId/camps/:campId" element={<DomainRouteProvider><CampEditor /></DomainRouteProvider>} />
+          <Route path="/domains/:domainId/map-data/camps" element={<DomainRouteProvider><CampList /></DomainRouteProvider>} />
+          <Route path="/domains/:domainId/map-data/camps/:campId" element={<DomainRouteProvider><CampEditor /></DomainRouteProvider>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -103,7 +103,7 @@ beforeEach(() => {
 
 it("lists the domain's camps with their latest layout and starts a new one", async () => {
   const write = stub(vi.fn().mockResolvedValue({ ...PLAN, id: 12 }));
-  renderAt("/domains/7/camps");
+  renderAt("/domains/7/map-data/camps");
   const row = await screen.findByTestId("camp");
   expect(within(row).getByText("North camp")).toBeInTheDocument();
   expect(row).toHaveTextContent("Latest layout: 2 beds, every check passed");
@@ -116,7 +116,7 @@ it("lists the domain's camps with their latest layout and starts a new one", asy
 
 it("shows the drawing's shapes and checks, and a door's numbers to type", async () => {
   stub();
-  renderAt("/domains/7/camps/11");
+  renderAt("/domains/7/map-data/camps/11");
   await screen.findByRole("heading", { name: "North camp" });
   fireEvent.click(screen.getByRole("button", { name: "Drawing" }));
   expect(screen.getByRole("toolbar", { name: "Drawing tools" })).toBeInTheDocument();
@@ -137,7 +137,7 @@ it("shows the drawing's shapes and checks, and a door's numbers to type", async 
 
 it("draws the latest layout on the map with its counts and downloads", async () => {
   stub();
-  renderAt("/domains/7/camps/11");
+  renderAt("/domains/7/map-data/camps/11");
   await screen.findByRole("heading", { name: "North camp" });
   fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
   await waitFor(() => expect(screen.getAllByTestId("layout-bed")).toHaveLength(2));

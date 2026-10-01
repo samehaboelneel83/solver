@@ -65,7 +65,7 @@ export default function FromMapData({ domainId }: { domainId: number }) {
       const body: FromMapRoles = { boundary: roles.boundary[0], doors: roles.doors, obstacles: roles.obstacles,
         prohibited: roles.prohibited, zones: roles.zones };
       const made = await createCampFromMap({ domain_id: domainId, name: name.trim() || "Camp", dataset_id: datasetId, ...body });
-      navigate(`/domains/${domainId}/camps/${made.id}`);
+      navigate(`/domains/${domainId}/map-data/camps/${made.id}`);
     } catch (e) {
       setError(formatApiError(e));
       setBusy(false);

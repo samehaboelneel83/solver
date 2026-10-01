@@ -93,6 +93,8 @@ export function useSiteBasemap(storageKey = "solver_site_basemap"): { options: B
 
 type Props = {
   origin: Pt;
+  /** How far the drawing's +y axis is turned clockwise from north (a camp's own grid). */
+  bearing?: number;
   view: MapView;
   onView: (view: MapView) => void;
   basemap: Basemap | null;
@@ -113,7 +115,7 @@ type Props = {
 };
 
 export default function CampMap({
-  origin, view, onView, basemap, height, cursor, onDown, onMove, onUp, onDoubleClick, onSize, children, canvas, onClick,
+  origin, bearing = 0, view, onView, basemap, height, cursor, onDown, onMove, onUp, onDoubleClick, onSize, children, canvas, onClick,
   overlay, label,
 }: Props) {
   const box = useRef<HTMLDivElement>(null);
@@ -182,21 +184,28 @@ export default function CampMap({
     const lat = origin[1];
     const ideal = Math.log2((EARTH * Math.cos((lat * Math.PI) / 180)) / view.mpp);
     const z = Math.max(basemap.minzoom, Math.min(basemap.maxzoom, Math.ceil(ideal)));
-    const corners = [fromScreen(0, 0), fromScreen(w, h)].map((p) => toLonLat(p, origin));
-    const [x0, y0] = worldPixel(corners[0][0], corners[0][1], z);
-    const [x1, y1] = worldPixel(corners[1][0], corners[1][1], z);
+    // The view's extent on the Earth: all four corners, the grid may be turned.
+    const corners = [fromScreen(0, 0), fromScreen(w, 0), fromScreen(0, h), fromScreen(w, h)].map((p) => toLonLat(p, origin, bearing));
+    const pix = corners.map((c) => worldPixel(c[0], c[1], z));
+    const [x0, y0] = [Math.min(...pix.map((p) => p[0])), Math.min(...pix.map((p) => p[1]))];
+    const [x1, y1] = [Math.max(...pix.map((p) => p[0])), Math.max(...pix.map((p) => p[1]))];
     const count = 2 ** z;
-    const out: { key: string; href: string; x: number; y: number; w: number; h: number }[] = [];
+    const out: { key: string; href: string; x: number; y: number; w: number; h: number; angle: number }[] = [];
     for (let ty = Math.max(0, Math.floor(y0 / 256)); ty <= Math.min(count - 1, Math.floor(y1 / 256)); ty += 1)
       for (let tx = Math.floor(x0 / 256); tx <= Math.floor(x1 / 256); tx += 1) {
         if (out.length >= MAX_TILES) return out;
-        const a = at(toLocal(tileLonLat(tx * 256, ty * 256, z), origin));
-        const b = at(toLocal(tileLonLat((tx + 1) * 256, (ty + 1) * 256, z), origin));
+        const tl = at(toLocal(tileLonLat(tx * 256, ty * 256, z), origin, bearing));
+        const tr = at(toLocal(tileLonLat((tx + 1) * 256, ty * 256, z), origin, bearing));
+        const bl = at(toLocal(tileLonLat(tx * 256, (ty + 1) * 256, z), origin, bearing));
         const x = ((tx % count) + count) % count;
-        out.push({ key: `${z}/${tx}/${ty}`, href: tileUrl(basemap.url, { x, y: ty, z }), x: a[0], y: a[1], w: b[0] - a[0], h: b[1] - a[1] });
+        out.push({
+          key: `${z}/${tx}/${ty}`, href: tileUrl(basemap.url, { x, y: ty, z }), x: tl[0], y: tl[1],
+          w: Math.hypot(tr[0] - tl[0], tr[1] - tl[1]), h: Math.hypot(bl[0] - tl[0], bl[1] - tl[1]),
+          angle: (Math.atan2(tr[1] - tl[1], tr[0] - tl[0]) * 180) / Math.PI,
+        });
       }
     return out;
-  }, [basemap, origin, view, w, h, at, fromScreen]);
+  }, [basemap, origin, bearing, view, w, h, at, fromScreen]);
 
   useEffect(() => {
     const el = paper.current;
@@ -212,7 +221,7 @@ export default function CampMap({
   }, [canvas, at, view.mpp, w, h]);
 
   const bar = niceLength(view.mpp * 120);
-  const lonlat = pointer ? toLonLat(pointer, origin) : null;
+  const lonlat = pointer ? toLonLat(pointer, origin, bearing) : null;
 
   return (
     <div
@@ -256,6 +265,7 @@ export default function CampMap({
       <svg width={w} height={h} className="absolute inset-0 block">
         {tiles.map((t) => (
           <image key={t.key} href={t.href} x={t.x} y={t.y} width={t.w + 0.5} height={t.h + 0.5} preserveAspectRatio="none"
+            transform={Math.abs(t.angle) > 0.001 ? `rotate(${t.angle.toFixed(4)} ${t.x} ${t.y})` : undefined}
             onError={() => setFailed((n) => n + 1)} />
         ))}
       </svg>
@@ -275,7 +285,8 @@ export default function CampMap({
           </div>
         )}
       </div>
-      <div className="pointer-events-none absolute right-2 top-2 flex h-8 w-8 flex-col items-center justify-center rounded-full bg-white/85 text-[10px] font-bold text-slate-800 shadow-sm" aria-hidden>
+      <div className="pointer-events-none absolute right-2 top-2 flex h-8 w-8 flex-col items-center justify-center rounded-full bg-white/85 text-[10px] font-bold text-slate-800 shadow-sm" aria-hidden
+        style={bearing ? { transform: `rotate(${-bearing}deg)` } : undefined} title={bearing ? `North; the grid is turned ${bearing}°` : "North"}>
         <span>▲</span><span className="-mt-1">N</span>
       </div>
       {basemap && (

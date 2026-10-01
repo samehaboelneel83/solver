@@ -66,6 +66,7 @@ def solve_problem(problem_data: dict[str, Any], options: dict[str, Any], log) ->
         "report": rep,
         "layout": to_json(run.layout),
         "origin_lonlat": list(problem.origin_lonlat),
+        "bearing": problem.bearing,
         "beds": len(run.layout.beds),
         "valid": run.validation.ok,
     }

@@ -1,14 +1,14 @@
-"""Camp plans: a camp drawn on the map, checked, solved and shown on the map (camp layout engine).
+"""Camps: a camp kept as records of its domain, drawn on the map, solved and shown on the map.
 
-    GET    /api/v1/camps?domain_id=                 the domain's camps, each with its latest solve
+    GET    /api/v1/camps?domain_id=                 the domain's camps (records of type camp), each with its latest solve
     POST   /api/v1/camps                            {domain_id, name, start: blank|small|complex, problem?}
     POST   /api/v1/camps/check                      {problem} -> faults and the door zones it implies
     POST   /api/v1/camps/import                     a .dxf or .xlsx file -> {problem, notes} (stores nothing)
     POST   /api/v1/camps/from-map                   {domain_id, name, dataset_id, boundary, doors, obstacles, prohibited,
                                                     zones} (layer ids of imported map data) -> a new camp
-    GET    /api/v1/camps/{id}                       the plan, its check and its solves
-    PUT    /api/v1/camps/{id}                       {name?, problem?, options?, updated_at?}
-    DELETE /api/v1/camps/{id}
+    GET    /api/v1/camps/{id}                       the camp as a problem, its check, its solves and its records
+    PUT    /api/v1/camps/{id}                       {name?, problem?, options?, updated_at?} -> written to its records
+    DELETE /api/v1/camps/{id}                       the camp and its records
     GET    /api/v1/camps/{id}/export?format=xlsx|dxf|json
     POST   /api/v1/camps/{id}/solves                {solver?, beds_seconds?, seconds?} -> queued solve
     GET    /api/v1/camp-solves/{id}                 status, progress and, when done, the result
@@ -17,10 +17,15 @@
                                                     input_wgs84.geojson, input_local.geojson,
                                                     report.json, layout.json, viewer.html
 
-A plan's problem is `camp-problem/1` JSON in local metres (x east, y north)
-around its `origin_lonlat`; the editor converts to and from the map. A solve
-freezes the problem as it was asked, so editing the plan never changes an
-answer already given. Solves run in the worker (`app.camp.jobs`).
+**A camp is domain data** (`app.camp.domain`): a `camp` record, its doors,
+areas, zones and bed types as records, linked by relationships and tuned by
+parameters -- the same records the Records, Relationships and Parameters
+pages show, and edits there are what the next solve reads. The editor works
+on the camp as a `camp-problem/1` problem in the camp's own frame; saving
+writes it back to the records. A camp's id is its record's id.
+
+A solve freezes the problem as it was asked, so editing the camp never
+changes an answer already given. Solves run in the worker (`app.camp.jobs`).
 
 Writes need `domain.edit`; asking for a solve needs `run.submit`, as a run does.
 """
@@ -39,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app import audit
 from app.api.deps import get_current_user, requires
+from app.camp import domain as records
 from app.camp import jobs, service
 from app.camp.engine import serial
 from app.core.db import get_db
@@ -52,7 +58,6 @@ FILES = {
     "output_wgs84.geojson", "output_local.geojson", "input_wgs84.geojson", "input_local.geojson",
     "report.json", "layout.json", "viewer.html",
 }
-_PLAN = "id, domain_id, name, problem, options, created_at, updated_at"
 
 
 class CreateBody(BaseModel):
@@ -103,9 +108,8 @@ def _domain(db: Session, domain_id: int, user: UserAccount) -> None:
         raise HTTPException(404, "Domain not found")
 
 
-def _plan(db: Session, camp_id: int, user: UserAccount) -> Any:
-    row = db.execute(text(f"SELECT {_PLAN} FROM camp_plan WHERE id = :i AND organization_id = :o"),
-                     {"i": camp_id, "o": user.organization_id}).mappings().one_or_none()
+def _camp(db: Session, camp_id: int, user: UserAccount) -> Any:
+    row = records.camp_row(db, camp_id, user.organization_id)
     if row is None:
         raise HTTPException(404, "Camp not found")
     return row
@@ -113,10 +117,8 @@ def _plan(db: Session, camp_id: int, user: UserAccount) -> Any:
 
 def _solve(db: Session, solve_id: int, user: UserAccount) -> Any:
     row = db.execute(text(
-        "SELECT s.*, p.domain_id, p.name AS camp_name,"
-        " extract(epoch FROM coalesce(s.finished_at, now()) - coalesce(s.started_at, now()))::float AS seconds"
-        " FROM camp_solve s JOIN camp_plan p ON p.id = s.camp_plan_id"
-        " WHERE s.id = :i AND s.organization_id = :o"),
+        "SELECT s.*, extract(epoch FROM coalesce(s.finished_at, now()) - coalesce(s.started_at, now()))::float AS seconds"
+        " FROM camp_solve s WHERE s.id = :i AND s.organization_id = :o"),
         {"i": solve_id, "o": user.organization_id}).mappings().one_or_none()
     if row is None:
         raise HTTPException(404, "Solve not found")
@@ -126,7 +128,7 @@ def _solve(db: Session, solve_id: int, user: UserAccount) -> Any:
 def _audit(db: Session, user: UserAccount, action: str, identity: int) -> None:
     audit.record(db, organization_id=user.organization_id, actor_id=user.id,
                  api_key_id=getattr(user, "api_key_id", None), action=action,
-                 object_type="camp_plan", object_id=identity)
+                 object_type="camp", object_id=identity)
 
 
 def _checked_problem(problem: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +141,19 @@ def _checked_problem(problem: dict[str, Any]) -> dict[str, Any]:
     except serial.ProblemFormatError as exc:
         raise HTTPException(422, [{"type": "value_error", "loc": ["body", "problem"], "msg": str(exc),
                                    "input": None}]) from exc
+
+
+def _write(db: Session, domain_id: int, problem: dict[str, Any], *, camp_id: int | None = None,
+           options: dict[str, Any] | None = None) -> int:
+    try:
+        return records.write_problem(db, domain_id, problem, camp_id=camp_id, options=options)
+    except Exception as exc:  # noqa: BLE001 -- a record the database refuses (a key, a type) is the sender's
+        from sqlalchemy.exc import DBAPIError
+        if isinstance(exc, DBAPIError):
+            db.rollback()
+            detail = str(getattr(exc, "orig", exc)).splitlines()[0][:300]
+            raise HTTPException(422, f"the camp could not be written as records: {detail}") from exc
+        raise
 
 
 def _solve_summary(row: Any) -> dict[str, Any]:
@@ -157,14 +172,16 @@ def list_camps(
 ) -> dict[str, Any]:
     _domain(db, domain_id, user)
     rows = db.execute(text(
-        "SELECT p.id, p.name, p.updated_at, p.problem -> 'origin_lonlat' AS origin_lonlat,"
-        " jsonb_array_length(coalesce(p.problem -> 'doors', '[]')) AS doors,"
+        "SELECT e.id, coalesce(e.label, e.key) AS name, e.key, e.updated_at, e.attrs -> 'origin' -> 'coordinates' AS origin_lonlat,"
+        " (SELECT count(*) FROM relationship r JOIN relationship_type rt ON rt.id = r.relationship_type_id"
+        "   WHERE rt.name = 'door_of' AND r.to_entity_id = e.id) AS doors,"
         " l.id AS solve_id, l.status, l.beds, l.valid, l.finished_at"
-        " FROM camp_plan p LEFT JOIN LATERAL (SELECT id, status, beds, valid, finished_at FROM camp_solve"
-        "   WHERE camp_plan_id = p.id ORDER BY id DESC LIMIT 1) l ON true"
-        " WHERE p.domain_id = :d AND p.organization_id = :o ORDER BY p.updated_at DESC"),
+        " FROM entity e JOIN entity_type t ON t.id = e.entity_type_id AND t.name = 'camp'"
+        " LEFT JOIN LATERAL (SELECT id, status, beds, valid, finished_at FROM camp_solve"
+        "   WHERE camp_entity_id = e.id ORDER BY id DESC LIMIT 1) l ON true"
+        " WHERE t.domain_id = :d AND t.organization_id = :o ORDER BY e.updated_at DESC"),
         {"d": domain_id, "o": user.organization_id}).mappings().all()
-    return {"items": [dict(r) for r in rows]}
+    return {"items": [dict(r) for r in rows], "structure": bool(records.types(db, domain_id))}
 
 
 @router.post("/camps", status_code=201)
@@ -182,14 +199,10 @@ def create_camp(
         problem = service.example(body.start, body.name)
         if body.origin_lonlat:
             problem["origin_lonlat"] = list(body.origin_lonlat)
-    row = db.execute(text(
-        "INSERT INTO camp_plan (organization_id, domain_id, name, problem, options, created_by)"
-        " VALUES (:o, :d, :n, CAST(:p AS jsonb), CAST(:opt AS jsonb), :u) RETURNING id"),
-        {"o": user.organization_id, "d": body.domain_id, "n": body.name, "p": json.dumps(problem),
-         "opt": json.dumps(jobs.DEFAULT_OPTIONS), "u": str(user.id)}).scalar_one()
-    _audit(db, user, "camp.create", row)
+    camp_id = _write(db, body.domain_id, problem, options=jobs.DEFAULT_OPTIONS)
+    _audit(db, user, "camp.create", camp_id)
     db.commit()
-    return get_camp(row, db, user)
+    return get_camp(camp_id, db, user)
 
 
 @router.post("/camps/from-map", status_code=201)
@@ -216,14 +229,10 @@ def create_from_map(
         problem, notes = build(db, body.dataset_id, roles, body.name)
     except FromMapError as exc:
         raise HTTPException(422, str(exc)) from exc
-    row = db.execute(text(
-        "INSERT INTO camp_plan (organization_id, domain_id, name, problem, options, created_by)"
-        " VALUES (:o, :d, :n, CAST(:p AS jsonb), CAST(:opt AS jsonb), :u) RETURNING id"),
-        {"o": user.organization_id, "d": body.domain_id, "n": body.name, "p": json.dumps(problem),
-         "opt": json.dumps(jobs.DEFAULT_OPTIONS), "u": str(user.id)}).scalar_one()
-    _audit(db, user, "camp.create", row)
+    camp_id = _write(db, body.domain_id, problem, options=jobs.DEFAULT_OPTIONS)
+    _audit(db, user, "camp.create", camp_id)
     db.commit()
-    return {**get_camp(row, db, user), "notes": notes}
+    return {**get_camp(camp_id, db, user), "notes": notes}
 
 
 @router.post("/camps/check")
@@ -273,12 +282,22 @@ def get_camp(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
-    row = _plan(db, camp_id, user)
+    camp = _camp(db, camp_id, user)
+    problem, _ = records.to_problem(db, camp_id, user.organization_id)
     solves = db.execute(text(
         "SELECT id, status, beds, valid, error, options, queued_at, started_at, finished_at FROM camp_solve"
-        " WHERE camp_plan_id = :i ORDER BY id DESC LIMIT 20"), {"i": camp_id}).mappings().all()
-    return {**dict(row), "options": jobs.options_of(row["options"]), "check": service.check(row["problem"]),
-            "solves": [_solve_summary(s) for s in solves]}
+        " WHERE camp_entity_id = :i ORDER BY id DESC LIMIT 20"), {"i": camp_id}).mappings().all()
+    kinds = records.types(db, camp["domain_id"])
+    counts: dict[str, int] = {}
+    for k in records.children(db, camp_id):
+        counts[k["type"]] = counts.get(k["type"], 0) + 1
+    return {
+        "id": camp_id, "domain_id": camp["domain_id"], "key": camp["key"], "name": camp["label"] or camp["key"],
+        "problem": problem, "options": jobs.options_of(records.options_of(camp)), "updated_at": camp["updated_at"],
+        "created_at": camp["updated_at"], "check": service.check(problem),
+        "solves": [_solve_summary(s) for s in solves],
+        "records": {"types": kinds, "counts": {"camp": 1, **counts}},
+    }
 
 
 @router.put("/camps/{camp_id}")
@@ -288,15 +307,14 @@ def save_camp(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("domain.edit")),
 ) -> dict[str, Any]:
-    row = _plan(db, camp_id, user)
-    if body.updated_at is not None and abs((row["updated_at"] - body.updated_at).total_seconds()) > 0.001:
+    camp = _camp(db, camp_id, user)
+    if body.updated_at is not None and abs((camp["updated_at"] - body.updated_at).total_seconds()) > 0.001:
         raise HTTPException(409, "someone saved this camp since you opened it; reload to see their changes")
-    name = body.name or row["name"]
-    problem = _checked_problem({**(body.problem or row["problem"]), "name": name})
-    options = jobs.options_of({**row["options"], **(body.options or {})})
-    db.execute(text("UPDATE camp_plan SET name = :n, problem = CAST(:p AS jsonb), options = CAST(:o AS jsonb)"
-                    " WHERE id = :i"),
-               {"n": name, "p": json.dumps(problem), "o": json.dumps(options), "i": camp_id})
+    current, _ = records.to_problem(db, camp_id, user.organization_id)
+    name = body.name or camp["label"] or camp["key"]
+    problem = _checked_problem({**(body.problem or current), "name": name})
+    options = jobs.options_of({**records.options_of(camp), **(body.options or {})})
+    _write(db, camp["domain_id"], problem, camp_id=camp_id, options=options)
     _audit(db, user, "camp.save", camp_id)
     db.commit()
     return get_camp(camp_id, db, user)
@@ -308,8 +326,8 @@ def delete_camp(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("domain.edit")),
 ) -> Response:
-    _plan(db, camp_id, user)
-    db.execute(text("DELETE FROM camp_plan WHERE id = :i"), {"i": camp_id})
+    _camp(db, camp_id, user)
+    records.delete_camp(db, camp_id)
     _audit(db, user, "camp.delete", camp_id)
     db.commit()
     return Response(status_code=204)
@@ -325,12 +343,13 @@ def export_camp(
     from camp_layout.dxf import write_dxf
     from camp_layout.workbook import write_workbook
 
-    row = _plan(db, camp_id, user)
-    stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in row["name"])[:60] or "camp"
+    _camp(db, camp_id, user)
+    problem_data, camp = records.to_problem(db, camp_id, user.organization_id)
+    stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in (camp["label"] or camp["key"]))[:60] or "camp"
     if format == "json":
-        return Response(json.dumps(row["problem"], indent=2), media_type="application/json",
+        return Response(json.dumps(problem_data, indent=2), media_type="application/json",
                         headers={"Content-Disposition": f'attachment; filename="{stem}.json"'})
-    problem = serial.from_dict(service.normalised(row["problem"]))
+    problem = serial.from_dict(service.normalised(problem_data))
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / f"{stem}.{format}"
         if format == "xlsx":
@@ -350,21 +369,22 @@ def solve_camp(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("run.submit")),
 ) -> dict[str, Any]:
-    row = _plan(db, camp_id, user)
-    check = service.check(row["problem"])
+    camp = _camp(db, camp_id, user)
+    problem, _ = records.to_problem(db, camp_id, user.organization_id)
+    check = service.check(problem)
     if not check["ok"]:
         first = next(f for f in check["faults"] if f["severity"] == "error")
         raise HTTPException(422, f"fix the camp first: {first['where']} {first['message']}")
-    busy = db.execute(text("SELECT count(*) FROM camp_solve WHERE camp_plan_id = :i AND status IN ('queued', 'running')"),
+    busy = db.execute(text("SELECT count(*) FROM camp_solve WHERE camp_entity_id = :i AND status IN ('queued', 'running')"),
                       {"i": camp_id}).scalar_one()
     if busy:
         raise HTTPException(409, "this camp is already being laid out; wait for it or stop it")
-    options = jobs.options_of({**row["options"], **body.model_dump(exclude_none=True)})
+    options = jobs.options_of({**records.options_of(camp), **body.model_dump(exclude_none=True)})
     solve_id = db.execute(text(
-        "INSERT INTO camp_solve (organization_id, camp_plan_id, problem, options, created_by)"
-        " VALUES (:o, :p, CAST(:pr AS jsonb), CAST(:opt AS jsonb), :u) RETURNING id"),
-        {"o": user.organization_id, "p": camp_id, "pr": json.dumps(row["problem"]), "opt": json.dumps(options),
-         "u": str(user.id)}).scalar_one()
+        "INSERT INTO camp_solve (organization_id, domain_id, camp_entity_id, camp_name, problem, options, created_by)"
+        " VALUES (:o, :d, :c, :n, CAST(:pr AS jsonb), CAST(:opt AS jsonb), :u) RETURNING id"),
+        {"o": user.organization_id, "d": camp["domain_id"], "c": camp_id, "n": camp["label"] or camp["key"],
+         "pr": json.dumps(problem), "opt": json.dumps(options), "u": str(user.id)}).scalar_one()
     _audit(db, user, "camp.solve", camp_id)
     db.commit()
     return get_solve(solve_id, False, db, user)
@@ -379,7 +399,7 @@ def get_solve(
 ) -> dict[str, Any]:
     row = _solve(db, solve_id, user)
     out = {
-        **_solve_summary(row), "camp_id": row["camp_plan_id"], "camp_name": row["camp_name"],
+        **_solve_summary(row), "camp_id": row["camp_entity_id"], "camp_name": row["camp_name"],
         "domain_id": row["domain_id"], "seconds": round(row["seconds"], 1),
         "progress": [p["line"] for p in row["progress"][-200:]],
         "deadline_seconds": jobs.deadline_of(jobs.options_of(row["options"])),
@@ -387,7 +407,7 @@ def get_solve(
     }
     if include_result and row["result"]:
         result = row["result"]
-        out["result"] = {k: result[k] for k in ("input", "output", "report", "origin_lonlat", "beds", "valid")}
+        out["result"] = {k: result.get(k) for k in ("input", "output", "report", "origin_lonlat", "bearing", "beds", "valid")}
     return out
 
 
@@ -422,7 +442,7 @@ def solve_file(
     result = row["result"]
     if not result:
         raise HTTPException(409, "this solve has no answer yet")
-    origin = result["origin_lonlat"]
+    origin, bearing = result["origin_lonlat"], float(result.get("bearing") or 0)
     collection = lambda feats, label: {"type": "FeatureCollection", "name": label, "features": feats}
     if name == "viewer.html":
         body = export.viewer_html(result["input"]["features"], result["output"]["features"], result["report"], origin)
@@ -432,7 +452,7 @@ def solve_file(
             part, crs = name.removesuffix(".geojson").split("_")
             feats = result[part]["features"]
             if crs == "wgs84":
-                feats = export.to_wgs84(feats, origin)
+                feats = export.to_wgs84(feats, origin, bearing)
             data = collection(feats, f"camp {'input' if part == 'input' else 'layout'}, "
                                      f"{'WGS84' if crs == 'wgs84' else 'local metres'}")
             media = "application/geo+json"

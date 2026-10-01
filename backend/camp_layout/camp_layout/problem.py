@@ -4,7 +4,9 @@ Everything here is data. Nothing refers to a solver, a grid or a variable:
 the same definition is discretised (`discretize`), modelled (`builder`),
 solved by any adapter (`adapters`) and checked (`validate`) without being
 rewritten. Units are metres in a local, flat coordinate system (x east,
-y north); `origin_lonlat` places it on the Earth for GIS output only.
+y north); `origin_lonlat` places it on the Earth for GIS output only, and
+`bearing` turns it: the local +y axis points `bearing` degrees clockwise from
+true north, so a camp whose walls run at an angle keeps them on the grid.
 
 Three kinds of object, kept apart (spec §6):
 
@@ -150,6 +152,7 @@ class CampProblem:
     objectives: ObjectiveSpec = ObjectiveSpec()
     grid: float = 0.5
     origin_lonlat: Point = (31.60, 30.10)
+    bearing: float = 0.0
 
     def door(self, door_id: str) -> Door:
         return next(d for d in self.doors if d.id == door_id)

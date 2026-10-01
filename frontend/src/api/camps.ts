@@ -44,6 +44,8 @@ export type CampProblem = {
   name: string;
   grid: number;
   origin_lonlat: Pt;
+  /** How far the camp's grid (+y) is turned clockwise from north. */
+  bearing?: number;
   boundary: Ring;
   doors: CampDoor[];
   zones: CampDoorZone[];
@@ -94,6 +96,8 @@ export type CampPlan = {
   updated_at: string;
   check: CampCheck;
   solves: CampSolveSummary[];
+  /** The camp as records of its domain: type ids by name, and how many records of each. */
+  records?: { types: Record<string, number>; counts: Record<string, number> };
 };
 
 export type CampListItem = {

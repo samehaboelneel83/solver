@@ -10,6 +10,7 @@ import { formatApiError } from "../api/errors";
 import { importCampFile, useCamps, useCreateCamp, useDeleteCamp, type CampListItem } from "../api/camps";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
+import MapDataTabs from "../components/map/MapDataTabs";
 import FromMapData from "../components/camp/FromMapData";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -33,7 +34,7 @@ function CampRow({ camp, domainId, canEdit }: { camp: CampListItem; domainId: nu
           <Tent className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <Link to={`/domains/${domainId}/camps/${camp.id}`} className="font-semibold text-slate-900 hover:underline">
+          <Link to={`/domains/${domainId}/map-data/camps/${camp.id}`} className="font-semibold text-slate-900 hover:underline">
             {camp.name}
           </Link>
           <p className="mt-0.5 text-xs text-slate-500">
@@ -68,7 +69,7 @@ function CampRow({ camp, domainId, canEdit }: { camp: CampListItem; domainId: nu
 }
 
 export default function CampList() {
-  useDocumentTitle("Camp layouts");
+  useDocumentTitle("Camps");
   const { domainId } = useDomain();
   const camps = useCamps(domainId);
   const create = useCreateCamp();
@@ -89,7 +90,7 @@ export default function CampList() {
     setError(null);
     try {
       const made = await create.mutateAsync(body);
-      navigate(`/domains/${domainId}/camps/${made.id}`);
+      navigate(`/domains/${domainId}/map-data/camps/${made.id}`);
     } catch (e) {
       setError(formatApiError(e));
     }
@@ -113,10 +114,13 @@ export default function CampList() {
   return (
     <div className="max-w-5xl space-y-6">
       <header>
-        <h1 className="mb-1 text-lg font-semibold text-slate-900">Camp layouts</h1>
+        <MapDataTabs domainId={domainId} />
+        <h1 className="mb-1 text-lg font-semibold text-slate-900">Camps</h1>
         <p className="text-sm text-slate-500">
           Draw a camp on the map — its outline, doors, closed areas, no-bed areas and bed zones — then lay it out:
           the most beds that fit, each reachable from a door along corridors at least as wide as you set, shown on the map.
+          A camp is kept as records of this domain — the camp, its doors, areas, zones and bed types, linked by
+          relationships, with capacities and counts as parameters — so the Records pages show and edit them too.
         </p>
       </header>
 
