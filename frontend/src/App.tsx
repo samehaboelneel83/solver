@@ -161,6 +161,9 @@ export default function App() {
         <Route path="sources" element={<LegacyDomainRedirect page="sources" />} />
         <Route path="quality" element={<LegacyDomainRedirect page="quality" />} />
         <Route path="predictors" element={<LegacyDomainRedirect page="predictors" />} />
+        <Route path="map-data" element={<LegacyDomainRedirect page="map-data" />} />
+        <Route path="camps" element={<LegacyDomainRedirect page="camps" />} />
+        <Route path="map-data/camps" element={<LegacyDomainRedirect page="camps" />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
         <Route path="ops/queue" element={<OpsQueue />} />

@@ -688,7 +688,7 @@ export function buildSidebarGroups(
     });
     const help = select("help", "Help", ["help-start", "help-modeling"]);
     if (inProblem) return [
-      named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"]]),
+      named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"], ["map-data", "Map data"]]),
       named("context", "Navigate", [["problems", "Other problems"], ["domains", "All workspaces"]]),
       help,
     ];
@@ -701,7 +701,7 @@ export function buildSidebarGroups(
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
     select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
-    select("data", "Data", ["records", "relationships", "parameters"]),
+    select("data", "Data", ["records", "relationships", "parameters", "map-data"]),
     ...common,
   ];
   if (inDomain) return [
@@ -712,11 +712,11 @@ export function buildSidebarGroups(
   ];
   const simple = level === "simple";
   const navigate = simple
-    ? { key: "context", label: "Navigate", items: [["home", "Home"], ["domains", "All workspaces"], ["templates", "Templates"]].map(([id, text]) => {
+    ? { key: "context", label: "Navigate", items: [["home", "Home"], ["domains", "All workspaces"], ["templates", "Templates"], ["map-data", "Map data"]].map(([id, text]) => {
         const d = byId.get(id)!;
         return { id, to: scopedPath(id, ctx), label: text, capability: d.capability };
       }) }
-    : select("context", "Navigate", ["home", "domains", "templates"]);
+    : select("context", "Navigate", ["home", "domains", "templates", "map-data"]);
   const tail = simple ? [select("help", "Help", ["help-start", "help-modeling"])] : common;
   const back = recent && ctx.domainId != null && recent.domainId === ctx.domainId ? recent : null;
   const recentGroup = (label: string, scope: ScopedNavContext, pairs: [string, string | null][]) => ({
@@ -735,8 +735,8 @@ export function buildSidebarGroups(
   if (back) {
     const scope = { domainId: back.domainId, problemId: null };
     return [navigate, simple
-      ? recentGroup("Recent workspace", scope, [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"]])
-      : recentGroup("Recent domain", scope, [["domain-overview", null], ["problems", null]]), ...tail];
+      ? recentGroup("Recent workspace", scope, [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"]])
+      : recentGroup("Recent domain", scope, [["domain-overview", null], ["problems", null], ["map-data", null]]), ...tail];
   }
   return [navigate, ...tail];
 }

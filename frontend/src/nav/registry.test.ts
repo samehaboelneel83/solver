@@ -61,7 +61,7 @@ describe("nav registry", () => {
   it("offers a recent domain when no problem was open", () => {
     const recent = buildSidebarGroups("/settings", { domainId: 7 }, { domainId: 7, problemId: null }).find((g) => g.key === "recent")!;
     expect(recent.label).toBe("Recent domain");
-    expect(recent.items.map((i) => i.to)).toEqual(["/domains/7/overview", "/domains/7/problems"]);
+    expect(recent.items.map((i) => i.to)).toEqual(["/domains/7/overview", "/domains/7/problems", "/domains/7/map-data"]);
   });
   it("drops the recent shortcut once another domain is selected", () => {
     const groups = buildSidebarGroups("/ops/queue", { domainId: 8 }, { domainId: 7, problemId: 9 });
@@ -150,7 +150,7 @@ describe("Simple on a legacy page (UX audit N-3)", () => {
   it("keeps the short menu on /runs, with the problem last opened in a planner's words", () => {
     const groups = buildSidebarGroups("/runs", { domainId: 1, problemId: null }, { domainId: 1, problemId: 5 }, "simple");
     expect(groups.map((g) => g.label)).toEqual(["Navigate", "Recent problem", "Help"]);
-    expect(groups[0].items.map((i) => i.label)).toEqual(["Home", "All workspaces", "Templates"]);
+    expect(groups[0].items.map((i) => i.label)).toEqual(["Home", "All workspaces", "Templates", "Map data"]);
     expect(groups[1].items.map((i) => [i.label, i.to])).toEqual([
       ["Overview & solve", "/domains/1/problems/5/overview"], ["Data", "/domains/1/data/records"],
       ["Model", "/domains/1/problems/5/model"], ["Results", "/domains/1/problems/5/runs"]]);

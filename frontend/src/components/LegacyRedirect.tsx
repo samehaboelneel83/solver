@@ -37,6 +37,8 @@ export const DOMAIN_PAGES: Record<string, string> = {
   sources: "data/sources",
   quality: "data/quality",
   predictors: "data/predictors",
+  "map-data": "map-data",
+  camps: "map-data/camps",
 };
 
 function rest(search: URLSearchParams, drop: string[]): string {
