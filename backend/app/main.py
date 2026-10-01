@@ -46,6 +46,7 @@ from app.api.settings import router as settings_router
 from app.api.relationships import router as relationships_router
 from app.api.routers import router as crud_router
 from app.api.start import router as start_router
+from app.api.people import router as people_router
 from app.clickhouse_schema import create_analytics_schema
 from app.core import logs, metrics, tracing
 from app.core.db import SessionLocal, get_clickhouse_client
@@ -239,4 +240,5 @@ app.include_router(settings_router)
 # route moved from /api/graph/domain to /api/v1/graph with it.
 app.include_router(graph_router)
 app.include_router(start_router)
+app.include_router(people_router)
 app.include_router(crud_router)

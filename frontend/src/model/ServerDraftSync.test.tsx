@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError, apiFetch } from "../api/client";
-import ServerDraftSync from "./ServerDraftSync";
+import ServerDraftSync, { AUTOSAVE_MS } from "./ServerDraftSync";
 import { clearDraft, readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
 
 vi.mock("../api/client", async () => {
@@ -41,7 +41,7 @@ it("saves a local draft naming the revision it was built on", async () => {
   const local = writeDraft({ problemId: P, base: "version-22", baseVersion: 2, ir: { sets: ["local"] } });
   mockFetch.mockRejectedValueOnce(new ApiError(404, "no draft"));
   const { rerender } = render(<ServerDraftSync problemId={P} draft={local} disabled={false} />);
-  expect(screen.getByText("Saved on this device only")).toBeInTheDocument();
+  expect(screen.getByText("Saving to the server in a moment…")).toBeInTheDocument();
   mockFetch.mockResolvedValueOnce(server(1, local.ir));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save to server" })));
   const [path, options] = mockFetch.mock.calls.at(-1)!;
@@ -52,10 +52,29 @@ it("saves a local draft naming the revision it was built on", async () => {
 
   const edited = writeDraft({ problemId: P, base: "version-22", baseVersion: 2, ir: { sets: ["edited"] } });
   rerender(<ServerDraftSync problemId={P} draft={edited} disabled={false} />);
-  expect(screen.getByText("Changes not saved to the server")).toBeInTheDocument();
+  expect(screen.getByText("Saving to the server in a moment…")).toBeInTheDocument();
   mockFetch.mockResolvedValueOnce(server(2, edited.ir));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save to server" })));
   expect(JSON.parse(mockFetch.mock.calls.at(-1)![1].body).expected_revision).toBe(1);
+});
+
+it("saves a draft to the server by itself once the edits pause (UX audit B-6)", async () => {
+  vi.useFakeTimers();
+  try {
+    const local = writeDraft({ problemId: P, base: "version-22", baseVersion: 2, ir: { sets: ["typed"] } });
+    mockFetch.mockRejectedValueOnce(new ApiError(404, "no draft"));
+    render(<ServerDraftSync problemId={P} draft={local} disabled={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    mockFetch.mockResolvedValueOnce(server(1, local.ir));
+    await act(async () => { await vi.advanceTimersByTimeAsync(AUTOSAVE_MS + 10); });
+    const [path, options] = mockFetch.mock.calls.at(-1)!;
+    expect(path).toBe(`/api/v1/problems/${P}/draft`);
+    expect(options.method).toBe("PUT");
+    expect(screen.getByText("Saved to the server as revision 1.")).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 async function staleSave(): Promise<ModelDraft> {

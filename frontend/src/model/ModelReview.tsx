@@ -1,5 +1,6 @@
 import type { FormDraft } from "./draftIr";
 import { referencesOf } from "./declarations";
+import { fieldsRead } from "./fieldsRead";
 import { printRule, printTerm } from "./formula";
 import { describeConnected, describeRoute, describeSchedule, describeWhen, type Constraint } from "./terms";
 
@@ -16,6 +17,7 @@ export default function ModelReview({ draft, units = {}, planner = [], wouldSolv
   wouldSolve?: string | null;
 }) {
   const notes = reviewNotes(draft);
+  const fields = fieldsRead(draft as unknown as Parameters<typeof fieldsRead>[0]);
   const kind = (domain: string) =>
     ({ binary: "yes or no", integer: "a whole number", continuous: "any number", interval: "a task in time" })[domain] ?? domain;
   const each = (index: string[]) => (index.length ? `for each ${index.join(" and ")}` : "one for the whole model");
@@ -45,10 +47,16 @@ export default function ModelReview({ draft, units = {}, planner = [], wouldSolv
         )}
       </Part>
       <Part title="The data it reads">
-        {Object.keys(draft.parameters).length === 0 ? <p>No parameters.</p> : (
-          <ul className="space-y-1">{Object.entries(draft.parameters).map(([name, spec]) => (
-            <li key={name}><span className="font-mono">{name}</span>: {each(spec.index)}{units[name] ? `, in ${units[name]}` : ""}.</li>
-          ))}</ul>
+        {Object.keys(draft.parameters).length === 0 && fields.length === 0 ? <p>No data: every number is written into the rules.</p> : (
+          <ul className="space-y-1">
+            {fields.map((field) => (
+              <li key={`${field.set}.${field.name}`}><span className="font-mono">{field.name}</span>:{" "}
+                {field.link ? `of each ${field.set} link` : `of each ${field.set}`}, from its records.</li>
+            ))}
+            {Object.entries(draft.parameters).map(([name, spec]) => (
+              <li key={name}><span className="font-mono">{name}</span>: {each(spec.index)}{units[name] ? `, in ${units[name]}` : ""}.</li>
+            ))}
+          </ul>
         )}
       </Part>
       <Part title="What must be true">

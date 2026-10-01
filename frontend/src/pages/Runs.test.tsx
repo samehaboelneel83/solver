@@ -320,7 +320,7 @@ describe("Runs", () => {
     expect(await screen.findByText(/Every required rule holds; 1 preference could not be met, at a cost of 3,600\./)).toBeInTheDocument();
     // Solver facts stay available, under Technical rather than in the header.
     expect(screen.getByText("Technical")).toBeInTheDocument();
-    expect(screen.getByText(/no room left/i)).toBeInTheDocument();
+    expect(screen.getByText(/at its limit/i)).toBeInTheDocument();
     expect(screen.getByText(/worth 6 on the goal/i)).toBeInTheDocument();
   });
 
@@ -719,13 +719,13 @@ describe("Runs", () => {
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /solve relaxed_cover/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /solve \(relaxed_cover scenario\)/i }));
 
     // Submitting only queues now, so the button says that rather than
     // claiming the solver is working -- a worker does that, elsewhere.
     expect(await screen.findByRole("button", { name: /queueing/i })).toBeDisabled();
     resolveWrite({ ...RUN_DETAIL, id: 12 });
-    await waitFor(() => expect(screen.getByRole("button", { name: /solve relaxed_cover/i })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /solve \(relaxed_cover scenario\)/i })).toBeEnabled());
   });
 
   it("follows a queued run until it settles, then stops asking", async () => {

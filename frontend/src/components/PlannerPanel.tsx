@@ -13,6 +13,7 @@ import {
   type WhyNotCell,
 } from "../api/v1";
 import { formatAmount } from "../lib/runViews";
+import { naturalOrder } from "../lib/naturalOrder";
 
 /**
  * The planner's tools on an answered plan (queue R28): hold part of it and solve the rest again
@@ -36,7 +37,7 @@ export default function PlannerPanel({ run, onOpen }: { run: Run; onOpen?: (id: 
 }
 
 function members(run: Run, set: string): string[] {
-  return run.set_order?.[set] ?? Object.keys(run.labels[set] ?? {});
+  return naturalOrder(run.set_order?.[set] ?? Object.keys(run.labels[set] ?? {}));
 }
 
 function label(run: Run, set: string, key: string): string {
@@ -194,7 +195,8 @@ function WhyNot({ run, decisions }: { run: Run; decisions: string[] }) {
           </label>
         ))}
         <button type="button" onClick={submit} disabled={ask.isPending || index.some((k) => !k)}
-                className="rounded-md border border-blue-700 bg-white px-3 py-1.5 text-sm text-blue-800 disabled:opacity-60">
+                // A long cell name wraps rather than running out of the button (UX audit C-2).
+                className="max-w-full whitespace-normal break-words rounded-md border border-blue-700 bg-white px-3 py-1.5 text-left text-sm text-blue-800 disabled:opacity-60">
           {isOn ? `Why is ${name} on?` : `Why isn't ${name} on?`}
         </button>
       </div>

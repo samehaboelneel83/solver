@@ -15,8 +15,9 @@ describe("nav registry", () => {
   it("takes domain and problem ids from the URL instead of stale preferences", () => {
     const groups = buildSidebarGroups("/domains/8/problems/12/inputs", { domainId: 7, problemId: 9 });
     const workflow = groups.find(group => group.key === "planning")!;
-    expect(workflow.items.map(item => item.label)).toEqual(["Problem overview", "Inputs", "Build model", "Versions", "Scenarios", "Runs & results"]);
-    expect(workflow.items.find(item => item.id === "inputs")?.to).toBe("/domains/8/problems/12/inputs");
+    // No Inputs hub (UX audit N-2): the data it pointed to is in the Data group, by name.
+    expect(workflow.items.map(item => item.label)).toEqual(["Problem overview", "Build model", "Versions", "Scenarios", "Runs & results"]);
+    expect(workflow.items.find(item => item.id === "model")?.to).toBe("/domains/8/problems/12/model");
   });
   it("resolves new hubs without swallowing their child routes", () => {
     expect(destinationForPath("/domains/8/data/sources")?.id).toBe("sources");
@@ -87,7 +88,9 @@ describe("nav registry", () => {
   });
   it("offers domain data without showing an unselected problem's editor", () => {
     const ids = buildSidebarGroups("/domains/7/overview", { domainId: 7 }).flatMap((g) => g.items.map((i) => i.id));
-    expect(ids).toContain("data-records");
+    // The records themselves, not the Records & relationships hub (UX audit N-2).
+    expect(ids).toContain("records");
+    expect(ids).not.toContain("data-records");
     expect(ids).toContain("problems");
     expect(ids).not.toContain("model");
   });
@@ -95,7 +98,8 @@ describe("nav registry", () => {
     const links = buildSidebarGroups("/domains/7/problems/9/model", { domainId: 7, problemId: 9 }).flatMap((g) => g.items);
     expect(links.find((i) => i.id === "domain-overview")?.to).toBe("/domains/7/overview");
     expect(links.filter((i) => i.to === "/domains/7/problems/9/runs")).toHaveLength(1);
-    expect(links.some((i) => i.id === "records")).toBe(false);
+    // The data a problem reads is one click away (UX audit N-2: the Inputs hub pointed back to it).
+    expect(links.find((i) => i.id === "records")?.to).toBe("/domains/7/data/records");
   });
   it("offers overview links only with enough context and names them in breadcrumbs", () => {
     expect(buildNavGroups().flatMap((group) => group.items).some((item) => item.id.endsWith("-overview"))).toBe(false);
@@ -139,5 +143,16 @@ describe("nav registry", () => {
     expect(groups.map((g) => g.key)).toContain("administration");
     expect(groups.find((g) => g.key === "administration")?.footer).toBe(true);
     expect(groups.find((g) => g.key === "domains")?.items.some((i) => i.label === "Records")).toBe(true);
+  });
+});
+
+describe("Simple on a legacy page (UX audit N-3)", () => {
+  it("keeps the short menu on /runs, with the problem last opened in a planner's words", () => {
+    const groups = buildSidebarGroups("/runs", { domainId: 1, problemId: null }, { domainId: 1, problemId: 5 }, "simple");
+    expect(groups.map((g) => g.label)).toEqual(["Navigate", "Recent problem", "Help"]);
+    expect(groups[0].items.map((i) => i.label)).toEqual(["Home", "All workspaces", "Templates"]);
+    expect(groups[1].items.map((i) => [i.label, i.to])).toEqual([
+      ["Overview & solve", "/domains/1/problems/5/overview"], ["Data", "/domains/1/data/records"],
+      ["Model", "/domains/1/problems/5/model"], ["Results", "/domains/1/problems/5/runs"]]);
   });
 });

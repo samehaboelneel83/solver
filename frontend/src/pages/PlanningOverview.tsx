@@ -74,7 +74,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
       {pending ? <p role="status" className="py-6 text-sm text-slate-600">Loading problems…</p>
         : problems.isError ? <LoadFailure subject="The problem list" error={problems.error} retry={() => void problems.refetch()} />
         : <>
-          <p className="mt-2 text-sm text-slate-500" aria-live="polite">{problems.data?.total ?? 0} {(problems.data?.total ?? 0) === 1 ? "problem" : "problems"}{q ? " matching your search" : " in this domain"}</p>
+          <p className="mt-2 text-sm text-slate-500" aria-live="polite">{problems.data?.total ?? 0} {(problems.data?.total ?? 0) === 1 ? "problem" : "problems"}{q ? " matching your search" : ` in this ${w("domain")}`}</p>
           {problems.data?.items.length ? <ul className="mt-4 divide-y divide-slate-100">
             {problems.data.items.map((problem) => <li key={String(problem.id)}>
               <Link to={`${base}/problems/${problem.id}/overview`} className="flex items-center justify-between gap-3 rounded-lg px-2 py-4 hover:bg-slate-50">
@@ -117,6 +117,7 @@ export function ProblemOverview() {
   const domainId = parseRouteId(params.domainId ?? null);
   const problemId = parseRouteId(params.problemId ?? null);
   const readiness = useReadiness(problemId);
+  const w = useWords();
   const { can } = useCapabilities();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -138,7 +139,7 @@ export function ProblemOverview() {
   if (readiness.isError) return <LoadFailure subject="The problem overview" error={readiness.error} retry={() => void readiness.refetch()} />;
   if (readiness.isLoading || !readiness.data) return <p role="status">Loading problem overview…</p>;
   const data = readiness.data;
-  if (Number(data.problem.domain_id) !== domainId) return <p role="alert">This problem is not available in this domain.</p>;
+  if (Number(data.problem.domain_id) !== domainId) return <p role="alert">This problem is not available here.</p>;
 
   const steps = problemSteps(data);
   const next = nextAction(data, can("model.publish"));
@@ -196,7 +197,7 @@ export function ProblemOverview() {
   };
 
   return <div className="max-w-4xl space-y-6">
-    <Link className={link} to={`/domains/${domainId}/problems`}>All problems in this domain</Link>
+    <Link className={link} to={`/domains/${domainId}/problems`}>All problems in this {w("domain")}</Link>
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold text-slate-900">{data.problem.name}</h1>
         <p className="mt-2 text-sm text-slate-600">Data, the model, a check, a solve and its results: each step below says where it stands.</p>

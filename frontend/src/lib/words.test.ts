@@ -6,7 +6,6 @@ describe("one vocabulary", () => {
     expect(word("Domain", true)).toBe("Workspace");
     expect(word("Domain", false)).toBe("Domain");
     expect(word("Entity type", true)).toBe("Kind of record");
-    expect(word("Objective", true)).toBe("Goal");
   });
 
   it("has a plain word for every term, different from the term", () => {

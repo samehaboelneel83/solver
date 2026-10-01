@@ -1892,3 +1892,18 @@ export type GraphLayout = { positions: Record<string, { x: number; y: number }>;
 export const getGraphLayout = (problemId: Id) => apiFetch<GraphLayout>(`/api/v1/problems/${problemId}/graph-layout`);
 export const saveGraphLayout = (problemId: Id, positions: GraphLayout["positions"]) =>
   send<GraphLayout>("PUT", `/api/v1/problems/${problemId}/graph-layout`, { positions });
+
+// --- people and roles (UX audit A-1) ---------------------------------------
+
+export type PersonRole = { id: string; code: string; name: string };
+export type Person = { id: string; username: string; display_name: string | null; email: string | null; is_active: boolean; roles: PersonRole[] };
+export type RoleSummary = PersonRole & { capabilities: string[]; users: number };
+export type People = { users: Person[]; roles: RoleSummary[] };
+
+export function usePeople() {
+  return useQuery({ queryKey: [V1, "people"], queryFn: () => apiFetch<People>("/api/v1/people") });
+}
+export const setPersonRoles = (userId: string, roleIds: string[]) =>
+  send<Person>("PUT", `/api/v1/people/${userId}/roles`, { role_ids: roleIds });
+export const setPersonActive = (userId: string, isActive: boolean) =>
+  send<Person>("PATCH", `/api/v1/people/${userId}`, { is_active: isActive });

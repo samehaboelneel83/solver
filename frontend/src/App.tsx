@@ -13,6 +13,7 @@ import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import Health from "./pages/Health";
+import People from "./pages/People";
 import StartProblem from "./pages/StartProblem";
 import { DomainOverview, ProblemOverview } from "./pages/PlanningOverview";
 import GraphDemo from "./pages/GraphDemo";
@@ -141,6 +142,7 @@ export default function App() {
         <Route path="workspace" element={<LegacyProblemRedirect page="workspace" fallback={<Workspace />} />} />
         <Route path="settings" element={<Settings />} />
         <Route path="administration/access" element={<NavigationHub kind="access" />} />
+        <Route path="administration/people" element={<People />} />
         <Route path="inputs" element={<LegacyProblemRedirect page="inputs" fallback={<AliasRedirect to="/domains" />} />} />
         <Route path="data" element={<LegacyDomainRedirect page="data" />} />
         <Route path="structure" element={<LegacyDomainRedirect page="structure" />} />

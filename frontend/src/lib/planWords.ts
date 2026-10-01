@@ -49,11 +49,26 @@ function goalLine(run: Run, ir: Ir): string | null {
   const terms = ir.objective?.terms ?? [];
   const minimise = (ir.objective?.sense ?? "minimize").startsWith("min");
   const name = terms.length === 1 ? terms[0].note?.trim() || plain(terms[0].id ?? "the goal") : "the goal";
+  // A name is the author's choice and may not say what is counted ("Morning" for a late-slot
+  // penalty, UX audit C-1): when it names none of the data the goal adds up, say that data too.
+  const counts = [...new Set((ir.objective?.terms ?? []).flatMap((term) => dataRead((term as { expression?: unknown }).expression)))];
+  const said = counts.length && !counts.some((c) => plain(c) === name.toLowerCase())
+    ? `${sentence(name)}, the total of ${counts.map(plain).join(" and ")},`
+    : sentence(name);
   const proven = run.status === "optimal";
   const how = minimise
     ? proven ? "as low as it can go" : "the lowest found"
     : proven ? "as high as it can go" : "the highest found";
-  return `${sentence(name)} came to ${number(value)}, ${how}.`;
+  return `${said} came to ${number(value)}, ${how}.`;
+}
+
+/** The data values and record fields an expression reads, by name. */
+function dataRead(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(dataRead);
+  if (!node || typeof node !== "object") return [];
+  const o = node as Record<string, unknown>;
+  const own = typeof o.par === "string" ? [o.par] : (o.attr as { name?: string } | undefined)?.name ? [(o.attr as { name: string }).name] : [];
+  return [...own, ...Object.values(o).flatMap(dataRead)];
 }
 
 function decisionLines(run: Run, ir: Ir): string[] {

@@ -20,6 +20,7 @@ import {
   type Shape,
   type ViewKind,
 } from "../lib/runViews";
+import { naturalOrders } from "../lib/naturalOrder";
 
 /** Colours for the members drawn inside a grid's cells (people in a roster): one each, the same on every run. */
 const PALETTE = ["#2563eb", "#d97706", "#059669", "#9333ea", "#ca8a04", "#dc2626", "#0891b2", "#64748b"];
@@ -88,7 +89,7 @@ function DecisionView({ run, variable, places }: { run: Run; variable: string; p
       shape={shape}
       entries={entries}
       bars={bars}
-      order={run.set_order ?? {}}
+      order={naturalOrders(run.set_order ?? {})}
       labels={run.labels}
       places={places}
       count={kind === "binary" ? `${entries.length} chosen` : `${entries.length} non-zero`}

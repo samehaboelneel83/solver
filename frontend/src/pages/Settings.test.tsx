@@ -169,4 +169,31 @@ describe("Settings", () => {
     expect(sent[0].path).toBe("/api/v1/me");
     expect(sent[0].body).toMatchObject({ password: "a new horse" });
   });
+
+  it("groups the keys, finds them by words, narrows to those set here, and asks yes or no (UX audit A-3)", async () => {
+    const sent: unknown[] = [];
+    stub({
+      settings: { items: [...SETTINGS.items,
+        { key: "retention.audit_days", value: 365, source: "default", value_type: "number", description: "How long audit events are kept" },
+        { key: "shadow.enabled", value: false, source: "default", value_type: "boolean", description: "Run a shadow solver alongside" }] },
+      write: (_path: string, options?: { body?: string }) => {
+        sent.push(JSON.parse(options?.body ?? "{}"));
+        return Promise.resolve({ ok: true });
+      },
+    });
+    renderPage();
+    expect(await screen.findByRole("region", { name: "Solving and solver choice" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "How long things are kept" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/find a setting/i), { target: { value: "audit" } });
+    expect(screen.queryByText("solve.seed")).not.toBeInTheDocument();
+    expect(screen.getByText("retention.audit_days")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/find a setting/i), { target: { value: "" } });
+
+    const shadow = screen.getByRole("combobox", { name: "shadow.enabled" });
+    expect(shadow).toHaveDisplayValue("inherited: no");
+    fireEvent.change(shadow, { target: { value: "true" } });
+    expect(shadow).toHaveDisplayValue("Yes");
+  });
 });
+

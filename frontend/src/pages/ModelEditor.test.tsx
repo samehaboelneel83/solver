@@ -809,14 +809,15 @@ describe("ModelEditor", () => {
       write,
       ir: {
         ...IR_V2,
+        variables: { ...IR_V2.variables, extra: { index: [], domain: "integer", lower: 0, upper: 5 } },
         constraints: [
           {
             id: "c_global",
-            note: "always true",
+            note: "at most everyone on every day",
             forall: [{ index: "d", set: "day" }],
-            left: { const: 0 },
+            left: { var: "extra", index: [] },
             relation: "<=",
-            right: { const: 1 },
+            right: { const: 100 },
             severity: "hard",
           },
         ],
@@ -840,6 +841,16 @@ describe("ModelEditor", () => {
     await waitFor(() => expect(write).toHaveBeenCalled());
     const sent = JSON.parse(write.mock.calls[0][1].body).ir;
     expect(sent.constraints[0]).not.toHaveProperty("forall");
+  });
+
+  it("will not publish a rule that decides nothing, and says which (UX audit B-4)", async () => {
+    stub({ ir: { ...IR_V2, constraints: [...IR_V2.constraints,
+      { id: "c_blank", left: { const: 0 }, relation: "<=", right: { const: 0 }, severity: "hard" }] } });
+    renderPage();
+    await screen.findByDisplayValue("c_blank");
+    const publish = screen.getByRole("button", { name: /publish a new version/i });
+    expect(publish).toBeDisabled();
+    expect(publish).toHaveAttribute("title", expect.stringContaining("c_blank decides nothing yet"));
   });
 
   it("drops a blank What it means rather than publishing an empty note", async () => {

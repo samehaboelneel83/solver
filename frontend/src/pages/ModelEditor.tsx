@@ -9,6 +9,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import {
   useApplyTemplate,
   useCreateVersion,
+  solveProblem,
   useClassify,
   useCreateAttribute,
   useCreateEntityType,
@@ -183,13 +184,17 @@ function ForDomain({ domainId }: { domainId: Id }) {
     <>
       <LegacyDraftRecovery problemId={problemId} />
       <ProblemReadiness problemId={problemId} />
-      <ProblemPicker
-        domainId={domainId}
-        current={problem}
-        firstPage={firstPage}
-        total={total}
-        onChoose={chooseProblem}
-      />
+      {/* Inside a problem's own pages the problem is already chosen: a switch here would
+          leave with a draft in hand (UX audit B-2). The sidebar's "Other problems" still goes. */}
+      {!route.problemId && (
+        <ProblemPicker
+          domainId={domainId}
+          current={problem}
+          firstPage={firstPage}
+          total={total}
+          onChoose={chooseProblem}
+        />
+      )}
       <Editor key={problemId} problemId={problemId} domainId={domainId} />
     </>
   );
@@ -229,6 +234,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [failure, setFailure] = useState<string | null>(null);
   // Publishing never moves a scenario (operator trial F29): say so, and where to move them.
   const [justPublished, setJustPublished] = useState<number | null>(null);
+  const [solvingNow, setSolvingNow] = useState(false);
+  const navigate = useNavigate();
   const [storedView, setEquationView] = useEquationView();
   // Simple or Expert (editorLevel.ts): Simple shows the plain views, one card open at a time, one “+ Add” per section.
   const [level] = useEditorLevel();
@@ -552,6 +559,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     key: `parameter-${name}-${i}`, where: `Data ${name}`, message: explain(problem), go: () => goTo("parameter", name),
   })));
   const fixes = [...parameterFixes, ...variableFixes, ...ruleFixes, ...goalFixes];
+  // A rule with no decision in it -- a blank rule's "0 ≤ 0" -- is valid IR and would publish as a
+  // rule that says nothing (UX audit B-4): Publish waits until it is filled in or removed.
+  const idleRules = draft.constraints.filter((rule) => rule.left != null && rule.right != null &&
+    checkRule(rule, context).some((problem) => problem.message.startsWith("neither side reads a decision"))).map((rule) => rule.id);
   const stepStatus: Record<Step, StepStatus> = {
     sets: draft.sets.length ? "done" : "todo",
     data: parameterFixes.length ? "fix" : Object.keys(draft.parameters).length ? "done" : "optional",
@@ -563,6 +574,35 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
 
   return (
     <EditorLevelContext.Provider value={level}>
+      {justPublished !== null && (
+        // Where the page lands after publishing, with the next step on it (UX audit B-7).
+        <div role="status" className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <p>
+            Version {justPublished} is published.{" "}
+            <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/versions`}>See the versions</Link>.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {can("run.submit") && (
+              <button type="button" disabled={solvingNow}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                onClick={async () => {
+                  setSolvingNow(true);
+                  try {
+                    const run = await solveProblem(Number(problemId));
+                    navigate(`/domains/${domainId}/problems/${problemId}/runs/${run.id}`);
+                  } catch (error) {
+                    setFailure(formatApiError(error));
+                  } finally {
+                    setSolvingNow(false);
+                  }
+                }}>
+                {solvingNow ? "Starting…" : `Solve version ${justPublished} now`}
+              </button>
+            )}
+            <span className="text-xs text-blue-800">It solves on the Base scenario; other scenarios keep their version until moved on the Scenarios page.</span>
+          </div>
+        </div>
+      )}
       {versionItems.length > 0 && !scratch ? (
         <div className="mb-4">
           <label htmlFor="model-base" className="block text-sm font-medium text-slate-700">
@@ -768,9 +808,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                       setComposed((current) => new Set(current).add(id));
                       setDraft((current) => current && { ...current, constraints: [...current.constraints, ruleFromShape(shape.shape, id, context)] });
                       close();
+                      goTo("rule", id);
                     }} />
                 ))}
-                <AddChoice title="A blank rule" hint="Start from “0 is at most 0” and build it in boxes."
+                <AddChoice title="A blank rule" hint="Starts as “0 is at most 0”: fill in both sides before publishing."
                   onPick={() => {
                     const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
                     setComposed((current) => new Set(current).add(id));
@@ -783,6 +824,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                       } as Constraint],
                     });
                     close();
+                    goTo("rule", id);
                   }} />
                 <p className="text-xs text-slate-500">Scheduling, connected and route rules are under Expert.</p>
               </>
@@ -793,17 +835,16 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <button
           type="button"
           className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
-          onClick={() =>
+          onClick={() => {
+            // The new rule opens where it is seen (UX audit B-4), not below the fold.
+            const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
             setDraft((current) =>
               current && {
                 ...current,
                 constraints: [
                   ...current.constraints,
                 {
-                  id: freeNumberedId(
-                    "c_",
-                    current.constraints.map((constraint) => constraint.id)
-                  ),
+                  id,
                   // No set yet → a global rule (omit forall). Naming an
                   // empty set would publish a binding the contract refuses.
                   ...(context.sets.length > 0
@@ -816,8 +857,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                 } as Constraint,
                 ],
               }
-            )
-          }
+            );
+            goTo("rule", id);
+          }}
         >
           Add a rule
         </button>
@@ -829,6 +871,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             const rule = ruleFromShape(shape as RuleShape, id, context);
             setComposed((current) => new Set(current).add(id));
             setDraft((current) => current && { ...current, constraints: [...current.constraints, rule] });
+            goTo("rule", id);
           }}
         />
         {newSchedulingRule("c_", context) !== null && (
@@ -908,7 +951,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       )}
       {stepByStep && view === "review" && <StepNav current={currentStep} onStep={goToStep} />}
 
-      {refusal === null && classification.data && (
+      {/* The review says this itself, under "How it will be solved" (UX audit B-7: shown twice). */}
+      {refusal === null && classification.data && view !== "review" && (
         <aside aria-label="What this model is" className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
           <h2 className="mb-1 text-sm font-semibold text-slate-900">What this model is</h2>
           {classification.data.planner.length > 0 && (
@@ -972,14 +1016,6 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           <span className="text-slate-600">before publishing: every rule in words, and what looks unfinished.</span>
         </p>
       )}
-      {justPublished !== null && (
-        <p role="status" className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          Version {justPublished} is published. Scenarios keep solving the version they were made on until they are moved:{" "}
-          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/runs`}>open Runs</Link> to move a
-          scenario from its &ldquo;Before you solve&rdquo; panel, or edit it on the{" "}
-          <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/scenarios`}>Scenarios page</Link>.
-        </p>
-      )}
       {canEdit && <>
       <DraftBar
         draft={stored}
@@ -989,7 +1025,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             ? `${outside} ${outside === 1 ? "block is" : "blocks are"} outside the model: put ${outside === 1 ? "it" : "them"} inside, or delete ${outside === 1 ? "it" : "them"}`
             : refusal
               ? refusal.message
-              : null
+              : idleRules.length
+                ? `${idleRules.join(", ")} ${idleRules.length === 1 ? "decides" : "decide"} nothing yet (neither side reads a decision): fill ${idleRules.length === 1 ? "it" : "them"} in, or remove ${idleRules.length === 1 ? "it" : "them"}`
+                : null
         }
         onPublish={publish}
         onDiscard={() => void discard()}

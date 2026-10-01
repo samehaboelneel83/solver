@@ -31,6 +31,8 @@ function renderAt(path = "/") {
 describe("the app's look (queue R22)", () => {
   beforeEach(() => {
     localStorage.clear();
+    // Most of these are about the shell itself, not Simple's short menu: Expert shows every group.
+    localStorage.setItem("solver_editor_level", "expert");
     document.documentElement.classList.remove("dark");
     document.documentElement.dir = "ltr";
     (apiFetch as any).mockImplementation((path: string) => {

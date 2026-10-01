@@ -109,6 +109,14 @@ def test_one_solve_keeps_a_base_scenario_on_the_latest_version(world, db, auth_h
     assert body["base_scenario"] == {"id": base[0].id, "version": 2}
     assert body["last_run"]["id"] == second.json()["id"] and body["last_run"]["scenario"] == "Base"
 
+    # A question asked of the plan (why-not) is a run too, but not the problem's latest result (UX audit C-2).
+    db.execute(text("INSERT INTO run (scenario_id, dataset_id, status, purpose, parent_run_id, params, seed)"
+                    " SELECT scenario_id, dataset_id, 'optimal', 'why_not', id, '{}', seed FROM run WHERE id = :r"),
+               {"r": second.json()["id"]})
+    db.commit()
+    body = client.get(f"/api/v1/problems/{world['problem']}/readiness", headers=auth_headers).json()
+    assert body["last_run"]["id"] == second.json()["id"]
+
 
 def test_the_scenario_preflight_names_missing_values_in_place_of_the_compiler_refusal(world, db, auth_headers):  # noqa: F811
     version = make_model_version(db, world["problem"], IR)
