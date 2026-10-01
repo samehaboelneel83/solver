@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import DataChecks from "../components/DataChecks";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -38,7 +39,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
       ],
     },
     quality: {
-      title: "Quality checks", detail: "Review input values and validate published models from their problem workspace. A consolidated domain quality report is not available yet.",
+      title: "Quality checks", detail: "This domain's records checked as a whole, below; input values and published models are checked from their own pages.",
       cards: [
         { title: "Review input values", description: "Check parameters and missing values in the existing data editor.", to: `${domain}/data/parameters` },
         { title: "Check relationships", description: "Inspect links and their record references.", to: `${domain}/data/relationships` },
@@ -69,6 +70,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
           <p className="mt-2 text-sm text-slate-600">{item.description}</p>
         </Link>)}
     </div>
+    {kind === "quality" && domainId && <DataChecks domainId={Number(domainId)} />}
     <Link className="inline-block py-2 text-sm text-blue-700 underline" to={kind === "access" ? "/help/getting-started" : problemId ? `${problem}/overview` : `${domain}/overview`}>
       {kind === "access" ? "Local help" : problemId ? "Problem overview" : "Domain overview"}
     </Link>
