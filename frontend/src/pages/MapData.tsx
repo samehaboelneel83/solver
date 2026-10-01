@@ -28,14 +28,15 @@ export default function MapData() {
           <div>
             <h1 className="mb-1 text-lg font-semibold text-slate-900">Map data</h1>
             <p className="max-w-2xl text-sm text-slate-500">
-              CAD drawings brought onto the map as GIS layers: every layer's points, lines, areas, text and blocks, placed
-              on the ground with the coordinate system you choose and checked over imagery before they are stored.
+              CAD drawings (DXF) and GIS files (GeoJSON, KML/KMZ, GPX, Shapefile, GeoPackage, CSV) brought onto the map as
+              layers: points, lines, areas, text and attributes, placed on the ground with their coordinate system and
+              checked over imagery before they are stored.
             </p>
           </div>
           {can("domain.edit") && (
             <Link to={`/domains/${domainId}/map-data/import`}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
-              <FileUp className="h-4 w-4" aria-hidden /> Import a CAD drawing (.dxf)
+              <FileUp className="h-4 w-4" aria-hidden /> Import map data (DXF, GeoJSON, KML, Shapefile…)
             </Link>
           )}
         </header>

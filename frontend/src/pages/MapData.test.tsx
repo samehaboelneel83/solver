@@ -38,5 +38,5 @@ it("lists imported drawings with their layers, size and coordinate system", asyn
   expect(within(row).getByRole("link", { name: "Site plan" })).toHaveAttribute("href", "/domains/7/map-data/3");
   expect(row).toHaveTextContent("site.dxf · 6 layers · 1,234 features · WGS 84 / UTM zone 36N");
   expect(screen.getByText(/Stored in PostGIS/)).toBeInTheDocument();
-  expect(await screen.findByRole("link", { name: /Import a CAD drawing/ })).toHaveAttribute("href", "/domains/7/map-data/import");
+  expect(await screen.findByRole("link", { name: /Import map data/ })).toHaveAttribute("href", "/domains/7/map-data/import");
 });

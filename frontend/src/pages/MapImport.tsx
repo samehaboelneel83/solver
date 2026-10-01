@@ -1,5 +1,5 @@
 /**
- * Import a CAD drawing as map data (DXF -> GIS):
+ * Import a spatial file as map data (DXF, GeoJSON, KML/KMZ, GPX, Shapefile, GeoPackage, CSV -> GIS):
  *
  * 1. the file: read on the server into layers of points, lines, polygons and text;
  * 2. the layers to keep, with their CAD colours and what each holds;
@@ -21,10 +21,13 @@ import { toLonLat } from "../lib/campGeo";
 import { draw, extentOf, prepare } from "../lib/gisDraw";
 import type { Pt } from "../api/camps";
 
+/** The files Map data reads (backend `app/gis/formats.py`). */
+export const SPATIAL_FILES = ".dxf,.geojson,.json,.kml,.kmz,.gpx,.zip,.gpkg,.csv";
+
 const KIND_WORDS: Record<string, string> = { point: "points", line: "lines", polygon: "areas", text: "texts" };
 
 export default function MapImport() {
-  useDocumentTitle("Import a drawing");
+  useDocumentTitle("Import map data");
   const { domainId } = useDomain();
   const navigate = useNavigate();
   const { can } = useCapabilities();
@@ -51,7 +54,7 @@ export default function MapImport() {
       setUpload(got);
       // AutoCAD's Defpoints never prints: left out unless chosen.
       setLayers(new Set(got.summary.layers.filter((l) => l.features > 0 && l.on && !l.frozen && l.name.toLowerCase() !== "defpoints").map((l) => l.name)));
-      setName(f.name.replace(/\.dxf$/i, "").replace(/[_]+/g, " "));
+      setName(f.name.replace(/\.[a-z0-9]+$/i, "").replace(/[_]+/g, " "));
       // Chosen for the person only when the evidence is good: a world-wide system that merely fits is not.
       const sure = got.candidates.find((c) => c.sure);
       setPick({ placement: sure?.placement ?? null, units: null });
@@ -126,23 +129,28 @@ export default function MapImport() {
       <header className="flex flex-wrap items-center gap-2">
         <Link to={`/domains/${domainId}/map-data`} className="text-sm text-blue-700 hover:underline">Map data</Link>
         <span className="text-slate-400">/</span>
-        <h1 className="text-lg font-semibold text-slate-900">Import a CAD drawing</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Import map data</h1>
       </header>
 
       {!upload && (
         <section className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center"
           onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void read(e.dataTransfer.files[0]); }}>
           <FileUp className="mx-auto h-8 w-8 text-slate-400" aria-hidden />
-          <p className="mt-2 text-sm text-slate-700">Drop a <strong>.dxf</strong> file here, or</p>
+          <p className="mt-2 text-sm text-slate-700">Drop a CAD drawing or GIS file here, or</p>
           <button type="button" disabled={!!busy} onClick={() => file.current?.click()}
             className="mt-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-            {busy ?? "Choose a drawing"}
+            {busy ?? "Choose a file"}
           </button>
-          <input ref={file} type="file" accept=".dxf" className="hidden" aria-label="CAD drawing" onChange={(e) => void read(e.target.files?.[0])} />
-          <p className="mx-auto mt-3 max-w-xl text-xs text-slate-500">
-            Every layer is read: points, lines and polylines, closed shapes and hatches, circles and arcs, text, blocks
-            with their attributes, and dimensions. A DWG must be saved as DXF from your CAD program first.
-          </p>
+          <input ref={file} type="file" accept={SPATIAL_FILES} className="hidden" aria-label="Map data file" onChange={(e) => void read(e.target.files?.[0])} />
+          <ul className="mx-auto mt-3 max-w-xl space-y-0.5 text-left text-xs text-slate-500">
+            <li><strong>CAD drawing</strong> (.dxf): every layer, with points, lines, closed shapes, hatches, circles, text and
+              blocks. A DWG must be saved as DXF from your CAD program first.</li>
+            <li><strong>GeoJSON</strong> (.geojson, .json), <strong>KML / KMZ</strong> (Google Earth), <strong>GPX</strong> (GPS):
+              in longitude and latitude, so they land on the map by themselves.</li>
+            <li><strong>Shapefile</strong>: a .zip of its .shp, .shx, .dbf and .prj. <strong>GeoPackage</strong> (.gpkg): each
+              table a layer. Both bring their coordinate system and attributes.</li>
+            <li><strong>CSV</strong>: a WKT column (wkt or geometry), or lon/lat or x/y columns; a layer column makes layers.</li>
+          </ul>
           {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
         </section>
       )}
@@ -152,7 +160,7 @@ export default function MapImport() {
           <section className="rounded-lg border border-slate-200 bg-white p-3" aria-label="Layers">
             <h2 className="text-sm font-semibold text-slate-900">1. Layers</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              {upload.filename} · DXF {s.version} · {s.features.toLocaleString()} features ·
+              {upload.filename} · {/^AC\d/.test(s.version) ? `DXF ${s.version}` : s.version} · {s.features.toLocaleString()} features ·
               {" "}{Object.entries(s.kinds).map(([k, n]) => `${n.toLocaleString()} ${KIND_WORDS[k] ?? k}`).join(", ")}
             </p>
             <div className="mt-2 flex gap-2 text-xs">
@@ -226,7 +234,9 @@ export default function MapImport() {
             <h2 className="text-sm font-semibold text-slate-900">2. Where is it?</h2>
             <p className="text-xs text-slate-500">
               The drawing's numbers run from {s.extent ? `${s.extent[0].toFixed(1)}, ${s.extent[1].toFixed(1)} to ${s.extent[2].toFixed(1)}, ${s.extent[3].toFixed(1)}` : "—"}.
-              A DXF rarely says which coordinate system they are in; choose the one that puts it in the right place.
+              {typeof s.geodata?.epsg === "number"
+                ? ` The file names its coordinate system (EPSG:${s.geodata.epsg}); check it lands in the right place.`
+                : " A DXF or a CSV rarely says which coordinate system they are in; choose the one that puts it in the right place."}
             </p>
             <SiteWherePicker value={where} onChange={(w) => {
               setWhere(w);

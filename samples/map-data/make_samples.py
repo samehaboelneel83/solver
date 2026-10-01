@@ -1,12 +1,14 @@
 """Make the sample drawings in this folder (see README.md).
 
-    cd backend && PYTHONPATH=camp_layout python ../samples/dxf/make_samples.py
+    cd backend && PYTHONPATH=camp_layout python ../samples/map-data/make_samples.py
 
 mina-camp-utm37n.dxf  the engine's complex example ("Irregular camp, four doors")
                       as a surveyed drawing: metres, UTM zone 37N (EPSG:32637),
                       at Mina, Makkah; camp layers plus roads and notes
 small-room-mm.dxf     the small example in millimetres with no coordinate system;
                       its door is a block (a leaf and its swing)
+mina-camp.geojson     the Mina camp again as GeoJSON (WGS 84), a `layer` property
+                      on each feature naming its layer as in the DXF
 """
 from __future__ import annotations
 
@@ -97,7 +99,39 @@ def small_room(path: Path) -> None:
     doc.saveas(path)
 
 
+def mina_geojson(path: Path) -> None:
+    """The Mina drawing's camp layers as GeoJSON in longitude and latitude."""
+    import json
+
+    from pyproj import Transformer
+
+    camp = examples.complex_camp()
+    t = Transformer.from_crs("EPSG:32637", "EPSG:4326", always_xy=True)
+
+    def lonlat(p) -> list[float]:
+        lon, lat = t.transform(*at(p))
+        return [round(lon, 8), round(lat, 8)]
+
+    def ring(points) -> list[list[float]]:
+        pts = [lonlat(p) for p in points]
+        return pts + [pts[0]]
+
+    def feature(layer: str, geometry: dict, **props) -> dict:
+        return {"type": "Feature", "properties": {"layer": layer, **props}, "geometry": geometry}
+
+    feats = [feature("CAMP_BOUNDARY", {"type": "Polygon", "coordinates": [ring(camp.boundary)]}, name=camp.name)]
+    feats += [feature("DOORS", {"type": "LineString", "coordinates": [lonlat(d.a), lonlat(d.b)]}, name=d.id)
+              for d in camp.doors]
+    feats += [feature("OBSTACLES", {"type": "Polygon", "coordinates": [ring(o.ring)]}, name=o.id, kind=o.kind)
+              for o in camp.obstacles]
+    feats += [feature("NO_BEDS", {"type": "Polygon", "coordinates": [ring(p.ring)]}, name=p.id) for p in camp.prohibited]
+    feats += [feature("ZONE_MEDICAL_AREA", {"type": "Polygon", "coordinates": [ring(z.ring)]}, name=z.id)
+              for z in camp.placement_zones]
+    path.write_text(json.dumps({"type": "FeatureCollection", "name": camp.name, "features": feats}, indent=1))
+
+
 if __name__ == "__main__":
     mina_camp(HERE / "mina-camp-utm37n.dxf")
     small_room(HERE / "small-room-mm.dxf")
-    print("wrote", ", ".join(p.name for p in sorted(HERE.glob("*.dxf"))))
+    mina_geojson(HERE / "mina-camp.geojson")
+    print("wrote", ", ".join(p.name for p in sorted(HERE.glob("*.*")) if p.suffix in (".dxf", ".geojson")))

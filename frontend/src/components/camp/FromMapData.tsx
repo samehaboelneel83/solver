@@ -51,7 +51,7 @@ export default function FromMapData({ domainId }: { domainId: number }) {
   if (!items.length) {
     return (
       <p className="text-xs text-slate-500">
-        Import a CAD drawing under <Link className="text-blue-700 underline" to={`/domains/${domainId}/map-data/import`}>Map data</Link> to
+        Import a CAD drawing or GIS file under <Link className="text-blue-700 underline" to={`/domains/${domainId}/map-data/import`}>Map data</Link> to
         start a camp from its layers.
       </p>
     );

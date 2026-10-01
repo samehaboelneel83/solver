@@ -47,7 +47,7 @@ def _slug(words: str) -> str:
 
 
 def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) -> tuple[dict[str, Any], list[str]]:
-    from shapely.geometry import LineString, MultiLineString, Point, Polygon, box, shape
+    from shapely.geometry import LineString, MultiLineString, Point, Polygon, box
     from shapely.ops import polygonize, unary_union
 
     ds = db.execute(text("SELECT placement, source FROM gis_dataset WHERE id = :d"), {"d": dataset_id}).mappings().one()
@@ -61,11 +61,34 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
     geographic = placement.kind == "epsg" and crs.crs_info(placement.code)["geographic"]
     k = placement.units * (placement.scale if placement.kind == "local" else 1.0)
 
+    to_m = None
+    if geographic:
+        # Longitude and latitude (GeoJSON, KML, GPX, ...): metres on a plane around the first boundary point.
+        from pyproj import Transformer
+
+        first = next((r for r in rows if r["layer_id"] in roles.get("boundary", [])), rows[0] if rows else None)
+        if first is None:
+            raise FromMapError("the boundary layer has no shapes")
+        g0 = first["geometry"]
+        c0 = g0["coordinates"] if g0["type"] == "Point" else g0["coordinates"][0] if g0["type"] == "LineString" \
+            else g0["coordinates"][0][0]
+        centre = (float(c0[0]), float(c0[1]))
+        aeqd = f"+proj=aeqd +lat_0={centre[1]} +lon_0={centre[0]} +x_0=0 +y_0=0 +units=m +ellps=WGS84"
+        to_m = Transformer.from_crs("EPSG:4326", aeqd, always_xy=True)
+        from_m = Transformer.from_crs(aeqd, "EPSG:4326", always_xy=True)
+
     def coords_of(row) -> Any:
-        """The feature in drawing metres (or WGS 84 degrees for a drawing in degrees)."""
+        """The feature in drawing metres (metres around the site for one in degrees)."""
         if geographic or not row["source"]:
-            g = row["geometry"]
-            return g["coordinates"]
+            c = row["geometry"]["coordinates"]
+            if to_m is None:
+                return c
+            m = lambda p: list(to_m.transform(p[0], p[1]))  # noqa: E731
+            if row["kind"] in ("point", "text"):
+                return m(c)
+            if row["kind"] == "line":
+                return [m(p) for p in c]
+            return [[m(p) for p in ring] for ring in c]
         c = row["source"]["coords"]
         if row["kind"] in ("point", "text"):
             return [c[0] * k, c[1] * k]
@@ -112,14 +135,25 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
     minx, miny = camp.bounds[0], camp.bounds[1]
 
     if geographic:
-        from pyproj import Transformer
-        lon0, lat0 = minx, miny
-        to_m = Transformer.from_crs("EPSG:4326", f"+proj=aeqd +lat_0={lat0} +lon_0={lon0} +units=m +ellps=WGS84", always_xy=True)
-        from shapely.ops import transform as shp_transform
-        local = lambda g: shp_transform(lambda x, y, z=None: to_m.transform(x, y), g)
-        origin = (lon0, lat0)
-        bearing = 0.0
-        notes.append("the drawing is in degrees: the camp is laid out in metres around its south-west corner")
+        # No grid of its own: the camp's grid is turned to its longest wall, so walls drawn straight on any
+        # grid (a UTM survey saved as GeoJSON) stay straight and doors sit on them; `bearing` is that turn.
+        from shapely.affinity import rotate, translate
+
+        pts = list(camp.exterior.coords)
+        (ax, ay), (bx, by) = max(zip(pts, pts[1:]), key=lambda e: math.dist(e[0], e[1]))
+        theta = math.degrees(math.atan2(by - ay, bx - ax)) % 90
+        turn = -theta if theta <= 45 else 90 - theta
+        if abs(turn) < 1e-4:
+            turn = 0.0
+        turned = rotate(camp, turn, origin=(0, 0))
+        tx, ty = turned.bounds[0], turned.bounds[1]
+        local = lambda g: translate(rotate(g, turn, origin=(0, 0)), -tx, -ty)  # noqa: E731
+        c, s_ = math.cos(math.radians(-turn)), math.sin(math.radians(-turn))
+        lon, lat = from_m.transform(tx * c - ty * s_, tx * s_ + ty * c)
+        origin = (round(float(lon), 9), round(float(lat), 9))
+        bearing = round(turn, 6)
+        notes.append("the data is in longitude and latitude: the camp is laid out in metres, its grid along "
+                     f"its longest wall{f' (turned {turn:.2f}°)' if turn else ''}")
     else:
         from shapely.affinity import translate
         local = lambda g: translate(g, -minx, -miny)
@@ -136,11 +170,23 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
         return [q for i, q in enumerate(pts) if i == 0 or q != pts[i - 1]]
 
     boundary = ring(local(camp))
+    if geographic:
+        from app.camp.domain import _square
+
+        boundary = _square(boundary)  # walls a hair off the grid after the turn, made exact
     camp_local = Polygon(boundary)
     edges = list(zip(boundary, boundary[1:] + boundary[:1]))
     axis = sum(1 for a, b in edges if math.isclose(a[0], b[0], abs_tol=1e-6) or math.isclose(a[1], b[1], abs_tol=1e-6))
     if axis == 0:
         notes.append("no wall of the boundary is horizontal or vertical in the drawing's grid: doors cannot sit on it")
+
+    def own_name(row) -> str | None:
+        """A feature's own name: GeoJSON, KML, shapefile and GeoPackage attributes, not a text beside it."""
+        props = (row or {}).get("properties") or {}
+        for key in ("name", "Name", "NAME", "label", "Label", "id", "ID"):
+            if props.get(key) not in (None, ""):
+                return _slug(str(props[key]))
+        return None
 
     def named(poly, layer_id_list: list[int], fallback: str) -> str:
         for lid in layer_id_list:
@@ -151,6 +197,7 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
 
     # Doors: touching pieces are one door.
     pieces = [local(g) for _, g in by_role["doors"]]
+    piece_names = [own_name(row) for row, _ in by_role["doors"]]
     clusters = list(getattr(unary_union([p.buffer(DOOR_GAP / 2) for p in pieces]), "geoms", [])) if pieces else []
     if pieces and not clusters:
         clusters = [unary_union([p.buffer(DOOR_GAP / 2) for p in pieces])]
@@ -169,7 +216,7 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
             continue
         a, b = got
         mid = Point((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-        label = None
+        label = next((piece_names[i] for i, p in enumerate(pieces) if p.intersects(blob) and piece_names[i]), None)
         for lid in roles.get("doors", []):
             for point, words in texts.get(lid, []):
                 if words and local(point).distance(mid) < 3:
@@ -196,7 +243,7 @@ def build(db: Session, dataset_id: int, roles: dict[str, list[int]], name: str) 
             stem = re.sub(r"^zone[_ -]+", "", layer_name, flags=re.I).lower() if role == "zones" else layer_name
             # One shape on its layer is named for the layer; several are numbered.
             fallback = _slug(stem if per_layer[layer_name] == 1 else f"{stem}-{i}")
-            sid = named(lp, layer_ids, fallback)
+            sid = named(lp, layer_ids, own_name(row) or fallback)
             while sid in {s for s, _ in out}:
                 sid = f"{sid}-{i}"
             out.append((sid, ring(lp)))

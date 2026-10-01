@@ -1,6 +1,6 @@
-# Sample drawings for the Map data and Camps workflow
+# Sample files for the Map data and Camps workflow
 
-Two CAD drawings to try the whole workflow with: import, place on the map,
+Two CAD drawings and a GeoJSON file to try the whole workflow with: import, place on the map,
 turn into a camp, type the numbers, lay it out. `make_samples.py` makes them
 from the camp engine's examples.
 
@@ -43,7 +43,7 @@ or workbook (.xlsx)*.
 point. Use *Place on map* to move it. Its millimetres are read as metres from
 the drawing's units, and the door block becomes one 1.5 m door.
 
-**B. As map data first (any drawing).** Go to Map data → Import a drawing.
+**B. As map data first (any drawing).** Go to Map data → Import map data.
 1. Upload `mina-camp-utm37n.dxf`.
 2. Region: Saudi Arabia, city Makkah. Choose **WGS 84 / UTM zone 37N
    (EPSG:32637)** from the suggestions.
@@ -58,6 +58,11 @@ the drawing's units, and the door block becomes one 1.5 m door.
 
    Leave `ROADS` and `NOTES` out.
 5. Continue as in A from step 3.
+
+**C. GeoJSON.** `mina-camp.geojson` is the same camp in longitude and latitude,
+each feature's `layer` property naming its layer and its `name` naming the
+shape. Import it under Map data → Import map data: it lands at Mina by itself (WGS 84 is chosen
+for you). Then make the camp from its layers as in B, step 4.
 
 For your own drawings, use the same layer names (case does not matter), or any
 names when going through Map data, since there you say which layer is which.

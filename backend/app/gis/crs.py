@@ -380,7 +380,7 @@ def candidates(extent, unit_metres: float | None, *, geodata: dict[str, Any] | N
                     "sure": fits and score >= 6})
 
     if geodata and geodata.get("epsg"):
-        offer(int(geodata["epsg"]), "the drawing's own geographic location (GEODATA) names it", 10)
+        offer(int(geodata["epsg"]), geodata.get("reason") or "the drawing's own geographic location (GEODATA) names it", 10)
     if usual:
         offer(int(usual), "the coordinate system this domain's drawings are usually in", 8)
     degrees = all(abs(v) <= 180 for v in (extent[0], extent[2])) and all(abs(v) <= 90 for v in (extent[1], extent[3]))

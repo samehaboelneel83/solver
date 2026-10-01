@@ -1,6 +1,7 @@
-"""Map data: CAD drawings imported as GIS layers (DXF -> GIS).
+"""Map data: CAD drawings and other spatial files imported as GIS layers (DXF, GeoJSON, KML, ... -> GIS).
 
-    POST   /api/v1/gis/uploads                       a .dxf (multipart `file`, `domain_id`) -> its layers,
+    POST   /api/v1/gis/uploads                       a spatial file (multipart `file`, `domain_id`): .dxf,
+                                                     .geojson, .kml/.kmz, .gpx, shapefile .zip, .gpkg, .csv -> its layers,
                                                      extent, units and the likely coordinate systems
     POST   /api/v1/gis/uploads/{id}/candidates       {region?, point?} -> the likely systems for a site roughly there
     POST   /api/v1/gis/uploads/{id}/preview          {placement, units?, layers?} -> where it lands, as GeoJSON
@@ -42,7 +43,7 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
-from app.gis import cad, crs, store
+from app.gis import cad, crs, formats, store
 from app.gis.convert import bounds, to_geojson
 from app.models.iam import UserAccount
 
@@ -173,17 +174,18 @@ def upload(
 ) -> dict[str, Any]:
     _domain(db, domain_id, user)
     name = (file.filename or "drawing.dxf")[:255]
-    if not name.lower().endswith(".dxf"):
-        raise HTTPException(415, "send a .dxf drawing (a .dwg must be saved as DXF from your CAD program first)")
+    if not name.lower().endswith(formats.ACCEPTED):
+        raise HTTPException(415, f"send a spatial file: {', '.join(formats.ACCEPTED)} (a shapefile as a .zip of its"
+                                 " .shp, .shx, .dbf and .prj; a .dwg saved as DXF from your CAD program first)")
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "the drawing is larger than 50 MB")
+        raise HTTPException(413, "the file is larger than 50 MB")
     try:
-        drawing = store.read_bytes(data)
+        drawing = store.read_bytes(data, name)
     except cad.CadError as exc:
         raise HTTPException(422, str(exc)) from exc
     if not drawing.features:
-        raise HTTPException(422, "the drawing's model space has nothing we can show on a map")
+        raise HTTPException(422, "the file has nothing we can show on a map")
     summary = drawing.summary()
     usual, near = _hints(db, domain_id)
     where_region, _ = _where(region or None, None)
@@ -226,7 +228,7 @@ def preview(
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
     row = _upload(db, upload_id, user)
-    drawing = store.read_bytes(bytes(row["data"]))
+    drawing = store.read_bytes(bytes(row["data"]), row["filename"])
     placement = _placement(body.placement, body.units or drawing.unit_metres)
     keep = set(body.layers) if body.layers else None
     feats = [f for f in drawing.features if keep is None or f.layer in keep]
@@ -259,12 +261,13 @@ def import_dataset(
 ) -> dict[str, Any]:
     _domain(db, body.domain_id, user)
     row = _upload(db, body.upload_id, user)
-    drawing = store.read_bytes(bytes(row["data"]))
+    drawing = store.read_bytes(bytes(row["data"]), row["filename"])
     placement = _placement(body.placement, body.units or drawing.unit_metres)
     unknown = set(body.layers or []) - set(drawing.layers)
     if unknown:
         raise HTTPException(422, f"the drawing has no layer {sorted(unknown)[0]!r}")
-    source = {"filename": row["filename"], "format": "dxf", "size_bytes": row["size_bytes"],
+    fmt = "dxf" if row["filename"].lower().endswith(".dxf") else drawing.version.lower()
+    source = {"filename": row["filename"], "format": fmt, "size_bytes": row["size_bytes"],
               "version": drawing.version, "units": drawing.units_name, "unit_metres": drawing.unit_metres,
               "extent": list(drawing.extent) if drawing.extent else None, "sha256": row["summary"].get("sha256"),
               "geodata": drawing.geodata}

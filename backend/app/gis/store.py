@@ -10,8 +10,6 @@ the file is not needed twice.
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -25,11 +23,11 @@ UPLOAD_DAYS = 1
 PAGE = 2000
 
 
-def read_bytes(data: bytes, suffix: str = ".dxf") -> cad.CadDrawing:
-    with tempfile.TemporaryDirectory() as folder:
-        path = Path(folder) / f"drawing{suffix}"
-        path.write_bytes(data)
-        return cad.read(path)
+def read_bytes(data: bytes, filename: str = "drawing.dxf") -> cad.CadDrawing:
+    """A DXF drawing or any other spatial file (`app.gis.formats`), by its file name."""
+    from app.gis.formats import read_any
+
+    return read_any(data, filename)
 
 
 def has_postgis(db: Session) -> bool:

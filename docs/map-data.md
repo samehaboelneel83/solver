@@ -1,7 +1,8 @@
-# Map data: CAD drawings as GIS layers
+# Map data: CAD drawings and GIS files as layers
 
-Any DXF drawing can be brought onto the map, layer by layer, and kept in the
-database as GIS features. Nothing in the pipeline knows what the drawing is
+Any DXF drawing, or a GeoJSON, KML/KMZ, GPX, Shapefile, GeoPackage or CSV
+file (section 1b), can be brought onto the map, layer by layer, and kept in
+the database as GIS features. Nothing in the pipeline knows what the drawing is
 of. Camps (and anything else) are built *from* map data by pointing at its
 layers.
 
@@ -33,6 +34,36 @@ own coordinates and units:
   as "skipped", never dropped silently. Z is kept as `elevation`.
 - **Damaged files** are repaired while reading, and the repair is noted. A
   DWG must be saved as DXF first.
+
+## 1b. Other spatial files (`backend/app/gis/formats.py`)
+
+Each reader gives the same layers of point, line and polygon features as a
+DXF, so placing, storing, viewing and making a camp from a layer work the
+same. Attributes become feature properties. Multi-part shapes become one
+feature per part, with a `part` number. Polygons keep their holes. No library
+beyond shapely and pyproj is needed: shapefiles and GeoPackages are read
+directly.
+
+| Format | File | Layers | Coordinate system |
+|---|---|---|---|
+| GeoJSON | `.geojson`, `.json` | a `layer` property, else points / lines / polygons | WGS 84 (RFC 7946), or the legacy `crs` member |
+| KML / KMZ | `.kml`, `.kmz` | the folder a placemark is in | WGS 84 |
+| GPX | `.gpx` | waypoints, routes, tracks | WGS 84 |
+| Shapefile | `.zip` of `.shp`, `.shx`, `.dbf`, `.prj` (`.cpg` for the text encoding) | each `.shp` | the `.prj` |
+| GeoPackage | `.gpkg` | each feature table | the table's SRS |
+| CSV | `.csv` (`,` `;` tab or `\|`) | a `layer` column, else the file | none: chosen when placing |
+
+- **CSV shapes:** a CSV row's shape is a WKT column (`wkt`, `geometry`, `geom`,
+  `the_geom`, `shape`) or two coordinate columns (`lon`/`lat`,
+  `longitude`/`latitude`, `x`/`y`, `easting`/`northing`).
+- **Coordinate system:** a system the file names is offered first and chosen
+  for you.
+- **Camps from longitude/latitude data:** a camp made from a file in longitude
+  and latitude is laid out in metres. Its grid is turned to its longest wall
+  (the camp's `bearing`), so walls drawn straight on any grid stay straight
+  and its doors sit on them.
+- **Names:** a shape's own `name` (or `label`, `id`) attribute names it, where
+  a DXF needs a text beside it.
 
 ## 2. Where is it? (`backend/app/gis/crs.py`)
 
