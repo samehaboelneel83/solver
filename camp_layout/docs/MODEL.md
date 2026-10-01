@@ -397,7 +397,14 @@ camp_layout/
   export.py          GeoJSON (local metres and WGS84), report.json, viewer.html
   pipeline.py        the chain of §11: solve(problem, solver=…)
   examples.py        small_camp, complex_camp
+  dxf.py             CAD drawing (layers, units, surveyed offset, door blocks) → Drawing; problem → template DXF
+  workbook.py        the problem as an .xlsx to review (defaults shaded) and read back; dxf_to_workbook
 ```
+
+The CAD input enters before `problem.py`: `plan.dxf → dxf.py → camp.xlsx →
+workbook.py → CampProblem`. Curves are flattened to within 5 mm of the arc;
+a door block covers the stretch of the axis-aligned wall its extent touches;
+doors off an axis-aligned wall are reported and skipped, never moved silently.
 
 Adding a solver is one file in `adapters/`. Adding a rule is a candidate
 filter (`discretize`), a row group (`builder`) or an objective term — see

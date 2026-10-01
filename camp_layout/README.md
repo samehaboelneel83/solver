@@ -16,7 +16,7 @@ geometry before it counts.
 ## Run
 
 ```bash
-pip install -e .            # ortools, shapely, numpy, scipy, pyproj
+pip install -e .            # ortools, shapely, numpy, scipy, pyproj, ezdxf, openpyxl
 python -m camp_layout complex --solver cpsat --beds-seconds 300 --seconds 120 --out examples/complex
 python -m camp_layout small --solver scip          # the same model on a MILP solver
 python -m camp_layout complex --solver heuristic   # Stage 0 only, about a second
@@ -32,6 +32,35 @@ export.write(run, "out/")
 
 Solvers: `cpsat` (OR-Tools CP-SAT), `scip`, `highs`, `cbc` (MILP through
 OR-Tools), `heuristic`. A new solver is one file in `camp_layout/adapters/`.
+
+## From a CAD drawing
+
+```
+plan.dxf  --dxf2xlsx-->  camp.xlsx (review, add bed types)  --run-->  best layout + map
+```
+
+```bash
+python -m camp_layout dxf2xlsx plan.dxf camp.xlsx --crs EPSG:32636   # crs optional
+python -m camp_layout run camp.xlsx --solver cpsat --out out/
+python -m camp_layout template templates/                           # blank drawing + workbook
+```
+
+Layers the converter reads (upper or lower case):
+
+| Layer | What it is | Drawn as |
+|---|---|---|
+| `CAMP_BOUNDARY` (`BOUNDARY`, `CAMP`, `SITE`) | the camp outline; the largest closed shape | closed polyline |
+| `DOORS` (`DOOR`, `GATES`, `ENTRANCES`) | each opening, on an axis-aligned wall; a text nearby names it | line along the wall, or a door block |
+| `OBSTACLES` (`CLOSED`, `FIXED`) | pillars, tanks, fixed rooms; a text inside names it | closed polyline, circle, hatch |
+| `NO_BEDS` (`PROHIBITED`, `FIRE_BREAK`, `KEEP_CLEAR`) | walkable, but no beds | closed shape |
+| `ZONE_<NAME>` | where beds with `zone = <name>` must go | closed shape |
+
+Every other layer is ignored and listed in the notes. Units come from the
+drawing (`$INSUNITS`) or `--units mm|cm|m`; surveyed coordinates are moved to a
+local origin, and with `--crs` the map is placed where the drawing is. Door
+blocks (leaf and swing arc) give the stretch of wall they cover. The workbook
+shades every value the drawing did not give (door capacities, bed types, zone
+depths) for review before solving.
 
 ## The chain
 

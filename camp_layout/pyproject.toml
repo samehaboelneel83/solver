@@ -3,7 +3,7 @@ name = "camp-layout"
 version = "0.1.0"
 description = "Camp Layout Optimization Engine: beds, corridors and doors as a solver-independent model."
 requires-python = ">=3.10"
-dependencies = ["ortools>=9.10", "shapely>=2.0", "numpy", "scipy", "pyproj"]
+dependencies = ["ortools>=9.10", "shapely>=2.0", "numpy", "scipy", "pyproj", "ezdxf>=1.1", "openpyxl>=3.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
