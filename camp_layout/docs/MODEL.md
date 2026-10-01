@@ -306,10 +306,24 @@ The zone growth shows the constraint doing its job: the specified zone
 (2.5 m × 2 m = 5 m²) holds 20 beds' worth; 30 beds need 7.5 m², so level 1
 (3 m deep, 7.5 m²) is chosen, and `M` records the 2.5 m² of growth.
 
-The complex example (`examples.complex_camp()`, ~940 m², four doors, five
-obstacles, a fire break, a medical zone) is run by
-`python -m camp_layout complex`; its GeoJSON, report and map are in
-`examples/complex/`.
+The complex example (`examples.complex_camp()`, 938.5 m², nine sides, four
+doors, five obstacles, a fire break, a no-bed exhaust area, a medical zone
+needing 4–6 wide beds) is run by `python -m camp_layout complex`; its GeoJSON,
+`layout.json`, report and map are in `examples/complex/`.
+
+| Quantity | Value |
+|---|---|
+| grid | 3 501 walkable / 3 211 bed cells; 10 657 placements; 3 295 tiles; 12 760 arcs; 20 174 access arcs |
+| model | 50 460 variables, 76 194 constraints, ~299 000 non-zeros |
+| Stage 0 | 167 beds in 1.4 s |
+| CP-SAT, beds (300 s) | **169 beds** (165 cots, 4 medical), feasible; bound 377 (the weak LP bound of §14) |
+| CP-SAT, distance / corridor / modifications (120 s each) | 2 566 m walked → corridor 235 m² → 39.1 m² of modifications, each stage keeping the ones before |
+| zones | D1, D2, D4 grown 2 → 4 m, D3 2 → 3 m: the 0.25 m²/bed rule binds at every door |
+| validator | **18/18 checks**; door loads 48/48/35/38; mean walk 13.8 m, longest 34.8 m |
+
+CP-SAT's search is not deterministic across machines and thread timings: an
+earlier run of the same model found 172 beds. A longer bed stage, more
+threads, or the regional decomposition of §15 narrows that spread.
 
 ## 17. Solver-independent pseudocode
 
