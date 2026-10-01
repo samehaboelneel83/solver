@@ -3,8 +3,8 @@ import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "reac
 import {
   Activity, Archive, Bell, BookOpen, Boxes, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Database, FileStack, FlaskConical, FolderTree,
   GitBranch, Home, Cpu,
-  KeyRound, Languages, LayoutTemplate, LogOut, Menu, Moon, Network, Play, ScrollText, Search, Settings,
-  ShieldCheck, SlidersHorizontal, Sun, Table2, UserCog, Users, Waypoints, Workflow, type LucideIcon,
+  KeyRound, Languages, LayoutTemplate, LogOut, Map as MapIcon, Menu, Moon, Network, Play, ScrollText, Search, Settings,
+  ShieldCheck, SlidersHorizontal, Sun, Table2, Tent, UserCog, Users, Waypoints, Workflow, type LucideIcon,
 } from "lucide-react";
 import { setToken } from "../api/client";
 import { applyDirection, applyTheme, isDark, storedDirection, storedTheme, type ThemeChoice } from "../lib/theme";
@@ -59,6 +59,8 @@ const ICONS: Record<string, LucideIcon> = {
   "/solvers": Cpu,
   "/ops/queue": Activity,
   "/predictors": BrainCircuit,
+  "/camps": Tent,
+  "/map-data": MapIcon,
   "/ops/audit": ScrollText,
   "/ops/backups": Archive,
   "/help/getting-started": CircleHelp,

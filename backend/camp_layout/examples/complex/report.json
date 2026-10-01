@@ -1,0 +1,199 @@
+{
+  "camp": "Irregular camp, four doors",
+  "solver": "cp-sat",
+  "beds": 169,
+  "beds_by_type": {
+    "cot": 165,
+    "medical": 4
+  },
+  "resized_beds": 106,
+  "stage0_beds": 167,
+  "objectives": {
+    "beds": 169.0,
+    "distance": 2490.0,
+    "corridor": 239.25,
+    "modifications": 39.08
+  },
+  "stages": [
+    {
+      "objective": "beds",
+      "status": "feasible",
+      "value": 169.0,
+      "bound": 377.0,
+      "seconds": 303.8889100551605,
+      "kept": "beds \u2265 169 (exactly)"
+    },
+    {
+      "objective": "distance",
+      "status": "feasible",
+      "value": 2566.0,
+      "bound": 1.0,
+      "seconds": 124.0374665260315,
+      "kept": "distance \u2264 2617.32 (within 2%)"
+    },
+    {
+      "objective": "corridor",
+      "status": "feasible",
+      "value": 235.0,
+      "bound": 0.0,
+      "seconds": 123.62459254264832,
+      "kept": "corridor \u2264 239.7 (within 2%)"
+    },
+    {
+      "objective": "modifications",
+      "status": "feasible",
+      "value": 39.079999999999984,
+      "bound": 0.0,
+      "seconds": 124.1518018245697,
+      "kept": "modifications \u2264 39.08 (exactly)"
+    }
+  ],
+  "zone_depth_m": {
+    "D1-south": 4.0,
+    "D2-east": 4.0,
+    "D3-north": 3.0,
+    "D4-west": 4.0
+  },
+  "validation": {
+    "valid": true,
+    "checks": [
+      {
+        "name": "beds inside the camp",
+        "ok": true,
+        "detail": "all 169 inside",
+        "count": 169
+      },
+      {
+        "name": "no two beds overlap",
+        "ok": true,
+        "detail": "none overlap",
+        "count": 0
+      },
+      {
+        "name": "no bed on an obstacle",
+        "ok": true,
+        "detail": "none on an obstacle",
+        "count": 0
+      },
+      {
+        "name": "no bed on a prohibited area",
+        "ok": true,
+        "detail": "none on a prohibited area",
+        "count": 0
+      },
+      {
+        "name": "no bed on a door",
+        "ok": true,
+        "detail": "none on a door",
+        "count": 0
+      },
+      {
+        "name": "no bed on a door zone",
+        "ok": true,
+        "detail": "none on a door zone",
+        "count": 0
+      },
+      {
+        "name": "door zones within their allowed depth",
+        "ok": true,
+        "detail": "every zone within its bounds",
+        "count": 0
+      },
+      {
+        "name": "door zones clear of obstacles",
+        "ok": true,
+        "detail": "all clear",
+        "count": 0
+      },
+      {
+        "name": "bed sizes, orientation and zones as allowed",
+        "ok": true,
+        "detail": "all within their type's rules",
+        "count": 0
+      },
+      {
+        "name": "bed counts per type",
+        "ok": true,
+        "detail": "cot: 165, medical: 4",
+        "count": 0
+      },
+      {
+        "name": "doors unchanged",
+        "ok": true,
+        "detail": "4 doors as defined",
+        "count": 0
+      },
+      {
+        "name": "corridors inside the camp",
+        "ok": true,
+        "detail": "inside",
+        "count": 0
+      },
+      {
+        "name": "corridors clear of obstacles",
+        "ok": true,
+        "detail": "clear",
+        "count": 0
+      },
+      {
+        "name": "corridors clear of beds",
+        "ok": true,
+        "detail": "clear",
+        "count": 0
+      },
+      {
+        "name": "corridor pieces at least 1.0 m wide",
+        "ok": true,
+        "detail": "537 pieces, each 1.0 m or wider",
+        "count": 0
+      },
+      {
+        "name": "every bed reaches a door (any free floor)",
+        "ok": true,
+        "detail": "all 169 beds reach a door with 1.0 m clearance (\u00b11 cm)",
+        "count": 169
+      },
+      {
+        "name": "every bed reaches a door through the corridors",
+        "ok": true,
+        "detail": "all 169 beds reach a door with 1.0 m clearance (\u00b11 cm)",
+        "count": 169
+      },
+      {
+        "name": "door capacities hold (max-flow assignment)",
+        "ok": true,
+        "detail": "all 169 beds assigned within capacity",
+        "count": 0
+      }
+    ],
+    "walk_total_m": 2329.0,
+    "walk_max_m": 34.8,
+    "walk_mean_m": 13.8,
+    "door_loads": {
+      "D1-south": 48,
+      "D2-east": 48,
+      "D3-north": 35,
+      "D4-west": 38
+    }
+  },
+  "grid": {
+    "cells_bed": 3211,
+    "cells_walk": 3501,
+    "placements": 10657,
+    "tiles": 3295,
+    "tile_arcs": 12760,
+    "access_arcs": 20174
+  },
+  "model": {
+    "variables": 50460,
+    "constraints": 76194,
+    "nonzeros": 298722
+  },
+  "seconds": {
+    "discretize": 1.3,
+    "model": 0.5,
+    "stage0": 1.4,
+    "solve": 676.4,
+    "validate": 6.1
+  }
+}

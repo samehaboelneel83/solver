@@ -18,7 +18,7 @@ public network are **not** the offline path; they are the development path.
 | Item | Source today | Offline requirement |
 |---|---|---|
 | App images | `solver-backend:latest`, `solver-frontend:latest` (Compose build) | Save/load as digest-pinned archives (`bash scripts/offline-bundle.sh`) |
-| Postgres | `postgres:16` | Same; pin via generated `docker-compose.digests.yml` (O04) |
+| Postgres | `postgis/postgis:16-3.4` | Same; pin via generated `docker-compose.digests.yml` (O04) |
 | ClickHouse | `clickhouse/clickhouse-server:24.8` | Same |
 | Digest Compose override | `scripts/render-digest-compose.sh` | Shipped in the bundle as `docker-compose.digests.yml` |
 | Wheelhouse / npm cache | `backend/wheelhouse/`, `frontend/npm-cache/` | Build with `docker build --build-arg OFFLINE=1` after `offline-bundle.sh` fills the caches |
