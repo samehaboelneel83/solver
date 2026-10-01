@@ -168,6 +168,9 @@ export const createCamp = (body: {
   problem?: CampProblem;
   origin_lonlat?: Pt;
 }) => apiFetch<CampPlan>("/api/v1/camps", { method: "POST", ...json(body) });
+export type FromMapRoles = { boundary: number; doors: number[]; obstacles: number[]; prohibited: number[]; zones: number[] };
+export const createCampFromMap = (body: { domain_id: number; name: string; dataset_id: number } & FromMapRoles) =>
+  apiFetch<CampPlan & { notes: string[] }>("/api/v1/camps/from-map", { method: "POST", ...json(body) });
 export const saveCamp = (id: number, body: { name?: string; problem?: CampProblem; options?: Partial<CampOptions>; updated_at?: string }) =>
   apiFetch<CampPlan>(`/api/v1/camps/${id}`, { method: "PUT", ...json(body) });
 export const deleteCamp = (id: number) => apiFetch<void>(`/api/v1/camps/${id}`, { method: "DELETE" });

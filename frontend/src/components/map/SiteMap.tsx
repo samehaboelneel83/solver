@@ -1,5 +1,6 @@
 /**
- * The camp's map: local metres drawn over imagery, with pan and zoom.
+ * A site's map: local metres drawn over imagery, with pan and zoom. The camp
+ * editor and the map data viewer both draw on it.
  *
  * The view is a centre in local metres and metres per screen pixel. Tiles
  * are Web Mercator; each is placed by its corners, converted to local
@@ -12,6 +13,7 @@
  * cursor.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useBasemaps } from "../../hooks/useBasemaps";
 import type { Pt, Ring } from "../../api/camps";
 import { toLocal, toLonLat } from "../../lib/campGeo";
 import { tileUrl, type Basemap } from "../../lib/tiles";
@@ -72,6 +74,23 @@ function niceLength(metres: number): number {
   return p;
 }
 
+/** The backgrounds a map offers: the organization's tile index first, then the built-in ones; the choice is remembered. */
+export function useSiteBasemap(storageKey = "solver_site_basemap"): { options: Basemap[]; chosen: Basemap | null; choose: (id: string) => void } {
+  const org = useBasemaps();
+  const options = [...org.basemaps, ...BUILTIN_BASEMAPS];
+  const [choice, setChoice] = useState<string | null>(() => {
+    try { return localStorage.getItem(storageKey); } catch { return null; }
+  });
+  const chosen = choice === "none" ? null : options.find((b) => b.id === choice) ?? options[0] ?? null;
+  return {
+    options, chosen,
+    choose: (id) => {
+      setChoice(id);
+      try { localStorage.setItem(storageKey, id); } catch { /* this page only */ }
+    },
+  };
+}
+
 type Props = {
   origin: Pt;
   view: MapView;
@@ -84,13 +103,18 @@ type Props = {
   onUp?: (p: Pt, e: React.PointerEvent) => void;
   onDoubleClick?: (p: Pt, e: React.MouseEvent) => void;
   onSize?: (width: number, height: number) => void;
-  children: (at: At, mpp: number) => ReactNode;
+  children?: (at: At, mpp: number) => ReactNode;
+  /** Drawn on a canvas under the SVG: for many features, where SVG would be thousands of nodes. */
+  canvas?: (ctx: CanvasRenderingContext2D, at: At, mpp: number) => void;
+  /** A click without a drag, in metres. */
+  onClick?: (p: Pt, e: React.MouseEvent) => void;
   overlay?: ReactNode;
   label: string;
 };
 
 export default function CampMap({
-  origin, view, onView, basemap, height, cursor, onDown, onMove, onUp, onDoubleClick, onSize, children, overlay, label,
+  origin, view, onView, basemap, height, cursor, onDown, onMove, onUp, onDoubleClick, onSize, children, canvas, onClick,
+  overlay, label,
 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<[number, number]>([800, 560]);
@@ -98,6 +122,8 @@ export default function CampMap({
   const pan = useRef<{ x: number; y: number; view: MapView } | null>(null);
   const space = useRef(false);
   const [failed, setFailed] = useState(0);
+  const paper = useRef<HTMLCanvasElement>(null);
+  const pressed = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const el = box.current;
@@ -172,6 +198,19 @@ export default function CampMap({
     return out;
   }, [basemap, origin, view, w, h, at, fromScreen]);
 
+  useEffect(() => {
+    const el = paper.current;
+    if (!el || !canvas) return;
+    const ratio = window.devicePixelRatio || 1;
+    el.width = w * ratio;
+    el.height = h * ratio;
+    const ctx = el.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    canvas(ctx, at, view.mpp);
+  }, [canvas, at, view.mpp, w, h]);
+
   const bar = niceLength(view.mpp * 120);
   const lonlat = pointer ? toLonLat(pointer, origin) : null;
 
@@ -183,6 +222,7 @@ export default function CampMap({
       onContextMenu={(e) => e.preventDefault()}
       onPointerDown={(e) => {
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        pressed.current = { x: e.clientX, y: e.clientY };
         const p = local(e);
         const wantsPan = e.button === 1 || e.button === 2 || space.current;
         if (!wantsPan && e.button === 0 && onDown?.(p, e) !== false) return;
@@ -199,6 +239,9 @@ export default function CampMap({
         onMove?.(p, e);
       }}
       onPointerUp={(e) => {
+        const start = pressed.current;
+        pressed.current = null;
+        if (start && onClick && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 4) onClick(local(e), e);
         if (pan.current) {
           pan.current = null;
           return;
@@ -215,8 +258,11 @@ export default function CampMap({
           <image key={t.key} href={t.href} x={t.x} y={t.y} width={t.w + 0.5} height={t.h + 0.5} preserveAspectRatio="none"
             onError={() => setFailed((n) => n + 1)} />
         ))}
-        {children(at, view.mpp)}
       </svg>
+      {canvas && <canvas ref={paper} className="pointer-events-none absolute inset-0" style={{ width: w, height: h }} />}
+      {children && (
+        <svg width={w} height={h} className="pointer-events-auto absolute inset-0 block">{children(at, view.mpp)}</svg>
+      )}
       {overlay}
       <div className="pointer-events-none absolute bottom-2 left-2 flex items-end gap-3 text-[11px] text-slate-800">
         <div className="rounded bg-white/85 px-1.5 py-0.5 shadow-sm">

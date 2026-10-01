@@ -68,6 +68,7 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
   quality: "/domains/:domainId/data/quality",
   predictors: "/domains/:domainId/data/predictors",
   camps: "/domains/:domainId/camps",
+  "map-data": "/domains/:domainId/map-data",
 };
 
 export const DESTINATIONS: Destination[] = [
@@ -76,6 +77,7 @@ export const DESTINATIONS: Destination[] = [
   { id: "data-structure", path: "/structure", canonical: DOMAIN_TEMPLATES["data-structure"], label: "Data structure", purpose: "Define record types and relationship types.", scope: "domain", group: "data" },
   { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Sources & imports", purpose: "Set up database sources and import their rows.", scope: "domain", group: "data", capability: "integration.run" },
   { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Predictors", purpose: "Train and keep the models a rule can read with predict.", scope: "domain", group: "data" },
+  { id: "map-data", path: "/map-data", canonical: DOMAIN_TEMPLATES["map-data"], label: "Map data", purpose: "Bring CAD drawings onto the map as GIS layers.", scope: "domain", group: "domains" },
   { id: "camps", path: "/camps", canonical: DOMAIN_TEMPLATES.camps, label: "Camp layouts", purpose: "Draw a camp on the map and lay out its beds and corridors.", scope: "domain", group: "domains" },
   { id: "quality", path: "/quality", canonical: DOMAIN_TEMPLATES.quality, label: "Quality checks", purpose: "Review data and model validation workflows.", scope: "domain", group: "data" },
   { id: "access", path: "/administration/access", canonical: "/administration/access", label: "Access & policies", purpose: "Manage people, permissions and platform policies.", scope: "administration", group: "administration", capability: "iam.manage" },
@@ -507,6 +509,7 @@ export function stripDomainPrefix(pathname: string): string {
     "/data/quality": "/quality",
     "/data/predictors": "/predictors",
     "/camps": "/camps",
+    "/map-data": "/map-data",
     "/data": "/data",
     "/structure": "/structure",
     "/problems": "/public/problem",
@@ -580,7 +583,7 @@ export function buildNavGroups(ctx: ScopedNavContext = {}): {
       .filter((d): d is Destination => d != null)
       .filter((d) => d.id !== "domain-overview" || ctx.domainId != null)
       .filter((d) => d.id !== "problem-overview" || (ctx.domainId != null && ctx.problemId != null))
-      .filter((d) => !["data-records", "data-structure", "sources", "predictors", "quality", "camps"].includes(d.id) || ctx.domainId != null)
+      .filter((d) => !["data-records", "data-structure", "sources", "predictors", "quality", "camps", "map-data"].includes(d.id) || ctx.domainId != null)
       .filter((d) => d.id !== "inputs" || (ctx.domainId != null && ctx.problemId != null))
       .map((d) => ({
         id: d.id,
@@ -679,7 +682,7 @@ export function buildSidebarGroups(
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["camps", "Camp layouts"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"], ["camps", "Camp layouts"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
@@ -691,7 +694,7 @@ export function buildSidebarGroups(
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
-    select("domain", "This domain", ["domain-overview", "problems", "camps"]),
+    select("domain", "This domain", ["domain-overview", "problems", "map-data", "camps"]),
     select("data", "Data", ["data-records", "data-structure", "map-graph", "sources", "predictors", "quality"]),
     ...common,
   ];

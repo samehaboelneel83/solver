@@ -14,7 +14,7 @@ import { CheckCircle2, Download, XCircle } from "lucide-react";
 import {
   downloadFrom, useCamp, type CampOptions, type CampPlan, type CampSolve, type GeoFeature, type Pt,
 } from "../../api/camps";
-import type { At } from "./CampMap";
+import type { At } from "../map/SiteMap";
 
 export type ColourBy = "type" | "door" | "walk";
 type Result = NonNullable<CampSolve["result"]>;

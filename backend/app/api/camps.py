@@ -4,6 +4,8 @@
     POST   /api/v1/camps                            {domain_id, name, start: blank|small|complex, problem?}
     POST   /api/v1/camps/check                      {problem} -> faults and the door zones it implies
     POST   /api/v1/camps/import                     a .dxf or .xlsx file -> {problem, notes} (stores nothing)
+    POST   /api/v1/camps/from-map                   {domain_id, name, dataset_id, boundary, doors, obstacles, prohibited,
+                                                    zones} (layer ids of imported map data) -> a new camp
     GET    /api/v1/camps/{id}                       the plan, its check and its solves
     PUT    /api/v1/camps/{id}                       {name?, problem?, options?, updated_at?}
     DELETE /api/v1/camps/{id}
@@ -60,6 +62,18 @@ class CreateBody(BaseModel):
     start: Literal["blank", "small", "complex"] = "blank"
     problem: dict[str, Any] | None = None
     origin_lonlat: tuple[float, float] | None = None
+
+
+class FromMapBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=200)
+    dataset_id: int = Field(gt=0)
+    boundary: int = Field(gt=0)
+    doors: list[int] = []
+    obstacles: list[int] = []
+    prohibited: list[int] = []
+    zones: list[int] = []
 
 
 class SaveBody(BaseModel):
@@ -176,6 +190,40 @@ def create_camp(
     _audit(db, user, "camp.create", row)
     db.commit()
     return get_camp(row, db, user)
+
+
+@router.post("/camps/from-map", status_code=201)
+def create_from_map(
+    body: FromMapBody,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("domain.edit")),
+) -> dict[str, Any]:
+    """A camp from layers of imported map data, each layer given a role."""
+    from app.camp.from_gis import FromMapError, build
+
+    _domain(db, body.domain_id, user)
+    found = db.execute(text("SELECT id FROM gis_dataset WHERE id = :d AND organization_id = :o AND domain_id = :dom"),
+                       {"d": body.dataset_id, "o": user.organization_id, "dom": body.domain_id}).scalar_one_or_none()
+    if found is None:
+        raise HTTPException(404, "Map data not found in this domain")
+    roles = {"boundary": [body.boundary], "doors": body.doors, "obstacles": body.obstacles,
+             "prohibited": body.prohibited, "zones": body.zones}
+    layers = set(db.execute(text("SELECT id FROM gis_layer WHERE dataset_id = :d"), {"d": body.dataset_id}).scalars())
+    stray = {i for ids in roles.values() for i in ids} - layers
+    if stray:
+        raise HTTPException(422, f"layer {sorted(stray)[0]} is not in this map data")
+    try:
+        problem, notes = build(db, body.dataset_id, roles, body.name)
+    except FromMapError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    row = db.execute(text(
+        "INSERT INTO camp_plan (organization_id, domain_id, name, problem, options, created_by)"
+        " VALUES (:o, :d, :n, CAST(:p AS jsonb), CAST(:opt AS jsonb), :u) RETURNING id"),
+        {"o": user.organization_id, "d": body.domain_id, "n": body.name, "p": json.dumps(problem),
+         "opt": json.dumps(jobs.DEFAULT_OPTIONS), "u": str(user.id)}).scalar_one()
+    _audit(db, user, "camp.create", row)
+    db.commit()
+    return {**get_camp(row, db, user), "notes": notes}
 
 
 @router.post("/camps/check")

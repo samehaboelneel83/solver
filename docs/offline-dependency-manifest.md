@@ -8,7 +8,7 @@ during image build), **external** (operator-supplied), **optional**.
 
 | Service | Image / build | Status | Notes |
 |---|---|---|---|
-| postgres | `postgres:16` | pull-at-build / bundle | Pin digest in customer release |
+| postgres | `postgis/postgis:16-3.4` | pull-at-build / bundle | Pin digest in customer release |
 | clickhouse | `clickhouse/clickhouse-server:24.8` | pull-at-build / bundle | Health-gated backend start today |
 | backend / worker | `solver-backend:latest` from `backend/Dockerfile` | pull-at-build | `pip install -r requirements.txt` in Dockerfile |
 | frontend | `solver-frontend:latest` from `frontend/Dockerfile` | pull-at-build | `npm install` then nginx alpine |

@@ -14,12 +14,12 @@ docker compose -f "$ROOT/docker-compose.yml" build backend frontend
 IMAGES=(
   "solver-backend:latest"
   "solver-frontend:latest"
-  "postgres:16"
+  "postgis/postgis:16-3.4"
   "clickhouse/clickhouse-server:24.8"
 )
 
 # Pull base images if missing (online build host only).
-for img in "postgres:16" "clickhouse/clickhouse-server:24.8"; do
+for img in "postgis/postgis:16-3.4" "clickhouse/clickhouse-server:24.8"; do
   docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img"
 done
 

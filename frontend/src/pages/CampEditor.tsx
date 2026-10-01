@@ -28,12 +28,11 @@ import {
   type Pt, type Ring,
 } from "../api/camps";
 import { useQueryClient } from "@tanstack/react-query";
-import CampMap, { BUILTIN_BASEMAPS, fitRings, type At, type MapView } from "../components/camp/CampMap";
+import CampMap, { fitRings, useSiteBasemap, type At, type MapView } from "../components/map/SiteMap";
 import { BedTypesPanel, CoordTable, DoorPanel, SettingsPanel, ShapePanel } from "../components/camp/CampPanels";
 import { ResultLayers, ResultLegend, ResultPanel, type ColourBy } from "../components/camp/CampResult";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
-import { useBasemaps } from "../hooks/useBasemaps";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -41,7 +40,6 @@ import {
   area, campRings, centroid, circle, doorAt, freshName, inside, length, nearestWall, onWall, orthogonal, rectangle,
   roundPt, snap, toLonLat,
 } from "../lib/campGeo";
-import type { Basemap } from "../lib/tiles";
 
 type ShapeKind = "obstacles" | "prohibited" | "placement_zones";
 type Selection = { kind: "boundary" } | { kind: "door"; id: string } | { kind: ShapeKind; id: string };
@@ -87,22 +85,6 @@ function distToSeg(p: [number, number], a: [number, number], b: [number, number]
 function sameSel(a: Selection | null, b: Selection | null): boolean {
   if (!a || !b || a.kind !== b.kind) return false;
   return a.kind === "boundary" || (a as { id: string }).id === (b as { id: string }).id;
-}
-
-function useCampBasemap(): { options: Basemap[]; chosen: Basemap | null; choose: (id: string) => void } {
-  const org = useBasemaps();
-  const options = [...org.basemaps, ...BUILTIN_BASEMAPS];
-  const [choice, setChoice] = useState<string | null>(() => {
-    try { return localStorage.getItem(CAMP_BASEMAP_KEY); } catch { return null; }
-  });
-  const chosen = choice === "none" ? null : options.find((b) => b.id === choice) ?? options[0] ?? null;
-  return {
-    options, chosen,
-    choose: (id) => {
-      setChoice(id);
-      try { localStorage.setItem(CAMP_BASEMAP_KEY, id); } catch { /* this page only */ }
-    },
-  };
 }
 
 export default function CampEditor() {
@@ -152,7 +134,7 @@ function CampWorkspace({ plan }: { plan: CampPlan }) {
   const [colourBy, setColourBy] = useState<ColourBy>("type");
   const [hoverBed, setHoverBed] = useState<string | null>(null);
   const [layers, setLayers] = useState({ zones: true, labels: true, paths: false });
-  const basemap = useCampBasemap();
+  const basemap = useSiteBasemap(CAMP_BASEMAP_KEY);
   const importer = useRef<HTMLInputElement>(null);
   const [importUnits, setImportUnits] = useState("");
 

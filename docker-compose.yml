@@ -10,7 +10,9 @@ volumes:
 
 services:
   postgres:
-    image: postgres:16
+    # PostGIS: Postgres 16 with the spatial extension (map data, migration 0097). The
+    # same data directory as postgres:16; without the extension the platform still runs.
+    image: postgis/postgis:16-3.4
     restart: unless-stopped
     # R39: nightly dumps + WAL land under SOLVER_BACKUP_DIR on the host
     # (default: sibling solver-backups/). archive_mode needs a restart once.

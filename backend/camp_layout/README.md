@@ -56,6 +56,10 @@ Each domain has **Camp layouts** in the sidebar (`/domains/:id/camps`):
   GeoJSON in WGS84 and local metres, the report, and a standalone map.
 - **Import** a `.dxf` or `.xlsx` into the editor; **export** the camp as a
   workbook, a DXF or JSON.
+- **From map data**: any drawing imported under *Map data* (the general
+  DXF → GIS pipeline, `docs/map-data.md`) can start a camp. Point at its
+  boundary layer and the layers holding doors, closed areas, no-bed areas and
+  bed zones (`app/camp/from_gis.py`).
 
 Imagery comes from the tile index named by the `spatial.tiles_index` setting,
 and otherwise from Esri World Imagery and OpenStreetMap, which the viewer's

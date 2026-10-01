@@ -41,12 +41,12 @@ need() {
 
 need "solver-backend:latest"
 need "solver-frontend:latest"
-need "postgres:16"
+need "postgis/postgis:16-3.4"
 need "clickhouse/clickhouse-server:24.8"
 
 BACKEND="$(pin solver-backend:latest)"
 FRONTEND="$(pin solver-frontend:latest)"
-POSTGRES="$(pin postgres:16)"
+POSTGRES="$(pin postgis/postgis:16-3.4)"
 CLICKHOUSE="$(pin clickhouse/clickhouse-server:24.8)"
 
 mkdir -p "$(dirname "$OUT")"

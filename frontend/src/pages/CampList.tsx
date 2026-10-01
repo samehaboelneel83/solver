@@ -10,6 +10,7 @@ import { formatApiError } from "../api/errors";
 import { importCampFile, useCamps, useCreateCamp, useDeleteCamp, type CampListItem } from "../api/camps";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
+import FromMapData from "../components/camp/FromMapData";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -173,6 +174,10 @@ export default function CampList() {
             system, the camp lands where the drawing is on the map.
           </p>
           {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+          <details className="mt-3 border-t border-slate-100 pt-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-800">Or from map data: an imported drawing's layers</summary>
+            <div className="mt-2"><FromMapData domainId={domainId} /></div>
+          </details>
         </section>
       )}
 
