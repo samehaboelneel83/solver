@@ -240,9 +240,13 @@ def stay_close(compiled: Compiled, spec: dict[str, Any], bases: dict[int, Base])
     if spec.get("mode", "weighted") == "lex":
         if compiled.objective_mode == "lex":
             stages = [*compiled.objective_terms]
-            if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
-                stages.append(compiled.penalty_objective)
             ids = [*compiled.objective_term_ids]
+            if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
+                # The bent rules' price, which a lex solve takes as its implicit last stage, made an
+                # explicit stage before the change -- with an id of its own, so stages and ids stay
+                # paired (a lex goal + a preference + a why-not probe failed on exactly this).
+                stages.append(compiled.penalty_objective)
+                ids.append("preferences")
         else:
             # The weighted goal, soft penalties folded in, as the first stage.
             stages, ids = [compiled.objective], ["goal"]

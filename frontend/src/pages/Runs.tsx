@@ -36,6 +36,7 @@ useScenario,
   type Run,
   type RunStatus,
   type ComputedSource,
+  type ScenarioPatch,
 } from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
@@ -52,6 +53,7 @@ import GuidedRunView from "../components/GuidedRunView";
 import ApprovePlanPanel from "../components/ApprovePlanPanel";
 import { RunMapView } from "../genui/components/SpatialMap";
 import { planWords, type PlanWords } from "../lib/planWords";
+import RunOutputs, { CompareMap } from "../components/RunOutputs";
 import { ruleSentence } from "../model/ruleSentence";
 import type { Constraint } from "../model/terms";
 
@@ -172,12 +174,23 @@ export function metaheuristicText(record: MetaheuristicRecord): string {
 export function computedText(inputs: (ComputedSource & { input: string; name: string })[]): string {
   return inputs
     .map((i) => {
+      const day = (i.computed_at ?? "").slice(0, 10);
+      // Anything else computed for a run (time slots too close, places inside areas, counts, heights):
+      // said by its kind, never assumed to be a distance (a roster run crashed on this page).
+      if (i.kind !== "distance" && i.kind !== "within") {
+        const extra = i as unknown as { of?: string; min_gap_hours?: number; links?: number };
+        const detail = extra.min_gap_hours !== undefined ? `less than ${extra.min_gap_hours} h apart` : String(i.kind ?? "computed").replace(/_/g, " ");
+        return `${i.name}: ${extra.of ?? [i.from, i.to].filter(Boolean).join(" to ")} ${detail}${extra.links !== undefined ? `, ${extra.links} links` : ""}${day ? `, ${day}` : ""}`;
+      }
       const timed = i.max_min !== undefined || i.unit === "s" || i.unit === "min";
-      const how = i.metric.startsWith("road") ? (timed ? "road travel time" : "along the roads") : "straight line";
+      const metric = i.metric ?? "";
+      const how = metric.startsWith("road") ? (timed ? "road travel time" : "along the roads")
+        : metric.startsWith("along layer") ? `${timed ? "travel time " : ""}${metric.replace(/ of map data \d+$/, "")}`
+        : "straight line";
       const gaps = i.no_road ? `, ${i.no_road} pairs with no road left far` : "";
       return i.kind === "within"
-        ? `${i.name}: ${i.from} to ${i.to} within ${i.max_min !== undefined ? `${i.max_min} min` : `${Number(((i.max_m ?? 0) / 1000).toPrecision(3))} km`}, ${how}, ${i.computed_at.slice(0, 10)}`
-        : `${i.name}: ${i.from} to ${i.to} in ${i.unit ?? "m"}, ${how}${i.nearest ? `, nearest ${i.nearest} kept` : ""}${gaps}, ${i.computed_at.slice(0, 10)}`;
+        ? `${i.name}: ${i.from} to ${i.to} within ${i.max_min !== undefined ? `${i.max_min} min` : `${Number(((i.max_m ?? 0) / 1000).toPrecision(3))} km`}, ${how}, ${day}`
+        : `${i.name}: ${i.from} to ${i.to} in ${i.unit ?? "m"}, ${how}${i.nearest ? `, nearest ${i.nearest} kept` : ""}${gaps}, ${day}`;
     })
     .join("; ");
 }
@@ -518,6 +531,25 @@ function ScenarioRuns({
     || (spec.domain === "integer" && typeof spec.lower === "number" && typeof spec.upper === "number"));
   // How many decisions each alternative changes from every other plan.
   const [apart, setApart] = useState("1");
+  // Refused before queueing, not after (user test, runs 748-749): the same reasons
+  // app.solve.pareto.admissible and app.solve.alternatives.admissible give, read off the
+  // model and the scenario, so the button says why instead of leaving an error run behind.
+  const thisScenario = useScenario(scenarioId);
+  const irOf = version.data?.ir as {
+    objective?: { mode?: string };
+    constraints?: { id?: string; severity?: string }[];
+  } | undefined;
+  const scenarioPatch = (thisScenario.data?.patch ?? {}) as { soften?: Record<string, number>; harden?: string[]; disable?: string[] };
+  const hardened = new Set([...(scenarioPatch.harden ?? []), ...(scenarioPatch.disable ?? [])]);
+  const bentRules = [
+    ...Object.keys(scenarioPatch.soften ?? {}),
+    ...(irOf?.constraints ?? []).filter((c) => c.severity === "soft" && c.id && !hardened.has(c.id)).map((c) => c.id as string),
+  ];
+  const frontRefusal = bentRules.length > 0
+    ? `Not for this scenario: a trade-off front needs every rule to be required, and ${bentRules.slice(0, 3).join(", ")}${bentRules.length > 3 ? "…" : ""} may bend here.`
+    : null;
+  // Goals in order get alternatives too now (improvement plan 0.3): each goal is held near its best.
+  const alternativesRefusal: string | null = null;
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
   // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
@@ -650,7 +682,9 @@ function ScenarioRuns({
             <button
               type="button"
               onClick={() => solve("front")}
-              disabled={createRun.isPending || blocked}
+              disabled={createRun.isPending || blocked || frontRefusal !== null}
+              title={frontRefusal ?? undefined}
+              aria-describedby={frontRefusal ? "front-refusal" : undefined}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
               Show the trade-off between its two goals
@@ -661,7 +695,9 @@ function ScenarioRuns({
               <button
                 type="button"
                 onClick={() => solve("alternatives")}
-                disabled={createRun.isPending || blocked}
+                disabled={createRun.isPending || blocked || alternativesRefusal !== null}
+                title={alternativesRefusal ?? undefined}
+                aria-describedby={alternativesRefusal ? "alternatives-refusal" : undefined}
                 className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
               >
                 Solve, with {ALTERNATIVES} alternative plans
@@ -677,6 +713,12 @@ function ScenarioRuns({
                 {apart === "1" ? "decision" : "decisions"}
               </label>
             </span>
+          )}
+          {!simple && ((twoGoals && frontRefusal) || (hasChoices && alternativesRefusal)) && (
+            <div className="basis-full space-y-1 text-xs text-slate-600">
+              {twoGoals && frontRefusal && <p id="front-refusal">{frontRefusal}</p>}
+              {hasChoices && alternativesRefusal && <p id="alternatives-refusal">{alternativesRefusal}</p>}
+            </div>
           )}
           {!simple && uncertain && (
             <button
@@ -827,6 +869,7 @@ function ScenarioRuns({
           )}
 
           {selected !== null && against !== null && <Comparison left={selected} right={against} />}
+          {selected !== null && against !== null && <CompareMap left={selected} right={against} />}
 
           {!runs.isLoading && runMissing && (
             <div className="mt-6">
@@ -1077,6 +1120,7 @@ function RunDetail({
       {tab !== "guided" && (
       <>
       <ApprovePlanPanel runId={id} scenarioId={data.scenario_id} status={data.status} />
+      <RunOutputs runId={id} status={data.status} ir={solvedVersion.data?.ir as Record<string, unknown> | undefined} />
       {data.reused_from != null && (
         <p className="mb-4 rounded bg-slate-50 p-3 text-sm text-slate-700">
           Answered by run {String(data.reused_from)}: the same model, data and settings were already
@@ -1420,20 +1464,28 @@ function Conflict({
     byRule.set(item.constraint_id, [...(byRule.get(item.constraint_id) ?? []), item.instance]);
   }
 
+  const navigate = useNavigate();
+  const { domainId } = useDomain();
   function soften() {
     if (!scenario.data) return;
     const patch: Record<string, number> = {};
     for (const id of byRule.keys()) patch[id] = 100;
+    // Keep everything the run's own scenario changed (records left out, data scaled or set):
+    // the question is "this what-if, with these rules bent", not the base case bent.
+    const base = (scenario.data.patch ?? {}) as Record<string, unknown>;
+    const already = (base.soften ?? {}) as Record<string, number>;
+    const bent = [...byRule.keys()].join(", ");
     create.mutate(
       {
         problem_id: scenario.data.problem_id,
         model_version_id: scenario.data.model_version_id,
-        name: `from run ${runId}`,
-        patch: { soften: patch },
+        name: `${scenario.data.name}, ${bent} bent (run ${runId})`.slice(0, 120),
+        patch: { ...base, soften: { ...already, ...patch } } as ScenarioPatch,
       },
       {
         onSuccess: (created) => {
           toast.success(`Created scenario “${created.name}”: these rules are now preferences.`);
+          navigate(`/domains/${domainId}/problems/${created.problem_id}/runs?problem=${created.problem_id}&scenario=${created.id}`);
         },
         onError: (error: unknown) => toast.error(formatApiError(error)),
       }
@@ -1492,7 +1544,7 @@ function Conflict({
             {create.isPending ? "Creating…" : "Make these preferences"}
           </button>
           <span className="text-xs text-amber-900">
-            Creates a scenario that softens the fighting rules. Solve it from the Scenarios page.
+            Creates a scenario with the same what-if changes and these rules bent, and opens it to solve.
           </span>
         </div>
       )}

@@ -13,6 +13,7 @@ import EntityList from "./pages/EntityList";
 import EntityDetail from "./pages/EntityDetail";
 import Dashboard from "./pages/Dashboard";
 import Health from "./pages/Health";
+import FieldPlan from "./pages/FieldPlan";
 import People from "./pages/People";
 import StartProblem from "./pages/StartProblem";
 import CampList from "./pages/CampList";
@@ -78,6 +79,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/health" element={<Health />} />
+      <Route path="/field/:problemId" element={<RequireAuth><FieldPlan /></RequireAuth>} />
       <Route
         path="/"
         element={

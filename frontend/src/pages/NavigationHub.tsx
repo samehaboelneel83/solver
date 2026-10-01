@@ -19,7 +19,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
         { title: "Records & relationships", description: "Review the people, resources and connections used by this problem.", to: `${domain}/data` },
         { title: "Input values", description: "Review demand, capacities, costs and other shared parameters.", to: `${domain}/data/parameters` },
         { title: "Scenario inputs", description: "Choose a scenario to inspect its dataset and assumptions.", to: `${problem}/scenarios` },
-        { title: "Sources & imports", description: "Review configured database connections.", to: `${domain}/data/sources`, capability: "integration.run" },
+        { title: "Database connections", description: "Import rows from a database; Excel and CSV import live on each kind of record.", to: `${domain}/data/sources`, capability: "integration.run" },
       ],
     },
     data: {

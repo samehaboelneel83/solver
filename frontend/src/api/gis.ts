@@ -167,3 +167,21 @@ export function useGisMutation<V, R>(fn: (vars: V) => Promise<R>) {
   const client = useQueryClient();
   return useMutation({ mutationFn: fn, onSuccess: () => client.invalidateQueries({ queryKey: [GIS] }) });
 }
+
+// --- Map layers as records (improvement plan 1.1 / 1.3) ------------------------------
+
+export type RecordsField = { property: string; name: string; data_type: string; enum_values: string[] | null; samples: string[]; skip: boolean };
+export type RecordsProposal = {
+  layers: string[]; name: string; exists: boolean; features: number; skipped_text: number; shapes: string[];
+  key: string | null; key_candidates: string[]; label?: string | null; fields: RecordsField[]; geometry_field: string;
+  measures: string[]; properties: string[];
+};
+export type RecordsMade = { type: string; entity_type_id: number; domain_id: number; made: number; updated: number };
+export type ShapesAttached = { type: string; field: string; attached: number; records_without_shape: string[]; unmatched_features: string[] };
+
+export const proposeRecords = (datasetId: number, layers: string[]) =>
+  apiFetch<RecordsProposal>(`/api/v1/gis/datasets/${datasetId}/records/propose`, { method: "POST", ...json({ layers }) });
+export const makeRecords = (datasetId: number, layers: string[], plan: RecordsProposal) =>
+  apiFetch<RecordsMade>(`/api/v1/gis/datasets/${datasetId}/records`, { method: "POST", ...json({ layers, plan }) });
+export const attachShapes = (datasetId: number, body: { layers: string[]; type: string; match: string; field?: string }) =>
+  apiFetch<ShapesAttached>(`/api/v1/gis/datasets/${datasetId}/records/attach`, { method: "POST", ...json(body) });

@@ -74,6 +74,11 @@ export default function ApprovePlanPanel({
           {current?.approved_at ? (
             <span className="text-slate-500"> ({new Date(current.approved_at).toLocaleString()})</span>
           ) : null}
+          {problemId !== null && (
+            <a className="ml-2 text-blue-700 underline" href={`/field/${String(problemId)}`} target="_blank" rel="noreferrer">
+              Open the field view (phone, read-only)
+            </a>
+          )}
         </p>
       ) : current ? (
         <p className="mb-2 text-sm text-slate-700">

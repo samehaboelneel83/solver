@@ -266,7 +266,7 @@ export function ModelSummary({ record, variant }: GenUIProps) {
         <Row label="Problem type" value={String(d.modelClass ?? "—")} />
         <Row label="Decisions" value={formatNumber(d.variables)} />
         <Row label="Rule instances" value={formatNumber(d.constraints)} />
-        {num(f.blocks) !== null && <Row label="Independent parts" value={formatNumber(f.blocks)} />}
+        {num(f.blocks) !== null && <Row label="Independent parts (this run’s model, scenario included)" value={formatNumber(f.blocks)} />}
       </dl>
       {variant === "expanded" && (
         <>

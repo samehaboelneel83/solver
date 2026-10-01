@@ -113,7 +113,57 @@ def missing_details(db: Session, domain_id: int, missing: list[dict[str, Any]]) 
     return out
 
 
-def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, Any]) -> dict[str, Any]:
+def data_findings(db: Session, domain_id: int, ir: dict[str, Any]) -> list[dict[str, Any]]:
+    """Gaps in the data a model reads that no compiler sees (improvement plan 5.5): a parameter
+    nobody has filled (every cell its default), and one computed from the map that left places out
+    or is older than the places it was computed from."""
+    names = list((ir.get("parameters") or {}).keys())
+    if not names:
+        return []
+    rows = db.execute(text(
+        "SELECT p.name, p.default_value, p.source, p.index_type_ids,"
+        "       (SELECT count(*) FROM parameter_value v WHERE v.parameter_def_id = p.id) AS stored"
+        "  FROM parameter_def p WHERE p.domain_id = :d AND p.name = ANY(:n)"), {"d": domain_id, "n": names}).mappings().all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        source = row["source"] or {}
+        if row["stored"] == 0 and not source and (ir["parameters"].get(row["name"]) or {}).get("index"):
+            out.append(_finding("warning", "parameter_unfilled",
+                                f"{row['name']} has no values yet, so every cell is its default {_num(row['default_value'])}. "
+                                "Fill it in under Data values, upload a file, or compute it from the map.",
+                                parameter=row["name"]))
+        missing = source.get("missing") or []
+        if missing:
+            out.append(_finding("warning", "computed_without_places",
+                                f"{row['name']} was computed from the map without {len(missing)} "
+                                f"{'record' if len(missing) == 1 else 'records'} that had no shape ({', '.join(map(str, missing[:5]))}"
+                                f"{'…' if len(missing) > 5 else ''}): their cells are the default.",
+                                parameter=row["name"], missing=missing[:50]))
+        computed_at = source.get("computed_at")
+        if source.get("shapes") and row["index_type_ids"]:
+            # Where the places are, not when a record was last touched: a new field (a height, a
+            # count) written on the same records is not a move.
+            from app.spatial.ops import shapes_fingerprint
+
+            if shapes_fingerprint(db, list(row["index_type_ids"])) != source["shapes"]:
+                out.append(_finding("warning", "computed_stale",
+                                    f"{row['name']} was computed from the map before some of its places moved, "
+                                    "were added or were removed; compute it again (Data › Parameters › its “Compute again”) so it matches where they are now.",
+                                    parameter=row["name"]))
+        elif computed_at and row["index_type_ids"]:
+            newer = db.execute(text(
+                "SELECT count(*) FROM entity WHERE entity_type_id = ANY(:t) AND updated_at > CAST(:c AS timestamptz)"),
+                {"t": list(row["index_type_ids"]), "c": computed_at}).scalar_one()
+            if newer:
+                out.append(_finding("warning", "computed_stale",
+                                    f"{row['name']} was computed from the map before {newer} of its records changed; "
+                                    "compute it again (Data › Parameters › its “Compute again”) so it matches where they are now.",
+                                    parameter=row["name"]))
+    return out
+
+
+def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, Any],
+                   patch: dict[str, Any] | None = None) -> dict[str, Any]:
     """What would stop a model solving on today's data, and what it is: the
     part of a preflight that does not depend on a scenario, so a problem's
     readiness can ask it of the latest version before any scenario exists."""
@@ -136,10 +186,18 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
                                  rules=unexpressed))
 
     data = live_data(db, domain_id, ir)
+    # A scenario's data what-ifs (records left out, numbers scaled or set) as the run will apply them,
+    # so "Y1 is flooded" is checked here -- not found only after solving.
+    from app.solve import whatif
+
+    if whatif.has_data_changes(patch):
+        data = whatif.apply(data, ir, patch)
     for name in ir.get("sets", []):
         if not data.get("sets", {}).get(name):
             findings.append(_finding("warning", "set_empty",
                                      f"There are no {name} records yet, so every rule and decision over {name} is empty.", set=name))
+
+    findings += data_findings(db, domain_id, ir)
 
     # Every record without a number the model reads, at once and with what it takes to fill
     # them in place -- rather than the compiler's refusal of the first one it meets.
@@ -228,7 +286,7 @@ def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount
             "Move the scenario to it to solve the model as it is now.",
             scenario_version=scenario["version"], latest_version=latest["version"], latest_version_id=latest["id"]))
 
-    checked = model_findings(db, scenario["domain_id"], scenario["problem_id"], ir)
+    checked = model_findings(db, scenario["domain_id"], scenario["problem_id"], ir, scenario["patch"] or {})
     findings.extend(checked["findings"])
     return {
         "scenario_id": scenario_id,

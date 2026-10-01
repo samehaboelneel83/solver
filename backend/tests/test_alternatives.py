@@ -99,7 +99,6 @@ def test_a_no_good_cut_forbids_exactly_that_plan():
     # A whole number with no upper bound has no big-M for its switch.
     (lambda ir: ir["variables"].update({f"x{i}": {"index": [], "domain": "integer", "lower": 0}
                                         for i in range(8)}), "no bounded whole-number"),
-    (lambda ir: ir["objective"].update(mode="lex"), "term by term"),
 ])
 def test_a_model_it_cannot_serve_is_refused_with_the_reason(change, reason):
     ir = _knapsack()
@@ -108,6 +107,26 @@ def test_a_model_it_cannot_serve_is_refused_with_the_reason(change, reason):
     best, _ = solve_compiled(by_name("highs"), compiled, time_limit=10, seed=1)
     with pytest.raises(NotApplicable, match=reason):
         find(compiled, lambda m, t: best, best, count=2, within=0.1, time_limit=5)
+
+
+def test_goals_in_order_get_alternatives_each_goal_held_near_its_best():
+    """Improvement plan 0.3: a lexicographic goal lists alternatives too. The first goal (value) is
+    held within the gap; the second (fewest items) only orders what is left."""
+    ir = _knapsack()
+    items = {"add": [_x(i) for i in range(8)]}
+    ir["objective"] = {"sense": "maximize", "mode": "lex", "terms": [
+        ir["objective"]["terms"][0],
+        {"id": "o_few", "weight": 1, "expression": {"mul": [{"const": -1}, items]}}]}
+    compiled = compile_model(ir, {})
+    best, _ = solve_compiled(by_name("cp-sat"), compiled, time_limit=10, seed=1)
+    solve = lambda model, limit: solve_compiled(by_name("cp-sat"), model, time_limit=limit, seed=1)[0]  # noqa: E731
+    found = find(compiled, solve, best, count=3, within=0.1, time_limit=30)
+    assert found, "ordered goals now have alternatives"
+    floor = float(bound(float(best.objective), 0.1, "maximize"))
+    for alternative in found:
+        value = sum(VALUE[i] * int(alternative.solution.assignments[(f"x{i}", ())]) for i in range(8))
+        assert value >= floor
+        assert alternative.changed >= 1
 
 
 def _plan(solution):

@@ -158,3 +158,18 @@ def test_the_api_stores_a_stay_close_as_sent(client, auth_headers, db, empty_que
                                                       "name": "close", "patch": {"stay_close": stay}}, headers=auth_headers)
     assert response.status_code == 201, response.text
     assert response.json()["patch"] == {"stay_close": stay}
+
+
+def test_a_lex_goal_with_a_bent_rule_keeps_one_id_per_stage():
+    """A lex goal + a preference + a why-not probe: the preference's price becomes a stage of its
+    own, and it must carry an id -- the run summary pairs ids and stages strictly (user test, run 747)."""
+    model = _pick_two()
+    penalty = Linear(coeffs={("take", ("3",)): Decimal(7)})
+    lex = Compiled(**{**model.__dict__, "objective_mode": "lex", "objective_terms": [model.objective],
+                      "objective_term_ids": ["o_cost"], "penalty_objective": penalty})
+    changed, _ = stay_close(lex, {"from_run": 1, "mode": "lex"}, BASE)
+    assert changed.objective_term_ids == ["o_cost", "preferences", "stay_close"]
+    assert len(changed.objective_term_ids) == len(changed.objective_terms)
+    result = _solve_lex(by_name("cp-sat"), changed, time_limit=10, workers=1)
+    assert result.status == "optimal"
+    list(zip(changed.objective_term_ids, changed.objective_terms, strict=True))

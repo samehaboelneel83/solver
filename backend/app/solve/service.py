@@ -697,6 +697,10 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     patch = params["case_patch"] if "case_patch" in params else (row["patch"] or {})
     ir = patched(row["ir"], patch)
     data = row["data"]
+    # The scenario's data what-ifs (improvement plan 3.3), on a copy: the frozen dataset stays as it is.
+    from app.solve import whatif
+
+    data = whatif.apply(data, ir, patch)
     if (params.get("probe_patch") or {}).get("override"):
         # A what-if (queue R27): some values changed on a copy of the frozen data.
         from app.solve.whynot import overridden

@@ -118,9 +118,11 @@ def work_once(db) -> int | None:
         outcome = execute_run(db, run_id)
         log.info("run settled", status=outcome.status, objective=outcome.objective)
         _record(db, run_id, time.monotonic() - started)
-    except Exception:
+    except Exception as exc:
         # A claimed run that raises would otherwise stay `running` for ever,
-        # and the next worker would skip it. Record the failure on the run.
+        # and the next worker would skip it. Record the failure on the run --
+        # with what went wrong, so the person who asked can read it on the run
+        # (the full traceback stays in the worker log).
         db.rollback()
         log.exception("run failed")
         db.execute(
@@ -128,13 +130,20 @@ def work_once(db) -> int | None:
                 "UPDATE run SET status = 'error', error = :e, finished_at = now()"
                 " WHERE id = :r"
             ),
-            {"e": "the worker failed while solving; see the worker log", "r": run_id},
+            {"e": failure_text(exc), "r": run_id},
         )
         db.commit()
     finally:
         metrics.WORKER_BUSY.set(0)
         logs.clear()
     return run_id
+
+
+def failure_text(exc: BaseException) -> str:
+    """A crashed run's error as its owner reads it: what failed, in one line, never a traceback."""
+    detail = " ".join(str(exc).split())[:400]
+    kind = type(exc).__name__
+    return f"the worker failed while solving ({kind}{': ' + detail if detail else ''}); the worker log has the rest"
 
 
 def _record(db, run_id: int, seconds: float) -> None:

@@ -63,4 +63,25 @@ describe("a plan in plain words", () => {
     expect(plain("o_total_cost")).toBe("total cost");
     expect(plain("hours_per_week")).toBe("hours per week");
   });
+
+  it("says ordered goals one by one, never as one total (user test, run 746)", () => {
+    const run = { ...base, objective: 361,
+      params: { objective_mode: "lex", objective_terms: [{ id: "risk_covered", value: 361 }, { id: "yard_rent", value: -255000 }] } } as unknown as Run;
+    const said = planWords(run, { ...ir, objective: { sense: "maximize", mode: "lex", terms: [{ id: "risk_covered" }, { id: "yard_rent" }] } } as never);
+    expect(said?.lines[0]).toBe("Goals, in order: risk covered 361, then yard rent -255,000 — each as high as it can go given the ones before it.");
+  });
+});
+
+describe("goals the editor named o_1, o_2", () => {
+  it("are said by what they add up, not as “o 1” (user test, Alexandria)", () => {
+    const run = { ...base, params: { objective_mode: "lex", objective_terms: [{ id: "o_1", value: 60000 }, { id: "o_2", value: 4 }] } } as unknown as Run;
+    const lexIr = {
+      objective: { sense: "minimize", mode: "lex", terms: [
+        { id: "o_1", expression: { sum: { mul: [{ attr: { of: "y", name: "rent_egp_3_days" } }, { var: "open", index: ["y"] }] } } },
+        { id: "o_2", expression: { sum: { var: "base", index: ["y", "t"] } } },
+      ] },
+      variables: ir.variables,
+    };
+    expect(planWords(run, lexIr)?.lines[0]).toBe("Goals, in order: rent egp 3 days 60,000, then total base 4 — each as low as it can go given the ones before it.");
+  });
 });

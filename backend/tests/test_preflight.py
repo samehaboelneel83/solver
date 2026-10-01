@@ -118,3 +118,22 @@ def test_the_solver_list_says_which_the_rules_really_choose(auth_headers):  # no
     for local in ("ipopt", "cma-es", "pso", "ga"):
         assert items[local]["chosen_unasked"] is False, local
     assert items["benders"]["chosen_unasked"] is False
+
+
+def test_a_scenario_s_left_out_records_are_checked_before_solving(db, monkeypatch):  # noqa: F811
+    """User test (Alexandria): "Y1 flooded" said ready, then solved infeasible. The what-if is applied first."""
+    from app.api import preflight
+    from app.solve import preview
+
+    ir = {"version": 2, "sets": ["yard"], "parameters": {},
+          "variables": {"open": {"index": ["yard"], "domain": "binary"}},
+          "constraints": [{"id": "c_one", "severity": "hard", "relation": ">=",
+                           "left": {"sum": {"var": "open", "index": ["y"]}, "over": [{"index": "y", "set": "yard"}]},
+                           "right": {"const": 1}}],
+          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression":
+              {"sum": {"var": "open", "index": ["y"]}, "over": [{"index": "y", "set": "yard"}]}}]}}
+    monkeypatch.setattr(preview, "live_data", lambda db, domain_id, ir: {"sets": {"yard": [{"id": "Y1"}]}, "parameters": {}})
+    monkeypatch.setattr(preflight, "data_findings", lambda *a, **k: [])
+    plain = {f["code"] for f in preflight.model_findings(db, 0, 0, ir)["findings"]}
+    without = {f["code"] for f in preflight.model_findings(db, 0, 0, ir, {"remove": {"yard": ["Y1"]}})["findings"]}
+    assert "set_empty" not in plain and "set_empty" in without

@@ -109,7 +109,7 @@ class Translator:
 
     def opening(self) -> list[dict]:
         """What is shown before any event: the job is in, the plan is on screen."""
-        out = [self._say(f"Run {self.run_id} is queued; a worker will take it.")]
+        out = [self._say(f"Run {self.run_id} went into the queue.")]
         out += self._create("timeline", "timeline", state="interactive", props={"title": "What the solver is doing"})
         out += self._enter("submitting_job")
         return out
@@ -129,7 +129,7 @@ class Translator:
         out: list[dict] = []
         if stage == "started":
             out += self._enter("understanding")
-            out.append(self._say("A worker took the run and is reading the model against its frozen data."))
+            out.append(self._say("A worker took the run and read the model against its frozen data."))
             # The model's card, as a skeleton while it is read and built.
             out += self._create("model", "model-summary", props={"title": "The model"})
         elif stage == "compiling":

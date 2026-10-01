@@ -13,7 +13,7 @@ const HINT: Record<EditorLevel, string> = {
 export default function LevelSwitch() {
   const [level, setLevel] = useEditorLevel();
   return (
-    <div role="group" aria-label="How much to show" className="inline-flex overflow-hidden rounded-md border border-slate-300 text-xs">
+    <div role="group" aria-label="How much to show" className="inline-flex shrink-0 overflow-hidden rounded-md border border-slate-300 text-xs">
       {(["simple", "expert"] as const).map((option) => (
         <button key={option} type="button" aria-pressed={level === option} title={HINT[option]} onClick={() => setLevel(option)}
           className={`px-2.5 py-1.5 font-medium ${level === option ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>

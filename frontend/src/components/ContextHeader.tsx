@@ -36,7 +36,7 @@ export default function ContextHeader() {
   }
 
   return (
-    <p className="min-w-0 max-w-[24rem] truncate text-xs text-slate-600" data-testid="context-header" title={domain.name}>
+    <p className="hidden min-w-0 max-w-[16rem] truncate text-xs text-slate-600 md:block" data-testid="context-header" title={domain.name}>
       {w("Domain")}: <span className="font-medium text-slate-800">{domain.name}</span>
       {problem.data && Number(problem.data.domain_id) === domainId && (
         <> / Problem: <span className="font-medium text-slate-800">{problem.data.name}</span></>

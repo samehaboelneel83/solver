@@ -186,6 +186,12 @@ function tokenize(text: string): Token[] {
       i += 1;
       continue;
     }
+    if (ch === "." && /[A-Za-z_]/.test(text[i - 1] ?? "") && /[A-Za-z_]/.test(text[i + 1] ?? "")) {
+      // `y.max_trucks` (improvement plan 4.1): say how a record's field is written here.
+      const before = /[A-Za-z_][A-Za-z0-9_]*$/.exec(text.slice(0, i))?.[0] ?? "y";
+      const after = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i + 1))?.[0] ?? "field";
+      throw new FormulaError(`A record's field is written ${after}[${before}], not ${before}.${after}.`, i);
+    }
     throw new FormulaError(`“${ch}” is not part of an equation.`, i);
   }
   tokens.push({ kind: "end", value: "", at: text.length, end: text.length });
@@ -298,7 +304,19 @@ class Parser {
     this.scope.pop();
     if (!this.isOp(stop)) {
       const token = this.peek();
-      throw new FormulaError(`Expected “${stop}” after “${list.map(printBinding).join(", ")}”.`, token.at, token.end);
+      const said = list.map(printBinding).join(", ");
+      // The two things a Python habit types here (improvement plan 4.1): say what is written instead.
+      if (token.kind === "name" && token.value === "for") {
+        throw new FormulaError(`One “for” lists every set, separated by commas: for ${said}, i in set.`, token.at, token.end);
+      }
+      if (token.kind === "name" && token.value === "if") {
+        throw new FormulaError(
+          `Write “where” instead of “if”, on a field of the records: ${said} where capacity >= 6. ` +
+          "To keep only pairs within reach, compute a 0/1 value from the map (Data › Parameters › Compute from the map) " +
+          "and multiply by it, or walk a within link: y in yard to h by within_reach.",
+          token.at, token.end);
+      }
+      throw new FormulaError(`Expected “${stop}” after “${said}”.`, token.at, token.end);
     }
     return list;
   }
@@ -433,6 +451,9 @@ class Parser {
   }
 
   private filter(owner: string, known: readonly { name: string }[]): IrFilter {
+    // "where not night_shift": a yes/no field read as false.
+    const negated = this.isWord("not") && this.peek(1).kind === "name" && this.isYesNo(known, String(this.peek(1).value));
+    if (negated) this.next();
     const attr = this.next();
     if (attr.kind !== "name" || !known.some((a) => a.name === attr.value)) {
       throw new FormulaError(
@@ -440,6 +461,10 @@ class Parser {
         attr.at,
         attr.end,
       );
+    }
+    // "where supervisor": a yes/no field on its own reads as "is yes" (user test: a roster's supervisor rule).
+    if (negated || (this.isYesNo(known, String(attr.value)) && !this.comparisonNext())) {
+      return { attr: attr.value, op: "=", value: !negated };
     }
     let op: string;
     const token = this.next();
@@ -450,6 +475,17 @@ class Parser {
     } else if (token.kind === "op" && (FILTER_OPERATORS as readonly string[]).includes(token.value)) op = token.value;
     else throw new FormulaError("Compare with =, !=, <, <=, >, >=, in or not in.", token.at, token.end);
     return { attr: attr.value, op, value: this.value() };
+  }
+
+  private isYesNo(known: readonly { name: string }[], name: string): boolean {
+    return (known.find((a) => a.name === name) as { data_type?: string } | undefined)?.data_type === "boolean";
+  }
+
+  /** Whether the next token starts a comparison (=, <, in, not in ...), not the end of a condition. */
+  private comparisonNext(): boolean {
+    const token = this.peek();
+    if (token.kind === "op") return (FILTER_OPERATORS as readonly string[]).includes(String(token.value));
+    return token.kind === "name" && (token.value === "in" || (token.value === "not" && this.peek(1).kind === "name" && this.peek(1).value === "in"));
   }
 
   private value(): unknown {

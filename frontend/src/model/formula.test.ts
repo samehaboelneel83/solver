@@ -47,6 +47,16 @@ describe("equations for rules", () => {
     });
   });
 
+  it("reads a yes/no field on its own as “is yes”, and with not as “is no” (user test: supervisors)", () => {
+    const withFlag: ModelContext = { ...CONTEXT, attributes: { person: [...CONTEXT.attributes.person, { name: "supervisor", data_type: "boolean" }] } };
+    const on = parseRule("for each d in day: sum(assign[p, d, s] for p in person where supervisor and cap >= 2, s in shift) >= 1", withFlag);
+    expect(on.ok && on.value.left).toMatchObject({ over: [{ where: [{ attr: "supervisor", op: "=", value: true }, { attr: "cap", op: ">=", value: 2 }] }, {}] });
+    const off = parseRule("sum(hours[p] for p in person where not supervisor) <= 40", withFlag);
+    expect(off.ok && off.value.left).toMatchObject({ over: [{ where: [{ attr: "supervisor", op: "=", value: false }] }] });
+    const spelled = parseRule("sum(hours[p] for p in person where supervisor = true) <= 40", withFlag);
+    expect(spelled.ok && spelled.value.left).toMatchObject({ over: [{ where: [{ attr: "supervisor", op: "=", value: true }] }] });
+  });
+
   it("explains what is wrong, and where", () => {
     const cases: [string, RegExp][] = [
       ["sum(hour[p] for p in person) = 1", /“hour” is not a variable.*did you mean “hours”/],
@@ -56,6 +66,10 @@ describe("equations for rules", () => {
       ["sum(hours[p] for p in person) < 1", /<=, >= or =/],
       ["(1 + 2 = 3", /close the bracket/],
       ["sum(hours[p] for p in person where colour = 1) = 1", /not an attribute of person/],
+      // What a Python habit types, and what is written instead (improvement plan 4.1).
+      ["sum(assign[p, d, s] for p in person for d in day, s in shift) = 1", /One “for” lists every set, separated by commas: for p in person, i in set/],
+      ["sum(hours[p] for p in person if cap >= 2) = 1", /Write “where” instead of “if”.*p in person where capacity >= 6.*Compute from the map/],
+      ["sum(p.cap * hours[p] for p in person) <= 40", /A record's field is written cap\[p\], not p\.cap/],
     ];
     for (const [text, message] of cases) {
       const parsed = parseRule(text, CONTEXT);

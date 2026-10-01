@@ -257,6 +257,205 @@
   },
   "version": 1
  },
+ "emergency_coverage": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "risk_place"
+     }
+    ],
+    "id": "c_covered_only_in_reach",
+    "left": {
+     "index": [
+      "p"
+     ],
+     "var": "covered"
+    },
+    "note": "a place counts as covered only when an open station reaches it",
+    "relation": "<=",
+    "right": {
+     "over": [
+      {
+       "index": "s",
+       "set": "station",
+       "via": {
+        "rel": "reaches",
+        "to": "p"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "s"
+      ],
+      "var": "open"
+     }
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "risk_place"
+     }
+    ],
+    "id": "c_critical_backup",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "station",
+       "via": {
+        "rel": "reaches",
+        "to": "p"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "s"
+      ],
+      "var": "open"
+     }
+    },
+    "note": "a critical place needs two open stations within reach",
+    "relation": ">=",
+    "right": {
+     "mul": [
+      {
+       "const": 2
+      },
+      {
+       "attr": {
+        "name": "critical",
+        "of": "p"
+       }
+      }
+     ]
+    },
+    "severity": "soft",
+    "weight": 100
+   },
+   {
+    "id": "c_budget",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "station"
+      }
+     ],
+     "sum": {
+      "index": [
+       "s"
+      ],
+      "var": "open"
+     }
+    },
+    "note": "at most 6 stations open",
+    "relation": "<=",
+    "right": {
+     "const": 6
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "mode": "lex",
+   "sense": "maximize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "p",
+        "set": "risk_place"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "attr": {
+          "name": "risk",
+          "of": "p"
+         }
+        },
+        {
+         "index": [
+          "p"
+         ],
+         "var": "covered"
+        }
+       ]
+      }
+     },
+     "id": "o_risk_covered",
+     "weight": 1
+    },
+    {
+     "expression": {
+      "mul": [
+       {
+        "const": -1
+       },
+       {
+        "over": [
+         {
+          "index": "s",
+          "set": "station"
+         }
+        ],
+        "sum": {
+         "mul": [
+          {
+           "attr": {
+            "name": "running_cost",
+            "of": "s"
+           }
+          },
+          {
+           "index": [
+            "s"
+           ],
+           "var": "open"
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "id": "o_running_cost",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {},
+  "relationships": [
+   "reaches"
+  ],
+  "sets": [
+   "station",
+   "risk_place"
+  ],
+  "variables": {
+   "covered": {
+    "domain": "binary",
+    "index": [
+     "risk_place"
+    ]
+   },
+   "open": {
+    "domain": "binary",
+    "index": [
+     "station"
+    ]
+   }
+  },
+  "version": 2
+ },
  "facility_coverage": {
   "constraints": [
    {

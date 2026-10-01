@@ -68,4 +68,38 @@ describe("computing distances from the map (queue R16a)", () => {
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, metric: "time", max_min: 12 });
   });
+
+  it("marks pairs within reach as a 0/1 parameter a rule multiplies by (improvement plan 2.2)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ parameter_id: 9, edges: 4, missing: [], source: {} }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    renderForm([shaped(1, "yard"), shaped(2, "hotspot")]);
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "within_flag" } });
+    fireEvent.change(screen.getByLabelText(/Within \(km\)/), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/within$/);
+    expect(JSON.parse(init.body as string)).toEqual({ name: "reach", from_type_id: 1, to_type_id: 2, metric: "straight", max_m: 3000, output: "parameter" });
+  });
+
+  it("counts places within a radius into a field, and links each place to its area", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ field: "near_count", records: 3, with_any: 1, links: 3, missing: [] }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    renderForm([shaped(1, "hotspot"), shaped(2, "hospital")]);
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "count" } });
+    fireEvent.change(screen.getByLabelText(/Within \(metres\)/), { target: { value: "300" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    let [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/domains\/7\/spatial\/count$/);
+    expect(JSON.parse(init.body as string)).toEqual({ name: "near_count", from_type_id: 1, to_type_id: 2, max_m: 300 });
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "inside" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    [url, init] = fetchSpy.mock.calls[1] as [string, RequestInit];
+    expect(url).toMatch(/\/spatial\/inside$/);
+    expect(JSON.parse(init.body as string)).toEqual({ name: "area_of", from_type_id: 1, to_type_id: 2 });
+  });
 });

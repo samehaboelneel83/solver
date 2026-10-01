@@ -249,6 +249,8 @@ function ScenarioForm({
     fromPatch(scenario?.patch ?? {})
   );
   const [failure, setFailure] = useState<string | null>(null);
+  // Data what-ifs (improvement plan 3.3): kept beside the rule choices, sent with them.
+  const [dataChanges, setDataChanges] = useState<ScenarioPatch>(() => dataOf(scenario?.patch ?? {}));
 
   const version = useVersion(modelVersionId);
   const constraints = (
@@ -269,7 +271,10 @@ function ScenarioForm({
 
   function save() {
     setFailure(null);
-    const body = { name, model_version_id: modelVersionId, patch: toPatch(choices) };
+    // Locks and stay-close a scenario was made with are kept; the form edits rules and data.
+    const kept = { ...(scenario?.patch?.lock ? { lock: scenario.patch.lock } : {}),
+      ...(scenario?.patch?.stay_close ? { stay_close: scenario.patch.stay_close } : {}) };
+    const body = { name, model_version_id: modelVersionId, patch: { ...kept, ...toPatch(choices), ...dataChanges } };
     const onError = (error: unknown) => setFailure(formatApiError(error));
     if (scenario) {
       update.mutate(
@@ -389,6 +394,8 @@ function ScenarioForm({
         </ul>
       )}
 
+      <DataWhatIf ir={version.data?.ir as WhatIfIr | undefined} value={dataChanges} onChange={setDataChanges} />
+
       {failure && (
         <p role="alert" className="mt-3 whitespace-pre-line text-sm text-red-600">
           {failure}
@@ -447,8 +454,130 @@ export function toPatch(choices: Record<string, { choice: Choice; weight: number
   return patch;
 }
 
+type WhatIfIr = { sets?: string[]; parameters?: Record<string, { index?: string[]; entity?: string }> };
+
+/** The data keys of a patch, and nothing else. */
+export function dataOf(patch: ScenarioPatch): ScenarioPatch {
+  const out: ScenarioPatch = {};
+  if (patch.remove && Object.keys(patch.remove).length) out.remove = patch.remove;
+  if (patch.scale_param && Object.keys(patch.scale_param).length) out.scale_param = patch.scale_param;
+  if (patch.set_param?.length) out.set_param = patch.set_param;
+  if (patch.set_attr?.length) out.set_attr = patch.set_attr;
+  return out;
+}
+
+/**
+ * "What if the data were different?" (improvement plan 3.3): leave records out,
+ * scale a parameter, or change one value -- on a copy of the frozen data, so the
+ * stored data never changes and the scenarios can be compared run by run.
+ */
+function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPatch; onChange: (next: ScenarioPatch) => void }) {
+  const sets = ir?.sets ?? [];
+  const numbers = Object.entries(ir?.parameters ?? {}).filter(([, spec]) => !spec.entity).map(([name]) => name);
+  const [removeSet, setRemoveSet] = useState("");
+  const [removeKeys, setRemoveKeys] = useState("");
+  const [scaleParam, setScaleParam] = useState("");
+  const [factor, setFactor] = useState("1.3");
+  const [cellParam, setCellParam] = useState("");
+  const [cellKeys, setCellKeys] = useState("");
+  const [cellValue, setCellValue] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  if (!sets.length) return null;
+  const said = describeData(value);
+  const keysOf = (text: string) => text.split(",").map((k) => k.trim()).filter(Boolean);
+  const input = "rounded border border-slate-300 px-2 py-1 text-sm";
+  return (
+    <fieldset className="mt-4 rounded-md border border-slate-200 p-3">
+      <legend className="px-1 text-sm font-semibold text-slate-900">What if the data were different?</legend>
+      <p className="mb-2 text-xs text-slate-600">
+        Changes made to a copy of the data when this scenario is solved — the records themselves are not touched.
+      </p>
+      {said.length > 0 && (
+        <ul className="mb-2 flex flex-wrap gap-2 text-xs">
+          {said.map((text) => <li key={text} className="rounded bg-amber-50 px-2 py-1 text-amber-900">{text}</li>)}
+          <li><button type="button" className="text-xs text-red-700 underline" onClick={() => onChange({})}>Clear the data changes</button></li>
+        </ul>
+      )}
+      <div className="flex flex-wrap items-end gap-2 text-xs text-slate-600">
+        <label>Leave out
+          <select aria-label="Leave out records of" className={`${input} ml-1`} value={removeSet} onChange={(e) => setRemoveSet(e.target.value)}>
+            <option value="">kind…</option>
+            {sets.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <input aria-label="Keys to leave out" className={`${input} w-40 font-mono`} placeholder="Y3, Y5" value={removeKeys} onChange={(e) => setRemoveKeys(e.target.value)} />
+        <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+          onClick={() => {
+            if (!removeSet || !keysOf(removeKeys).length) return setProblem("Choose a kind and the keys to leave out.");
+            setProblem(null);
+            onChange({ ...value, remove: { ...(value.remove ?? {}), [removeSet]: [...new Set([...(value.remove?.[removeSet] ?? []), ...keysOf(removeKeys)])] } });
+            setRemoveKeys("");
+          }}>Add</button>
+      </div>
+      {numbers.length > 0 && (
+        <>
+          <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
+            <label>Scale
+              <select aria-label="Parameter to scale" className={`${input} ml-1`} value={scaleParam} onChange={(e) => setScaleParam(e.target.value)}>
+                <option value="">data…</option>
+                {numbers.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <label>by ×
+              <input aria-label="Scale factor" inputMode="decimal" className={`${input} ml-1 w-20`} value={factor} onChange={(e) => setFactor(e.target.value)} />
+            </label>
+            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+              onClick={() => {
+                const f = Number(factor);
+                if (!scaleParam || !(f >= 0)) return setProblem("Choose data to scale and a factor of 0 or more.");
+                setProblem(null);
+                onChange({ ...value, scale_param: { ...(value.scale_param ?? {}), [scaleParam]: f } });
+              }}>Add</button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
+            <label>Set
+              <select aria-label="Parameter to change" className={`${input} ml-1`} value={cellParam} onChange={(e) => setCellParam(e.target.value)}>
+                <option value="">data…</option>
+                {numbers.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <input aria-label="Keys of the value" className={`${input} w-36 font-mono`}
+              placeholder={(ir?.parameters?.[cellParam]?.index ?? ["key"]).join(", ")} value={cellKeys} onChange={(e) => setCellKeys(e.target.value)} />
+            <label>to
+              <input aria-label="New value" inputMode="decimal" className={`${input} ml-1 w-20`} value={cellValue} onChange={(e) => setCellValue(e.target.value)} />
+            </label>
+            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+              onClick={() => {
+                const arity = ir?.parameters?.[cellParam]?.index?.length ?? 0;
+                const keys = keysOf(cellKeys);
+                const v = Number(cellValue);
+                if (!cellParam || keys.length !== arity || cellValue.trim() === "" || Number.isNaN(v)) {
+                  return setProblem(`Choose data, ${arity || "its"} key${arity === 1 ? "" : "s"} and a number.`);
+                }
+                setProblem(null);
+                onChange({ ...value, set_param: [...(value.set_param ?? []), { param: cellParam, index: keys, value: v }] });
+                setCellKeys("");
+                setCellValue("");
+              }}>Add</button>
+          </div>
+        </>
+      )}
+      {problem && <p role="alert" className="mt-2 text-xs text-red-700">{problem}</p>}
+    </fieldset>
+  );
+}
+
+export function describeData(patch: ScenarioPatch): string[] {
+  const said: string[] = [];
+  for (const [set, keys] of Object.entries(patch.remove ?? {})) said.push(`without ${set} ${keys.join(", ")}`);
+  for (const [param, f] of Object.entries(patch.scale_param ?? {})) said.push(`${param} × ${f}`);
+  for (const c of patch.set_param ?? []) said.push(`${c.param}[${c.index.join(", ")}] = ${c.value}`);
+  for (const c of patch.set_attr ?? []) said.push(`${c.set} ${c.key}: ${c.attr} = ${String(c.value)}`);
+  return said;
+}
+
 export function describePatch(patch: ScenarioPatch): string {
-  const parts: string[] = [];
+  const parts: string[] = [...describeData(patch)];
   if (patch.disable?.length) parts.push(`ignores ${patch.disable.join(", ")}`);
   if (patch.harden?.length) parts.push(`insists on ${patch.harden.join(", ")}`);
   const soften = Object.entries(patch.soften ?? {});

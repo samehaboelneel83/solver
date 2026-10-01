@@ -30,6 +30,10 @@ export const EXAMPLES: Record<string, ExampleWords> = {
     title: "Where to open sites",
     says: "Choose which sites to open and who each one serves, so every customer is in reach at the least cost.",
   },
+  emergency_coverage: {
+    title: "Cover places at risk",
+    says: "Choose where to keep response units so places at risk are within reach on the map, the critical ones twice, most risk first and then the least cost.",
+  },
   cairo_university_lectures: {
     title: "Lecture timetable",
     says: "Put university sections into days, times and rooms with no clashes, keeping to room sizes and preferring mornings.",

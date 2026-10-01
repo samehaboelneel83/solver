@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import date
+from datetime import date, time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,6 +54,8 @@ def test_values_read_as_their_type():
     assert infer(["yes", "No", True]) == ("boolean", None)
     assert infer([date(2024, 1, 1), "2024-02-01"]) == ("date", None)
     assert infer(["a", "b", "a", "b"]) == ("enum", ["a", "b"])
+    assert infer(["06:00", "18:00", time(6, 30)]) == ("time", None)
+    assert convert("6:05", "time") == "06:05"
     assert infer(["a", "b", "c"]) == ("text", None)
     assert to_name("Hours per week") == "hours_per_week" and to_name("2nd shift") == "n_2nd_shift"
     assert convert("12", "integer") == 12 and convert(12.0, "integer") == 12

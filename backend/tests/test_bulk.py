@@ -96,6 +96,20 @@ def test_an_unknown_column_is_named_on_row_one(shop):
     assert report["faults"] == [{"row": 1, "column": "colour", "message": "is not a column of this template"}]
 
 
+
+def test_add_fields_turns_unknown_columns_into_typed_fields(shop):
+    site = shop["site"]["id"]
+    path = f"/api/v1/entity-types/{site}/upload"
+    rows = [["key", "capacity", "floors", "shift_start", "Bad Name"], ["n", "1", "3", "06:00", "x"], ["s", "2", "5", "18:00", "y"]]
+    refused = _upload(shop, path, rows, add_fields=True, dry_run=True)
+    assert [f["column"] for f in refused["faults"]] == ["Bad Name"]  # not a name a field may have
+    attrs = {a["name"] for a in shop["call"]("GET", f"/api/v1/entity-types/{site}").json()["attributes"]}
+    assert "floors" not in attrs  # a dry run leaves the type alone
+    report = _upload(shop, path, [r[:4] for r in rows], add_fields=True)
+    assert report["ok"] and report["written"] == 2, report
+    kinds = {a["name"]: a["data_type"] for a in shop["call"]("GET", f"/api/v1/entity-types/{site}").json()["attributes"]}
+    assert kinds["floors"] == "integer" and kinds["shift_start"] == "time"
+
 def test_xlsx_round_trips_the_stored_rows(shop):
     path = f"/api/v1/entity-types/{shop['site']['id']}/upload"
     _upload(shop, path, [["key", "capacity", "opens"], ["north", "10", "08:00"], ["south", "4", ""]])

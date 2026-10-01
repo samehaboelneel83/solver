@@ -54,6 +54,9 @@ from sqlalchemy.orm import Session
 
 from app.models.v1_problem import Template
 from app.facilities import FACILITY_COVERAGE
+from app.emergency_coverage import EMERGENCY_COVERAGE
+from app.emergency_coverage import build_ir as emergency_ir
+from app.emergency_coverage import build_seed as emergency_seed
 from app.facilities import build_ir as facility_ir
 from app.facilities import build_seed as facility_seed
 from app.lectures import CAIRO_UNIVERSITY_LECTURES
@@ -293,6 +296,23 @@ SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     REGION_PARTITIONING: (build_seed(), build_ir()),
     FACILITY_COVERAGE: (facility_seed(), facility_ir()),
     CAIRO_UNIVERSITY_LECTURES: (lectures_seed(), lectures_ir()),
+    EMERGENCY_COVERAGE: (emergency_seed(), emergency_ir()),
+}
+
+
+#: A one-line purpose for each template that does not say its own (improvement plan 4.7): the
+#: template list shows it, so a newcomer can tell a facility-location model from a blend.
+NOTES: dict[str, str] = {
+    FEED_BLEND: "Mix ingredients at the lowest cost while meeting nutrient limits: the classic blending "
+                "(diet) model -- feed, fuel, fertiliser, concrete.",
+    LOAD_BALANCE: "Share work across people or machines as evenly as each one's capacity allows: "
+                  "minimise the busiest one's load.",
+    WORKSHOP: "Order jobs through machines (cut, then weld) so everything is finished as early as possible: "
+              "a job-shop schedule with task durations.",
+    REGION_PARTITIONING: "Cut a map into connected zones with balanced populations, each as compact as it can be: "
+                         "territories, districts, service areas.",
+    FACILITY_COVERAGE: "Choose which sites to open and who each one serves, from the places on the map, at the "
+                       "least fixed plus travel cost: depots, clinics, yards, warehouses.",
 }
 
 
@@ -300,6 +320,8 @@ def ensure_showcase_templates(db: Session) -> dict[str, int]:
     """Create or refresh the showcase templates. Idempotent on the name."""
     ids: dict[str, int] = {}
     for name, (seed, ir) in SHOWCASE.items():
+        if not seed.get("note") and name in NOTES:
+            seed = {**seed, "note": NOTES[name]}
         found = db.execute(select(Template.id).where(Template.name == name)).scalar_one_or_none()
         if found is not None:
             db.execute(

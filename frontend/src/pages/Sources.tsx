@@ -56,7 +56,7 @@ const STATE_TEXT: Record<Job["state"], string> = {
 export function SourcesPage() {
   const { domainId } = useParams();
   const { can, known } = useCapabilities();
-  useDocumentTitle("Sources & imports");
+  useDocumentTitle("Database connections");
   if (!known) return <p role="status">Checking access…</p>;
   if (!can("integration.run")) return <p role="alert">Your account does not have access to sources and imports.</p>;
   return <SourceList key={domainId} domainId={domainId!} canManage={can("integration.manage")} />;
@@ -73,7 +73,7 @@ function SourceList({ domainId, canManage }: { domainId: string; canManage: bool
   });
   const refresh = () => client.invalidateQueries({ queryKey: ["connections", domainId] });
   return <div className="max-w-5xl space-y-5">
-    <h1 className="text-2xl font-semibold">Sources & imports</h1>
+    <h1 className="text-2xl font-semibold">Database connections</h1>
     <p className="text-sm text-slate-600">
       Database sources for this domain. Run an extraction to copy a table&rsquo;s rows here, then import them: preview, map the columns
       onto a record type, check every row, and load.

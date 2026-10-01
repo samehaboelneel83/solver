@@ -24,6 +24,25 @@ export function plain(name: string): string {
   return name.replace(/^[a-z]_(?=[a-z])/, "").replace(/_/g, " ");
 }
 
+/** A goal's name in words: the author's note, else its id -- unless the id is an editor's
+ * placeholder ("o_1"), when what it adds up says more: "rent egp 3 days", "total base". */
+function goalName(term: { id?: string; note?: string; expression?: unknown } | undefined, id: string): string {
+  const note = term?.note?.trim();
+  if (note) return note;
+  if (!/^o_?\d+$/.test(id)) return plain(id);
+  const data = [...new Set(dataRead(term?.expression))];
+  if (data.length) return data.map(plain).join(" and ");
+  const decided = [...new Set(varsRead(term?.expression))];
+  return decided.length ? `total ${decided.map(plain).join(" and ")}` : plain(id);
+}
+
+function varsRead(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(varsRead);
+  if (!node || typeof node !== "object") return [];
+  const o = node as Record<string, unknown>;
+  return [...(typeof o.var === "string" ? [o.var] : []), ...Object.values(o).flatMap(varsRead)];
+}
+
 function number(value: number): string {
   return NUMBER.format(value);
 }
@@ -42,13 +61,34 @@ function list(items: string[]): string {
   return items.length > SHOWN ? `${shown} and ${items.length - SHOWN} more` : shown;
 }
 
+/** Ordered goals (lexicographic) are not one total: each term, by name, with its own value. */
+function lexGoalLine(run: Run, ir: Ir): string | null {
+  const params = (run as { params?: { objective_mode?: string; objective_terms?: { id: string; value: number }[] } }).params;
+  const lex = params?.objective_mode === "lex" || (ir.objective as { mode?: string } | undefined)?.mode === "lex";
+  const values = params?.objective_terms ?? [];
+  if (!lex || !values.length) return null;
+  const notes = new Map((ir.objective?.terms ?? []).map((t) => [t.id ?? "", goalName(t, t.id ?? "")]));
+  const minimise = (ir.objective?.sense ?? "minimize").startsWith("min");
+  const proven = run.status === "optimal";
+  const how = minimise
+    ? proven ? "as low as it can go" : "the lowest found"
+    : proven ? "as high as it can go" : "the highest found";
+  const parts = values
+    .filter((t) => t.id !== "stay_close" && t.id !== "preferences")
+    .map((t) => `${notes.get(t.id) ?? plain(t.id)} ${number(t.value)}`);
+  if (!parts.length) return null;
+  return `Goals, in order: ${parts.join(", then ")} — each ${how} given the ones before it.`;
+}
+
 function goalLine(run: Run, ir: Ir): string | null {
+  const ordered = lexGoalLine(run, ir);
+  if (ordered) return ordered;
   if (run.objective === null || run.objective === undefined) return null;
   const value = Number(run.objective);
   if (!Number.isFinite(value)) return null;
   const terms = ir.objective?.terms ?? [];
   const minimise = (ir.objective?.sense ?? "minimize").startsWith("min");
-  const name = terms.length === 1 ? terms[0].note?.trim() || plain(terms[0].id ?? "the goal") : "the goal";
+  const name = terms.length === 1 ? goalName(terms[0], terms[0].id ?? "the goal") : "the goal";
   // A name is the author's choice and may not say what is counted ("Morning" for a late-slot
   // penalty, UX audit C-1): when it names none of the data the goal adds up, say that data too.
   const counts = [...new Set((ir.objective?.terms ?? []).flatMap((term) => dataRead((term as { expression?: unknown }).expression)))];

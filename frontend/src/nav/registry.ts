@@ -75,7 +75,7 @@ export const DESTINATIONS: Destination[] = [
   { id: "inputs", path: "/inputs", canonical: DOMAIN_TEMPLATES.inputs, label: "Inputs", purpose: "Prepare shared data and scenario inputs.", scope: "problem", group: "problems" },
   { id: "data-records", path: "/data", canonical: DOMAIN_TEMPLATES["data-records"], label: "Records & relationships", purpose: "Manage operational records, links and values.", scope: "domain", group: "data" },
   { id: "data-structure", path: "/structure", canonical: DOMAIN_TEMPLATES["data-structure"], label: "Data structure", purpose: "Define record types and relationship types.", scope: "domain", group: "data" },
-  { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Sources & imports", purpose: "Set up database sources and import their rows.", scope: "domain", group: "data", capability: "integration.run" },
+  { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Database connections", purpose: "Import rows from a database (Excel and CSV import live on each kind of record).", scope: "domain", group: "data", capability: "integration.run" },
   { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Predictors", purpose: "Train and keep the models a rule can read with predict.", scope: "domain", group: "data" },
   { id: "map-data", path: "/map-data", canonical: DOMAIN_TEMPLATES["map-data"], label: "Map data", purpose: "Bring CAD drawings onto the map as GIS layers.", scope: "domain", group: "domains" },
   // Camps are map data (a tab of Map data), not a page of the sidebar; kept for the command palette.

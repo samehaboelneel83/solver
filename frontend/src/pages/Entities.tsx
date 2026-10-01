@@ -1,4 +1,6 @@
 import { FormEvent, lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+import RecordsMap, { geometryFields } from "../components/map/RecordsMap";
+import BulkPanel from "../components/BulkPanel";
 
 import QuickStructure, { NewKindForm } from "../components/QuickStructure";
 import EntityPicture from "../components/EntityPicture";
@@ -371,6 +373,8 @@ function EntityTable({
     setSearchParams(next, { replace: true });
   }, [applied, q, type.id, searchParams, setSearchParams]);
 
+  // Records with a shape can be seen where they are (improvement plan 1.4).
+  const [view, setView] = useState<"table" | "map">("table");
   const { data, error, isError, isLoading, refetch, fetchStatus } = useEntities(type.id, {
     q: q || undefined,
     expression: applied,
@@ -535,11 +539,36 @@ function EntityTable({
     );
   }
 
+  const placed = geometryFields(type).length > 0;
   return (
     <>
+      {/* One door for bringing records in (improvement plan 4.5): a file of rows, or the features of a map layer. */}
+      <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
+        <summary className="cursor-pointer select-none text-sm font-medium text-slate-800">
+          Import {type.name} records — from Excel / CSV, or from the map
+        </summary>
+        <div className="mt-2 space-y-2">
+          <BulkPanel base={`/api/v1/entity-types/${type.id}`} what={`${type.name} records`} />
+          <p className="text-xs text-slate-600">
+            Places drawn in CAD or GIS? Import the file under{" "}
+            <Link className="underline" to={`/domains/${type.domain_id}/map-data`}>Map data</Link>, then use its
+            layers here (“Use in models”). A sheet with longitude and latitude columns becomes places on its own.
+          </p>
+        </div>
+      </details>
       {search}
       {conditions}
-      {body}
+      {placed && (
+        <div role="tablist" aria-label="Show the records as" className="mb-3 inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
+          {(["table", "map"] as const).map((v) => (
+            <button key={v} role="tab" type="button" aria-selected={view === v} onClick={() => setView(v)}
+              className={`px-3 py-1.5 ${view === v ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              {v === "table" ? "Table" : "Map"}
+            </button>
+          ))}
+        </div>
+      )}
+      {placed && view === "map" ? <RecordsMap type={type} /> : body}
     </>
   );
 }

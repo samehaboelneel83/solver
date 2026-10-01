@@ -130,6 +130,8 @@ class ParameterDefRead(BaseModel):
     unit: str | None
     # Migration 0068 (queue R20b): its values are entities of this type.
     value_type_id: int | None = None
+    # How it was made, when computed (from the map, from an answer): read-only.
+    source: dict | None = None
 
 
 class ParameterDefCreate(BaseModel):

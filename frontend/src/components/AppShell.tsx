@@ -583,7 +583,7 @@ function AppShellContent() {
         >
           <Menu className="h-4 w-4" aria-hidden /> Menu
         </button>
-        <nav aria-label="Breadcrumb" className="min-w-0 flex-1 truncate text-sm">
+        <nav aria-label="Breadcrumb" className="min-w-[8rem] flex-1 truncate text-sm">
           <ol className="flex items-center gap-1.5">
             {where.group && where.group !== where.page && (
               <>
@@ -603,11 +603,12 @@ function AppShellContent() {
         <button
           type="button"
           onClick={() => setPaletteOpen(true)}
-          className="hidden items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 hover:border-slate-300 sm:inline-flex"
+          aria-label="Go to page (Ctrl K)"
+          className="hidden shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 hover:border-slate-300 sm:inline-flex"
         >
           <Search className="h-4 w-4" aria-hidden />
-          <span className="w-32 text-start">Go to page…</span>
-          <kbd className="rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500">Ctrl K</kbd>
+          <span className="hidden w-32 text-start xl:inline">Go to page…</span>
+          <kbd className="hidden rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500 xl:inline">Ctrl K</kbd>
         </button>
         <LevelSwitch />
         {/* Language and text direction together (UX audit N-7: direction was its own sidebar item). */}

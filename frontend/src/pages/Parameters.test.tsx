@@ -243,14 +243,14 @@ describe("Parameters: creating one", () => {
     });
   });
 
-  it("refuses a decimal default before sending anything, and says why", async () => {
+  it("refuses a default that is not a number before sending anything, and says why", async () => {
     const form = await openForm();
 
     fireEvent.change(within(form).getByLabelText(/^Name/), { target: { value: "cost" } });
-    fireEvent.change(within(form).getByLabelText(/^Default value/), { target: { value: "2.5" } });
+    fireEvent.change(within(form).getByLabelText(/^Default value/), { target: { value: "2,5" } });
     fireEvent.click(within(form).getByRole("button", { name: /create parameter/i }));
 
-    expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/whole number/i);
+    expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/must be a number/i);
     expect(calls("POST")).toHaveLength(0);
   });
 
@@ -349,15 +349,15 @@ describe("Parameters: changing a definition", () => {
     expect(calls("PATCH")[0].body).toEqual({ default_value: 6 });
   });
 
-  it("refuses a decimal default here too, without sending anything", async () => {
+  it("refuses a default with too many decimals here too, without sending anything", async () => {
     serve();
     renderPage("/parameters?parameter=3");
 
     const form = await screen.findByRole("form", { name: /parameter settings/i });
-    fireEvent.change(within(form).getByLabelText(/^Default value/), { target: { value: "1.5" } });
+    fireEvent.change(within(form).getByLabelText(/^Default value/), { target: { value: "1.1234567" } });
     fireEvent.click(within(form).getByRole("button", { name: /save settings/i }));
 
-    expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/whole number/i);
+    expect(await within(form).findByTestId("form-errors")).toHaveTextContent(/decimal places/i);
     expect(calls("PATCH")).toHaveLength(0);
   });
 

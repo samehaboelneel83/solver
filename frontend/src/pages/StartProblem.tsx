@@ -7,7 +7,7 @@
  * its values read as, and a link where a column holds another sheet's keys.
  * Nothing is written until they say so, and one bad cell writes nothing.
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
@@ -26,6 +26,7 @@ import {
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { exampleWords } from "../lib/examples";
+import { suggest } from "../lib/describeProblem";
 import { parseRouteId } from "../lib/routeId";
 
 type Way = "example" | "sheet" | "scratch";
@@ -39,6 +40,7 @@ const TYPE_WORDS: [AttrType, string][] = [
   ["number", "a number"],
   ["boolean", "yes or no"],
   ["date", "a date"],
+  ["time", "a time of day"],
   ["enum", "one of a list"],
   ["text", "text"],
 ];
@@ -97,17 +99,52 @@ function Start({ domainId }: { domainId: Id }) {
           </button>
         ))}
       </div>
+      <InWords />
       {way === "example" && <FromExample domainId={domainId} name={name} onMade={land} />}
-      {way === "sheet" && <FromSheet domainId={domainId} name={name} onMade={land} />}
+      {way === "sheet" && <FromSheet domainId={domainId} name={name} setName={setName} onMade={land} />}
       {way === "scratch" && <FromScratch domainId={domainId} name={name} onMade={land} />}
     </div>
   );
 }
 
+/** Describe it in words (improvement plan 5.6): where to start, and which tools the words call for. */
+function InWords() {
+  const templates = useTemplates();
+  const [text, setText] = useState("");
+  const available = (templates.data?.items ?? []).map((row) => row.name);
+  const found = suggest(text, available);
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white p-4">
+      <summary className="cursor-pointer font-semibold text-slate-900">Not sure where to start? Describe the problem in your own words</summary>
+      <textarea aria-label="Your problem in words" className={`${INPUT} mt-3 h-24 w-full`} value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder="e.g. Where to keep 40 trucks so every hotspot is within 15 minutes, then a crew roster with 10 hours rest between shifts" />
+      {text.trim().length >= 12 && (found.length ? (
+        <ul className="mt-3 space-y-2 text-sm">
+          {found.map((s) => (
+            <li key={s.key} className="rounded-md border border-slate-200 p-2">
+              <span className={`mr-2 rounded px-1.5 py-0.5 text-xs ${s.kind === "example" ? "bg-blue-100 text-blue-800" : "bg-emerald-100 text-emerald-800"}`}>
+                {s.kind === "example" ? "start from" : "you will need"}
+              </span>
+              <span className="font-medium text-slate-900">{s.kind === "example" ? exampleWords(s.key).title : s.title}</span>
+              <span className="block text-xs text-slate-600">{s.where} — because {s.why}.</span>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="mt-2 text-sm text-slate-600">Nothing in those words matched a starting point yet; say what is decided and what limits it.</p>)}
+    </details>
+  );
+}
+
 function Problems({ items }: { items: string[] }) {
+  // Brought into view when they appear: a refusal at the foot of a long sheet list went unseen (user test).
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (items.length) box.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }, [items]);
   if (!items.length) return null;
   return (
-    <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+    <div ref={box} role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
       {items.length === 1 ? items[0] : <ul className="list-disc pl-5">{items.map((item) => <li key={item}>{item}</li>)}</ul>}
     </div>
   );
@@ -180,7 +217,13 @@ function FromScratch({ domainId, name, onMade }: { domainId: Id; name: string; o
   );
 }
 
-function FromSheet({ domainId, name, onMade }: { domainId: Id; name: string; onMade: (id: Id) => void }) {
+/** "alexandria_flood_data.xlsx" -> "Alexandria flood data": a name to start from, never a blocker. */
+export function nameFromFile(file: string): string {
+  const words = file.replace(/\.[^.]+$/, "").replace(/[_\-.]+/g, " ").replace(/\s+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
+}
+
+function FromSheet({ domainId, name, setName, onMade }: { domainId: Id; name: string; setName: (name: string) => void; onMade: (id: Id) => void }) {
   const client = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [proposal, setProposal] = useState<SheetProposal | null>(null);
@@ -190,6 +233,7 @@ function FromSheet({ domainId, name, onMade }: { domainId: Id; name: string; onM
 
   async function read(chosen: File) {
     setFile(chosen);
+    if (!name.trim()) setName(nameFromFile(chosen.name));
     setProposal(null);
     setProblems([]);
     setMade(null);
@@ -243,16 +287,22 @@ function FromSheet({ domainId, name, onMade }: { domainId: Id; name: string; onM
               onChange={(change) => edit(index, change)} />
           ))}
           <div className="flex flex-wrap items-center gap-3">
+            {/* The name again beside the button that needs it: the field at the top is out of sight here. */}
+            <label className="text-sm text-slate-700">
+              Problem name{" "}
+              <input aria-label="Problem name" className={`${INPUT} w-64`} value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
             <button type="button" className={PRIMARY} disabled={busy !== null || !name.trim() || kinds.every((k) => k.skip)} onClick={build}>
               Import and make the problem
             </button>
             {!name.trim() && <span className="text-xs text-slate-500">Give the problem a name first.</span>}
           </div>
+          <Problems items={problems} />
         </>
       )}
       {busy && <p role="status" className="text-sm text-slate-600">{busy}</p>}
       {made && <p role="status" className="text-sm text-emerald-700">{made}</p>}
-      <Problems items={problems} />
+      {kinds.length === 0 && <Problems items={problems} />}
     </section>
   );
 }
@@ -327,6 +377,21 @@ function KindCard({ kind, names, onChange }: { kind: SheetKind; names: string[];
                     onChange={(event) => onChange((k) => ({ ...k, links: k.links.map((l, j) => (j === i ? { ...l, skip: !event.target.checked } : l)) }))} /></td>
                 </Row>
               ))}
+              {kind.location && (
+                <Row key="__location">
+                  <td className="py-1 pr-2">{kind.location.wkt ?? `${kind.location.lon} + ${kind.location.lat}`}</td>
+                  <td className="pr-2">
+                    <input aria-label="Location field name" className={`${INPUT} w-40`} value={kind.location.name}
+                      onChange={(event) => onChange((k) => (k.location ? { ...k, location: { ...k.location, name: event.target.value } } : k))} />
+                  </td>
+                  <td className="pr-2" colSpan={2}>
+                    a location on the map{kind.location.wkt ? " (WKT)" : " (longitude, latitude)"} — distances, travel times
+                    and maps can then be made from it
+                  </td>
+                  <td><input type="checkbox" aria-label="Import the location" checked={!kind.location.skip}
+                    onChange={(event) => onChange((k) => (k.location ? { ...k, location: { ...k.location, skip: !event.target.checked } } : k))} /></td>
+                </Row>
+              )}
             </tbody>
           </table>
         </>

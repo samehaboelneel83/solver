@@ -231,3 +231,18 @@ def test_a_rule_reads_the_distance_on_each_within_edge(placed, db, empty_queue):
     # c0 is at s0 (0 m), c1 half a degree from either, c2 at s1 (0 m); c3 and nowhere reach no site.
     assert run["status"] == "optimal", run.get("error")
     assert run["objective"] == pytest.approx(0.5 * DEGREE_M - 3 * 100000, abs=2)
+
+
+def test_a_map_made_parameter_computes_again_from_what_it_remembers(placed, db):  # noqa: F811
+    """User test (Alexandria): "within 15 min" left hotspots out; the person tries 25 without retyping the ask."""
+    made = placed["post"](f"/api/v1/domains/{placed['domain']}/within",
+                          {"name": "near_flag", "from_type_id": placed["site"]["id"], "to_type_id": placed["customer"]["id"],
+                           "max_m": 1000, "output": "parameter"})
+    assert made["source"]["request"]["max_m"] == 1000
+    listed = placed["client"].get(f"/api/v1/parameters/{made['parameter_id']}", headers=placed["headers"]).json()
+    assert listed["source"]["kind"] == "within"
+    again = placed["post"](f"/api/v1/parameters/{made['parameter_id']}/recompute", {"max_m": 120_000})
+    assert again["edges"] > made["edges"] and again["source"]["request"]["max_m"] == 120_000
+    refused = placed["client"].post(f"/api/v1/parameters/{made['parameter_id']}/recompute", json={"join_m": 900},
+                                    headers=placed["headers"])
+    assert refused.status_code == 422 and "lines layer" in refused.json()["detail"]

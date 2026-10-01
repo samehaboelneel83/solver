@@ -153,6 +153,50 @@ export default function EquationField<T>({
           {sets.length > 0 && <span className="ml-1 text-xs text-slate-500">sets: {sets.join(", ")}</span>}
         </div>
       )}
+      {editing && <SyntaxCard sets={sets} />}
     </div>
+  );
+}
+
+/** One letter per set for the examples: the set's first letter, or the next free one. */
+function letters(sets: string[]): string[] {
+  const used = new Set<string>();
+  return sets.map((set) => {
+    let letter = (set[0] ?? "i").toLowerCase();
+    for (const c of "ijklmnpqrstuvw") {
+      if (!used.has(letter)) break;
+      letter = c;
+    }
+    used.add(letter);
+    return letter;
+  });
+}
+
+/**
+ * How it is written, in the model's own names (improvement plan 4.2): the few
+ * patterns most rules are made of, so nobody has to guess the grammar.
+ */
+export function SyntaxCard({ sets }: { sets: string[] }) {
+  const [a, b] = [sets[0] ?? "item", sets[1] ?? sets[0] ?? "place"];
+  const [x, y] = letters([a, b]);
+  const examples: [string, string][] = [
+    [`for each ${y} in ${b}: … <= 1`, "a rule for every member of a set"],
+    [`sum(choose[${x}, ${y}] for ${x} in ${a}, ${y} in ${b})`, "a sum over two sets: one “for”, a comma between"],
+    [`sum(choose[${x}] for ${x} in ${a} where capacity >= 6)`, "only the members whose field passes (“where”, not “if”)"],
+    [`sum(choose[${x}] for ${x} in ${a} where supervisor)`, "a yes/no field on its own: only those marked yes (“where not supervisor”: marked no)"],
+    [`capacity[${x}] * open[${x}]`, "a record's field (capacity of x), times a decision"],
+    [`for each ${y} in ${b}: sum(reach[${x}, ${y}] * open[${x}] for ${x} in ${a}) >= 1`, "within reach: multiply by 0/1 data computed from the map"],
+    [`sum(open[${x}] for ${x} in ${a} to ${y} by within_reach)`, "only those linked to y: walk a relationship"],
+  ];
+  return (
+    <details className="mt-1 text-xs text-slate-600">
+      <summary className="cursor-pointer select-none text-slate-700">How to write it</summary>
+      <ul className="mt-1 space-y-1">
+        {examples.map(([code, meaning]) => (
+          <li key={meaning}><code className="rounded bg-slate-50 px-1 font-mono text-slate-800">{code}</code> — {meaning}</li>
+        ))}
+      </ul>
+      <p className="mt-1 text-slate-500">The names (choose, open, capacity, reach) stand for your own decisions, fields and data.</p>
+    </details>
   );
 }

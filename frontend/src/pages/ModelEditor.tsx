@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
@@ -220,6 +221,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500, offset: 0 });
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
+  const queryClient = useQueryClient();
   const toast = useToast();
   // A planner may read a model but not change it (operator trial F22): the
   // editors are shown disabled rather than inviting edits Publish would refuse.
@@ -463,6 +465,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       { replace: true }
     );
     versions.refetch();
+    // Everything else that counts versions (the "Continue this problem" checklist, the overview,
+    // the runs page's "Solve version N") reads its own query: refresh them all, not just this list.
+    void queryClient.invalidateQueries({ queryKey: ["v1"] });
   }
 
   // A draft saved to the server publishes from there: the server validates

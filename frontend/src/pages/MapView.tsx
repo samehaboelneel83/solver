@@ -19,6 +19,7 @@ import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
 import SiteMap, { fitRings, useSiteBasemap, type At, type MapView as View } from "../components/map/SiteMap";
 import PlacementPicker, { SiteWherePicker, storedWhere, type PickerState } from "../components/map/PlacementPicker";
+import LayersToRecords from "../components/map/LayersToRecords";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -65,7 +66,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
   const [byLayer, setByLayer] = useState(false);
   const [labels, setLabels] = useState(true);
   const [selected, setSelected] = useState<Prepared | null>(null);
-  const [tab, setTab] = useState<"layers" | "feature" | "details">("layers");
+  const [tab, setTab] = useState<"layers" | "feature" | "records" | "details">("layers");
   const [query, setQuery] = useState("");
   const [placing, setPlacing] = useState(false);
   const [pick, setPick] = useState<PickerState>({ placement: dataset.placement, units: dataset.placement.units ?? null });
@@ -175,7 +176,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
         </div>
         <aside className="flex w-[360px] shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white" aria-label="Map data details">
           <div className="flex border-b border-slate-200 text-xs font-medium" role="tablist">
-            {([["layers", "Layers"], ["feature", "Feature"], ["details", "Source & location"]] as const).map(([k, text]) => (
+            {([["layers", "Layers"], ["feature", "Feature"], ["records", "Use in models"], ["details", "Source & location"]] as const).map(([k, text]) => (
               <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => setTab(k)}
                 className={`flex-1 px-2 py-2 ${tab === k ? "border-b-2 border-blue-600 text-blue-800" : "text-slate-600 hover:bg-slate-50"}`}>{text}</button>
             ))}
@@ -254,10 +255,11 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
                 </section>
               ) : <p className="text-xs text-slate-500">Click a feature on the map to see what the drawing says about it.</p>
             )}
+            {tab === "records" && <LayersToRecords dataset={dataset} canEdit={canEdit} />}
             {tab === "details" && (
               <div className="space-y-3 text-xs">
                 <dl className="grid grid-cols-[110px_1fr] gap-x-2 gap-y-1">
-                  <dt className="text-slate-500">File</dt><dd>{dataset.source.filename} (DXF {dataset.source.version})</dd>
+                  <dt className="text-slate-500">File</dt><dd>{dataset.source.filename} ({/\.dxf$/i.test(dataset.source.filename ?? "") ? `DXF ${dataset.source.version ?? ""}`.trim() : dataset.source.version ?? "map file"})</dd>
                   <dt className="text-slate-500">Drawing units</dt><dd>{dataset.source.units ?? "not stated"}</dd>
                   <dt className="text-slate-500">Placed with</dt>
                   <dd>{dataset.placement.kind === "epsg" ? `${dataset.placement.name} (EPSG:${dataset.placement.code})`

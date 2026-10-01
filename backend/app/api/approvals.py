@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -111,6 +111,10 @@ def approve_run(
         after={"problem_id": problem_id, "reason": body.reason},
     )
     db.commit()
+    # Chains (improvement plan 5.1): data other problems read that follows this problem's approved plan.
+    from app.api.run_promote import refresh_followers
+
+    refresh_followers(db, problem_id, run_id)
     return ApprovedPlanRead(**row)
 
 
@@ -131,3 +135,43 @@ def list_approvals(
     sql += " ORDER BY approved_at DESC"
     rows = db.execute(text(sql), {"p": problem_id}).mappings().all()
     return [ApprovedPlanRead(**row) for row in rows]
+
+
+@router.get("/problems/{problem_id}/approved-plan")
+def get_approved_plan(
+    problem_id: int,
+    format: str = Query("json", pattern="^(json|xlsx|csv|geojson|html)$"),
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(get_current_user),
+):
+    """The problem's current approved plan, for the systems that act on it (improvement plan 3.6):
+    `json` -- the approval, the goals and every decision's chosen cells with record names; or the
+    same files a run exports. A dispatch tool calls this with an API key and always gets the plan
+    people approved, never the newest run."""
+    from app.api import run_export
+
+    approval = db.execute(
+        text("SELECT id, run_id, problem_id, reason, approved_by, approved_at, effective_from, effective_to, superseded_by"
+             "  FROM approved_plan WHERE problem_id = :p AND superseded_by IS NULL ORDER BY approved_at DESC LIMIT 1"),
+        {"p": problem_id},
+    ).mappings().one_or_none()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="this problem has no approved plan yet")
+    if format != "json":
+        return run_export.export_run(approval["run_id"], format=format, print=False, db=db, user=user)
+    rec = run_export._record(db, approval["run_id"])
+    labels = run_export._labels(rec["data"] or {})
+    decisions = {}
+    for var, (index, rows) in run_export.decision_rows(rec).items():
+        decisions[var] = {"index": index, "rows": [
+            {"keys": row[:-1], "names": [labels.get(s, {}).get(k) for s, k in zip(index, row[:-1])], "value": row[-1]}
+            for row in rows]}
+    params = rec["params"] or {}
+    return {
+        "approval": {**ApprovedPlanRead(**approval).model_dump(mode="json")},
+        "problem": rec["problem"],
+        "run": {"id": rec["id"], "status": rec["status"], "scenario": rec["scenario"], "solver": rec["solver"],
+                "objective": float(rec["objective"]) if rec["objective"] is not None else None,
+                "goals": params.get("objective_terms") if params.get("objective_mode") == "lex" else None},
+        "decisions": decisions,
+    }

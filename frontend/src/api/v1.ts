@@ -421,6 +421,8 @@ export type ParameterDef = {
   unit: string | null;
   /** Migration 0068 (queue R20b): its values are entities of this type; absent or null: numbers. */
   value_type_id?: Id | null;
+  /** How it was made when computed (from the map, from an answer); read-only. */
+  source?: Record<string, unknown> | null;
 };
 
 export type ParameterDefCreate = {
@@ -504,6 +506,11 @@ export type ScenarioPatch = {
   lock?: Lock[];
   /** Queue R25: change as little as possible from an earlier run. */
   stay_close?: { from_run: number; mode?: "weighted" | "lex"; weight?: number; vars?: string[] };
+  /** Data what-ifs (improvement plan 3.3), applied to a copy of the frozen data when solved. */
+  remove?: Record<string, string[]>;
+  set_param?: { param: string; index: string[]; value: number }[];
+  scale_param?: Record<string, number>;
+  set_attr?: { set: string; key: string; attr: string; value: unknown }[];
 };
 
 export type Scenario = {
@@ -1040,7 +1047,9 @@ export const createProblem = (body: { domain_id: Id; name: string }) =>
 
 export type SheetField = { column: string; name: string; data_type: AttrType; enum_values: string[] | null; samples: string[]; skip: boolean };
 export type SheetLink = { column: string; name: string; to: string; skip: boolean };
-export type SheetKind = { sheet: string; name: string; key: string | null; rows: number; exists: boolean; fields: SheetField[]; links: SheetLink[]; skip: boolean };
+/** Where a sheet's rows are (improvement plan 1.2): a longitude + latitude pair, or a WKT column. */
+export type SheetLocation = { name: string; lon: string | null; lat: string | null; wkt: string | null; skip: boolean };
+export type SheetKind = { sheet: string; name: string; key: string | null; rows: number; exists: boolean; fields: SheetField[]; links: SheetLink[]; location?: SheetLocation | null; skip: boolean };
 export type SheetProposal = { kinds: SheetKind[] };
 export type SheetImported = { made: { kinds: number; fields: number; records: number; link_types: number; links: number } };
 
@@ -1316,7 +1325,8 @@ export const useCreateParameter = () => useV1Mutation(createParameter);
 
 /** Distances and nearness from the map (queue R16a): what the platform computed, and how. */
 export type ComputedSource = {
-  kind: "distance" | "within";
+  /** distance / within from the map; other kinds (too_close, inside, count_within, elevation...) carry their own fields. */
+  kind: "distance" | "within" | (string & {});
   metric: string;
   from: string;
   to: string;
@@ -1324,6 +1334,8 @@ export type ComputedSource = {
   max_min?: number;
   no_road?: number;
   off_road?: string[];
+  /** Places further than the join limit from the lines layer, as "key (metres)". */
+  off_network?: string[];
   nearest?: number;
   far?: number;
   max_m?: number;
@@ -1332,9 +1344,11 @@ export type ComputedSource = {
   missing?: string[];
   computed_at: string;
 };
-export type Metric = "straight" | "road" | "time";
-export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number };
-export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number };
+export type Metric = "straight" | "road" | "time" | "network" | "network_time";
+/** A lines layer of imported map data to travel along (improvement plan 2.9). */
+export type NetworkSource = { dataset_id: number; layer: string; speed_field?: string; default_kmh?: number; join_m?: number };
+export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number; network?: NetworkSource };
+export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number; network?: NetworkSource; output?: "relationship" | "parameter" };
 export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>
   send<{ parameter_id: Id; pairs: number; missing: string[]; source: ComputedSource }>(
     "POST", `/api/v1/domains/${domainId}/distances`, body);
@@ -1342,6 +1356,21 @@ export const computeWithin = ({ domainId, ...body }: WithinBody & { domainId: Id
   send<{ relationship_type_id: Id; edges: number; missing: string[]; source: ComputedSource }>(
     "POST", `/api/v1/domains/${domainId}/within`, body);
 export const useComputeDistances = () => useV1Mutation(computeDistances);
+
+// The other "From the map" operations (improvement plan, phase 2): each writes a link, a field or a parameter.
+export type SpatialOp = "inside" | "count" | "nearest" | "touching" | "overlap" | "elevation";
+export type SpatialOpBody =
+  | { op: "inside" | "overlap"; name: string; from_type_id: Id; to_type_id: Id }
+  | { op: "count"; name: string; from_type_id: Id; to_type_id: Id; max_m: number }
+  | { op: "nearest"; name: string; from_type_id: Id; to_type_id: Id; k: number }
+  | { op: "touching" | "elevation"; name: string; type_id: Id };
+export type SpatialOpReport = {
+  relationship_type_id?: Id; parameter_id?: Id; field?: string; links?: number; pairs?: number; records?: number;
+  with_any?: number; outside?: string[]; missing: string[]; uncovered?: string[]; slope_field?: string;
+};
+export const computeSpatial = ({ domainId, op, ...body }: SpatialOpBody & { domainId: Id }) =>
+  send<SpatialOpReport>("POST", `/api/v1/domains/${domainId}/spatial/${op}`, body);
+export const useComputeSpatial = () => useV1Mutation(computeSpatial);
 export const useComputeWithin = () => useV1Mutation(computeWithin);
 export const useUpdateParameter = () =>
   useV1Mutation(({ id, body }: { id: Id; body: ParameterDefUpdate }) => updateParameter(id, body));

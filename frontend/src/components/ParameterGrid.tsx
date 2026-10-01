@@ -4,7 +4,6 @@ import {
   ErrorSummary,
   FieldError,
   describedBy,
-  parseAttrValue,
   useFieldErrors,
   type FieldErrors,
 } from "./attrTypes";
@@ -43,10 +42,12 @@ import { mergeReload } from "../lib/staleRecord";
  *    to equal the default -- which `PATCH default_value` can leave behind,
  *    since it does not rewrite cells -- is still shown as stored, because
  *    it is.
- * 2. **Values are integers, and that is a modelling decision** (spec §2:
- *    `int` columns, for CP-SAT), not a UI shortcut. The rule is stated on
- *    screen and enforced before the request: a decimal is refused here, so
- *    no one meets a raw 422. `<input type="number">` is deliberately not
+ * 2. **Values are numbers to six decimal places** (`numeric(15, 6)` since
+ *    migration 0015; improvement plan 4.4 -- rainfall in mm/h, prices,
+ *    rates are not whole). A model whose data has fractions is solved by a
+ *    MILP solver as it is, or by CP-SAT scaled exactly (`solve.cpsat_scaling`).
+ *    The rule is stated on screen and enforced before the request, so no one
+ *    meets a raw 422. `<input type="number">` is deliberately not
  *    used -- Task 11's finding: it reports an invalid entry as `""`, which
  *    in this grid would silently read as "clear the cell".
  * 3. **A PUT is atomic and carries many cells**, so a rejected cell's 422
@@ -63,10 +64,11 @@ import { mergeReload } from "../lib/staleRecord";
  * truncated, with a notice, rather than silently cut off. */
 export const AXIS_PAGE_SIZE = 500;
 
-// `parameter_value.value` is `int` (int4). The server refuses anything
-// outside it with a 422; this is the same rule, said before the request.
-const INT4_MIN = -(2 ** 31);
-const INT4_MAX = 2 ** 31 - 1;
+// `parameter_value.value` is `numeric(15, 6)`: nine digits before the point,
+// six after. The server refuses anything outside it with a 422; this is the
+// same rule, said before the request.
+const VALUE_LIMIT = 999_999_999;
+const DECIMALS = 6;
 
 /** How an entity is named everywhere it is shown: its label, or its key
  * when it has none (the same rule the graph uses). */
@@ -86,13 +88,17 @@ export function parseCellValue(
 ): { ok: true; value: number } | { ok: false; message: string } {
   const text = raw.trim();
   if (text === "") return { ok: true, value: defaultValue };
-  // Task 11's integer parser: digits only, so `5.0` and `5e3` are refused
-  // exactly as `StrictInt` refuses them server-side.
-  const parsed = parseAttrValue("integer", text, [], label);
-  if (!parsed.ok) return parsed;
-  const value = parsed.value as number;
-  if (value < INT4_MIN || value > INT4_MAX) {
-    return { ok: false, message: `${label}: must be between ${INT4_MIN} and ${INT4_MAX}.` };
+  // A plain decimal: digits, one point, a sign -- not `5e3`, which a person did not mean to type.
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(text)) {
+    return { ok: false, message: `${label}: must be a number, such as 12 or 2.5.` };
+  }
+  const decimals = text.includes(".") ? text.split(".")[1].length : 0;
+  if (decimals > DECIMALS) {
+    return { ok: false, message: `${label}: at most ${DECIMALS} decimal places.` };
+  }
+  const value = Number(text);
+  if (Math.abs(value) > VALUE_LIMIT) {
+    return { ok: false, message: `${label}: must be between -${VALUE_LIMIT} and ${VALUE_LIMIT}.` };
   }
   return { ok: true, value };
 }
@@ -371,7 +377,7 @@ function Editor({
   return (
     <form onSubmit={handleSubmit} noValidate aria-label={`${parameter.name} values`} className="space-y-3">
       <p data-testid="grid-rules" className="text-sm text-slate-600">
-        Values are whole numbers — no decimals{parameter.unit ? `, in ${parameter.unit}` : ""}. An empty cell uses
+        Values are numbers, up to six decimal places{parameter.unit ? `, in ${parameter.unit}` : ""}. An empty cell uses
         this parameter&rsquo;s default of <strong>{values.default_value}</strong>; typing{" "}
         {values.default_value} into a cell clears it back to the default rather than storing it.
       </p>
@@ -460,6 +466,7 @@ function CellInput({
   error,
   baseId,
   onChange,
+  onPasteBlock,
 }: {
   label: string;
   cellKey: string;
@@ -469,13 +476,15 @@ function CellInput({
   error?: string;
   baseId: string;
   onChange: (key: string, value: string) => void;
+  /** A block copied from a spreadsheet (tabs or new lines), filled from this cell right and down. */
+  onPasteBlock?: (text: string) => void;
 }) {
   const errorId = `${baseId}-${cellKey}-error`;
   return (
     <>
       <input
         type="text"
-        inputMode="numeric"
+        inputMode="decimal"
         autoComplete="off"
         spellCheck={false}
         aria-label={label}
@@ -486,6 +495,12 @@ function CellInput({
         value={text}
         {...(isStored || defaultValue === null ? {} : { placeholder: String(defaultValue) })}
         onChange={(event) => onChange(cellKey, event.target.value)}
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData("text/plain");
+          if (!onPasteBlock || !/[\t\n]/.test(pasted.trim())) return;
+          event.preventDefault();
+          onPasteBlock(pasted);
+        }}
       />
       <FieldError id={errorId} message={error} />
     </>
@@ -538,14 +553,28 @@ function MatrixTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
+        {rows.map((row, r) => (
           <tr key={row.id} className="border-b border-slate-100 last:border-0">
             <th scope="row" className="whitespace-nowrap px-3 py-2 font-normal text-slate-700">
               {entityDisplay(row)}
             </th>
-            {(columns ?? [null]).map((column) => {
+            {(columns ?? [null]).map((column, c) => {
               const ids = column ? [row.id, column.id] : [row.id];
               const key = coordKey(ids);
+              // Paste from Excel (improvement plan 4.6): the block lands from this cell right and down,
+              // as unsaved edits, checked like typing and sent with Save.
+              const pasteBlock = (text: string) => {
+                const lines = text.replace(/\r/g, "").replace(/\n$/, "").split("\n");
+                lines.forEach((line, dr) => {
+                  const target = rows[r + dr];
+                  if (!target) return;
+                  line.split("\t").forEach((cellText, dc) => {
+                    const col = columns ? columns[c + dc] : dc === 0 ? null : undefined;
+                    if (col === undefined) return;
+                    onChange(coordKey(col ? [target.id, col.id] : [target.id]), cellText.trim());
+                  });
+                });
+              };
               return (
                 <td key={key} className="px-3 py-2 align-top">
                   <CellInput
@@ -557,6 +586,7 @@ function MatrixTable({
                     error={errors[key]}
                     baseId={baseId}
                     onChange={onChange}
+                    onPasteBlock={pasteBlock}
                   />
                 </td>
               );

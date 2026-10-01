@@ -160,12 +160,12 @@ describe("ParameterGrid: the matrix itself", () => {
     expect(empty.className).not.toEqual(stored.className);
   });
 
-  it("says values are whole numbers and what the default is", async () => {
+  it("says values are numbers to six places and what the default is", async () => {
     serve();
     renderGrid();
 
     const note = await screen.findByTestId("grid-rules");
-    expect(note.textContent).toMatch(/whole numbers/i);
+    expect(note.textContent).toMatch(/six decimal places/i);
     expect(note.textContent).toMatch(/\b4\b/);
     expect(note.textContent).toMatch(/people/);
   });
@@ -256,12 +256,12 @@ describe("ParameterGrid: editing", () => {
   });
 });
 
-describe("ParameterGrid: integers only, refused before the request", () => {
+describe("ParameterGrid: plain decimals only, refused before the request", () => {
   it.each([
-    ["2.5", /whole number/i],
-    ["abc", /whole number/i],
-    ["5e3", /whole number/i],
-    ["2147483648", /between/i],
+    ["2.1234567", /decimal places/i],
+    ["abc", /must be a number/i],
+    ["5e3", /must be a number/i],
+    ["1000000000", /between/i],
   ])("refuses %s client-side and sends nothing", async (typed, message) => {
     serve({ "PUT /api/v1/parameters/3/values": VALUES });
     renderGrid();
@@ -277,7 +277,7 @@ describe("ParameterGrid: integers only, refused before the request", () => {
     serve({ "PUT /api/v1/parameters/3/values": VALUES });
     renderGrid();
 
-    fireEvent.change(await cell("demand[Monday, Morning]"), { target: { value: "2.5" } });
+    fireEvent.change(await cell("demand[Monday, Morning]"), { target: { value: "two" } });
     fireEvent.change(await cell("demand[tue, Night]"), { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 
@@ -538,5 +538,20 @@ describe("ParameterGrid: a concurrent edit (Ruling 42)", () => {
     await waitFor(() => expect(screen.queryByTestId("stale-record")).toBeNull());
     expect((await cell("demand[Monday, Evening]")).value).toBe("8");
     expect((await cell("demand[Monday, Night]")).value).toBe("11");
+  });
+});
+
+describe("ParameterGrid: pasting a block from a spreadsheet (improvement plan 4.6)", () => {
+  it("fills right and down from the cell pasted into, as unsaved edits", async () => {
+    serve();
+    renderGrid();
+    const start = await cell("demand[Monday, Morning]");
+    fireEvent.paste(start, { clipboardData: { getData: () => "1\t2.5\t3\r\n4\t5\t6\r\n" } });
+    expect((await cell("demand[Monday, Morning]")).value).toBe("1");
+    expect((await cell("demand[Monday, Evening]")).value).toBe("2.5");
+    expect((await cell("demand[Monday, Night]")).value).toBe("3");
+    expect((await cell("demand[tue, Morning]")).value).toBe("4");
+    expect((await cell("demand[tue, Night]")).value).toBe("6");
+    expect(puts()).toHaveLength(0);
   });
 });

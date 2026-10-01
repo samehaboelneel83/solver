@@ -29,8 +29,12 @@ yes-or-no terms.
 **What it does not do.** Quantities have infinitely many near neighbours,
 and a whole number with no bound has no big-M to write the switch with, so
 neither counts towards distinctness: a model with no yes-or-no and no
-bounded whole-number decision is refused with that reason. A lexicographic goal or one that multiplies
-decisions is refused too -- the gap row is written on a linear goal.
+bounded whole-number decision is refused with that reason. A goal that multiplies decisions is
+refused too -- the gap row is written on a linear goal.
+
+**Goals in order (lexicographic).** Each goal gets its own gap row, held within `within` of the value
+it has in the best answer, so an alternative may give up a little on any goal but never trade the
+first goal away for the second; the solve itself stays term by term (improvement plan 0.3).
 """
 
 from __future__ import annotations
@@ -80,8 +84,8 @@ def whole_numbers(compiled: Compiled) -> list[Any]:
 
 def admissible(compiled: Compiled) -> None:
     """Raise `NotApplicable` with the reason, or return for a model it can serve."""
-    if compiled.objective_mode == "lex":
-        raise NotApplicable("alternatives are listed for a weighted goal; this one is solved term by term")
+    if compiled.objective_mode == "lex" and not compiled.objective_terms:
+        raise NotApplicable("the goals are solved in order, but the model has no goal terms to hold")
     if compiled.objective_quadratic:
         raise NotApplicable("the goal multiplies decisions together, and the gap is written on a linear goal")
     if not decisions(compiled) and not whole_numbers(compiled):
@@ -147,6 +151,27 @@ def differs(
     return helpers, [*rows, row]
 
 
+def gap_rows(compiled: Compiled, best: Solution, within: float, relation: str) -> list[Constraint]:
+    """The rows holding the goal near the best: one on a weighted goal, one per goal when they are
+    solved in order -- each at the value that goal has in the best answer."""
+    if compiled.objective_mode == "lex" and compiled.objective_terms:
+        rows = []
+        for i, term in enumerate(compiled.objective_terms):
+            value = float(term.evaluated_at(best.assignments))
+            limit = bound(value, within, compiled.sense)
+            if compiled.is_integral:
+                # A whole-number goal takes no value in between: rounding inwards is exact, and keeps
+                # the model whole for cp-sat and the stage freezes that follow.
+                import math
+
+                limit = Decimal(math.floor(limit) if relation == "<=" else math.ceil(limit))
+            rows.append(Constraint(ROW_ID, {"cut": "gap", "goal": str(i)}, term.copy(), relation,
+                                   Linear(const=limit)))
+        return rows
+    limit = bound(float(best.objective), within, compiled.sense)
+    return [Constraint(ROW_ID, {"cut": "gap"}, compiled.objective.copy(), relation, Linear(const=limit))]
+
+
 def changed_between(keys: list[Any], a: dict[Any, Any], b: dict[Any, Any]) -> int:
     return sum(1 for key in keys if _whole(a.get(key, 0)) != _whole(b.get(key, 0)))
 
@@ -180,10 +205,9 @@ def find(
         raise NotApplicable(
             f"the model has {len(keys) + len(integers)} decisions to tell plans apart by, fewer than {min_changes}"
         )
-    limit = bound(float(best.objective), within, compiled.sense)
     relation = "<=" if compiled.sense == "minimize" else ">="
     variables = dict(compiled.variables)
-    rows = [Constraint(ROW_ID, {"cut": "gap"}, compiled.objective.copy(), relation, Linear(const=limit))]
+    rows = gap_rows(compiled, best, within, relation)
 
     def apart_from(answer: dict[Any, Any], tag: int) -> None:
         helpers, more = differs(compiled, keys, integers, answer, min_changes, tag)

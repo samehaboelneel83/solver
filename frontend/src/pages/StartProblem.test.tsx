@@ -110,3 +110,11 @@ describe("start a problem", () => {
     await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === "/api/problem/")).toBe(false));
   });
 });
+
+describe("nameFromFile", () => {
+  it("gives a spreadsheet's problem a name from its file (user test: the name was lost)", async () => {
+    const { nameFromFile } = await import("./StartProblem");
+    expect(nameFromFile("alexandria_flood_data.xlsx")).toBe("Alexandria flood data");
+    expect(nameFromFile("crew-roster.v2.csv")).toBe("Crew roster v2");
+  });
+});

@@ -39,6 +39,9 @@ export default function BulkPanel({
   const input = useRef<HTMLInputElement>(null);
   const [cleanOnly, setCleanOnly] = useState(false);
   const [dryRun, setDryRun] = useState(false);
+  // Records only: a column the kind has no field for becomes a new field, typed from its values.
+  const recordsUpload = base.includes("/entity-types/");
+  const [addFields, setAddFields] = useState(false);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<UploadReport | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export default function BulkPanel({
     }
   }
 
-  async function upload() {
+  async function upload(withNewFields = addFields) {
     const file = input.current?.files?.[0];
     if (!file) {
       setProblem("Choose a CSV or Excel file first.");
@@ -70,7 +73,7 @@ export default function BulkPanel({
     try {
       const body = new FormData();
       body.append("file", file);
-      const answer = await apiFetch<UploadReport>(`${base}/upload?clean_only=${cleanOnly}&dry_run=${dryRun}`, {
+      const answer = await apiFetch<UploadReport>(`${base}/upload?clean_only=${cleanOnly}&dry_run=${dryRun}${recordsUpload && withNewFields ? "&add_fields=true" : ""}`, {
         method: "POST",
         body,
       });
@@ -121,9 +124,15 @@ export default function BulkPanel({
             <input type="checkbox" checked={cleanOnly} onChange={(e) => setCleanOnly(e.target.checked)} /> Write the clean
             rows even if some are faulty
           </label>
+          {recordsUpload && (
+            <label className="flex items-center gap-1 text-sm text-slate-700">
+              <input type="checkbox" checked={addFields} onChange={(e) => setAddFields(e.target.checked)} /> Add new
+              columns as fields
+            </label>
+          )}
           <button
             type="button"
-            onClick={upload}
+            onClick={() => upload()}
             disabled={busy}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
@@ -147,6 +156,21 @@ export default function BulkPanel({
                 ? `${report.written} row(s) written` + (report.skipped ? `, ${report.skipped} skipped for their faults.` : ".")
                 : `Nothing was written: ${report.faults.length} fault(s) to fix first.`}
           </p>
+          {recordsUpload && unknownColumns(report).length > 0 && can("domain.edit") && (
+            <p className="mt-1">
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={busy}
+                onClick={() => {
+                  setAddFields(true);
+                  void upload(true);
+                }}
+              >
+                Add {unknownColumns(report).join(", ")} as new field{unknownColumns(report).length > 1 ? "s" : ""} and upload again
+              </button>
+            </p>
+          )}
           {report.faults.length > 0 && (
             <div className="mt-2 max-h-64 overflow-auto">
               <table className="text-left text-xs">
@@ -173,4 +197,12 @@ export default function BulkPanel({
       )}
     </section>
   );
+}
+
+/** Columns a records file carries that the kind has no field for (row 1 faults). */
+function unknownColumns(report: UploadReport): string[] {
+  return report.faults
+    .filter((f) => f.row === 1 && f.column && f.message.startsWith("is not a column"))
+    .map((f) => f.column as string)
+    .filter((c) => /^[a-z][a-z0-9_]*$/.test(c));
 }

@@ -16,6 +16,9 @@
     DELETE /api/v1/gis/datasets/{id}
     GET    /api/v1/gis/datasets/{id}/export          ?format=geojson|csv&layer= -> a file
     PATCH  /api/v1/gis/layers/{id}                   {name?, color?, visible?}
+    POST   /api/v1/gis/datasets/{id}/records/propose {layers} -> the kind of record its features would make
+    POST   /api/v1/gis/datasets/{id}/records         {layers, plan} -> one record per feature, its shape a field
+    POST   /api/v1/gis/datasets/{id}/records/attach  {layers, type, match, field?} -> shapes onto records by key
     GET    /api/v1/gis/crs?q=                        coordinate systems in the EPSG registry
     GET    /api/v1/gis/crs/{code}                    one, with its area of use
 
@@ -464,6 +467,107 @@ def export(
                          json.dumps({k: v for k, v in p.items() if k not in ("layer", "kind", "entity", "text", "layer_id")})])
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'})
+
+
+class RecordsPropose(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    layers: list[str] = Field(min_length=1, max_length=50)
+
+
+class RecordsMake(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    layers: list[str] = Field(min_length=1, max_length=50)
+    plan: dict[str, Any]
+
+
+class RecordsAttach(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    layers: list[str] = Field(min_length=1, max_length=50)
+    type: str = Field(min_length=1, max_length=63)
+    match: str = Field(min_length=1, max_length=255)
+    field: str = Field(default="shape", min_length=1, max_length=63)
+
+
+def _layer_features(db: Session, dataset_id: int, layers: list[str], user: UserAccount) -> tuple[int, list[dict[str, Any]]]:
+    from app.gis import to_records
+
+    row = _dataset(db, dataset_id, user)
+    found = to_records.load(db, dataset_id, layers)
+    if not found:
+        raise HTTPException(422, "Those layers have no features in this map data")
+    if len(found) > to_records.MAX_FEATURES:
+        raise HTTPException(422, f"At most {to_records.MAX_FEATURES} features become records at once; pick fewer layers")
+    return int(row["domain_id"]), found
+
+
+@router.post("/datasets/{dataset_id}/records/propose")
+def propose_records(dataset_id: int, body: RecordsPropose, db: Session = Depends(get_db),
+                    user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """What making records of these layers would make (phase 1.1): nothing is written."""
+    from app.gis import to_records
+
+    domain_id, found = _layer_features(db, dataset_id, body.layers, user)
+    existing = set(db.execute(text("SELECT name FROM entity_type WHERE domain_id = :d"), {"d": domain_id}).scalars())
+    proposal = to_records.propose(found, body.layers, existing)
+    proposal["properties"] = sorted({k for f in found for k in (f.get("properties") or {}) if k not in to_records.INTERNAL})
+    return proposal
+
+
+@router.post("/datasets/{dataset_id}/records", status_code=201)
+def make_records(dataset_id: int, body: RecordsMake, db: Session = Depends(get_db),
+                 user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """One record per feature of the layers, as the (edited) proposal says; again = refreshed by key."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.gis import to_records
+    from app.seed import plant_domain_seed
+
+    domain_id, found = _layer_features(db, dataset_id, body.layers, user)
+    seed, faults = to_records.build_seed(found, body.plan)
+    if faults:
+        raise HTTPException(422, {"message": "Nothing was made: fix these first.", "faults": faults[:50],
+                                  "more": max(0, len(faults) - 50)})
+    name = seed["entity_types"][0]["name"]
+    before = to_records.existing_keys(db, domain_id, name)
+    try:
+        plant_domain_seed(db, domain_id, seed)
+        updated = to_records.update_existing(db, domain_id, seed, before)
+        db.execute(text("UPDATE entity_type SET role = 'location' WHERE domain_id = :d AND name = :n AND role = 'other'"),
+                   {"d": domain_id, "n": name})
+        _audit(db, user, "gis.dataset.records", dataset_id)
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        says = str(getattr(exc, "orig", exc)).splitlines()[0]
+        raise HTTPException(422, {"message": "Nothing was made: fix these first.", "faults": [says], "more": 0}) from exc
+    type_id = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                         {"d": domain_id, "n": name}).scalar_one()
+    made = len([e for e in seed["entities"] if e["key"] not in before])
+    return {"type": name, "entity_type_id": int(type_id), "domain_id": domain_id, "made": made, "updated": updated,
+            "source": {"dataset_id": dataset_id, "layers": body.layers}}
+
+
+@router.post("/datasets/{dataset_id}/records/attach")
+def attach_shapes(dataset_id: int, body: RecordsAttach, db: Session = Depends(get_db),
+                  user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """The features' shapes onto records already there, matched by a property holding the record's key (1.3)."""
+    from app.api.validation import validate_name
+    from app.gis import to_records
+
+    domain_id, found = _layer_features(db, dataset_id, body.layers, user)
+    try:
+        validate_name(body.field)
+    except ValueError as exc:
+        raise HTTPException(422, f"the field is named {body.field!r}; a name is lower case letters, digits and _") from exc
+    keys = to_records.existing_keys(db, domain_id, body.type)
+    if not keys:
+        raise HTTPException(422, f"There are no {body.type} records in this workspace to attach shapes to")
+    shapes, unmatched = to_records.match(found, body.match, keys)
+    written = to_records.write_shapes(db, domain_id, body.type, body.field, shapes)
+    _audit(db, user, "gis.dataset.attach", dataset_id)
+    db.commit()
+    return {"type": body.type, "field": body.field, "attached": written,
+            "records_without_shape": sorted(keys - set(shapes))[:200], "unmatched_features": unmatched[:200]}
 
 
 @router.get("/crs")

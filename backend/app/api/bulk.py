@@ -401,14 +401,40 @@ def entity_template(entity_type_id: int, format: str = Query("csv", pattern="^(c
     return _file(entity_type.name, columns, body, format)
 
 
+_FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+
+
+def add_new_fields(db: Session, entity_type: EntityType, header: list[str], rows: list[list[Any]]) -> list[str]:
+    """Columns the type has no field for become fields, typed from their own values (the same
+    reading a spreadsheet start uses). Only names a field may have; anything else stays a fault.
+    Inside the upload's transaction, so a dry run or a refused file leaves the type as it was."""
+    from app.api.start import infer
+
+    known = {c.name for c in _entity_columns(db, entity_type)[0]}
+    added = []
+    for i, name in enumerate(header):
+        if name in known or not _FIELD_NAME.match(name or "") or header.count(name) > 1:
+            continue
+        values = [r[i] for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
+        data_type, choices = infer(values)
+        db.add(AttributeDef(entity_type_id=entity_type.id, name=name, data_type=data_type, enum_values=choices))
+        added.append(name)
+    if added:
+        db.flush()
+    return added
+
+
 @router.post("/entity-types/{entity_type_id}/upload")
 def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
-                  dry_run: bool = False, db: Session = Depends(get_db),
+                  dry_run: bool = False, add_fields: bool = False, db: Session = Depends(get_db),
                   user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+    """`add_fields`: a column the type has no field for becomes a new field instead of a fault."""
     entity_type = _get(db, EntityType, entity_type_id, "entity type")
     if entity_type.is_abstract:
         raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
     header, rows = _read(file)
+    if add_fields:
+        add_new_fields(db, entity_type, header, rows)
     columns, write = entity_writer(db, entity_type, header)
     return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("entity_type", entity_type_id))

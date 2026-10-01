@@ -56,7 +56,7 @@ export default function Login() {
     // any landmark at all) here specifically. Every other page state gets
     // `<main>` for free from AppShell; this one renders outside AppShell
     // (there's no signed-in shell to render yet), so it needs its own.
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-shell">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-shell">
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-shell rounded-shell border border-slate-200/80 bg-white p-shell-lg shadow-panel"

@@ -279,6 +279,7 @@ def test_create_parameter_def(client, auth_headers, domain_id, grid):
         "default_value": 0,  # the column default
         "unit": None,
         "value_type_id": None,  # numbers (migration 0068)
+        "source": None,  # typed by hand: nothing to compute again
     }
 
 

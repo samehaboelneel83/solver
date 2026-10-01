@@ -241,6 +241,25 @@ class StayClose(BaseModel):
     vars: list[StrictStr] = None  # type: ignore[assignment]
 
 
+class ParamCell(BaseModel):
+    """One parameter value changed in a what-if (improvement plan 3.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+    param: StrictStr
+    index: list[StrictStr]
+    value: float
+
+
+class AttrCell(BaseModel):
+    """One record's field changed in a what-if (improvement plan 3.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+    set: StrictStr
+    key: StrictStr
+    attr: StrictStr
+    value: Any
+
+
 class ScenarioPatch(BaseModel):
     """``ProblemIR.patched()``'s argument. Each key is optional; a key the
     client omits is omitted from what is stored (`model_dump(exclude_unset
@@ -255,6 +274,11 @@ class ScenarioPatch(BaseModel):
     # Parts of a plan held fixed while the rest is solved again (queue R24).
     lock: list[Lock] = None  # type: ignore[assignment]
     stay_close: StayClose = None  # type: ignore[assignment]
+    # Data what-ifs (improvement plan 3.3, app.solve.whatif): applied to a copy of the frozen data.
+    remove: dict[StrictStr, list[StrictStr]] = None  # type: ignore[assignment]
+    set_param: list[ParamCell] = None  # type: ignore[assignment]
+    scale_param: dict[StrictStr, Annotated[float, Field(ge=0, le=1000)]] = None  # type: ignore[assignment]
+    set_attr: list[AttrCell] = None  # type: ignore[assignment]
 
     @model_validator(mode="after")
     def _one_instruction_per_constraint(self) -> "ScenarioPatch":
@@ -441,11 +465,41 @@ def _check_patch_ids(db: Session, model_version_id: int, patch: "ScenarioPatch")
             )
 
 
+def _check_data_changes(model_version_id: int, ir: dict[str, Any], patch: "ScenarioPatch") -> None:
+    """A what-if names this version's sets and number parameters, with a key per set (improvement plan 3.3)."""
+    sets = set(ir.get("sets") or [])
+    parameters = {name: spec for name, spec in (ir.get("parameters") or {}).items() if isinstance(spec, dict)}
+    for set_name in (patch.remove or {}):
+        if set_name not in sets:
+            raise field_error(["patch", "remove", set_name],
+                              f"whatif_unknown: model version {model_version_id} has no set {set_name!r}", set_name)
+    for position, cell in enumerate(patch.set_param or []):
+        spec = parameters.get(cell.param)
+        if spec is None or spec.get("entity"):
+            raise field_error(["patch", "set_param", position, "param"],
+                              f"whatif_unknown: model version {model_version_id} reads no number parameter {cell.param!r}",
+                              cell.param)
+        if len(cell.index) != len(spec.get("index") or []):
+            raise field_error(["patch", "set_param", position, "index"],
+                              f"whatif_index_arity: {cell.param!r} is indexed by {spec.get('index')}", cell.index)
+    for name in (patch.scale_param or {}):
+        if name not in parameters:
+            raise field_error(["patch", "scale_param", name],
+                              f"whatif_unknown: model version {model_version_id} reads no parameter {name!r}", name)
+    for position, cell in enumerate(patch.set_attr or []):
+        if cell.set not in sets:
+            raise field_error(["patch", "set_attr", position, "set"],
+                              f"whatif_unknown: model version {model_version_id} has no set {cell.set!r}", cell.set)
+
+
 def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "ScenarioPatch") -> None:
     """What can be known of a lock before the data is (queue R24): the decision and the sets it
     names are this version's, a cell has as many keys as its decision has sets, and an earlier run
     is an answered run of this problem. The rest -- a value within today's bounds, an amount that
     run kept, the attribute a horizon compares -- is refused when the run is compiled."""
+    if patch.remove or patch.set_param or patch.scale_param or patch.set_attr:
+        _check_data_changes(model_version_id, db.execute(select(_version_columns.ir).where(
+            _version_columns.id == model_version_id)).scalar_one(), patch)
     if not patch.lock and not patch.stay_close:
         return
     ir = db.execute(select(_version_columns.ir).where(_version_columns.id == model_version_id)).scalar_one()

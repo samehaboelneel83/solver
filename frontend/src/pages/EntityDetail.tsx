@@ -1,4 +1,5 @@
 import NotFound from "./NotFound";
+import TemplateInWords from "../components/TemplateInWords";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import EntityForm, { type ServerFieldError } from "../components/EntityForm";
@@ -285,6 +286,9 @@ export default function EntityDetail() {
         <p className="mb-4 text-xs text-slate-500" data-testid="schema-subtitle">
           {schemaName}.{tableName}
         </p>
+      )}
+      {!isNew && schemaName === "public" && tableName === "template" && existing && (
+        <TemplateInWords record={existing as Record<string, unknown>} />
       )}
       {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}

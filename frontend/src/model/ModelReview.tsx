@@ -16,7 +16,7 @@ export default function ModelReview({ draft, units = {}, planner = [], wouldSolv
   planner?: string[];
   wouldSolve?: string | null;
 }) {
-  const notes = reviewNotes(draft);
+  const notes = [...reviewNotes(draft), ...unitNotes(draft, units)];
   const fields = fieldsRead(draft as unknown as Parameters<typeof fieldsRead>[0]);
   const kind = (domain: string) =>
     ({ binary: "yes or no", integer: "a whole number", continuous: "any number", interval: "a task in time" })[domain] ?? domain;
@@ -120,5 +120,54 @@ export function reviewNotes(draft: FormDraft): string[] {
   const unbounded = Object.entries(draft.variables).filter(([, s]) => s.domain !== "binary" && s.domain !== "interval" && s.upper === undefined).map(([n]) => n);
   if (unbounded.length && draft.objective.terms.length) notes.push(`${unbounded.join(", ")} ${unbounded.length > 1 ? "have" : "has"} no maximum: if the goal rewards more of ${unbounded.length > 1 ? "them" : "it"}, the answer may run to the platform's ceiling.`);
   if (!draft.constraints.length && !draft.objective.terms.length) notes.push("There are no rules and no goal yet.");
+  return notes;
+}
+
+type UnitTerm = { par?: string; var?: string; const?: number; attr?: unknown; sum?: UnitTerm; add?: UnitTerm[]; mul?: UnitTerm[]; neg?: UnitTerm };
+
+/**
+ * The unit a term is in, as far as the data's units say (improvement plan 5.4): a parameter carries
+ * its own; a parameter times a decision keeps the parameter's (minutes x a yes/no is minutes); a sum
+ * keeps its body's; anything else is not known, and is never guessed.
+ */
+export function unitOf(term: UnitTerm | undefined, units: Record<string, string | null | undefined>): string | null {
+  if (!term || typeof term !== "object") return null;
+  if (term.par) return (units[term.par] ?? "").trim().toLowerCase() || null;
+  if (term.sum) return unitOf(term.sum, units);
+  if (term.neg) return unitOf(term.neg, units);
+  if (term.mul) {
+    const known = term.mul.map((t) => unitOf(t, units)).filter((u): u is string => !!u);
+    return known.length === 1 ? known[0] : null;
+  }
+  if (term.add) {
+    const known = [...new Set(term.add.map((t) => unitOf(t, units)).filter((u): u is string => !!u))];
+    return known.length === 1 ? known[0] : null;
+  }
+  return null;
+}
+
+/** Sums and comparisons that mix units -- minutes added to kilometres, a cost compared with a count. */
+export function unitNotes(draft: FormDraft, units: Record<string, string | null | undefined>): string[] {
+  const notes: string[] = [];
+  const mixed = (term: UnitTerm | undefined, where: string) => {
+    if (!term || typeof term !== "object") return;
+    if (term.add) {
+      const known = [...new Set(term.add.map((t) => unitOf(t, units)).filter((u): u is string => !!u))];
+      if (known.length > 1) notes.push(`${where} adds ${known.join(" to ")}: check the units, or convert one first.`);
+      term.add.forEach((t) => mixed(t, where));
+    }
+    if (term.sum) mixed(term.sum, where);
+    if (term.mul) term.mul.forEach((t) => mixed(t, where));
+  };
+  for (const rule of draft.constraints) {
+    const left = rule.left as UnitTerm | undefined;
+    const right = rule.right as UnitTerm | undefined;
+    mixed(left, rule.id);
+    mixed(right, rule.id);
+    const a = unitOf(left, units);
+    const b = unitOf(right, units);
+    if (a && b && a !== b) notes.push(`${rule.id} compares ${a} with ${b}: check the units.`);
+  }
+  for (const term of draft.objective.terms) mixed(term.expression as UnitTerm | undefined, `Goal ${term.id}`);
   return notes;
 }

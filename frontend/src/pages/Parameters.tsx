@@ -4,6 +4,8 @@ import SearchBox, { NoMatches } from "../components/SearchBox";
 import { FormEvent, useId, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import MeasureFromMap from "../components/MeasureFromMap";
+import ComputedFrom, { type MadeSource } from "../components/ComputedFrom";
+import TimesTooClose from "../components/TimesTooClose";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
 import EntityParameterGrid from "../components/EntityParameterGrid";
 import BulkPanel from "../components/BulkPanel";
@@ -151,6 +153,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           <h2 id="parameter-values-heading" className="mb-3 text-base font-semibold text-slate-900">
             <span className="font-mono">{selected.name}</span> values
           </h2>
+          <ComputedFrom key={`made-${selected.id}`} parameterId={selected.id} source={selected.source as MadeSource | null | undefined} />
           <ParameterSettings key={`settings-${selected.id}`} parameter={selected} entityTypes={entityTypes} />
           {selected.value_type_id != null ? (
             <EntityParameterGrid key={selected.id} parameter={selected} entityTypes={entityTypes} />
@@ -187,6 +190,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
         canEdit && (
         <>
         <MeasureFromMap domainId={domainId} entityTypes={entityTypes} />
+        <TimesTooClose domainId={domainId} entityTypes={entityTypes} />
         <CreateParameterForm
           domainId={domainId}
           entityTypes={entityTypes}
@@ -371,7 +375,7 @@ function DefinitionFields({
           onChange={(event) => onDefault(event.target.value)}
         />
         <p id={id("default-hint")} className="mt-1 text-xs text-slate-500">
-          A whole number, used by every cell left empty. Values are integers throughout (no decimals).
+          A number, used by every cell left empty. Values may have up to six decimal places (2.5, 0.125).
         </p>
         <FieldError id={errorId("default_value")} message={errors.default_value} />
       </div>

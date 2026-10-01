@@ -29,9 +29,14 @@ from app.api.suites import router as suites_router
 from app.api.run_events import router as run_events_router
 from app.api.genui import router as genui_router
 from app.api.distances import router as distances_router
+from app.api.spatial_ops import router as spatial_ops_router
 from app.api.bulk import router as bulk_router
 from app.api.grids import router as grids_router
 from app.api.run_map import router as run_map_router
+from app.api.answer_map import router as answer_map_router
+from app.api.run_export import router as run_export_router
+from app.api.time_ops import router as time_ops_router
+from app.api.run_promote import router as run_promote_router
 from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
@@ -225,8 +230,13 @@ app.include_router(run_events_router)
 app.include_router(genui_router)
 app.include_router(grids_router)
 app.include_router(distances_router)
+app.include_router(spatial_ops_router)
 app.include_router(bulk_router)
 app.include_router(run_map_router)
+app.include_router(answer_map_router)
+app.include_router(run_export_router)
+app.include_router(time_ops_router)
+app.include_router(run_promote_router)
 app.include_router(quota_router)
 app.include_router(metrics_router)
 app.include_router(audit_router)

@@ -13,7 +13,10 @@ workbook is read first and the structure is proposed from it:
 - the first column whose values are all there and all different is the key
   (a column called id, key, code or name is preferred);
 - a column whose every value is a key of another sheet is a link to it
-  (a many-to-one link type, and one link per row), not a field.
+  (a many-to-one link type, and one link per row), not a field;
+- a pair of longitude / latitude columns, or a WKT column, is a location
+  (improvement plan 1.2): one `geometry` field, so the sheet's places can be
+  measured, mapped and reached without being drawn again.
 
 The person corrects the proposal -- names, types, which column is the key --
 and the import builds it through the same `plant_domain_seed` the ready
@@ -28,7 +31,7 @@ import csv
 import io
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -53,6 +56,7 @@ _TRUE = {"true", "yes", "y"}
 _FALSE = {"false", "no", "n"}
 _KEY_NAMES = ("id", "key", "code", "name")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_TIME = re.compile(r"(\d{1,2}):(\d{2})(?::\d{2})?")
 
 
 # --- reading ------------------------------------------------------------------------
@@ -178,6 +182,16 @@ def convert(value: Any, data_type: str, enum_values: list[str] | None = None) ->
             except ValueError:
                 pass
         raise ValueError("is not a date (YYYY-MM-DD)")
+    if data_type == "time":
+        if isinstance(value, datetime):
+            return value.strftime("%H:%M")
+        if isinstance(value, time):
+            return value.strftime("%H:%M")
+        if isinstance(value, str):
+            m = _TIME.fullmatch(value)
+            if m and int(m[1]) < 24 and int(m[2]) < 60:
+                return f"{int(m[1]):02d}:{m[2]}"
+        raise ValueError("is not a time of day (HH:MM)")
     word = _as_key(value)
     if data_type == "enum" and word not in (enum_values or []):
         raise ValueError(f"is not one of {', '.join(enum_values or [])}")
@@ -199,7 +213,7 @@ def infer(values: list[Any]) -> tuple[str, list[str] | None]:
         return "text", None
     if all(isinstance(v, bool) or str(v).strip().lower() in _TRUE | _FALSE for v in values):
         return "boolean", None
-    for data_type in ("integer", "number", "date"):
+    for data_type in ("integer", "number", "date", "time"):
         if _fits(values, data_type):
             return data_type, None
     distinct = sorted({_as_key(v) for v in values})
@@ -227,6 +241,15 @@ class LinkPlan(BaseModel):
     skip: bool = False
 
 
+class LocationPlan(BaseModel):
+    """Where each row is: a longitude and a latitude column (WGS 84 degrees), or one WKT column."""
+    name: str = "location"
+    lon: str | None = None
+    lat: str | None = None
+    wkt: str | None = None
+    skip: bool = False
+
+
 class KindPlan(BaseModel):
     sheet: str
     name: str
@@ -235,6 +258,7 @@ class KindPlan(BaseModel):
     exists: bool = False
     fields: list[FieldPlan] = Field(default_factory=list)
     links: list[LinkPlan] = Field(default_factory=list)
+    location: LocationPlan | None = None
     skip: bool = False
 
 
@@ -250,6 +274,58 @@ def _existing_types(db: Session, domain_id: int) -> set[str]:
 
 def _column(rows: list[list[Any]], i: int) -> list[Any]:
     return [row[i] for row in rows if not _blank(row[i])]
+
+
+_LON = ("lon", "lng", "long", "longitude", "x_lon")
+_LAT = ("lat", "latitude", "y_lat")
+_WKT = ("wkt", "geometry", "geom", "the_geom", "shape")
+
+
+def _degrees(values: list[Any], limit: float) -> bool:
+    try:
+        return bool(values) and all(-limit <= float(v) <= limit for v in values)
+    except (TypeError, ValueError):
+        return False
+
+
+def find_location(header: list[str], rows: list[list[Any]]) -> LocationPlan | None:
+    """A longitude/latitude pair in degrees, or a WKT column -- by name, then checked against the values."""
+    names = {to_name(h): h for h in header if h}
+    lon = next((names[n] for n in _LON if n in names), None)
+    lat = next((names[n] for n in _LAT if n in names), None)
+    if lon and lat:
+        i, j = header.index(lon), header.index(lat)
+        if _degrees(_column(rows, i), 180) and _degrees(_column(rows, j), 90):
+            return LocationPlan(lon=lon, lat=lat)
+    wkt = next((names[n] for n in _WKT if n in names), None)
+    if wkt:
+        values = _column(rows, header.index(wkt))
+        if values and all(isinstance(v, str) and v.strip().upper().startswith(("POINT", "POLYGON", "MULTIPOLYGON"))
+                          for v in values):
+            return LocationPlan(wkt=wkt)
+    return None
+
+
+def location_value(plan: LocationPlan, row: list[Any], at: dict[str, int]) -> dict[str, Any] | None:
+    """A row's place as a geometry field holds it (GeoJSON, WGS 84), or None when its cells are blank."""
+    if plan.wkt:
+        cell = row[at[plan.wkt]]
+        if _blank(cell):
+            return None
+        from shapely import wkt as shapely_wkt
+        from shapely.geometry import mapping
+
+        try:
+            return json.loads(json.dumps(mapping(shapely_wkt.loads(str(cell)))))
+        except Exception as exc:  # noqa: BLE001 -- any unreadable WKT is the same fault
+            raise ValueError("is not a WKT point or area") from exc
+    lon, lat = row[at[plan.lon]], row[at[plan.lat]]
+    if _blank(lon) or _blank(lat):
+        return None
+    x, y = float(lon), float(lat)
+    if not (-180 <= x <= 180 and -90 <= y <= 90):
+        raise ValueError("is not a longitude, latitude in degrees")
+    return {"type": "Point", "coordinates": [x, y]}
 
 
 def propose(sheets: list[tuple[str, list[str], list[list[Any]]]], existing: set[str]) -> Proposal:
@@ -291,6 +367,12 @@ def propose(sheets: list[tuple[str, list[str], list[list[Any]]]], existing: set[
             data_type, choices = infer(values)
             plan.fields.append(FieldPlan(column=column, name=field_name, data_type=data_type, enum_values=choices,
                                          samples=[_as_key(v) for v in values[:SAMPLES]]))
+        plan.location = find_location(header, rows)
+        if plan.location is not None:
+            # The columns it is read from are kept as they are, and also become one place.
+            used_names = {f.name for f in plan.fields}
+            while plan.location.name in used_names:
+                plan.location.name = f"{plan.location.name}_2"
     return Proposal(kinds=kinds)
 
 
@@ -332,6 +414,20 @@ def _check(proposal: Proposal, sheets: dict[str, tuple[list[str], list[list[Any]
         for link in kind.links:
             if not link.skip and link.to not in names:
                 faults.append(f"{where}: link {link.name!r} goes to {link.to!r}, which this import does not make")
+        place = kind.location
+        if place is not None and not place.skip:
+            try:
+                validate_name(place.name)
+            except ValueError:
+                faults.append(f"{where}: the location is named {place.name!r}; a name is lower case letters, digits and _")
+            columns = [place.wkt] if place.wkt else [place.lon, place.lat]
+            if None in columns:
+                faults.append(f"{where}: a location needs a longitude and a latitude column, or a WKT column")
+            for column in (c for c in columns if c is not None):
+                if column not in header:
+                    faults.append(f"{where}: the location column {column!r} is not in the sheet")
+            if place.name in own:
+                faults.append(f"{where}: the location and a column are both named {place.name!r}")
     return faults
 
 
@@ -345,9 +441,11 @@ def build_seed(proposal: Proposal, sheets: dict[str, tuple[list[str], list[list[
         header, rows = sheets[kind.sheet]
         at = {column: i for i, column in enumerate(header)}
         fields = [f for f in kind.fields if not f.skip]
-        seed["entity_types"].append({"name": kind.name, "attributes": [
-            {"name": f.name, "data_type": f.data_type, **({"enum_values": f.enum_values} if f.data_type == "enum" else {})}
-            for f in fields]})
+        place = kind.location if kind.location is not None and not kind.location.skip else None
+        seed["entity_types"].append({"name": kind.name, **({"role": "location"} if place else {}), "attributes": [
+            *({"name": f.name, "data_type": f.data_type, **({"enum_values": f.enum_values} if f.data_type == "enum" else {})}
+              for f in fields),
+            *([{"name": place.name, "data_type": "geometry"}] if place else [])]})
         keys: list[str] = []
         seen: set[str] = set()
         for n, row in enumerate(rows, start=2):
@@ -367,6 +465,14 @@ def build_seed(proposal: Proposal, sheets: dict[str, tuple[list[str], list[list[
                     attrs[f.name] = convert(cell, f.data_type, f.enum_values)
                 except ValueError as exc:
                     faults.append(f"{kind.sheet!r} row {n}, column {f.column!r}: {_as_key(cell)!r} {exc}")
+            if place is not None:
+                try:
+                    shape = location_value(place, row, at)
+                except ValueError as exc:
+                    faults.append(f"{kind.sheet!r} row {n}, location: {exc}")
+                else:
+                    if shape is not None:
+                        attrs[place.name] = shape
             seed["entities"].append({"type": kind.name, "key": key, "sort_order": n - 1, "attrs": attrs})
         row_keys[kind.name] = keys
 

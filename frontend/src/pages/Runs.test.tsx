@@ -429,8 +429,10 @@ describe("Runs", () => {
 
     const why = await screen.findByRole("heading", { name: /why there is no answer/i });
     const panel = why.closest("section") as HTMLElement;
-    expect(within(panel).getByText("c_cover")).toBeInTheDocument();
-    expect(within(panel).getByText("c_max_hours")).toBeInTheDocument();
+    // The rule's id, alone or after its sentence once the model has loaded: "(c_cover)".
+    const id = (rule: string) => (text: string) => text === rule || text === `(${rule})`;
+    expect(within(panel).getByText(id("c_cover"))).toBeInTheDocument();
+    expect(within(panel).getByText(id("c_max_hours"))).toBeInTheDocument();
     // The instances, in names, because a rule alone does not say where to
     // look and "mon" is a key rather than a day.
     expect(within(panel).getByText(/Monday . morning/)).toBeInTheDocument();
@@ -648,7 +650,8 @@ describe("Runs", () => {
     expect(JSON.parse(options.body as string)).toMatchObject({
       problem_id: 1,
       model_version_id: 2,
-      name: "from run 11",
+      // The run's own scenario's what-if is kept; the clash's rules are bent on top of it.
+      name: "relaxed_cover, c_cover, c_max_hours bent (run 11)",
       patch: { soften: { c_cover: 100, c_max_hours: 100 } },
     });
   });
@@ -1129,6 +1132,16 @@ describe("what was computed from the map (queue R16a)", () => {
       { input: "relationship", name: "near", kind: "within", metric: "road (OpenMapTiles zoom-12 roads ...)", from: "site", to: "customer",
         max_min: 15, computed_at: "2026-09-25T12:00:00+00:00" },
     ])).toBe("drive: depot to stop in min, road travel time, 3 pairs with no road left far, 2026-09-25; near: site to customer within 15 min, road travel time, 2026-09-25");
+  });
+
+  it("says a lines-layer time and a too-close link without assuming a distance (user test: roster run crashed)", async () => {
+    const { computedText } = await import("./Runs");
+    expect(computedText([
+      { input: "parameter", name: "reach", kind: "within", metric: "along layer 'ROADS' of map data 2", from: "yard", to: "hotspot",
+        max_min: 20, computed_at: "2026-10-01T12:00:00+00:00" },
+      { input: "relationship", name: "too_close", kind: "too_close", of: "time_block", min_gap_hours: 10, links: 5,
+        computed_at: "2026-10-01T12:00:00+00:00" } as never,
+    ])).toBe("reach: yard to hotspot within 20 min, travel time along layer 'ROADS', 2026-10-01; too_close: time_block less than 10 h apart, 5 links, 2026-10-01");
   });
 });
 
