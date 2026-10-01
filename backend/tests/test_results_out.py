@@ -302,3 +302,26 @@ def test_the_printed_map_has_the_chosen_base_map_under_it(monkeypatch):
     assert fetched and all(u.startswith("https://tile.openstreetmap.org/") for u in fetched)
     # Only base maps the app offers are fetched: an address in the request is not one.
     assert run_export.basemap_of(None, None, "https://evil.example/{z}/{x}/{y}.png") is None
+
+
+def test_a_whole_number_answer_is_kept_once_per_cell_with_its_amount(db, placed, empty_queue, client, auth_headers):  # noqa: F811
+    """A whole-number decision is in the roster *and* in the amounts: kept as data, each cell is one
+    value -- its amount -- not a 1 beside it."""
+    ir = json.loads(json.dumps(IR))
+    ir["variables"]["trucks"] = {"index": ["depot"], "domain": "integer", "lower": 0, "upper": 5}
+    ir["constraints"].append({"id": "c_trucks", "note": "an open depot has three trucks",
+                              "forall": [{"index": "d", "set": "depot"}],
+                              "left": {"var": "trucks", "index": ["d"]}, "relation": ">=",
+                              "right": {"mul": [{"const": 3}, {"var": "open", "index": ["d"]}]}, "severity": "hard"})
+    ir["objective"]["terms"].append({"id": "o_trucks", "weight": 1, "expression": {
+        "sum": {"var": "trucks", "index": ["d"]}, "over": [{"index": "d", "set": "depot"}]}})
+    version = make_model_version(db, placed["problem"], ir)
+    db.commit()
+    run, outcome = _solve(db, _scenario(db, {**placed, "version": version}))
+    assert outcome.status == "optimal"
+    kept = client.post(f"/api/v1/runs/{run}/promote", json={"decision": "trucks", "name": "trucks_placed", "as": "parameter"},
+                       headers=auth_headers)
+    assert kept.status_code == 201, kept.text
+    values = db.execute(text("SELECT pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
+                             " WHERE pd.name = 'trucks_placed'")).scalars().all()
+    assert sorted(float(v) for v in values) == [3.0, 3.0]

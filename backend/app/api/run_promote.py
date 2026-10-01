@@ -93,9 +93,20 @@ def keep(db: Session, run_id: int, body: Promote) -> dict[str, Any]:
     ids: dict[str, dict[str, int]] = {}
     for s in set(index):
         ids[s] = dict(db.execute(text("SELECT key, id FROM entity WHERE entity_type_id = :t"), {"t": types[s].id}).all())
-    cells: list[tuple[list[str], float]] = [([str(k) for k in c], 1.0) for c in (row["assignments"] or {}).get(body.decision, [])]
-    cells += [([str(k) for k in e.get("index") or []], float(e.get("value") or 0))
-              for e in (row["amounts"] or {}).get(body.decision, []) if abs(float(e.get("value") or 0)) > 1e-9]
+    if not binary and body.as_ == "parameter" and row["amounts"] is None:
+        # Too many cells to keep inline: the roster alone would write every amount as 1.
+        raise HTTPException(409, f"run {run_id} keeps {body.decision!r} amounts in chunks; it cannot be kept as data here")
+    # The roster names every chosen cell; a whole-number or continuous decision also has its amount
+    # there, which wins -- one value per cell.
+    found: dict[tuple[str, ...], float] = {tuple(str(k) for k in c): 1.0 for c in (row["assignments"] or {}).get(body.decision, [])}
+    for e in (row["amounts"] or {}).get(body.decision, []):
+        value = float(e.get("value") or 0)
+        key = tuple(str(k) for k in e.get("index") or [])
+        if abs(value) > 1e-9:
+            found[key] = value
+        else:
+            found.pop(key, None)
+    cells: list[tuple[list[str], float]] = [(list(keys), v) for keys, v in found.items()]
     gone = sorted({k for keys, _ in cells for s, k in zip(index, keys) if k not in ids[s]})
     cells = [(keys, v) for keys, v in cells if all(k in ids[s] for s, k in zip(index, keys))]
     source = {"kind": "answer", "run_id": run_id, "decision": body.decision, "cells": len(cells),
