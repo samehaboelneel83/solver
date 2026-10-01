@@ -9,7 +9,8 @@ import {
   parseAttrValue,
   type FieldErrors,
 } from "./attrTypes";
-import { useEntities, type AttrType, type AttributeDef, type Id } from "../api/v1";
+import RecordPicker from "./RecordPicker";
+import { type AttrType, type AttributeDef, type Id } from "../api/v1";
 
 /**
  * The typed part of an entity form: one control per `attribute_def` row of
@@ -300,18 +301,17 @@ function Control({ attribute, draft, common }: { attribute: AttributeDef; draft:
 
 /** A reference (queue R20a): one entity of the target type or a type inheriting from it, by key. */
 function ReferenceControl({ attribute, draft, common }: { attribute: AttributeDef; draft: string; common: any }) {
-  const targets = useEntities((attribute.target_type_id as Id | null) ?? null, { family: true, limit: 500 });
-  const options = (targets.data?.items ?? []).map((e) => ({ value: e.key, label: e.label ? `${e.key} — ${e.label}` : e.key }));
-  const stale = draft !== "" && targets.isSuccess && !options.some((o) => o.value === draft);
   return (
-    <select {...common}>
-      <option value="">No value</option>
-      {stale && <option value={draft}>{draft} (not found)</option>}
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <RecordPicker
+      typeId={(attribute.target_type_id as Id | null) ?? null}
+      value={draft}
+      onChange={(key) => common.onChange({ target: { value: key } })}
+      id={common.id}
+      data-testid={common["data-testid"]}
+      aria-invalid={common["aria-invalid"]}
+      aria-describedby={common["aria-describedby"]}
+      className={common.className}
+      required={attribute.required}
+    />
   );
 }
