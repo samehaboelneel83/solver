@@ -1204,6 +1204,22 @@ export const getEntityTrees = (id: Id) => apiFetch<{ entity_id: Id; trees: Entit
 export function useEntityTrees(id: Id | null | undefined) {
   return useQuery({ queryKey: [V1, "entity-trees", id], queryFn: () => getEntityTrees(id as Id), enabled: isId(id) });
 }
+/** Records naming this one in a reference field (`app/api/referrers.py`). */
+export type ReferrerField = {
+  kind: string;
+  attribute: string;
+  /** A required reference refuses the delete; an optional one is cleared by it. */
+  required: boolean;
+  count: number;
+  records: { id: Id; key: string; label: string | null }[];
+};
+export function useEntityReferrers(id: Id | null | undefined) {
+  return useQuery({
+    queryKey: [V1, "entity-referrers", id],
+    queryFn: () => apiFetch<{ entity_id: Id; fields: ReferrerField[]; blocks_delete: boolean }>(`/api/v1/entities/${id}/referrers`),
+    enabled: isId(id),
+  });
+}
 export const useCreateEntity = () => useV1Mutation(createEntity);
 export const useUpdateEntity = () =>
   useV1Mutation(({ id, body }: { id: Id; body: EntityUpdate }) => updateEntity(id, body));

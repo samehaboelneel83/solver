@@ -63,3 +63,25 @@ def test_a_record_of_an_unrelated_kind_has_no_trees(auth_headers, types, hierarc
     lone = _entity(client, auth_headers, types["employee"], "alone")
     assert _trees(lone, auth_headers) == {}
     assert client.get("/api/v1/entities/999999999/trees", headers=auth_headers).status_code == 404
+
+
+def test_the_records_naming_this_one_say_whether_a_delete_is_refused_or_clears_them(auth_headers, types):  # noqa: F811
+    employee, unit = types["employee"], types["unit"]
+    for name, required in (("home", True), ("visits", False)):
+        made = client.post(f"/api/v1/entity-types/{employee}/attributes",
+                           json={"name": name, "data_type": "reference", "target_type_id": unit, "required": required},
+                           headers=auth_headers)
+        assert made.status_code == 201, made.text
+    north = _entity(client, auth_headers, unit, "north")
+    south = _entity(client, auth_headers, unit, "south")
+    _entity(client, auth_headers, employee, "ali", attrs={"home": "north", "visits": "south"})
+    _entity(client, auth_headers, employee, "mona", attrs={"home": "south", "visits": "south"})
+
+    got = client.get(f"/api/v1/entities/{south}/referrers", headers=auth_headers).json()
+    assert got["blocks_delete"] is True
+    assert [(f["attribute"], f["required"], f["count"], [r["key"] for r in f["records"]]) for f in got["fields"]] == [
+        ("home", True, 1, ["mona"]), ("visits", False, 2, ["ali", "mona"])]
+    assert client.get(f"/api/v1/entities/{north}/referrers", headers=auth_headers).json()["fields"][0]["records"][0]["key"] == "ali"
+    alone = _entity(client, auth_headers, unit, "east")
+    assert client.get(f"/api/v1/entities/{alone}/referrers", headers=auth_headers).json() == {
+        "entity_id": alone, "fields": [], "blocks_delete": False}

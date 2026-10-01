@@ -435,3 +435,16 @@ describe("a map shape in a records cell (UX audit A-4)", () => {
     expect(formatAttrValue({ a: 1 })).toBe('{"a":1}');
   });
 });
+
+describe("AttrsForm: sections", () => {
+  it("shows no headings when every field is a plain detail", () => {
+    renderForm();
+    expect(screen.queryByRole("heading")).toBeNull();
+  });
+
+  it("puts a location after the details, each under its heading, keeping order within each", () => {
+    const { container } = renderForm({ attributes: [def("site", "geometry"), def("grade", "integer"), def("note", "text")] });
+    expect(screen.getAllByRole("heading").map((h) => h.textContent)).toEqual(["Details", "Location"]);
+    expect(controlOrder(container)).toEqual(["grade", "note", "site"]);
+  });
+});

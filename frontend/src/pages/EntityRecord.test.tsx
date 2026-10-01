@@ -169,6 +169,7 @@ function answerEntity(value: unknown) {
 
 // The record's place in self-nesting relationships: none unless a test gives one.
 let treesAnswer: unknown = { entity_id: 42, trees: [] };
+let referrersAnswer: unknown = { entity_id: 42, fields: [], blocks_delete: false };
 
 function reads(path: string) {
   mockFetch.mockImplementation((p: string, init?: RequestInit) => {
@@ -185,6 +186,7 @@ function reads(path: string) {
     if (p === "/api/v1/entity-types/5") return Promise.resolve(TYPE);
     if (p === "/api/v1/entities/42") return Promise.resolve(entityAnswer ?? ENTITY);
     if (p === "/api/v1/entities/42/trees") return Promise.resolve(treesAnswer);
+    if (p === "/api/v1/entities/42/referrers") return Promise.resolve(referrersAnswer);
     if (p.startsWith("/api/v1/entity-types")) return Promise.resolve({ items: ENTITY_TYPES, total: 2 });
     if (p.startsWith("/api/v1/relationship-types")) return Promise.resolve({ items: REL_TYPES, total: 1 });
     if (p.startsWith("/api/v1/relationships")) {
@@ -214,6 +216,7 @@ beforeEach(() => {
   writeAnswer = null;
   entityAnswer = null;
   treesAnswer = { entity_id: 42, trees: [] };
+  referrersAnswer = { entity_id: 42, fields: [], blocks_delete: false };
   window.confirm = vi.fn(() => true);
 });
 
@@ -971,5 +974,29 @@ describe("EntityRecord: a record nested in its own kind", () => {
     fireEvent.change(kind, { target: { value: "9:from" } });
     await waitFor(() => expect(other().getByRole("option", { name: /Sara.*above it: a loop/ })).toBeDisabled());
     expect(other().getByRole("option", { name: /Omar/ })).not.toBeDisabled();
+  });
+});
+
+describe("EntityRecord: records that name this one", () => {
+  const field = (attribute: string, required: boolean, keys: string[], count = keys.length) => ({
+    kind: "shift", attribute, required, count, records: keys.map((key, i) => ({ id: 500 + i, key, label: null })),
+  });
+
+  it("refuses to delete while a required reference names it, and says which records", async () => {
+    referrersAnswer = { entity_id: 42, fields: [field("lead", true, ["mon-am"], 3)], blocks_delete: true };
+    reads("/entities/42");
+    const refused = await screen.findByTestId("delete-refused");
+    expect(refused).toHaveTextContent("shift.lead — mon-am and 2 more");
+    expect(within(refused).getByRole("link", { name: "mon-am" })).toHaveAttribute("href", "/entities/500");
+    expect(screen.getByRole("button", { name: "Delete entity" })).toBeDisabled();
+  });
+
+  it("says which fields a delete empties, in the page and in the question", async () => {
+    referrersAnswer = { entity_id: 42, fields: [field("cover", false, ["tue-pm", "wed-pm"])], blocks_delete: false };
+    reads("/entities/42");
+    expect(await screen.findByTestId("delete-clears")).toHaveTextContent("shift.cover — tue-pm, wed-pm");
+    window.confirm = vi.fn(() => false);
+    fireEvent.click(screen.getByRole("button", { name: "Delete entity" }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("It also empties shift.cover on 2 records."));
   });
 });

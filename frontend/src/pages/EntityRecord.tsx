@@ -24,12 +24,14 @@ import {
   useDeleteEntity,
   useEntityRecord,
   useEntityType,
+  useEntityReferrers,
   useEntityTrees,
   useUpdateEntity,
   validationErrors,
   type AttributeDef,
   type Entity,
   type EntityType,
+  type ReferrerField,
 } from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -245,6 +247,9 @@ function RecordForm({
   const deleteEntity = useDeleteEntity();
   // A reference that nests this kind in itself may not name this record or anything below it.
   const trees = useEntityTrees(entity?.id);
+  const referrers = useEntityReferrers(entity?.id);
+  const clears = (referrers.data?.fields ?? []).filter((f) => !f.required);
+  const refuses = (referrers.data?.fields ?? []).filter((f) => f.required);
   const loopBlocked = (attributeName: string): ReadonlyMap<string, string> | undefined => {
     const tree = trees.data?.trees.find((t) => t.via_attribute === attributeName);
     return tree ? new Map(tree.blocked.map((key) => [key, key === entity?.key ? "this record" : "below this one: a loop"])) : undefined;
@@ -394,9 +399,10 @@ function RecordForm({
 
   async function handleDelete() {
     if (!entity) return;
+    const cleared = clears.map((f) => `${f.kind}.${f.attribute} on ${f.count} record${f.count === 1 ? "" : "s"}`);
     const confirmed = window.confirm(
       `Delete entity "${entity.key}"? This also deletes every relationship it takes part in and every parameter ` +
-        `value indexed by it. This cannot be undone.`
+        `value indexed by it.${cleared.length ? ` It also empties ${cleared.join(", ")}.` : ""} This cannot be undone.`
     );
     if (!confirmed) return;
     try {
@@ -591,10 +597,23 @@ function RecordForm({
           <p className="mb-3 text-sm text-slate-600">
             Its relationships and any parameter values indexed by it go with it.
           </p>
+          {refuses.length > 0 && (
+            <div data-testid="delete-refused" className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              <p className="font-medium">It cannot be deleted while these records name it in a required field:</p>
+              <ReferrerList fields={refuses} />
+              <p className="mt-1">Point them at another record first.</p>
+            </div>
+          )}
+          {clears.length > 0 && (
+            <div data-testid="delete-clears" className="mb-3 text-sm text-slate-700">
+              <p>Deleting it empties the field on records that name it:</p>
+              <ReferrerList fields={clears} />
+            </div>
+          )}
           <button
             type="button"
             onClick={handleDelete}
-            disabled={deleteEntity.isPending}
+            disabled={deleteEntity.isPending || refuses.length > 0}
             className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
           >
             Delete entity
@@ -602,5 +621,29 @@ function RecordForm({
         </section>
       )}
     </div>
+  );
+}
+
+function ReferrerList({ fields }: { fields: ReferrerField[] }) {
+  return (
+    <ul className="mt-1 space-y-1">
+      {fields.map((f) => (
+        <li key={`${f.kind}.${f.attribute}`}>
+          <span className="font-mono">
+            {f.kind}.{f.attribute}
+          </span>
+          {" — "}
+          {f.records.map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && ", "}
+              <Link to={`/entities/${r.id}`} className="underline">
+                {r.key}
+              </Link>
+            </span>
+          ))}
+          {f.count > f.records.length && ` and ${f.count - f.records.length} more`}
+        </li>
+      ))}
+    </ul>
   );
 }

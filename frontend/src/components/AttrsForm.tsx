@@ -10,6 +10,7 @@ import {
   type FieldErrors,
 } from "./attrTypes";
 import RecordPicker from "./RecordPicker";
+import { useCapabilities } from "../hooks/useCapability";
 import { type AttrType, type AttributeDef, type Id } from "../api/v1";
 
 /**
@@ -193,6 +194,47 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
     );
   }
 
+  const field = (attribute: AttributeDef) => {
+    const id = `${baseId}-${attribute.name}`;
+    const errorId = `${id}-error`;
+    const hintId = `${id}-hint`;
+    const hint = hintFor(attribute);
+    const message = errors[attrField(attribute.name)];
+    const draft = drafts[attribute.name] ?? "";
+    const common = {
+      id,
+      "data-testid": `attr-${attribute.name}`,
+      "aria-invalid": message ? ("true" as const) : undefined,
+      "aria-describedby": describedBy(hint && hintId, message && errorId),
+      className: INPUT_CLASS,
+      value: draft,
+      onChange: (event: { target: { value: string } }) => onChange(attribute.name, event.target.value),
+    };
+    return (
+      <div key={attribute.id}>
+        <FieldLabel htmlFor={id} required={attribute.required}>
+          <span className="font-mono">{attribute.name}</span>
+          {attribute.unit ? ` (${attribute.unit})` : ""}
+        </FieldLabel>
+        <Control attribute={attribute} draft={draft} common={common} blocked={blocked?.(attribute.name)} />
+        {hint && (
+          <p id={hintId} className="mt-1 text-xs text-slate-500">
+            {hint}
+          </p>
+        )}
+        <FieldError id={errorId} message={message} />
+      </div>
+    );
+  };
+
+  // Fields in the order the API gives, grouped: what the record is, which records it names,
+  // where it is. One group shows no headings.
+  const sections = [
+    { title: "Details", attributes: attributes.filter((a) => a.data_type !== "reference" && a.data_type !== "geometry") },
+    { title: "Links to other records", attributes: attributes.filter((a) => a.data_type === "reference") },
+    { title: "Location", attributes: attributes.filter((a) => a.data_type === "geometry") },
+  ].filter((section) => section.attributes.length > 0);
+
   return (
     <div className="space-y-4">
       {staleKeys.length > 0 && (
@@ -203,40 +245,12 @@ export default function AttrsForm({ attributes, drafts, errors, staleKeys = [], 
           {staleKeys.length === 1 ? "It" : "They"} will be removed when you save.
         </p>
       )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {attributes.map((attribute) => {
-          const id = `${baseId}-${attribute.name}`;
-          const errorId = `${id}-error`;
-          const hintId = `${id}-hint`;
-          const hint = hintFor(attribute);
-          const message = errors[attrField(attribute.name)];
-          const draft = drafts[attribute.name] ?? "";
-          const common = {
-            id,
-            "data-testid": `attr-${attribute.name}`,
-            "aria-invalid": message ? ("true" as const) : undefined,
-            "aria-describedby": describedBy(hint && hintId, message && errorId),
-            className: INPUT_CLASS,
-            value: draft,
-            onChange: (event: { target: { value: string } }) => onChange(attribute.name, event.target.value),
-          };
-          return (
-            <div key={attribute.id}>
-              <FieldLabel htmlFor={id} required={attribute.required}>
-                <span className="font-mono">{attribute.name}</span>
-                {attribute.unit ? ` (${attribute.unit})` : ""}
-              </FieldLabel>
-              <Control attribute={attribute} draft={draft} common={common} blocked={blocked?.(attribute.name)} />
-              {hint && (
-                <p id={hintId} className="mt-1 text-xs text-slate-500">
-                  {hint}
-                </p>
-              )}
-              <FieldError id={errorId} message={message} />
-            </div>
-          );
-        })}
-      </div>
+      {sections.map((section) => (
+        <div key={section.title} className="space-y-2">
+          {sections.length > 1 && <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{section.title}</h3>}
+          <div className="grid gap-4 sm:grid-cols-2">{section.attributes.map(field)}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -323,6 +337,7 @@ function ReferenceControl({
   common: any;
   blocked?: ReadonlyMap<string, string>;
 }) {
+  const { can } = useCapabilities();
   return (
     <RecordPicker
       typeId={(attribute.target_type_id as Id | null) ?? null}
@@ -335,6 +350,7 @@ function ReferenceControl({
       className={common.className}
       required={attribute.required}
       blocked={blocked}
+      allowCreate={can("domain.edit")}
     />
   );
 }

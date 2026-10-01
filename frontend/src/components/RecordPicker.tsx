@@ -1,6 +1,8 @@
 import { KeyboardEvent, useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { listEntities, type Entity, type Id } from "../api/v1";
+import { formatApiError } from "../api/errors";
+import { listEntities, useCreateEntity, type Entity, type Id } from "../api/v1";
 
 const DEBOUNCE_MS = 200;
 const PAGE = 20;
@@ -20,6 +22,10 @@ export type RecordPickerProps = {
   "aria-describedby"?: string;
   /** Keys that may not be chosen here, each with the reason shown beside it (a cycle, the record itself). */
   blocked?: ReadonlyMap<string, string>;
+  /** Offer to create a record with the typed key when none matches (the reader may edit records). */
+  allowCreate?: boolean;
+  /** The kind's name, for "Create … as a new <kind>". */
+  kindName?: string;
 };
 
 function optionText(e: Pick<Entity, "key" | "label">): string {
@@ -46,7 +52,11 @@ export default function RecordPicker({
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
   blocked,
+  allowCreate,
+  kindName,
 }: RecordPickerProps) {
+  const create = useCreateEntity();
+  const [createError, setCreateError] = useState<string | null>(null);
   const listId = useId();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -75,6 +85,21 @@ export default function RecordPicker({
   const more = (results.data?.total ?? 0) > options.length;
   const missing = value !== "" && chosen.isSuccess && chosen.data === null;
   const shown = open ? text : value === "" ? "" : chosen.data ? optionText(chosen.data) : value;
+
+  // The typed text, offered as a new record's key when nothing has exactly that key.
+  const typed = text.trim();
+  const canCreate =
+    allowCreate && typeId != null && typed !== "" && search === typed && results.isSuccess && !options.some((e) => e.key === typed);
+
+  async function createAndPick() {
+    setCreateError(null);
+    try {
+      const made = await create.mutateAsync({ entity_type_id: typeId as Id, key: typed });
+      pick(made.key);
+    } catch (err) {
+      setCreateError(formatApiError(err));
+    }
+  }
 
   function pick(key: string) {
     if (blocked?.has(key)) return;
@@ -142,6 +167,14 @@ export default function RecordPicker({
         )}
       </div>
       {missing && <p className="mt-1 text-xs text-amber-700">“{value}” is not a record here any more.</p>}
+      {createError && (
+        <p role="alert" className="mt-1 text-xs text-red-700">
+          Could not create it here: {createError}{" "}
+          <Link to={`/entities/new?type=${typeId}`} className="underline">
+            Open the full form
+          </Link>
+        </p>
+      )}
       {open && (
         <ul
           id={listId}
@@ -176,6 +209,19 @@ export default function RecordPicker({
             );
           })}
           {more && <li className="px-3 py-1.5 text-xs text-slate-500">More records: type to narrow.</li>}
+          {canCreate && (
+            <li
+              role="option"
+              aria-selected={false}
+              className="cursor-pointer border-t border-slate-100 px-3 py-1.5 text-blue-700"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                void createAndPick();
+              }}
+            >
+              {create.isPending ? "Creating…" : `+ Create “${typed}” as a new ${kindName ?? "record"}`}
+            </li>
+          )}
         </ul>
       )}
     </div>
