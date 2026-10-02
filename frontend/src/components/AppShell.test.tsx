@@ -59,7 +59,7 @@ describe("AppShell", () => {
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-        "Overview & solve", "Data", "Model", "What-ifs", "Results", "Data workbench", "Data values", "Map data", "Other problems", "All workspaces", "Getting started", "Modeling guide",
+        "Overview & solve", "Data", "Model", "What-ifs", "Results", "Data workbench", "Data values", "Map data", "Forecasts", "Other problems", "All workspaces", "Getting started", "Modeling guide",
       ]);
       expect(within(nav).getByRole("link", { name: "Data" })).toHaveAttribute("href", "/domains/7/data/records");
       expect(within(nav).queryByRole("link", { name: "Versions" })).toBeNull();

@@ -123,6 +123,24 @@ def test_a_predictor_is_trained_from_the_domain_s_own_entities_and_retrained_in_
     assert first["metrics"]["r2"] > 0.5
     assert first["training"]["entity_type"] == "store"
 
+    # Forecasts kept as data: the stores with no sales yet get a predicted one (benchmark, October 2026).
+    for i in range(3):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": type_id, "k": f"new{i}", "a": json.dumps({"price": 5.0, "footfall": 500.0})})
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'blank', '{}')"), {"t": type_id})
+    db.commit()
+    kept = http.post(f"/api/v1/predictors/{first['id']}/apply", json={"field": "sales_forecast", "only_missing": True},
+                     headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 3 and kept.json()["skipped"] == ["blank"]
+    forecast = db.execute(text("SELECT (attrs->>'sales_forecast')::float FROM entity WHERE entity_type_id = :t AND key = 'new0'"),
+                          {"t": type_id}).scalar_one()
+    assert 60 < forecast < 140  # footfall 500 / price 5, about 100
+    assert db.execute(text("SELECT count(*) FROM entity WHERE entity_type_id = :t AND attrs ? 'sales_forecast'"),
+                      {"t": type_id}).scalar_one() == 3
+    assert http.post(f"/api/v1/predictors/{first['id']}/apply", json={"field": "price"}, headers=t["a"]).status_code == 422
+    assert http.post(f"/api/v1/predictors/{first['id']}/apply", json={"field": "x"}, headers=t["b"]).status_code in (403, 404)
+
     again = http.post("/api/v1/predictors/train", json=body, headers=t["a"])
     assert again.status_code == 409
     replaced = http.post("/api/v1/predictors/train", json={**body, "kind": "gradient_boosting", "replace": True},

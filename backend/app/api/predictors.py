@@ -376,6 +376,66 @@ def predict_with(
     return out
 
 
+class ApplyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: The number field the predictions go into: made if the kind has none of that name.
+    field: str = Field(pattern=_NAME, max_length=63)
+    #: Only the records whose own target is empty -- the future days, the new sites.
+    only_missing: bool = False
+
+
+@router.post("/predictors/{identity}/apply")
+def apply_predictor(
+    identity: int,
+    body: ApplyBody,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("domain.edit")),
+) -> dict[str, Any]:
+    """Predict for the records of the kind the predictor was trained on, and keep each prediction in
+    a number field: a forecast a model reads as data (benchmark, October 2026: a demand model
+    trained, but its forecasts for the coming days could be seen nowhere and used nowhere)."""
+    row = _load(db, identity, user)
+    source = row["training"] or {}
+    if not source.get("entity_type") or not source.get("features"):
+        raise HTTPException(422, f"{row['name']} was uploaded, not trained on records here; it cannot say which records to predict for")
+    if source.get("positive") is not None:
+        raise HTTPException(422, f"{row['name']} predicts yes or no; keep its chance with a model that reads it")
+    features, target = list(source["features"]), source.get("target")
+    if body.field in features:
+        raise HTTPException(422, f"{body.field} is one of {row['name']}'s inputs; choose another field for the predictions")
+    type_id = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                         {"d": row["domain_id"], "n": source["entity_type"]}).scalar_one_or_none()
+    if type_id is None:
+        raise HTTPException(422, f"the kind {source['entity_type']!r} it was trained on is gone")
+    kind = db.execute(text("SELECT data_type::text FROM attribute_def WHERE entity_type_id = ANY (entity_type_lineage(:t))"
+                           " AND name = :n"), {"t": type_id, "n": body.field}).scalar_one_or_none()
+    if kind is None:
+        db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, 'number')"),
+                   {"t": type_id, "n": body.field})
+    elif kind not in ("number", "integer"):
+        raise HTTPException(422, f"{body.field} is a {kind} field; predictions go into a number field")
+    model = row["model"]
+    written, skipped = 0, []
+    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
+                              " ORDER BY sort_order, key"), {"t": type_id}).all()
+    for entity_id, key, attrs in records:
+        attrs = dict(attrs or {})
+        if body.only_missing and target and training._number(attrs.get(target)):
+            continue
+        values = [attrs.get(f) for f in features]
+        if not all(training._number(v) for v in values):
+            skipped.append(key)
+            continue
+        value = trees.predict(model, [float(v) for v in values])
+        db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object(:f, CAST(:v AS numeric)) WHERE id = :id"),
+                   {"f": body.field, "v": round(float(value), 6), "id": entity_id})
+        written += 1
+    _audit(db, user, "predictor.apply", identity)
+    db.commit()
+    return {"field": body.field, "entity_type": source["entity_type"], "written": written,
+            "skipped": skipped[:50], "skipped_count": len(skipped)}
+
+
 @router.delete("/predictors/{identity}", status_code=204)
 def delete_predictor(
     identity: int,

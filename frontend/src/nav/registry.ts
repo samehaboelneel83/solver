@@ -701,12 +701,13 @@ export function buildSidebarGroups(
     if (inProblem) return [
       named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["scenarios", "What-ifs"], ["runs", "Results"]]),
       // Where the data comes from, as in a workspace: computed values and the map are a planner's too (user trial).
-      named("data", "Data", [["workbench", "Data workbench"], ["parameters", "Data values"], ["map-data", "Map data"]]),
+      // Forecasts are data a rule reads (benchmark, October 2026: the page was in no menu).
+      named("data", "Data", [["workbench", "Data workbench"], ["parameters", "Data values"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
       named("context", "Navigate", [["problems", "Other problems"], ["domains", "All workspaces"]]),
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["parameters", "Data values"], ["map-data", "Map data"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["parameters", "Data values"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
@@ -714,7 +715,7 @@ export function buildSidebarGroups(
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
     select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
-    select("data", "Data", ["workbench", "records", "relationships", "parameters", "map-data"]),
+    select("data", "Data", ["workbench", "records", "relationships", "parameters", "map-data", "predictors"]),
     ...common,
   ];
   if (inDomain) return [

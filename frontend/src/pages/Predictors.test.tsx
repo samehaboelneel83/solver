@@ -179,3 +179,22 @@ it("says why a training failed on the server, after the request was answered (op
   state = "failed";
   expect(await screen.findByRole("alert", {}, { timeout: 3000 })).toHaveTextContent("0 rows with a value");
 });
+
+it("makes number fields from a text, and keeps a model's predictions as data (benchmark, October 2026)", async () => {
+  const write = stub(vi.fn().mockImplementation((path: string) => Promise.resolve(path.endsWith("/derive")
+    ? { made: ["label_a", "label_b"], records: 10, left_empty: 0 }
+    : { field: "demand_forecast", entity_type: "product", written: 7, skipped: [], skipped_count: 0 })));
+  renderPage();
+  const card = await screen.findByTestId("predictor");
+  await screen.findByRole("option", { name: "product" });
+  fireEvent.change(screen.getByLabelText("Learn from records of"), { target: { value: "product" } });
+  fireEvent.click(screen.getByRole("button", { name: "one yes/no field per value" }));
+  expect(await screen.findByText(/Made label_a, label_b on 10 records/)).toBeInTheDocument();
+  expect(write.mock.calls[0][0]).toBe("/api/v1/entity-types/5/derive");
+  expect(JSON.parse(write.mock.calls[0][1].body)).toEqual({ op: "categories", field: "label" });
+
+  expect(within(card).getByLabelText("Field for the predictions")).toHaveValue("demand_forecast");
+  fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
+  expect(await within(card).findByText(/7 product records now have demand_forecast/)).toBeInTheDocument();
+  expect(JSON.parse(write.mock.calls[1][1].body)).toEqual({ field: "demand_forecast", only_missing: true });
+});

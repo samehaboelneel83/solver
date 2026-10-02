@@ -1938,6 +1938,19 @@ export const deletePredictor = (id: Id) => remove(`/api/v1/predictors/${id}`);
 export const predictWith = (id: Id, inputs: number[][]) =>
   send<{ predictions: number[]; ranges?: { low: number; high: number }[] }>("POST", `/api/v1/predictors/${id}/predict`, { inputs });
 
+/** Keep a trained predictor's predictions in a number field of its records (a forecast as data). */
+export const applyPredictor = (id: Id, body: { field: string; only_missing: boolean }) =>
+  send<{ field: string; entity_type: string; written: number; skipped: string[]; skipped_count: number }>(
+    "POST", `/api/v1/predictors/${id}/apply`, body);
+export const useApplyPredictor = () =>
+  useV1Mutation(({ id, body }: { id: Id; body: { field: string; only_missing: boolean } }) => applyPredictor(id, body));
+/** Number fields made from a date, a text or a linked record's number (`app/api/derive.py`). */
+export type DeriveBody = { op: "date_parts" | "categories" | "from_link"; field: string; of?: string };
+export const deriveFields = (entityTypeId: Id, body: DeriveBody) =>
+  send<{ made: string[]; records: number; left_empty: number }>("POST", `/api/v1/entity-types/${entityTypeId}/derive`, body);
+export const useDeriveFields = () =>
+  useV1Mutation(({ entityTypeId, body }: { entityTypeId: Id; body: DeriveBody }) => deriveFields(entityTypeId, body));
+
 export function usePredictors(domainId: Id | null) {
   return useQuery({
     queryKey: [V1, "predictors", domainId],

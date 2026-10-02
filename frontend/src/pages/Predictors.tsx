@@ -9,12 +9,15 @@ import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, Trash2 } from "lucide-react";
 import { formatApiError } from "../api/errors";
 import {
+  useApplyPredictor,
   useDeletePredictor,
+  useDeriveFields,
   useEntityTypes,
   usePredictors,
   usePredictorTraining,
   useTrainPredictor,
   useUploadPredictor,
+  type EntityType,
   type Predictor,
 } from "../api/v1";
 import LoadFailure from "../components/LoadFailure";
@@ -121,6 +124,7 @@ function PredictorCard({ predictor, canEdit }: { predictor: Predictor; canEdit: 
           Measured on {m.evaluated_on}{m.rows ? ` (${m.rows} rows${m.rows_skipped ? `, ${m.rows_skipped} skipped for missing numbers` : ""})` : ""}.
         </p>
       )}
+      {canEdit && <KeepPredictions predictor={predictor} />}
       {confirming && (
         <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           <p>Delete {predictor.name}? A model version that reads it keeps it from being deleted.</p>
@@ -135,6 +139,90 @@ function PredictorCard({ predictor, canEdit }: { predictor: Predictor; canEdit: 
       )}
       {problem && <p role="alert" className="mt-2 text-sm text-red-700">{problem}</p>}
     </li>
+  );
+}
+
+/**
+ * A model learns from numbers. A date, a text (weather, soil) or a number on a linked record
+ * (an observation's road) is made into number fields here, once, on the records themselves
+ * (benchmark, October 2026: four of five testers could not use what they had).
+ */
+function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] }) {
+  const derive = useDeriveFields();
+  const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
+  const [linkOf, setLinkOf] = useState<Record<string, string>>({});
+  const fields = kind.attributes ?? [];
+  const dates = fields.filter((a) => (a.data_type as string) === "date");
+  const texts = fields.filter((a) => a.data_type === "text" || a.data_type === "enum");
+  const links = fields.filter((a) => a.data_type === "reference");
+  if (!dates.length && !texts.length && !links.length) return null;
+  const numbersOf = (a: (typeof fields)[number]) => {
+    const target = kinds.find((k) => k.id === a.target_type_id);
+    return (target?.attributes ?? []).filter((x) => NUMERIC.has(x.data_type)).map((x) => x.name);
+  };
+  const run = (body: { op: "date_parts" | "categories" | "from_link"; field: string; of?: string }) =>
+    derive.mutate({ entityTypeId: kind.id, body }, {
+      onSuccess: (done) => setSaid({ error: false, text: `Made ${done.made.join(", ")} on ${done.records} records${done.left_empty ? `; ${done.left_empty} had nothing to read` : ""}. Tick them above.` }),
+      onError: (e) => setSaid({ error: true, text: formatApiError(e) }),
+    });
+  const button = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50 disabled:opacity-60";
+  return (
+    <div className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-sm" aria-label="Make number fields">
+      <p className="text-xs text-slate-600">Not a number yet? Make number fields from it:</p>
+      <ul className="mt-1 space-y-1">
+        {dates.map((a) => (
+          <li key={a.name}><span className="font-mono text-xs">{a.name}</span>{" "}
+            <button type="button" className={button} disabled={derive.isPending} onClick={() => run({ op: "date_parts", field: a.name })}>
+              weekday, month and day of year</button></li>
+        ))}
+        {texts.map((a) => (
+          <li key={a.name}><span className="font-mono text-xs">{a.name}</span>{" "}
+            <button type="button" className={button} disabled={derive.isPending} onClick={() => run({ op: "categories", field: a.name })}>
+              one yes/no field per value</button></li>
+        ))}
+        {links.map((a) => numbersOf(a).length > 0 && (
+          <li key={a.name}><span className="font-mono text-xs">{a.name}</span>{" "}
+            <select aria-label={`Number of the linked record for ${a.name}`} className="rounded border border-slate-300 px-1 text-xs"
+              value={linkOf[a.name] ?? ""} onChange={(e) => setLinkOf({ ...linkOf, [a.name]: e.target.value })}>
+              <option value="">its…</option>
+              {numbersOf(a).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>{" "}
+            <button type="button" className={button} disabled={derive.isPending || !linkOf[a.name]}
+              onClick={() => run({ op: "from_link", field: a.name, of: linkOf[a.name] })}>copy onto each record</button></li>
+        ))}
+      </ul>
+      {said && <p role={said.error ? "alert" : "status"} className={`mt-1 text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
+    </div>
+  );
+}
+
+/** A trained model's predictions kept in a number field: a forecast a model reads as data. */
+function KeepPredictions({ predictor }: { predictor: Predictor }) {
+  const apply = useApplyPredictor();
+  const target = predictor.training?.target ?? "value";
+  const [field, setField] = useState(`${target}_forecast`);
+  const [onlyMissing, setOnlyMissing] = useState(true);
+  const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
+  if (!predictor.training?.entity_type || predictor.training.positive !== undefined) return null;
+  return (
+    <form className="mt-3 flex flex-wrap items-center gap-2 text-sm" aria-label={`Keep ${predictor.name}'s predictions`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        apply.mutate({ id: predictor.id, body: { field, only_missing: onlyMissing } }, {
+          onSuccess: (done) => setSaid({ error: false, text: `${done.written} ${predictor.training?.entity_type} records now have ${done.field}${done.skipped_count ? `; ${done.skipped_count} lack an input (${done.skipped.slice(0, 5).join(", ")})` : ""}. A model reads it as data.` }),
+          onError: (err) => setSaid({ error: true, text: formatApiError(err) }),
+        });
+      }}>
+      <span>Keep its predictions for the {predictor.training.entity_type} records in</span>
+      <input aria-label="Field for the predictions" className="w-40 rounded border border-slate-300 px-2 py-0.5 font-mono text-xs"
+        value={field} onChange={(e) => setField(e.target.value)} />
+      <label className="inline-flex items-center gap-1 text-xs">
+        <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />
+        only those with no {target} yet</label>
+      <button type="submit" disabled={apply.isPending} className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-60">
+        {apply.isPending ? "Predicting…" : "Predict and keep"}</button>
+      {said && <p role={said.error ? "alert" : "status"} className={`basis-full text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
+    </form>
   );
 }
 
@@ -249,6 +337,7 @@ function TrainForm({ domainId }: { domainId: number }) {
               </label>
             ))}
           </div>
+          <MakeNumbers kind={chosen} kinds={typeItems} />
         </fieldset>
       )}
       <details>
