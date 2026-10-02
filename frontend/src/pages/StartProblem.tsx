@@ -133,6 +133,7 @@ function InWords() {
           ))}
         </ul>
       ) : <p className="mt-2 text-sm text-slate-600">Nothing in those words matched a starting point yet; say what is decided and what limits it.</p>)}
+      <p className="mt-2 text-xs text-slate-600">Once the problem is made, the model editor's “Describe the problem in words” writes a first draft from these words and your data.</p>
     </details>
   );
 }

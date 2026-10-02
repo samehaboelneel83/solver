@@ -1,5 +1,6 @@
 import CoverageRecipeForm from "../model/CoverageRecipeForm";
 import RecipesForm from "../model/RecipesForm";
+import DescribeToDraft from "../model/DescribeToDraft";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -732,6 +733,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
+      {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
+        <DescribeToDraft
+          kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, role: t.role, attributes: t.attributes }))}
+          data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          onApply={(edit) => setDraft((current) => current && edit(current))}
+        />
+      )}
       {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
         <CoverageRecipeForm
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ id: Number(t.id), name: t.name, attributes: t.attributes }))}
