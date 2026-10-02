@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
@@ -29,6 +29,8 @@ import RelationshipTypes from "./pages/RelationshipTypes";
 import RelationshipTypeDetail from "./pages/RelationshipTypeDetail";
 import Relationships from "./pages/Relationships";
 import Entities from "./pages/Entities";
+// Its own chunk: the workbench is a large page most visits never open.
+const Workbench = lazy(() => import("./pages/Workbench"));
 import EntityRecord from "./pages/EntityRecord";
 import Parameters from "./pages/Parameters";
 import ModelVersions from "./pages/ModelVersions";
@@ -104,6 +106,7 @@ export default function App() {
           <Route path="data/predictors" element={<Predictors />} />
           <Route path="data/sources" element={<SourcesPage />} />
           <Route path="data/sources/:connectionId/jobs/:jobId/import" element={<ImportWizard />} />
+          <Route path="data/workbench" element={<Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}><Workbench /></Suspense>} />
           <Route path="data/records" element={<Entities />} />
           <Route path="data/records/new" element={<EntityRecord />} />
           <Route path="data/records/:id" element={<EntityRecord />} />
@@ -164,6 +167,7 @@ export default function App() {
         <Route path="quality" element={<LegacyDomainRedirect page="quality" />} />
         <Route path="predictors" element={<LegacyDomainRedirect page="predictors" />} />
         <Route path="map-data" element={<LegacyDomainRedirect page="map-data" />} />
+        <Route path="workbench" element={<LegacyDomainRedirect page="workbench" />} />
         <Route path="camps" element={<LegacyDomainRedirect page="camps" />} />
         <Route path="map-data/camps" element={<LegacyDomainRedirect page="camps" />} />
         <Route path="api-keys" element={<ApiKeys />} />

@@ -135,3 +135,36 @@ describe("RecordGrid", () => {
     await waitFor(() => expect(screen.queryByLabelText("T1: key")).toBeNull());
   });
 });
+
+describe("RecordGrid: shortcuts", () => {
+  it("duplicates a row as a new one with its values and no key, right below it", async () => {
+    renderGrid();
+    fireEvent.click(screen.getByLabelText("Duplicate T1"));
+    const copy = screen.getByTestId("grid-row-1");
+    expect(within(copy).getByLabelText("new row 2: key")).toHaveValue("");
+    expect(within(copy).getByLabelText("new row 2: capacity")).toHaveValue("10");
+    expect(within(copy).getByLabelText("new row 2: fuel")).toHaveValue("diesel");
+    fireEvent.change(within(copy).getByLabelText("new row 2: key"), { target: { value: "T1b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 change" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ key: "T1b", attrs: { capacity: 10, fuel: "diesel" } });
+  });
+
+  it("fills the parent into every new row, and runs what follows a create", async () => {
+    const afterCreate = vi.fn(() => Promise.resolve());
+    render(
+      <QueryClientProvider client={editorQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <RecordGrid type={TYPE as never} records={[]} prefill={{ fuel: "electric" }} afterCreate={afterCreate} startWithNew />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    expect(screen.getByLabelText("new row 1: fuel")).toHaveValue("electric");
+    expect(screen.getByRole("button", { name: "Save 0 changes" })).toBeDisabled(); // a prefilled row is not yet a change
+    fireEvent.change(screen.getByLabelText("new row 1: key"), { target: { value: "T9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 change" }));
+    await waitFor(() => expect(afterCreate).toHaveBeenCalledWith(expect.objectContaining({ key: "T9" })));
+  });
+});

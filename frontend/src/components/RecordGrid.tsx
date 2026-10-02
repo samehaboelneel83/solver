@@ -1,4 +1,4 @@
-import { ClipboardEvent, useState } from "react";
+import { ClipboardEvent, useEffect, useState } from "react";
 import { attrField, buildAttrs, draftsFromAttrs, type AttrDrafts } from "./AttrsForm";
 import RecordPicker from "./RecordPicker";
 import { useToast } from "./ToastProvider";
@@ -43,8 +43,8 @@ function fromEntity(type: EntityType, e: Entity): Row {
   return { ...base, rowKey: `e${e.id}`, id: e.id, updatedAt: e.updated_at ?? null, original: snapshot(base), remove: false, errors: {}, general: null };
 }
 
-function blank(type: EntityType): Row {
-  const base = { key: "", label: "", active: true, attrs: draftsFromAttrs(type.attributes, {}) };
+function blank(type: EntityType, prefill: AttrDrafts = {}): Row {
+  const base = { key: "", label: "", active: true, attrs: { ...draftsFromAttrs(type.attributes, {}), ...prefill } };
   made += 1;
   return { ...base, rowKey: `n${made}`, id: null, updatedAt: null, original: snapshot(base), remove: false, errors: {}, general: null };
 }
@@ -125,18 +125,56 @@ function Cell({
  * (`buildAttrs`) and saved on its own, so one refused row keeps its error beside it while the
  * rest are saved.
  */
-export default function RecordGrid({ type, records, onDone }: { type: EntityType; records: Entity[]; onDone: () => void }) {
+export default function RecordGrid({
+  type,
+  records,
+  onDone,
+  prefill,
+  afterCreate,
+  startWithNew = false,
+  onOpen,
+}: {
+  type: EntityType;
+  records: Entity[];
+  onDone?: () => void;
+  /** Fields every new row starts with: the parent a workbench list sits under. */
+  prefill?: AttrDrafts;
+  /** Run after a new record is created, before it counts as saved (linking it into a hierarchy). */
+  afterCreate?: (created: Entity) => Promise<void>;
+  /** Open with one empty row ready to type into. */
+  startWithNew?: boolean;
+  /** Offer to open a stored row's record (the workbench shows it beside the grid). */
+  onOpen?: (id: Id) => void;
+}) {
   const toast = useToast();
   const create = useCreateEntity();
   const update = useUpdateEntity();
   const remove = useDeleteEntity();
   const columns = editable(type);
-  const [rows, setRows] = useState<Row[]>(() => records.map((e) => fromEntity(type, e)));
+  const [rows, setRows] = useState<Row[]>(() => [
+    ...records.map((e) => fromEntity(type, e)),
+    ...(startWithNew ? [blank(type, prefill)] : []),
+  ]);
   const [saving, setSaving] = useState(false);
   const names = type.attributes.map((a) => a.name);
   const fields = ["key", "label", ...columns.map((a) => a.name)];
 
   const changed = rows.filter(isDirty);
+  // Unsaved cells are not lost to a closed tab or a reload without a word.
+  const unsaved = changed.length > 0;
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsaved]);
+  /** A new row with this row's values and no key: the next truck like this one. */
+  const duplicate = (row: Row) =>
+    setRows((all) => {
+      const copy = { ...blank(type, prefill), label: row.label, active: row.active, attrs: { ...row.attrs } };
+      const at = all.findIndex((r) => r.rowKey === row.rowKey);
+      return [...all.slice(0, at + 1), copy, ...all.slice(at + 1)];
+    });
   const set = (rowKey: string, patch: Partial<Row>) =>
     setRows((all) => all.map((r) => (r.rowKey === rowKey ? { ...r, ...patch } : r)));
   const setAttr = (row: Row, name: string, value: string) => set(row.rowKey, { attrs: { ...row.attrs, [name]: value } });
@@ -158,7 +196,7 @@ export default function RecordGrid({ type, records, onDone }: { type: EntityType
       const next = [...all];
       block.forEach((cells, i) => {
         const at = rowIndex + i;
-        while (next.length <= at) next.push(blank(type));
+        while (next.length <= at) next.push(blank(type, prefill));
         let row = next[at];
         cells.forEach((value, j) => {
           const f = fields[start + j];
@@ -204,6 +242,7 @@ export default function RecordGrid({ type, records, onDone }: { type: EntityType
         const saved = isNew(row)
           ? await create.mutateAsync({ entity_type_id: type.id, ...body })
           : await update.mutateAsync({ id: row.id as Id, body: row.updatedAt ? { ...body, updated_at: row.updatedAt } : body });
+        if (isNew(row) && afterCreate) await afterCreate(saved);
         ok += 1;
         next.push({ ...fromEntity(type, saved), rowKey: row.rowKey });
       } catch (err) {
@@ -252,7 +291,16 @@ export default function RecordGrid({ type, records, onDone }: { type: EntityType
               const who = row.key || `new row ${i + 1}`;
               return [
                 <tr key={row.rowKey} className={`border-b border-slate-100 ${tone}`} data-testid={`grid-row-${i}`}>
-                  <td className="px-2">
+                  <td className="whitespace-nowrap px-2">
+                    {onOpen && row.id !== null && (
+                      <button type="button" className="mr-1 text-blue-700" aria-label={`Open ${who}`} onClick={() => onOpen(row.id as Id)}>
+                        ↗
+                      </button>
+                    )}
+                    <button type="button" className="mr-1 text-slate-500 hover:text-slate-900" aria-label={`Duplicate ${who}`}
+                      title="A new row with these values" onClick={() => duplicate(row)}>
+                      ⧉
+                    </button>
                     <input
                       type="checkbox"
                       aria-label={`Delete ${who}`}
@@ -311,7 +359,7 @@ export default function RecordGrid({ type, records, onDone }: { type: EntityType
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50" onClick={() => setRows((all) => [...all, blank(type)])}>
+        <button type="button" className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50" onClick={() => setRows((all) => [...all, blank(type, prefill)])}>
           + Add row
         </button>
         <button
@@ -326,15 +374,17 @@ export default function RecordGrid({ type, records, onDone }: { type: EntityType
         >
           {saving ? "Saving…" : `Save ${changed.length} change${changed.length === 1 ? "" : "s"}`}
         </button>
-        <button
-          type="button"
-          className="text-sm text-slate-600 underline"
-          onClick={() => {
-            if (changed.length === 0 || window.confirm("Leave the grid without saving your changes?")) onDone();
-          }}
-        >
-          Done
-        </button>
+        {onDone && (
+          <button
+            type="button"
+            className="text-sm text-slate-600 underline"
+            onClick={() => {
+              if (changed.length === 0 || window.confirm("Leave the grid without saving your changes?")) onDone();
+            }}
+          >
+            Done
+          </button>
+        )}
       </div>
     </div>
   );

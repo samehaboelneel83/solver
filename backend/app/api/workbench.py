@@ -216,7 +216,10 @@ def problems(domain_id: int, db: Session = Depends(get_db), _: UserAccount = Dep
             continue
         for r in f["records"]:
             out.setdefault(r["id"], []).append(f["code"])
-    return {"domain_id": domain_id, "records": {str(k): sorted(set(v)) for k, v in out.items()}}
+    items = [dict(r) | {"codes": sorted(set(out[r["id"]]))} for r in db.execute(text(
+        "SELECT e.id, e.key, e.label, e.entity_type_id, t.name AS kind FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+        " WHERE e.id = ANY(:ids) ORDER BY t.name, e.key"), {"ids": list(out)}).mappings()] if out else []
+    return {"domain_id": domain_id, "records": {str(k): sorted(set(v)) for k, v in out.items()}, "items": items}
 
 
 @router.get("/entities/{entity_id}/values")
@@ -248,3 +251,19 @@ def entity_values(entity_id: int, db: Session = Depends(get_db), _: UserAccount 
                     "entity_valued": p["value_type_id"] is not None,
                     "single": len(p["index_type_ids"]) == 1, "cells": cells})
     return {"entity_id": entity_id, "parameters": out}
+
+
+@router.get("/domains/{domain_id}/workbench/place")
+def place(domain_id: int, entity: int, db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """Where a record sits: its parent and the group it is listed in there -- or, placed under
+    nothing, its kind's top-level group. The list a record's siblings are in."""
+    _domain(db, domain_id)
+    kind = db.execute(text("SELECT entity_type_id FROM entity WHERE id = :e"), {"e": entity}).scalar()
+    if kind is None:
+        raise HTTPException(404, "entity not found")
+    above = path_above(db, domain_id, entity)
+    if not above:
+        return {"entity": entity, "kind_id": kind, "parent": None, "group": f"root:{kind}"}
+    parent = above[-1]
+    return {"entity": entity, "kind_id": kind, "group": parent["child_group"],
+            "parent": {k: parent[k] for k in ("id", "key", "label", "entity_type_id")}}

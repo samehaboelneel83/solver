@@ -31,6 +31,7 @@ import {
   type AttributeDef,
   type Entity,
   type EntityType,
+  type Id,
   type ReferrerField,
 } from "../api/v1";
 import { useCapabilities } from "../hooks/useCapability";
@@ -189,6 +190,23 @@ export default function EntityRecord() {
   );
 }
 
+/** One stored record's form inside another page (the data workbench). */
+export function RecordPanel({ entityId, onDeleted }: { entityId: Id; onDeleted: () => void }) {
+  const entityQuery = useEntityRecord(entityId);
+  const typeQuery = useEntityType(entityQuery.data?.entity_type_id ?? null);
+  if (entityQuery.isError) return <LoadFailure subject="This record" error={entityQuery.error} retry={() => void entityQuery.refetch()} />;
+  if (!entityQuery.data || !typeQuery.data) return <p className="text-sm text-slate-500">Loading…</p>;
+  return (
+    <RecordForm
+      key={`${entityQuery.data.id}-${entityQuery.data.updated_at}`}
+      type={typeQuery.data}
+      entity={entityQuery.data}
+      reload={async () => (await entityQuery.refetch()).data ?? null}
+      embedded={{ onDeleted }}
+    />
+  );
+}
+
 function sortedFieldOrder(attributes: AttributeDef[]): string[] {
   return [...COLUMN_FIELDS, ...attributes.map((attribute) => attrField(attribute.name))];
 }
@@ -211,10 +229,14 @@ function RecordForm({
   type,
   entity,
   reload,
+  embedded,
 }: {
   type: EntityType;
   entity: Entity | null;
   reload: () => Promise<Entity | null>;
+  /** Shown inside another page (the data workbench): no page header, no trees or relationship
+   * sections (the host shows them), and a delete hands back instead of leaving the page. */
+  embedded?: { onDeleted: () => void };
 }) {
   const { can } = useCapabilities();
   const canEdit = can("domain.edit");
@@ -408,7 +430,8 @@ function RecordForm({
     try {
       await deleteEntity.mutateAsync(entity.id);
       toast.success(`Entity "${entity.key}" deleted`);
-      navigate("/entities");
+      if (embedded) embedded.onDeleted();
+      else navigate("/entities");
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -416,7 +439,7 @@ function RecordForm({
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div>
+      {!embedded && <div>
         <nav aria-label="Breadcrumb" className="mb-2 text-sm">
           <Link to={`/entities?type=${type.id}`} className={BACK_LINK}>
             Entities
@@ -450,7 +473,7 @@ function RecordForm({
             </Link>
           </p>
         )}
-      </div>
+      </div>}
 
       <section aria-labelledby="entity-heading" className="rounded-md border border-slate-200 bg-white p-4">
         <h2 id="entity-heading" className="mb-3 text-base font-semibold text-slate-900">
@@ -574,9 +597,11 @@ function RecordForm({
               {isSubmitting ? "Saving…" : entity ? "Save entity" : "Create entity"}
             </button>
             )}
+            {!embedded && (
             <Link to={`/entities?type=${type.id}`} className="rounded px-3 py-2 text-sm text-slate-600 underline hover:text-slate-900">
               Cancel
             </Link>
+            )}
           </div>
         </form>
       </section>
@@ -585,9 +610,9 @@ function RecordForm({
           entity's page never showed which unit they work in, or which unit
           a unit sits under -- while the delete warning below counted those
           very rows. */}
-      {entity && <RecordTrees entity={entity} />}
+      {entity && !embedded && <RecordTrees entity={entity} />}
 
-      {entity && <EntityRelationships entity={entity} entityType={type} />}
+      {entity && !embedded && <EntityRelationships entity={entity} entityType={type} />}
 
       {entity && canEdit && (
         <section aria-labelledby="delete-entity-heading" className="rounded-md border border-red-200 bg-white p-4">

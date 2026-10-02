@@ -72,12 +72,12 @@ describe("AppShell", () => {
       expect(localStorage.getItem("solver_editor_level")).toBe("expert");
     });
 
-    it("keeps a domain to its overview, problems and records", async () => {
+    it("keeps a domain to its overview, problems, data workbench and records", async () => {
       localStorage.removeItem("solver_editor_level");
       renderWithProviders(["/domains/7/overview"]);
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
-      expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim()).slice(0, 3)).toEqual(["Overview", "Problems", "Records"]);
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim()).slice(0, 4)).toEqual(["Overview", "Problems", "Data workbench", "Records"]);
       expect(within(nav).queryByRole("link", { name: /Sources|Predictors|Data structure/ })).toBeNull();
     });
   });

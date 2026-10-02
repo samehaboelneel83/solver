@@ -52,6 +52,7 @@ const DOMAIN_TEMPLATES: Record<string, string> = {
   "record-types": "/domains/:domainId/structure/record-types",
   "relationship-types": "/domains/:domainId/structure/relationship-types",
   records: "/domains/:domainId/data/records",
+  workbench: "/domains/:domainId/data/workbench",
   relationships: "/domains/:domainId/data/relationships",
   parameters: "/domains/:domainId/data/parameters",
   "map-graph": "/domains/:domainId/data/explore",
@@ -124,6 +125,15 @@ export const DESTINATIONS: Destination[] = [
     purpose: "Define how record types connect.",
     scope: "domain",
     group: "structure",
+  },
+  {
+    id: "workbench",
+    path: "/workbench",
+    canonical: "/domains/:domainId/data/workbench",
+    label: "Data workbench",
+    purpose: "Enter and fix records in one place: the tree of records, what sits under each, and its form.",
+    scope: "domain",
+    group: "data",
   },
   {
     id: "records",
@@ -503,6 +513,7 @@ export function stripDomainPrefix(pathname: string): string {
     "/structure/record-types": "/entity-types",
     "/structure/relationship-types": "/relationship-types",
     "/data/records": "/entities",
+    "/data/workbench": "/workbench",
     "/data/relationships": "/relationships",
     "/data/parameters": "/parameters",
     "/data/explore": "/graph",
@@ -693,7 +704,7 @@ export function buildSidebarGroups(
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["map-data", "Map data"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
@@ -701,13 +712,13 @@ export function buildSidebarGroups(
   if (inProblem) return [
     select("context", "Navigate", ["home", "domains", "domain-overview", "problems"]),
     select("planning", "This problem", ["problem-overview", "model", "versions", "scenarios", "runs"]),
-    select("data", "Data", ["records", "relationships", "parameters", "map-data"]),
+    select("data", "Data", ["workbench", "records", "relationships", "parameters", "map-data"]),
     ...common,
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
     select("domain", "This domain", ["domain-overview", "problems", "map-data"]),
-    select("data", "Data", ["records", "relationships", "parameters", "record-types", "relationship-types", "map-graph", "sources", "predictors"]),
+    select("data", "Data", ["workbench", "records", "relationships", "parameters", "record-types", "relationship-types", "map-graph", "sources", "predictors"]),
     ...common,
   ];
   const simple = level === "simple";

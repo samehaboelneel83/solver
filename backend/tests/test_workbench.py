@@ -92,10 +92,20 @@ def test_values_for_one_record_and_problems_for_the_tree(auth_headers, world):  
     # A staff member whose home depot is switched off: a warning the tree marks on that record.
     closed = _entity(client, auth_headers, world["kinds"]["depot"], "D9", attrs={"region": "giza"}, active=False)
     zaki = _entity(client, auth_headers, world["kinds"]["staff"], "zaki", attrs={"home": "D9"})
-    problems = _get(f"/api/v1/domains/{world['domain']}/workbench/problems", auth_headers)["records"]
+    answer = _get(f"/api/v1/domains/{world['domain']}/workbench/problems", auth_headers)
+    assert [(i["key"], i["kind"], i["codes"]) for i in answer["items"]] == [("zaki", "staff", ["inactive_target"])]
+    problems = answer["records"]
     assert problems.get(str(zaki)) == ["inactive_target"]
     assert str(ids["T1"]) not in problems and str(ids["mona"]) not in problems  # an empty optional field is only a note
     assert closed
+
+
+def test_a_record_s_place_is_the_list_its_siblings_are_in(auth_headers, world):  # noqa: F811
+    d, ids, k = world["domain"], world["ids"], world["kinds"]
+    placed = _get(f"/api/v1/domains/{d}/workbench/place", auth_headers, entity=ids["T3"])
+    assert placed["parent"]["key"] == "D2" and placed["group"].startswith("ref:")
+    top = _get(f"/api/v1/domains/{d}/workbench/place", auth_headers, entity=ids["mona"])
+    assert top["parent"] is None and top["group"] == f"root:{k['staff']}"
 
 
 def test_bad_groups_are_refused(auth_headers, world):  # noqa: F811
