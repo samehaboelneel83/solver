@@ -118,9 +118,25 @@ describe("Scenarios", () => {
     renderPage();
 
     expect(await screen.findByText("relaxed_cover")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^solve$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^solve$/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /^runs$/i }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /new scenario/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
+  });
+
+  it("starts the run in one click", async () => {
+    const writes: [string, unknown][] = [];
+    stub({
+      write: (path: string, options: { body?: string }) => {
+        writes.push([path, JSON.parse(options.body ?? "{}")]);
+        return Promise.resolve({ id: 44, status: "queued" });
+      },
+    });
+    renderPage();
+    fireEvent.click((await screen.findAllByRole("button", { name: /^solve$/i }))[0]);
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0][0]).toMatch(/\/api\/v1\/scenarios\/\d+\/runs$/);
+    expect(writes[0][1]).toEqual({ time_limit_s: 30 });
   });
 
   it("offers the version's own rules to patch", async () => {

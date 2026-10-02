@@ -1973,9 +1973,11 @@ function ShapePicker({ label, shapes, onPick }: {
   onPick: (shape: string) => void;
 }) {
   return (
-    <label className="ml-2 mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
-      {label}
-      <select aria-label={label} className="rounded border border-slate-300 bg-white px-2 py-2 text-sm" value=""
+    // Long shape titles must not stretch the select past the page (user trial): it takes the width there
+    // is and no more, and the label keeps its words on one line.
+    <label className="ml-2 mt-3 inline-flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-slate-700">
+      <span className="whitespace-nowrap">{label}</span>
+      <select aria-label={label} className="w-full min-w-0 max-w-xl truncate rounded border border-slate-300 bg-white px-2 py-2 text-sm sm:w-auto" value=""
         onChange={(event) => event.target.value && onPick(event.target.value)}>
         <option value="">choose…</option>
         {shapes.map((shape) => (

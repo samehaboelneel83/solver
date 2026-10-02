@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { INPUT_CLASS } from "../components/attrTypes";
@@ -14,6 +14,7 @@ const SCENARIO_PAGE = 50;
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import {
+  useCreateRun,
   useCreateScenario,
   useDeleteScenario,
   useScenarios,
@@ -124,6 +125,28 @@ function ForDomain({ domainId }: { domainId: Id }) {
 function ForProblem({ problemId }: { problemId: Id }) {
   const { can } = useCapabilities();
   const canPublish = can("model.publish");
+  const canSolve = can("run.submit");
+  const createRun = useCreateRun();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [solving, setSolving] = useState<Id | null>(null);
+  const runsOf = (scenarioId: Id, runId?: Id) =>
+    `/runs?problem=${problemId}&scenario=${scenarioId}${runId === undefined ? "" : `&run=${runId}`}`;
+  // One click: the run starts here, and the runs page follows it (user trial: "Solve" only opened that page).
+  function solve(scenarioId: Id) {
+    setSolving(scenarioId);
+    createRun.mutate(
+      { scenarioId, body: { time_limit_s: 30 } },
+      {
+        onSuccess: (run) => navigate(runsOf(scenarioId, run.id)),
+        onError: (error: unknown) => {
+          toast.error(formatApiError(error));
+          navigate(runsOf(scenarioId));
+        },
+        onSettled: () => setSolving(null),
+      }
+    );
+  }
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
   const scenarios = useScenarios(problemId, { limit: SCENARIO_PAGE, offset, q });
@@ -188,8 +211,18 @@ function ForProblem({ problemId }: { problemId: Id }) {
                     Edit
                   </button>
                 )}
-                <Link to={`/runs?problem=${problemId}&scenario=${scenario.id}`} className="rounded px-2 py-1 text-blue-700 underline">
-                  Solve
+                {canSolve && (
+                  <button
+                    type="button"
+                    className="rounded bg-blue-600 px-2 py-1 text-white disabled:opacity-60"
+                    disabled={solving !== null}
+                    onClick={() => solve(scenario.id)}
+                  >
+                    {solving === scenario.id ? "Starting…" : "Solve"}
+                  </button>
+                )}
+                <Link to={runsOf(scenario.id)} className="rounded px-2 py-1 text-blue-700 underline">
+                  Runs
                 </Link>
               </span>
             </li>
