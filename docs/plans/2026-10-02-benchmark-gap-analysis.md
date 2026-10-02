@@ -1,6 +1,6 @@
 # Five-problem benchmark — unified gap analysis and to-do plan
 
-**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** plan, not started
+**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** Phases 0–4 done; re-tested (§6)
 
 Five testers, each a new user with one hard real-world problem, worked only through the UI with no
 prepared workflow. Each brought synthetic tabular data (CSV/Excel) and GIS data (GeoJSON points,
@@ -244,8 +244,8 @@ lift are per point, averaged over the five problems.
       `001aaa1`.
 
 ### Re-test
-- [ ] Re-run the same five problems with fresh testers after Phase 1 and after Phase 3, same brief
-      and rubric, and add the scores to this document.
+- [x] Re-run the same five problems with fresh testers, same brief and rubric, after Phase 4 (one
+      round instead of two): scores in §6.
 
 ## 5. Expected effect
 
@@ -258,7 +258,106 @@ lift are per point, averaged over the five problems.
 | Phase 3 | ~95% | ~75% |
 | Phase 4 | ~95% | ~78% |
 
-These are estimates from the per-point lifts above, not measurements; the re-tests replace them.
+These are estimates from the per-point lifts above, not measurements; the re-test (§6) measured
+**89.4% coverage and 76.6% navigation/UX** after Phase 4.
 
 **Not planned here** (outside the app's scope today): raster import (satellite NDVI, elevation),
 traffic user-equilibrium assignment, queueing models for ambulance counts, live data feeds.
+
+## 6. Re-test after Phase 4 (round 2)
+
+Five fresh testers, the same five problems, brief and rubric; each made its own data and workspace
+("RETEST n — …") and worked only through the UI on the code after Phase 4 (`cfaf53c`). Raw
+results: `/tmp/claude-0/bench2/<n>/result.json` and `notes.md` (not in the repository).
+
+| Problem | Coverage R1 → R2 | Navigation/UX R1 → R2 |
+| --- | --- | --- |
+| 1. Emergency base and supply deployment | 82.8% → **89.1%** | 68.6% → **75.0%** |
+| 2. Ambulance and hospital network | 82.8% → **93.8%** | 67.9% → **79.3%** |
+| 3. City traffic and infrastructure | 85.9% → **89.1%** | 67.1% → **79.3%** |
+| 4. Precision irrigation and crop planning | 62.5% → **81.2%** | 56.4% → **70.0%** |
+| 5. National warehouse and distribution | 84.4% → **93.8%** | 67.1% → **79.3%** |
+| **Overall** | **79.7% → 89.4%** | **65.4% → 76.6%** |
+
+No point scored Available or Missing in round 2 (round 1: four). Per point, average of five:
+
+| # | Point | R1 | R2 | | # | Point | R1 | R2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Understand the app | 75 | **100** | | 9 | Constraints | 85 | 85 |
+| 2 | Import data | 80 | 80 | | 10 | Verbal → equations | 75 | **70** |
+| 3 | Tabular + GIS | 90 | 95 | | 11 | Run optimization | 85 | **100** |
+| 4 | Explore | 75 | 85 | | 12 | Prediction / ML | 60 | 75 |
+| 5 | Relationships / joins | 85 | **80** | | 13 | What-if | 80 | 95 |
+| 6 | GIS layers | 80 | 95 | | 14 | Solution on the map | 70 | 85 |
+| 7 | Variables | 100 | 100 | | 15 | Understand the result | 70 | **100** |
+| 8 | Objectives | 85 | 90 | | 16 | Export / share | 80 | 95 |
+
+UX sub-scores, R1 → R2: orientation 69 → **88**, finding features 58 → **75**, wording 74 → 77,
+feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84**.
+
+### What did not move, and why
+- **Point 10, words → equations (75 → 70).** "Describe the problem in words" knows four recipes;
+  crop allocation (P4), traffic flow (P3) and coverage-with-capacity (P1) fell outside them, and it
+  misread "zone" (P3: construction zones; P1: restricted zones as the thing to cover) and a budget's
+  units (P3: EGP vs mEGP). Testers then wrote the model by hand — usable, but the drafter did not help.
+- **Point 5, joins (85 → 80).** Joining two tables on a matching code column still needs a links
+  file made outside the app (P1, P2, P4); "read through a link" listed only link fields, not links
+  made from the map (P2 — fixed below); a table keyed by two columns was refused where the composite
+  key exists but was not found (P1, P4).
+- **Point 2, import (80).** Same causes as point 5; the values upload took an extra column for an
+  index (P5 — fixed below).
+
+### Gaps found in round 2 (R2a–R2h)
+- **R2a Join on a matching field:** link records of two kinds where a field of one equals the key
+  (or a field) of the other — call history to districts by `dist_code`, yield history to parcels —
+  without a links file. (P1, P2, P4)
+- **R2b Describe → draft for more shapes:** allocation of an area/amount among options (crops),
+  coverage with capacity and cost, network flow with an origin–destination table; read units and
+  the thing to cover from the data's own names, not only from words. (P1, P3, P4)
+- **R2c Forecasts as data per record:** a forecast's inputs read from the record and its links
+  (road attributes through a link; customer fields), written as a data value per record and period
+  to drive the plan — today a rule calls it with constants. Time-series features (lags, horizons).
+  (P2, P3, P5)
+- **R2d What-ifs that recompute map data:** a scenario that scales travel times should recompute
+  the 0/1 "within 30 minutes" data, or let reach be written as `travel_min <= 30` over the scaled
+  times; per-period road speeds. (P1)
+- **R2e Multi-product inventory and routing tied to location:** stock and flows per product; vehicle
+  routes from the depots the location model opens. (P5)
+- **R2f Water as a decision feeding a yield model** (a predictor over a decision). (P4)
+- **R2g Make the existing joins findable:** the composite key ("several columns read as the key"),
+  computed data values and "read through a link" were not found by two testers who needed them.
+- **R2h Analytics banner:** "the analytics store reported an error" shows on every page when
+  ClickHouse is not running (all five); say it once, where analytics are used.
+
+### Bugs from round 2, and what was fixed after it
+- [x] "The dataset carries no predictor … frozen before the model declared it" on the problem
+      Overview and a scenario's pre-solve check, with no Solve (P3, P4, P5): the checks built
+      today's data without the trained models — `live_data` now carries them.
+- [x] "See what stops it" seemed to do nothing (P3, P4): it now scrolls, focuses and lights the check.
+- [x] A goal weight of 0.5 was reset to 1 (P4, P5): weights are any number, in the contract, both
+      validators and the editor.
+- [x] "Read through a link" offered no links where kinds were linked by relationships (P2): it reads
+      relationships from either end, a record with several linked ones taking their mean.
+- [x] "Flows along" drew straight lines (P5): places up to 20 km off the roads now join them; the
+      caption says how many flows follow the roads; drawn ways simplified (10,000 points → 13).
+- [x] A values upload read an extra column as an index and failed (P5): unmatched columns are left out.
+- [x] Make records with "grid cell" refused the layer with only a headline (P2): kinds named in
+      words become names, and every refusal lists its faults.
+- [x] Run comparison: list "3 added" vs map "+13" (P2, P3) — one direction; "Objective change 0"
+      when a second goal doubled (P1) — every goal's change is listed.
+- [x] The GeoJSON and map gave each parcel the value 1, not its planted area, and the map could not
+      show the crop per parcel (P4): each place carries its total, its amount per crop and its main
+      crop; "Colour areas by: largest …" colours by it, with a key.
+- [x] PDF numbers like 6.52646e+07 (P4): written 65,264,600.
+- [x] The sweep accepted text and offered "Solve 0 times" (P1); "Approve" with no reason did nothing
+      (P3): both say what they need.
+- [x] The Start page's description was not carried into "Describe the problem in words" (P1, P5).
+- [x] A new blank rule opened in Boxes with Equation chosen (P3, P5): it opens as an equation.
+- [x] Read-back dropped brackets (P2, P3) and said "whose after c" (P1).
+- [x] A note kept "at least 10000 apart" after the rule became 5 (P1): a note follows its rule's one
+      changed number.
+- [ ] HTTP 409 on draft saves when adding rules quickly (P1, P4, P5) — the rules were kept.
+- [ ] Import preview repeats the first value of a sparse column (P3).
+- [ ] Empty browser dialogs when leaving the model editor (P2).
+- [ ] A scenario run labelled "cp-sat queued" for 3 minutes, then solved by HiGHS (P2).
+
