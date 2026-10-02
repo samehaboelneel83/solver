@@ -77,6 +77,19 @@ describe("planning overviews", () => {
       path.includes("q=weekly") && path.includes("offset=0") && path.includes("f_domain_id=7"))).toBe(true));
   });
 
+  it("tells a new, empty workspace where to begin", async () => {
+    const served = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (path.startsWith("/api/v1/entity-types")) return { items: [], total: 0 };
+      if (path.startsWith("/api/problem/?")) return { items: [], total: 0 };
+      return served(path, options);
+    });
+    mount("/domains/7/overview");
+    const begin = await screen.findByRole("region", { name: "Where to begin" });
+    expect(within(begin).getByRole("link", { name: "map files" })).toHaveAttribute("href", "/domains/7/map-data/import");
+    expect(within(begin).getByRole("link", { name: "Start a problem" })).toHaveAttribute("href", "/domains/7/start");
+  });
+
   it("does not offer creation to readers", async () => {
     capabilities = [];
     mount("/domains/7/overview");

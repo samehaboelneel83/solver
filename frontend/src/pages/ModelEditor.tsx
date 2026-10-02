@@ -721,6 +721,11 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <CoverageRecipeForm
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          links={(relationshipTypes.data?.items ?? []).map((rel) => ({
+            name: rel.name,
+            from: entityTypes.data?.items.find((t) => t.id === rel.from_type_id)?.name ?? "",
+            to: entityTypes.data?.items.find((t) => t.id === rel.to_type_id)?.name ?? "",
+          }))}
           onApply={(edit) => setDraft((current) => current && edit(current))}
         />
       )}

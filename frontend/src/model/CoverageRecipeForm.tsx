@@ -15,10 +15,12 @@ const numberFields = (kind: Kind | undefined) =>
  * covering. Applying it writes the decisions, the rules and the goals into the draft, to read and
  * change like any other.
  */
-export default function CoverageRecipeForm({ kinds, data, onApply }: {
+export default function CoverageRecipeForm({ kinds, data, links = [], onApply }: {
   kinds: Kind[];
   /** The domain's parameters, each with the kinds it is indexed by. */
   data: Data[];
+  /** The domain's relationship types between kinds: a team's hospital, a van's depot. */
+  links?: { name: string; from: string; to: string }[];
   onApply: (edit: (draft: FormDraft) => FormDraft) => void;
 }) {
   const [sites, setSites] = useState("");
@@ -27,6 +29,24 @@ export default function CoverageRecipeForm({ kinds, data, onApply }: {
   const [budget, setBudget] = useState("");
   const [weights, setWeights] = useState<string[]>([]);
   const [coverAll, setCoverAll] = useState(false);
+  const [avoidLink, setAvoidLink] = useState("");
+  const [avoidUnless, setAvoidUnless] = useState("");
+  const siteLinks = links.flatMap((l): { rel: string; end: "from" | "to"; kind: string }[] =>
+    l.from === sites && l.to !== sites ? [{ rel: l.name, end: "from", kind: l.to }]
+      : l.to === sites && l.from !== sites ? [{ rel: l.name, end: "to", kind: l.from }] : []);
+  const avoid = siteLinks.find((l) => l.rel === avoidLink) ?? null;
+  const [staffKind, setStaffKind] = useState("");
+  const [staffCap, setStaffCap] = useState("");
+  const [staffLink, setStaffLink] = useState("");
+  const [staffReach, setStaffReach] = useState("");
+  // A link from the staff kind to another kind (team -> hospital), read from either end.
+  type StaffLink = { rel: string; end: "from" | "to"; kind: string };
+  const staffLinks = links.flatMap((l): StaffLink[] =>
+    l.from === staffKind && l.to !== staffKind ? [{ rel: l.name, end: "from" as const, kind: l.to }]
+      : l.to === staffKind && l.from !== staffKind ? [{ rel: l.name, end: "to" as const, kind: l.from }] : []);
+  const link = staffLinks.find((l) => l.rel === staffLink) ?? null;
+  const linkReach = link ? data.filter((d) => d.index.length === 2 && d.index.includes(link.kind) && d.index.includes(sites) && link.kind !== sites) : [];
+  const viaReach = linkReach.find((d) => d.name === staffReach) ?? linkReach[0];
   const reachOptions = data.filter((d) => d.index.length === 2 && sites && places && d.index.includes(sites) && d.index.includes(places) && sites !== places);
   const [reachChoice, setReachChoice] = useState("");
   const reach = reachOptions.find((d) => d.name === reachChoice) ?? reachOptions[0];
@@ -50,6 +70,11 @@ export default function CoverageRecipeForm({ kinds, data, onApply }: {
             sites, places, reach: reach.name, reachIndex: reach.index,
             ...(cost ? { cost } : {}), ...(budgetNumber !== undefined ? { budget: budgetNumber } : {}),
             weights, coverAll,
+            ...(avoid ? { avoid: { ...avoid, ...(avoidUnless ? { unless: avoidUnless } : {}) } } : {}),
+            ...(staffKind ? { staff: {
+              kind: staffKind, ...(staffCap ? { capacity: staffCap } : {}),
+              ...(link && viaReach ? { via: { rel: link.rel, end: link.end, kind: link.kind, reach: viaReach.name, reachIndex: viaReach.index } } : {}),
+            } } : {}),
           };
           onApply((draft) => applyCoverage(draft, recipe));
         }}
@@ -101,6 +126,61 @@ export default function CoverageRecipeForm({ kinds, data, onApply }: {
             <input type="radio" name="cover" checked={coverAll} onChange={() => setCoverAll(true)} /> cover every one, at the least cost
           </label>
         </fieldset>
+        {siteLinks.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-sky-200 pt-2">
+            Never open one linked by
+            <select aria-label="Avoid link" className={SELECT} value={avoidLink} onChange={(e) => setAvoidLink(e.target.value)}>
+              <option value="">(no such rule)</option>
+              {siteLinks.map((l) => <option key={l.rel} value={l.rel}>{l.rel} (to a {l.kind})</option>)}
+            </select>
+            {avoid && (
+              <>
+                unless its
+                <select aria-label="Avoid unless" className={SELECT} value={avoidUnless} onChange={(e) => setAvoidUnless(e.target.value)}>
+                  <option value="">(no exception)</option>
+                  {(kinds.find((k) => k.name === sites)?.attributes ?? []).filter((a) => a.data_type === "boolean")
+                    .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+                </select>
+                is yes
+              </>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2 border-t border-sky-200 pt-2">
+          Each open one needs one
+          <select aria-label="Staff kind" className={SELECT} value={staffKind}
+            onChange={(e) => { setStaffKind(e.target.value); setStaffCap(""); setStaffLink(""); setStaffReach(""); }}>
+            <option value="">(nobody: leave out)</option>
+            {kinds.filter((k) => k.name !== sites && k.name !== places).map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
+          </select>
+          {staffKind && (
+            <>
+              , serving at most its
+              <select aria-label="Staff capacity field" className={SELECT} value={staffCap} onChange={(e) => setStaffCap(e.target.value)}>
+                <option value="">(no limit)</option>
+                {numberFields(kinds.find((k) => k.name === staffKind)).map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+              {staffLinks.length > 0 && (
+                <>
+                  , and only {sites || "sites"} its
+                  <select aria-label="Staff link" className={SELECT} value={staffLink} onChange={(e) => setStaffLink(e.target.value)}>
+                    <option value="">(any {sites || "site"})</option>
+                    {staffLinks.map((l) => <option key={l.rel} value={l.rel}>{l.rel} ({l.kind})</option>)}
+                  </select>
+                  {link && (
+                    <>
+                      reaches, by
+                      <select aria-label="Staff reach data" className={SELECT} value={viaReach?.name ?? ""} onChange={(e) => setStaffReach(e.target.value)} disabled={!linkReach.length}>
+                        {linkReach.length === 0 && <option value="">no 0/1 data over {link.kind} and {sites} yet</option>}
+                        {linkReach.map((d) => <option key={d.name} value={d.name}>{d.name}[{d.index.join(", ")}]</option>)}
+                      </select>
+                    </>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button type="submit" disabled={!ready} className="rounded-md bg-sky-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
             Write these rules and goals

@@ -54,8 +54,8 @@ describe("choosing a domain (Epic UX, U-1)", () => {
   it("searches on the server and says when nothing matches", async () => {
     mount();
     await screen.findByRole("link", { name: /Fleet/ });
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search domains" }), { target: { value: "zzz" } });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No domains match"));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), { target: { value: "zzz" } });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No workspaces match"));
     expect(vi.mocked(apiFetch).mock.calls.some(([p]) => String(p).includes("q=zzz"))).toBe(true);
   });
 
@@ -67,7 +67,7 @@ describe("choosing a domain (Epic UX, U-1)", () => {
     mount();
     expect(await screen.findByText("There are no domains yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "start from a template on Home" })).toHaveAttribute("href", "/#templates");
-    fireEvent.click(screen.getByRole("button", { name: "Create a domain" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create a workspace" }));
     fireEvent.change(screen.getByLabelText("Name of the business area"), { target: { value: "Hospital staffing" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(await screen.findByTestId("landed")).toHaveTextContent("/domains/9/overview");
@@ -80,6 +80,6 @@ describe("choosing a domain (Epic UX, U-1)", () => {
     access.capabilities = [];
     mount();
     await screen.findByRole("link", { name: /Fleet/ });
-    expect(screen.queryByRole("button", { name: "Create a domain" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create a workspace" })).not.toBeInTheDocument();
   });
 });

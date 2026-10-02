@@ -699,12 +699,14 @@ export function buildSidebarGroups(
     });
     const help = select("help", "Help", ["help-start", "help-modeling"]);
     if (inProblem) return [
-      named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["runs", "Results"], ["map-data", "Map data"]]),
+      named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["scenarios", "What-ifs"], ["runs", "Results"]]),
+      // Where the data comes from, as in a workspace: computed values and the map are a planner's too (user trial).
+      named("data", "Data", [["workbench", "Data workbench"], ["parameters", "Data values"], ["map-data", "Map data"]]),
       named("context", "Navigate", [["problems", "Other problems"], ["domains", "All workspaces"]]),
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["map-data", "Map data"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["parameters", "Data values"], ["map-data", "Map data"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];

@@ -36,7 +36,7 @@ export default function DomainChooser() {
         {next !== "overview" && " You will go on to the page you asked for."}
       </p>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <SearchBox label="domains" onSearch={(text) => { setQ(text); setOffset(0); }} />
+        <SearchBox label={w("domain") + "s"} onSearch={(text) => { setQ(text); setOffset(0); }} />
         <CreateDomain next={next} />
       </div>
       {domains.isError ? (
@@ -44,7 +44,7 @@ export default function DomainChooser() {
       ) : domains.isLoading ? (
         <p role="status">Loading domains…</p>
       ) : items.length === 0 ? (
-        q ? <NoMatches label="domains" q={q} /> : (
+        q ? <NoMatches label={w("domain") + "s"} q={q} /> : (
           <div className="rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-700">
             <p className="font-medium">There are no domains yet.</p>
             <p className="mt-1">
@@ -94,17 +94,18 @@ function CreateDomain({ next }: { next: string }) {
   const create = useCreateEntity("public", "domain");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const w = useWords();
   if (!can("domain.edit")) return null;
   if (!open) {
     return (
       <button type="button" className="rounded-md bg-blue-700 px-3 py-2 text-sm font-medium text-white" onClick={() => setOpen(true)}>
-        Create a domain
+        Create a {w("domain")}
       </button>
     );
   }
   return (
     <form
-      aria-label="Create a domain"
+      aria-label={`Create a ${w("domain")}`}
       className="flex flex-wrap items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault();

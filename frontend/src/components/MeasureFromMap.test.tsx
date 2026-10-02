@@ -58,7 +58,9 @@ describe("computing distances from the map (queue R16a)", () => {
     expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, metric: "straight", max_m: 2500 });
     // Kept on screen with where the result went: a toast alone fades.
     const status = await screen.findByText(/within_reach: 3 pairs within 2.5 km linked/, { selector: "p[role=status]" });
-    expect(status.querySelector("a")).toHaveAttribute("href", "/domains/7/data/relationships");
+    // Simple (the default) has no Relationships page: the links are shown in the workbench.
+    expect(status.querySelector("a")).toHaveAttribute("href", "/domains/7/data/workbench");
+    expect(status).toHaveTextContent("a model walks them from either end");
   });
 
   it("asks again when a reach in km looks like metres", () => {

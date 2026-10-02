@@ -12,6 +12,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { useWords } from "../lib/words";
+import { useEntityTypes } from "../api/v1";
 
 const card = "rounded-2xl border border-slate-200 bg-white p-5";
 const link = "inline-flex items-center gap-2 rounded-md py-2 text-sm font-semibold text-blue-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
@@ -38,6 +39,9 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
     filters: { domain_id: String(domainId) }, orderBy: "name", order: "asc",
   });
   useDocumentTitle(`${listing ? "Problems" : "Overview"} · ${name}`);
+  // A new workspace says where to begin (user trial): its data first, then a problem on it.
+  const kinds = useEntityTypes(domainId, { limit: 1 });
+  const fresh = !listing && kinds.data?.total === 0 && problems.data?.total === 0 && can("domain.edit");
   const base = `/domains/${domainId}`;
   const pending = problems.isLoading || problems.isPlaceholderData;
   function change(values: Record<string, string>) {
@@ -52,6 +56,14 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
         <p className="mt-2 max-w-2xl text-sm text-slate-600">Shared data for this business area. Choose a problem to continue planning, or prepare its inputs.</p></div>
       {can("domain.edit") && <Link className={link} to={`/domains/${domainId}/start`}>New problem <ArrowRight size={16} aria-hidden /></Link>}
     </header>
+    {fresh && <section aria-label="Where to begin" className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+      <h2 className="mb-2 font-semibold text-slate-900">Where to begin</h2>
+      <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
+        <li>Bring your data: <Link className="font-medium text-blue-700 underline" to={`${base}/map-data/import`}>map files</Link> (GeoJSON, Shapefile, KML, DXF) or a <Link className="font-medium text-blue-700 underline" to={`${base}/data/records`}>spreadsheet</Link> (Excel, CSV).</li>
+        <li>On <Link className="font-medium text-blue-700 underline" to={`${base}/map-data`}>Map data</Link>, make records of the places, then compute distances and what is within reach.</li>
+        <li><Link className="font-medium text-blue-700 underline" to={`${base}/start`}>Start a problem</Link> on that data, and say what to decide.</li>
+      </ol>
+    </section>}
     {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {[
         { label: "Records & relationships", detail: "People, places, resources and other operational data.", href: "data", Icon: Database },
@@ -92,7 +104,7 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
           </nav>}
         </>}
     </section>
-    <p className="text-sm text-slate-500">Domain data is shared by its problems. Use a scenario when exploring different assumptions.</p>
+    <p className="text-sm text-slate-500">{w("Domain")} data is shared by its problems. Use a scenario when exploring different assumptions.</p>
   </div>;
 }
 

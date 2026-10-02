@@ -6,6 +6,7 @@ import {
   type ComputedSource, type EntityType, type Id, type Metric, type NetworkSource,
 } from "../api/v1";
 import { useToast } from "./ToastProvider";
+import { useEditorLevel } from "../model/editorLevel";
 
 /**
  * Data computed from the map (queue R16a; improvement plan, phase 2): between
@@ -38,11 +39,16 @@ const MAKES: [Make, string, string][] = [
 const MEASURED = new Set<Make>(["distances", "within", "within_flag"]);
 
 /** Where each result is kept, so the line that reports it can take the person there. */
-export function resultPlace(kind: Make, domainId: Id): { to: string; words: string } {
+export function resultPlace(kind: Make, domainId: Id, simple = false): { to: string; words: string; read: string } {
   if (kind === "distances" || kind === "within_flag" || kind === "overlap")
-    return { to: `/domains/${domainId}/data/parameters`, words: "Open it under Parameters" };
-  if (kind === "count" || kind === "elevation") return { to: `/domains/${domainId}/data/records`, words: "See it on the records" };
-  return { to: `/domains/${domainId}/data/relationships`, words: "See the links under Relationships" };
+    return { to: `/domains/${domainId}/data/parameters`, words: `Open it under ${simple ? "Data values" : "Parameters"}`,
+      read: "a model reads it once it is ticked under “Data this model reads”" };
+  if (kind === "count" || kind === "elevation")
+    return { to: `/domains/${domainId}/data/records`, words: "See it on the records", read: "a model reads it as a field of each record" };
+  // Simple has no Relationships page: the workbench shows each record's links.
+  return simple
+    ? { to: `/domains/${domainId}/data/workbench`, words: "See the links in the Data workbench", read: "a model walks them from either end" }
+    : { to: `/domains/${domainId}/data/relationships`, words: "See the links under Relationships", read: "a model walks them from either end" };
 }
 
 export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id; entityTypes: EntityType[] }) {
@@ -73,6 +79,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const within = useComputeWithin();
   const spatial = useComputeSpatial();
   const toast = useToast();
+  const [level] = useEditorLevel();
+  const simple = level === "simple";
   const timed = metric === "time" || metric === "network_time";
   const onLayer = metric === "network" || metric === "network_time";
   // Read only when a layer is to be travelled along: the form otherwise asks nothing of the server.
@@ -325,8 +333,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       {last && (
         <p role="status" className="mt-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm text-emerald-900">
           ✓ {last.text}.{" "}
-          <Link className="font-medium underline" to={resultPlace(last.kind, domainId).to}>{resultPlace(last.kind, domainId).words}</Link>
-          {" "}— a model reads it once it is ticked under “Data this model reads”.
+          <Link className="font-medium underline" to={resultPlace(last.kind, domainId, simple).to}>{resultPlace(last.kind, domainId, simple).words}</Link>
+          {" "}— {resultPlace(last.kind, domainId, simple).read}.
         </p>
       )}
       {notice && <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-amber-900">{notice}</p>}

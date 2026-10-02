@@ -33,6 +33,9 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
   const [field, setField] = useState("shape");
   const [attached, setAttached] = useState<ShapesAttached | null>(null);
   const types = useEntityTypes(dataset.domain_id, { limit: 500, offset: 0 });
+  const [addToExisting, setAddToExisting] = useState(false);
+  // Read from the kinds there are now, so renaming clears the warning at once.
+  const existing = plan && !done ? (types.data?.items ?? []).find((t) => t.name === plan.name.trim()) ?? null : null;
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -92,8 +95,22 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
               <label className="block">Each feature becomes a{" "}
                 <input aria-label="Kind of record" className={`${INPUT} w-32 font-mono`} value={plan.name}
                   onChange={(e) => setPlan({ ...plan, name: e.target.value })} />
-                {plan.exists && <span className="ml-1 text-amber-800">(exists: records are added, or refreshed by key)</span>}
               </label>
+              {existing && (
+                // User trial: hospitals went quietly into the "point" kind the sites had just made.
+                <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-amber-900">
+                  <p>
+                    A kind named <span className="font-mono">{existing.name}</span> already exists
+                    {existing.attributes.length > 0 && <> (fields: {existing.attributes.map((a) => a.name).join(", ")})</>}.
+                    These features would be added to it, and records with the same key refreshed.
+                    Rename it above to make a kind of their own.
+                  </p>
+                  <label className="mt-1 flex items-center gap-1">
+                    <input type="checkbox" checked={addToExisting} onChange={(e) => setAddToExisting(e.target.checked)} />
+                    Yes, add them to {existing.name}
+                  </label>
+                </div>
+              )}
               <label className="block">told apart by{" "}
                 <select aria-label="Key property" className={INPUT} value={plan.key ?? ""}
                   onChange={(e) => setPlan({ ...plan, key: e.target.value || null })}>
@@ -126,7 +143,7 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
                   </tbody>
                 </table>
               )}
-              <button type="button" disabled={busy}
+              <button type="button" disabled={busy || (!!existing && !addToExisting) || !plan.name.trim()}
                 onClick={() => void run(async () => {
                   const made = await makeRecords(dataset.id, layers, plan);
                   void client.invalidateQueries();
