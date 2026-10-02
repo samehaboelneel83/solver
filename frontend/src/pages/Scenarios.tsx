@@ -14,6 +14,9 @@ const SCENARIO_PAGE = 50;
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import RecordPicker from "../components/RecordPicker";
+import LimitSweep from "../components/LimitSweep";
+import { ruleLimit, type RuleSides } from "../model/ruleLimit";
+export { ruleLimit };
 import {
   solveProblem,
   useCreateRun,
@@ -250,6 +253,9 @@ function ForProblem({ problemId }: { problemId: Id }) {
         </ul>
       )}
       <Pager label="Scenario" offset={offset} size={SCENARIO_PAGE} total={total} onOffset={setOffset} />
+      {canSolve && canPublish && versionItems.length > 0 && (
+        <LimitSweep problemId={problemId} versionId={versionItems[0].id} scenarioHref={(scenarioId, runId) => runsOf(scenarioId, runId)} />
+      )}
 
       {editing === null ? (
         canPublish ? (
@@ -506,17 +512,7 @@ function ScenarioForm({
   );
 }
 
-type RuleSides = { id: string; note?: string; severity?: string; left?: unknown; right?: unknown };
 
-/** The number on the side of a rule that is one number -- what a scenario may change -- or null. */
-export function ruleLimit(rule: RuleSides): number | null {
-  for (const side of [rule.right, rule.left]) {
-    if (side && typeof side === "object" && Object.keys(side).length === 1 && typeof (side as { const?: unknown }).const === "number") {
-      return (side as { const: number }).const;
-    }
-  }
-  return null;
-}
 
 /** The limits typed that are numbers and differ from the model's own. */
 export function limitsOf(typed: Record<string, string>, rules: RuleSides[]): Record<string, number> {
