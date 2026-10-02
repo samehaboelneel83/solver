@@ -1530,6 +1530,16 @@ describe("the Simple level", () => {
     expect(within(blocks).getByRole("status")).toHaveTextContent("Complete");
   });
 
+  it("opens a blank rule as an equation when equations are the view chosen (benchmark re-test, October 2026)", async () => {
+    renderPage();
+    await screen.findByText("What must be true");
+    fireEvent.click(screen.getAllByRole("button", { name: "Show all as equations" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a rule" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Add a rule" })).getByRole("button", { name: /A blank rule/ }));
+    expect(await screen.findByLabelText("Equation for c_1")).toBeInTheDocument();
+    expect(screen.queryByTestId("rule-blocks")).toBeNull();
+  });
+
   it("names the declarations plainly, closes them to a line, and keeps choosing and creating behind + Add", async () => {
     renderPage();
     await screen.findByText("What must be true");

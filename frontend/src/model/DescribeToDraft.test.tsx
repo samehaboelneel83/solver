@@ -20,3 +20,11 @@ it("proposes a draft from the words, says what is missing, and writes it when as
   expect(d.variables.choose).toEqual({ index: ["project"], domain: "binary" });
   expect(screen.getByRole("status")).toHaveTextContent("Written below");
 });
+
+it("starts from the words typed on the Start page for this workspace (benchmark re-test, October 2026)", async () => {
+  const { keepWords } = await import("./draftFromWords");
+  keepWords(7, "Which projects should we fund with a budget of 900");
+  render(<DescribeToDraft kinds={KINDS} data={[]} onApply={vi.fn()} startOpen domainId={7} />);
+  expect(screen.getAllByLabelText("The problem in words").at(-1)).toHaveValue("Which projects should we fund with a budget of 900");
+  localStorage.clear();
+});

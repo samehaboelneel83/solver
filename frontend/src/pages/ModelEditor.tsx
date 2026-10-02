@@ -1,6 +1,7 @@
 import CoverageRecipeForm from "../model/CoverageRecipeForm";
 import RecipesForm from "../model/RecipesForm";
 import DescribeToDraft from "../model/DescribeToDraft";
+import { keptWords } from "../model/draftFromWords";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -300,6 +301,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const ruleIds = (draft?.constraints ?? []).map((rule) => rule.id);
   // Rules composed from a shape in this visit, which open in their boxes.
   const [composed, setComposed] = useState<Set<string>>(() => new Set());
+  const [blankRules, setBlankRules] = useState<Set<string>>(() => new Set());
   const ruleKeys = useMemo(() => {
     const keys = stableKeys(ruleIdentity.current.ids, ruleIdentity.current.keys, ruleIds);
     ruleIdentity.current = { ids: ruleIds, keys };
@@ -735,6 +737,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
       {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
         <DescribeToDraft
+          domainId={domainId}
+          startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0 && keptWords(domainId) !== ""}
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, role: t.role, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
           onApply={(edit) => setDraft((current) => current && edit(current))}
@@ -818,7 +822,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             <ConstraintCard
               key={ruleKeys[position]}
               view={equationView}
-              startIn={composed.has(constraint.id) ? "boxes" : undefined}
+              // Composed from a shape: in its boxes, to see what was filled in. A blank rule opens where the
+              // person works -- in equations, to type it (benchmark re-test, October 2026: each new rule
+              // needed a reload to type it).
+              startIn={composed.has(constraint.id) && !(blankRules.has(constraint.id) && equationView === "equation") ? "boxes" : undefined}
               simple={simple}
               openSignal={opening?.kind === "rule" && opening.id === constraint.id ? opening.seq : undefined}
               constraint={constraint}
@@ -865,6 +872,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                   onPick={() => {
                     const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
                     setComposed((current) => new Set(current).add(id));
+                    setBlankRules((current) => new Set(current).add(id));
                     setDraft((current) => current && {
                       ...current,
                       constraints: [...current.constraints, {
@@ -1114,6 +1122,19 @@ function ConstraintCard({
   const { note: _note, id: _id, ...arithmetic } = constraint;
   const said = canonicalJson(arithmetic);
   const [noteFits, setNoteFits] = useState(said);
+  // One number changed (10000 → 5) and the note says the old one: the note follows, unasked
+  // (benchmark re-test, October 2026: "at least 10000 apart" was kept beside a rule of 5).
+  const lastSaid = useRef({ said, rule: constraint });
+  useEffect(() => {
+    const before = lastSaid.current;
+    if (before.said === said) return;
+    lastSaid.current = { said, rule: constraint };
+    const followed = noteFits === before.said ? noteWithNumber(constraint.note, before.rule, constraint) : null;
+    if (followed !== null) {
+      setNoteFits(said);
+      onChange({ ...constraint, note: followed });
+    }
+  }, [said, constraint, noteFits, onChange]);
   const noteStale = Boolean(constraint.note?.trim()) && said !== noteFits;
   // Condition, chance and the structure tree: advanced, so folded away unless
   // the rule already uses a chance.
@@ -2091,4 +2112,34 @@ function WeightInput({ id, weight, onWeight }: { id: string; weight: number; onW
       {!reads && <span className="block text-xs text-red-700">A weight is a number, such as 2 or 0.5.</span>}
     </>
   );
+}
+
+
+/** The numbers a rule's arithmetic holds, in order. */
+function constantsOf(value: unknown, out: number[] = []): number[] {
+  if (Array.isArray(value)) value.forEach((v) => constantsOf(v, out));
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      if ((k === "const" || k === "value") && typeof v === "number") out.push(v);
+      else if (k !== "note" && k !== "id") constantsOf(v, out);
+    }
+  }
+  return out;
+}
+
+/** The note with its number brought up to date, when exactly one number of the rule changed and the
+ * note says the old one; else null. */
+export function noteWithNumber(note: string | undefined, before: unknown, after: unknown): string | null {
+  if (!note?.trim()) return null;
+  const a = constantsOf(before), b = constantsOf(after);
+  if (a.length !== b.length) return null;
+  const changed = a.map((v, i) => [v, b[i]] as const).filter(([x, y]) => x !== y);
+  if (changed.length !== 1) return null;
+  const [old, now] = changed[0];
+  const shown = (n: number) => [String(n), n.toLocaleString("en-US")];
+  for (const text of shown(old)) {
+    const at = new RegExp(`(^|[^0-9.,])${text.replace(/[.,]/g, (c) => `\\${c}`)}(?![0-9])`);
+    if (at.test(note)) return note.replace(at, (_m, lead: string) => `${lead}${now.toLocaleString("en-US")}`);
+  }
+  return null;
 }

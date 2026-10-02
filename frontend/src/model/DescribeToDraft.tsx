@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormDraft } from "./draftIr";
-import { proposeDraft, type Data, type Kind, type Recipe } from "./draftFromWords";
+import { keptWords, proposeDraft, type Data, type Kind, type Recipe } from "./draftFromWords";
 
 const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["selection", "projects within a budget"],
   ["network", "a supply network"], ["phasing", "projects over periods"]];
@@ -10,10 +10,12 @@ const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["sele
  * for, filled in from this workspace's kinds, fields and data, each choice with its reason -- and
  * what is still missing. Written into the model only when asked.
  */
-export default function DescribeToDraft({ kinds, data, onApply, startOpen = false }: {
+export default function DescribeToDraft({ kinds, data, onApply, startOpen = false, domainId }: {
   kinds: Kind[]; data: Data[]; onApply: (edit: (draft: FormDraft) => FormDraft) => void; startOpen?: boolean;
+  /** The words typed on the Start page for this workspace start the box. */
+  domainId?: number | string;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => keptWords(domainId));
   const [only, setOnly] = useState<Recipe | "">("");
   const [done, setDone] = useState(false);
   const proposal = proposeDraft(text, kinds, data, only || undefined);

@@ -28,6 +28,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { exampleWords } from "../lib/examples";
 import { suggest } from "../lib/describeProblem";
+import { keepWords, keptWords } from "../model/draftFromWords";
 import { parseRouteId } from "../lib/routeId";
 
 type Way = "example" | "sheet" | "scratch";
@@ -100,7 +101,7 @@ function Start({ domainId }: { domainId: Id }) {
           </button>
         ))}
       </div>
-      <InWords />
+      <InWords domainId={domainId} />
       {way === "example" && <FromExample domainId={domainId} name={name} onMade={land} />}
       {way === "sheet" && <FromSheet domainId={domainId} name={name} setName={setName} onMade={land} />}
       {way === "scratch" && <FromScratch domainId={domainId} name={name} onMade={land} />}
@@ -109,16 +110,16 @@ function Start({ domainId }: { domainId: Id }) {
 }
 
 /** Describe it in words (improvement plan 5.6): where to start, and which tools the words call for. */
-function InWords() {
+function InWords({ domainId }: { domainId: Id }) {
   const templates = useTemplates();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => keptWords(domainId));
   const available = (templates.data?.items ?? []).map((row) => row.name);
   const found = suggest(text, available);
   return (
     <details className="rounded-lg border border-slate-200 bg-white p-4">
       <summary className="cursor-pointer font-semibold text-slate-900">Not sure where to start? Describe the problem in your own words</summary>
       <textarea aria-label="Your problem in words" className={`${INPUT} mt-3 h-24 w-full`} value={text}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => { setText(event.target.value); keepWords(domainId, event.target.value); }}
         placeholder="e.g. Where to keep 40 trucks so every hotspot is within 15 minutes, then a crew roster with 10 hours rest between shifts" />
       {text.trim().length >= 12 && (found.length ? (
         <ul className="mt-3 space-y-2 text-sm">

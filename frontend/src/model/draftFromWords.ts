@@ -211,3 +211,23 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     ...(cost ? { cost } : {}), ...(budget !== undefined ? { budget } : {}), weights, coverAll } satisfies CoverageRecipe);
   return { recipe: "coverage", title: TITLES.coverage, choices, missing, apply: recipe ? (d) => applyCoverage(d, recipe) : null };
 }
+
+/** The words typed on the Start page, kept per workspace so the model editor's "Describe" box starts
+ * from them (benchmark re-test, October 2026: they were typed twice). */
+const WORDS_KEY = (domainId: number | string) => `solver_problem_words:${domainId}`;
+export function keepWords(domainId: number | string | null | undefined, text: string): void {
+  if (domainId == null) return;
+  try {
+    if (text.trim()) localStorage.setItem(WORDS_KEY(domainId), text);
+  } catch {
+    /* kept for this page only */
+  }
+}
+export function keptWords(domainId: number | string | null | undefined): string {
+  if (domainId == null) return "";
+  try {
+    return localStorage.getItem(WORDS_KEY(domainId)) ?? "";
+  } catch {
+    return "";
+  }
+}

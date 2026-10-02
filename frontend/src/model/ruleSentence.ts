@@ -10,7 +10,7 @@
  */
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { describeWhen, type Binding, type Constraint, type IrFilter, type Term } from "./terms";
+import { describeWhen, isIndexFilter, type Binding, type Constraint, type IrFilter, type Term } from "./terms";
 import { walkWords } from "./walkWords";
 import { entryWords, OP_WORDS } from "./whereWords";
 
@@ -28,10 +28,15 @@ function where(binding: Binding, rels: Rels): string {
     const op = OP_WORDS[f.op] ?? f.op;
     return `${f.attr} ${op} ${Array.isArray(f.value) ? f.value.join(", ") : typeof f.value === "object" && f.value !== null ? cellText(f.value) : String(f.value)}`;
   };
-  const filters = (binding.where ?? []).map((entry) => entryWords(entry, said));
+  // Another item of the set is not a field of this one: "every site c2 after c", not "whose after c"
+  // (benchmark re-test, October 2026).
+  const entries = binding.where ?? [];
+  const against = entries.filter(isIndexFilter).map((entry) => entryWords(entry, said));
+  const filters = entries.filter((entry) => !isIndexFilter(entry)).map((entry) => entryWords(entry, said));
   const tree = rels.some((r) => r.name === binding.via?.rel && r.hierarchy);
   const walk = binding.via ? ` ${walkWords(binding.via, tree)}` : "";
-  return `every ${binding.set} ${binding.index}${filters.length ? ` whose ${filters.join(" and ")}${walk ? "," : ""}` : ""}${walk}`;
+  return `every ${binding.set} ${binding.index}${against.length ? ` ${against.join(" and ")}` : ""}${
+    filters.length ? `${against.length ? "," : ""} whose ${filters.join(" and ")}${walk ? "," : ""}` : ""}${walk}`;
 }
 
 /** `-1 × x` reads as "minus x" inside a sum of terms. */
@@ -57,9 +62,12 @@ export function termSentence(term: Term, rels: Rels = []): string {
       .join(" ");
   }
   if ("mul" in term) {
+    // A sum inside a product keeps its brackets: "price times (a plus b)" is not "price times a plus b"
+    // (benchmark re-test, October 2026).
+    const grouped = (part: Term) => ("add" in part && part.add.length > 1 ? `(${t(part)})` : t(part));
     const minus = negated(term);
-    if (minus) return `minus ${t(minus)}`;
-    return `${t(term.mul[0])} times ${t(term.mul[1])}`;
+    if (minus) return `minus ${grouped(minus)}`;
+    return `${grouped(term.mul[0])} times ${grouped(term.mul[1])}`;
   }
   if ("fn" in term) return `${FUNCTIONS[term.fn]?.text ?? term.fn} of ${t(term.of)}`;
   if ("predict" in term) return `what ${term.predict} predicts from ${term.of.map(t).join(" and ")}`;
