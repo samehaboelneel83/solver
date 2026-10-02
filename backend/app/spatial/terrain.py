@@ -83,7 +83,9 @@ class TerrainSource:
 def terrain_source(index_url: str, fetch: Fetch = fetch_bytes) -> TerrainSource:
     """The terrain tileset of the index at `index_url`, its tile addresses reachable from here."""
     if not index_url.lower().startswith(("http://", "https://")):
-        raise TerrainError("elevation needs the tile index address (setting spatial.tiles_index) -- it is not set")
+        raise TerrainError(
+            "This installation has no terrain map set up, so ground height cannot be read. Ask an administrator to "
+            "set it (setting spatial.tiles_index), or import heights as a field of the records.")
     last: Exception | None = None
     for url in candidates(index_url):
         try:

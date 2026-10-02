@@ -62,7 +62,10 @@ class Network:
 def vector_source(index_url: str, fetch: Callable[[str], bytes | None] = fetch_bytes) -> str:
     """The tile address template of the index's vector tileset with roads."""
     if not index_url.lower().startswith(("http://", "https://")):
-        raise RoadsError("road distances need the tile index address (setting spatial.tiles_index) -- it is not set")
+        raise RoadsError(
+            "This installation has no road map set up, so \"along the roads\" cannot be measured. Import your own "
+            "roads as map data and choose \"along a lines layer I imported\", or ask an administrator to set the "
+            "road map (setting spatial.tiles_index).")
     last: Exception | None = None
     for url in candidates(index_url):
         try:

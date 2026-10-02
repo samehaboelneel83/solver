@@ -18,6 +18,7 @@ import type { Constraint, ObjectiveTerm } from "./terms";
 import { checkDeclaration, declarationSentence, DeclarationView, type DeclarationKind } from "./declarationViews";
 import AddMenu from "../components/AddMenu";
 import { useCardView, ViewToggle, type EquationView } from "./ViewToggle";
+import { formatApiError } from "../api/errors";
 
 /**
  * What a model declares: its sets, the domain parameters it reads, and the
@@ -1196,7 +1197,7 @@ function CreateForm({ title, button, ready, onSubmit, children }: {
         try {
           setSaid({ error: false, text: await onSubmit() });
         } catch (error) {
-          setSaid({ error: true, text: error instanceof Error ? error.message : String(error) });
+          setSaid({ error: true, text: formatApiError(error) });
         } finally {
           setBusy(false);
         }

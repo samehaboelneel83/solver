@@ -8,7 +8,7 @@ describe("formatApiError", () => {
       422,
       JSON.stringify({ detail: [{ loc: ["body", "code"], msg: "Field required" }] })
     );
-    expect(formatApiError(err)).toBe("code: Field required");
+    expect(formatApiError(err)).toBe("code is required");
   });
 
   it("formats a 422 with multiple field errors as multiple lines", () => {
@@ -21,7 +21,7 @@ describe("formatApiError", () => {
         ],
       })
     );
-    expect(formatApiError(err)).toBe("code: Field required\nname: String too short");
+    expect(formatApiError(err)).toBe("code is required\nname: String too short");
   });
 
   it("joins every loc segment after the leading body/query/path marker with a dot", () => {
@@ -120,13 +120,14 @@ describe("formatApiError", () => {
         422,
         JSON.stringify({ detail: { message: "m", field: "f", kind: "k" } })
       );
-      expect(formatApiError(err)).toBe(JSON.stringify({ message: "m", field: "f", kind: "k" }));
+      // Its own sentence is what a person reads (benchmark, October 2026: raw JSON was shown).
+      expect(formatApiError(err)).toBe("m");
     });
   });
 
   it("renders a non-string, non-array detail as JSON", () => {
     const err = new ApiError(400, JSON.stringify({ detail: { code: "conflict", reason: "locked" } }));
-    expect(formatApiError(err)).toBe(JSON.stringify({ code: "conflict", reason: "locked" }));
+    expect(formatApiError(err)).toBe("code: conflict; reason: locked");
   });
 
   it("formats a 409 conflict with a plain-text detail", () => {
@@ -176,5 +177,15 @@ describe("formatApiError", () => {
 
       expect(formatApiError(err)).toBe("Server error (500). Please try again.");
     });
+  });
+});
+
+describe("validation in plain words (benchmark, October 2026)", () => {
+  it("says what a limit means instead of the validator's text", async () => {
+    const { plainValidation } = await import("./errors");
+    expect(plainValidation("Input should be less than or equal to 20000")).toBe("must be at most 20000");
+    expect(plainValidation("Field required")).toBe("is required");
+    expect(plainValidation("String should match pattern '^[a-z][a-z0-9_]*$'")).toBe("must be lower-case letters, digits and _, starting with a letter");
+    expect(plainValidation("something else")).toBe("something else");
   });
 });

@@ -70,6 +70,25 @@ function fieldNameFromLoc(loc: (string | number)[] | undefined): string {
  * - anything else that is an ApiError: the raw body.
  * - a non-ApiError Error: its `message`.
  */
+/** A validation message in plain words: "must be at most 20000", not "Input should be less than or equal to 20000"
+ * (benchmark, October 2026: raw validation text shown to a planner). Anything else as it came. */
+export function plainValidation(msg: string): string {
+  const rules: [RegExp, string][] = [
+    [/^Input should be less than or equal to (.+)$/, "must be at most $1"],
+    [/^Input should be greater than or equal to (.+)$/, "must be at least $1"],
+    [/^Input should be less than (.+)$/, "must be below $1"],
+    [/^Input should be greater than (.+)$/, "must be above $1"],
+    [/^Field required$/, "is required"],
+    [/^Input should be a valid number.*$/, "must be a number"],
+    [/^Input should be a valid integer.*$/, "must be a whole number"],
+    [/^String should match pattern .*$/, "must be lower-case letters, digits and _, starting with a letter"],
+    [/^String should have at most (\d+) characters?$/, "must be at most $1 characters"],
+    [/^List should have at most (\d+) items?.*$/, "may have at most $1 items"],
+  ];
+  for (const [pattern, words] of rules) if (pattern.test(msg)) return msg.replace(pattern, words);
+  return msg;
+}
+
 export function formatApiError(err: unknown): string {
   if (err instanceof NetworkError) {
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -89,8 +108,10 @@ export function formatApiError(err: unknown): string {
     if (err.status === 422 && Array.isArray(detail)) {
       const lines = (detail as ValidationDetail[]).map((d) => {
         const field = fieldNameFromLoc(d.loc);
-        const msg = d.msg ?? "Invalid value";
-        return field ? `${field}: ${msg}` : msg;
+        const raw = d.msg ?? "Invalid value";
+        const msg = plainValidation(raw);
+        // "code is required", "join_m must be at most 20000"; an unrecognised message keeps its colon.
+        return field ? (msg !== raw ? `${field} ${msg}` : `${field}: ${msg}`) : msg;
       });
       if (lines.length > 0) {
         return lines.join("\n");
@@ -107,7 +128,12 @@ export function formatApiError(err: unknown): string {
     }
 
     if (detail !== undefined && !Array.isArray(detail)) {
-      return JSON.stringify(detail);
+      // An object: its own sentence when it carries one, else its parts in words -- never raw JSON
+      // (benchmark, October 2026).
+      const o = (detail ?? {}) as Record<string, unknown>;
+      const said = [o.message, o.says, o.detail].find((v) => typeof v === "string" && v.trim());
+      if (said) return said as string;
+      return Object.entries(o).map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("; ");
     }
 
     return err.message;

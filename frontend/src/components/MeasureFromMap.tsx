@@ -7,6 +7,7 @@ import {
 } from "../api/v1";
 import { useToast } from "./ToastProvider";
 import { useEditorLevel } from "../model/editorLevel";
+import { formatApiError } from "../api/errors";
 
 /**
  * Data computed from the map (queue R16a; improvement plan, phase 2): between
@@ -118,6 +119,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
     if (from === "" || (kind !== "touching" && kind !== "elevation" && to === "")) return setError("Choose both kinds.");
     const fromId = from as Id;
     const toId = (to === "" ? from : to) as Id;
+    // Said here rather than as the server's validation text (benchmark, October 2026).
+    if (onLayer && Number(joinM) > 20000) return setError("Join places up to: at most 20,000 m (20 km). A place further from every line is left out and named.");
     const net = onLayer ? network() : null;
     if (onLayer && !net) return setError("Choose imported map data with a lines layer to travel along.");
     const along = net ? { network: net } : {};
@@ -161,7 +164,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         report(kind === "inside" ? `${name}: ${done.links ?? 0} places linked to their area${outside}` : `${name}: ${done.pairs ?? 0} overlapping pairs`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatApiError(err));
     }
   }
 
@@ -256,7 +259,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
                      onChange={(event) => setDefaultKmh(event.target.value)} />
             </div>
             <div>
-              <label htmlFor={`${id}-join`} className="block text-xs text-slate-600">Join places up to (m)</label>
+              <label htmlFor={`${id}-join`} className="block text-xs text-slate-600">Join places up to (m, at most 20,000)</label>
               <input id={`${id}-join`} className="w-20 rounded border px-2 py-1 text-sm" inputMode="decimal" value={joinM}
                      title="A place further than this from every line cannot join the network; its pairs are left out and named."
                      onChange={(event) => setJoinM(event.target.value)} />

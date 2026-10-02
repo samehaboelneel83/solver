@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getEntity, updateAttribute, updateEntity, type Id, type MissingGap } from "../api/v1";
+import { formatApiError } from "../api/errors";
 
 const INPUT = "rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900";
 
@@ -74,7 +75,7 @@ export default function MissingValues({ gap, domainId }: { gap: MissingGap; doma
       // Readiness, the preflight and the records all read these values.
       await client.invalidateQueries();
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : "The values could not be saved.");
+      setProblem(error instanceof Error ? formatApiError(error) : "The values could not be saved.");
     } finally {
       setBusy(false);
     }

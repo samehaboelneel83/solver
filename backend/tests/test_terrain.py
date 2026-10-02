@@ -90,7 +90,7 @@ def test_the_terrain_tileset_is_found_and_its_tiles_rewritten_to_the_host_that_a
 
 
 def test_what_cannot_be_read_is_named():
-    with pytest.raises(TerrainError, match="not set"):
+    with pytest.raises(TerrainError, match="no terrain map set up"):
         terrain_source("", _server(lambda lon, lat: 0))
     with pytest.raises(TerrainError, match="could not be reached"):
         terrain_source("http://localhost:8080/index.json", _server(lambda lon, lat: 0, index_hosts=()))
