@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.data_checks import depths, loops
 from app.main import app
 from tests.test_api_relationships import (  # noqa: F401
-    _entity, _rel_id, auth_headers, domain_id, ensure_admin_seeded, hierarchy_type_id, types,
+    _entity, _rel_id, _rel_type_id, auth_headers, domain_id, ensure_admin_seeded, hierarchy_type_id, types,
 )
 
 client = TestClient(app)
@@ -43,25 +43,29 @@ def test_a_hierarchy_too_deep_and_records_left_outside_it(auth_headers, domain_i
     assert {f["code"] for f in _checks(domain_id, auth_headers, max_depth=10)} == {"outside_tree"}
 
 
-def test_reference_loops_switched_off_targets_and_empty_references(auth_headers, domain_id, types):  # noqa: F811
+def test_loops_switched_off_targets_and_empty_references(auth_headers, domain_id, types):  # noqa: F811
     employee = types["employee"]
     made = client.post(f"/api/v1/entity-types/{employee}/attributes",
                        json={"name": "manager", "data_type": "reference", "target_type_id": employee}, headers=auth_headers)
     assert made.status_code == 201, made.text
     a = _entity(client, auth_headers, employee, "a")
-    _entity(client, auth_headers, employee, "b", attrs={"manager": "a"})
+    b = _entity(client, auth_headers, employee, "b", attrs={"manager": "a"})
     _entity(client, auth_headers, employee, "c")
     _entity(client, auth_headers, employee, "gone", active=False)
     _entity(client, auth_headers, employee, "d", attrs={"manager": "gone"})
-    assert client.patch(f"/api/v1/entities/{a}", json={"attrs": {"manager": "b"}}, headers=auth_headers).status_code == 200
+    # A reference refuses a loop (migration 0098); an ordinary self-relationship can still hold one.
+    assert client.patch(f"/api/v1/entities/{a}", json={"attrs": {"manager": "b"}}, headers=auth_headers).status_code == 422
+    mentors = _rel_type_id(client, auth_headers, domain_id, name="mentors", from_type_id=employee, to_type_id=employee)
+    _rel_id(client, auth_headers, mentors, a, b)
+    _rel_id(client, auth_headers, mentors, b, a)
 
     findings = _checks(domain_id, auth_headers)
     assert [f["severity"] for f in findings] == sorted((f["severity"] for f in findings),
                                                        key=["error", "warning", "info"].index)
     found = {f["code"]: f for f in findings}
-    assert [r["key"] for r in found["loop"]["records"]] == ["a", "b"] and found["loop"]["attribute"] == "manager"
+    assert [r["key"] for r in found["loop"]["records"]] == ["a", "b"] and found["loop"]["relationship"] == "mentors"
     assert [r["key"] for r in found["inactive_target"]["records"]] == ["d"]
-    assert [r["key"] for r in found["empty_reference"]["records"]] == ["c"]
+    assert [r["key"] for r in found["empty_reference"]["records"]] == ["a", "c"]  # a: the loop was refused
 
 
 def test_an_unknown_domain_is_404(auth_headers):  # noqa: F811

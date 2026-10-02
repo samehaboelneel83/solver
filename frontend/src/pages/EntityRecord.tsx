@@ -57,7 +57,7 @@ const COLUMN_FIELDS = ["key", "label", "sort_order", "active"];
  * `unknown_attribute` also carries an attribute name, but by definition it
  * is one with no definition and so no control -- it becomes a general
  * message instead of being attached to nothing. */
-const ATTRIBUTE_KINDS = new Set(["required_attribute", "attribute_type"]);
+const ATTRIBUTE_KINDS = new Set(["required_attribute", "attribute_type", "cycle"]);
 
 /**
  * Splits a refused save into per-control messages and a general one.

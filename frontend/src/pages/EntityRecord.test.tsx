@@ -850,6 +850,14 @@ describe("entityServerErrors", () => {
     expect(result.general).toBeNull();
   });
 
+  it("routes a refused loop through a reference to that reference's control", () => {
+    const result = entityServerErrors(
+      err(422, { detail: [{ loc: ["body", "grade"], msg: 'grade: "boss" would make a loop', kind: "cycle" }] }),
+      names
+    );
+    expect(result.fields).toStrictEqual({ [attrField("grade")]: 'grade: "boss" would make a loop' });
+  });
+
   it("routes a column refusal to that column, not to an attribute of the same name", () => {
     const result = entityServerErrors(err(422, { detail: [{ loc: ["body", "key"], msg: "bad key" }] }), names);
     expect(result.fields).toStrictEqual({ key: "bad key" });

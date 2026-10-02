@@ -52,11 +52,23 @@ def test_a_self_reference_attribute_is_a_tree_read_the_other_way_and_its_loops_a
     assert [d["key"] for d in tree["descendants"]] == ["dev"]
     assert tree["loop"] is False
 
-    # Nothing refuses a loop through a reference: the boss reports to the dev.
-    patched = client.patch(f"/api/v1/entities/{boss}", json={"attrs": {"manager": "dev"}}, headers=auth_headers)
-    assert patched.status_code == 200, patched.text
-    (looped,) = _trees(lead, auth_headers).values()
-    assert looped["loop"] is True
+    # The database refuses a loop through the reference (migration 0098): the boss cannot report
+    # to the dev, and the refusal names the field.
+    refused = client.patch(f"/api/v1/entities/{boss}", json={"attrs": {"manager": "dev"}}, headers=auth_headers)
+    assert refused.status_code == 422, refused.text
+    (item,) = refused.json()["detail"]
+    assert item["kind"] == "cycle" and item["loc"][-1] == "manager" and '"dev" would make a loop' in item["msg"]
+    assert client.patch(f"/api/v1/entities/{boss}", json={"attrs": {"manager": "boss"}}, headers=auth_headers).status_code == 422
+
+
+def test_an_ordinary_self_relationship_may_loop_and_the_tree_says_so(auth_headers, domain_id, types):  # noqa: F811
+    unit = types["unit"]
+    supplies = _rel_type_id(client, auth_headers, domain_id, name="supplies", from_type_id=unit, to_type_id=unit)
+    a, b, c = (_entity(client, auth_headers, unit, k) for k in ("a", "b", "c"))
+    for x, y in ((a, b), (b, c), (c, a)):
+        _rel_id(client, auth_headers, supplies, x, y)
+    tree = _trees(b, auth_headers)["supplies"]
+    assert tree["loop"] is True and tree["via_attribute"] is None
 
 
 def test_a_record_of_an_unrelated_kind_has_no_trees(auth_headers, types, hierarchy_type_id):  # noqa: F811
