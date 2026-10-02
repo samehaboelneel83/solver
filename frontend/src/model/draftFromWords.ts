@@ -7,12 +7,12 @@
  */
 import { applyCoverage, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyNetwork, applyPhasing, applySelection, type AllocationRecipe, type NetworkRecipe, type PhasingRecipe,
-  type SelectionRecipe } from "./recipes";
+import { applyAllocation, applyFlow, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type FlowRecipe, type Link,
+  type NetworkRecipe, type PhasingRecipe, type SelectionRecipe } from "./recipes";
 
 export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string }[] };
 export type Data = { name: string; index: string[] };
-export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation";
+export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow";
 
 export type Proposal = {
   recipe: Recipe;
@@ -30,6 +30,7 @@ const TITLES: Record<Recipe, string> = {
   network: "A supply network: open, ship, deliver",
   phasing: "Start projects over periods within each period's budget",
   allocation: "Share each one out among options (land among crops)",
+  flow: "Traffic: route the trips between zones over the roads",
 };
 
 const SIGNALS: Record<Recipe, RegExp> = {
@@ -39,6 +40,8 @@ const SIGNALS: Record<Recipe, RegExp> = {
   phasing: /\b(years?|yearly|annual\w*|quarters?|periods?|phas\w*|over time|month\w*|multi-?year|horizon)\b/g,
   // Benchmark re-test, October 2026: crop planning matched no recipe.
   allocation: /\b(allocat\w*|crops?|plant\w*|feddans?|hectares?|acres?|land|grow\w*|share\w* (out|of)|split|mix|irrigat\w*|sow\w*|area to)\b/g,
+  // Benchmark re-test, October 2026: a trips table over a road network matched no recipe.
+  flow: /\b(traffic|congest\w*|trips?|commut\w*|junctions?|intersections?|roads?|od matrix|origin-destination|lanes?|widen\w*|travel times?)\b/g,
 };
 
 const words = (name: string) => name.toLowerCase().split(/_+/).filter(Boolean);
@@ -111,7 +114,7 @@ export function recipeFor(text: string): { recipe: Recipe; said: string[] }[] {
   return found.sort((a, b) => b.said.length - a.said.length || (a.recipe === "phasing" ? -1 : 1));
 }
 
-export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: Recipe): Proposal | null {
+export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: Recipe, links: Link[] = []): Proposal | null {
   if (text.trim().length < 12 || !kinds.length) return null;
   const ranked = recipeFor(text);
   const best = only ? ranked.find((r) => r.recipe === only) ?? { recipe: only, said: [] } : ranked[0];
@@ -202,6 +205,39 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
       ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
       ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(all ? { all } : {}) } satisfies AllocationRecipe);
     return { recipe: "allocation", title: TITLES.allocation, choices, missing, apply: recipe ? (d) => applyAllocation(d, recipe) : null };
+  }
+
+  if (best.recipe === "flow") {
+    const square = (k: Kind) => data.some((d) => d.index.length === 2 && d.index[0] === k.name && d.index[1] === k.name);
+    const twoLinks = (arc: string, node: string) => links.filter((l) => l.from === arc && l.to === node).length >= 2;
+    const nodes = pick(text, kinds, /zone|junction|intersection|node|district|area|taz|centroid|place/,
+      (k) => square(k) || kinds.some((a) => twoLinks(a.name, k.name)));
+    const arcs = pick(text, kinds, /road|link|street|segment|arc|edge|lane|route/, (k) => !!nodes && twoLinks(k.name, nodes.kind.name),
+      nodes ? [nodes.kind.name] : []);
+    note("Trips between", nodes?.kind.name, nodes?.why ?? "");
+    note("Over", arcs?.kind.name, arcs?.why ?? "");
+    need(nodes, "a kind of record trips go between (zones, junctions)");
+    if (nodes) need(arcs, `a kind of record for the roads, each linked twice to ${nodes.kind.name}: where it starts and where it ends`);
+    const { startsAt, endsAt } = nodes && arcs ? endsOf(links.filter((l) => l.from === arcs.kind.name && l.to === nodes.kind.name)) : {};
+    if (startsAt && endsAt) choices.push(`A road starts at ${startsAt} and ends at ${endsAt} — their names`);
+    if (nodes && arcs) need(startsAt && endsAt ? startsAt : undefined, `which link of ${arcs.kind.name} is where it starts and which where it ends: name them from_… and to_…`);
+    const square2 = data.filter((d) => nodes && d.index.length === 2 && d.index[0] === nodes.kind.name && d.index[1] === nodes.kind.name);
+    const trips = square2.find((d) => /trip|od|demand|flow|volume|journey/.test(d.name)) ?? square2[0];
+    note("How many trips", trips?.name, "data over two of them, origin first");
+    if (nodes) need(trips, `a data value over ${nodes.kind.name} twice (origin, destination): how many trips go from one to the other`);
+    const time = field(arcs?.kind, /time|minutes|min\b|travel|duration|length|km|dist/);
+    note("Time on a road", time, "its name");
+    if (arcs) need(time, `a number field of ${arcs.kind.name} for how long it takes`);
+    const capacity = field(arcs?.kind, /capacity|cap\b|_cap|max|throughput/);
+    note("Capacity", capacity, "its name");
+    const added = /\b(widen\w*|upgrad\w*|expan\w*|add\w* lanes?|new lanes?)\b/i.test(text) ? field(arcs?.kind, /extra|added|widen|upgrade|new_cap|more/) : undefined;
+    const cost = added ? field(arcs?.kind, /cost|price|capex/) : undefined;
+    const budget = added && cost ? inUnitsOf(amount(text, ["budget", "spend", "afford"]), cost, choices) : undefined;
+    const upgrade = capacity && added && cost && budget !== undefined ? { added, cost, budget } : undefined;
+    if (upgrade) choices.push(`Roads may be widened by ${added} at ${cost}, within ${budget} — you wrote of widening`);
+    const recipe = missing.length ? null : ({ nodes: nodes!.kind.name, arcs: arcs!.kind.name, startsAt: startsAt!, endsAt: endsAt!, trips: trips!.name,
+      time: time!, ...(capacity ? { capacity } : {}), ...(upgrade ? { upgrade } : {}) } satisfies FlowRecipe);
+    return { recipe: "flow", title: TITLES.flow, choices, missing, apply: recipe ? (d) => applyFlow(d, recipe) : null };
   }
 
   if (best.recipe === "network") {

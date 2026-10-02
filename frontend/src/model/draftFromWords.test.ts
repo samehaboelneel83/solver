@@ -84,6 +84,25 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(JSON.stringify(d.constraints[2])).toContain('"par":"suitable","index":["o","i"]');
   });
 
+  it("routes a trips table over the roads, widened within a budget (benchmark re-test, October 2026)", () => {
+    const kinds: Kind[] = [
+      { name: "zone", attributes: [] },
+      { name: "road_link", attributes: [n("travel_minutes"), n("capacity_vph"), n("extra_capacity"), n("widen_cost_m")] },
+    ];
+    const data = [{ name: "od_trips", index: ["zone", "zone"] }];
+    const links = [{ name: "from_zone", from: "road_link", to: "zone" }, { name: "to_zone", from: "road_link", to: "zone" }];
+    const text = "Morning commute trips between zones congest the roads: which roads to widen with a budget of 30 million";
+    expect(recipeFor(text)[0].recipe).toBe("flow");
+    const p = proposeDraft(text, kinds, data, undefined, links)!;
+    expect(p.missing).toEqual([]);
+    expect(p.choices).toContain("A road starts at from_zone and ends at to_zone — their names");
+    const d = p.apply!(empty);
+    expect(d.constraints.map((c) => c.id)).toEqual(["trips_arrive", "upgrade_budget", "road_capacity"]);
+    expect(d.constraints[1]).toMatchObject({ right: { const: 30 } });
+    // Without the two links it says what is missing instead of guessing.
+    expect(proposeDraft(text, kinds, data)!.missing[0]).toMatch(/each linked twice to zone/);
+  });
+
   it("covers what the reach data joins the sites to, not a kind only named, with seats and the budget in the costs' units", () => {
     const kinds: Kind[] = [
       { name: "candidate_site", attributes: [n("monthly_cost_k"), n("capacity")] },

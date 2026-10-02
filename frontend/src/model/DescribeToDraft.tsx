@@ -1,24 +1,25 @@
 import { useState } from "react";
 import type { FormDraft } from "./draftIr";
 import { keptWords, proposeDraft, type Data, type Kind, type Recipe } from "./draftFromWords";
+import type { Link } from "./recipes";
 
 const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["selection", "projects within a budget"],
-  ["network", "a supply network"], ["phasing", "projects over periods"], ["allocation", "land among crops"]];
+  ["network", "a supply network"], ["phasing", "projects over periods"], ["allocation", "land among crops"], ["flow", "traffic over roads"]];
 
 /**
  * Describe the problem, get a first draft (benchmark, October 2026, G3c): the recipe the words call
  * for, filled in from this workspace's kinds, fields and data, each choice with its reason -- and
  * what is still missing. Written into the model only when asked.
  */
-export default function DescribeToDraft({ kinds, data, onApply, startOpen = false, domainId }: {
-  kinds: Kind[]; data: Data[]; onApply: (edit: (draft: FormDraft) => FormDraft) => void; startOpen?: boolean;
+export default function DescribeToDraft({ kinds, data, links = [], onApply, startOpen = false, domainId }: {
+  kinds: Kind[]; data: Data[]; links?: Link[]; onApply: (edit: (draft: FormDraft) => FormDraft) => void; startOpen?: boolean;
   /** The words typed on the Start page for this workspace start the box. */
   domainId?: number | string;
 }) {
   const [text, setText] = useState(() => keptWords(domainId));
   const [only, setOnly] = useState<Recipe | "">("");
   const [done, setDone] = useState(false);
-  const proposal = proposeDraft(text, kinds, data, only || undefined);
+  const proposal = proposeDraft(text, kinds, data, only || undefined, links);
   return (
     <details className="mb-6 rounded-md border border-violet-200 bg-violet-50 p-3" open={startOpen || undefined}>
       <summary className="cursor-pointer text-sm font-semibold text-violet-900">Describe the problem in words, and get a first draft</summary>

@@ -312,11 +312,13 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
   join, matching another kind's key, name or a field, case and spaces aside, listing what did not match): link records of two kinds where a field of one equals the key
   (or a field) of the other — call history to districts by `dist_code`, yield history to parcels —
   without a links file. (P1, P2, P4)
-- **R2b Describe → draft for more shapes** (done in part: an allocation recipe — land among crops, a
+- **R2b Describe → draft for more shapes** (done: an allocation recipe — land among crops, a
   shared limit, where allowed, least and most shares — in words and as a form; coverage covers what the
   reach data joins the sites to and seats people where sites have a capacity; a budget typed in pounds
-  is read in the costs' units, millions or thousands. Network flow with an origin–destination table
-  is still to do): allocation of an area/amount among options (crops),
+  is read in the costs' units, millions or thousands; a traffic recipe routes a trips table between
+  zones over the roads — a flow per road and origin, kept apart by origin, each road within its
+  capacity, roads widened within a budget, least total travel time — with the road's two ends read
+  from its links' names (`from_…`, `to_…`)): allocation of an area/amount among options (crops),
   coverage with capacity and cost, network flow with an origin–destination table; read units and
   the thing to cover from the data's own names, not only from words. (P1, P3, P4)
 - **R2c Forecasts as data per record** (done in part: "Predict and keep" predicts for another kind's

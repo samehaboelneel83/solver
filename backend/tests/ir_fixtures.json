@@ -261,6 +261,33 @@
             "data_type": "number"
           }
         ]
+      },
+      {
+        "name": "junction",
+        "role": "location",
+        "attributes": []
+      },
+      {
+        "name": "road",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "minutes",
+            "data_type": "number"
+          },
+          {
+            "name": "capacity",
+            "data_type": "number"
+          },
+          {
+            "name": "extra",
+            "data_type": "number"
+          },
+          {
+            "name": "widen_cost",
+            "data_type": "number"
+          }
+        ]
       }
     ],
     "parameters": [
@@ -312,6 +339,14 @@
           "crop"
         ],
         "default_value": 0
+      },
+      {
+        "name": "trips",
+        "index": [
+          "junction",
+          "junction"
+        ],
+        "default_value": 0
       }
     ],
     "relationshipTypes": [
@@ -334,6 +369,20 @@
         "from": "cell",
         "to": "cell",
         "cardinality": "many_to_many",
+        "is_hierarchy": false
+      },
+      {
+        "name": "road_from",
+        "from": "road",
+        "to": "junction",
+        "cardinality": "many_to_one",
+        "is_hierarchy": false
+      },
+      {
+        "name": "road_to",
+        "from": "road",
+        "to": "junction",
+        "cardinality": "many_to_one",
         "is_hierarchy": false
       }
     ],
@@ -5255,6 +5304,248 @@
                   {
                     "index": "o",
                     "set": "crop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "recipe_flow",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "junction",
+          "road"
+        ],
+        "parameters": {
+          "trips": {
+            "index": [
+              "junction",
+              "junction"
+            ]
+          }
+        },
+        "variables": {
+          "flow": {
+            "index": [
+              "road",
+              "junction"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "upgrade": {
+            "index": [
+              "road"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "trips_arrive",
+            "note": "at every junction, the traffic from each origin that stays there is the trips ending there",
+            "forall": [
+              {
+                "index": "o",
+                "set": "junction"
+              },
+              {
+                "index": "n",
+                "set": "junction",
+                "where": [
+                  {
+                    "index": "o",
+                    "op": "!="
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "add": [
+                {
+                  "sum": {
+                    "var": "flow",
+                    "index": [
+                      "a",
+                      "o"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "a",
+                      "set": "road",
+                      "via": {
+                        "rel": "road_to",
+                        "to": "n"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "mul": [
+                    {
+                      "const": -1
+                    },
+                    {
+                      "sum": {
+                        "var": "flow",
+                        "index": [
+                          "a",
+                          "o"
+                        ]
+                      },
+                      "over": [
+                        {
+                          "index": "a",
+                          "set": "road",
+                          "via": {
+                            "rel": "road_from",
+                            "to": "n"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "par": "trips",
+              "index": [
+                "o",
+                "n"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "upgrade_budget",
+            "note": "the roads upgraded cost at most 10",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "a",
+                      "name": "widen_cost"
+                    }
+                  },
+                  {
+                    "var": "upgrade",
+                    "index": [
+                      "a"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "a",
+                  "set": "road"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "road_capacity",
+            "note": "each road carries at most its capacity, more if upgraded",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "flow",
+                "index": [
+                  "a",
+                  "o"
+                ]
+              },
+              "over": [
+                {
+                  "index": "o",
+                  "set": "junction"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "add": [
+                {
+                  "attr": {
+                    "of": "a",
+                    "name": "capacity"
+                  }
+                },
+                {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "extra"
+                      }
+                    },
+                    {
+                      "var": "upgrade",
+                      "index": [
+                        "a"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ],
+        "relationships": [
+          "road_from",
+          "road_to"
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "travel_time",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "minutes"
+                      }
+                    },
+                    {
+                      "var": "flow",
+                      "index": [
+                        "a",
+                        "o"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "a",
+                    "set": "road"
+                  },
+                  {
+                    "index": "o",
+                    "set": "junction"
                   }
                 ]
               }

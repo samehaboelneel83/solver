@@ -65,3 +65,25 @@ def test_allocation_puts_the_land_where_it_is_worth_most_within_water_suitabilit
     # Rice is suitable on p1 only and worth more: all 10 of p1 (its share cap is 10 of 20), using 80 water.
     # The other 20 water grows 10 wheat on p2. Profit 10*5 + 10*3 = 80.
     assert round(float(_solve("recipe_allocation", data).objective), 6) == 80
+
+
+def test_flow_routes_trips_over_the_quickest_roads_within_capacity_and_widens_within_budget():
+    """Benchmark re-test, October 2026: traffic over a road network with a table of trips had no recipe."""
+    roads = {"ab": ("a", "b", 1, 10, 5), "bc": ("b", "c", 1, 10, 5), "ac": ("a", "c", 5, 100, 99)}
+    data = {
+        "sets": {
+            "junction": [{"id": j} for j in "abc"],
+            "road": [{"id": r, "minutes": t, "capacity": cap, "extra": 10, "widen_cost": cost} for r, (_, _, t, cap, cost) in roads.items()],
+        },
+        "relationships": {"road_from": [{"from": r, "to": s} for r, (s, _, _, _, _) in roads.items()],
+                          "road_to": [{"from": r, "to": e} for r, (_, e, _, _, _) in roads.items()]},
+        "parameters": {"trips": [{"0": "a", "1": "c", "value": 15}, {"0": "a", "1": "b", "value": 2}]},
+        "parameter_defaults": {"trips": 0},
+    }
+    # 2 trips a->b (2 minutes) and 15 a->c. Unwidened, a-b carries 10 in all, so 8 go a-b-c (16) and 7 the slow road (35): 53.
+    # Widening a-b and b-c (5 + 5 within 10) lets all 15 go a-b-c: 2 + 30 = 32.
+    assert round(float(_solve("recipe_flow", data).objective), 6) == 32
+    data["sets"]["road"] = [{**r, "widen_cost": 6} if r["id"] == "bc" else r for r in data["sets"]["road"]]
+    # Widening b-c too is now beyond the budget. a-b alone carries the 2 to b and 10 on over b-c (its limit); 5 take
+    # the slow road: 2 + 20 + 25 = 47.
+    assert round(float(_solve("recipe_flow", data).objective), 6) == 47

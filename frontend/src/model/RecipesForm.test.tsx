@@ -60,3 +60,23 @@ it("shares land among crops from the form (benchmark re-test, October 2026)", ()
   const d = onApply.mock.calls[0][0](empty) as FormDraft;
   expect(d.constraints.map((c) => c.id)).toEqual(["size_of_each", "shared_limit", "only_where_allowed"]);
 });
+
+it("routes trips over the roads from the form, the road's two ends read from the links' names (benchmark re-test, October 2026)", () => {
+  const onApply = vi.fn();
+  const kinds = [{ name: "junction", attributes: [] },
+    { name: "road", attributes: [{ name: "minutes", data_type: "number" }, { name: "capacity", data_type: "number" }] }];
+  const links = [{ name: "road_to", from: "road", to: "junction" }, { name: "road_from", from: "road", to: "junction" }];
+  render(<RecipesForm kinds={kinds} data={[{ name: "trips", index: ["junction", "junction"] }]} links={links} onApply={onApply} />);
+  fireEvent.click(screen.getByLabelText(/Traffic/));
+  fireEvent.change(screen.getByLabelText("Trips between"), { target: { value: "junction" } });
+  fireEvent.change(screen.getByLabelText("Over"), { target: { value: "road" } });
+  expect(screen.getByLabelText("A road starts at")).toHaveValue("road_from");
+  expect(screen.getByLabelText("and ends at")).toHaveValue("road_to");
+  fireEvent.change(screen.getByLabelText("How many trips"), { target: { value: "trips" } });
+  fireEvent.change(screen.getByLabelText("Time on a road"), { target: { value: "minutes" } });
+  fireEvent.change(screen.getByLabelText("Capacity"), { target: { value: "capacity" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write it into the model" }));
+  const d = onApply.mock.calls[0][0](empty) as FormDraft;
+  expect(d.constraints.map((c) => c.id)).toEqual(["trips_arrive", "road_capacity"]);
+  expect(JSON.stringify(d.constraints[0])).toContain('"via":{"rel":"road_to","to":"n"}');
+});

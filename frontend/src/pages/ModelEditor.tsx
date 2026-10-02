@@ -220,6 +220,12 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [scratch, setScratch] = useState(false);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500, offset: 0 });
+  // Relationships by kind name, for the recipes that walk them (coverage, traffic).
+  const kindLinks = (relationshipTypes.data?.items ?? []).map((rel) => ({
+    name: rel.name,
+    from: entityTypes.data?.items.find((t) => t.id === rel.from_type_id)?.name ?? "",
+    to: entityTypes.data?.items.find((t) => t.id === rel.to_type_id)?.name ?? "",
+  }));
   const predictors = usePredictors(domainId);
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
@@ -741,6 +747,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0 && keptWords(domainId) !== ""}
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, role: t.role, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          links={kindLinks}
           onApply={(edit) => setDraft((current) => current && edit(current))}
         />
       )}
@@ -748,11 +755,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <CoverageRecipeForm
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ id: Number(t.id), name: t.name, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
-          links={(relationshipTypes.data?.items ?? []).map((rel) => ({
-            name: rel.name,
-            from: entityTypes.data?.items.find((t) => t.id === rel.from_type_id)?.name ?? "",
-            to: entityTypes.data?.items.find((t) => t.id === rel.to_type_id)?.name ?? "",
-          }))}
+          links={kindLinks}
           onApply={(edit) => setDraft((current) => current && edit(current))}
           startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0}
         />
@@ -761,6 +764,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <RecipesForm
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          links={kindLinks}
           onApply={(edit) => setDraft((current) => current && edit(current))}
         />
       )}

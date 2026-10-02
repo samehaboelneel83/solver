@@ -6,8 +6,9 @@
  * - network: which depots to open and what each ships to each customer -- capacity, one supplier per
  *   customer, shortage at a penalty, a fleet by vehicle type;
  * - phasing: which project to start in which period, within each period's budget, sooner worth more.
+ * - flow: trips between zones routed over the roads, within capacity (widened within a budget), least time.
  */
-import type { Constraint, ObjectiveTerm, Term } from "./terms";
+import type { Binding, Constraint, ObjectiveTerm, Term } from "./terms";
 import type { FormDraft } from "./draftIr";
 import { say } from "./coverageRecipe";
 
@@ -37,7 +38,7 @@ function namer(draft: FormDraft) {
   };
 }
 
-function rule(id: string, note: string, left: Term, relation: "<=" | ">=" | "=", right: Term, forall?: ReturnType<typeof each>): Constraint {
+function rule(id: string, note: string, left: Term, relation: "<=" | ">=" | "=", right: Term, forall?: Binding[]): Constraint {
   return { id, note, ...(forall ? { forall } : {}), left, relation, right, severity: "hard" } as Constraint;
 }
 
@@ -278,5 +279,74 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
     constraints,
     objective: { sense: "maximize", mode: "weighted", terms: [
       { id: name("worth"), weight: 1, expression: sum(mul(worth, cell), [i, r.items], [o, r.options]) } as ObjectiveTerm] },
+  };
+}
+
+// --- traffic over a road network -----------------------------------------------------------------
+
+export type FlowRecipe = {
+  /** Where trips start and end (zones, junctions), and the roads between them. */
+  nodes: string;
+  arcs: string;
+  /** Relationships from a road to the node it starts at and to the one it ends at. */
+  startsAt: string;
+  endsAt: string;
+  /** Data over two nodes, origin first: how many trips go from one to the other. */
+  trips: string;
+  /** A number field of a road: how long it takes. */
+  time: string;
+  /** A number field of a road: the most it carries. */
+  capacity?: string;
+  /** Roads may be widened: a number field each of the capacity added and what it costs, within a budget. */
+  upgrade?: { added: string; cost: string; budget: number };
+};
+
+/** A relationship between two kinds, by name. */
+export type Link = { name: string; from: string; to: string };
+
+/** Of the links from a road to a node, the one its name says it starts at (from, start, origin), and the one it ends at. */
+export function endsOf(links: Link[]): { startsAt?: string; endsAt?: string } {
+  const start = links.find((l) => /(^|_)(from|start\w*|origin|source|tail)($|_)/.test(l.name));
+  const end = links.find((l) => l !== start && /(^|_)(to|end\w*|dest\w*|target|head)($|_)/.test(l.name));
+  return { startsAt: start?.name, endsAt: end?.name };
+}
+
+/**
+ * Every trip goes from its origin to its destination over the roads, each road within its capacity,
+ * for the least total travel time. The flow is kept apart by origin, so each origin's trips are
+ * followed to where they end: at every other node, what of an origin's traffic comes in less what
+ * goes out is the trips from that origin ending there. The origin's own balance follows.
+ */
+export function applyFlow(draft: FormDraft, r: FlowRecipe): FormDraft {
+  const name = namer(draft);
+  const a = "a", o = "o", n = "n";
+  const flow = name("flow");
+  const onRoad = v(flow, [a, o]);
+  const along = (rel: string): Term => ({ sum: onRoad, over: [{ index: a, set: r.arcs, via: { rel, to: n } }] }) as Term;
+  const variables = { ...draft.variables, [flow]: { index: [r.arcs, r.nodes], domain: "continuous", lower: 0 } } as Variables;
+  const constraints: Constraint[] = [...draft.constraints,
+    rule(name("trips_arrive"), `at every ${say(r.nodes)}, the traffic from each origin that stays there is the ${say(r.trips)} ending there`,
+      { add: [along(r.endsAt), mul(k(-1), along(r.startsAt))] } as Term, "=", { par: r.trips, index: [o, n] } as Term,
+      [{ index: o, set: r.nodes }, { index: n, set: r.nodes, where: [{ index: o, op: "!=" }] }])];
+  if (r.capacity) {
+    let most: Term = attr(a, r.capacity);
+    if (r.upgrade) {
+      const widen = name("upgrade");
+      variables[widen] = { index: [r.arcs], domain: "binary" } as Variables[string];
+      most = { add: [most, mul(attr(a, r.upgrade.added), v(widen, [a]))] } as Term;
+      constraints.push(rule(name("upgrade_budget"), `the ${say(r.arcs)}s upgraded cost at most ${r.upgrade.budget}`,
+        sum(mul(attr(a, r.upgrade.cost), v(widen, [a])), [a, r.arcs]), "<=", k(r.upgrade.budget)));
+    }
+    constraints.push(rule(name("road_capacity"), r.upgrade ? `each ${say(r.arcs)} carries at most its ${say(r.capacity)}, more if upgraded`
+      : `each ${say(r.arcs)} carries at most its ${say(r.capacity)}`, sum(onRoad, [o, r.nodes]), "<=", most, each([a, r.arcs])));
+  }
+  return {
+    ...draft,
+    sets: [...new Set([...draft.sets, r.nodes, r.arcs])],
+    parameters: { ...draft.parameters, [r.trips]: draft.parameters[r.trips] ?? { index: [r.nodes, r.nodes] } },
+    variables,
+    constraints,
+    objective: { sense: "minimize", mode: "weighted", terms: [
+      { id: name("travel_time"), weight: 1, expression: sum(mul(attr(a, r.time), onRoad), [a, r.arcs], [o, r.nodes]) } as ObjectiveTerm] },
   };
 }

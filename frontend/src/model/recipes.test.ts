@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyAllocation, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, applyNetwork, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
-import { EMPTY_MODEL, type FormDraft } from "./draftIr";
+import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 
 const empty: FormDraft = { sets: [], parameters: {}, variables: {}, constraints: [], objective: { sense: "minimize", mode: "weighted", terms: [] } };
 const ir = (d: FormDraft) => ({ ...EMPTY_MODEL, ...d });
@@ -64,6 +64,20 @@ describe("more recipes (benchmark, October 2026)", () => {
       most_share: "for each o in crop: sum(amount[i, o] for i in parcel) <= max_share[o] * sum(area[i] for i in parcel)",
     });
     made.allocation = ir(d);
+  });
+
+  it("routes trips between zones over the roads within capacity, widening roads within a budget (benchmark re-test, October 2026)", () => {
+    const d = applyFlow(empty, { nodes: "junction", arcs: "road", startsAt: "road_from", endsAt: "road_to", trips: "trips", time: "minutes",
+      capacity: "capacity", upgrade: { added: "extra", cost: "widen_cost", budget: 10 } });
+    const published = publishable(ir(d));
+    expect(checkIrShape(published)).toBeNull();
+    expect(rules(d)).toEqual({
+      trips_arrive: "for each o in junction, n in junction where n != o: sum(flow[a, o] for a in road to n by road_to) - sum(flow[a, o] for a in road to n by road_from) = trips[o, n]",
+      upgrade_budget: "sum(widen_cost[a] * upgrade[a] for a in road) <= 10",
+      road_capacity: "for each a in road: sum(flow[a, o] for o in junction) <= capacity[a] + extra[a] * upgrade[a]",
+    });
+    expect(published.relationships).toEqual(["road_from", "road_to"]);
+    made.flow = published;
     if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
   });
 

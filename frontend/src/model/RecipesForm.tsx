@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
 type Data = { name: string; index: string[] };
-type Which = "selection" | "network" | "phasing" | "allocation";
+type Which = "selection" | "network" | "phasing" | "allocation" | "flow";
 
 const SELECT = "ml-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numbers = (kind: Kind | undefined) =>
@@ -30,12 +30,14 @@ function Row({ children }: { children: ReactNode }) {
 }
 
 /**
- * Three more recipes (benchmark, October 2026): projects within a budget, a supply network, and
- * projects phased over periods -- each writes its decisions, rules and goals into the draft.
+ * More recipes (benchmark, October 2026): projects within a budget, a supply network, projects
+ * phased over periods, land among crops, traffic over roads -- each writes its decisions, rules and goals into the draft.
  */
-export default function RecipesForm({ kinds, data, onApply }: {
+export default function RecipesForm({ kinds, data, links = [], onApply }: {
   kinds: Kind[];
   data: Data[];
+  /** Relationships between kinds: a road's start and end for traffic. */
+  links?: Link[];
   onApply: (edit: (draft: FormDraft) => FormDraft) => void;
 }) {
   const [which, setWhich] = useState<Which>("selection");
@@ -102,6 +104,48 @@ export default function RecipesForm({ kinds, data, onApply }: {
         </Row>
       </>
     );
+  } else if (which === "flow") {
+    // Traffic: a table of trips between zones over the roads (benchmark re-test, October 2026).
+    const ends = links.filter((l) => f.arcs && f.nodes && l.from === f.arcs && l.to === f.nodes);
+    const guess = endsOf(ends);
+    const startsAt = f.startsAt || guess.startsAt || "";
+    const endsAt = f.endsAt || guess.endsAt || "";
+    const trips = data.filter((d) => f.nodes && d.index.length === 2 && d.index[0] === f.nodes && d.index[1] === f.nodes);
+    const budget = toNumber(get("budget"));
+    const widen = !!(f.capacity && f.added && f.widenCost && budget !== undefined && Number.isFinite(budget));
+    ready = !!(f.nodes && f.arcs && f.nodes !== f.arcs && startsAt && endsAt && startsAt !== endsAt && f.trips && f.time);
+    apply = (d) => applyFlow(d, { nodes: f.nodes, arcs: f.arcs, startsAt, endsAt, trips: f.trips, time: f.time,
+      ...(f.capacity ? { capacity: f.capacity } : {}), ...(widen ? { upgrade: { added: f.added, cost: f.widenCost, budget: budget! } } : {}) });
+    body = (
+      <>
+        <Row>
+          <Pick label="Trips between" value={get("nodes")} onChange={set("nodes")} options={names} />
+          <Pick label="Over" value={get("arcs")} onChange={set("arcs")} options={names} />
+          <Pick label="A road starts at" value={startsAt} onChange={set("startsAt")} options={ends.map((l) => l.name)} />
+          <Pick label="and ends at" value={endsAt} onChange={set("endsAt")} options={ends.map((l) => l.name)} />
+        </Row>
+        {f.nodes && f.arcs && ends.length < 2 && (
+          <p className="text-xs text-amber-800">A {f.arcs} needs two links to {f.nodes}: where it starts and where it ends (Records → link records on a matching field).</p>
+        )}
+        <Row>
+          <Pick label="How many trips" value={get("trips")} onChange={set("trips")} options={trips.map((d) => d.name)} />
+          <Pick label="Time on a road" value={get("time")} onChange={set("time")} options={numbers(kind("arcs"))} />
+          <Pick label="Capacity" value={get("capacity")} onChange={set("capacity")} options={numbers(kind("arcs"))} optional />
+        </Row>
+        {f.nodes && trips.length === 0 && (
+          <p className="text-xs text-amber-800">No data value is indexed by {f.nodes} twice (origin, destination): upload the trips table as one first.</p>
+        )}
+        {f.capacity && (
+          <Row>
+            <Pick label="Widening adds" value={get("added")} onChange={set("added")} options={numbers(kind("arcs"))} optional />
+            <Pick label="Widening costs" value={get("widenCost")} onChange={set("widenCost")} options={numbers(kind("arcs"))} optional />
+            <label className="text-xs text-slate-700">Widening budget
+              <input aria-label="Widening budget" className={`${SELECT} w-28`} inputMode="decimal" value={get("budget")} onChange={(e) => set("budget")(e.target.value)} />
+            </label>
+          </Row>
+        )}
+      </>
+    );
   } else if (which === "network") {
     const costs = data.filter((d) => d.index.length === 2 && f.sources && f.customers && d.index.includes(f.sources) && d.index.includes(f.customers));
     const unit = costs.find((d) => d.name === f.unitCost) ?? costs[0];
@@ -163,7 +207,7 @@ export default function RecipesForm({ kinds, data, onApply }: {
   return (
     <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
-        More recipes: projects within a budget, a supply network, projects over years, land among crops
+        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads
       </summary>
       <form aria-label="More recipes" className="mt-3 space-y-3 text-sm text-slate-800"
         onSubmit={(e) => {
@@ -174,7 +218,8 @@ export default function RecipesForm({ kinds, data, onApply }: {
         }}>
         <div role="radiogroup" aria-label="Recipe" className="flex flex-wrap gap-3 text-xs">
           {([["selection", "Choose projects within a budget"], ["network", "Supply network: open, ship, fleet"],
-            ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"]] as [Which, string][]).map(([w, words]) => (
+            ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"],
+            ["flow", "Traffic: trips over the roads"]] as [Which, string][]).map(([w, words]) => (
             <label key={w}><input type="radio" checked={which === w} onChange={() => { setWhich(w); setF({}); setDone(null); }} /> {words}</label>
           ))}
         </div>
