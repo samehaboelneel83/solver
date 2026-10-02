@@ -92,7 +92,9 @@ export function irToBlocks(
               type: "ir_filter_any",
               inputs: inputs({ ANY: filters(f.any as unknown[], [...loc, k, "any"]) }),
             })
-          : block([...loc, k], { type: "ir_filter", fields: { ATTR: String(f.attr), OP: String(f.op), VALUE: JSON.stringify(f.value) } })
+          : "index" in f
+            ? block([...loc, k], { type: "ir_filter_index", fields: { INDEX: String(f.index), OP: String(f.op) } })
+            : block([...loc, k], { type: "ir_filter", fields: { ATTR: String(f.attr), OP: String(f.op), VALUE: JSON.stringify(f.value) } })
       )
     );
   }

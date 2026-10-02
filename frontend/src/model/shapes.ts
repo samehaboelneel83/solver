@@ -10,7 +10,7 @@
  */
 import { fillIndices, freeIndexName, seedForSet, type Binding, type Constraint, type ModelContext, type ObjectiveTerm, type Term } from "./terms";
 
-export type RuleShape = "cap_total" | "cap_each" | "cover_each" | "cap_linked" | "cap_when_chosen" | "cover_within_reach" | "total_per_item" | "rest_between" | "allowed_through_link";
+export type RuleShape = "cap_total" | "cap_each" | "cover_each" | "cap_linked" | "cap_when_chosen" | "cover_within_reach" | "total_per_item" | "rest_between" | "allowed_through_link" | "apart";
 export type GoalShape = "count" | "cost";
 
 /** The decision a shape is built on: the first that is a number and (when asked) over at least
@@ -147,6 +147,23 @@ function throughLink(context: ModelContext): { name: string; index: string[]; wh
   return null;
 }
 
+/**
+ * Benchmark, October 2026 ("bases at least 30 km apart"): a yes/no decision over one set (open[b])
+ * and data over that set twice (dist[b, b]). Each pair once ("b2 after b"), and only when both are
+ * chosen must they be far enough apart.
+ */
+function apartPair(context: ModelContext): { name: string; set: string; par: string } | null {
+  for (const [name, spec] of Object.entries(context.variables)) {
+    if (spec.domain !== "binary" || spec.index.length !== 1) continue;
+    const set = spec.index[0];
+    const pars = Object.entries(context.parameters)
+      .filter(([, p]) => p.index.length === 2 && p.index[0] === set && p.index[1] === set)
+      .sort(([a], [b]) => Number(/dist|km|m$|metre|meter/i.test(b)) - Number(/dist|km|m$|metre|meter/i.test(a)));
+    if (pars.length) return { name, set, par: pars[0][0] };
+  }
+  return null;
+}
+
 export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: ModelContext) => string | null }[] = [
   {
     shape: "cap_total",
@@ -192,6 +209,11 @@ export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: Mo
     shape: "allowed_through_link",
     title: "A pair only where what one is linked to reaches the other (a team, only centres its hospital reaches)",
     needs: (c) => (throughLink(c) ? null : "a decision over two sets, a link from one to a third kind, and 0/1 data over that kind and the other"),
+  },
+  {
+    shape: "apart",
+    title: "No two chosen closer than a distance (bases at least 30 km apart)",
+    needs: (c) => (apartPair(c) ? null : "a yes/no decision over one set, and distances between its items (Data values → Compute from the map)"),
   },
 ];
 
@@ -278,6 +300,23 @@ export function ruleFromShape(shape: RuleShape, id: string, context: ModelContex
       relation: "<=",
       right: { sum: { par: through.par, index: through.parIndex.map(at) }, over: [{ ...linkedTo, via: { rel: through.rel, [through.end]: letters.get(through.who) ?? "" } }] },
       severity: "hard",
+    };
+  }
+  const apart = shape === "apart" ? apartPair(context) : null;
+  if (apart) {
+    // "For each a, b after a: D * open[a] + D * open[b] - D <= dist[a, b]": both chosen, at least D apart.
+    const [first] = bindingsFor([apart.set]);
+    const [second] = bindingsFor([apart.set], [first]);
+    const pair = [first, { ...second, where: [{ index: first.index, op: ">" }] }];
+    const D = 10000;
+    const times = (i: string): Term => ({ mul: [{ const: D }, { var: apart.name, index: [i] }] });
+    return {
+      id, forall: pair,
+      left: { add: [times(first.index), times(second.index), { const: -D }] },
+      relation: "<=",
+      right: { par: apart.par, index: [first.index, second.index] },
+      severity: "hard",
+      note: `two chosen ${apart.set} items are at least ${D} apart in ${apart.par} (change ${D} to the distance wanted, in its unit)`,
     };
   }
   const link = shape === "cap_linked" ? linked(context) : null;

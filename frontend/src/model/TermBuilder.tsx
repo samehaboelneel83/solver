@@ -24,6 +24,7 @@ import {
   walkKey,
   walksAvailable,
   isGroup,
+  isIndexFilter,
   type Binding,
   type ModelContext,
   type Term,
@@ -454,7 +455,8 @@ export function BindingsEditor({
           const attributes = context.attributes[binding.set] ?? [];
           // A filter on the row's own key (queue R20b: `id = preferred_shift[e, d]`) is not
           // an attribute the builder offers; it is shown as written and kept as it is.
-          const keyed = (binding.where ?? []).some((f) => !isGroup(f) && f.attr === "id");
+          // So is a comparison with another item ("b > a").
+          const keyed = (binding.where ?? []).some((f) => isIndexFilter(f) || (!isGroup(f) && (f as { attr?: string }).attr === "id"));
           const hasFilter = setId !== undefined && attributes.length > 0 && !keyed;
           const overName = `Over ${binding.index} in ${binding.set}`;
           return (
@@ -553,7 +555,7 @@ export function BindingsEditor({
                       })}
                       label={`Filter for ${binding.index} in ${binding.set}`}
                       bindingFilter
-                      value={fromIrWhere(binding.where, setId)}
+                      value={fromIrWhere(binding.where as Parameters<typeof fromIrWhere>[0], setId)}
                       onChange={(document) => {
                         const converted = toIrWhere(document);
                         if (!converted.ok) {

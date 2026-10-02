@@ -822,6 +822,11 @@
       "text": "an index position is an index name, or `{par, index}` naming a parameter whose values are entities of that position's set"
     },
     {
+      "code": "where_index_invalid",
+      "where": "shape",
+      "text": "a filter compares this item with another as `{index, op}`, the other bound earlier over the same set, op one of = != < <= > >="
+    },
+    {
       "code": "where_parameter_invalid",
       "where": "shape",
       "text": "a filter compares with a parameter only as `id` `=` or `!=` a parameter whose values are entities of the binding's set, read at indices already bound"

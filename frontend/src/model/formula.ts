@@ -42,7 +42,7 @@
  */
 import { FUNCTIONS, FILTER_OPERATORS, PATH_COMBINATIONS, RELATIONS, TRAVERSAL_DEPTHS, type PathCombination, type Relation, type TraversalDepth } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
-import { edgeAttributes, isGroup, type Binding, type Constraint, type IrFilter, type ModelContext, type Term, type Via, type WhereEntry } from "./terms";
+import { edgeAttributes, isGroup, isIndexFilter, type Binding, type Constraint, type IrFilter, type ModelContext, type Term, type Via, type WhereEntry } from "./terms";
 
 // --- printing ----------------------------------------------------------------
 
@@ -56,8 +56,9 @@ function printFilter(filter: IrFilter): string {
   return `${filter.attr} ${op} ${printValue(filter.value)}`;
 }
 
-/** A filter, or a group of them: `(grade = "senior" or hours >= 40)`. */
-function printEntry(entry: WhereEntry): string {
+/** A filter, a group of them -- `(grade = "senior" or hours >= 40)` -- or this item against another, `b > a`. */
+function printEntry(entry: WhereEntry, own = "it"): string {
+  if (isIndexFilter(entry)) return `${own} ${entry.op} ${entry.index}`;
   return isGroup(entry) ? `(${entry.any.map(printFilter).join(" or ")})` : printFilter(entry);
 }
 
@@ -67,14 +68,14 @@ function printWalk(via: Via): string {
   const depth = via.steps
     ? ` steps ${via.steps.min} to ${via.steps.max ?? "any"}`
     : via.depth && via.depth !== "one" ? ` depth ${via.depth}` : "";
-  const through = via.where?.length ? ` through ${via.where.map(printEntry).join(" and ")}` : "";
+  const through = via.where?.length ? ` through ${via.where.map((e) => printEntry(e)).join(" and ")}` : "";
   const on = via.on ? ` on ${JSON.stringify(via.on)}` : "";
   const edge = via.as ? ` as ${via.as}` : "";
   return ` ${end} ${anchor} by ${via.rel}${depth}${through}${on}${edge}`;
 }
 
 export function printBinding(binding: Binding): string {
-  const where = binding.where?.length ? ` where ${binding.where.map(printEntry).join(" and ")}` : "";
+  const where = binding.where?.length ? ` where ${binding.where.map((e) => printEntry(e, binding.index)).join(" and ")}` : "";
   return `${binding.index} in ${binding.set}${binding.via ? printWalk(binding.via) : ""}${where}`;
 }
 
@@ -339,7 +340,7 @@ class Parser {
     if (this.isWord("from") || this.isWord("to") || this.isWord("both")) binding.via = this.walk(set.value);
     if (this.isWord("where")) {
       this.next();
-      binding.where = this.entries(set.value, this.context.attributes[set.value] ?? []);
+      binding.where = this.entries(set.value, this.context.attributes[set.value] ?? [], index.value);
     }
     return binding;
   }
@@ -428,16 +429,28 @@ class Parser {
   }
 
   /** Filters joined by "and", each one a filter or a group in brackets joined by "or". */
-  private entries(owner: string, known: readonly { name: string }[]): WhereEntry[] {
-    const entries: WhereEntry[] = [this.entry(owner, known)];
+  private entries(owner: string, known: readonly { name: string }[], own?: string): WhereEntry[] {
+    const entries: WhereEntry[] = [this.entry(owner, known, own)];
     while (this.isWord("and")) {
       this.next();
-      entries.push(this.entry(owner, known));
+      entries.push(this.entry(owner, known, own));
     }
     return entries;
   }
 
-  private entry(owner: string, known: readonly { name: string }[]): WhereEntry {
+  private entry(owner: string, known: readonly { name: string }[], own?: string): WhereEntry {
+    // "b > a", "b != a": this item against one bound earlier (benchmark, October 2026).
+    if (own !== undefined && this.peek().kind === "name" && this.peek().value === own) {
+      this.next();
+      const token = this.next();
+      const op = String(token.value);
+      if (!["=", "!=", "<", "<=", ">", ">="].includes(op)) {
+        throw new FormulaError(`Compare ${own} with another item using = != < <= > or >=.`, token.at, token.end);
+      }
+      const other = this.next();
+      if (other.kind !== "name") throw new FormulaError(`After ${own} ${op}, name an item bound before it.`, other.at, other.end);
+      return { index: String(other.value), op };
+    }
     if (!this.isOp("(")) return this.filter(owner, known);
     const open = this.next();
     const any: IrFilter[] = [this.filter(owner, known)];

@@ -891,8 +891,9 @@ class _Compiler:
             # (queue R20b) depends on the indices around it, so it is judged
             # per environment; every other filter once, before the product.
             where = binding.get("where", [])
-            fixed = [f for f in where if not isinstance(f.get("value"), dict)]
-            varying = [f for f in where if isinstance(f.get("value"), dict)]
+            # So does one comparing the row with another bound item ("a != b", benchmark October 2026).
+            fixed = [f for f in where if not isinstance(f.get("value"), dict) and "index" not in f]
+            varying = [f for f in where if isinstance(f.get("value"), dict) or "index" in f]
             rows = [r for r in self.sets.get(set_name, []) if _passes(r, fixed)]
 
             def kept(env, rows=rows, varying=varying):
@@ -940,6 +941,12 @@ class _Compiler:
         """`id = preferred_shift[e, d]`: the row is the entity that cell
         holds. A cell with no value holds no entity -- nothing is equal to
         it and everything differs from it."""
+        if "index" in f:
+            # This item against the one bound to another index, by key: `!=` leaves the pair of an
+            # item with itself out, `<` takes each unordered pair once.
+            mine, theirs = str(row["id"]), str(env[f["index"]][1]["id"])
+            return {"=": mine == theirs, "==": mine == theirs, "!=": mine != theirs, "<": mine < theirs,
+                    "<=": mine <= theirs, ">": mine > theirs, ">=": mine >= theirs}[f["op"]]
         ref = f["value"]
         keys = tuple(self._key(i, env) for i in ref["index"])
         held = self._params.get(ref["par"], {}).get(keys)

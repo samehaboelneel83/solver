@@ -47,10 +47,11 @@ describe("starting shapes", () => {
       "a decision, and 0/1 reach data -- tick it under “Data this model reads” -- or a relationship to the items it covers",
       "a decision over two sets",
       "a yes/no decision over who and when, and a too-close link between slots (Data values → From times)",
-      "a decision over two sets, a link from one to a third kind, and 0/1 data over that kind and the other"]);
+      "a decision over two sets, a link from one to a third kind, and 0/1 data over that kind and the other",
+      "a yes/no decision over one set, and distances between its items (Data values → Compute from the map)"]);
     // A model with no relationships has no walk to offer, no yes/no over one set, no reach data.
     expect(RULE_SHAPES.filter((s) => s.needs(CONTEXT) !== null).map((s) => s.shape))
-      .toEqual(["cap_linked", "cap_when_chosen", "cover_within_reach", "rest_between", "allowed_through_link"]);
+      .toEqual(["cap_linked", "cap_when_chosen", "cover_within_reach", "rest_between", "allowed_through_link", "apart"]);
   });
 });
 
@@ -198,5 +199,19 @@ describe("a pair allowed only through a link", () => {
   it("is not offered without the link", () => {
     const shape = RULE_SHAPES.find((s) => s.shape === "allowed_through_link")!;
     expect(shape.needs({ ...TEAMS, relationships: [] })).toMatch(/a link from one to a third kind/);
+  });
+});
+
+describe("chosen ones apart (benchmark, October 2026)", () => {
+  it("takes each pair once and holds only when both are chosen", async () => {
+    const { ruleFromShape, RULE_SHAPES } = await import("./shapes");
+    const { printRule } = await import("./formula");
+    const context = {
+      sets: ["base"], setIds: {}, relationships: [], attributes: {},
+      variables: { open: { index: ["base"], domain: "binary" } }, parameters: { dist_km: { index: ["base", "base"] } },
+    } as never;
+    expect(RULE_SHAPES.find((s) => s.shape === "apart")!.needs(context)).toBeNull();
+    const rule = ruleFromShape("apart", "c_apart", context);
+    expect(printRule(rule)).toBe("for each b in base, b2 in base where b2 > b: 10000 * open[b] + 10000 * open[b2] - 10000 <= dist_km[b, b2]");
   });
 });

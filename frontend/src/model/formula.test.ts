@@ -161,7 +161,7 @@ function contextOf(ir: Record<string, unknown>): ModelContext {
     for (const key of ["forall", "over"]) {
       for (const binding of (record[key] as Binding[] | undefined) ?? []) {
         inner[binding.index] = binding.set;
-        for (const entry of binding.where ?? []) for (const filter of "any" in entry ? entry.any : [entry]) add(binding.set, filter.attr);
+        for (const entry of binding.where ?? []) for (const filter of "any" in entry ? entry.any : "index" in entry ? [] : [entry]) add(binding.set, filter.attr);
       }
     }
     const attr = record.attr as { of?: string; name?: string } | undefined;
@@ -316,5 +316,16 @@ describe("walks narrowed four ways, and groups of conditions, in equations", () 
     expect(message("from m by manages on \"tomorrow\"")).toMatch(/YYYY-MM-DD/);
     expect(message("where (grade = 1)")).toMatch(/two or more conditions with or/);
     expect(message("from m by manages through colour = 1")).toMatch(/not an attribute of a manages link \(weight\)/);
+  });
+});
+
+describe("two items of one set compared (benchmark, October 2026)", () => {
+  it("reads and writes 'b > a' as a condition on b, so each pair is taken once", () => {
+    const text = "for each a in item, b in item where b > a: x[a] + x[b] <= 1";
+    const parsed = parseRule(text, CONTEXT);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.forall).toEqual([{ index: "a", set: "item" }, { index: "b", set: "item", where: [{ index: "a", op: ">" }] }]);
+    expect(printRule(parsed.value)).toBe(text);
   });
 });

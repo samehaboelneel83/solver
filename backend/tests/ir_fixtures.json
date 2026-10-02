@@ -3875,6 +3875,67 @@
           }
         ]
       }
+    },
+    {
+      "name": "pairs_apart",
+      "why": "Two items of one set compared by key: each pair of employees is taken once (b after a), so 'no two together' is one row per pair, not two, and never an employee with itself (benchmark, October 2026).",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_apart",
+            "forall": [
+              {
+                "index": "a",
+                "set": "employee"
+              },
+              {
+                "index": "b",
+                "set": "employee",
+                "where": [
+                  {
+                    "index": "a",
+                    "op": ">"
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "add": [
+                {
+                  "var": "x",
+                  "index": [
+                    "a"
+                  ]
+                },
+                {
+                  "var": "x",
+                  "index": [
+                    "b"
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
     }
   ],
   "invalid": [
@@ -16591,6 +16652,66 @@
                     }
                   }
                 }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ]
+      }
+    },
+    {
+      "code": "where_index_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "forall",
+        1,
+        "where",
+        0
+      ],
+      "why": "the other item must be bound earlier, over the same set: an employee is not compared with a day",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "employee",
+          "day"
+        ],
+        "parameters": {},
+        "variables": {
+          "x": {
+            "index": [
+              "employee"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_apart",
+            "forall": [
+              {
+                "index": "d",
+                "set": "day"
+              },
+              {
+                "index": "b",
+                "set": "employee",
+                "where": [
+                  {
+                    "index": "d",
+                    "op": "!="
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "var": "x",
+              "index": [
+                "b"
               ]
             },
             "relation": "<=",

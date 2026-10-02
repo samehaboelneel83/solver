@@ -673,6 +673,21 @@ export function defineIrBlocks(): void {
     },
   };
 
+  // This item against another bound earlier over the same set, by key: "b > a" takes each pair once
+  // (benchmark, October 2026).
+  Blockly.Blocks.ir_filter_index = {
+    init(this: B) {
+      this.appendDummyInput()
+        .appendField("this one")
+        .appendField(fixed(["!=", "<", ">", "<=", ">=", "="], (o) => ({ "!=": "is not", "<": "comes before", ">": "comes after", "<=": "is at or before", ">=": "is at or after", "=": "is" })[o] ?? o), "OP")
+        .appendField(new Blockly.FieldTextInput("a"), "INDEX");
+      this.setPreviousStatement(true, "filter");
+      this.setNextStatement(true, "filter");
+      this.setColour(COLOUR.binding);
+      this.setTooltip("Compares this item with the one an earlier index of the same set is on, by key: \"comes after a\" takes each pair once");
+    },
+  };
+
   // "This or that": filters of which any one holding is enough, one level deep.
   Blockly.Blocks.ir_filter_any = {
     init(this: B) {
@@ -1106,7 +1121,7 @@ export function defineIrBlocks(): void {
 export const RULE_KINDS = ["ir_rule", "ir_opaque_rule", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route"] as const;
 
 export const IR_BLOCK_TYPES = [
-  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_filter_any", "ir_goal_term",
+  "ir_model", "ir_set", "ir_variable", "ir_parameter", "ir_future", "ir_rule", "ir_binding", "ir_filter", "ir_filter_index", "ir_filter_any", "ir_goal_term",
   "ir_const", "ir_var", "ir_par", "ir_attr", "ir_sum", "ir_add", "ir_mul",
   "ir_when", "ir_no_overlap", "ir_cumulative", "ir_connected", "ir_route", "ir_pwl", "ir_fn", "ir_predict",
   "ir_opaque_declaration", "ir_opaque_rule", "ir_opaque_term",
@@ -1132,7 +1147,7 @@ export function toolboxFor(catalogue: import("./catalogue").BlockCatalogue) {
         kind: "category",
         name: "Rules",
         colour: "#334155",
-        contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter", hasAttributes && "ir_filter_any", "ir_when"]),
+        contents: blocks(["ir_rule", hasTypes && "ir_binding", hasAttributes && "ir_filter", hasAttributes && "ir_filter_any", hasTypes && "ir_filter_index", "ir_when"]),
       },
       {
         kind: "category",

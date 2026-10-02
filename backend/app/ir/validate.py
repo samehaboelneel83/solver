@@ -123,6 +123,7 @@ def _is_date(value: Any) -> bool:
         return False
     return True
 _FILTER_KEYS = frozenset({"attr", "op", "value"})
+_INDEX_OPERATORS = ("=", "!=", "<", "<=", ">", ">=")
 _VARIABLE_KEYS = frozenset({"index", "domain", "lower", "upper", "stage"}) | INTERVAL_KEYS
 _PARAMETER_KEYS = frozenset({"index", "uncertainty", "entity"})
 _OBJECTIVE_KEYS = frozenset({"sense", "terms", "mode"})
@@ -1374,7 +1375,8 @@ class _ShapeChecker:
                     set(entry) != {"any"}
                     or not isinstance(group, list)
                     or len(group) < 2
-                    or not all(isinstance(g, dict) and "any" not in g and not isinstance(g.get("value"), dict) for g in group)
+                    or not all(isinstance(g, dict) and "any" not in g and "index" not in g
+                               and not isinstance(g.get("value"), dict) for g in group)
                 ):
                     return Refusal(
                         "where_group_malformed",
@@ -1395,6 +1397,23 @@ class _ShapeChecker:
     def _check_filter(self, entry: Any, here: Loc, set_name: str | None, scope: dict[str, str]):
         if not isinstance(entry, dict):
             return Refusal("where_filter_malformed", here, "each filter must be an object")
+        if "index" in entry:
+            # "a != b": this item against one bound earlier, of the same set (benchmark, October 2026).
+            other = entry.get("index")
+            if (
+                set(entry) != {"index", "op"}
+                or entry.get("op") not in _INDEX_OPERATORS
+                or set_name is None
+                or not isinstance(other, str)
+                or (scope or {}).get(other) != set_name
+            ):
+                return Refusal(
+                    "where_index_invalid",
+                    here,
+                    "a filter compares this item with another as {\"index\": name, \"op\": one of "
+                    f"{', '.join(_INDEX_OPERATORS)}}}, the other bound earlier over the same set ({set_name!r})",
+                )
+            return None
         problem = _unknown_key(entry, _FILTER_KEYS, here, "filter")
         if problem:
             return problem
@@ -2290,6 +2309,8 @@ class _DomainChecker:
                 if problem:
                     return problem
                 continue
+            if "index" in entry:
+                continue  # an item compared with another reads no field
             here: Loc = [*at, k]
             declared = lookup(entry["attr"])
             if entry["attr"] == "id":

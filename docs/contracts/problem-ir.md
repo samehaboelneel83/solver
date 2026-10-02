@@ -492,6 +492,19 @@ vocabulary on this platform, not two.
 A filter's value must be a value of the attribute's data type — the same
 judgement `entity_validate` makes when the value is stored.
 
+An entry may also compare **this item with another**, bound earlier over the same
+set, by key (version 2, benchmark October 2026):
+
+```json
+"forall": [{ "index": "a", "set": "base" },
+           { "index": "b", "set": "base", "where": [{ "index": "a", "op": ">" }] }]
+```
+
+`op` is one of `=`, `!=`, `<`, `<=`, `>`, `>=`. `!=` leaves out an item paired with
+itself; `>` takes each unordered pair once ("no two chosen bases closer than 30 km"
+is one row per pair). It is not allowed in a group, and the other index must be in
+scope and range over the same set (`where_index_invalid`).
+
 ### 4.2 `via` — traversal
 
 ```json

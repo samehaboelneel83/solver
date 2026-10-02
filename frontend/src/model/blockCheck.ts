@@ -16,7 +16,7 @@
  */
 import { FUNCTIONS } from "../ir";
 import { opsFor, OP_WORDS } from "./whereWords";
-import { arithmeticAttributes, degree, edgeAttributes, isGroup, singleStep, viaOf, type IrFilter, type WhereEntry, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { arithmeticAttributes, degree, edgeAttributes, isGroup, isIndexFilter, singleStep, viaOf, type IrFilter, type WhereEntry, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
 
 /** Where in the hierarchy a problem sits (the design's validation levels). */
 export type Level = "primitive" | "operation" | "aggregation" | "comparison" | "rule";
@@ -216,6 +216,7 @@ function checkFilters(entries: WhereEntry[], attributes: { name: string; data_ty
   const out: string[] = [];
   const filters: IrFilter[] = [];
   for (const entry of entries) {
+    if (isIndexFilter(entry)) continue; // another item: the scope check is the validator's
     if (isGroup(entry)) {
       if (entry.any.length < 2) out.push("an “or” needs two or more conditions");
       filters.push(...entry.any);

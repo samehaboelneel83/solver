@@ -85,6 +85,7 @@ function isDate(value: unknown): boolean {
 /** A scope entry that is an edge a `via` names (queue R19), not a set. */
 const isEdge = (bound: string | undefined): boolean => typeof bound === "string" && bound.startsWith(EDGE_MARK);
 const FILTER_KEYS: ReadonlySet<string> = new Set(["attr", "op", "value"]);
+const INDEX_OPERATORS = ["=", "!=", "<", "<=", ">", ">="];
 const VARIABLE_KEYS: ReadonlySet<string> = new Set(["index", "domain", "lower", "upper", "stage", ...INTERVAL_KEYS]);
 const PARAMETER_KEYS: ReadonlySet<string> = new Set(["index", "uncertainty", "entity"]);
 const OBJECTIVE_KEYS: ReadonlySet<string> = new Set(["sense", "terms", "mode"]);
@@ -1409,7 +1410,7 @@ class ShapeChecker {
           Object.keys(entry).length !== 1 ||
           !Array.isArray(group) ||
           group.length < 2 ||
-          !group.every((g) => isObject(g) && !("any" in g) && !isObject(g.value))
+          !group.every((g) => isObject(g) && !("any" in g) && !("index" in g) && !isObject(g.value))
         ) {
           return refusal(
             "where_group_malformed",
@@ -1433,6 +1434,24 @@ class ShapeChecker {
   private checkFilter(entry: unknown, here: IrLoc, set: string | undefined, scope: Map<string, string>): IrRefusal | null {
     if (!isObject(entry)) {
       return refusal("where_filter_malformed", here, "each filter must be an object");
+    }
+    if ("index" in entry) {
+      // "a != b": this item against one bound earlier, of the same set (benchmark, October 2026).
+      const other = entry.index;
+      const keys = Object.keys(entry);
+      if (
+        keys.length !== 2 || !keys.includes("op") ||
+        !INDEX_OPERATORS.includes(entry.op as string) ||
+        set === undefined || typeof other !== "string" || scope.get(other) !== set
+      ) {
+        return refusal(
+          "where_index_invalid",
+          here,
+          `a filter compares this item with another as {"index": name, "op": one of ${INDEX_OPERATORS.join(", ")}}, ` +
+            `the other bound earlier over the same set ('${set}')`
+        );
+      }
+      return null;
     }
     const unknown = unknownKey(entry, FILTER_KEYS, here, "filter");
     if (unknown) return unknown;

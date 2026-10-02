@@ -1,5 +1,5 @@
 /** The words for a binding's conditions ("team is north"), and what each attribute type can be compared with. */
-import { isGroup, type IrFilter, type WhereEntry } from "./terms";
+import { isGroup, isIndexFilter, type IrFilter, type WhereEntry } from "./terms";
 
 export const OP_WORDS: Record<string, string> = {
   "=": "is",
@@ -40,6 +40,11 @@ export function valueWords(value: unknown): string {
   return String(value);
 }
 
+/** This item against another, in words: "other than a", "after a" (in key order). */
+const INDEX_WORDS: Record<string, string> = {
+  "!=": "other than", "=": "the same as", ">": "after", ">=": "at or after", "<": "before", "<=": "at or before",
+};
+
 /** One condition in words: "team is north". */
 export function filterWords(filter: IrFilter): string {
   return `${filter.attr} ${OP_WORDS[filter.op] ?? filter.op} ${valueWords(filter.value)}`;
@@ -47,5 +52,6 @@ export function filterWords(filter: IrFilter): string {
 
 /** A `where` entry in words: a filter, or a group read "(team is north or cap is at least 2)". */
 export function entryWords(entry: WhereEntry, words: (filter: IrFilter) => string = filterWords): string {
+  if (isIndexFilter(entry)) return INDEX_WORDS[entry.op] ? `${INDEX_WORDS[entry.op]} ${entry.index}` : `${entry.op} ${entry.index}`;
   return isGroup(entry) ? `(${entry.any.map(words).join(" or ")})` : words(entry);
 }

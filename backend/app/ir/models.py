@@ -80,7 +80,14 @@ class FilterGroup(_Model):
     any: list[Filter] = Field(min_length=2)
 
 
-WhereEntry = Union[Filter, FilterGroup]
+class IndexFilter(_Model):
+    """This item compared with the one bound to another index of the same set, by key ("a != b")."""
+
+    index: Name
+    op: Literal["=", "!=", "<", "<=", ">", ">="]
+
+
+WhereEntry = Union[Filter, FilterGroup, IndexFilter]
 
 
 class Steps(_Model):

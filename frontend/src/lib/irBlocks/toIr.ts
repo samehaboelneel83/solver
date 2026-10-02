@@ -73,6 +73,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
     return [...stackOf(first)].map((f, k) => {
       mark(f, [...loc, k]);
       if (f.type === "ir_filter_any") return { any: filters(f.inputs?.ANY, [...loc, k, "any"]) };
+      if (f.type === "ir_filter_index") return { index: fieldOf(f, "INDEX"), op: fieldOf(f, "OP") };
       let value: unknown;
       try {
         value = JSON.parse(fieldOf(f, "VALUE"));

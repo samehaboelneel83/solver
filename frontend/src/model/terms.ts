@@ -22,10 +22,13 @@ import type { PathCombination, Relation, Severity, TermKind, TraversalDepth } fr
 export type IrFilter = { attr: string; op: string; value: unknown };
 /** "This or that": filters of which any one holding is enough, one level deep. */
 export type FilterGroup = { any: IrFilter[] };
-/** One entry of a `where`: a filter, or a group of them. */
-export type WhereEntry = IrFilter | FilterGroup;
+/** This item compared with the one bound to another index of the same set, by key ("b > a"). */
+export type IndexFilter = { index: string; op: string };
+/** One entry of a `where`: a filter, a group of them, or a comparison with another item. */
+export type WhereEntry = IrFilter | FilterGroup | IndexFilter;
 
 export const isGroup = (entry: WhereEntry): entry is FilterGroup => "any" in entry;
+export const isIndexFilter = (entry: WhereEntry): entry is IndexFilter => "index" in entry;
 
 /** How far a walk goes: from `min` to `max` steps, no `max` for no limit. */
 export type Steps = { min: number; max?: number };
@@ -63,7 +66,8 @@ export function rebindSet(binding: Binding, set: string, context: ModelContext, 
     const now = attrs.find((a) => a.name === f.attr);
     return !!now && now.data_type === oldAttrs.find((a) => a.name === f.attr)?.data_type;
   };
-  const where = (binding.where ?? []).filter((entry) => (isGroup(entry) ? entry.any.every(fits) : fits(entry)));
+  // A comparison with another item is about the old set's items: it goes with the set.
+  const where = (binding.where ?? []).filter((entry) => !isIndexFilter(entry) && (isGroup(entry) ? entry.any.every(fits) : fits(entry)));
   if (where.length) next.where = where;
   const walk = viaOf(binding);
   if (walk && walksAvailable(context, set, earlier).some((o) => o.rel === walk.rel && o.anchorEnd === walk.anchorEnd && o.anchors.includes(walk.anchor))) {

@@ -89,6 +89,8 @@ SEMANTIC = frozenset({
     # declarations around a term (queue R20b).
     "parameter_entity_invalid", "entity_parameter_read_as_number", "index_entry_invalid",
     "where_parameter_invalid", "parameter_entity_mismatch",
+    # Whether the other index is bound, and over the same set, is a fact about the scope (benchmark, October 2026).
+    "where_index_invalid",
     # Which parameter travel names, and over what, is a fact of the declarations (queue R15c).
     "route_travel_invalid",
     # Where a chance may be is a fact about the rest of the rule.

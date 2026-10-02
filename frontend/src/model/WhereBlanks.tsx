@@ -11,8 +11,9 @@
  * comma-separated list for "is one of".
  */
 import { useEffect, useState } from "react";
-import { isGroup, type IrFilter, type ModelContext, type WhereEntry } from "./terms";
+import { isGroup, isIndexFilter, type IrFilter, type ModelContext, type WhereEntry } from "./terms";
 import { defaultValue, isList, NUMBER_TYPES, opsFor, OP_WORDS, valueWords } from "./whereWords";
+import { entryWords } from "./whereWords";
 
 function parseOne(text: string, dataType: string | undefined): unknown {
   if (dataType && NUMBER_TYPES.includes(dataType)) {
@@ -184,6 +185,17 @@ export function WhereBlanks({ label, set, where, context, onChange, className, l
       {entries.map((entry, i) => {
         const name = `${label}: condition ${i + 1}`;
         const joiner = <span className="text-slate-600">{i === 0 ? ` ${lead} ` : " and "}</span>;
+        if (isIndexFilter(entry)) {
+          // Another item ("after a"): shown as written; changed in the formula, removed here.
+          return (
+            <span key={i} className="inline-flex flex-wrap items-center gap-1">
+              {joiner}
+              <span className="rounded bg-slate-100 px-1 font-mono text-xs">{entryWords(entry)}</span>
+              <button type="button" aria-label={`Remove ${name}`} className="text-xs text-red-700 underline"
+                onClick={() => setAll(entries.filter((_, j) => j !== i))}>remove</button>
+            </span>
+          );
+        }
         if (!isGroup(entry)) {
           return (
             <span key={i} className="inline-flex flex-wrap items-center gap-1">
