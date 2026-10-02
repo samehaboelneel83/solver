@@ -72,7 +72,11 @@ export default function GuidedCreation({ draft, availableSets, onApply, onPatter
       try {
         onApply(command);
         setFeedback({ error: false, text: `${kind === "objective" ? "Objective term" : kind === "rule" ? "Rule" : "Decision variable"} ${command.name} added to the draft.` });
-        setName("");
+        // A fresh form for the next one: a kept tick put the next decision over the last one's sets
+        // without anyone seeing it (benchmark, October 2026).
+        setName(""); setDomain("binary"); setIndex([]); setLower("0"); setUpper("");
+        setSeparate([]); setLimit(""); setLimitSource("number"); setLimitParameter({ name: "", dimensions: [] });
+        setCoefficient({ name: "", dimensions: [] }); setPreference(false); setPenalty("1"); setNote(""); setWeight("1");
       } catch (error) { setFeedback({ error: true, text: (error as Error).message }); }
     }}>
       <div className="grid gap-4 sm:grid-cols-2">

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { checkRule, explain, problemsAt } from "./blockCheck";
@@ -114,8 +114,14 @@ describe("the boxes", () => {
     fireEvent.change(screen.getByLabelText("factor 1: number"), { target: { value: "2" } });
     expect(ir().right).toEqual({ mul: [{ const: 2 }, { par: "demand", index: ["d"] }] });
 
-    // Rename the total's letter: the decision inside no longer reads a bound name.
+    // Rename the total's letter: the decision inside follows it (benchmark, October 2026).
     fireEvent.change(screen.getByLabelText("left side: runs over: name 1"), { target: { value: "x" } });
+    expect(JSON.stringify(ir().left)).toContain('"index":["x"');
+    expect(screen.getByRole("status")).not.toHaveTextContent("thing to fix");
+    // A decision reading a name nothing binds: the problem shows at its box and above it.
+    cleanup();
+    const total = COVER.left as { sum: Term; over: { index: string; set: string }[] };
+    render(<Harness initial={{ ...COVER, left: { ...total, over: [{ ...total.over[0], index: "x" }] } }} />);
     expect(screen.getByRole("status")).toHaveTextContent("1 thing to fix");
     expect(screen.getByRole("status")).toHaveTextContent("left side › what is totalled: “p” is not bound here");
     expect(within(screen.getByRole("group", { name: "Total: left side" })).getByText("1 problem inside")).toBeInTheDocument();

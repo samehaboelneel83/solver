@@ -14,6 +14,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { FUNCTIONS } from "../ir";
 import { cellText } from "../lib/irBlocks/catalogue";
 import { fillIndices, lost, rebindSet, withWhere, type Binding, type Constraint, type ModelContext, type Term } from "./terms";
+import { following } from "./renameIndex";
 import { AttrBlanks, UndoSetChange, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 
@@ -141,7 +142,10 @@ export function TermWords({ term, path, context, bound, onChange, grouped = fals
     return (
       <span>
         the total of {words(term.sum, "what is totalled", (sum) => onChange({ ...term, sum }), [...bound, ...term.over])}, over{" "}
-        <BindingBlanks label={label("runs over")} bindings={term.over} bound={bound} context={context} onChange={(over) => onChange({ ...term, over })} />
+        <BindingBlanks label={label("runs over")} bindings={term.over} bound={bound} context={context} onChange={(over) => {
+          const { bindings, body } = following(term.over, over, term.sum);
+          onChange({ ...term, sum: body, over: bindings });
+        }} />
       </span>
     );
   }
@@ -216,7 +220,10 @@ export function RuleWords({ rule, context, onChange }: { rule: Constraint; conte
         <>
           For{" "}
           <BindingBlanks label="for each" bindings={forall} context={context}
-            onChange={(next) => onChange({ ...rule, forall: next.length ? next : undefined })} />
+            onChange={(next) => {
+              const { bindings, body } = following(forall, next, { left: rule.left, right: rule.right, ...(rule.when ? { when: rule.when } : {}) });
+              onChange({ ...rule, ...body, forall: bindings.length ? bindings : undefined });
+            }} />
           ,{" "}
         </>
       )}

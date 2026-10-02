@@ -14,6 +14,7 @@ import EquationField, { chipsFor } from "./EquationField";
 import { parseBindings, parseTermIn, printBinding, printTerm } from "./formula";
 import { cellText } from "../lib/irBlocks/catalogue";
 import type { Binding, Constraint, ModelContext, Term } from "./terms";
+import { following } from "./renameIndex";
 import { walkWords } from "./walkWords";
 import { entryWords } from "./whereWords";
 
@@ -180,7 +181,10 @@ export function PartBox({ label, term, bound, context, onChange, startOpen = fal
   if (open) {
     if ("sum" in term) {
       parts = [
-        <BindingsBox key="over" label="over" bindings={term.over} bound={bound} context={context} onChange={(over) => onChange({ ...term, over })} />,
+        <BindingsBox key="over" label="over" bindings={term.over} bound={bound} context={context} onChange={(over) => {
+          const { bindings, body } = following(term.over, over, term.sum);
+          onChange({ ...term, sum: body, over: bindings });
+        }} />,
         <PartBox key="of" label="of" term={term.sum} bound={[...bound, ...term.over]} context={context} onChange={(sum) => onChange({ ...term, sum })} />,
       ];
     } else if ("add" in term) {
@@ -260,7 +264,10 @@ export function RuleDiagram({ rule, context, onChange }: {
             {[
               ...(forall.length
                 ? [<BindingsBox key="forall" label="for each" bindings={forall} bound={[]} context={context}
-                    onChange={(next) => onChange({ ...rule, forall: next })} />]
+                    onChange={(next) => {
+                      const { bindings, body } = following(forall, next, { left: rule.left, right: rule.right, ...(rule.when ? { when: rule.when } : {}) });
+                      onChange({ ...rule, ...body, forall: bindings });
+                    }} />]
                 : []),
               <PartBox key="left" label="left side" term={rule.left} bound={forall} context={context} onChange={(left) => onChange({ ...rule, left })} />,
               <Joiner key="rel" text={rule.relation ?? "?"} />,

@@ -74,3 +74,16 @@ it("does not enable a rule or objective before a decision exists", () => {
   expect(screen.getByRole("button", { name: "Create rule" })).toBeDisabled();
   expect(within(screen.getByRole("region", { name: "Create with guided forms" })).getByText(/Create a decision variable first/)).toBeInTheDocument();
 });
+
+it("starts the next decision with a fresh form, not the last one's sets", () => {
+  render(<Harness />);
+  fireEvent.change(screen.getByLabelText("Decision name"), { target: { value: "assign" } });
+  fireEvent.click(screen.getByLabelText("employee", { exact: true }));
+  fireEvent.click(screen.getByLabelText("day", { exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Create decision variable" }));
+  expect(screen.getByLabelText("employee", { exact: true })).not.toBeChecked();
+  fireEvent.change(screen.getByLabelText("Decision name"), { target: { value: "staff" } });
+  fireEvent.click(screen.getByLabelText("day", { exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Create decision variable" }));
+  expect(draft().variables.staff.index).toEqual(["day"]);
+});

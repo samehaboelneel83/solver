@@ -19,6 +19,7 @@ import { cellText } from "../lib/irBlocks/catalogue";
 import { checkGoal, checkRule, explain, problemsAt, type Problem } from "./blockCheck";
 import { ruleSentence, termSentence } from "./ruleSentence";
 import { RuleWords, TermWords } from "./SentenceEditor";
+import { following } from "./renameIndex";
 import { AttrBlanks, UndoSetChange, WalkBlanks } from "./WalkBlanks";
 import { WhereBlanks } from "./WhereBlanks";
 import {
@@ -352,7 +353,7 @@ export function TermBlock({ term, label, path, problems, context, bound, onChang
     body = (
       <div className="space-y-2">
         <BindingsEditor label={`${label}: runs over`} bindings={term.over} bound={bound} context={context}
-          onChange={(over) => onChange({ ...term, over })} removable={false} />
+          onChange={(over) => { const { bindings, body } = following(term.over, over, term.sum); onChange({ ...term, sum: body, over: bindings }); }} removable={false} />
         {child(term.sum, "what is totalled", (sum) => onChange({ ...term, sum }), [...bound, ...term.over])}
       </div>
     );
@@ -435,7 +436,10 @@ export function RuleBlocks({ rule, context, onChange }: {
           {forall.length > 0 ? (
             <Box role="scope" title="For each" label="the rule is checked once for" problems={problems} path={["for each"]}>
               <BindingsEditor label="For each" bindings={forall} bound={[]} context={context} removable
-                onChange={(next) => onChange({ ...rule, forall: next.length ? next : undefined })} />
+                onChange={(next) => {
+                  const { bindings, body } = following(forall, next, { left: rule.left, right: rule.right, ...(rule.when ? { when: rule.when } : {}) });
+                  onChange({ ...rule, ...body, forall: bindings.length ? bindings : undefined });
+                }} />
             </Box>
           ) : context.sets.length > 0 && (
             <button type="button" className="text-xs text-blue-700 underline"

@@ -471,9 +471,14 @@ export function uniqueByIndex(bound: Binding[]): Binding[] {
 }
 
 export function fillIndices(arity: number, wantedSets: string[], bound: Binding[]): string[] {
+  // Two cells of one set take two different names when there are two (cc_km[c, c2], not
+  // cc_km[c, c] -- benchmark, October 2026); with one, both read it.
+  const used = new Set<Binding>();
   return Array.from({ length: arity }, (_, position) => {
     const set = wantedSets[position];
-    return bound.find((b) => b.set === set)?.index ?? "";
+    const found = bound.find((b) => b.set === set && !used.has(b)) ?? bound.find((b) => b.set === set);
+    if (found) used.add(found);
+    return found?.index ?? "";
   });
 }
 
