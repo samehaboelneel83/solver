@@ -230,7 +230,7 @@ describe("parameter and version routes (Task 13)", () => {
 
   it("/parameters renders the parameter list, not the generic table page", async () => {
     renderAt("/parameters");
-    expect(await screen.findByRole("heading", { level: 1, name: "Parameters" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Data values" })).toBeInTheDocument();
     expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
   });
 

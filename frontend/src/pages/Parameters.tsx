@@ -61,12 +61,12 @@ import { parseRouteId } from "../lib/routeId";
 const FIELDS = ["name", "index_type_ids", "default_value", "unit"];
 
 export default function Parameters() {
-  useDocumentTitle("Parameters");
+  useDocumentTitle("Data values");
   const { domainId } = useDomain();
 
   return (
     <div className="max-w-5xl">
-      <h1 className="mb-4 text-lg font-semibold text-slate-900">Parameters</h1>
+      <h1 className="mb-4 text-lg font-semibold text-slate-900">Data values</h1>
       {domainId === null ? (
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
           <p>

@@ -1473,9 +1473,12 @@ describe("the Simple level", () => {
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Build", "Check"]);
     expect(screen.queryByText("Create with guided forms")).toBeNull();
     expect(screen.queryByText("Advanced views")).toBeNull();
-    // One switch for the page, between the two plain views; none on each card.
+    // One switch for the page, between its views; none on each card.
     expect(screen.getByRole("button", { name: "Show all as sentences" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Show all as equations" })).toBeNull();
+    // The equation is offered too, with a line saying what it is (benchmark, October 2026: Expert only).
+    expect(screen.getByRole("button", { name: "Show all as equations" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show all as diagrams" })).toBeNull();
+    expect(screen.getAllByText(/^Sentence: each rule in plain words/).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Show c_cover as boxes" })).toBeNull();
     // The goal's equation line is Expert's.
     expect(screen.queryByTestId("objective-equation")).toBeNull();

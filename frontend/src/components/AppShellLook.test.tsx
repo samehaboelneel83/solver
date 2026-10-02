@@ -94,7 +94,7 @@ describe("the app's look (queue R22)", () => {
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     const search = screen.getByRole("combobox", { name: "Go to a page" });
     fireEvent.change(search, { target: { value: "param" } });
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["ParametersDomains"]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Data valuesWorkspaces"]);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(screen.getByTestId("path")).toHaveTextContent("/parameters");
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -115,7 +115,7 @@ describe("the app's look (queue R22)", () => {
       renderAt();
       fireEvent.click(screen.getByRole("button", { name: "Collapse the sidebar" }));
       expect(document.getElementById("sidebar-nav")).toHaveClass("w-16");
-      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All workspaces" })).toBeInTheDocument();
       expect(localStorage.getItem("solver_nav_collapsed")).toBe("1");
     } finally {
       window.matchMedia = original;

@@ -403,7 +403,7 @@ function UploadForm({ domainId }: { domainId: number }) {
 }
 
 export default function Predictors() {
-  useDocumentTitle("Predictors");
+  useDocumentTitle("Forecasts");
   const { domainId } = useDomain();
   const { can } = useCapabilities();
   const list = usePredictors(domainId);
@@ -413,7 +413,7 @@ export default function Predictors() {
   return (
     <div className="max-w-5xl space-y-6">
       <div>
-        <h1 className="mb-1 text-lg font-semibold text-slate-900">Predictors</h1>
+        <h1 className="mb-1 text-lg font-semibold text-slate-900">Forecasts <span className="text-sm font-normal text-slate-500">(predictors)</span></h1>
         <p className="text-sm text-slate-500">
           Trained models this domain holds. A rule or goal reads one as <code className="font-mono">predict name(inputs…)</code>;
           a run freezes the model it used, so retraining changes later runs, never earlier ones.

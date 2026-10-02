@@ -43,7 +43,7 @@ const MEASURED = new Set<Make>(["distances", "within", "within_flag"]);
 /** Where each result is kept, so the line that reports it can take the person there. */
 export function resultPlace(kind: Make, domainId: Id, simple = false): { to: string; words: string; read: string } {
   if (kind === "distances" || kind === "within_flag" || kind === "overlap")
-    return { to: `/domains/${domainId}/data/parameters`, words: `Open it under ${simple ? "Data values" : "Parameters"}`,
+    return { to: `/domains/${domainId}/data/parameters`, words: "Open it under Data values",
       read: "a model reads it once it is ticked under “Data this model reads”" };
   if (kind === "count" || kind === "elevation")
     return { to: `/domains/${domainId}/data/records`, words: "See it on the records", read: "a model reads it as a field of each record" };

@@ -59,7 +59,7 @@ describe("AppShell", () => {
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual([
-        "Overview & solve", "Data", "Model", "What-ifs", "Results", "Data workbench", "Data values", "Map data", "Forecasts", "Other problems", "All workspaces", "Getting started", "Modeling guide",
+        "Overview & solve", "Data", "Model", "What-ifs", "Results", "Data workbench", "Data values", "Links between records", "Map data", "Forecasts", "Other problems", "All workspaces", "Getting started", "Modeling guide",
       ]);
       expect(within(nav).getByRole("link", { name: "Data" })).toHaveAttribute("href", "/domains/7/data/records");
       expect(within(nav).queryByRole("link", { name: "Versions" })).toBeNull();
@@ -78,7 +78,7 @@ describe("AppShell", () => {
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getAllByRole("link").map((link) => link.textContent?.trim()).slice(0, 4)).toEqual(["Overview", "Problems", "Data workbench", "Records"]);
-      expect(within(nav).queryByRole("link", { name: /Sources|Predictors|Data structure/ })).toBeNull();
+      expect(within(nav).queryByRole("link", { name: /Sources|Data structure/ })).toBeNull();
     });
   });
 
@@ -88,19 +88,19 @@ describe("AppShell", () => {
     it("keeps Home independent of the remembered domain", async () => {
       renderWithProviders(["/"]);
       await settled();
-      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All workspaces" })).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Build model" })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Records" })).not.toBeInTheDocument();
     });
     it("shows only the selected problem workflow and a link back to its domain", async () => {
       renderWithProviders(["/domains/7/problems/9/model"]);
       await settled();
-      // `/domains` prefixes this page; "All domains" is still not the current page.
-      expect(screen.getByRole("link", { name: "All domains" })).not.toHaveAttribute("aria-current");
+      // `/domains` prefixes this page; "All workspaces" is still not the current page.
+      expect(screen.getByRole("link", { name: "All workspaces" })).not.toHaveAttribute("aria-current");
       expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("href", "/domains/7/problems/9/model");
       expect(screen.getByRole("link", { name: "Build model" })).toHaveAttribute("aria-current", "page");
       expect(screen.getByRole("link", { name: "Problems" })).not.toHaveAttribute("aria-current");
-      expect(screen.getByRole("link", { name: "Domain overview" })).toHaveAttribute("href", "/domains/7/overview");
+      expect(screen.getByRole("link", { name: "Workspace overview" })).toHaveAttribute("href", "/domains/7/overview");
       expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute("href", "/domains/7/data/records");
     });
     it("keeps the problem one click away after opening a platform page", async () => {
@@ -117,7 +117,7 @@ describe("AppShell", () => {
       localStorage.setItem("solver_last_problem_by_domain", JSON.stringify({ 3: 5 }));
       renderWithProviders(["/domains/7/problems/9/runs"]);
       await settled();
-      fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "3" } });
+      fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "3" } });
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getByText("This problem")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/domains/3/problems/5/runs");
@@ -127,12 +127,12 @@ describe("AppShell", () => {
       renderWithProviders(["/domains/7/problems/9/runs"]);
       await settled();
       fireEvent.click(screen.getByRole("link", { name: "Run queue" }));
-      fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "3" } });
+      fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "3" } });
       expect(screen.getByRole("link", { name: "Run queue" })).toHaveAttribute("aria-current", "page");
       const nav = screen.getByRole("navigation", { name: "Main" });
       expect(within(nav).getByText("Navigate")).toBeInTheDocument();
       // Domain 3 has no problem opened yet: the shortcut is the domain itself.
-      expect(within(nav).getByText("Recent domain")).toBeInTheDocument();
+      expect(within(nav).getByText("Recent workspace")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/3/problems");
     });
     it("renders the primary sidebar groups in planner order", async () => {
@@ -143,7 +143,7 @@ describe("AppShell", () => {
       const headings = within(nav)
         .getAllByRole("button", { expanded: true })
         .map((b) => b.textContent?.replace(/[▾▸]/g, "").trim());
-      expect(headings.slice(0, 5)).toEqual(["Home", "Domains", "Data structure", "Data", "Problems"]);
+      expect(headings.slice(0, 5)).toEqual(["Home", "Workspaces", "Data structure", "Data", "Problems"]);
     });
 
     it("links each group's pages from a static map", async () => {
@@ -151,7 +151,7 @@ describe("AppShell", () => {
       await settled();
 
       // The chooser (Epic UX, U-1); the editable table stays at /public/domain.
-      expect(screen.getByRole("link", { name: "All domains" })).toHaveAttribute("href", "/domains");
+      expect(screen.getByRole("link", { name: "All workspaces" })).toHaveAttribute("href", "/domains");
       expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/domains/7/problems");
       expect(screen.getByRole("link", { name: "Templates" })).toHaveAttribute("href", "/public/template");
       expect(screen.getByRole("link", { name: "Getting started" })).toHaveAttribute(
@@ -263,7 +263,7 @@ describe("AppShell", () => {
       const nav = screen.getByRole("navigation", { name: "Main" });
       const records = within(nav).getByRole("link", { name: "Records" });
       expect(records).toHaveAttribute("href", "/domains/7/data/records");
-      const domainsToggle = within(nav).getByRole("button", { name: /^Domains/ });
+      const domainsToggle = within(nav).getByRole("button", { name: /^Workspaces/ });
       const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
       expect(domainsToggle.compareDocumentPosition(records) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(records.compareDocumentPosition(problemsToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -273,7 +273,7 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
       const nav = screen.getByRole("navigation", { name: "Main" });
-      const parameters = within(nav).getByRole("link", { name: "Parameters" });
+      const parameters = within(nav).getByRole("link", { name: "Data values" });
       expect(parameters).toHaveAttribute("href", "/domains/7/data/parameters");
       const records = within(nav).getByRole("link", { name: "Records" });
       const problemsToggle = within(nav).getByRole("button", { name: /^Problems/ });
@@ -316,7 +316,7 @@ describe("AppShell", () => {
       renderWithProviders();
       await settled();
       const aside = document.getElementById("sidebar-nav") as HTMLElement;
-      const select = within(aside).getByRole("combobox", { name: "Domain" });
+      const select = within(aside).getByRole("combobox", { name: "Workspace" });
       const firstNavLink = within(aside).getByRole("link", { name: "Home" });
       expect(select.compareDocumentPosition(firstNavLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
@@ -334,7 +334,7 @@ describe("AppShell", () => {
   it("marks the nav link for the current route as active and leaves the others plain", async () => {
     renderWithProviders(["/domains"]);
     await settled();
-    const activeLink = screen.getByRole("link", { name: "All domains" });
+    const activeLink = screen.getByRole("link", { name: "All workspaces" });
     const otherLink = screen.getByRole("link", { name: "Home" });
 
     expect(activeLink).toHaveAttribute("aria-current", "page");
@@ -363,7 +363,7 @@ describe("AppShell", () => {
       expect(heading).toHaveAttribute("aria-expanded", "false");
       expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
       // The other groups are untouched.
-      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All workspaces" })).toBeInTheDocument();
 
       fireEvent.click(heading);
       expect(screen.getByRole("link", { name: "Problems" })).toBeInTheDocument();
@@ -385,7 +385,7 @@ describe("AppShell", () => {
       await settled();
       // Restored collapsed -- the page link stays hidden without clicking again.
       expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All workspaces" })).toBeInTheDocument();
     });
   });
 
@@ -397,8 +397,8 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("link", { name: "Templates" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Problems" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "All domains" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Domains" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "All workspaces" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspaces" })).not.toBeInTheDocument();
   });
 
   it("matches the filter against the group name too", async () => {
@@ -408,7 +408,7 @@ describe("AppShell", () => {
     fireEvent.change(screen.getByPlaceholderText("Filter pages…"), { target: { value: "admin" } });
 
     expect(screen.getByRole("link", { name: "Organizations" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "All domains" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "All workspaces" })).not.toBeInTheDocument();
   });
 
   it("scrolls the nav region independently of the rest of the sidebar", async () => {
@@ -672,7 +672,7 @@ describe("AppShell", () => {
     main.scrollTop = 240;
     expect(main.scrollTop).toBe(240);
 
-    fireEvent.click(screen.getByRole("link", { name: "All domains" }));
+    fireEvent.click(screen.getByRole("link", { name: "All workspaces" }));
 
     expect(main).toHaveFocus();
     expect(main.scrollTop).toBe(0);
@@ -689,7 +689,7 @@ describe("AppShell", () => {
     const signOut = screen.getByRole("button", { name: "Sign out" });
     expect(signOut.className).toMatch(/py-2/);
 
-    const groupToggle = screen.getByRole("button", { name: "Domains" });
+    const groupToggle = screen.getByRole("button", { name: "Workspaces" });
     expect(groupToggle.className).toMatch(/py-2/);
   });
 
@@ -709,7 +709,7 @@ describe("AppShell", () => {
 
       expect(await screen.findAllByTestId("offline-notice")).not.toHaveLength(0);
       // The nav no longer depends on any request, so it is all still there.
-      expect(screen.getByRole("link", { name: "All domains" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All workspaces" })).toBeInTheDocument();
       expect(screen.queryByText("Loading navigation…")).not.toBeInTheDocument();
     });
   });

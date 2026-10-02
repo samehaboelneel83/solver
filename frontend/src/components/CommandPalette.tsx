@@ -6,7 +6,13 @@ import { useDomain } from "../hooks/useDomain";
 import { parseRouteId } from "../lib/routeId";
 import { useConfirmLeave } from "../hooks/useUnsavedChangesGuard";
 
-type Entry = { to: string; label: string; group: string };
+type Entry = { to: string; label: string; group: string; also: string }
+
+/** The older names a page still answers to in the search (benchmark, October 2026: one vocabulary
+ * across levels -- Workspace and Data values -- without losing what experts type). */
+const ALSO_KNOWN_AS: Record<string, string> = {
+  parameters: "parameters", domains: "domains", "domain-overview": "domain", predictors: "predictors",
+};
 
 /**
  * Ctrl+K: every page of the app, found by typing (queue R22 / OAAS N05).
@@ -29,12 +35,12 @@ export default function CommandPalette({ open, onClose, can }: { open: boolean; 
       buildNavGroups({ domainId, problemId }).flatMap((g) =>
         g.items
           .filter((i) => !i.capability || can(i.capability))
-          .map((i) => ({ to: i.to, label: i.label, group: g.label }))
+          .map((i) => ({ to: i.to, label: i.label, group: g.label, also: ALSO_KNOWN_AS[i.id] ?? "" }))
       ),
     [can, domainId, problemId]
   );
   const needle = query.trim().toLowerCase();
-  const found = needle ? entries.filter((e) => `${e.label} ${e.group}`.toLowerCase().includes(needle)) : entries;
+  const found = needle ? entries.filter((e) => `${e.label} ${e.group} ${e.also}`.toLowerCase().includes(needle)) : entries;
 
   useEffect(() => {
     if (open) {

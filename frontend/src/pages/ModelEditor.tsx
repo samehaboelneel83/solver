@@ -239,10 +239,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [justPublished, setJustPublished] = useState<number | null>(null);
   const [solvingNow, setSolvingNow] = useState(false);
   const navigate = useNavigate();
-  const [storedView, setEquationView] = useEquationView();
   // Simple or Expert (editorLevel.ts): Simple shows the plain views, one card open at a time, one “+ Add” per section.
   const [level] = useEditorLevel();
   const simple = level === "simple";
+  const [storedView, setEquationView] = useEquationView(simple);
   const equationView = viewAt(storedView, simple);
   // Step by step at Simple (ModelSteps.tsx): which step is on screen, or all of them.
   const [simpleSteps, setSimpleSteps] = useStepByStep();

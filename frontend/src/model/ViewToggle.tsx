@@ -9,8 +9,15 @@ import { useLevel } from "./editorLevel";
 /** How a rule, goal or declaration is shown: in words, as nested boxes, as a drill-down diagram, or as one equation line. */
 export type EquationView = "sentence" | "boxes" | "diagram" | "equation";
 const EQUATION_VIEWS: readonly EquationView[] = ["sentence", "boxes", "diagram", "equation"];
-/** What the Simple level offers. */
-export const SIMPLE_VIEWS: readonly EquationView[] = ["sentence", "boxes"];
+/** What the Simple level offers: the equation too, a typed line (benchmark, October 2026: Expert only). */
+export const SIMPLE_VIEWS: readonly EquationView[] = ["sentence", "boxes", "equation"];
+/** A line under the Simple switch saying what each view is for. */
+const HINT: Record<EquationView, string> = {
+  sentence: "Sentence: each rule in plain words, with blanks to fill.",
+  boxes: "Boxes: the parts of each rule, one inside another.",
+  diagram: "Diagram: each rule drawn as a tree.",
+  equation: "Equation: each rule as one line you can type, e.g. sum(x[s] for s in site) <= 3.",
+};
 /** The view shown at a level: Simple reads Diagram and Equation as Sentence. */
 export const viewAt = (view: EquationView, simple: boolean): EquationView =>
   simple && !SIMPLE_VIEWS.includes(view) ? "sentence" : view;
@@ -22,20 +29,30 @@ const VIEW_TEXT: Record<EquationView, { button: string; all: string; one: string
 };
 const EQUATION_VIEW_KEY = "solver_equation_view";
 
-/** How rules and goals are shown on this page, remembered in this browser. */
-export function useEquationView(): [EquationView, (next: EquationView) => void] {
-  const [view, setView] = useState<EquationView>(() => {
+/** How rules and goals are shown on this page, remembered in this browser -- per level: Expert
+ * starts on equations, Simple on sentences, and an equation chosen in Simple is kept there. */
+export function useEquationView(simple = false): [EquationView, (next: EquationView) => void] {
+  const key = simple ? `${EQUATION_VIEW_KEY}_simple` : EQUATION_VIEW_KEY;
+  const start: EquationView = simple ? "sentence" : "equation";
+  const read = (): EquationView => {
     try {
-      const stored = localStorage.getItem(EQUATION_VIEW_KEY) as EquationView | null;
-      return stored && EQUATION_VIEWS.includes(stored) ? stored : "equation";
+      const stored = localStorage.getItem(key) as EquationView | null;
+      return stored && EQUATION_VIEWS.includes(stored) ? stored : start;
     } catch {
-      return "equation";
+      return start;
     }
-  });
+  };
+  const [view, setView] = useState<EquationView>(read);
+  const [shownFor, setShownFor] = useState(key);
+  if (shownFor !== key) {
+    // The level switched: the view remembered for that level.
+    setShownFor(key);
+    setView(read());
+  }
   return [view, (next) => {
     setView(next);
     try {
-      localStorage.setItem(EQUATION_VIEW_KEY, next);
+      localStorage.setItem(key, next);
     } catch {
       // Without storage the choice holds for this page only.
     }
@@ -51,12 +68,12 @@ export function ViewToggle({ value, onChange, name, size = "sm" }: {
   size?: "sm" | "xs";
 }) {
   const pad = size === "sm" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
-  // Simple: one switch for the page (not one per card), between the two plain views.
+  // Simple: one switch for the page (not one per card), between its three views, with a line on the one shown.
   const simple = useLevel() === "simple";
   const pageSwitch = name === "all" || name.startsWith("all ");
   if (simple && !pageSwitch) return null;
   const options = simple ? SIMPLE_VIEWS : EQUATION_VIEWS;
-  return (
+  const buttons = (
     <div role="group" aria-label={`Show ${name} as`} className="inline-flex overflow-hidden rounded-md border border-slate-300">
       {options.map((option) => (
         <button
@@ -71,6 +88,13 @@ export function ViewToggle({ value, onChange, name, size = "sm" }: {
         </button>
       ))}
     </div>
+  );
+  if (!simple) return buttons;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {buttons}
+      <span className="text-xs text-slate-500">{HINT[value] ?? HINT.sentence}</span>
+    </span>
   );
 }
 

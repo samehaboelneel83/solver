@@ -29,7 +29,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
       cards: [
         { title: "Records", description: "Manage people, places, resources and other business objects.", to: `${domain}/data/records` },
         { title: "Relationships", description: "Manage connections between records.", to: `${domain}/data/relationships` },
-        { title: "Parameters", description: "Manage numeric and structured input values.", to: `${domain}/data/parameters` },
+        { title: "Data values", description: "Manage numeric and structured input values.", to: `${domain}/data/parameters` },
       ],
     },
     structure: {

@@ -34,7 +34,7 @@ export const TERMS = {
   records: "Records",
   relationshipTypes: "Relationship types",
   relationships: "Relationships",
-  parameters: "Parameters",
+  parameters: "Data values",
   mapGraph: "Data relationships (graph)",
   problems: "Problems",
   model: "Build model",
@@ -77,14 +77,14 @@ export const DESTINATIONS: Destination[] = [
   { id: "data-records", path: "/data", canonical: DOMAIN_TEMPLATES["data-records"], label: "Records & relationships", purpose: "Manage operational records, links and values.", scope: "domain", group: "data" },
   { id: "data-structure", path: "/structure", canonical: DOMAIN_TEMPLATES["data-structure"], label: "Data structure", purpose: "Define record types and relationship types.", scope: "domain", group: "data" },
   { id: "sources", path: "/sources", canonical: DOMAIN_TEMPLATES.sources, label: "Database connections", purpose: "Import rows from a database (Excel and CSV import live on each kind of record).", scope: "domain", group: "data", capability: "integration.run" },
-  { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Predictors", purpose: "Train and keep the models a rule can read with predict.", scope: "domain", group: "data" },
+  { id: "predictors", path: "/predictors", canonical: DOMAIN_TEMPLATES.predictors, label: "Forecasts", purpose: "Train and keep the forecasting models (predictors) a rule can read with predict.", scope: "domain", group: "data" },
   { id: "map-data", path: "/map-data", canonical: DOMAIN_TEMPLATES["map-data"], label: "Map data", purpose: "Bring CAD drawings onto the map as GIS layers.", scope: "domain", group: "domains" },
   // Camps are map data (a tab of Map data), not a page of the sidebar; kept for the command palette.
   { id: "camps", path: "/map-data/camps", canonical: DOMAIN_TEMPLATES.camps, label: "Camps (map data)", purpose: "Draw a camp on the map and lay out its beds and corridors.", scope: "domain", group: "domains" },
   { id: "quality", path: "/quality", canonical: DOMAIN_TEMPLATES.quality, label: "Quality checks", purpose: "Review data and model validation workflows.", scope: "domain", group: "data" },
   { id: "access", path: "/administration/access", canonical: "/administration/access", label: "Access & policies", purpose: "Manage people, permissions and platform policies.", scope: "administration", group: "administration", capability: "iam.manage" },
   { id: "domain-overview", path: "/domains/:domainId/overview", canonical: "/domains/:domainId/overview",
-    label: "Domain overview", purpose: "Prepare data and continue a planning problem.", scope: "domain", group: "domains" },
+    label: "Workspace overview", purpose: "Prepare data and continue a planning problem.", scope: "domain", group: "domains" },
   { id: "problem-overview", path: "/domains/:domainId/problems/:problemId/overview", canonical: "/domains/:domainId/problems/:problemId/overview",
     label: "Problem overview", purpose: "See model readiness, scenarios and results.", scope: "problem", group: "problems" },
   {
@@ -102,7 +102,7 @@ export const DESTINATIONS: Destination[] = [
     // The chooser (Epic UX, U-1); the editable table stays at /public/domain.
     path: "/domains",
     canonical: "/domains",
-    label: "All domains",
+    label: "All workspaces",
     purpose: "Choose shared operational data for a business area.",
     scope: "global",
     group: "domains",
@@ -427,7 +427,7 @@ export const NAV_GROUP_DEFS: NavGroupDef[] = [
   { key: "home", label: "Home", itemIds: ["home"] },
   {
     key: "domains",
-    label: "Domains",
+    label: "Workspaces",
     itemIds: ["domains", "domain-overview", "records", "relationships", "parameters", "map-graph"],
   },
   {
@@ -702,12 +702,12 @@ export function buildSidebarGroups(
       named("planning", "This problem", [["problem-overview", "Overview & solve"], ["records", "Data"], ["model", "Model"], ["scenarios", "What-ifs"], ["runs", "Results"]]),
       // Where the data comes from, as in a workspace: computed values and the map are a planner's too (user trial).
       // Forecasts are data a rule reads (benchmark, October 2026: the page was in no menu).
-      named("data", "Data", [["workbench", "Data workbench"], ["parameters", "Data values"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
+      named("data", "Data", [["workbench", "Data workbench"], ["parameters", "Data values"], ["relationships", "Links between records"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
       named("context", "Navigate", [["problems", "Other problems"], ["domains", "All workspaces"]]),
       help,
     ];
     if (inDomain) return [
-      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["parameters", "Data values"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
+      named("domain", "This workspace", [["domain-overview", "Overview"], ["problems", "Problems"], ["workbench", "Data workbench"], ["records", "Records"], ["parameters", "Data values"], ["relationships", "Links between records"], ["map-data", "Map data"], ["predictors", "Forecasts"]]),
       named("context", "Navigate", [["domains", "All workspaces"], ["templates", "Templates"]]),
       help,
     ];
@@ -720,7 +720,7 @@ export function buildSidebarGroups(
   ];
   if (inDomain) return [
     select("context", "Navigate", ["home", "domains", "templates"]),
-    select("domain", "This domain", ["domain-overview", "problems", "map-data"]),
+    select("domain", "This workspace", ["domain-overview", "problems", "map-data"]),
     select("data", "Data", ["workbench", "records", "relationships", "parameters", "record-types", "relationship-types", "map-graph", "sources", "predictors"]),
     ...common,
   ];
@@ -750,7 +750,7 @@ export function buildSidebarGroups(
     const scope = { domainId: back.domainId, problemId: null };
     return [navigate, simple
       ? recentGroup("Recent workspace", scope, [["domain-overview", "Overview"], ["problems", "Problems"], ["records", "Records"], ["map-data", "Map data"]])
-      : recentGroup("Recent domain", scope, [["domain-overview", null], ["problems", null], ["map-data", null]]), ...tail];
+      : recentGroup("Recent workspace", scope, [["domain-overview", null], ["problems", null], ["map-data", null]]), ...tail];
   }
   return [navigate, ...tail];
 }

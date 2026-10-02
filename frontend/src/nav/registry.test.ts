@@ -60,7 +60,7 @@ describe("nav registry", () => {
   });
   it("offers a recent domain when no problem was open", () => {
     const recent = buildSidebarGroups("/settings", { domainId: 7 }, { domainId: 7, problemId: null }).find((g) => g.key === "recent")!;
-    expect(recent.label).toBe("Recent domain");
+    expect(recent.label).toBe("Recent workspace");
     expect(recent.items.map((i) => i.to)).toEqual(["/domains/7/overview", "/domains/7/problems", "/domains/7/map-data"]);
   });
   it("drops the recent shortcut once another domain is selected", () => {
