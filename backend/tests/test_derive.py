@@ -44,3 +44,22 @@ def test_dates_texts_and_links_become_number_fields(tenants, db):  # noqa: F811
     assert refused.status_code == 422
     assert http.post(f"/api/v1/entity-types/{obs['id']}/derive", json={"op": "date_parts", "field": "day"},
                      headers=tenants["b"]).status_code in (403, 404)
+
+
+def test_a_formula_over_a_record_s_numbers_becomes_a_field(tenants, db):  # noqa: F811
+    """Benchmark, October 2026: volume / capacity and length / speed could not be written."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+    road = http.post("/api/v1/entity-types", json={"domain_id": domain, "name": "link", "role": "location"}, headers=h).json()
+    for name in ("volume", "capacity", "label_text"):
+        http.post(f"/api/v1/entity-types/{road['id']}/attributes",
+                  json={"name": name, "data_type": "text" if name == "label_text" else "number"}, headers=h)
+    for key, attrs in (("a", {"volume": 900, "capacity": 1200}), ("b", {"volume": 300, "capacity": 0}), ("c", {"volume": 50})):
+        http.post("/api/v1/entities", json={"entity_type_id": road["id"], "key": key, "attrs": attrs}, headers=h)
+    path = f"/api/v1/entity-types/{road['id']}/derive"
+    done = http.post(path, json={"op": "formula", "field": "vc_ratio", "formula": "volume / capacity"}, headers=h)
+    assert done.status_code == 200, done.text
+    assert done.json()["records"] == 1 and sorted(done.json()["empty"]) == ["b", "c"]  # no division by zero, nothing missing made up
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": road["id"]}, headers=h).json()["items"]}
+    assert items["a"]["vc_ratio"] == 0.75 and "vc_ratio" not in items["b"]
+    for bad in ("volume / label_text", "__import__('os')", "volume ** 2", "volume /"):
+        assert http.post(path, json={"op": "formula", "field": "x", "formula": bad}, headers=h).status_code == 422, bad

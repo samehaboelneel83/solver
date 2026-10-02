@@ -42,6 +42,7 @@ import { typeColour } from "../lib/colour";
 import { parseRouteId } from "../lib/routeId";
 import { mergeReload, reloadedKeys } from "../lib/staleRecord";
 import { ENTITY_TYPE_FIELDS, EntityTypeFields } from "./EntityTypes";
+import FormulaField from "../components/FormulaField";
 
 const BACK_LINK = "inline-block rounded py-1 text-sm text-blue-600 underline";
 
@@ -100,6 +101,7 @@ function Editor({ type, reload }: { type: EntityType; reload: () => Promise<Enti
       </div>
       <TypeForm type={type} reload={reload} />
       <Attributes type={type} />
+      {!type.is_abstract && <FormulaField kind={type} />}
       {/* Queue R21: a template out, a filled file in. */}
       {!type.is_abstract && <BulkPanel base={`/api/v1/entity-types/${type.id}`} what={`${type.name} entities`} />}
       <DeleteType type={type} />

@@ -346,13 +346,14 @@ def test_a_run_needs_a_session(seeded):
 
 
 def test_a_time_limit_outside_the_allowed_range_is_refused(seeded, auth_headers):
-    """Solving happens in the request, so the ceiling is what stops one
-    running away. Refused at the request layer, naming the field."""
+    """A worker solves, so a long run holds no request open; the ceiling (half an hour since the
+    benchmark, October 2026) is what stops one running away. Refused at the request layer, naming
+    the field."""
     client = TestClient(app)
 
     response = client.post(
         f"/api/v1/scenarios/{seeded['scenario_id']}/runs",
-        json={"time_limit_s": 600},
+        json={"time_limit_s": 3600},
         headers=auth_headers,
     )
 

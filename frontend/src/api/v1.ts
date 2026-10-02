@@ -1949,9 +1949,9 @@ export const applyPredictor = (id: Id, body: { field: string; only_missing: bool
 export const useApplyPredictor = () =>
   useV1Mutation(({ id, body }: { id: Id; body: { field: string; only_missing: boolean } }) => applyPredictor(id, body));
 /** Number fields made from a date, a text or a linked record's number (`app/api/derive.py`). */
-export type DeriveBody = { op: "date_parts" | "categories" | "from_link"; field: string; of?: string };
+export type DeriveBody = { op: "date_parts" | "categories" | "from_link" | "formula"; field: string; of?: string; formula?: string };
 export const deriveFields = (entityTypeId: Id, body: DeriveBody) =>
-  send<{ made: string[]; records: number; left_empty: number }>("POST", `/api/v1/entity-types/${entityTypeId}/derive`, body);
+  send<{ made: string[]; records: number; left_empty: number; empty?: string[] }>("POST", `/api/v1/entity-types/${entityTypeId}/derive`, body);
 export const useDeriveFields = () =>
   useV1Mutation(({ entityTypeId, body }: { entityTypeId: Id; body: DeriveBody }) => deriveFields(entityTypeId, body));
 

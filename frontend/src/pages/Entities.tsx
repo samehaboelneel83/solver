@@ -35,6 +35,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { useWords } from "../lib/words";
 import { useEditorLevel } from "../model/editorLevel";
+import FormulaField from "../components/FormulaField";
 
 // Lazy, like the graph's filter bar. The builder is the only module that
 // imports react-querybuilder, which Task 14c measured at +47.6 kB gz on a
@@ -590,6 +591,13 @@ function EntityTable({
   const placed = geometryFields(type).length > 0;
   return (
     <>
+      {/* Ratios and travel times as data, in Simple as in Expert (benchmark, October 2026). */}
+      <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
+        <summary className="cursor-pointer select-none text-sm font-medium text-slate-800">
+          Compute a field from others (a ratio, a time from a length and a speed)
+        </summary>
+        <div className="mt-2"><FormulaField kind={type} /></div>
+      </details>
       {/* One door for bringing records in (improvement plan 4.5): a file of rows, or the features of a map layer. */}
       <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
         <summary className="cursor-pointer select-none text-sm font-medium text-slate-800">
