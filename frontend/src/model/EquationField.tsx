@@ -153,7 +153,9 @@ export default function EquationField<T>({
           {sets.length > 0 && <span className="ml-1 text-xs text-slate-500">sets: {sets.join(", ")}</span>}
         </div>
       )}
-      {editing && <SyntaxCard sets={sets} />}
+      {/* Always there, so opening it does not close it (benchmark, October 2026, B21: shown only while
+          typing, a click on it ended the typing and took it away). */}
+      <SyntaxCard sets={sets} />
     </div>
   );
 }

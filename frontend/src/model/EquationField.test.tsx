@@ -43,3 +43,15 @@ it("puts the model's equation back on Escape", () => {
   fireEvent.keyDown(field, { key: "Escape" });
   expect(field).toHaveValue("x[i] * 1");
 });
+
+it("keeps the help open when it is clicked, typing or not (benchmark, October 2026, B21)", () => {
+  const { field } = mount();
+  fireEvent.focus(field);
+  const summary = screen.getByText("How to write it");
+  fireEvent.blur(field);
+  fireEvent.click(summary);
+  const card = summary.closest("details")!;
+  expect(card).toBeInTheDocument();
+  expect(card.open).toBe(true);
+  expect(screen.getByText(/a rule for every member of a set/)).toBeInTheDocument();
+});

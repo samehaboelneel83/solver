@@ -8,6 +8,7 @@ import { formatApiError } from "../api/errors";
 import { useApplyTemplate, useTemplates } from "../api/v1";
 import OfflineNotice from "../components/OfflineNotice";
 import HomeResults from "../components/HomeResults";
+import WhatThisAppDoes from "../components/WhatThisAppDoes";
 import HomeSection, { HOME_CARD, HOME_ICON } from "../components/HomeSection";
 import { Activity, Database, FlaskConical, LayoutTemplate, Play } from "lucide-react";
 import { relativeTime } from "../lib/relativeTime";
@@ -21,14 +22,14 @@ import { useCapabilities } from "../hooks/useCapability";
 const ENTRY_POINTS = [
   {
     href: "/public/domain",
-    title: "Domains",
+    title: "Workspaces",
     description: "Shared operational data for a business area.",
     icon: Database,
   },
   {
     href: "/public/problem",
     title: "Problems",
-    description: "Decisions to optimize in the selected domain.",
+    description: "Decisions to optimize in the selected workspace.",
     icon: FlaskConical,
   },
   {
@@ -110,6 +111,8 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      <WhatThisAppDoes domainId={domainId} />
+
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {ENTRY_POINTS.map((entry) => (
           <Link key={entry.href} to={entry.href} aria-label={entry.title} className={HOME_CARD}>
@@ -125,7 +128,7 @@ export default function Dashboard() {
       <HomeSection
         id="continue-working"
         title="Continue working"
-        note={`Recently created problems${domainId !== null ? " in the selected domain" : " across your domains"}.`}
+        note={`Recently created problems${domainId !== null ? " in the selected workspace" : " across your workspaces"}.`}
         viewAll={{ to: domainId !== null ? `/domains/${domainId}/problems` : "/public/problem" }}
       >
         {problemsOffline ? (

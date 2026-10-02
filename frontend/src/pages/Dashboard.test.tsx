@@ -71,7 +71,7 @@ describe("Dashboard", () => {
     renderWithProviders();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Domains" })).toHaveAttribute("href", "/public/domain");
+    expect(screen.getByRole("link", { name: "Workspaces" })).toHaveAttribute("href", "/public/domain");
     expect(screen.getByRole("link", { name: "Problems" })).toHaveAttribute("href", "/public/problem");
     expect(screen.getByRole("link", { name: "Runs & results" })).toHaveAttribute("href", "/runs");
   });
