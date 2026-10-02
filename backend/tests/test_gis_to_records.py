@@ -77,3 +77,12 @@ def test_a_row_becomes_a_point_and_bad_cells_say_so():
     assert location_value(LocationPlan(lon="lon", lat="lat"), ["", 31.18], at) is None
     with pytest.raises(ValueError):
         location_value(LocationPlan(lon="lon", lat="lat"), [200, 31.18], at)
+
+
+def test_a_kind_is_named_after_the_map_data_when_its_layer_is_only_points_or_polygons():
+    from app.gis.to_records import kind_name
+
+    assert kind_name(["polygons"], "neighbourhood zones") == "neighbourhood_zone"
+    assert kind_name(["points"], "Candidate Sites") == "candidate_site"
+    assert kind_name(["clinics"], "survey 2027") == "clinic"
+    assert kind_name(["points"], None) == "point"

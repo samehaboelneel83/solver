@@ -98,10 +98,17 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl">
-      <h1 className="mb-1 text-lg font-semibold text-slate-900">Home</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Continue planning from recent work, or start from a template.
-      </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="mb-1 text-lg font-semibold text-slate-900">Home</h1>
+          <p className="text-sm text-slate-500">Continue planning from recent work, or start from a template.</p>
+        </div>
+        {/* One clear way in (user trial): a new problem -- from an example, a spreadsheet, scratch, or words. */}
+        <Link to={domainId != null ? `/domains/${domainId}/start` : "/domains"}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          Start a problem
+        </Link>
+      </div>
 
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {ENTRY_POINTS.map((entry) => (

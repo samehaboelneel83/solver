@@ -508,7 +508,8 @@ def propose_records(dataset_id: int, body: RecordsPropose, db: Session = Depends
 
     domain_id, found = _layer_features(db, dataset_id, body.layers, user)
     existing = set(db.execute(text("SELECT name FROM entity_type WHERE domain_id = :d"), {"d": domain_id}).scalars())
-    proposal = to_records.propose(found, body.layers, existing)
+    dataset = db.execute(text("SELECT name FROM gis_dataset WHERE id = :i"), {"i": dataset_id}).scalar_one_or_none()
+    proposal = to_records.propose(found, body.layers, existing, dataset)
     proposal["properties"] = sorted({k for f in found for k in (f.get("properties") or {}) if k not in to_records.INTERNAL})
     return proposal
 

@@ -45,10 +45,20 @@ def to_name(text_: str) -> str:
     return _to_name(text_)
 
 
-def kind_name(layers: list[str]) -> str:
+#: Layer names a file gives that say nothing about the places: the kind is named after the file instead.
+_GENERIC = {"points", "point", "polygons", "polygon", "lines", "line", "layer", "layer_0", "0", "default", "features",
+            "feature", "geometry", "geometries", "areas", "area", "shapes", "shape", "data", "sheet1", "field"}
+
+
+def kind_name(layers: list[str], dataset: str | None = None) -> str:
+    """A kind named after what the places are: the layer's own name, or -- when the layer is only
+    "points" or "polygons", as a GeoJSON file's are (user trial) -- the map data's name."""
     from app.api.start import _singular
 
-    return _singular(to_name(layers[0] if len(layers) == 1 else "place")) or "place"
+    layer = to_name(layers[0]) if len(layers) == 1 else ""
+    if (not layer or layer in _GENERIC) and dataset and to_name(dataset) not in _GENERIC:
+        return _singular(to_name(dataset)) or "place"
+    return _singular(layer or "place") or "place"
 
 
 def measure(geometry: dict[str, Any]) -> dict[str, float]:
@@ -94,7 +104,7 @@ def _properties(feature: dict[str, Any]) -> dict[str, Any]:
             if k not in INTERNAL and v is not None and not isinstance(v, (dict, list))}
 
 
-def propose(features: list[dict[str, Any]], layers: list[str], existing: set[str]) -> dict[str, Any]:
+def propose(features: list[dict[str, Any]], layers: list[str], existing: set[str], dataset: str | None = None) -> dict[str, Any]:
     """What making records of these features would make: the kind, its key, its fields."""
     from app.api.start import infer
 
@@ -116,7 +126,7 @@ def propose(features: list[dict[str, Any]], layers: list[str], existing: set[str
         fields.append({"property": column, "name": to_name(column) or "field", "data_type": data_type,
                        "enum_values": choices, "samples": [_as_key(v) for v in values[:3]], "skip": False})
     kinds = sorted({f.get("kind") for f in usable})
-    name = kind_name(layers)
+    name = kind_name(layers, dataset)
     return {
         "layers": layers, "name": name, "exists": name in existing, "features": n,
         "skipped_text": len(features) - n, "shapes": kinds, "key": key, "key_candidates": key_candidates,

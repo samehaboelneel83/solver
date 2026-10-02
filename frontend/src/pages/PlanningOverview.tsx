@@ -1,7 +1,7 @@
 import LoadFailure from "../components/LoadFailure";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Database, FileStack, GitBranch, Play } from "lucide-react";
+import { ArrowRight, Database, FileStack, GitBranch, Map as MapIcon, Play } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
@@ -52,11 +52,12 @@ function DomainContent({ domainId, listing }: { domainId: number; listing: boole
         <p className="mt-2 max-w-2xl text-sm text-slate-600">Shared data for this business area. Choose a problem to continue planning, or prepare its inputs.</p></div>
       {can("domain.edit") && <Link className={link} to={`/domains/${domainId}/start`}>New problem <ArrowRight size={16} aria-hidden /></Link>}
     </header>
-    {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-3">
+    {!listing && <section aria-label="Domain data" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {[
         { label: "Records & relationships", detail: "People, places, resources and other operational data.", href: "data", Icon: Database },
         { label: w("Parameters"), detail: "Demand, capacities, costs and other model inputs.", href: "data/parameters", Icon: FileStack },
         { label: "Data relationships (graph)", detail: "Explore locations and connections in your data.", href: "data/explore", Icon: GitBranch },
+        { label: "Map data", detail: "Import GIS files, make records of their places, and compute distances and reach.", href: "map-data", Icon: MapIcon },
       ].map(({ label, detail, href, Icon }) => <article key={href} className={card}>
         <Icon className="mb-3 h-5 w-5 text-blue-700" aria-hidden />
         <h2 className="font-semibold text-slate-900"><Link className={link} to={`${base}/${href}`}>{label}</Link></h2>

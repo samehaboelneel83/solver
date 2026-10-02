@@ -228,6 +228,7 @@ export default function MapImport() {
               </select>
               <span className="text-slate-400">Check the drawing sits where it should on the imagery before importing.</span>
             </div>
+            {preview && <AttributeSample features={preview.features.features} />}
           </section>
 
           <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-3" aria-label="Where it is">
@@ -271,3 +272,31 @@ export default function MapImport() {
   );
 }
 
+/** Properties the importer adds itself, not the file's own attributes. */
+const OWN = new Set(["layer", "kind", "color", "colour", "text", "block", "block_path", "handle", "linetype", "lineweight", "entity", "part"]);
+
+/** The first features' attributes, so what the file carries is seen before importing (user trial). */
+export function AttributeSample({ features }: { features: { properties?: Record<string, unknown> | null }[] }) {
+  const rows = features.slice(0, 5).map((f) => f.properties ?? {});
+  const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !OWN.has(c));
+  if (!columns.length) return null;
+  return (
+    <div className="mt-2 max-h-48 overflow-auto rounded border border-slate-200 bg-white">
+      <table className="text-left text-xs" aria-label="What each feature carries">
+        <caption className="px-2 py-1 text-left text-slate-600">What the features carry (first {rows.length})</caption>
+        <thead>
+          <tr className="bg-slate-50 text-slate-600">
+            {columns.map((c) => <th key={c} scope="col" className="whitespace-nowrap px-2 py-1 font-mono font-medium">{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t border-slate-100">
+              {columns.map((c) => <td key={c} className="whitespace-nowrap px-2 py-1">{r[c] == null ? "" : typeof r[c] === "object" ? "…" : String(r[c])}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
