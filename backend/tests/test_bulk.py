@@ -4,11 +4,12 @@ first, each fault by row and column, nothing written until the file is clean."""
 from __future__ import annotations
 
 import csv
+import json
 import io
 
 import pytest
 from fastapi.testclient import TestClient
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 
 from app.main import app
 from tests.test_tenancy import tenants  # noqa: F401
@@ -166,3 +167,58 @@ def test_a_place_cell_takes_a_latitude_and_longitude():
     assert _parse("geometry", '{"type": "Point", "coordinates": [31.2, 30.0]}', None)[0] == {"type": "Point", "coordinates": [31.2, 30.0]}
     assert "latitude and longitude" in _parse("geometry", "120, 31", None)[1]
     assert "such as 30.04, 31.23" in _parse("geometry", "near the river", None)[1]
+
+
+@pytest.fixture
+def teams(shop):
+    """hospitals with a code, teams that link to one."""
+    post = shop["post"]
+    hospital = post("/api/v1/entity-types", {"domain_id": shop["domain"], "name": "hospital", "role": "location"})
+    post(f"/api/v1/entity-types/{hospital['id']}/attributes", {"name": "hospital_code", "data_type": "text"})
+    for key, label, code in (("imbaba", "Imbaba General Hospital", "H1"), ("haram", "Haram Hospital", "H3")):
+        post("/api/v1/entities", {"entity_type_id": hospital["id"], "key": key, "label": label, "attrs": {"hospital_code": code}})
+    team = post("/api/v1/entity-types", {"domain_id": shop["domain"], "name": "medical_team", "role": "agent"})
+    post(f"/api/v1/entity-types/{team['id']}/attributes",
+         {"name": "base_hospital", "data_type": "reference", "target_type_id": hospital["id"]})
+    return {**shop, "team": team, "hospital": hospital}
+
+
+def _upload_mapped(shop, type_id, rows, mapping=None, **params):
+    query = "&".join(f"{k}={str(v).lower()}" for k, v in params.items())
+    data = {"mapping": json.dumps(mapping)} if mapping is not None else None
+    return shop["call"]("POST", f"/api/v1/entity-types/{type_id}/upload?{query}", files=_csv(rows), data=data).json()
+
+
+def test_a_preview_reads_a_people_s_sheet_against_the_kind(teams):
+    rows = [["team", "name", "hospital", "doctors"], ["T1", "Team 1", "H1", "2"], ["T2", "Team 2", "Haram Hospital", "1"]]
+    got = teams["call"]("POST", f"/api/v1/entity-types/{teams['team']['id']}/upload/preview", files=_csv(rows)).json()
+    assert got["rows"] == 2
+    guesses = {c["name"]: c["suggestion"] for c in got["columns"]}
+    assert guesses == {"team": "key", "name": "label", "hospital": "base_hospital", "doctors": None}
+    assert {t["name"]: t["links_to"] for t in got["targets"]}["base_hospital"] == "hospital"
+    assert got["columns"][0]["sample"] == ["T1", "T2"] and got["columns"][0]["unique"] is True
+
+
+def test_a_mapped_upload_links_by_label_or_code_and_says_so(teams):
+    rows = [["team", "name", "hospital", "notes"], ["T1", "Team 1", "H1", "x"], ["T2", "Team 2", "haram hospital", "y"]]
+    got = _upload_mapped(teams, teams["team"]["id"], rows, {"team": "key", "name": "label", "hospital": "base_hospital", "notes": ""})
+    assert got["ok"] and got["written"] == 2, got
+    assert got["notes"] == ["base_hospital: 2 value(s) matched their record by its label or a code"]
+    stored = teams["call"]("GET", f"/api/v1/entities?entity_type_id={teams['team']['id']}").json()["items"]
+    assert {e["key"]: (e["label"], e["attrs"].get("base_hospital")) for e in stored} == {
+        "T1": ("Team 1", "imbaba"), "T2": ("Team 2", "haram")}
+
+
+def test_a_name_two_records_share_is_a_fault_not_a_guess(teams):
+    teams["post"]("/api/v1/entities", {"entity_type_id": teams["hospital"]["id"], "key": "haram2", "label": "Haram Hospital"})
+    rows = [["key", "base_hospital"], ["T9", "Haram Hospital"]]
+    got = _upload_mapped(teams, teams["team"]["id"], rows)
+    assert not got["ok"]
+    assert got["faults"][0]["column"] == "base_hospital" and "matches 2 records" in got["faults"][0]["message"]
+
+
+def test_two_columns_read_as_one_target_are_refused(teams):
+    rows = [["a", "b"], ["T1", "T2"]]
+    got = teams["call"]("POST", f"/api/v1/entity-types/{teams['team']['id']}/upload", files=_csv(rows),
+                        data={"mapping": json.dumps({"a": "key", "b": "key"})}, ok=None)
+    assert got.status_code == 422 and "'key'" in got.text

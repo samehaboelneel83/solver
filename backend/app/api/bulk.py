@@ -36,7 +36,7 @@ from decimal import Decimal, InvalidOperation
 from itertools import product
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, text
@@ -85,6 +85,8 @@ class UploadReport(BaseModel):
     skipped: int
     dry_run: bool
     faults: list[Fault]
+    #: What was done that the person did not spell out: links matched by a name or a code.
+    notes: list[str] = []
 
 
 # --- columns -----------------------------------------------------------------
@@ -374,18 +376,77 @@ def _get(db: Session, model, id_: int, what: str):
     return row
 
 
-def entity_writer(db: Session, entity_type: EntityType, header: list[str]):
+class LinkMatcher:
+    """A reference cell names its record by key -- or, as people's sheets do, by its label or a code
+    (a text field whose values are unique among that kind, such as hospital_code). A value that is
+    no key but matches exactly one record by one of those is written as that record's key."""
+
+    def __init__(self, db: Session, target_type_id: int) -> None:
+        self.db, self.target = db, target_type_id
+        self.keys: set[str] | None = None
+        self.aliases: dict[str, set[str]] = {}
+        self.matched = 0
+
+    def _load(self) -> None:
+        rows = self.db.execute(text("SELECT key, label, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
+                               {"t": self.target}).all()
+        self.keys = {r.key for r in rows}
+        by_field: dict[str, dict[str, set[str]]] = {}
+        for r in rows:
+            if r.label:
+                self.aliases.setdefault(_fold(r.label), set()).add(r.key)
+            for name, value in (r.attrs or {}).items():
+                if isinstance(value, str) and value.strip():
+                    by_field.setdefault(name, {}).setdefault(_fold(str(value)), set()).add(r.key)
+        for values in by_field.values():
+            # A code only counts where it tells the records apart.
+            if all(len(k) == 1 for k in values.values()):
+                for word, keys in values.items():
+                    self.aliases.setdefault(word, set()).update(keys)
+        self.aliases.update({_fold(k): {k} for k in self.keys if _fold(k) not in self.aliases})
+
+    def resolve(self, value: str, written: set[str]) -> tuple[str, str | None]:
+        """The key to store, or the value unchanged with why it could not be matched."""
+        if value in written:
+            return value, None
+        if self.keys is None:
+            self._load()
+        if value in (self.keys or set()):
+            return value, None
+        found = self.aliases.get(_fold(value), set())
+        if len(found) == 1:
+            self.matched += 1
+            return next(iter(found)), None
+        if len(found) > 1:
+            return value, f"{value!r} matches {len(found)} records by name or code ({', '.join(sorted(found)[:5])}); use the key"
+        return value, None
+
+
+def _fold(word: str) -> str:
+    return " ".join(word.split()).casefold()
+
+
+def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes: list[str] | None = None):
     """The columns of an entity type and the function that writes one parsed row of it:
-    shared by a file upload and a database import (Epic UX, U-4), so both meet the same checks."""
+    shared by a file upload and a database import (Epic UX, U-4), so both meet the same checks.
+    `notes`, when given, is told how many links were matched by a name or a code (see `finish`)."""
     columns, attributes = _entity_columns(db, entity_type)
     names = {a.name for a in attributes}
     seen: set[str] = set()
+    matchers = {a.name: LinkMatcher(db, a.target_type_id) for a in attributes
+                if a.data_type == "reference" and a.target_type_id is not None and a.name in header}
+    same_kind = {a.name for a in attributes if a.data_type == "reference" and a.target_type_id == entity_type.id}
 
     def write(values: dict[str, Any]):
         key = values["key"]
         if key in seen:
             return "key", f"{key!r} appears earlier in this file"
         seen.add(key)
+        for name, matcher in matchers.items():
+            if isinstance(values.get(name), str):
+                values[name], problem = matcher.resolve(values[name], seen if name in same_kind else set())
+                if problem:
+                    return name, problem
         found = db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id, Entity.key == key)).scalar_one_or_none()
         attrs = dict(found.attrs or {}) if found else {}
         for name in names & set(header):
@@ -406,6 +467,14 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str]):
             found.active = values["active"]
         return None
 
+    def finish() -> None:
+        if notes is None:
+            return
+        for name, matcher in matchers.items():
+            if matcher.matched:
+                notes.append(f"{name}: {matcher.matched} value(s) matched their record by its label or a code")
+
+    write.finish = finish  # type: ignore[attr-defined]
     return columns, write
 
 
@@ -445,20 +514,137 @@ def add_new_fields(db: Session, entity_type: EntityType, header: list[str], rows
     return added
 
 
+def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, str]) -> tuple[list[str], list[list[Any]]]:
+    """The file's columns renamed as the person chose: `{"team": "key", "notes": ""}` reads the
+    column `team` as the key and leaves `notes` out. Columns not named keep their names."""
+    for target in mapping.values():
+        if not isinstance(target, str):
+            raise HTTPException(422, "a mapping names each file column's target as text, or \"\" to leave it out")
+    keep = [i for i, h in enumerate(header) if mapping.get(h, h) != ""]
+    renamed = [mapping.get(header[i], header[i]) for i in keep]
+    twice = sorted({h for h in renamed if renamed.count(h) > 1})
+    if twice:
+        raise HTTPException(422, f"two columns are read as {', '.join(repr(t) for t in twice)}; choose one")
+    return renamed, [[r[i] if i < len(r) else None for i in keep] for r in rows]
+
+
+def _mapping(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        found = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(422, "mapping is not JSON") from exc
+    if not isinstance(found, dict):
+        raise HTTPException(422, "mapping is an object of file column -> target")
+    return found
+
+
 @router.post("/entity-types/{entity_type_id}/upload")
 def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
-                  dry_run: bool = False, add_fields: bool = False, db: Session = Depends(get_db),
+                  dry_run: bool = False, add_fields: bool = False, mapping: str | None = Form(None),
+                  db: Session = Depends(get_db),
                   user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
-    """`add_fields`: a column the type has no field for becomes a new field instead of a fault."""
+    """`add_fields`: a column the type has no field for becomes a new field instead of a fault.
+    `mapping`: JSON, file column -> what it is read as (`key`, `label`, a field, or "" to leave it out)."""
     entity_type = _get(db, EntityType, entity_type_id, "entity type")
     if entity_type.is_abstract:
         raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
     header, rows = _read(file)
+    header, rows = apply_mapping(header, rows, _mapping(mapping))
     if add_fields:
         add_new_fields(db, entity_type, header, rows)
-    columns, write = entity_writer(db, entity_type, header)
-    return run_rows(db, header, rows, columns, write, clean_only, dry_run,
-                user=user, request=request, audit_object=("entity_type", entity_type_id))
+    notes: list[str] = []
+    columns, write = entity_writer(db, entity_type, header, notes)
+    report = run_rows(db, header, rows, columns, write, clean_only, dry_run,
+                      user=user, request=request, audit_object=("entity_type", entity_type_id))
+    write.finish()
+    report.notes = notes
+    return report
+
+
+class ColumnGuess(BaseModel):
+    name: str
+    sample: list[str]
+    #: Every non-empty value differs: it could be the key.
+    unique: bool
+    #: What it is read as unless the person says otherwise: key, label, a field, or None (new or left out).
+    suggestion: str | None
+
+
+class Target(BaseModel):
+    name: str
+    kind: str
+    required: bool
+    #: For a link: the kind it names.
+    links_to: str | None = None
+
+
+class UploadPreview(BaseModel):
+    rows: int
+    columns: list[ColumnGuess]
+    targets: list[Target]
+
+
+_KEYISH = ("key", "code", "id", "ref", "no", "number")
+_LABELISH = ("label", "name", "title", "description")
+
+
+def suggest_mapping(header: list[str], rows: list[list[Any]], entity_type: EntityType, targets: list[Target]) -> dict[str, str | None]:
+    """A first reading of a file's columns against a kind: the same name; a link named after the kind
+    it links to; a key from a code-like, then any all-different column; a label from a name-like one."""
+    norm = {h: re.sub(r"[^a-z0-9]+", "_", (h or "").strip().lower()).strip("_") for h in header}
+    names = {t.name for t in targets}
+    guess: dict[str, str | None] = {h: (norm[h] if norm[h] in names else None) for h in header}
+    for t in targets:
+        if t.links_to and t.name not in guess.values():
+            for h in header:
+                if guess[h] is None and norm[h] in (t.links_to, f"{t.links_to}_id", f"{t.links_to}_code", f"{t.links_to}_name"):
+                    guess[h] = t.name
+                    break
+
+    def column(h: str) -> list[str]:
+        i = header.index(h)
+        return [str(r[i]).strip() for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
+
+    def unique(h: str) -> bool:
+        values = column(h)
+        return bool(values) and len(values) == len(rows) and len(set(values)) == len(values)
+
+    kind = entity_type.name
+    if "key" not in guess.values():
+        free = [h for h in header if guess[h] is None and unique(h)]
+        keyish = [h for h in free if norm[h] in _KEYISH or norm[h] in (kind, f"{kind}_id", f"{kind}_code")
+                  or norm[h].endswith(("_code", "_id", "_key"))]
+        named = [h for h in free if norm[h] in _LABELISH]
+        pick = (keyish or free[:1] or named[:1])
+        if pick:
+            guess[pick[0]] = "key"
+    if "label" not in guess.values():
+        for h in header:
+            if guess[h] is None and norm[h] in _LABELISH:
+                guess[h] = "label"
+                break
+    return guess
+
+
+@router.post("/entity-types/{entity_type_id}/upload/preview")
+def entity_upload_preview(entity_type_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                          _: UserAccount = Depends(get_current_user)) -> UploadPreview:
+    """A file's columns, a few values of each, and what each would be read as -- before anything is written."""
+    entity_type = _get(db, EntityType, entity_type_id, "entity type")
+    header, rows = _read(file)
+    columns, attributes = _entity_columns(db, entity_type)
+    kinds = {t.id: t.name for t in db.execute(select(EntityType).where(EntityType.domain_id == entity_type.domain_id)).scalars()}
+    links = {a.name: kinds.get(a.target_type_id) for a in attributes if a.data_type == "reference"}
+    targets = [Target(name=c.name, kind=c.kind, required=c.structural or c.required, links_to=links.get(c.name)) for c in columns]
+    guess = suggest_mapping(header, rows, entity_type, targets)
+    out = []
+    for i, h in enumerate(header):
+        values = [str(r[i]).strip() for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
+        out.append(ColumnGuess(name=h, sample=values[:3], unique=bool(values) and len(values) == len(rows) and len(set(values)) == len(values),
+                               suggestion=guess.get(h)))
+    return UploadPreview(rows=len(rows), columns=out, targets=targets)
 
 
 # --- relationship types ------------------------------------------------------------

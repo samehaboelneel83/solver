@@ -12,7 +12,40 @@ export type UploadReport = {
   skipped: number;
   dry_run: boolean;
   faults: { row: number; column: string | null; message: string }[];
+  /** What was done unasked: links matched by a label or a code. */
+  notes?: string[];
 };
+
+/** A records file read against its kind before anything is written (`/upload/preview`). */
+export type UploadPreview = {
+  rows: number;
+  columns: { name: string; sample: string[]; unique: boolean; suggestion: string | null }[];
+  targets: { name: string; kind: string; required: boolean; links_to?: string | null }[];
+};
+
+/** What a column is read as: a target's name, a new field of its own name, or left out. */
+export const NEW_FIELD = "__new__";
+const LEAVE_OUT = "";
+
+/** "Base Hospital" -> "base_hospital": the name a new field gets. */
+export function fieldName(column: string): string {
+  return column.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^([0-9])/, "n_$1");
+}
+
+/** The mapping the upload sends, and whether it adds fields. */
+export function mappingOf(choices: Record<string, string>): { mapping: Record<string, string>; addsFields: boolean } {
+  const mapping: Record<string, string> = {};
+  let addsFields = false;
+  for (const [column, choice] of Object.entries(choices)) {
+    if (choice === NEW_FIELD) {
+      mapping[column] = fieldName(column);
+      addsFields = true;
+    } else {
+      mapping[column] = choice;
+    }
+  }
+  return { mapping, addsFields };
+}
 
 const BUTTON = "rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60";
 
@@ -45,6 +78,28 @@ export default function BulkPanel({
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<UploadReport | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [preview, setPreview] = useState<UploadPreview | null>(null);
+  const [choices, setChoices] = useState<Record<string, string>>({});
+  const chosen = Object.values(choices);
+  const twice = [...new Set(chosen.filter((c) => c !== LEAVE_OUT && c !== NEW_FIELD && chosen.indexOf(c) !== chosen.lastIndexOf(c)))];
+  const keyMissing = preview != null && !chosen.includes("key");
+
+  async function readColumns() {
+    const file = input.current?.files?.[0];
+    setPreview(null);
+    setReport(null);
+    if (!file || !recordsUpload) return;
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const found = await apiFetch<UploadPreview>(`${base}/upload/preview`, { method: "POST", body });
+      if (!Array.isArray(found?.columns)) return;
+      setPreview(found);
+      setChoices(Object.fromEntries(found.columns.map((c) => [c.name, c.suggestion ?? (fieldName(c.name) ? NEW_FIELD : LEAVE_OUT)])));
+    } catch (err) {
+      setProblem(formatApiError(err));
+    }
+  }
 
   async function download(format: "csv" | "xlsx", rows: boolean) {
     setProblem(null);
@@ -73,7 +128,13 @@ export default function BulkPanel({
     try {
       const body = new FormData();
       body.append("file", file);
-      const answer = await apiFetch<UploadReport>(`${base}/upload?clean_only=${cleanOnly}&dry_run=${dryRun}${recordsUpload && withNewFields ? "&add_fields=true" : ""}`, {
+      let adds = withNewFields;
+      if (preview) {
+        const { mapping, addsFields } = mappingOf(choices);
+        body.append("mapping", JSON.stringify(mapping));
+        adds = adds || addsFields;
+      }
+      const answer = await apiFetch<UploadReport>(`${base}/upload?clean_only=${cleanOnly}&dry_run=${dryRun}${recordsUpload && adds ? "&add_fields=true" : ""}`, {
         method: "POST",
         body,
       });
@@ -116,7 +177,7 @@ export default function BulkPanel({
           <label htmlFor={`${id}-file`} className="sr-only">
             File to upload
           </label>
-          <input id={`${id}-file`} ref={input} type="file" accept=".csv,.xlsx" className="text-sm" />
+          <input id={`${id}-file`} ref={input} type="file" accept=".csv,.xlsx" className="text-sm" onChange={() => void readColumns()} />
           <label className="flex items-center gap-1 text-sm text-slate-700">
             <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Check only
           </label>
@@ -124,7 +185,7 @@ export default function BulkPanel({
             <input type="checkbox" checked={cleanOnly} onChange={(e) => setCleanOnly(e.target.checked)} /> Write the clean
             rows even if some are faulty
           </label>
-          {recordsUpload && (
+          {recordsUpload && !preview && (
             <label className="flex items-center gap-1 text-sm text-slate-700">
               <input type="checkbox" checked={addFields} onChange={(e) => setAddFields(e.target.checked)} /> Add new
               columns as fields
@@ -133,11 +194,56 @@ export default function BulkPanel({
           <button
             type="button"
             onClick={() => upload()}
-            disabled={busy}
+            disabled={busy || twice.length > 0 || keyMissing}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
             {busy ? "Checking…" : "Upload"}
           </button>
+        </div>
+      )}
+      {preview && can("domain.edit") && (
+        <div className="mt-3 overflow-auto">
+          <table className="text-left text-sm" aria-label="How each column is read">
+            <thead>
+              <tr className="text-xs text-slate-600">
+                <th scope="col" className="px-2 py-1">Column in the file</th>
+                <th scope="col" className="px-2 py-1">First values</th>
+                <th scope="col" className="px-2 py-1">Read as</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.columns.map((c) => (
+                <tr key={c.name} className="border-t border-slate-100">
+                  <td className="px-2 py-1 font-mono">{c.name || "(no name)"}</td>
+                  <td className="px-2 py-1 text-xs text-slate-600">{c.sample.join(", ")}</td>
+                  <td className="px-2 py-1">
+                    <select
+                      aria-label={`${c.name} is read as`}
+                      className="rounded border border-slate-300 px-2 py-1 text-sm"
+                      value={choices[c.name] ?? LEAVE_OUT}
+                      onChange={(e) => setChoices({ ...choices, [c.name]: e.target.value })}
+                    >
+                      <option value="key">the key{c.unique ? "" : " (values repeat!)"}</option>
+                      <option value="label">the label (the name shown)</option>
+                      {preview.targets
+                        .filter((t) => !["key", "label"].includes(t.name))
+                        .map((t) => (
+                          <option key={t.name} value={t.name}>
+                            {t.links_to ? `${t.name} — a link to a ${t.links_to}, by key, name or code` : t.name}
+                          </option>
+                        ))}
+                      {fieldName(c.name) && !preview.targets.some((t) => t.name === fieldName(c.name)) && (
+                        <option value={NEW_FIELD}>a new field “{fieldName(c.name)}”</option>
+                      )}
+                      <option value={LEAVE_OUT}>leave it out</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key.</p>}
+          {twice.length > 0 && <p className="mt-1 text-sm text-amber-800">Two columns are read as {twice.join(", ")}; choose one.</p>}
         </div>
       )}
       {problem && (
@@ -156,6 +262,9 @@ export default function BulkPanel({
                 ? `${report.written} row(s) written` + (report.skipped ? `, ${report.skipped} skipped for their faults.` : ".")
                 : `Nothing was written: ${report.faults.length} fault(s) to fix first.`}
           </p>
+          {(report.notes ?? []).map((n) => (
+            <p key={n} className="mt-1 text-slate-700">{n}.</p>
+          ))}
           {recordsUpload && unknownColumns(report).length > 0 && can("domain.edit") && (
             <p className="mt-1">
               <button
