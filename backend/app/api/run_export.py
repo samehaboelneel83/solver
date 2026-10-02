@@ -1,6 +1,6 @@
 """A run's answer as files (improvement plan 3.2).
 
-    GET /api/v1/runs/{id}/export?format=xlsx|csv|geojson|html
+    GET /api/v1/runs/{id}/export?format=xlsx|csv|geojson|html|pdf
 
 What a field supervisor, a dispatcher or a spreadsheet downstream needs, from
 the run's own frozen record (never today's data):
@@ -13,8 +13,9 @@ the run's own frozen record (never today's data):
 - **csv**: every decision in one long table: decision, keys, value;
 - **geojson**: the answer map (`app.api.answer_map`), for GIS tools;
 - **html**: a printable report -- summary, goals, the answer map drawn, the rules and each decision --
-  that the browser saves as PDF (`print=true` opens the print dialog). No PDF library is needed in the
-  image, and what is printed is exactly what the person sees (improvement plan 3.2).
+  that the browser prints (`print=true` opens the print dialog);
+- **pdf**: that same report as a PDF file, laid out by WeasyPrint on A4 (user trial: "a real download").
+  Nothing is fetched while laying it out: the base map is already drawn into the page as an image.
 """
 from __future__ import annotations
 
@@ -385,11 +386,14 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
                            f'stroke="{colour}" stroke-width="0.8">{title}</polygon>')
     # The chosen places by name, readable on any background.
     for x, y, label in names[:40]:
-        out.append(f'<text x="{x + 9:.1f}" y="{y + 4:.1f}" font-size="12" font-weight="700" fill="#0f172a" '
-                   f'stroke="#ffffff" stroke-width="3" paint-order="stroke">{escape(label)}</text>')
+        # The white halo, then the name over it: two texts, not paint-order, which a PDF renderer may ignore.
+        at = f'x="{x + 9:.1f}" y="{y + 4:.1f}" font-size="12" font-weight="700"'
+        out.append(f'<text {at} fill="#ffffff" stroke="#ffffff" stroke-width="3">{escape(label)}</text>'
+                   f'<text {at} fill="#0f172a">{escape(label)}</text>')
     if credit:
-        out.append(f'<text x="{width - 6}" y="{height - 6}" font-size="9" text-anchor="end" fill="#0f172a" '
-                   f'stroke="#ffffff" stroke-width="2.5" paint-order="stroke">{escape(credit)}</text>')
+        at = f'x="{width - 6}" y="{height - 6}" font-size="9" text-anchor="end"'
+        out.append(f'<text {at} fill="#ffffff" stroke="#ffffff" stroke-width="2.5">{escape(credit)}</text>'
+                   f'<text {at} fill="#0f172a">{escape(credit)}</text>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" '
             f'style="border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc">{under}{"".join(out)}</svg>')
 
@@ -461,14 +465,36 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
              "h1{font-size:22px;margin:0}h2{font-size:16px;margin:24px 0 8px}.sub{color:#64748b}.bad{color:#b91c1c}.ok{color:#15803d}"
              ".key{font-size:12px;color:#475569}table{border-collapse:collapse;width:100%;font-size:12px}"
              "th,td{border:1px solid #e2e8f0;padding:3px 6px;text-align:left;vertical-align:top}th{background:#f1f5f9}"
-             "@media print{body{margin:0}h2{break-after:avoid}tr{break-inside:avoid}}")
+             "@media print{body{margin:0}h2{break-after:avoid}tr{break-inside:avoid}}"
+             "@page{size:A4;margin:14mm 12mm;@bottom-right{content:counter(page) ' / ' counter(pages);font-size:10px;color:#64748b}}"
+             "svg{max-width:100%;height:auto}")
     script = "<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),300))</script>" if print_now else ""
     return (f"<!doctype html><html><head><meta charset=utf-8><title>{e(rec['problem'])} — run {e(rec['id'])}</title>"
             f"<style>{style}</style></head><body>{''.join(parts)}{script}</body></html>")
 
 
+def _no_fetch(url: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """WeasyPrint asks for every resource a page names; the report names only `data:` ones, and anything
+    else is refused rather than fetched from wherever the page says."""
+    if url.startswith("data:"):
+        from weasyprint.urls import default_url_fetcher
+
+        return default_url_fetcher(url, *args, **kwargs)
+    raise ValueError(f"the report fetches nothing: {url[:60]}")
+
+
+def to_pdf(rec: dict[str, Any], *, basemap: tuple[str, str] | None = None) -> bytes:
+    """The printable report as a PDF file (WeasyPrint, A4, numbered pages)."""
+    try:
+        from weasyprint import HTML
+    except (ImportError, OSError) as exc:  # the library, or the Pango it draws text with, is not installed
+        raise HTTPException(503, "PDF export is not installed on this server; use the printable report and "
+                                 "save it as PDF from the browser") from exc
+    return HTML(string=to_html(rec, basemap=basemap), url_fetcher=_no_fetch).write_pdf()
+
+
 @router.get("/runs/{run_id}/export")
-def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geojson|html)$"),
+def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geojson|html|pdf)$"),
                print: bool = Query(False),  # noqa: A002 -- the query word a person types
                basemap: str | None = Query(None, max_length=255),
                db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> Response:
@@ -477,6 +503,10 @@ def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geoj
         # The base map the person had under the run's map, by its id (never an address from the request).
         under = basemap_of(db, rec.get("domain_id"), basemap)
         return Response(to_html(rec, print_now=print, basemap=under), media_type="text/html; charset=utf-8")
+    if format == "pdf":
+        under = basemap_of(db, rec.get("domain_id"), basemap)
+        return Response(to_pdf(rec, basemap=under), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{_filename(rec, "pdf")}"'})
     if rec["assignments"] is None and rec["amounts"] is None and format != "xlsx":
         raise HTTPException(409, f"run {run_id} has no answer to export (it is {rec['status']})")
     if format == "xlsx":

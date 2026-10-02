@@ -181,6 +181,7 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   });
   const [failed, setFailed] = useState<string | null>(null);
   const [colourBy, setColourBy] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
   const basemaps = useBasemaps();
   if (!answered) return null;
   const decisions = Object.entries(((ir?.variables ?? {}) as Record<string, { index?: string[]; domain?: string }>))
@@ -212,6 +213,21 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
       })
       .catch((e) => { opened?.close(); setFailed(formatApiError(e)); });
   };
+  // The report as a file (WeasyPrint on the server), with the background the person has under the map.
+  const pdf = () => {
+    setFailed(null);
+    setPdfBusy(true);
+    let background: string | null = basemaps.chosen?.id ?? null;
+    try {
+      background = localStorage.getItem(BASEMAP_STORAGE_KEY) ?? background;
+    } catch {
+      /* storage unavailable: the default background */
+    }
+    const under = background ? `&basemap=${encodeURIComponent(background)}` : "";
+    downloadFrom(`/api/v1/runs/${runId}/export?format=pdf${under}`)
+      .catch((e) => setFailed(formatApiError(e)))
+      .finally(() => setPdfBusy(false));
+  };
   const download = (format: "xlsx" | "csv" | "geojson") => {
     setFailed(null);
     downloadFrom(`/api/v1/runs/${runId}/export?format=${format}`).catch((e) => setFailed(formatApiError(e)));
@@ -222,7 +238,10 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
         <span className="font-semibold text-slate-900">Take the answer out</span>
         <button type="button" onClick={() => download("xlsx")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Excel</button>
         <button type="button" onClick={() => download("csv")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">CSV</button>
-        <button type="button" onClick={report} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50" title="Opens the report with the print dialog: choose “Save as PDF” to keep a file.">Report — print or save as PDF</button>
+        <button type="button" onClick={() => pdf()} disabled={pdfBusy} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50 disabled:opacity-60">
+          {pdfBusy ? "Making the PDF…" : "PDF report"}
+        </button>
+        <button type="button" onClick={report} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50" title="Opens the same report with the print dialog.">Print</button>
         {drawn && <button type="button" onClick={() => download("geojson")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">GeoJSON (map)</button>}
         {failed && <span role="alert" className="text-xs text-red-700">{failed}</span>}
       </div>

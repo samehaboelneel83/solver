@@ -144,6 +144,42 @@ def test_an_answer_prints_as_a_report_with_its_map(db, placed, empty_queue, clie
     assert "Rules" in html and "window.print" in html
 
 
+def test_an_answer_downloads_as_a_pdf_of_that_report(db, placed, empty_queue, client, auth_headers):  # noqa: F811
+    """User trial: the report as a real file, not only a page to print."""
+    run, _ = _solve(db, _scenario(db, placed))
+    got = client.get(f"/api/v1/runs/{run}/export", params={"format": "pdf"}, headers=auth_headers)
+    assert got.status_code == 200, got.text
+    assert got.headers["content-type"] == "application/pdf"
+    assert got.headers["content-disposition"].endswith('.pdf"')
+    assert got.content.startswith(b"%PDF-") and len(got.content) > 2000
+
+
+def test_a_server_without_pango_says_how_to_get_a_pdf_anyway(db, placed, empty_queue, client, auth_headers, monkeypatch):  # noqa: F811
+    import builtins
+
+    real = builtins.__import__
+
+    def missing(name, *args, **kwargs):
+        if name == "weasyprint":
+            raise OSError("cannot load library 'pango-1.0-0'")
+        return real(name, *args, **kwargs)
+
+    run, _ = _solve(db, _scenario(db, placed))
+    monkeypatch.setattr(builtins, "__import__", missing)
+    got = client.get(f"/api/v1/runs/{run}/export", params={"format": "pdf"}, headers=auth_headers)
+    assert got.status_code == 503 and "printable report" in got.text
+
+
+def test_the_report_fetches_nothing_it_is_not_given():
+    import pytest
+
+    from app.api.run_export import _no_fetch
+
+    with pytest.raises(ValueError):
+        _no_fetch("http://169.254.169.254/latest/meta-data")
+    assert _no_fetch("data:text/plain;base64,aGk=")  # a data: address is read, not refused
+
+
 def test_what_if_a_depot_is_closed_is_a_scenario_on_the_same_data(db, placed, empty_queue):  # noqa: F811
     base, _ = _solve(db, _scenario(db, placed))
     closed, outcome = _solve(db, _scenario(db, placed, {"remove": {"depot": ["D2"]}}))

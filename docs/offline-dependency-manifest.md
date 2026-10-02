@@ -24,6 +24,13 @@ adapter under `/opt/solver/adapters`).
 Epic ML (2026-09-28): it trains predictors (`app.ml.train`) and the run-time estimate
 (`app.ml.eta`). An offline wheelhouse must carry it; nothing is fetched at run time.
 
+`weasyprint` (with `pydyf`, `tinycss2`, `cssselect2`, `tinyhtml5`, `Pyphen`, `fonttools`) lays out the run
+report as a PDF (`GET /runs/{id}/export?format=pdf`, 2026-10). It draws text with **Pango**, a system
+library: the Dockerfile installs `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz0b` and
+`fonts-dejavu-core` with apt, which an air-gapped build needs from a local Debian mirror or a pre-built
+base image. Without Pango the API still runs; the PDF export answers 503 and points to the printable
+report, which the browser saves as PDF.
+
 ## Frontend Node (`frontend/package.json`)
 
 Installed at frontend image build (`npm install`). Runtime is static files in

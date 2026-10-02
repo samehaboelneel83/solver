@@ -32,3 +32,5 @@ Pillow==11.0.0
 casadi==3.8.1
 # Trained predictors (Epic ML): tree ensembles fitted here and stored as JSON, never pickled.
 scikit-learn==1.5.2
+# The run report as a PDF file (export?format=pdf); draws text with Pango (the Dockerfile installs it).
+weasyprint==63.1

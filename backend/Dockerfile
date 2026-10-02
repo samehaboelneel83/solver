@@ -8,6 +8,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Pango and a font for WeasyPrint, which lays out the run report as a PDF (export?format=pdf).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 # Optional local wheelhouse for offline installs (ignored when empty).
 COPY wheelhouse/ /tmp/wheelhouse/
