@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiDownload, apiFetch } from "../api/client";
+import { ApiError, apiDownload, apiFetch } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCapabilities } from "../hooks/useCapability";
 import type { Id } from "../api/v1";
@@ -54,7 +54,11 @@ export default function WorkbookPanel({ domainId }: { domainId: Id }) {
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setProblem(formatApiError(err));
+      // Before there is any kind of record there is nothing to put in a sheet (benchmark, October 2026:
+      // the button answered with a bare 404).
+      setProblem(err instanceof ApiError && err.status === 404
+        ? "There are no kinds of record in this workspace yet, so there is no sheet to download. Make one first (add a kind, or import a file), then each kind gets its own sheet."
+        : formatApiError(err));
     }
   }
 

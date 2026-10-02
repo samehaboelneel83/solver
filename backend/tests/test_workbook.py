@@ -143,3 +143,20 @@ def test_links_and_values_sheets_come_after_the_records_they_name(auth_headers, 
     assert [r for r in template["values demand"].iter_rows(min_row=2, values_only=True)] == [("D1", 40), ("D2", 15)]
     # A reference field's own relationship is written through its field, so it gets no sheet.
     assert not any(n.startswith("links region") or n.startswith("links depot") for n in template.sheetnames)
+
+
+def test_the_stored_records_download_with_their_shapes_and_upload_again(auth_headers, domain_id):  # noqa: F811
+    """Benchmark, October 2026: records made from a map layer made "With what is stored" an HTTP 500."""
+    site = _kind(auth_headers, domain_id, "site", [{"name": "shape", "data_type": "geometry"}, {"name": "seats", "data_type": "integer"}])
+    point = {"type": "Point", "coordinates": [31.2, 30.05]}
+    made = client.post("/api/v1/entities", json={"entity_type_id": site, "key": "S1", "attrs": {"shape": point, "seats": 40}},
+                       headers=auth_headers)
+    assert made.status_code == 201, made.text
+    got = client.get(f"/api/v1/domains/{domain_id}/workbook", params={"rows": "true"}, headers=auth_headers)
+    assert got.status_code == 200, got.text
+    sheet = load_workbook(io.BytesIO(got.content))["site"]
+    rows = [list(r) for r in sheet.iter_rows(values_only=True)]
+    assert rows[1][:4] == ["S1", None, 0, True] and rows[1][-1] == 40
+    again = _upload(auth_headers, domain_id, got.content).json()
+    assert again["ok"] is True, again
+    assert _keys(auth_headers, site)["S1"] == {"shape": point, "seats": 40}

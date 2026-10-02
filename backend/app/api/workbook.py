@@ -26,6 +26,8 @@ Sheets named after nothing here are reported as ignored; `about` (the template's
 from __future__ import annotations
 
 import io
+import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -167,6 +169,17 @@ def _project(header: list[str], rows: list[list[Any]], keep: list[str]) -> tuple
     return keep, [[r[i] if i < len(r) else None for i in at] for r in rows]
 
 
+def _cell(value: Any) -> Any:
+    """What a spreadsheet cell can hold: a shape or a list as its JSON (as the one-kind template
+    writes it, and the upload reads back), a date and time without its zone, in UTC. Benchmark,
+    October 2026: records made from a map layer made the whole download an HTTP 500."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 @router.get("/domains/{domain_id}/workbook")
 def workbook_template(domain_id: int, rows: bool = False, db: Session = Depends(get_db),
                       _: UserAccount = Depends(get_current_user)) -> Response:
@@ -191,7 +204,8 @@ def workbook_template(domain_id: int, rows: bool = False, db: Session = Depends(
             cell.font = Font(bold=True)
         if rows:
             for e in db.execute(select(Entity).where(Entity.entity_type_id == kid).order_by(Entity.sort_order, Entity.key)).scalars():
-                sheet.append([e.key, e.label, e.sort_order, e.active, *[(e.attrs or {}).get(a.name) for a in attributes]])
+                sheet.append([_cell(v) for v in [e.key, e.label, e.sort_order, e.active,
+                                                 *[(e.attrs or {}).get(a.name) for a in attributes]]])
         for c in columns:
             names = sorted(by_id[t].name for t in refers[kid].get(c.name, set()))
             notes.append([kind.name, c.name, c.kind, "yes" if c.required else "", ", ".join(c.values or []),
@@ -206,7 +220,7 @@ def workbook_template(domain_id: int, rows: bool = False, db: Session = Depends(
                     "SELECT ef.key, et.key, r.valid_from, r.valid_to, r.attrs FROM relationship r"
                     " JOIN entity ef ON ef.id = r.from_entity_id JOIN entity et ON et.id = r.to_entity_id"
                     " WHERE r.relationship_type_id = :t ORDER BY ef.key, et.key"), {"t": rel.id}).all():
-                sheet.append([a, b, valid_from, valid_to, *[(attrs or {}).get(x.name) for x in attributes]])
+                sheet.append([_cell(v) for v in [a, b, valid_from, valid_to, *[(attrs or {}).get(x.name) for x in attributes]]])
         notes += [[name, c.name, c.kind, "yes" if c.required else "", ", ".join(c.values or []), "", "after the records", c.note]
                   for c in columns]
     for parameter in _values(db, domain_id):

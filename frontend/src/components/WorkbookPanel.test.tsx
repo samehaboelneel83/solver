@@ -6,10 +6,10 @@ import { editorQueryClient } from "../test/me";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
-  return { ...actual, apiFetch: vi.fn() };
+  return { ...actual, apiFetch: vi.fn(), apiDownload: vi.fn() };
 });
 
-import { apiFetch } from "../api/client";
+import { ApiError, apiDownload, apiFetch } from "../api/client";
 
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -56,5 +56,12 @@ describe("WorkbookPanel", () => {
     expect(await screen.findByText("row 2, bays: must be a whole number")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("1 problem — nothing was written.");
     expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
+  });
+
+  it("says why there is no template before any kind of record exists", async () => {
+    vi.mocked(apiDownload).mockRejectedValueOnce(new ApiError(404, JSON.stringify({ detail: "this domain has no kinds of record to fill" })));
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Empty template" }));
+    expect(await screen.findByText(/no kinds of record in this workspace yet/)).toBeInTheDocument();
   });
 });
