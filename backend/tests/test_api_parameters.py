@@ -325,11 +325,12 @@ def test_unknown_parameter_is_404(client, auth_headers):
         assert response.status_code == 404, (method, path, response.text)
 
 
-def test_empty_index_type_ids_is_422_not_409(client, auth_headers, domain_id):
-    """The DDL's `CHECK (cardinality(index_type_ids) >= 1)` has no DETAIL,
-    so left to the database this would be a 409 (Ruling 16)."""
+def test_empty_index_type_ids_is_one_number(client, auth_headers, domain_id):
+    """No index is one number (migration 0104, benchmark October 2026): a budget, a truck's
+    capacity -- created, not refused as it was while every parameter needed an index."""
     response = _make_def(client, auth_headers, domain_id, name="demand", index_type_ids=[])
-    _blamed(_request_layer_errors(response), "index_type_ids")
+    assert response.status_code == 201, response.text
+    assert response.json()["index_type_ids"] == []
 
 
 def test_self_indexed_parameter_is_accepted(client, auth_headers, domain_id, grid):

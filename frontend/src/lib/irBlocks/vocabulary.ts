@@ -972,6 +972,8 @@ export function defineIrBlocks(): void {
         .appendField(dynamic((b) => declared(b.workspace).sets, choose), "S_SET");
       this.appendDummyInput()
         .appendField("starting and ending at")
+        // Benchmark, October 2026: one depot for all, or the stop each vehicle's field names (several depots).
+        .appendField(new Blockly.FieldDropdown([["the stop", "one"], ["each vehicle's own, by its field", "own"]]), "DEPOT_MODE")
         .appendField(new Blockly.FieldTextInput("depot", (t: string) => (loading || t !== "" ? t : null)), "DEPOT");
       this.appendDummyInput()
         .appendField("each stop's load")

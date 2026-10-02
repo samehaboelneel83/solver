@@ -912,14 +912,20 @@ class ShapeChecker {
     }
     let odd: string | undefined;
     let what = "";
-    odd = ["visit", "vehicles", "stops", "depot"].find((key) => !(key in body));
+    odd = ["visit", "vehicles", "stops"].find((key) => !(key in body));
     if (odd !== undefined) what = "missing";
+    // One depot for all, or each vehicle's own (`depot_of`; benchmark, October 2026).
+    if (odd === undefined && ("depot" in body) === ("depot_of" in body)) {
+      [odd, what] = !("depot" in body)
+        ? ["depot", "missing (or depot_of: the field of each vehicle naming its own depot)"]
+        : ["depot_of", "given with depot: name one depot for all, or each vehicle's own"];
+    }
     if (odd === undefined) {
       odd = Object.keys(body).find((key) => !ROUTE_KEYS.includes(key));
       what = "not one of them";
     }
     if (odd === undefined) {
-      odd = ["depot", "demand", "capacity", "travel", "earliest", "latest", "service"].find(
+      odd = ["depot", "depot_of", "demand", "capacity", "travel", "earliest", "latest", "service"].find(
         (key) => key in body && !(typeof body[key] === "string" && body[key] !== "")
       );
       what = "not a name";

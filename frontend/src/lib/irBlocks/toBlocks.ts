@@ -328,7 +328,9 @@ export function irToBlocks(
     const r = rule.route;
     const fits =
       Object.keys(rule).every((k) => ["id", "note", "severity", "route"].includes(k)) && rule.severity === "hard" &&
-      shaped(r, ["visit", "vehicles", "stops", "depot"], ROUTE_KEYS) && isRef(r.visit) && isName(r.depot) &&
+      shaped(r, ["visit", "vehicles", "stops"], ROUTE_KEYS) && isRef(r.visit) &&
+      // One depot for all, or each vehicle's own (`depot_of`), never both.
+      (r.depot === undefined) !== (r.depot_of === undefined) && isName(r.depot ?? r.depot_of) &&
       shaped(r.vehicles, ["index", "set"]) && shaped(r.stops, ["index", "set"]) &&
       (r.demand === undefined) === (r.capacity === undefined) &&
       (r.demand === undefined || (isName(r.demand) && isName(r.capacity))) &&
@@ -351,7 +353,8 @@ export function irToBlocks(
         S_INDEX: stops.index,
         S_SET: stops.set,
         TO_INDEX: visit.index[2],
-        DEPOT: r.depot as string,
+        DEPOT_MODE: r.depot_of !== undefined ? "own" : "one",
+        DEPOT: (r.depot ?? r.depot_of) as string,
         DEMAND: (r.demand as string) ?? "",
         CAPACITY: (r.capacity as string) ?? "",
         TRAVEL: (r.travel as string) ?? "",

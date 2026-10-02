@@ -87,4 +87,21 @@ describe("time windows on the route rule (queue R15c)", () => {
     render(<Harness start={newRouteRule("c_1", CONTEXT)!} />);
     expect(screen.getByLabelText(/has a time window/)).toBeDisabled();
   });
+
+  it("lets each vehicle start from its own depot, named by one of its fields (benchmark, October 2026)", () => {
+    const context = { ...CONTEXT, attributes: { ...CONTEXT.attributes, truck: [...CONTEXT.attributes.truck, { name: "home", data_type: "reference" }] } };
+    function Own() {
+      const [rule, setRule] = useState(newRouteRule("c_1", context)!);
+      return <><RouteEditor constraint={rule} context={context} onChange={setRule} /><pre data-testid="rule">{JSON.stringify(rule)}</pre></>;
+    }
+    render(<Own />);
+    fireEvent.change(screen.getByLabelText("Where vehicles start"), { target: { value: "own" } });
+    const route = shown().route!;
+    expect(route.depot).toBeUndefined();
+    expect(route.depot_of).toBe("home");
+    expect(describeRoute(shown())).toBe("every stop but the depots visited once by a truck from its own home and back");
+    fireEvent.change(screen.getByLabelText("Where vehicles start"), { target: { value: "one" } });
+    expect(shown().route).toMatchObject({ depot: "depot" });
+    expect(shown().route!.depot_of).toBeUndefined();
+  });
 });

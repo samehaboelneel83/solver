@@ -764,7 +764,7 @@
     {
       "code": "route_malformed",
       "where": "shape",
-      "text": "a `route` names `visit`, `vehicles`, `stops` and `depot`, and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`"
+      "text": "a `route` names `visit`, `vehicles`, `stops` and `depot` -- or `depot_of`, the field of each vehicle naming its own -- and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`"
     },
     {
       "code": "route_not_binary",

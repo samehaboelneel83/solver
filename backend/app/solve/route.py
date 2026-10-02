@@ -36,15 +36,14 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
     vehicles = compiler.sets.get(body["vehicles"]["set"], [])
     stop_rows = compiler.sets.get(body["stops"]["set"], [])
     stops = [row["id"] for row in stop_rows]
-    depot = body["depot"]
-    if depot not in stops:
-        raise Unsupported(f"{rule}: the depot {depot!r} is not one of the {body['stops']['set']} in the data")
+    home = depots_of(body, vehicles, stops, rule)
+    depots = set(home.values()) or ({body["depot"]} if body.get("depot") else set())
     one, zero = Decimal(1), Decimal(0)
-    others = [s for s in stops if s != depot]
+    others = [s for s in stops if s not in depots]
     if "demand" in body:
         demand: dict[str, Decimal] = {}
         for row in stop_rows:
-            if row["id"] == depot:
+            if row["id"] in depots:
                 continue
             value = row.get(body["demand"])
             if value is None or Decimal(str(value)) <= 0:
@@ -91,8 +90,13 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
             balance = Linear(coeffs={x[(v, i, j)]: one for i in stops if i != j})
             balance.add(Linear(coeffs={x[(v, j, k)]: one for k in stops if k != j}), factor=-1)
             row({v_name: v, s_name: j}, balance, "=", Linear())
-        # It leaves the depot once at most.
+        # It leaves its depot once at most, and never goes through another vehicle's depot.
+        depot = home[v]
         row({v_name: v}, Linear(coeffs={x[(v, depot, j)]: one for j in others}), "<=", Linear(const=one))
+        for d in depots - {depot}:
+            for k in stops:
+                if k != d:
+                    row({v_name: v, s_name: d, to_name: k}, Linear(coeffs={x[(v, d, k)]: one, x[(v, k, d)]: one}), "=", Linear())
         # The load: at most the capacity on an arc in use, nothing on one that is not ...
         load = {}
         for i in stops:
@@ -116,6 +120,21 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
     compiler.routes.append(rule)
 
 
+def depots_of(body: dict[str, Any], vehicles: list[dict[str, Any]], stops: list[str], rule: str) -> dict[str, str]:
+    """Each vehicle's depot: the one `depot` for all, or the stop its `depot_of` field names (several
+    depots; benchmark, October 2026)."""
+    from app.solve.compile import Unsupported
+
+    home: dict[str, str] = {}
+    for vehicle in vehicles:
+        depot = body["depot"] if body.get("depot") else vehicle.get(body["depot_of"])
+        if depot is None or str(depot) not in stops:
+            where = f"the depot {depot!r}" if body.get("depot") else f"the vehicle {vehicle['id']}'s {body['depot_of']} {depot!r}"
+            raise Unsupported(f"{rule}: {where} is not one of the {body['stops']['set']} in the data")
+        home[vehicle["id"]] = str(depot)
+    return home
+
+
 def _windows(compiler: Any, spec: dict[str, Any], stop_rows: list[dict[str, Any]], x: dict, vehicles: list,
              row) -> None:
     """Time windows (queue R15c): an arrival time per stop within its window, and on every arc in use
@@ -130,7 +149,7 @@ def _windows(compiler: Any, spec: dict[str, Any], stop_rows: list[dict[str, Any]
 
     body, rule = spec["route"], spec["id"]
     stops = [r["id"] for r in stop_rows]
-    depot = body["depot"]
+    depots = set(depots_of(body, vehicles, stops, rule).values())
     one, zero = Decimal(1), Decimal(0)
 
     def attribute(r: dict[str, Any], name: str | None) -> Decimal | None:
@@ -166,10 +185,10 @@ def _windows(compiler: Any, spec: dict[str, Any], stop_rows: list[dict[str, Any]
         key = (ARRIVE, (rule, s))
         compiler.variables[key] = Variable(key, "integer" if whole else "continuous", opens[s], closes[s])
         arrive[s] = key
-    v_name, s_name, to_name = body["vehicles"]["index"], body["stops"]["index"], body["visit"]["index"][2]
+    s_name, to_name = body["stops"]["index"], body["visit"]["index"][2]
     for i in stops:
         for j in stops:
-            if i == j or j == depot:
+            if i == j or j in depots:
                 continue
             # The smallest M that frees the row when the arc is not used.
             big = closes[i] + service[i] + travel[(i, j)] - opens[j]

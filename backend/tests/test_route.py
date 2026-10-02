@@ -162,3 +162,46 @@ def test_a_route_run_through_the_api_starts_from_the_routing_search(tenants, db,
     start = run["params"]["routing_start_run"]
     assert start["used"] and start["feasible"] and start["objective"] >= float(run["objective"])
     assert "connected_start_run" not in run["params"]  # no connected rule, nothing said about one
+
+
+def _two_depots():
+    """Benchmark, October 2026: two depots, each truck from its own, and distances in fractions of a km."""
+    ir, _ = vrp("S", 0, load=True)
+    body = ir["constraints"][0]["route"]
+    del body["depot"]
+    body["depot_of"] = "home"
+    at = {"north": 0.0, "n1": 1.0, "n2": 2.0, "south": 10.0, "s1": 11.0, "s2": 12.5}
+    data = {
+        "sets": {"vehicle": [{"id": "t_north", "capacity": 10, "home": "north"}, {"id": "t_south", "capacity": 10, "home": "south"}],
+                 "stop": [{"id": k, "demand": 0 if k in ("north", "south") else 1} for k in at]},
+        "parameters": {"distance": [{"0": a, "1": b, "value": round(abs(at[a] - at[b]) * 1.5, 2)} for a in at for b in at]},
+        "parameter_defaults": {"distance": 0},
+    }
+    return ir, data
+
+
+def test_each_vehicle_starts_from_its_own_depot_and_distances_may_be_fractional():
+    ir, data = _two_depots()
+    assert check_shape(ir) is None
+    compiled = compile_model(ir, data)
+    result = by_name("highs").solve(compiled, time_limit=30, workers=1, seed=1)
+    assert result.status == "optimal"
+    # Each truck out and back to its own two stops: 2 x 1.5 x 2 + 2 x 1.5 x 2.5 = 13.5.
+    assert float(result.objective) == pytest.approx(13.5)
+    used = {k[1] for k, v in result.assignments.items() if k[0] == "visit" and round(float(v)) == 1}
+    assert all(("north" not in arc and "n1" not in arc) for v, *arc in used if v == "t_south")
+
+
+def test_the_routing_start_takes_several_depots_and_fractional_distances():
+    ir, data = _two_depots()
+    compiled = compile_model(ir, data)
+    assert routing.applies(ir, compiled) is None
+    hint, record = routing.start(ir, data, compiled, seconds=2)
+    assert record["feasible"] is True and float(record["objective"]) == pytest.approx(13.5)
+
+
+def test_a_vehicle_whose_depot_is_not_a_stop_is_named():
+    ir, data = _two_depots()
+    data["sets"]["vehicle"][1]["home"] = "nowhere"
+    with pytest.raises(Unsupported, match="t_south's home 'nowhere'"):
+        compile_model(ir, data)

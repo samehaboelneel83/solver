@@ -173,3 +173,32 @@ def test_a_spreadsheet_with_longitude_and_latitude_makes_places(tenants, db):  #
     shape = db.execute(text("SELECT e.attrs->'location' FROM entity e JOIN entity_type k ON k.id = e.entity_type_id"
                             " WHERE k.domain_id = :d AND k.name = 'yard' AND e.key = 'Y2'"), {"d": t["domain_a"]}).scalar_one()
     assert shape == {"type": "Point", "coordinates": [29.94, 31.18]}
+
+
+def test_roads_cross_zones_and_stand_in_for_road_tiles(town, db):  # noqa: F811
+    """Benchmark, October 2026: which zones a road passes through, and road distances with no
+    road tiles set -- the workspace's own roads are used, and the source says so."""
+    http, t, ds = town
+    _, roads = _make(http, t, ds, "ROADS")
+    _, zones = _make(http, t, ds, "ZONES")
+    _, depots = _make(http, t, ds, "DEPOTS")
+    _, sites = _make(http, t, ds, "SITES")
+    d = t["domain_a"]
+    got = http.post(f"/api/v1/domains/{d}/spatial/crosses", json={"name": "passes_through", "from_type_id": roads["entity_type_id"],
+                                                                 "to_type_id": zones["entity_type_id"]}, headers=t["a"])
+    assert got.status_code == 201, got.text
+    crossed = sorted((b, m) for b, m in db.execute(text(
+        "SELECT b.key, (r.attrs->>'metres')::float FROM relationship r"
+        " JOIN entity b ON b.id = r.to_entity_id WHERE r.relationship_type_id = :r"), {"r": got.json()["relationship_type_id"]}).all())
+    # The long road runs ~1.9 km through each zone; the short one ~1.6 km up the south's outer edge.
+    assert [b for b, _ in crossed] == ["North", "South", "South"]
+    assert 1800 < crossed[0][1] < 2000 and sorted(round(m, -2) for _, m in crossed[1:]) == [1600.0, 1900.0]
+    refused = http.post(f"/api/v1/domains/{d}/spatial/crosses", json={"name": "x", "from_type_id": zones["entity_type_id"],
+                                                                     "to_type_id": zones["entity_type_id"]}, headers=t["a"])
+    assert refused.status_code == 422 and "line" in refused.text
+
+    road = http.post(f"/api/v1/domains/{d}/distances", json={"name": "road_m", "from_type_id": depots["entity_type_id"],
+                                                             "to_type_id": sites["entity_type_id"], "metric": "road"}, headers=t["a"])
+    assert road.status_code == 201, road.text
+    assert road.json()["source"]["metric"].startswith("along layer 'ROADS'")
+    assert "no road tiles are set" in road.json()["source"]["note"]

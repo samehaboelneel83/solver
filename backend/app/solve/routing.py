@@ -49,9 +49,15 @@ def applies(ir: dict[str, Any], compiled: Compiled) -> str | None:
     other = next((k for k in compiled.objective.coeffs if k[0] != var), None)
     if other is not None:
         return f"the goal reads {other[0]!r} as well as the visits"
-    if any(v < 0 or v != v.to_integral_value() for v in compiled.objective.coeffs.values()):
-        return "the routing search takes whole, non-negative costs"
+    if any(v < 0 for v in compiled.objective.coeffs.values()):
+        return "the routing search takes non-negative costs"
     return None
+
+
+def _scale(costs) -> int:
+    """Costs as the whole numbers the routing search takes: as they are when whole, else in
+    thousandths -- 2.35 km is 2350 (benchmark, October 2026: fractional distances got no start)."""
+    return 1 if all(c == c.to_integral_value() for c in costs) else 1000
 
 
 def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, seconds: float) -> tuple[dict[VarKey, int], dict[str, Any]]:
@@ -65,18 +71,23 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
     vehicles = [row["id"] for row in data["sets"].get(body["vehicles"]["set"], [])]
     stop_rows = data["sets"].get(body["stops"]["set"], [])
     stops = [row["id"] for row in stop_rows]
-    depot = stops.index(body["depot"])
+    from app.solve.route import depots_of
+
+    home = depots_of(body, data["sets"].get(body["vehicles"]["set"], []), stops, rule_id)
+    starts = [stops.index(home[v]) for v in vehicles]
+    depot_nodes = set(starts)
     if "demand" in body:
-        demand = [0 if s == body["depot"] else int(Decimal(str(row[body["demand"]])))
-                  for s, row in zip(stops, stop_rows)]
+        demand = [0 if n in depot_nodes else int(Decimal(str(row[body["demand"]])))
+                  for n, row in enumerate(stop_rows)]
         capacity = [int(Decimal(str(row[body["capacity"]]))) for row in data["sets"][body["vehicles"]["set"]]]
     else:
-        demand = [0 if s == body["depot"] else 1 for s in stops]
-        capacity = [len(stops) - 1] * len(vehicles)
-    cost = {v: [[int(compiled.objective.coeffs.get((var, (v, a, b)), 0)) for b in stops] for a in stops]
+        demand = [0 if n in depot_nodes else 1 for n in range(len(stops))]
+        capacity = [len(stops) - len(depot_nodes)] * len(vehicles)
+    scale = _scale(compiled.objective.coeffs.values())
+    cost = {v: [[int(round(compiled.objective.coeffs.get((var, (v, a, b)), 0) * scale)) for b in stops] for a in stops]
             for v in vehicles}
 
-    manager = pywrapcp.RoutingIndexManager(len(stops), len(vehicles), depot)
+    manager = pywrapcp.RoutingIndexManager(len(stops), len(vehicles), starts, starts)
     model = pywrapcp.RoutingModel(manager)
     for k, v in enumerate(vehicles):
         table = cost[v]
@@ -105,9 +116,10 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
         model.AddDimension(transit, horizon, horizon + max(leg.values(), default=0) + 1, False, "time")
         times = model.GetDimensionOrDie("time")
         for n, s in enumerate(stops):
-            if n == depot:
+            if n in depot_nodes:
                 for k in range(len(vehicles)):
-                    times.CumulVar(model.Start(k)).SetRange(int(bounds[s].lower), int(bounds[s].upper))
+                    if starts[k] == n:
+                        times.CumulVar(model.Start(k)).SetRange(int(bounds[s].lower), int(bounds[s].upper))
             else:
                 times.CumulVar(manager.NodeToIndex(n)).SetRange(int(bounds[s].lower), int(bounds[s].upper))
     params = pywrapcp.DefaultRoutingSearchParameters()
@@ -131,7 +143,7 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
                 if a != b:
                     hint[(LOAD, (rule_id, v, a, b))] = 0
     used = 0
-    departure = None
+    departure: dict[int, int] = {}
     for k, v in enumerate(vehicles):
         index, path = model.Start(k), []
         while not model.IsEnd(index):
@@ -139,9 +151,9 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
             if times is not None:
                 at = solution.Value(times.CumulVar(index))
                 node = manager.IndexToNode(index)
-                if node == depot:
-                    # One departure time for every vehicle: the earliest any leaves, so no arrival is early.
-                    departure = at if departure is None else min(departure, at)
+                if node in depot_nodes:
+                    # One departure time per depot: the earliest any leaves, so no arrival is early.
+                    departure[node] = min(departure.get(node, at), at)
                 else:
                     hint[(ARRIVE, (rule_id, stops[node]))] = at
             index = solution.Value(model.NextVar(index))
@@ -152,12 +164,13 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
         carried = sum(demand[n] for n in path)
         for a, b in zip(path, path[1:]):
             hint[(var, (v, stops[a], stops[b]))] = 1
-            hint[(LOAD, (rule_id, v, stops[a], stops[b]))] = carried - demand[a] if a != depot else carried
-            if a != depot:
+            hint[(LOAD, (rule_id, v, stops[a], stops[b]))] = carried - demand[a] if a not in depot_nodes else carried
+            if a not in depot_nodes:
                 carried -= demand[a]
     if times is not None:
-        hint[(ARRIVE, (rule_id, body["depot"]))] = departure if departure is not None else int(
-            compiled.variables[(ARRIVE, (rule_id, body["depot"]))].lower)
+        for n in depot_nodes:
+            key = (ARRIVE, (rule_id, stops[n]))
+            hint[key] = departure.get(n, int(compiled.variables[key].lower))
     hint = {k: val for k, val in hint.items() if k in compiled.variables}
     from app.solve.evolve import holds, objective_at
 

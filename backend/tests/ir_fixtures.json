@@ -145,6 +145,10 @@
             "name": "capacity",
             "data_type": "integer",
             "default_value": 10
+          },
+          {
+            "name": "home",
+            "data_type": "text"
           }
         ]
       },
@@ -156,6 +160,77 @@
             "name": "demand",
             "data_type": "integer",
             "default_value": 1
+          }
+        ]
+      },
+      {
+        "name": "project",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "benefit",
+            "data_type": "number"
+          },
+          {
+            "name": "capex",
+            "data_type": "number"
+          },
+          {
+            "name": "committed",
+            "data_type": "boolean",
+            "default_value": false
+          }
+        ]
+      },
+      {
+        "name": "year",
+        "role": "time",
+        "attributes": [
+          {
+            "name": "budget",
+            "data_type": "number"
+          },
+          {
+            "name": "weight",
+            "data_type": "number"
+          }
+        ]
+      },
+      {
+        "name": "depot",
+        "role": "location",
+        "attributes": [
+          {
+            "name": "capacity",
+            "data_type": "number"
+          },
+          {
+            "name": "fixed_cost",
+            "data_type": "number"
+          }
+        ]
+      },
+      {
+        "name": "store",
+        "role": "location",
+        "attributes": [
+          {
+            "name": "demand",
+            "data_type": "number"
+          }
+        ]
+      },
+      {
+        "name": "truck_type",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "load",
+            "data_type": "number"
+          },
+          {
+            "name": "price",
+            "data_type": "number"
           }
         ]
       }
@@ -180,6 +255,22 @@
       },
       {
         "name": "travel",
+        "index": [
+          "stop",
+          "stop"
+        ],
+        "default_value": 0
+      },
+      {
+        "name": "unit_cost",
+        "index": [
+          "depot",
+          "store"
+        ],
+        "default_value": 0
+      },
+      {
+        "name": "distance",
         "index": [
           "stop",
           "stop"
@@ -4629,6 +4720,106 @@
                   {
                     "index": "t",
                     "set": "year"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "route_depot_each",
+      "why": "Several depots (benchmark, October 2026): each vehicle starts from the stop its `home` field names.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "distance": {
+            "index": [
+              "stop",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "demand": "demand",
+              "capacity": "capacity",
+              "depot_of": "home"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_distance",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "distance",
+                      "index": [
+                        "i",
+                        "j"
+                      ]
+                    },
+                    {
+                      "var": "visit",
+                      "index": [
+                        "v",
+                        "i",
+                        "j"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
                   }
                 ]
               }
@@ -17421,6 +17612,113 @@
             "severity": "hard"
           }
         ]
+      }
+    },
+    {
+      "code": "route_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "depot_of"
+      ],
+      "why": "One depot for all and each vehicle's own cannot both be named.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "distance": {
+            "index": [
+              "stop",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "demand": "demand",
+              "capacity": "capacity",
+              "depot_of": "home",
+              "depot": "north"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_distance",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "distance",
+                      "index": [
+                        "i",
+                        "j"
+                      ]
+                    },
+                    {
+                      "var": "visit",
+                      "index": [
+                        "v",
+                        "i",
+                        "j"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        }
       }
     }
   ]

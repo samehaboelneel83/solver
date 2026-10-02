@@ -132,7 +132,9 @@ export type RouteBody = {
   visit: { var: string; index: string[] };
   vehicles: { index: string; set: string };
   stops: { index: string; set: string };
-  depot: string;
+  /** One depot for all, or `depot_of`: a field of each vehicle naming its own (several depots). */
+  depot?: string;
+  depot_of?: string;
   demand?: string;
   capacity?: string;
   /** Time windows (queue R15c): a parameter over [stop, stop], and stop attributes. */
@@ -150,6 +152,8 @@ export function describeRoute(rule: { route?: unknown }): string | null {
   const windows = r.travel
     ? `, arriving between ${r.earliest || "0"} and ${r.latest || "any time"} after ${r.travel}${r.service ? ` and ${r.service} at each` : ""}`
     : "";
+  if (r.depot_of)
+    return `every ${r.stops?.set || "stop"} but the depots visited once by a ${r.vehicles?.set || "vehicle"} from its own ${r.depot_of} and back${load}${windows}`;
   return `every ${r.stops?.set || "stop"} but ${r.depot || "?"} visited once by a ${r.vehicles?.set || "vehicle"} from ${r.depot || "?"} and back${load}${windows}`;
 }
 

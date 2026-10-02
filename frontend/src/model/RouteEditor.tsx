@@ -32,6 +32,9 @@ export default function RouteEditor({
     (context.attributes[set] ?? []).filter((a) => a.data_type === "integer" || a.data_type === "number").map((a) => a.name);
   const stopNumbers = numbers(body.stops.set);
   const vehicleNumbers = numbers(body.vehicles.set);
+  // Fields of a vehicle that can name its own depot: text, a choice, or a link (several depots).
+  const vehicleFields = (context.attributes[body.vehicles.set] ?? [])
+    .filter((a) => ["text", "enum", "reference"].includes(a.data_type)).map((a) => a.name);
   const loaded = body.demand !== undefined && body.capacity !== undefined;
   // Queue R15c: the parameters that can be a travel time -- over [stop, stop].
   const travels = Object.entries(context.parameters)
@@ -61,7 +64,7 @@ export default function RouteEditor({
             onChange={(event) => {
               const next = choices.find((c) => c.variable === event.target.value);
               if (next)
-                write({ ...routeBody(next, body.depot, loaded ? { demand: body.demand!, capacity: body.capacity! } : undefined), ...keep });
+                write({ ...routeBody(next, body.depot ?? "depot", loaded ? { demand: body.demand!, capacity: body.capacity! } : undefined), ...keep });
             }}
           >
             {!chosen && <option value={body.visit.var}>{body.visit.var} (not a yes-or-no over vehicle × stop × stop)</option>}
@@ -73,11 +76,26 @@ export default function RouteEditor({
           </select>
         </div>
         <div>
-          <label htmlFor={depotId} className="block text-xs text-slate-600">
-            Depot ({body.stops.set || "stop"} key)
+          <label className="block text-xs text-slate-600">
+            <select aria-label="Where vehicles start" className="rounded border px-1 py-0.5 text-xs" value={body.depot_of !== undefined ? "own" : "one"}
+              onChange={(event) => {
+                const { depot: _d, depot_of: _o, ...rest } = body;
+                write(event.target.value === "own" ? { ...rest, depot_of: vehicleFields[0] ?? "depot" } : { ...rest, depot: "depot" });
+              }}>
+              <option value="one">One depot for all</option>
+              <option value="own">Each {body.vehicles.set || "vehicle"} from its own</option>
+            </select>
           </label>
-          <input id={depotId} className="rounded border px-2 py-1" value={body.depot}
-                 onChange={(event) => write({ ...body, depot: event.target.value })} />
+          {body.depot_of !== undefined ? (
+            <select id={depotId} aria-label={`The ${body.vehicles.set || "vehicle"} field naming its depot`} className="rounded border px-2 py-1"
+              value={body.depot_of} onChange={(event) => write({ ...body, depot_of: event.target.value })}>
+              {!vehicleFields.includes(body.depot_of) && <option value={body.depot_of}>{body.depot_of}</option>}
+              {vehicleFields.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          ) : (
+            <input id={depotId} aria-label={`Depot (${body.stops.set || "stop"} key)`} className="rounded border px-2 py-1" value={body.depot ?? ""}
+                   onChange={(event) => write({ ...body, depot: event.target.value })} />
+          )}
         </div>
       </div>
       <label className="flex items-center gap-2">

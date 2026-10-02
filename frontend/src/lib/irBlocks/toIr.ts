@@ -283,7 +283,7 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
           visit: { var: fieldOf(r, "VAR"), index: [v, i, fieldOf(r, "TO_INDEX")] },
           vehicles: { index: v, set: fieldOf(r, "V_SET") },
           stops: { index: i, set: fieldOf(r, "S_SET") },
-          depot: fieldOf(r, "DEPOT"),
+          ...(fieldOf(r, "DEPOT_MODE") === "own" ? { depot_of: fieldOf(r, "DEPOT") } : { depot: fieldOf(r, "DEPOT") }),
           ...(demand || capacity ? { demand, capacity } : {}),
           ...timing,
         },

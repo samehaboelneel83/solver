@@ -987,15 +987,19 @@ class _ShapeChecker:
                            "a route rule names visit, vehicles, stops and depot, and optionally demand and capacity "
                            "and time windows (travel, earliest, latest, service)")
         odd, what = None, ""
-        for key in ("visit", "vehicles", "stops", "depot"):
+        for key in ("visit", "vehicles", "stops"):
             if key not in body:
                 odd, what = key, "missing"
                 break
+        # One depot for all, or each vehicle's own (`depot_of`, a field of the vehicles; benchmark, October 2026).
+        if odd is None and ("depot" in body) == ("depot_of" in body):
+            odd, what = ("depot", "missing (or depot_of: the field of each vehicle naming its own depot)") if "depot" not in body \
+                else ("depot_of", "given with depot: name one depot for all, or each vehicle's own")
         if odd is None:
             odd = next((key for key in body if key not in ROUTE_KEYS), None)
             what = "not one of them"
         if odd is None:
-            odd = next((key for key in ("depot", "demand", "capacity", "travel", "earliest", "latest", "service")
+            odd = next((key for key in ("depot", "depot_of", "demand", "capacity", "travel", "earliest", "latest", "service")
                         if key in body and not (isinstance(body[key], str) and body[key])), None)
             what = "not a name"
         if odd is None and ("demand" in body) != ("capacity" in body):
