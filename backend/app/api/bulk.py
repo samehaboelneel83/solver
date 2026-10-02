@@ -589,10 +589,23 @@ def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, s
             raise HTTPException(422, "a mapping names each file column's target as text, or \"\" to leave it out")
     keep = [i for i, h in enumerate(header) if mapping.get(h, h) != ""]
     renamed = [mapping.get(header[i], header[i]) for i in keep]
-    twice = sorted({h for h in renamed if renamed.count(h) > 1})
+    # Several columns read as the key make one key, joined by "_": a depot and a day, a route and
+    # a stop (benchmark, October 2026: composite keys were built in the spreadsheet first).
+    parts = [i for i, h in zip(keep, renamed) if h == "key"] if renamed.count("key") > 1 else []
+    twice = sorted({h for h in renamed if renamed.count(h) > 1 and not (parts and h == "key")})
     if twice:
         raise HTTPException(422, f"two columns are read as {', '.join(repr(t) for t in twice)}; choose one")
-    return renamed, [[r[i] if i < len(r) else None for i in keep] for r in rows]
+    if parts:
+        keep = [i for i in keep if i not in parts[1:]]
+        renamed = [mapping.get(header[i], header[i]) for i in keep]
+
+    def cell(r: list[Any], i: int) -> Any:
+        if parts and i == parts[0]:
+            values = [str(r[j]).strip() if j < len(r) and r[j] is not None else "" for j in parts]
+            return None if any(v == "" for v in values) else "_".join(values)
+        return r[i] if i < len(r) else None
+
+    return renamed, [[cell(r, i) for i in keep] for r in rows]
 
 
 def _mapping(raw: str | None) -> dict[str, str]:
@@ -958,10 +971,13 @@ def parameter_writer(db: Session, parameter: ParameterDef):
 
 @router.post("/parameters/{parameter_id}/upload")
 def parameter_upload(parameter_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
-                     dry_run: bool = False, db: Session = Depends(get_db),
+                     dry_run: bool = False, mapping: str | None = Form(None), db: Session = Depends(get_db),
                      user: UserAccount = Depends(requires("domain.edit"))) -> UploadReport:
+    """`mapping`: JSON, file column -> the index column or `value` it is read as, or "" to leave
+    it out -- a sheet whose columns are `Crop`, `Soil type` and `score` (benchmark, October 2026)."""
     parameter = _get(db, ParameterDef, parameter_id, "parameter")
     header, rows = _read(file)
+    header, rows = apply_mapping(header, rows, _mapping(mapping))
     columns, write = parameter_writer(db, parameter)
     return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("parameter", parameter_id))

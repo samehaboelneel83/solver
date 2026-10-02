@@ -220,8 +220,30 @@ def test_a_name_two_records_share_is_a_fault_not_a_guess(teams):
 def test_two_columns_read_as_one_target_are_refused(teams):
     rows = [["a", "b"], ["T1", "T2"]]
     got = teams["call"]("POST", f"/api/v1/entity-types/{teams['team']['id']}/upload", files=_csv(rows),
-                        data={"mapping": json.dumps({"a": "key", "b": "key"})}, ok=None)
-    assert got.status_code == 422 and "'key'" in got.text
+                        data={"mapping": json.dumps({"a": "label", "b": "label"})}, ok=None)
+    assert got.status_code == 422 and "'label'" in got.text
+
+
+def test_several_columns_read_as_the_key_make_one_key(teams):
+    """Benchmark, October 2026: a route and a stop were joined into one key in the spreadsheet first."""
+    rows = [["route", "stop", "name"], ["R1", "3", "Market"], ["R1", "4", "Bridge"], ["R2", "", "Gap"]]
+    got = _upload_mapped(teams, teams["team"]["id"], rows, {"route": "key", "stop": "key", "name": "label"}, clean_only=True)
+    assert got["written"] == 2 and got["skipped"] == 1, got  # a missing part is a missing key, not "R2_"
+    stored = teams["call"]("GET", f"/api/v1/entities?entity_type_id={teams['team']['id']}").json()["items"]
+    assert sorted((e["key"], e["label"]) for e in stored) == [("R1_3", "Market"), ("R1_4", "Bridge")]
+
+
+def test_a_value_upload_reads_columns_as_mapped(shop):
+    for key in ("north", "south"):
+        shop["post"]("/api/v1/entities", {"entity_type_id": shop["site"]["id"], "key": key, "attrs": {"capacity": 1}})
+    par = shop["post"]("/api/v1/parameters", {"domain_id": shop["domain"], "name": "demand", "default_value": 0,
+                                              "index_type_ids": [shop["site"]["id"], shop["day"]["id"]]})
+    rows = [["Weekday", "Site name", "score", "comment"], ["mon", "north", "4", "x"], ["tue", "south", "2", "y"]]
+    got = shop["call"]("POST", f"/api/v1/parameters/{par['id']}/upload", files=_csv(rows),
+                       data={"mapping": json.dumps({"Weekday": "day", "Site name": "site", "score": "value", "comment": ""})}).json()
+    assert got["ok"] and got["written"] == 2, got
+    cells = shop["call"]("GET", f"/api/v1/parameters/{par['id']}/values").json()["cells"]
+    assert sorted(c["value"] for c in cells) == [2, 4]
 
 
 def test_a_refused_row_among_many_is_named_and_the_rest_kept_when_asked(shop):
