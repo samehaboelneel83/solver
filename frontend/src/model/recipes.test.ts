@@ -1,0 +1,63 @@
+import { writeFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { checkIrShape } from "../ir/validate";
+import { applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { printRule } from "./formula";
+import { EMPTY_MODEL, type FormDraft } from "./draftIr";
+
+const empty: FormDraft = { sets: [], parameters: {}, variables: {}, constraints: [], objective: { sense: "minimize", mode: "weighted", terms: [] } };
+const ir = (d: FormDraft) => ({ ...EMPTY_MODEL, ...d });
+const rules = (d: FormDraft) => Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+const made: Record<string, unknown> = {};
+
+describe("more recipes (benchmark, October 2026)", () => {
+  it("chooses projects within a budget for the most value", () => {
+    const d = applySelection(empty, { items: "project", value: "benefit", cost: "capex", budget: 500, atMost: 3, mustHave: "committed" });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(rules(d)).toEqual({
+      budget: "sum(capex[i] * choose[i] for i in project) <= 500",
+      at_most_chosen: "sum(choose[i] for i in project) <= 3",
+      must_have: "for each i in project where committed = true: choose[i] >= 1",
+    });
+    expect(d.objective).toMatchObject({ sense: "maximize" });
+    made.selection = ir(d);
+  });
+
+  it("designs a network: open depots, ship, one supplier each, shortage at a price, a fleet by type", () => {
+    const d = applyNetwork(empty, { sources: "depot", customers: "store", demand: "demand", unitCost: "unit_cost", unitCostIndex: ["depot", "store"],
+      capacity: "capacity", openCost: "fixed_cost", singleSource: true, shortagePenalty: 1000, fleet: { kind: "truck_type", capacity: "load", cost: "price" } });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(Object.keys(d.variables)).toEqual(["ship", "open", "short", "served_by", "vehicles"]);
+    const r = rules(d);
+    expect(r.demand_met).toBe("for each c in store: sum(ship[s, c] for s in depot) + short[c] >= demand[c]");
+    expect(r.ship_only_if_served).toBe("for each s in depot, c in store: ship[s, c] <= demand[c] * served_by[s, c]");
+    expect(r.source_capacity).toBe("for each s in depot: sum(ship[s, c] for c in store) <= capacity[s] * open[s]");
+    expect(r.fleet_carries).toBe("for each s in depot: sum(ship[s, c] for c in store) <= sum(load[t] * vehicles[s, t] for t in truck_type)");
+    expect(d.objective.terms.map((t) => [t.id, t.weight])).toEqual([["shipping_cost", 1], ["opening_cost", 1], ["fleet_cost", 1], ["shortage", 1000]]);
+    expect(d.sets).toEqual(["depot", "store", "truck_type"]);
+    made.network = ir(d);
+    // The plainest form: ship from fixed sources, nothing else.
+    const plain = applyNetwork(empty, { sources: "depot", customers: "store", demand: "demand", unitCost: "unit_cost", unitCostIndex: ["store", "depot"] });
+    expect(Object.keys(rules(plain))).toEqual(["demand_met"]);
+    expect(JSON.stringify(plain.objective)).toContain('"par":"unit_cost","index":["c","s"]');
+  });
+
+  it("phases projects over periods within each period's budget, sooner worth more", () => {
+    const d = applyPhasing(empty, { items: "project", periods: "year", value: "benefit", cost: "capex", budget: "budget", weight: "weight" });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(rules(d)).toEqual({
+      start_once: "for each i in project: sum(start[i, t] for t in year) <= 1",
+      period_budget: "for each t in year: sum(capex[i] * start[i, t] for i in project) <= budget[t]",
+    });
+    expect(d.objective.terms[0].id).toBe("value_sooner");
+    made.phasing = ir(d);
+    if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
+  });
+
+  it("keeps what the draft had and gives new names", () => {
+    const once = applySelection(empty, { items: "project", value: "benefit", cost: "capex", budget: 5 });
+    const twice = applySelection(once, { items: "project", value: "benefit", cost: "capex", budget: 9 });
+    expect(Object.keys(twice.variables)).toEqual(["choose", "choose_2"]);
+    expect(twice.constraints.map((c) => c.id)).toEqual(["budget", "budget_2"]);
+  });
+});

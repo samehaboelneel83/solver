@@ -1,4 +1,5 @@
 import CoverageRecipeForm from "../model/CoverageRecipeForm";
+import RecipesForm from "../model/RecipesForm";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -742,6 +743,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           }))}
           onApply={(edit) => setDraft((current) => current && edit(current))}
           startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0}
+        />
+      )}
+      {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
+        <RecipesForm
+          kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
+          data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          onApply={(edit) => setDraft((current) => current && edit(current))}
         />
       )}
       <div hidden={focusedPart === "rules" || focusedPart === "objective" || (stepByStep && !["sets", "data", "decisions"].includes(step))} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">

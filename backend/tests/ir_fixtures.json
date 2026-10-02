@@ -3936,6 +3936,706 @@
           }
         ]
       }
+    },
+    {
+      "name": "recipe_selection",
+      "why": "Recipe (benchmark, October 2026): projects chosen within a budget, at most three, the committed ones always.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "project"
+        ],
+        "parameters": {},
+        "variables": {
+          "choose": {
+            "index": [
+              "project"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "budget",
+            "note": "the chosen project cost at most 500",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "i",
+                      "name": "capex"
+                    }
+                  },
+                  {
+                    "var": "choose",
+                    "index": [
+                      "i"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 500
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "at_most_chosen",
+            "note": "at most 3 project are chosen",
+            "left": {
+              "sum": {
+                "var": "choose",
+                "index": [
+                  "i"
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "must_have",
+            "note": "every project marked committed is chosen",
+            "left": {
+              "var": "choose",
+              "index": [
+                "i"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard",
+            "forall": [
+              {
+                "index": "i",
+                "set": "project",
+                "where": [
+                  {
+                    "attr": "committed",
+                    "op": "=",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "value_chosen",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "i",
+                        "name": "benefit"
+                      }
+                    },
+                    {
+                      "var": "choose",
+                      "index": [
+                        "i"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "project"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "recipe_network",
+      "why": "Recipe (benchmark, October 2026): depots opened, goods shipped, one supplier each, shortage at a price, trucks by type.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "depot",
+          "store",
+          "truck_type"
+        ],
+        "parameters": {
+          "unit_cost": {
+            "index": [
+              "depot",
+              "store"
+            ]
+          }
+        },
+        "variables": {
+          "ship": {
+            "index": [
+              "depot",
+              "store"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "open": {
+            "index": [
+              "depot"
+            ],
+            "domain": "binary"
+          },
+          "short": {
+            "index": [
+              "store"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "served_by": {
+            "index": [
+              "depot",
+              "store"
+            ],
+            "domain": "binary"
+          },
+          "vehicles": {
+            "index": [
+              "depot",
+              "truck_type"
+            ],
+            "domain": "integer",
+            "lower": 0
+          }
+        },
+        "constraints": [
+          {
+            "id": "demand_met",
+            "note": "each store gets its demand, or the rest counts as short",
+            "forall": [
+              {
+                "index": "c",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "add": [
+                {
+                  "sum": {
+                    "var": "ship",
+                    "index": [
+                      "s",
+                      "c"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "s",
+                      "set": "depot"
+                    }
+                  ]
+                },
+                {
+                  "var": "short",
+                  "index": [
+                    "c"
+                  ]
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "attr": {
+                "of": "c",
+                "name": "demand"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "one_source_each",
+            "note": "each store is served by one depot",
+            "forall": [
+              {
+                "index": "c",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "served_by",
+                "index": [
+                  "s",
+                  "c"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "depot"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "ship_only_if_served",
+            "note": "a depot ships to a store only if it serves it",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              },
+              {
+                "index": "c",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "var": "ship",
+              "index": [
+                "s",
+                "c"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "attr": {
+                    "of": "c",
+                    "name": "demand"
+                  }
+                },
+                {
+                  "var": "served_by",
+                  "index": [
+                    "s",
+                    "c"
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "serve_only_if_open",
+            "note": "only an open depot serves",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              },
+              {
+                "index": "c",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "var": "served_by",
+              "index": [
+                "s",
+                "c"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "var": "open",
+              "index": [
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "source_capacity",
+            "note": "an open depot ships at most its capacity, a closed one nothing",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "ship",
+                "index": [
+                  "s",
+                  "c"
+                ]
+              },
+              "over": [
+                {
+                  "index": "c",
+                  "set": "store"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "attr": {
+                    "of": "s",
+                    "name": "capacity"
+                  }
+                },
+                {
+                  "var": "open",
+                  "index": [
+                    "s"
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "fleet_carries",
+            "note": "what a depot ships fits in its truck types",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "ship",
+                "index": [
+                  "s",
+                  "c"
+                ]
+              },
+              "over": [
+                {
+                  "index": "c",
+                  "set": "store"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "t",
+                      "name": "load"
+                    }
+                  },
+                  {
+                    "var": "vehicles",
+                    "index": [
+                      "s",
+                      "t"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "t",
+                  "set": "truck_type"
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "shipping_cost",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "unit_cost",
+                      "index": [
+                        "s",
+                        "c"
+                      ]
+                    },
+                    {
+                      "var": "ship",
+                      "index": [
+                        "s",
+                        "c"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "s",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "c",
+                    "set": "store"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "opening_cost",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "s",
+                        "name": "fixed_cost"
+                      }
+                    },
+                    {
+                      "var": "open",
+                      "index": [
+                        "s"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "s",
+                    "set": "depot"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "fleet_cost",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "t",
+                        "name": "price"
+                      }
+                    },
+                    {
+                      "var": "vehicles",
+                      "index": [
+                        "s",
+                        "t"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "s",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "t",
+                    "set": "truck_type"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "shortage",
+              "weight": 1000,
+              "expression": {
+                "sum": {
+                  "var": "short",
+                  "index": [
+                    "c"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "c",
+                    "set": "store"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "recipe_phasing",
+      "why": "Recipe (benchmark, October 2026): projects started in years within each year's budget, sooner worth more.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "project",
+          "year"
+        ],
+        "parameters": {},
+        "variables": {
+          "start": {
+            "index": [
+              "project",
+              "year"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "start_once",
+            "note": "each project starts at most once",
+            "forall": [
+              {
+                "index": "i",
+                "set": "project"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "start",
+                "index": [
+                  "i",
+                  "t"
+                ]
+              },
+              "over": [
+                {
+                  "index": "t",
+                  "set": "year"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "period_budget",
+            "note": "what starts in a year costs at most its budget",
+            "forall": [
+              {
+                "index": "t",
+                "set": "year"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "i",
+                      "name": "capex"
+                    }
+                  },
+                  {
+                    "var": "start",
+                    "index": [
+                      "i",
+                      "t"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "t",
+                "name": "budget"
+              }
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "value_sooner",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "mul": [
+                        {
+                          "attr": {
+                            "of": "i",
+                            "name": "benefit"
+                          }
+                        },
+                        {
+                          "attr": {
+                            "of": "t",
+                            "name": "weight"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "var": "start",
+                      "index": [
+                        "i",
+                        "t"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "project"
+                  },
+                  {
+                    "index": "t",
+                    "set": "year"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
