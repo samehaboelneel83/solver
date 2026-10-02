@@ -48,4 +48,25 @@ describe("the coverage recipe", () => {
     expect(printRule(rule)).toBe("for each s in site where has_generator = false: sum(open[s] for a in outage_risk_area from s by in_outage_area) <= 0");
     expect(d.sets).toContain("outage_risk_area");
   });
+
+  it("seats a covered place's people at open sites within reach, none over its seats", () => {
+    const d = applyCoverage(empty, { ...recipe, seats: { capacity: "seats", demand: ["population", "share_over65"] } });
+    expect(d.variables.seated).toEqual({ index: ["zone", "site"], domain: "continuous", lower: 0 });
+    const rules = Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+    expect(rules.seats_for_covered).toBe("for each p in zone: sum(seated[p, s] for s in site) >= population[p] * share_over65[p] * covered[p]");
+    expect(rules.seats_within_reach).toBe("for each p in zone, s in site: seated[p, s] <= population[p] * share_over65[p] * covers[p, s]");
+    expect(rules.seats_capacity).toBe("for each s in site: sum(seated[p, s] for p in zone) <= seats[s] * open[s]");
+  });
+
+  it("gives an open site as many staff as its field asks", () => {
+    const d = applyCoverage(empty, { ...recipe, staff: { kind: "medical_team", needs: "teams_needed" } });
+    expect(printRule(d.constraints.find((c) => c.id === "staff_per_open_site")!))
+      .toBe("for each s in site: sum(assign[t, s] for t in medical_team) = teams_needed[s] * open[s]");
+  });
+
+  it("seats only the share that needs a seat at once", () => {
+    const d = applyCoverage(empty, { ...recipe, seats: { capacity: "seats", demand: ["population"], share: 0.05 } });
+    expect(printRule(d.constraints.find((c) => c.id === "seats_for_covered")!))
+      .toBe("for each p in zone: sum(seated[p, s] for s in site) >= population[p] * 0.05 * covered[p]");
+  });
 });

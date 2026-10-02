@@ -62,6 +62,11 @@ def _label(row: dict[str, Any], key: str) -> str:
     return key
 
 
+def _words(name: str) -> str:
+    """A kind's name as words in a title a person reads: candidate_site -> candidate site."""
+    return name.replace("_", " ")
+
+
 def _numbers(row: dict[str, Any]) -> dict[str, float]:
     """A record's number fields, for a map that colours areas by one (population, vulnerability)."""
     return {k: v for k, v in row.items()
@@ -126,7 +131,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                 add({"type": "Feature", "geometry": member["geometry"],
                      "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": value,
                                     "status": status, "title": title, "data": member["data"]}})
-            layers.append({"id": var, "kind": "places", "set": s, "title": f"{var}: {on} of {len(placed[s])} {s}"})
+            layers.append({"id": var, "kind": "places", "set": s, "title": f"{var}: {on} of {len(placed[s])} {_words(s)}"})
         elif len(index) == 2 and len(placed_positions) == 2:
             a, b = index
             drawn_sets.update(index)
@@ -164,7 +169,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                      "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": len(got),
                                     "status": "chosen" if got else "not_chosen", "data": member["data"],
                                     "title": f"{member['label']}: {var} {len(got)}" + (f" — {shown}" if got else "")}})
-            layers.append({"id": var, "kind": "counts", "set": s, "title": f"{var}: {total} over {len(placed[s])} {s}"})
+            layers.append({"id": var, "kind": "counts", "set": s, "title": f"{var}: {total} over {len(placed[s])} {_words(s)}"})
 
     # Who serves whom: 0/1 reach data between two placed sets and a yes/no choice over one of them
     # (open[yard] with reach[yard, hotspot]) -- each item joined to the nearest chosen place that
@@ -207,7 +212,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
             add({"type": "Feature", "geometry": member["geometry"],
                  "properties": {"layer": s, "set": s, "key": key, "label": member["label"], "value": None,
                                 "status": "place", "title": member["label"], "data": member["data"]}})
-        layers.append({"id": s, "kind": "context", "set": s, "title": f"{s}: {len(members)}"})
+        layers.append({"id": s, "kind": "context", "set": s, "title": f"{_words(s)}: {len(members)}"})
     return {"layers": layers, "features": features, "truncated": len(features) >= MAX_FEATURES}
 
 
@@ -253,9 +258,9 @@ def _coverage(ir: dict[str, Any], data: dict[str, Any], placed: dict[str, dict[s
                     features.append({"type": "Feature", "geometry": member["geometry"],
                                      "properties": {"layer": f"{par}_served", "set": item, "key": key, "label": member["label"],
                                                     "value": 0, "status": "short", "data": member.get("data") or {},
-                                                    "title": f"{member['label']}: no chosen {server} within {par}"}})
+                                                    "title": f"{member['label']}: no chosen {_words(server)} within {par}"}})
             out.append(({"id": f"{par}_served", "kind": "links", "set": f"{server}-{item}",
-                         "title": f"{item} served from a chosen {server} ({par}): {served} of {len(placed[item])}"}, features))
+                         "title": f"{_words(item)} served from a chosen {_words(server)} ({par}): {served} of {len(placed[item])}"}, features))
             break
     return out
 

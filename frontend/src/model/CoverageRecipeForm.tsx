@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { applyCoverage, type CoverageRecipe } from "./coverageRecipe";
+import { applyCoverage, say, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
@@ -37,6 +37,10 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
   const avoid = siteLinks.find((l) => l.rel === avoidLink) ?? null;
   const [staffKind, setStaffKind] = useState("");
   const [staffCap, setStaffCap] = useState("");
+  const [staffNeeds, setStaffNeeds] = useState("");
+  const [seatCap, setSeatCap] = useState("");
+  const [seatDemand, setSeatDemand] = useState<string[]>([]);
+  const [seatShare, setSeatShare] = useState("100");
   const [staffLink, setStaffLink] = useState("");
   const [staffReach, setStaffReach] = useState("");
   // A link from the staff kind to another kind (team -> hospital), read from either end.
@@ -71,8 +75,10 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
             ...(cost ? { cost } : {}), ...(budgetNumber !== undefined ? { budget: budgetNumber } : {}),
             weights, coverAll,
             ...(avoid ? { avoid: { ...avoid, ...(avoidUnless ? { unless: avoidUnless } : {}) } } : {}),
+            ...(!coverAll && seatCap && seatDemand.length ? { seats: { capacity: seatCap, demand: seatDemand,
+              ...(Number(seatShare) > 0 && Number(seatShare) < 100 ? { share: Number(seatShare) / 100 } : {}) } } : {}),
             ...(staffKind ? { staff: {
-              kind: staffKind, ...(staffCap ? { capacity: staffCap } : {}),
+              kind: staffKind, ...(staffCap ? { capacity: staffCap } : {}), ...(staffNeeds ? { needs: staffNeeds } : {}),
               ...(link && viaReach ? { via: { rel: link.rel, end: link.end, kind: link.kind, reach: viaReach.name, reachIndex: viaReach.index } } : {}),
             } } : {}),
           };
@@ -83,12 +89,12 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
           Open some
           <select aria-label="Kind to open" className={SELECT} value={sites} onChange={(e) => { setSites(e.target.value); setCost(""); }}>
             <option value="">kind…</option>
-            {kinds.map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
+            {kinds.map((k) => <option key={k.name} value={k.name}>{say(k.name)}</option>)}
           </select>
           so that each
           <select aria-label="Kind to cover" className={SELECT} value={places} onChange={(e) => { setPlaces(e.target.value); setWeights([]); }}>
             <option value="">kind…</option>
-            {kinds.filter((k) => k.name !== sites).map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
+            {kinds.filter((k) => k.name !== sites).map((k) => <option key={k.name} value={k.name}>{say(k.name)}</option>)}
           </select>
           has one within reach, by
           <select aria-label="Reach data" className={SELECT} value={reach?.name ?? ""} onChange={(e) => setReachChoice(e.target.value)} disabled={!reachOptions.length}>
@@ -146,12 +152,35 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
             )}
           </div>
         )}
+        {!coverAll && numberFields(siteKind).length > 0 && numberFields(placeKind).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-sky-200 pt-2">
+            Count a {places || "place"} covered only if its
+            {numberFields(placeKind).map((f) => (
+              <label key={f} className="flex items-center gap-1">
+                <input type="checkbox" checked={seatDemand.includes(f)}
+                  onChange={(e) => setSeatDemand(e.target.checked ? [...seatDemand, f] : seatDemand.filter((d) => d !== f))} /> {f}
+              </label>
+            ))}
+            <span className="text-xs text-slate-500">(multiplied: the people)</span>
+            — of whom
+            <input aria-label="Share needing a seat" inputMode="decimal" className={`${SELECT} w-16`} value={seatShare} onChange={(e) => setSeatShare(e.target.value)} />
+            % at once — find seats at open ones within reach, each holding at most its
+            <select aria-label="Seats field" className={SELECT} value={seatCap} onChange={(e) => setSeatCap(e.target.value)}>
+              <option value="">(no seat limit)</option>
+              {numberFields(siteKind).map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 border-t border-sky-200 pt-2">
-          Each open one needs one
+          Each open one needs
+          <select aria-label="Staff needed" className={SELECT} value={staffNeeds} onChange={(e) => setStaffNeeds(e.target.value)} disabled={!staffKind}>
+            <option value="">one</option>
+            {numberFields(siteKind).map((f) => <option key={f} value={f}>as many as its {f}</option>)}
+          </select>
           <select aria-label="Staff kind" className={SELECT} value={staffKind}
             onChange={(e) => { setStaffKind(e.target.value); setStaffCap(""); setStaffLink(""); setStaffReach(""); }}>
             <option value="">(nobody: leave out)</option>
-            {kinds.filter((k) => k.name !== sites && k.name !== places).map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
+            {kinds.filter((k) => k.name !== sites && k.name !== places).map((k) => <option key={k.name} value={k.name}>{say(k.name)}</option>)}
           </select>
           {staffKind && (
             <>
