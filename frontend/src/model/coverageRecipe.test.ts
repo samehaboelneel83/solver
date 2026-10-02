@@ -69,4 +69,9 @@ describe("the coverage recipe", () => {
     expect(printRule(d.constraints.find((c) => c.id === "seats_for_covered")!))
       .toBe("for each p in zone: sum(seated[p, s] for s in site) >= population[p] * 0.05 * covered[p]");
   });
+
+  it("never leaves out a place this needy", () => {
+    const d = applyCoverage(empty, { ...recipe, mustCover: { field: "vulnerability", atLeast: 4 } });
+    expect(printRule(d.constraints.find((c) => c.id === "must_cover")!)).toBe("for each p in zone where vulnerability >= 4: covered[p] >= 1");
+  });
 });

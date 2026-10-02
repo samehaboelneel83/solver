@@ -40,6 +40,8 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
   const [staffNeeds, setStaffNeeds] = useState("");
   const [seatCap, setSeatCap] = useState("");
   const [seatDemand, setSeatDemand] = useState<string[]>([]);
+  const [mustField, setMustField] = useState("");
+  const [mustAtLeast, setMustAtLeast] = useState("");
   const [seatShare, setSeatShare] = useState("100");
   const [staffLink, setStaffLink] = useState("");
   const [staffReach, setStaffReach] = useState("");
@@ -75,6 +77,8 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
             ...(cost ? { cost } : {}), ...(budgetNumber !== undefined ? { budget: budgetNumber } : {}),
             weights, coverAll,
             ...(avoid ? { avoid: { ...avoid, ...(avoidUnless ? { unless: avoidUnless } : {}) } } : {}),
+            ...(!coverAll && mustField && mustAtLeast.trim() !== "" && Number.isFinite(Number(mustAtLeast))
+              ? { mustCover: { field: mustField, atLeast: Number(mustAtLeast) } } : {}),
             ...(!coverAll && seatCap && seatDemand.length ? { seats: { capacity: seatCap, demand: seatDemand,
               ...(Number(seatShare) > 0 && Number(seatShare) < 100 ? { share: Number(seatShare) / 100 } : {}) } } : {}),
             ...(staffKind ? { staff: {
@@ -148,6 +152,22 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
                     .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
                 </select>
                 is yes
+              </>
+            )}
+          </div>
+        )}
+        {!coverAll && numberFields(placeKind).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-sky-200 pt-2">
+            Never leave out a {places ? say(places) : "place"} whose
+            <select aria-label="Must-cover field" className={SELECT} value={mustField} onChange={(e) => setMustField(e.target.value)}>
+              <option value="">(no such rule)</option>
+              {numberFields(placeKind).map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+            {mustField && (
+              <>
+                is at least
+                <input aria-label="Must-cover from" inputMode="decimal" className={`${SELECT} w-20`} value={mustAtLeast} onChange={(e) => setMustAtLeast(e.target.value)} />
+                <span className="text-xs text-slate-500">(if the budget cannot reach them all, the answer says so)</span>
               </>
             )}
           </div>

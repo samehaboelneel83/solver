@@ -22,6 +22,8 @@ export type CoverageRecipe = {
   weights: string[];
   /** Every place must be covered (the goal is then the least cost) -- else cover the most worth. */
   coverAll: boolean;
+  /** Never leave out a place this needy: every one whose number field is at least this is covered. */
+  mustCover?: { field: string; atLeast: number };
   /** Seats: a covered place's people (number fields multiplied) are seated at open sites within reach,
    * none holding more than its capacity field -- not merely "a site is near". Only with !coverAll. */
   seats?: { capacity: string; demand: string[]; /** The share of them that needs a seat at once, 0..1 (else all). */ share?: number };
@@ -84,6 +86,15 @@ export function applyCoverage(draft: FormDraft, r: CoverageRecipe): FormDraft {
       : ({ var: covered, index: [p] } as Term);
     terms.push({ id: free("covered_worth", taken), weight: 1, expression: { sum: worth, over: [{ index: p, set: r.places }] } as Term } as ObjectiveTerm);
     terms.push({ id: free(r.cost ? "cost" : "sites_open", taken), weight: 1, expression: { mul: [{ const: -1 }, costOf] } as Term } as ObjectiveTerm);
+  }
+  if (r.mustCover && !r.coverAll && Number.isFinite(r.mustCover.atLeast)) {
+    const m = r.mustCover;
+    constraints.push({
+      id: free("must_cover", [...taken, ...constraints.map((c) => c.id)]),
+      note: `every ${say(r.places)} with ${say(m.field)} of ${m.atLeast} or more is covered`,
+      forall: [{ index: p, set: r.places, where: [{ attr: m.field, op: ">=", value: m.atLeast }] }],
+      left: { var: covered, index: [p] } as Term, relation: ">=", right: { const: 1 } as Term, severity: "hard",
+    } as Constraint);
   }
   if (r.budget !== undefined && Number.isFinite(r.budget)) {
     constraints.push({
