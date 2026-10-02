@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Workbench, { pathNodes } from "./Workbench";
-import { moveField } from "../components/workbench/WorkbenchTree";
+import { moveEdge } from "../components/workbench/move";
 import { ToastProvider } from "../components/ToastProvider";
 import { editorQueryClient } from "../test/me";
 import type { WorkbenchSchema } from "../api/workbench";
@@ -148,8 +148,8 @@ describe("Data workbench", () => {
 
 describe("workbench helpers", () => {
   it("knows by which field a record can be moved under another", () => {
-    expect(moveField(SCHEMA, 2, 1)).toBe("region");
-    expect(moveField(SCHEMA, 1, 2)).toBeNull();
+    expect(moveEdge(SCHEMA, 2, 1)?.field).toBe("region");
+    expect(moveEdge(SCHEMA, 1, 2)).toBeNull();
   });
 
   it("opens the branches above a record found by search", () => {

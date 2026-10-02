@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatApiError } from "../api/errors";
-import { getEntity, updateEntity, type Id } from "../api/v1";
+import type { Id } from "../api/v1";
 import {
   usePlace,
   useProblems,
@@ -14,7 +14,8 @@ import {
 import { useToast } from "../components/ToastProvider";
 import DetailPane from "../components/workbench/DetailPane";
 import MasterPane, { type View } from "../components/workbench/MasterPane";
-import WorkbenchTree, { groupNode, moveField, recordNode, rootNode, type TreeSelection } from "../components/workbench/WorkbenchTree";
+import WorkbenchTree, { groupNode, recordNode, rootNode, type TreeSelection } from "../components/workbench/WorkbenchTree";
+import { moveEdge, moveRecord, moveWords } from "../components/workbench/move";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
@@ -160,16 +161,15 @@ export default function Workbench() {
 
   async function move(moved: TreeRecord, onto: TreeRecord) {
     if (!schema.data || !can("domain.edit")) return;
-    const field = moveField(schema.data, moved.entity_type_id, onto.entity_type_id);
+    const edge = moveEdge(schema.data, moved.entity_type_id, onto.entity_type_id);
     const kindName = (id: Id) => schema.data?.kinds.find((k) => k.id === id)?.name ?? "record";
-    if (!field) {
+    if (!edge) {
       toast.error(`A ${kindName(moved.entity_type_id)} cannot be placed under a ${kindName(onto.entity_type_id)}.`);
       return;
     }
-    if (!window.confirm(`Move ${moved.label || moved.key} under ${onto.label || onto.key} (${field} = ${onto.key})?`)) return;
+    if (!window.confirm(`Move ${moved.label || moved.key} under ${onto.label || onto.key} (${moveWords(edge, onto)})?`)) return;
     try {
-      const fresh = await getEntity(moved.id);
-      await updateEntity(moved.id, { attrs: { ...fresh.attrs, [field]: onto.key }, updated_at: fresh.updated_at });
+      await moveRecord(edge, moved, onto);
       toast.success(`${moved.key} is now under ${onto.key}`);
       toggle(recordNode(onto.id), true);
       await queryClient.invalidateQueries({ queryKey: ["v1"] });

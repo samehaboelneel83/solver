@@ -1,6 +1,5 @@
 import { DragEvent, useState } from "react";
 import {
-  placingEdges,
   useChildren,
   useGroups,
   type ChildGroup,
@@ -241,8 +240,4 @@ export default function WorkbenchTree(props: TreeProps) {
   );
 }
 
-/** Whether a record of `moved`'s kind can sit under `onto` by a reference field, and which. */
-export function moveField(schema: WorkbenchSchema, movedKind: Id, ontoKind: Id): string | null {
-  const edge = placingEdges(schema, movedKind, ontoKind).find((e) => e.group_key.startsWith("ref:"));
-  return edge?.field ?? null;
-}
+
