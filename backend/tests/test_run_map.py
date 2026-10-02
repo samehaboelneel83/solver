@@ -140,3 +140,18 @@ def test_two_stacked_cells_dissolve_to_a_rectangle():
     above = cell("b", 3.0000000000000004, 0.004523656847896722, 3.0044933738211133, 0.009047313695227132)
     [zone] = dissolve([below, above])
     assert zone["geometry"]["type"] == "Polygon" and len(shape(zone["geometry"]).exterior.coords) == 5
+
+
+def test_each_place_carries_its_amounts_and_what_it_got_most_of():
+    """Benchmark re-test, October 2026: a parcel's planted area by crop was lost -- its value was 1."""
+    from app.api.answer_map import answer_map
+
+    box = {"type": "Polygon", "coordinates": [[[30, 31], [30.01, 31], [30.01, 31.01], [30, 31.01], [30, 31]]]}
+    ir = {"sets": ["parcel", "crop"], "variables": {"area": {"index": ["parcel", "crop"], "domain": "continuous"}}}
+    data = {"sets": {"parcel": [{"id": "p1", "shape": box}], "crop": [{"id": "wheat"}, {"id": "maize"}]}}
+    amounts = {"area": [{"index": ["p1", "wheat"], "value": 12.5}, {"index": ["p1", "maize"], "value": 3}]}
+    found = answer_map(ir, data, {}, amounts, [])
+    p1 = next(f for f in found["features"] if f["properties"].get("key") == "p1" and f["properties"]["layer"] == "area")
+    assert p1["properties"]["value"] == 15.5 and p1["properties"]["largest"] == "wheat"
+    assert p1["properties"]["by"] == {"wheat": 12.5, "maize": 3}
+    assert "wheat 12.5, maize 3" in p1["properties"]["title"]

@@ -25,6 +25,9 @@ type AnswerFeature = {
     layer: string; key: string; label?: string; status: "chosen" | "not_chosen" | "short" | "place"; title: string; value: unknown;
     /** The place's number fields, to colour areas by (population, vulnerability). */
     data?: Record<string, number>;
+    /** Over a placed kind and another: each thing's amount, and the one it got most of (a parcel's crops). */
+    by?: Record<string, number>;
+    largest?: string;
   };
 };
 export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean;
@@ -42,7 +45,9 @@ const CHANGE: Record<string, string> = { added: "#059669", removed: "#dc2626", s
 export function CompareMap({ left, right }: { left: Id; right: Id }) {
   const map = useQuery({
     queryKey: ["answer-map-compare", left, right],
-    queryFn: () => apiFetch<AnswerMap & { changed?: number }>(`/api/v1/runs/${left}/answer-map/compare/${right}`),
+    // Read as the list beside it reads it, run `left` → run `right`: "added" is what `right` chose that
+    // `left` did not (benchmark re-test, October 2026: the list said "3 added" and the map "+13").
+    queryFn: () => apiFetch<AnswerMap & { changed?: number }>(`/api/v1/runs/${right}/answer-map/compare/${left}`),
     retry: false,
   });
   if (!map.data || map.data.none || !Array.isArray(map.data.features) || !map.data.features.length) return null;
@@ -56,14 +61,14 @@ export function CompareMap({ left, right }: { left: Id; right: Id }) {
     } satisfies GeoMark;
   });
   const legend = [
-    { layer: "added", colour: CHANGE.added, text: `chosen in run ${String(left)}, not in ${String(right)} (or no longer short)` },
-    { layer: "removed", colour: CHANGE.removed, text: `chosen in run ${String(right)} only (or newly short)` },
+    { layer: "added", colour: CHANGE.added, text: `chosen in run ${String(right)}, not in ${String(left)} (or no longer short)` },
+    { layer: "removed", colour: CHANGE.removed, text: `chosen in run ${String(left)} only (or newly short)` },
     { layer: "same", colour: CHANGE.same, text: "the same in both" },
   ];
   return (
     <section aria-label="Comparison on the map" className="mt-4">
       <h3 className="mb-1 text-sm font-semibold text-slate-900">
-        On the map: {map.data.changed ?? 0} {map.data.changed === 1 ? "change" : "changes"} from run {String(right)} to run {String(left)}
+        On the map: {map.data.changed ?? 0} {map.data.changed === 1 ? "change" : "changes"} from run {String(left)} to run {String(right)}
       </h3>
       <GeoMap marks={marks} legend={legend} caption={map.data.layers.map((l) => l.title).join(" · ")} />
     </section>
@@ -96,7 +101,23 @@ const isArea = (g: GeoGeometry) => g.type === "Polygon" || g.type === "MultiPoly
 export function areaFields(map: AnswerMap): string[] {
   const names = new Set<string>();
   for (const f of map.features) if (isArea(f.geometry)) Object.keys(f.properties.data ?? {}).forEach((k) => names.add(k));
-  return [...names].sort();
+  // What each place got most of (parcel × crop: its main crop), one colour each (benchmark re-test, October 2026).
+  const largest = new Set<string>();
+  for (const f of map.features) if (isArea(f.geometry) && typeof f.properties.largest === "string") largest.add(`largest ${f.properties.layer}`);
+  return [...[...largest].sort(), ...[...names].sort()];
+}
+
+/** Areas coloured by what each got most of: one colour per kind of thing, with its key. */
+export function colourByLargest(map: AnswerMap, marks: GeoMark[], layer: string): { marks: GeoMark[]; key: { name: string; colour: string }[] } {
+  const names = [...new Set(map.features.filter((f) => f.properties.layer === layer && typeof f.properties.largest === "string")
+    .map((f) => f.properties.largest as string))].sort();
+  const colourOf = new Map(names.map((n, i) => [n, COLOURS[i % COLOURS.length]]));
+  const out = marks.map((m, i) => {
+    const f = map.features[i];
+    const top = f?.properties.layer === layer ? f.properties.largest : undefined;
+    return typeof top === "string" ? { ...m, colour: colourOf.get(top)!, fill: 0.6, title: `${m.title} · mostly ${top}` } : m;
+  });
+  return { marks: out, key: names.map((name) => ({ name, colour: colourOf.get(name)! })) };
 }
 
 /** Areas filled by a number on a scale (user trial: which covered zones are the vulnerable ones?). The
@@ -210,7 +231,9 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
     && map.data.features.length > 0;
   const plain = usable && map.data ? marksOf(map.data) : null;
   const fields = usable && map.data ? areaFields(map.data) : [];
-  const coloured = plain && map.data && colourBy ? colourAreas(map.data, plain.marks, colourBy) : null;
+  const byLargest = plain && map.data && colourBy.startsWith("largest ") ? colourByLargest(map.data, plain.marks, colourBy.slice("largest ".length)) : null;
+  const coloured = byLargest ? { marks: byLargest.marks, ramp: null }
+    : plain && map.data && colourBy ? colourAreas(map.data, plain.marks, colourBy) : null;
   const answerDrawn = plain && coloured ? { ...plain, marks: coloured.marks } : plain;
   const under: GeoMark[] = (overlaid.data?.features.features ?? []).filter((f) => f.properties.kind !== "text").map((f, i) => ({
     id: `overlay-${i}`, geometry: f.geometry as GeoGeometry, colour: f.properties.color ?? "#94a3b8",
@@ -311,6 +334,15 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
               map.data?.along ? ` · ${map.data.along.flows - map.data.along.straight} of ${map.data.along.flows} flows along ${map.data.along.layer}${
                 map.data.along.straight ? ` (${map.data.along.straight} straight: no way between them on it)` : ""}` : ""}${
               coloured?.ramp ? ` · areas filled by ${colourBy}; a chosen area deeper` : ""}`} />
+          {byLargest && byLargest.key.length > 0 && (
+            <ul aria-label="Colours" className="mt-1 flex flex-wrap gap-3 text-xs text-slate-700">
+              {byLargest.key.map((k) => (
+                <li key={k.name} className="flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: k.colour }} aria-hidden />{k.name}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       <KeepAsData runId={runId} decisions={decisions} />

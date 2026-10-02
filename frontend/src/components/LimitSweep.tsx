@@ -174,6 +174,13 @@ export default function LimitSweep({ problemId, versionId, scenarioHref }: {
           {busy ? "Starting…" : `Solve ${values.length} times`}
         </button>
       </div>
+      {/* Benchmark re-test, October 2026: text in From read as "Solve 0 times" with no word on why. */}
+      {values.length < 2 && !busy && (
+        <p role="note" className="mt-2 text-xs text-amber-800">
+          {!Number.isFinite(lo) || !Number.isFinite(hi) ? "From and To are numbers, such as 6 and 12."
+            : !(Number(steps) >= 2) ? "Steps is a whole number, 2 or more." : "From and To must differ."}
+        </p>
+      )}
       {values.length >= 2 && !points.length && (
         <p className="mt-2 text-xs text-slate-500">{values.map((v) => v.toLocaleString("en-US")).join(" · ")} (at most {MAX_STEPS})</p>
       )}

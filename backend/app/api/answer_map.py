@@ -156,19 +156,34 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
             drawn_sets.add(s)
             cells = chosen.get(var, set()) if binary else {k for k, v in amount.get(var, {}).items() if abs(v) > 1e-9}
             per: dict[str, list[str]] = {}
+            # Amounts too, not only how many (benchmark re-test, October 2026: each parcel's planted area
+            # by crop was lost, its value 1): the total, each one's share, and the largest by name.
+            much: dict[str, dict[str, float]] = {}
             for cell in cells:
                 if len(cell) == len(index):
-                    rest = [cell[i] for i in range(len(index)) if i != p]
-                    per.setdefault(cell[p], []).append(" · ".join(rest))
+                    rest = " · ".join(cell[i] for i in range(len(index)) if i != p)
+                    per.setdefault(cell[p], []).append(rest)
+                    if not binary:
+                        much.setdefault(cell[p], {})[rest] = float(amount[var][cell])
             total = 0
             for key, member in placed[s].items():
                 got = sorted(per.get(key, []))
                 total += len(got)
-                shown = ", ".join(got[:8]) + (f" and {len(got) - 8} more" if len(got) > 8 else "")
+                amounts = much.get(key, {})
+                if amounts:
+                    ranked = sorted(amounts.items(), key=lambda kv: -kv[1])
+                    shown = ", ".join(f"{k} {v:g}" for k, v in ranked[:8]) + (f" and {len(ranked) - 8} more" if len(ranked) > 8 else "")
+                    value = round(sum(amounts.values()), 6)
+                    extra = {"by": {k: round(v, 6) for k, v in ranked}, "largest": ranked[0][0]}
+                else:
+                    shown = ", ".join(got[:8]) + (f" and {len(got) - 8} more" if len(got) > 8 else "")
+                    value, extra = len(got), {}
                 add({"type": "Feature", "geometry": member["geometry"],
-                     "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": len(got),
-                                    "status": "chosen" if got else "not_chosen", "data": member["data"],
-                                    "title": f"{member['label']}: {var} {len(got)}" + (f" — {shown}" if got else "")}})
+                     "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": value,
+                                    "status": "chosen" if got else "not_chosen",
+                                    "data": member["data"],
+                                    **extra,
+                                    "title": f"{member['label']}: {var} {value:g}" + (f" — {shown}" if got else "")}})
             layers.append({"id": var, "kind": "counts", "set": s, "title": f"{var}: {total} over {len(placed[s])} {_words(s)}"})
 
     # Who serves whom: 0/1 reach data between two placed sets and a yes/no choice over one of them

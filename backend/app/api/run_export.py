@@ -66,6 +66,17 @@ def _labels(data: dict[str, Any]) -> dict[str, dict[str, str]]:
     return out
 
 
+def _num(value: Any) -> str:
+    """A number as a person reads it in a report: 65,264,600 and 0.375, never 6.52646e+07
+    (benchmark re-test, October 2026)."""
+    v = float(value)
+    if v != v or v in (float("inf"), float("-inf")):
+        return str(v)
+    if abs(v) >= 1000 or v == int(v):
+        return f"{v:,.0f}" if abs(v - round(v)) < 1e-6 or abs(v) >= 1e5 else f"{v:,.2f}"
+    return f"{v:.4g}"
+
+
 def decision_rows(rec: dict[str, Any]) -> dict[str, tuple[list[str], list[list[Any]]]]:
     """Per decision: the index sets and its rows (keys..., value) -- chosen yes/no cells and non-zero amounts."""
     variables = (rec["ir"] or {}).get("variables") or {}
@@ -166,7 +177,7 @@ def to_xlsx(rec: dict[str, Any]) -> bytes:
         c.font = Font(bold=True)
     for r in rec["results"]:
         where = "; ".join(f"{' · '.join(map(str, v.get('index') or v.get('instance') or []))} by "
-                          f"{float(v.get('by') if v.get('by') is not None else v.get('amount') or 0):g}"
+                          f"{_num(v.get('by') if v.get('by') is not None else v.get('amount') or 0)}"
                           for v in (r["violations"] or [])[:50])
         rules.append([r["constraint_id"], r["hard"], r["satisfied"],
                       float(r["slack"]) if r["slack"] is not None else None,
@@ -445,18 +456,18 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
         terms = {t.get("id"): t for t in ((rec["ir"] or {}).get("objective") or {}).get("terms") or [] if isinstance(t, dict)}
         # A cost among maximised goals is written "maximise minus the cost": print it as the cost.
         goals = ", then ".join(
-            f"{e(_goal_name(terms.get(t['id']), t['id']))} <b>{(-1 if _negated(terms.get(t['id'])) else 1) * float(t['value']):,.6g}</b>"
+            f"{e(_goal_name(terms.get(t['id']), t['id']))} <b>{_num((-1 if _negated(terms.get(t['id'])) else 1) * float(t['value']))}</b>"
             + (" (kept as low as it can go)" if _negated(terms.get(t["id"])) else "")
             for t in params["objective_terms"] if t.get("id") not in ("stay_close", "preferences"))
         parts.append(f"<p>Goals, in order: {goals}.</p>")
     elif rec["objective"] is not None:
-        parts.append(f"<p>Goal: <b>{float(rec['objective']):g}</b></p>")
+        parts.append(f"<p>Goal: <b>{_num(rec['objective'])}</b></p>")
     made_of = params.get("objective_breakdown") or {}
     shown = [t for t in made_of.get("terms") or [] if t.get("id") not in ("stay_close", "preferences")]
     if len(shown) > 1 or (shown and len(shown[0].get("records") or []) > 1):
         rows = "".join(
-            f"<tr><td>{e(t['id'].replace('_', ' '))}</td><td>{t['value']:,.6g}</td><td>{t['share'] * 100:.1f}%</td>"
-            f"<td>{e(', '.join(str((labels.get(r['kind']) or {}).get(r['key'], r['key'])) + ' ' + format(r['value'], ',.6g') for r in (t.get('records') or [])[:5]))}</td></tr>"
+            f"<tr><td>{e(t['id'].replace('_', ' '))}</td><td>{_num(t['value'])}</td><td>{t['share'] * 100:.1f}%</td>"
+            f"<td>{e(', '.join(str((labels.get(r['kind']) or {}).get(r['key'], r['key'])) + ' ' + _num(r['value']) for r in (t.get('records') or [])[:5]))}</td></tr>"
             for t in shown)
         parts.append("<h2>What the goal is made of</h2><table><tr><th>Goal term</th><th>Value</th><th>Share</th><th>Most of it from</th></tr>"
                      f"{rows}</table>")
@@ -476,9 +487,9 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
         rows = []
         for r in rec["results"]:
             short = "; ".join(f"{' · '.join(map(str, v.get('index') or v.get('instance') or []))} by "
-                              f"{float(v.get('by') if v.get('by') is not None else v.get('amount') or 0):g}"
+                              f"{_num(v.get('by') if v.get('by') is not None else v.get('amount') or 0)}"
                               for v in (r["violations"] or [])[:12])
-            slack = "" if r["slack"] is None else f"{float(r['slack']):g}"
+            slack = "" if r["slack"] is None else _num(r["slack"])
             rows.append(f"<tr><td>{e(r['label'] or r['constraint_id'])}</td><td>{'must hold' if r['hard'] else 'preference'}</td>"
                         f"<td class={'ok' if r['satisfied'] else 'bad'}>{'held' if r['satisfied'] else 'not met'}</td>"
                         f"<td>{slack}</td><td>{e(short)}</td></tr>")
@@ -489,7 +500,7 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
             continue
         head = "".join(f"<th>{e(s)}</th>" for s in index) + "<th>value</th>"
         body = "".join("<tr>" + "".join(f"<td>{e(labels.get(s, {}).get(k) or k)}</td>" for s, k in zip(index, row[:-1]))
-                       + f"<td>{row[-1]:g}</td></tr>" for row in rows[:1000])
+                       + f"<td>{_num(row[-1])}</td></tr>" for row in rows[:1000])
         more = f"<p class=sub>{len(rows) - 1000} more rows in the Excel export.</p>" if len(rows) > 1000 else ""
         parts.append(f"<h2>{e(var)} <span class=sub>({len(rows)})</span></h2><table><tr>{head}</tr>{body}</table>{more}")
     style = ("body{font:13px/1.45 system-ui,sans-serif;color:#0f172a;max-width:900px;margin:24px auto;padding:0 16px}"

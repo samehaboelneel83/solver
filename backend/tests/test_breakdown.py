@@ -63,3 +63,10 @@ def test_the_exports_say_what_the_goal_is_made_of():
     sheet = load_workbook(BytesIO(to_xlsx(rec)))["Goal"]
     rows = [list(r) for r in sheet.iter_rows(values_only=True)]
     assert rows[1][:4] == ["shipping_cost", 1, 70, 0.4268] and rows[2][4:] == ["depot", "south", 70]
+
+
+def test_report_numbers_are_written_as_people_read_them():
+    """Benchmark re-test, October 2026: the PDF said 6.52646e+07."""
+    from app.api.run_export import _num
+
+    assert [_num(65264600.4), _num(1234.5), _num(0.375), _num(3), _num(-247000)] == ["65,264,600", "1,234.50", "0.375", "3", "-247,000"]

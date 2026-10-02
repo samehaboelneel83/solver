@@ -31,3 +31,18 @@ it("shows map data under the answer and draws the flows along its roads (benchma
     .toContain("/api/v1/runs/9/answer-map?along_dataset=5&along_layer=ROADS"));
   expect(screen.getByText("ROADS (city roads, under the answer)")).toBeInTheDocument();
 });
+
+it("colours each area by what it got most of, with a key (benchmark re-test, October 2026)", async () => {
+  const { areaFields, colourByLargest } = await import("./RunOutputs");
+  const box = (x: number) => ({ type: "Polygon", coordinates: [[[x, 31], [x + 0.01, 31], [x + 0.01, 31.01], [x, 31.01], [x, 31]]] });
+  const map = { layers: [{ id: "area", kind: "counts", title: "area" }], features: [
+    { geometry: box(30), properties: { layer: "area", key: "p1", status: "chosen", title: "p1", value: 15.5, largest: "wheat" } },
+    { geometry: box(30.1), properties: { layer: "area", key: "p2", status: "chosen", title: "p2", value: 4, largest: "maize" } },
+  ] } as never;
+  expect(areaFields(map)[0]).toBe("largest area");
+  const marks = [{ id: "a", colour: "#000", title: "p1", layer: "area" }, { id: "b", colour: "#000", title: "p2", layer: "area" }] as never;
+  const { marks: out, key } = colourByLargest(map, marks, "area");
+  expect(key.map((k) => k.name)).toEqual(["maize", "wheat"]);
+  expect((out as { colour: string }[])[0].colour).toBe(key[1].colour);
+  expect((out as { title: string }[])[1].title).toBe("p2 · mostly maize");
+});

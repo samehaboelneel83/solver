@@ -958,8 +958,24 @@ function ScenarioRuns({
  * it says anything else: crediting a rule for a change an added employee
  * caused is a wrong answer dressed as an insight.
  */
+/** Each goal's value in two runs: with goals in order the objective is the first goal only, and a
+ * second goal that doubled showed as "change 0" (benchmark re-test, October 2026). */
+export function goalChanges(leftParams: unknown, rightParams: unknown): { id: string; left: number; right: number }[] {
+  const terms = (params: unknown): Map<string, number> => {
+    const p = (params ?? {}) as { objective_breakdown?: { terms?: { id: string; value: number }[] }; objective_terms?: { id: string; value: number }[] };
+    const list = p.objective_breakdown?.terms ?? p.objective_terms ?? [];
+    return new Map(list.filter((t) => t.id !== "stay_close" && t.id !== "preferences").map((t) => [t.id, t.value]));
+  };
+  const a = terms(leftParams), b = terms(rightParams);
+  if (a.size < 2 && b.size < 2) return [];
+  return [...a.keys()].filter((id) => b.has(id)).map((id) => ({ id, left: a.get(id)!, right: b.get(id)! }));
+}
+
 function Comparison({ left, right }: { left: Id; right: Id }) {
   const comparison = useRunComparison(left, right);
+  const leftRun = useRun(left);
+  const rightRun = useRun(right);
+  const goals = goalChanges(leftRun.data?.params, rightRun.data?.params);
 
   if (comparison.isLoading) return <Skeleton rows={3} cols={3} />;
   if (comparison.isError && !comparison.data) {
@@ -1004,6 +1020,10 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
               : `${data.objective_delta > 0 ? "+" : ""}${formatGoal(data.objective_delta)}`
           }
         />
+        {goals.map((g) => (
+          <Fact key={`goal-${g.id}`} label={`Goal ${g.id.replace(/_/g, " ")}, run ${String(left)} → run ${String(right)}`}
+            value={`${formatGoal(g.left)} → ${formatGoal(g.right)}${g.right === g.left ? " (same)" : ` (${g.right > g.left ? "+" : ""}${formatGoal(g.right - g.left)})`}`} />
+        ))}
         <Fact label="Differs by" value={data.differs_by.length === 0 ? "nothing" : data.differs_by.join(", ")} />
         {([data.left, data.right] as const).map((side) => (
           <Fact key={`quality-${side.id}`} label={`Run ${String(side.id)}: how good`}

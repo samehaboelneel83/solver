@@ -125,6 +125,10 @@ export default function ApprovePlanPanel({
               </label>
             </div>
             {error && <p className="text-sm text-red-700">{error}</p>}
+            {reason.trim().length === 0 && (
+              // The button stays off until a reason is given; say so (benchmark re-test, October 2026).
+              <p className="text-xs text-slate-600">Say why this plan is approved; the approval keeps it.</p>
+            )}
             <div className="flex gap-2">
               <button
                 type="submit"
