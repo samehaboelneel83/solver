@@ -10,7 +10,7 @@
  */
 import { fillIndices, freeIndexName, seedForSet, type Binding, type Constraint, type ModelContext, type ObjectiveTerm, type Term } from "./terms";
 
-export type RuleShape = "cap_total" | "cap_each" | "cover_each" | "cap_linked" | "cap_when_chosen" | "cover_within_reach" | "total_per_item" | "rest_between";
+export type RuleShape = "cap_total" | "cap_each" | "cover_each" | "cap_linked" | "cap_when_chosen" | "cover_within_reach" | "total_per_item" | "rest_between" | "allowed_through_link";
 export type GoalShape = "count" | "cost";
 
 /** The decision a shape is built on: the first that is a number and (when asked) over at least
@@ -121,6 +121,32 @@ function restPair(context: ModelContext): { name: string; index: string[]; slot:
   return null;
 }
 
+/**
+ * User trial, "a team serves only centres its hospital reaches": a decision over two sets
+ * (assign[team, site]), a link from the first to a third kind (team -> its hospital), and 0/1 data
+ * over that kind and the second (reach[hospital, site]). A pair may be chosen only when what the
+ * first is linked to reaches the second.
+ */
+function throughLink(context: ModelContext): { name: string; index: string[]; who: string; what: string; via: string; rel: string; end: "from" | "to"; par: string; parIndex: string[] } | null {
+  for (const [name, spec] of Object.entries(context.variables)) {
+    if (spec.domain === "interval" || spec.index.length !== 2) continue;
+    for (const who of spec.index) {
+      const what = spec.index.find((s) => s !== who);
+      if (!what) continue;
+      for (const rel of context.relationships) {
+        const end = rel.from === who ? "from" : rel.to === who ? "to" : null;
+        const via = end === "from" ? rel.to : end === "to" ? rel.from : null;
+        if (!end || !via || via === who || via === what) continue;
+        const pars = Object.entries(context.parameters)
+          .filter(([, p]) => p.index.length === 2 && p.index.includes(via) && p.index.includes(what))
+          .sort(([n1, p1], [n2, p2]) => reachLike(n2, p2) - reachLike(n1, p1));
+        if (pars.length) return { name, index: spec.index, who, what, via, rel: rel.name, end, par: pars[0][0], parIndex: pars[0][1].index };
+      }
+    }
+  }
+  return null;
+}
+
 export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: ModelContext) => string | null }[] = [
   {
     shape: "cap_total",
@@ -161,6 +187,11 @@ export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: Mo
     shape: "rest_between",
     title: "Nobody takes two slots that are too close (rest between shifts, no overlaps)",
     needs: (c) => (restPair(c) ? null : "a yes/no decision over who and when, and a too-close link between slots (Data values → From times)"),
+  },
+  {
+    shape: "allowed_through_link",
+    title: "A pair only where what one is linked to reaches the other (a team, only centres its hospital reaches)",
+    needs: (c) => (throughLink(c) ? null : "a decision over two sets, a link from one to a third kind, and 0/1 data over that kind and the other"),
   },
 ];
 
@@ -233,6 +264,21 @@ export function ruleFromShape(shape: RuleShape, id: string, context: ModelContex
     }
     const walked = over.map((b) => (b.set === reach.server && reach.rel ? { ...b, via: { rel: reach.rel.name, [reach.rel.end]: forall[0].index } } : b));
     return { id, forall, left: { sum: read, over: walked }, relation: ">=", right: { const: 1 }, severity: "hard" };
+  }
+  const through = shape === "allowed_through_link" ? throughLink(context) : null;
+  if (through) {
+    // "For each team t, site s: assign[t, s] <= sum(reach[h, s] for h in hospital from t by base_hospital)."
+    const forall = bindingsFor(through.index);
+    const letters = new Map(forall.map((b) => [b.set, b.index]));
+    const [linkedTo] = bindingsFor([through.via], forall);
+    const at = (set: string) => (set === through.via ? linkedTo.index : letters.get(set) ?? "");
+    return {
+      id, forall,
+      left: { var: through.name, index: through.index.map((set) => letters.get(set) ?? "") },
+      relation: "<=",
+      right: { sum: { par: through.par, index: through.parIndex.map(at) }, over: [{ ...linkedTo, via: { rel: through.rel, [through.end]: letters.get(through.who) ?? "" } }] },
+      severity: "hard",
+    };
   }
   const link = shape === "cap_linked" ? linked(context) : null;
   if (link) {

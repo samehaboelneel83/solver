@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkGoal, checkRule } from "./blockCheck";
 import { goalFromShape, GOAL_SHAPES, ruleFromShape, RULE_SHAPES } from "./shapes";
 import type { ModelContext } from "./terms";
+import { printRule } from "./formula";
 
 const CONTEXT: ModelContext = {
   sets: ["employee", "day"],
@@ -45,10 +46,11 @@ describe("starting shapes", () => {
       "a yes/no decision over a set, and another decision over that set and more",
       "a decision, and 0/1 reach data -- tick it under “Data this model reads” -- or a relationship to the items it covers",
       "a decision over two sets",
-      "a yes/no decision over who and when, and a too-close link between slots (Data values → From times)"]);
+      "a yes/no decision over who and when, and a too-close link between slots (Data values → From times)",
+      "a decision over two sets, a link from one to a third kind, and 0/1 data over that kind and the other"]);
     // A model with no relationships has no walk to offer, no yes/no over one set, no reach data.
     expect(RULE_SHAPES.filter((s) => s.needs(CONTEXT) !== null).map((s) => s.shape))
-      .toEqual(["cap_linked", "cap_when_chosen", "cover_within_reach", "rest_between"]);
+      .toEqual(["cap_linked", "cap_when_chosen", "cover_within_reach", "rest_between", "allowed_through_link"]);
   });
 });
 
@@ -173,5 +175,28 @@ describe("workforce rules (improvement plan 5.2)", () => {
     expect(rule.forall![2]).toMatchObject({ set: "time_block", via: { rel: "too_close", from: rule.forall![1].index } });
     expect(rule).toMatchObject({ left: { add: [{ var: "work" }, { var: "work" }] }, relation: "<=", right: { const: 1 } });
     expect(checkRule(rule, ROSTER)).toEqual([]);
+  });
+});
+
+describe("a pair allowed only through a link", () => {
+  const TEAMS: ModelContext = {
+    sets: ["medical_team", "site", "hospital"],
+    setIds: {},
+    attributes: {},
+    variables: { open: { index: ["site"], domain: "binary" }, assign: { index: ["medical_team", "site"], domain: "binary" } },
+    parameters: { hosp_km: { index: ["hospital", "site"] }, hosp_reach: { index: ["hospital", "site"] } },
+    relationships: [{ name: "base_hospital", from: "medical_team", to: "hospital" }],
+  };
+
+  it("lets a team serve a site only where its hospital reaches it, reading the 0/1 data, not the distance", () => {
+    const rule = ruleFromShape("allowed_through_link", "team_reach", TEAMS);
+    expect(printRule(rule)).toBe(
+      "for each m in medical_team, s in site: assign[m, s] <= sum(hosp_reach[h, s] for h in hospital from m by base_hospital)");
+    expect(checkRule(rule, TEAMS)).toEqual([]);
+  });
+
+  it("is not offered without the link", () => {
+    const shape = RULE_SHAPES.find((s) => s.shape === "allowed_through_link")!;
+    expect(shape.needs({ ...TEAMS, relationships: [] })).toMatch(/a link from one to a third kind/);
   });
 });
