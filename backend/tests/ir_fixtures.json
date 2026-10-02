@@ -4124,7 +4124,7 @@
         "demand",
         "index"
       ],
-      "why": "a parameter is indexed by an ordered, non-empty list of sets, as parameter_def.index_type_ids is",
+      "why": "a parameter is indexed by an ordered list of sets -- empty for one number -- as parameter_def.index_type_ids is",
       "ir": {
         "version": 1,
         "sets": [

@@ -1273,7 +1273,8 @@ function NewData({ sets, taken, onCreate }: {
   const [unit, setUnit] = useState("");
   const problem = nameProblem(name, taken);
   const number = Number(fallback);
-  const ready = !!name && !problem && index.length > 0 && fallback.trim() !== "" && Number.isFinite(number);
+  // No set ticked is one number (a budget, a truck's capacity): its value is the default below.
+  const ready = !!name && !problem && fallback.trim() !== "" && Number.isFinite(number);
   return (
     <CreateForm title="Create new data" button="Create data" ready={ready}
       onSubmit={async () => {
@@ -1306,7 +1307,7 @@ function NewData({ sets, taken, onCreate }: {
         <input aria-label="New data unit" className={`${FORM_INPUT} ml-1 w-24`} value={unit} placeholder="optional" onChange={(e) => setUnit(e.target.value)} />
       </label>
       {problem && <p className="w-full text-xs text-red-700">{problem}</p>}
-      {name && !problem && index.length === 0 && <p className="w-full text-xs text-slate-600">Choose which sets it has one number for.</p>}
+      {name && !problem && index.length === 0 && <p className="w-full text-xs text-slate-600">No set ticked: one number for the whole model. Tick sets for one number each.</p>}
       <p className="w-full text-xs text-slate-500">
         Places with a shape? Distances, travel times, “within reach” and counts can be computed from the map instead of
         typed: Data › Parameters › Compute from the map.

@@ -511,7 +511,8 @@ describe("making new record types, numbers and data from the declarations", () =
     const form = screen.getByRole("form", { name: "Create new data" });
     fireEvent.change(within(form).getByLabelText("New data name"), { target: { value: "capacity" } });
     const create = within(form).getByRole("button", { name: "Create data" });
-    expect(create).toBeDisabled();
+    // No set ticked is one number for the whole model (migration 0104).
+    expect(within(form).getByText(/No set ticked: one number for the whole model/)).toBeInTheDocument();
     fireEvent.click(within(form).getByRole("checkbox", { name: "day" }));
     fireEvent.change(within(form).getByLabelText("New data default"), { target: { value: "8" } });
     fireEvent.click(create);

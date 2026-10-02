@@ -155,7 +155,13 @@ function ForDomain({ domainId }: { domainId: Id }) {
           </h2>
           <ComputedFrom key={`made-${selected.id}`} parameterId={selected.id} source={selected.source as MadeSource | null | undefined} />
           <ParameterSettings key={`settings-${selected.id}`} parameter={selected} entityTypes={entityTypes} />
-          {selected.value_type_id != null ? (
+          {selected.index_type_ids.length === 0 ? (
+            // One number (migration 0104): its value is its default, changed in the settings above.
+            <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              One number for the whole model: <span className="font-mono font-semibold">{String(selected.default_value)}</span>.
+              Change it as its default value above; a model reads it as <code className="font-mono">{selected.name}</code>.
+            </p>
+          ) : selected.value_type_id != null ? (
             <EntityParameterGrid key={selected.id} parameter={selected} entityTypes={entityTypes} />
           ) : (
             <>
@@ -166,9 +172,11 @@ function ForDomain({ domainId }: { domainId: Id }) {
               </div>
             </>
           )}
-          <div className="mt-4">
-            <BulkPanel base={`/api/v1/parameters/${selected.id}`} what={`${selected.name} cells`} exportRows={false} />
-          </div>
+          {selected.index_type_ids.length > 0 && (
+            <div className="mt-4">
+              <BulkPanel base={`/api/v1/parameters/${selected.id}`} what={`${selected.name} cells`} exportRows={false} />
+            </div>
+          )}
         </section>
       ) : (
         items.length > 0 && (
@@ -210,6 +218,7 @@ function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
 /** The index types of a parameter, named, **in index order**:
  * `demand[day, shift]` and `supply[shift, day]` are different parameters. */
 function indexNames(parameter: ParameterDef, entityTypes: EntityType[]): string {
+  if (parameter.index_type_ids.length === 0) return "— (one number)";
   return parameter.index_type_ids
     .map((id) => entityTypes.find((type) => type.id === id)?.name ?? `#${id}`)
     .join(", ");
@@ -581,7 +590,11 @@ function IndexChooser({
         >
           Add an index
         </button>
-        {indexes.length > 1 && (
+        {indexes.length === 0 && (
+          // One number, no index (migration 0104): a budget, a truck's capacity.
+          <p className="text-sm text-slate-700">No index: one number, its default value below.</p>
+        )}
+        {indexes.length > 0 && (
           <button
             type="button"
             onClick={() => onChange(indexes.slice(0, -1))}

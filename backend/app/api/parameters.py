@@ -137,7 +137,8 @@ class ParameterDefRead(BaseModel):
 class ParameterDefCreate(BaseModel):
     domain_id: int
     name: str
-    index_type_ids: list[BigintId] = Field(min_length=1)
+    #: Empty for one number (migration 0104): a truck's capacity, a budget -- its value is `default_value`.
+    index_type_ids: list[BigintId] = Field(min_length=0)
     # Mirrors the column's server default, so the field can be omitted.
     default_value: Quantity = Decimal(0)
     unit: str | None = None
@@ -151,7 +152,7 @@ class ParameterDefUpdate(BaseModel):
     cell's entities belong to the old domain."""
 
     name: str | None = None
-    index_type_ids: list[BigintId] | None = Field(default=None, min_length=1)
+    index_type_ids: list[BigintId] | None = Field(default=None, min_length=0)
     default_value: Quantity | None = None
     unit: str | None = None
     value_type_id: BigintId | None = None
@@ -405,6 +406,9 @@ def create_parameter(
 ) -> ParameterDefRead:
     _check_index_types(db, payload.domain_id, payload.index_type_ids)
     if payload.value_type_id is not None:
+        if not payload.index_type_ids:
+            raise field_error(["index_type_ids"], "one value with no index is a number; a record as a value needs an index",
+                              payload.index_type_ids)
         _check_index_types(db, payload.domain_id, [payload.value_type_id])
     row = ParameterDef(**payload.model_dump())
     db.add(row)
@@ -497,6 +501,10 @@ def put_parameter_values(
     """Set the named cells; cells not named are left as they are. Atomic:
     one bad cell and nothing in the request is written."""
     parameter = _get_parameter(db, parameter_id, lock="share")
+    if not parameter.index_type_ids:
+        # One number has no cells: it is the default value (benchmark, October 2026: scalars).
+        raise field_error(["cells"], f"{parameter.name} is one number with no index; change its value, not cells",
+                          [c.model_dump() for c in payload.cells])
 
     seen: set[tuple[int, ...]] = set()
     for index, cell in enumerate(payload.cells):

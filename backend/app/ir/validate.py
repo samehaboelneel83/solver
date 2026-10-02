@@ -292,13 +292,14 @@ class _ShapeChecker:
             index = declaration.get("index")
             if (
                 not isinstance(index, list)
-                or not 1 <= len(index) <= MAX_INDICES
+                or not 0 <= len(index) <= MAX_INDICES
                 or not all(isinstance(s, str) for s in index)
             ):
+                # Empty is one number (migration 0104).
                 return Refusal(
                     "parameter_index_not_array",
                     [*at, "index"],
-                    f"{name!r} must declare index as an array of 1 to {MAX_INDICES} set names, "
+                    f"{name!r} must declare index as an array of 0 to {MAX_INDICES} set names, "
                     "in the order parameter_def.index_type_ids holds them",
                 )
             for j, set_name in enumerate(index):

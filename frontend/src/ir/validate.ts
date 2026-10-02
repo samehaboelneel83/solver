@@ -267,14 +267,14 @@ class ShapeChecker {
       const index = declaration.index;
       if (
         !Array.isArray(index) ||
-        index.length < 1 ||
+        // Empty is one number (migration 0104).
         index.length > MAX_INDICES ||
         !index.every((s) => typeof s === "string")
       ) {
         return refusal(
           "parameter_index_not_array",
           [...at, "index"],
-          `'${name}' must declare index as an array of 1 to ${MAX_INDICES} set names, in the ` +
+          `'${name}' must declare index as an array of 0 to ${MAX_INDICES} set names, in the ` +
             "order parameter_def.index_type_ids holds them"
         );
       }

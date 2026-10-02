@@ -247,8 +247,13 @@ than the domain's own list.
 ```
 
 Each key names a `parameter_def` of the problem's domain. `index` is the
-ordered, non-empty list of set names it is indexed by, and it must be **exactly**
+ordered list of set names it is indexed by, and it must be **exactly**
 the domain's own `index_type_ids` resolved to names, in that order.
+
+An empty `index` is **one number** (migration `0104`): a budget, a truck's
+capacity. It has no cells, so its value is always its `default_value`, read as
+`{"par": "budget", "index": []}`. It is numbers only: a record as the value needs
+an index.
 
 That last rule is worth its weight. `snapshot_dataset()` emits a parameter's
 cells keyed by entity **type name** when every index type is distinct, so an
