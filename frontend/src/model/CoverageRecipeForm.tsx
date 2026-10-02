@@ -1,9 +1,45 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getParameterValues, listEntities, type Id, type ParameterCell } from "../api/v1";
 import { applyCoverage, say, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
 
-type Kind = { name: string; attributes: { name: string; data_type: string }[] };
-type Data = { name: string; index: string[] };
+type Kind = { id?: number; name: string; attributes: { name: string; data_type: string }[] };
+type Data = { name: string; index: string[]; id?: number | string };
+
+/** The places no site reaches in 0/1 reach data: no cell with a value above 0 names them. */
+export function unreached(cells: ParameterCell[], placeIds: Id[], position: number): Id[] {
+  const reached = new Set(cells.filter((c) => (c.value ?? 0) > 0).map((c) => c.entity_ids[position]));
+  return placeIds.filter((id) => !reached.has(id));
+}
+
+/** Said before solving (user trial: a zone no site reaches made "never leave one out" impossible). */
+function ReachGaps({ reach, placeKind, places }: { reach: Data; placeKind: Kind; places: string }) {
+  const found = useQuery({
+    queryKey: ["v1", "recipe-reach-gaps", reach.id, placeKind.id],
+    enabled: reach.id != null && placeKind.id != null,
+    queryFn: async () => {
+      const values = await getParameterValues(Number(reach.id));
+      // Pages of 500, the most one request returns.
+      const items: { id: Id; key: string; label: string | null }[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const page = await listEntities({ entityTypeId: placeKind.id!, limit: 500, offset, family: true });
+        items.push(...page.items);
+        if (items.length >= page.total || !page.items.length || offset > 20_000) break;
+      }
+      const gaps = new Set(unreached(values.cells, items.map((r) => r.id), reach.index.indexOf(places)));
+      return items.filter((r) => gaps.has(r.id)).map((r) => r.label || r.key);
+    },
+  });
+  const names = found.data ?? [];
+  if (!names.length) return null;
+  return (
+    <p role="note" className="text-xs text-amber-800">
+      {names.length} {say(places)}{names.length === 1 ? " has" : "s have"} no site within reach in {reach.name}, so cannot be covered:{" "}
+      {names.slice(0, 6).join(", ")}{names.length > 6 ? ` and ${names.length - 6} more` : ""}. Add a site near them, or widen the reach.
+    </p>
+  );
+}
 
 const SELECT = "rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numberFields = (kind: Kind | undefined) =>
@@ -15,7 +51,9 @@ const numberFields = (kind: Kind | undefined) =>
  * covering. Applying it writes the decisions, the rules and the goals into the draft, to read and
  * change like any other.
  */
-export default function CoverageRecipeForm({ kinds, data, links = [], onApply }: {
+export default function CoverageRecipeForm({ kinds, data, links = [], onApply, startOpen = false }: {
+  /** Open at first: an empty model is where a recipe helps most. */
+  startOpen?: boolean;
   kinds: Kind[];
   /** The domain's parameters, each with the kinds it is indexed by. */
   data: Data[];
@@ -23,6 +61,7 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
   links?: { name: string; from: string; to: string }[];
   onApply: (edit: (draft: FormDraft) => FormDraft) => void;
 }) {
+  const [opened, setOpened] = useState(startOpen);
   const [sites, setSites] = useState("");
   const [places, setPlaces] = useState("");
   const [cost, setCost] = useState("");
@@ -62,7 +101,7 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
   const ready = !!sites && !!places && !!reach && (budgetNumber === undefined || Number.isFinite(budgetNumber));
 
   return (
-    <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
+    <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3" open={opened} onToggle={(e) => setOpened(e.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
         Recipe: choose places to open so others are within reach (cooling centres, depots, clinics…)
       </summary>
@@ -106,6 +145,7 @@ export default function CoverageRecipeForm({ kinds, data, links = [], onApply }:
             {reachOptions.map((d) => <option key={d.name} value={d.name}>{d.name}[{d.index.join(", ")}]</option>)}
           </select>
         </div>
+        {reach && placeKind && <ReachGaps reach={reach} placeKind={placeKind} places={places} />}
         {sites && places && reachOptions.length === 0 && (
           <p className="text-xs text-amber-800">
             First make 0/1 reach data between {places} and {sites}: Map data → Compute from the map → “a 0/1 within parameter”.

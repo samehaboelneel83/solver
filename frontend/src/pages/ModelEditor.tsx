@@ -719,7 +719,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
       {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
         <CoverageRecipeForm
-          kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
+          kinds={(entityTypes.data?.items ?? []).map((t) => ({ id: Number(t.id), name: t.name, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
           links={(relationshipTypes.data?.items ?? []).map((rel) => ({
             name: rel.name,
@@ -727,6 +727,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             to: entityTypes.data?.items.find((t) => t.id === rel.to_type_id)?.name ?? "",
           }))}
           onApply={(edit) => setDraft((current) => current && edit(current))}
+          startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0}
         />
       )}
       <div hidden={focusedPart === "rules" || focusedPart === "objective" || (stepByStep && !["sets", "data", "decisions"].includes(step))} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
