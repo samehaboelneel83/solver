@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import MeasureFromMap from "../components/MeasureFromMap";
 import ComputedFrom, { type MadeSource } from "../components/ComputedFrom";
 import TimesTooClose from "../components/TimesTooClose";
+import ComputedValue from "../components/ComputedValue";
 import ParameterGrid, { parseCellValue } from "../components/ParameterGrid";
 import EntityParameterGrid from "../components/EntityParameterGrid";
 import BulkPanel from "../components/BulkPanel";
@@ -199,6 +200,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
         <>
         <MeasureFromMap domainId={domainId} entityTypes={entityTypes} />
         <TimesTooClose domainId={domainId} entityTypes={entityTypes} />
+        <ComputedValue domainId={domainId} entityTypes={entityTypes}
+          onMade={(id) => setSearchParams({ parameter: String(id) }, { replace: true })} />
         <CreateParameterForm
           domainId={domainId}
           entityTypes={entityTypes}

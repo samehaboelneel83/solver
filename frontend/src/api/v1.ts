@@ -1951,11 +1951,24 @@ export const applyPredictor = (id: Id, body: { field: string; only_missing: bool
 export const useApplyPredictor = () =>
   useV1Mutation(({ id, body }: { id: Id; body: { field: string; only_missing: boolean } }) => applyPredictor(id, body));
 /** Number fields made from a date, a text or a linked record's number (`app/api/derive.py`). */
-export type DeriveBody = { op: "date_parts" | "categories" | "from_link" | "formula"; field: string; of?: string; formula?: string };
+export type DeriveBody = {
+  op: "date_parts" | "categories" | "from_link" | "formula" | "linked_total"; field: string; of?: string; formula?: string;
+  /** linked_total: the kind whose records link here, by which link, totalled how. */
+  from_kind?: string; link?: string; how?: "count" | "sum" | "mean" | "max" | "min";
+};
 export const deriveFields = (entityTypeId: Id, body: DeriveBody) =>
   send<{ made: string[]; records: number; left_empty: number; empty?: string[] }>("POST", `/api/v1/entity-types/${entityTypeId}/derive`, body);
 export const useDeriveFields = () =>
   useV1Mutation(({ entityTypeId, body }: { entityTypeId: Id; body: DeriveBody }) => deriveFields(entityTypeId, body));
+/** A data value computed from the records: read through a link (`lookup`) or 1/0 by a comparison (`compare`). */
+export type DeriveValueBody = {
+  op: "lookup" | "compare"; name: string; kind: string; field: string;
+  source?: string; other?: string; against?: string; compare?: "=" | "!=";
+};
+export const deriveValue = (domainId: Id, body: DeriveValueBody) =>
+  send<{ parameter_id: Id; name: string; cells: number; index: Id[] }>("POST", `/api/v1/domains/${domainId}/derive-value`, body);
+export const useDeriveValue = () =>
+  useV1Mutation(({ domainId, body }: { domainId: Id; body: DeriveValueBody }) => deriveValue(domainId, body));
 
 export function usePredictors(domainId: Id | null) {
   return useQuery({
