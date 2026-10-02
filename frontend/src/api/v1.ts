@@ -1613,6 +1613,14 @@ export function useProblemRuns(problemId: Id | null) {
     enabled: isId(problemId),
   });
 }
+/** Runs over every scenario of a problem, newest first: what a run can be compared with. */
+export function useProblemRunList(problemId: Id | null, page: PageParams = {}) {
+  return useQuery({
+    queryKey: [V1, "runs", { problemId, ...page }],
+    queryFn: () => listRuns({ problemId, ...page }),
+    enabled: isId(problemId),
+  });
+}
 export const useAskWhyNot = () => useV1Mutation(askWhyNot);
 
 /** Where a version stands against its problem's acceptance cases (queue R30 / R32). */

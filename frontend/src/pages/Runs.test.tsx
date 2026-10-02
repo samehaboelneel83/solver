@@ -888,6 +888,24 @@ describe("Runs", () => {
     expect(within(panel).getByText(/cannot be attributed/i)).toBeInTheDocument();
   });
 
+  it("compares a run with the answered run of another scenario of the problem", async () => {
+    stub({
+      scenarios: { items: [SCENARIOS.items[0], { ...SCENARIOS.items[0], id: 8, name: "Base" }], total: 2 },
+      runs: (path: string) =>
+        path.includes("problem_id=")
+          ? { items: [RUN_SUMMARY, { ...RUN_SUMMARY, id: 9, scenario_id: 8 }, { ...RUN_SUMMARY, id: 10, scenario_id: 8, status: "failed" }], total: 3 }
+          : { items: [RUN_SUMMARY], total: 1 },
+    });
+    renderPage("/runs?problem=1&scenario=7");
+
+    const chooser = await screen.findByLabelText(/compare run 11 with/i);
+    await waitFor(() => expect(within(chooser).getByRole("option", { name: "Run 9 — Base (optimal)" })).toBeInTheDocument());
+    // A run with no answer is nothing to compare with.
+    expect(within(chooser).queryByRole("option", { name: /Run 10/ })).toBeNull();
+    fireEvent.change(chooser, { target: { value: "9" } });
+    expect(await screen.findByRole("heading", { name: /run 11 compared with run 9/i })).toBeInTheDocument();
+  });
+
   it("does not offer to compare a run with itself", async () => {
     stub({ runs: { items: [RUN_SUMMARY], total: 1 } });
     renderPage();

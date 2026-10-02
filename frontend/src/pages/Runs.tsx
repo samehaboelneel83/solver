@@ -23,6 +23,7 @@ import {
   useRunEta,
   type RunEta,
   useRunComparison,
+  useProblemRunList,
   useRuns,
   useVersion,
 useScenario,
@@ -466,6 +467,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
           scenarioName={scenario.name}
           modelVersionId={scenario.model_version_id}
           problemId={problemId!}
+          scenarioNames={Object.fromEntries(scenarioItems.map((sc) => [String(sc.id), sc.name]))}
         />
       ) : null}
     </>
@@ -502,11 +504,14 @@ function ScenarioRuns({
   scenarioName,
   modelVersionId,
   problemId,
+  scenarioNames = {},
 }: {
   scenarioId: Id;
   scenarioName: string;
   modelVersionId: Id;
   problemId: Id;
+  /** Every scenario of the problem by id, so a run can be compared with another scenario's. */
+  scenarioNames?: Record<string, string>;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useCapabilities();
@@ -615,9 +620,15 @@ function ScenarioRuns({
     } else setSearchParams(next, { replace: true });
   }
 
-  // Comparing is only offered once there is something to compare with.
+  // Comparing is only offered once there is something to compare with: this scenario's runs, and
+  // the answered runs of the problem's other scenarios -- "what does closing this site cost?".
+  const problemRuns = useProblemRunList(problemId, { limit: 100, offset: 0 });
+  const elsewhere = (problemRuns.data?.items ?? []).filter(
+    (row) => row.scenario_id !== scenarioId && (row.status === "optimal" || row.status === "feasible")
+  );
   const comparable = items.filter((row) => row.id !== selected);
-  const against = comparable.some((row) => row.id === againstId) ? againstId : null;
+  const anyComparable = [...comparable, ...elsewhere];
+  const against = anyComparable.some((row) => row.id === againstId) ? againstId : null;
 
   function solve(how: "plain" | "front" | "robust" | "alternatives" = "plain") {
     setFailure(null);
@@ -847,7 +858,7 @@ function ScenarioRuns({
           </table>
           <Pager label="Run" offset={runOffset} size={PAGE_SIZE} total={runs.data?.total ?? 0} onOffset={setRunOffset} />
 
-          {selected !== null && comparable.length > 0 && (
+          {selected !== null && anyComparable.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-slate-600">
               <label>
                 <span className="mr-2">Compare run {String(selected)} with</span>
@@ -859,11 +870,24 @@ function ScenarioRuns({
                   }
                 >
                   <option value="">nothing</option>
-                  {comparable.map((row) => (
-                    <option key={String(row.id)} value={String(row.id)}>
-                      Run {String(row.id)} ({row.status})
-                    </option>
-                  ))}
+                  {comparable.length > 0 && (
+                    <optgroup label={`${scenarioName} (this scenario)`}>
+                      {comparable.map((row) => (
+                        <option key={String(row.id)} value={String(row.id)}>
+                          Run {String(row.id)} ({row.status})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {elsewhere.length > 0 && (
+                    <optgroup label="Other scenarios">
+                      {elsewhere.map((row) => (
+                        <option key={String(row.id)} value={String(row.id)}>
+                          Run {String(row.id)} — {scenarioNames[String(row.scenario_id)] ?? `scenario ${String(row.scenario_id)}`} ({row.status})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </label>
             </div>
