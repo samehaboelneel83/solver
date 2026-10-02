@@ -31,9 +31,16 @@ function goalName(term: { id?: string; note?: string; expression?: unknown } | u
   if (note) return note;
   if (!/^o_?\d+$/.test(id)) return plain(id);
   const data = [...new Set(dataRead(term?.expression))];
-  if (data.length) return data.map(plain).join(" and ");
+  if (data.length) return listed(data.map(plain));
   const decided = [...new Set(varsRead(term?.expression))];
   return decided.length ? `total ${decided.map(plain).join(" and ")}` : plain(id);
+}
+
+/** "a", "a and b", "a, b and c", "a, b, c and 3 more": a goal over many data stays one readable
+ * phrase (benchmark, October 2026: "Peak volume vph and capacity vph and length km and ..."). */
+function listed(names: string[]): string {
+  const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}` : shown[0] ?? "";
 }
 
 function varsRead(node: unknown): string[] {
@@ -114,8 +121,11 @@ function goalLine(run: Run, ir: Ir): string | null {
   // A name is the author's choice and may not say what is counted ("Morning" for a late-slot
   // penalty, UX audit C-1): when it names none of the data the goal adds up, say that data too.
   const counts = [...new Set((ir.objective?.terms ?? []).flatMap((term) => dataRead((term as { expression?: unknown }).expression)))];
-  const said = counts.length && !counts.some((c) => plain(c) === name.toLowerCase())
-    ? `${sentence(name)}, the total of ${counts.map(plain).join(" and ")},`
+  // A name made from that data already says it.
+  const only = terms.length === 1 ? terms[0] as { id?: string; note?: string } : undefined;
+  const madeFromData = only !== undefined && !only.note?.trim() && /^o_?\d+$/.test(only.id ?? "");
+  const said = counts.length && !madeFromData && !counts.some((c) => plain(c) === name.toLowerCase())
+    ? `${sentence(name)}, the total of ${listed(counts.map(plain))},`
     : sentence(name);
   const proven = run.status === "optimal";
   const how = minimise

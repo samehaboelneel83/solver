@@ -99,3 +99,15 @@ describe("goals the editor named o_1, o_2", () => {
     expect(planWords(run, lexIr)?.lines[0]).toBe("Goals, in order: rent egp 3 days 60,000, then total base 4 — each as low as it can go given the ones before it.");
   });
 });
+
+describe("a goal over many data (benchmark, October 2026)", () => {
+  it("names a few and counts the rest, once", () => {
+    const reads = ["peak_volume_vph", "capacity_vph", "length_km", "lanes", "speed_kmh"]
+      .map((name) => ({ mul: [{ attr: { of: "r", name } }, { var: "x", index: ["r"] }] }));
+    const ir = { variables: { x: { index: ["road"], domain: "binary" } },
+      objective: { sense: "maximize", terms: [{ id: "o_1", weight: 1, expression: { sum: { add: reads }, over: [{ index: "r", set: "road" }] } }] } };
+    const words = planWords({ status: "optimal", objective: 4864.36, constraints: [], assignments: {}, amounts: {} } as unknown as Run, ir)!.lines[0];
+    expect(words).toContain("Peak volume vph, capacity vph, length km and 2 more came to 4,864.36");
+    expect(words).not.toContain("the total of");
+  });
+});

@@ -63,6 +63,19 @@ describe("computing distances from the map (queue R16a)", () => {
     expect(status).toHaveTextContent("a model walks them from either end");
   });
 
+  it("keeps a name typed before the kind of result is chosen", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ relationship_type_id: 4, edges: 3, missing: [], source: {} }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    renderForm([shaped(1, "site"), shaped(2, "customer")]);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "site_reach" } });
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "within" } });
+    expect(screen.getByLabelText("Name")).toHaveValue("site_reach");
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(JSON.parse((fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string).name).toBe("site_reach");
+  });
+
   it("asks again when a reach in km looks like metres", () => {
     renderForm([shaped(1, "site"), shaped(2, "customer")]);
     fireEvent.change(screen.getByLabelText("Make"), { target: { value: "within_flag" } });

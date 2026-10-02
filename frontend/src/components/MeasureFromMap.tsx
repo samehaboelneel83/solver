@@ -56,6 +56,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const placed = entityTypes.filter((t) => t.attributes.some((a) => a.data_type === "geometry"));
   const [kind, setKind] = useState<Make>("distances");
   const [name, setName] = useState("distance");
+  const [named, setNamed] = useState(false);
   const [from, setFrom] = useState<Id | "">(placed[0]?.id ?? "");
   const [to, setTo] = useState<Id | "">(placed[1]?.id ?? placed[0]?.id ?? "");
   const [metric, setMetric] = useState<Metric>("straight");
@@ -191,7 +192,9 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
                   onChange={(event) => {
                     const next = event.target.value as Make;
                     setKind(next);
-                    setName(MAKES.find(([value]) => value === next)?.[2] ?? "result");
+                    // A name the person typed stays; only the suggested one follows the choice
+                    // (benchmark, October 2026: typed names became "area_of" and "distance").
+                    if (!named) setName(MAKES.find(([value]) => value === next)?.[2] ?? "result");
                     // Operations on areas start from a kind that looks like areas, not the first kind with a shape.
                     const area = areaKinds(placed)[0];
                     if (area && (next === "inside" || next === "overlap") && !areaKinds(placed).some((t) => t.id === to)) setTo(area.id);
@@ -203,7 +206,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         <div>
           <label htmlFor={`${id}-name`} className="block text-xs text-slate-600">Name</label>
           <input id={`${id}-name`} className="rounded border px-2 py-1 font-mono text-sm" value={name}
-                 onChange={(event) => setName(event.target.value)} />
+                 onChange={(event) => { setName(event.target.value); setNamed(event.target.value.trim() !== ""); }} />
         </div>
         {MEASURED.has(kind) && (
           <div>

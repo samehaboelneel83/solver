@@ -432,7 +432,8 @@ function RecordForm({
       await deleteEntity.mutateAsync(entity.id);
       toast.success(`Entity "${entity.key}" deleted`);
       if (embedded) embedded.onDeleted();
-      else navigate("/entities");
+      // Back to the records of its own kind, not the first kind (benchmark, October 2026).
+      else navigate(`/entities?type=${type.id}`);
     } catch (err) {
       toast.error(formatApiError(err));
     }
