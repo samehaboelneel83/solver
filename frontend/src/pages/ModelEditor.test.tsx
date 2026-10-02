@@ -1044,6 +1044,17 @@ describe("ModelEditor and the shared draft", () => {
     expect(localStorage.getItem(draftStorageKey(1))).toBeNull();
   });
 
+  it("lets go of a draft that was published elsewhere and is the latest version now", async () => {
+    localStorage.setItem(draftStorageKey(1), JSON.stringify({
+      problemId: 1, base: "version-21", baseVersion: 1, editedAt: "2026-09-24T12:00:00Z", persisted: true,
+      ir: JSON.parse(JSON.stringify(IR_V2)),
+    }));
+    renderPage();
+    expect(await screen.findByDisplayValue("c_cover")).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).toBeNull());
+    expect(screen.queryByText(/unpublished changes started from version 1/i)).toBeNull();
+  });
+
   it("clears the draft on publish, and on a confirmed discard only", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({ write });

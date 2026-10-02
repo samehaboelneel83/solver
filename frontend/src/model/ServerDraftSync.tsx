@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { baseOfServerDraft, fetchServerDraft, saveServerDraft, type ServerDraft } from "../api/drafts";
 import { isStaleRecordError, formatApiError } from "../api/errors";
-import { readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
+import { canonicalJson, readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
 import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 
 /** How long after the last edit a draft is saved to the server by itself. */
@@ -26,13 +26,28 @@ function time(iso: string): string {
   return new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** Save the local draft as the next server revision after `expected`. */
+/**
+ * Save the local draft as the next server revision after `expected`.
+ *
+ * A refusal as stale is answered here when the server's copy holds this very model: nothing of
+ * anyone's is lost by going on -- typically a save that arrived after its tab was closed, so its
+ * new revision was never noted here (benchmark, October 2026: reopening the editor, and publishing
+ * after it, asked which copy to keep). A different copy is still the caller's to resolve.
+ */
 export async function saveToServer(draft: ModelDraft, expected: number | null): Promise<ServerDraft> {
-  const saved = await saveServerDraft(draft.problemId, {
+  const body = {
     ir: draft.ir,
     base_version_id: draft.base === "scratch" ? null : Number(draft.base.slice("version-".length)),
-    expected_revision: expected,
-  });
+  };
+  let saved: ServerDraft;
+  try {
+    saved = await saveServerDraft(draft.problemId, { ...body, expected_revision: expected });
+  } catch (error) {
+    if (!isStaleRecordError(error)) throw error;
+    const latest = await fetchServerDraft(draft.problemId).catch(() => null);
+    if (latest === null || canonicalJson(latest.ir) !== canonicalJson(draft.ir)) throw error;
+    saved = await saveServerDraft(draft.problemId, { ...body, expected_revision: latest.revision });
+  }
   writeServerLink(draft.problemId, { revision: saved.revision, savedEditedAt: draft.editedAt });
   return saved;
 }

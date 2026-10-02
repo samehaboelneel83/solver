@@ -83,7 +83,8 @@ async function staleSave(): Promise<ModelDraft> {
   mockFetch.mockResolvedValueOnce(server(1));
   render(<ServerDraftSync problemId={P} draft={local} disabled={false} />);
   await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
-  mockFetch.mockRejectedValueOnce(STALE).mockResolvedValueOnce(server(4));
+  // Refused; the save looks at the server copy (another model), and so does the question.
+  mockFetch.mockRejectedValueOnce(STALE).mockResolvedValueOnce(server(4)).mockResolvedValueOnce(server(4));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save to server" })));
   expect(await screen.findByRole("alert")).toHaveTextContent(/saved from another tab or browser \(revision 4/);
   return local;
@@ -105,3 +106,25 @@ it("can take the server copy instead", async () => {
   expect(readServerLink(P)?.revision).toBe(4);
 });
 
+
+it("goes on without asking when the newer server copy is this very model (a save whose answer was lost)", async () => {
+  const { saveToServer } = await import("./ServerDraftSync");
+  const local = writeDraft({ problemId: P, base: "version-22", baseVersion: 2, ir: { sets: ["a"], variables: { x: { index: [], domain: "binary" } } } });
+  writeServerLink(P, { revision: 4, savedEditedAt: local.editedAt });
+  // The server keeps jsonb: the same model, its keys in another order.
+  mockFetch.mockRejectedValueOnce(STALE)
+    .mockResolvedValueOnce(server(5, { variables: { x: { domain: "binary", index: [] } }, sets: ["a"] }))
+    .mockResolvedValueOnce(server(6, local.ir));
+  const saved = await saveToServer(local, 4);
+  expect(saved.revision).toBe(6);
+  expect(JSON.parse(mockFetch.mock.calls.at(-1)![1].body).expected_revision).toBe(5);
+  expect(readServerLink(P)?.revision).toBe(6);
+});
+
+it("still refuses when the newer server copy is a different model", async () => {
+  const { saveToServer } = await import("./ServerDraftSync");
+  const local = writeDraft({ problemId: P, base: "version-22", baseVersion: 2, ir: { sets: ["mine"] } });
+  mockFetch.mockRejectedValueOnce(STALE).mockResolvedValueOnce(server(5, { sets: ["theirs"] }));
+  await expect(saveToServer(local, 4)).rejects.toBe(STALE);
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+});

@@ -63,7 +63,7 @@ import LoadFailure from "../components/LoadFailure";
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import ServerDraftSync, { saveToServer } from "../model/ServerDraftSync";
 import { discardServerDraft, publishServerDraft } from "../api/drafts";
-import { clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
+import { canonicalJson, clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { useDraftRefusal } from "../model/useDraftRefusal";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
 import {
@@ -281,6 +281,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   // never swapped silently: the page asks (`DraftConflict`).
   const stored = useModelDraft(Number(problemId));
   const conflict = stored !== null && seedKey !== null && stored.base !== seedKey;
+  // A draft published elsewhere (the problem page's "Publish changes and solve") is the latest
+  // version now: nothing is unpublished, so it goes rather than asking (benchmark, October 2026).
+  const publishedAlready = conflict && validVersion && baseId === listedVersions[0]?.id && !scratch
+    && canonicalJson(stored.ir) === canonicalJson(latest.data?.ir);
+  useEffect(() => {
+    if (publishedAlready) clearDraft(Number(problemId));
+  }, [publishedAlready, problemId]);
   const workingIr = !conflict && stored ? stored.ir : ir;
   const draft: Draft | null = useMemo(() => (workingIr ? formDraftOf(workingIr) : null), [workingIr]);
   // Stable identities for the rules (Epic UX, U-3): a rename, or deleting another rule, keeps focus and state on this one.
