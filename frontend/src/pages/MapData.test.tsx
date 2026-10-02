@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import { apiFetch } from "../api/client";
@@ -66,4 +66,32 @@ it("lists imported drawings with their layers, size and coordinate system", asyn
   expect(row).toHaveTextContent("site.dxf · 6 layers · 1,234 features · WGS 84 / UTM zone 36N");
   expect(screen.getByText(/Stored in PostGIS/)).toBeInTheDocument();
   expect(await screen.findByRole("link", { name: /Import map data/ })).toHaveAttribute("href", "/domains/7/map-data/import");
+});
+
+it("makes records of a file in one click, and leaves a kind that exists to the file's page", async () => {
+  const { QuickRecords } = await import("./MapData");
+  const plan = { layers: ["points"], name: "hospital", exists: false, features: 4, skipped_text: 0, shapes: ["point"], key: "name",
+    key_candidates: ["name"], fields: [], geometry_field: "shape", measures: [], properties: [] };
+  let exists = false;
+  mockFetch.mockImplementation((path: string) => {
+    if (path === "/api/v1/gis/datasets/3") return Promise.resolve({ id: 3, layers: [{ name: "points", feature_count: 4 }, { name: "empty", feature_count: 0 }] });
+    if (path.endsWith("/records/propose")) return Promise.resolve({ ...plan, exists });
+    if (path.endsWith("/records")) return Promise.resolve({ type: "hospital", entity_type_id: 12, domain_id: 7, made: 4, updated: 0 });
+    return Promise.reject(new Error(`unexpected ${path}`));
+  });
+  const view = (
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter><QuickRecords domainId={7} datasetId={3} /></MemoryRouter>
+    </QueryClientProvider>
+  );
+  const { unmount } = render(view);
+  fireEvent.click(screen.getByRole("button", { name: "Make records" }));
+  expect(await screen.findByRole("link", { name: "✓ 4 hospital records" })).toHaveAttribute("href", "/domains/7/data/records?type=12");
+  const sent = mockFetch.mock.calls.find(([p]) => String(p).endsWith("/records/propose"))!;
+  expect(JSON.parse((sent[1] as { body: string }).body)).toEqual({ layers: ["points"] });
+  unmount();
+  exists = true;
+  render(view);
+  fireEvent.click(screen.getByRole("button", { name: "Make records" }));
+  expect(await screen.findByRole("link", { name: /A kind “hospital” exists/ })).toHaveAttribute("href", "/domains/7/map-data/3");
 });

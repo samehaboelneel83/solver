@@ -69,3 +69,34 @@ it("takes GIS files, not only drawings, and says when a file names its coordinat
   expect(screen.getByText(/The file names its coordinate system \(EPSG:4326\)/)).toBeInTheDocument();
   await waitFor(() => expect(screen.getByDisplayValue("mina-camp")).toBeInTheDocument());
 });
+
+it("imports several files at once, each whose coordinate system is certain, and names the rest", async () => {
+  const unsure = { ...UPLOAD, upload_id: "u2", candidates: [{ ...UPLOAD.candidates[0], sure: false }] };
+  const posted: unknown[] = [];
+  let uploads = 0;
+  mockFetch.mockImplementation((path: string, init?: { body?: string }) => {
+    if (path === "/api/v1/gis/uploads") return Promise.resolve(uploads++ === 0 ? UPLOAD : unsure);
+    if (path === "/api/v1/gis/datasets") { posted.push(JSON.parse(init?.body ?? "{}")); return Promise.resolve({ id: 41 }); }
+    if (path.startsWith("/api/v1/gis/regions")) return Promise.resolve({ items: [] });
+    if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "a", display_name: null, capabilities: ["domain.edit"] });
+    if (path.startsWith("/api/v1/settings")) return Promise.resolve({ items: [] });
+    return Promise.reject(new Error(`unexpected ${path}`));
+  });
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/domains/7/map-data/import"]}>
+        <Routes>
+          <Route path="/domains/:domainId/map-data/import" element={<DomainRouteProvider><MapImport /></DomainRouteProvider>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const input = await screen.findByLabelText("Map data file");
+  expect(input).toHaveAttribute("multiple");
+  fireEvent.change(input, { target: { files: [new File(["{}"], "candidate_sites.geojson"), new File(["0"], "site plan.dxf")] } });
+  const list = await screen.findByRole("region", { name: "Imported files" });
+  await waitFor(() => expect(list).toHaveTextContent("site plan.dxf: its coordinate system is not certain"));
+  expect(screen.getByRole("link", { name: "candidate_sites.geojson" })).toHaveAttribute("href", "/domains/7/map-data/41");
+  expect(posted).toEqual([{ upload_id: "u1", domain_id: 7, name: "candidate sites", placement: { kind: "epsg", code: 4326 }, units: null,
+    layers: ["CAMP_BOUNDARY"] }]);
+});

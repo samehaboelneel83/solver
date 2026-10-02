@@ -5,7 +5,10 @@
  */
 import { Link } from "react-router-dom";
 import { Database, FileUp, Layers } from "lucide-react";
-import { useDatasets } from "../api/gis";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getDataset, makeRecords, proposeRecords, useDatasets } from "../api/gis";
+import { formatApiError } from "../api/errors";
 import { useEntityTypes } from "../api/v1";
 import MeasureFromMap from "../components/MeasureFromMap";
 import LoadFailure from "../components/LoadFailure";
@@ -69,6 +72,7 @@ export default function MapData() {
                         {" "}imported {relativeTime(d.created_at)}
                       </p>
                     </div>
+                    {can("domain.edit") && <QuickRecords domainId={domainId} datasetId={d.id} />}
                   </div>
                 </li>
               ))}
@@ -91,5 +95,52 @@ export default function MapData() {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Records from a file in one click (enhancement after the user trial: four files meant four trips through
+ * "Use in models"): every layer with features, the suggested kind name and key. A kind of that name
+ * already there is never added to here -- that choice is made on the file's own page.
+ */
+export function QuickRecords({ domainId, datasetId }: { domainId: number; datasetId: number }) {
+  const client = useQueryClient();
+  const [state, setState] = useState<{ busy?: boolean; made?: { type: string; id: number; n: number }; exists?: string; error?: string }>({});
+  if (state.made) {
+    return (
+      <Link className="shrink-0 text-xs text-emerald-800 underline" to={`/domains/${domainId}/data/records?type=${state.made.id}`}>
+        ✓ {state.made.n} {state.made.type.replace(/_/g, " ")} records
+      </Link>
+    );
+  }
+  if (state.exists) {
+    return (
+      <Link className="shrink-0 text-xs text-amber-800 underline" to={`/domains/${domainId}/map-data/${datasetId}`}>
+        A kind “{state.exists}” exists: choose on the file’s page
+      </Link>
+    );
+  }
+  return (
+    <span className="flex shrink-0 flex-col items-end gap-1">
+      <button type="button" disabled={state.busy} className="rounded-md border border-blue-600 px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-60"
+        onClick={async () => {
+          setState({ busy: true });
+          try {
+            const dataset = await getDataset(datasetId);
+            const layers = dataset.layers.filter((l) => l.feature_count > 0).map((l) => l.name);
+            const plan = await proposeRecords(datasetId, layers);
+            if (plan.exists) return setState({ exists: plan.name });
+            const made = await makeRecords(datasetId, layers, plan);
+            // Only what records change: refreshing everything re-mounts the page and loses this row's answer.
+            await client.invalidateQueries({ queryKey: ["v1", "entity-types"] });
+            setState({ made: { type: made.type, id: made.entity_type_id, n: made.made } });
+          } catch (e) {
+            setState({ error: formatApiError(e) });
+          }
+        }}>
+        {state.busy ? "Making…" : "Make records"}
+      </button>
+      {state.error && <span role="alert" className="text-xs text-red-700">{state.error}</span>}
+    </span>
   );
 }

@@ -44,6 +44,37 @@ export default function MapImport() {
   const basemap = useSiteBasemap();
   const file = useRef<HTMLInputElement>(null);
 
+  // Several files at once (enhancement after the user trial): each whose coordinate system is certain
+  // is imported as it is, with all its layers; any other is named to be opened on its own.
+  const [batch, setBatch] = useState<{ file: string; id?: number; note?: string }[] | null>(null);
+  const readMany = async (files: File[]) => {
+    if (domainId === null || !files.length) return;
+    if (files.length === 1) return read(files[0]);
+    setError(null);
+    const done: { file: string; id?: number; note?: string }[] = [];
+    setBatch([]);
+    for (const [i, f] of files.entries()) {
+      setBusy(`Importing ${i + 1} of ${files.length}: ${f.name}…`);
+      try {
+        const got = await uploadDrawing(f, domainId, where.point ? null : where.region);
+        const sure = got.candidates.find((c) => c.sure);
+        if (!sure) {
+          done.push({ file: f.name, note: "its coordinate system is not certain: import it on its own to place it" });
+        } else {
+          const kept = got.summary.layers.filter((l) => l.features > 0 && l.on && !l.frozen && l.name.toLowerCase() !== "defpoints").map((l) => l.name);
+          const made = await importDataset({ upload_id: got.upload_id, domain_id: domainId,
+            name: f.name.replace(/\.[a-z0-9]+$/i, "").replace(/[_]+/g, " "), placement: sure.placement, units: null, layers: kept });
+          done.push({ file: f.name, id: made.id });
+        }
+      } catch (e) {
+        done.push({ file: f.name, note: formatApiError(e) });
+      }
+      setBatch([...done]);
+    }
+    setBusy(null);
+    if (file.current) file.current.value = "";
+  };
+
   const read = async (f: File | undefined) => {
     if (!f || domainId === null) return;
     setBusy(`Reading ${f.name}…`);
@@ -132,16 +163,34 @@ export default function MapImport() {
         <h1 className="text-lg font-semibold text-slate-900">Import map data</h1>
       </header>
 
+      {batch && batch.length > 0 && (
+        <section aria-label="Imported files" className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          <ul className="space-y-1">
+            {batch.map((b) => (
+              <li key={b.file}>
+                {b.id !== undefined
+                  ? <>✓ <Link className="text-blue-700 underline" to={`/domains/${domainId}/map-data/${b.id}`}>{b.file}</Link> imported</>
+                  : <span className="text-amber-800">{b.file}: {b.note}</span>}
+              </li>
+            ))}
+          </ul>
+          {!busy && (
+            <p className="mt-2 text-slate-600">
+              Next: on <Link className="text-blue-700 underline" to={`/domains/${domainId}/map-data`}>Map data</Link>, make records of their places.
+            </p>
+          )}
+        </section>
+      )}
       {!upload && (
         <section className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center"
-          onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void read(e.dataTransfer.files[0]); }}>
+          onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void readMany([...e.dataTransfer.files]); }}>
           <FileUp className="mx-auto h-8 w-8 text-slate-400" aria-hidden />
-          <p className="mt-2 text-sm text-slate-700">Drop a CAD drawing or GIS file here, or</p>
+          <p className="mt-2 text-sm text-slate-700">Drop a CAD drawing or GIS file here — or several at once — or</p>
           <button type="button" disabled={!!busy} onClick={() => file.current?.click()}
             className="mt-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-            {busy ?? "Choose a file"}
+            {busy ?? "Choose files"}
           </button>
-          <input ref={file} type="file" accept={SPATIAL_FILES} className="hidden" aria-label="Map data file" onChange={(e) => void read(e.target.files?.[0])} />
+          <input ref={file} type="file" multiple accept={SPATIAL_FILES} className="hidden" aria-label="Map data file" onChange={(e) => void readMany([...(e.target.files ?? [])])} />
           <ul className="mx-auto mt-3 max-w-xl space-y-0.5 text-left text-xs text-slate-500">
             <li><strong>CAD drawing</strong> (.dxf): every layer, with points, lines, closed shapes, hatches, circles, text and
               blocks. A DWG must be saved as DXF from your CAD program first.</li>
