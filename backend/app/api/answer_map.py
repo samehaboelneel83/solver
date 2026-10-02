@@ -290,9 +290,39 @@ def _map_of(db: Session, run_id: int) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/answer-map")
-def get_answer_map(run_id: int, db: Session = Depends(get_db),
-                   user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
-    return _map_of(db, run_id)
+def get_answer_map(run_id: int, along_dataset: int | None = None, along_layer: str | None = None,
+                   db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """`along_dataset` and `along_layer`: draw each flow (a decision over two placed kinds) along that
+    lines layer, the way it would travel, instead of as a straight line."""
+    found = _map_of(db, run_id)
+    if along_dataset is not None and along_layer and found.get("features"):
+        found = _along(db, run_id, found, along_dataset, along_layer)
+    return found
+
+
+def _along(db: Session, run_id: int, found: dict[str, Any], dataset_id: int, layer: str) -> dict[str, Any]:
+    from app.spatial import layer_network
+
+    same = db.execute(text("SELECT 1 FROM gis_dataset g JOIN problem p ON p.domain_id = g.domain_id JOIN scenario s ON s.problem_id = p.id"
+                           " JOIN run r ON r.scenario_id = s.id WHERE r.id = :r AND g.id = :g"), {"r": run_id, "g": dataset_id}).first()
+    if same is None:
+        raise HTTPException(422, f"map data {dataset_id} is not in this run's workspace")
+    flows = [f for f in found["features"] if f["geometry"]["type"] == "LineString" and len(f["geometry"]["coordinates"]) == 2
+             and "-" in str(f["properties"].get("set", ""))]
+    if not flows:
+        return found
+    try:
+        net = layer_network.build(layer_network.from_layer(db, dataset_id, layer), None, 30.0)
+    except layer_network.NetworkError as exc:
+        raise HTTPException(422, f"layer {layer!r}: {exc}") from exc
+    ways = layer_network.paths(net, [(tuple(f["geometry"]["coordinates"][0]), tuple(f["geometry"]["coordinates"][1])) for f in flows])
+    straight = 0
+    for feature, way in zip(flows, ways, strict=True):
+        if way is None:
+            straight += 1
+            continue
+        feature["geometry"] = {"type": "LineString", "coordinates": way}
+    return {**found, "along": {"dataset_id": dataset_id, "layer": layer, "flows": len(flows), "straight": straight}}
 
 
 def compare_maps(now: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:

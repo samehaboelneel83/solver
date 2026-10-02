@@ -139,7 +139,7 @@ describe("computing distances from the map (queue R16a)", () => {
         : { parameter_id: 3, pairs: 4, missing: [], source: {} };
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
-    const zone = { ...shaped(9, "flood_zone"), role: "area" } as EntityType;
+    const zone = shaped(9, "flood_zone");
     renderForm([shaped(1, "site"), shaped(2, "customer"), zone]);
     fireEvent.change(screen.getByLabelText("Measured"), { target: { value: "network_time" } });
     await screen.findByRole("option", { name: "ROADS" });

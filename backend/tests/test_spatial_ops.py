@@ -151,3 +151,12 @@ def test_closed_roads_delays_and_no_go_areas_change_the_way_and_the_time():
     zone = Polygon([(30.004, 31.199), (30.006, 31.199), (30.006, 31.201), (30.004, 31.201)])  # over the direct road only
     assert 3.0 < minutes(avoid=[zone]) < 3.3
     assert layer_network.closed(True) and layer_network.closed("Closed") and not layer_network.closed(0) and not layer_network.closed(None)
+
+
+def test_a_flow_is_drawn_along_the_roads_it_takes():
+    lines = [([[30.0, 31.2], [30.0, 31.21], [30.01, 31.21], [30.01, 31.2]], {}), ([[35.0, 31.2], [35.01, 31.2]], {})]
+    net = layer_network.build(lines, None, 30)
+    way, off, apart = layer_network.paths(net, [((30.0, 31.2), (30.01, 31.2)), ((40.0, 0.0), (30.0, 31.2)), ((30.0, 31.2), (35.0, 31.2))])
+    assert way[0] == [30.0, 31.2] and way[-1] == [30.01, 31.2]
+    assert any(abs(p[1] - 31.21) < 1e-9 for p in way)  # round by the top, not straight across
+    assert off is None and apart is None

@@ -264,3 +264,38 @@ def from_layer(db, dataset_id: int, layer: str) -> list[tuple[list[list[float]],
         elif geometry.get("type") == "MultiLineString":
             out += [(part, props or {}) for part in geometry["coordinates"]]
     return out
+
+
+def paths(net: Network, pairs: list[tuple[tuple[float, float], tuple[float, float]]], *, snap_m: float = SNAP_M,
+          minutes: bool = False) -> list[list[list[float]] | None]:
+    """For each (from, to) the way along the network as [lon, lat] points, the places themselves
+    at each end; None where either is off the network or the other cannot be reached. To draw a
+    flow along the roads it takes rather than as a straight line (benchmark, October 2026)."""
+    from scipy.sparse.csgraph import dijkstra
+    from scipy.spatial import cKDTree
+
+    if not pairs:
+        return []
+    tree = cKDTree(net.xy)
+    ends = np.array([p for pair in pairs for p in pair], dtype=float)
+    d, i = tree.query(_local(ends[:, 0], ends[:, 1], net.origin))
+    starts = sorted({int(i[2 * k]) for k in range(len(pairs))})
+    _, before = dijkstra(net.minutes if minutes else net.graph, directed=False, indices=starts, return_predecessors=True)
+    row = {n: r for r, n in enumerate(starts)}
+    out: list[list[list[float]] | None] = []
+    for k, (a, b) in enumerate(pairs):
+        if d[2 * k] > snap_m or d[2 * k + 1] > snap_m:
+            out.append(None)
+            continue
+        s, t = int(i[2 * k]), int(i[2 * k + 1])
+        way, at = [t], t
+        while at != s:
+            at = int(before[row[s], at])
+            if at < 0:
+                break
+            way.append(at)
+        if at != s:
+            out.append(None)
+            continue
+        out.append([list(a), *[[float(x), float(y)] for x, y in net.lonlat[way[::-1]]], list(b)])
+    return out

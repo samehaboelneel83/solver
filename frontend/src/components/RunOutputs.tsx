@@ -16,6 +16,8 @@ import { formatApiError } from "../api/errors";
 import { BASEMAP_STORAGE_KEY, useBasemaps } from "../hooks/useBasemaps";
 import type { Id } from "../api/v1";
 import GeoMap, { rampColour, type GeoGeometry, type GeoMark } from "./map/GeoMap";
+import { getDataset, getFeatures, useDatasets } from "../api/gis";
+import { useDomain } from "../hooks/useDomain";
 
 type AnswerFeature = {
   geometry: GeoGeometry;
@@ -173,11 +175,26 @@ function KeepAsData({ runId, decisions }: { runId: Id; decisions: [string, { ind
 
 export default function RunOutputs({ runId, status, ir }: { runId: Id; status: string; ir?: Record<string, unknown> }) {
   const answered = status === "optimal" || status === "feasible";
+  // Any map data under the answer (roads, zones, incident heat), and the flows drawn along its
+  // lines rather than straight (benchmark, October 2026).
+  const { domainId } = useDomain();
+  const datasets = useDatasets(answered ? domainId : null);
+  const [overlay, setOverlay] = useState<number | null>(null);
+  const [alongLayer, setAlongLayer] = useState("");
+  const overlaid = useQuery({
+    queryKey: ["answer-overlay", overlay],
+    queryFn: async () => ({ dataset: await getDataset(overlay as number), features: await getFeatures(overlay as number) }),
+    enabled: overlay !== null,
+  });
+  const lineLayers = (overlaid.data?.dataset.layers ?? []).filter((l) => (l.kinds?.line ?? 0) > 0);
+  const along = overlay !== null && alongLayer && lineLayers.some((l) => l.name === alongLayer)
+    ? `?along_dataset=${overlay}&along_layer=${encodeURIComponent(alongLayer)}` : "";
   const map = useQuery({
-    queryKey: ["answer-map", runId],
-    queryFn: () => apiFetch<AnswerMap>(`/api/v1/runs/${runId}/answer-map`),
+    queryKey: ["answer-map", runId, along],
+    queryFn: () => apiFetch<AnswerMap>(`/api/v1/runs/${runId}/answer-map${along}`),
     enabled: answered,
     retry: false,
+    placeholderData: (previous) => previous,
   });
   const [failed, setFailed] = useState<string | null>(null);
   const [colourBy, setColourBy] = useState("");
@@ -192,7 +209,17 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   const plain = usable && map.data ? marksOf(map.data) : null;
   const fields = usable && map.data ? areaFields(map.data) : [];
   const coloured = plain && map.data && colourBy ? colourAreas(map.data, plain.marks, colourBy) : null;
-  const drawn = plain && coloured ? { ...plain, marks: coloured.marks } : plain;
+  const answerDrawn = plain && coloured ? { ...plain, marks: coloured.marks } : plain;
+  const under: GeoMark[] = (overlaid.data?.features.features ?? []).filter((f) => f.properties.kind !== "text").map((f, i) => ({
+    id: `overlay-${i}`, geometry: f.geometry as GeoGeometry, colour: f.properties.color ?? "#94a3b8",
+    size: f.geometry.type === "Point" ? 2 : 1.5, fill: 0.08, title: `${f.properties.layer}`, layer: `under: ${f.properties.layer}`,
+  }));
+  const drawn = answerDrawn && under.length
+    ? { marks: [...under, ...answerDrawn.marks],
+        legend: [...(answerDrawn.legend ?? []), ...[...new Set(under.map((m) => m.layer))].map((layer) => ({
+          layer, colour: under.find((m) => m.layer === layer)?.colour ?? "#94a3b8",
+          text: `${layer.slice("under: ".length)} (${overlaid.data?.dataset.name ?? "map data"}, under the answer)` }))] }
+    : answerDrawn;
   const report = () => {
     setFailed(null);
     // The report is an HTML page the browser prints or saves as PDF; fetched with the session, opened as a page.
@@ -249,7 +276,8 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
         <div>
           <h3 className="mb-1 text-sm font-semibold text-slate-900">On the map</h3>
           <GeoMap marks={drawn.marks} legend={drawn.legend} ramp={coloured?.ramp ?? undefined}
-            controls={fields.length > 0 ? (
+            controls={<>
+              {fields.length > 0 && (
               <label className="flex items-center gap-1">Colour areas by
                 <select aria-label="Colour areas by" className="rounded border border-slate-300 px-1 py-0.5 text-xs" value={colourBy}
                   onChange={(e) => setColourBy(e.target.value)}>
@@ -257,7 +285,26 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
                   {fields.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </label>
-            ) : undefined}
+              )}
+              {(datasets.data?.items ?? []).length > 0 && (
+                <label className="flex items-center gap-1">Show under it
+                  <select aria-label="Show under the answer" className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+                    value={overlay ?? ""} onChange={(e) => { setOverlay(e.target.value ? Number(e.target.value) : null); setAlongLayer(""); }}>
+                    <option value="">nothing</option>
+                    {(datasets.data?.items ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {lineLayers.length > 0 && (
+                <label className="flex items-center gap-1">Flows along
+                  <select aria-label="Draw flows along" className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+                    value={alongLayer} onChange={(e) => setAlongLayer(e.target.value)}>
+                    <option value="">straight lines</option>
+                    {lineLayers.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </>}
             caption={`${(map.data?.layers ?? []).map((l) => l.title).join(" · ")}${map.data?.truncated ? " · the first 20,000 shown" : ""}${
               coloured?.ramp ? ` · areas filled by ${colourBy}; a chosen area deeper` : ""}`} />
         </div>
