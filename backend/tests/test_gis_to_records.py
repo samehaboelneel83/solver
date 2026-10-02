@@ -47,7 +47,7 @@ def test_records_carry_their_shape_and_fields():
     assert kinds == {"max_trucks": "integer", "shape": "geometry"}
 
 
-def test_an_area_is_measured_and_a_line_keeps_its_length_and_a_point():
+def test_an_area_is_measured_and_a_line_is_kept_whole_with_its_length():
     area = {"kind": "polygon", "geometry": SQUARE, "properties": {"name": "A"}}
     road = {"kind": "line", "geometry": LINE, "properties": {"name": "R"}}
     seed, faults = to_records.build_seed([area, road], {"name": "place", "key": "name", "fields": []})
@@ -55,7 +55,8 @@ def test_an_area_is_measured_and_a_line_keeps_its_length_and_a_point():
     a, r = (e["attrs"] for e in seed["entities"])
     assert 10_000 < a["area_m2"] < 13_000  # about 95 m x 111 m at 31 N
     assert a["shape"]["type"] == "Polygon"
-    assert 900 < r["length_m"] < 1000 and r["shape"]["type"] == "Point"
+    # Kept as a line since migration 0103 (benchmark, October 2026: roads and canals were dots).
+    assert 900 < r["length_m"] < 1000 and r["shape"] == LINE
 
 
 def test_text_labels_are_left_out_and_duplicate_keys_refused():

@@ -365,7 +365,7 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
     order = {"place": 0, "not_chosen": 1, "chosen": 2, "short": 3}
     out, names = [], []
     on_map = bool(under)
-    for f in sorted(features, key=lambda f: (f.get("geometry") or {}).get("type") != "LineString"
+    for f in sorted(features, key=lambda f: (f.get("geometry") or {}).get("type") not in ("LineString", "MultiLineString")
                     and order.get((f.get("properties") or {}).get("status"), 1) + 1 or 0):
         g, props = f.get("geometry") or {}, f.get("properties") or {}
         status = props.get("status")
@@ -380,9 +380,12 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
                        f'stroke="{ring}" stroke-width="{1.5 if big else 0.6}">{title}</circle>')
             if big and status == "chosen" and props.get("label"):
                 names.append((x, y, str(props["label"])))
-        elif g.get("type") == "LineString":
-            out.append(f'<polyline points="{" ".join(xy(p) for p in g["coordinates"])}" fill="none" stroke="{colour}" '
-                       f'stroke-width="{1.2 if served else 1.8}" stroke-opacity="{0.75 if served else 0.85}">{title}</polyline>')
+        elif g.get("type") in ("LineString", "MultiLineString"):
+            # A road or a canal, chosen or not: a thicker line for a chosen one.
+            width = 1.2 if served else 3.0 if status == "chosen" else 1.8
+            for line in ([g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]):
+                out.append(f'<polyline points="{" ".join(xy(p) for p in line)}" fill="none" stroke="{colour}" '
+                           f'stroke-width="{width}" stroke-opacity="{0.75 if served else 0.85}">{title}</polyline>')
         elif g.get("type") in ("Polygon", "MultiPolygon"):
             polys = [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
             for poly in polys:

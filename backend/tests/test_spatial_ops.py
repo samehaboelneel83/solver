@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
 from app.spatial import layer_network, ops
 
@@ -52,6 +52,15 @@ def test_overlap_is_in_square_metres():
     rows = {(a, b): m2 for a, b, m2 in ops.overlap_m2([_s(1, "x", half)], DISTRICTS)}
     assert set(rows) == {(1, 10), (1, 11)}
     assert math.isclose(rows[(1, 10)], rows[(1, 11)], rel_tol=0.01) and rows[(1, 10)] > 20_000_000
+
+
+def test_a_road_overlaps_a_zone_by_the_metres_it_runs_inside_it_and_is_placed_halfway_along():
+    """Benchmark, October 2026: roads kept as lines can be checked against construction zones."""
+    road = LineString([(29.96, 31.2), (30.04, 31.2)])  # crosses both districts, ~3.8 km in each
+    rows = {(a, b): m for a, b, m in ops.overlap_m2([_s(1, "r", road)], DISTRICTS)}
+    assert set(rows) == {(1, 10), (1, 11)} and all(3_500 < m < 4_200 for m in rows.values())
+    pairs, _ = ops.inside([_s(1, "r", road)], DISTRICTS)
+    assert pairs == [(1, 11)] or pairs == [(1, 10)]  # its middle is on the shared border at 30.0
 
 
 def test_travel_along_my_own_lines_follows_the_network_and_its_speeds():

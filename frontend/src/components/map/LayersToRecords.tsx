@@ -134,7 +134,7 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
                 {plan.features} records · shape in <span className="font-mono">{plan.geometry_field}</span>
                 {plan.measures.length > 0 && <> · measured: {plan.measures.join(", ")}</>}
                 {plan.skipped_text > 0 && <> · {plan.skipped_text} text labels left out</>}
-                {plan.shapes.includes("line") && <> · a line is kept as its length and a point on it</>}
+                {plan.shapes.includes("line") && <> · a line is kept whole, with its length</>}
               </p>
               {plan.fields.length > 0 && (
                 <table className="w-full">

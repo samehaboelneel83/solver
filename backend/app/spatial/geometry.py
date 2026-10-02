@@ -1,7 +1,7 @@
 """GeoJSON geometry, judged once, in words (spatial spec §2).
 
-The database checks only that a geometry is an object of one of the three
-types (migration 0049); this names the ring or position at fault, which is
+The database checks only that a geometry is an object of one of the five
+types (migrations 0049, 0103); this names the ring or position at fault, which is
 what a planner fixing a file needs.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-GEOMETRY_TYPES = ("Point", "Polygon", "MultiPolygon")
+GEOMETRY_TYPES = ("Point", "LineString", "MultiLineString", "Polygon", "MultiPolygon")
 MAX_VERTICES = 10_000
 
 
@@ -40,6 +40,17 @@ def _ring(ring: Any, n: int) -> tuple[str | None, int]:
     return None, len(ring)
 
 
+def _line(line: Any, n: int, count: list[int]) -> str | None:
+    if not isinstance(line, list):
+        return f"line {n} is not an array of positions"
+    for p in line:
+        fault = _position(p)
+        if fault:
+            return fault
+    count[0] += len(line)
+    return None if len(line) >= 2 else f"line {n} has {len(line)} position; a line needs at least 2"
+
+
 def _polygon(rings: Any, count: list[int]) -> str | None:
     if not isinstance(rings, list) or not rings:
         return "a polygon is a non-empty array of rings"
@@ -57,12 +68,17 @@ def validate_geometry(value: Any) -> str | None:
         return "a geometry is a GeoJSON object, not text" if isinstance(value, str) else "a geometry is a GeoJSON object"
     kind = value.get("type")
     if kind not in GEOMETRY_TYPES:
-        return f"a geometry is a Point, Polygon or MultiPolygon, not {kind}"
+        return f"a geometry is a Point, LineString, MultiLineString, Polygon or MultiPolygon, not {kind}"
     coordinates = value.get("coordinates")
     if kind == "Point":
         return _position(coordinates)
     count = [0]
-    if kind == "Polygon":
+    if kind in ("LineString", "MultiLineString"):
+        lines = [coordinates] if kind == "LineString" else coordinates
+        if not isinstance(lines, list) or not lines:
+            return "a multilinestring is a non-empty array of lines"
+        fault = next((f for f in (_line(line, n, count) for n, line in enumerate(lines)) if f), None)
+    elif kind == "Polygon":
         fault = _polygon(coordinates, count)
     else:
         if not isinstance(coordinates, list) or not coordinates:

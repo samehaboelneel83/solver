@@ -140,6 +140,8 @@ export function shapeWords(value: unknown): string | null {
     return `Area, ${corners} ${corners === 1 ? "corner" : "corners"}`;
   }
   if (geo.type === "MultiPolygon") return `Area in ${geo.coordinates.length} ${geo.coordinates.length === 1 ? "part" : "parts"}`;
+  if (geo.type === "LineString") return `Line of ${geo.coordinates.length} points`;
+  if (geo.type === "MultiLineString") return `Line in ${geo.coordinates.length} ${geo.coordinates.length === 1 ? "part" : "parts"}`;
   return null;
 }
 
@@ -157,7 +159,7 @@ const TYPE_HINT: Record<AttrType, string> = {
   enum: "",
   date: "",
   time: "",
-  geometry: 'GeoJSON: a Point, Polygon or MultiPolygon, such as {"type": "Point", "coordinates": [31.2, 30.0]}.',
+  geometry: 'GeoJSON: a Point, LineString, Polygon or MultiPolygon, such as {"type": "Point", "coordinates": [31.2, 30.0]}.',
   reference: "",
 };
 

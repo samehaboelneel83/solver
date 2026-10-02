@@ -62,3 +62,11 @@ describe("formatCellValue", () => {
     expect(formatCellValue({ type: "json" }, { a: 1 })).toEqual({ text: '{"a":1}' });
   });
 });
+
+describe("a line in a record (benchmark, October 2026)", () => {
+  it("is named as a shape, like a point or an area", async () => {
+    const { shapeWords } = await import("../components/AttrsForm");
+    expect(shapeWords({ type: "LineString", coordinates: [[31, 30], [31.1, 30], [31.2, 30.1]] })).toBe("Line of 3 points");
+    expect(shapeWords({ type: "MultiLineString", coordinates: [[[31, 30], [31.1, 30]], [[31, 31], [31.1, 31]]] })).toBe("Line in 2 parts");
+  });
+});

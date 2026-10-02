@@ -77,16 +77,12 @@ def measure(geometry: dict[str, Any]) -> dict[str, float]:
 
 
 def storable(geometry: dict[str, Any]) -> dict[str, Any] | None:
-    """The shape as a geometry field holds it: a point or an area as is, a line as a point on it."""
+    """The shape as a geometry field holds it: a point, a line or an area as is (lines since migration 0103)."""
     from shapely.geometry import mapping, shape
 
     kind = geometry.get("type")
-    if kind in ("Point", "Polygon", "MultiPolygon"):
+    if kind in ("Point", "LineString", "MultiLineString", "Polygon", "MultiPolygon"):
         return geometry
-    if kind in ("LineString", "MultiLineString"):
-        shp = shape(geometry)
-        point = shp.interpolate(0.5, normalized=True) if kind == "LineString" else shp.representative_point()
-        return {"type": "Point", "coordinates": [round(point.x, 7), round(point.y, 7)]}
     if kind == "MultiPoint":
         shp = shape(geometry)
         return dict(mapping(shp.representative_point()))

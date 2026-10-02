@@ -20,7 +20,8 @@ SQUARE = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0
         (SQUARE, None),
         ({"type": "Point", "coordinates": [31.2, 30.0]}, None),
         ({"type": "MultiPolygon", "coordinates": [SQUARE["coordinates"]]}, None),
-        ({"type": "LineString", "coordinates": [[0, 0], [1, 1]]}, "a geometry is a Point, Polygon or MultiPolygon, not LineString"),
+        ({"type": "GeometryCollection", "geometries": []}, "a geometry is a Point, LineString, MultiLineString, Polygon or MultiPolygon, not GeometryCollection"),
+        ({"type": "LineString", "coordinates": [[0, 0]]}, "line 0 has 1 position; a line needs at least 2"),
         ({"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0.5]]]},
          "ring 0 is not closed: it starts at [0, 0] and ends at [0, 0.5]"),
         ({"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [0, 0]]]},
@@ -49,6 +50,11 @@ def test_the_database_accepts_a_geometry_and_refuses_text_for_one(db):  # noqa: 
     db.execute(
         text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'a', CAST(:g AS jsonb))"),
         {"t": area, "g": '{"shape": {"type": "Point", "coordinates": [31, 30]}}'},
+    )
+    # A road (migration 0103).
+    db.execute(
+        text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'r', CAST(:g AS jsonb))"),
+        {"t": area, "g": '{"shape": {"type": "LineString", "coordinates": [[31, 30], [31.1, 30]]}}'},
     )
     db.commit()
     with pytest.raises(Exception, match='attribute "shape" must be geometry'):

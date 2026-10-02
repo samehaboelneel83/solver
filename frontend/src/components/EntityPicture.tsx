@@ -10,6 +10,10 @@ export function placeOf(value: unknown): Point | null {
   const shape = value as { type?: string; coordinates?: unknown } | null;
   if (!shape || typeof shape !== "object") return null;
   if (shape.type === "Point" && Array.isArray(shape.coordinates)) return shape.coordinates.slice(0, 2) as Point;
+  if (shape.type === "LineString" && Array.isArray(shape.coordinates) && shape.coordinates.length) {
+    // A road or a canal stands at its middle point.
+    return (shape.coordinates as Point[])[Math.floor((shape.coordinates.length - 1) / 2)].slice(0, 2) as Point;
+  }
   const ring =
     shape.type === "Polygon" ? (shape.coordinates as Point[][])?.[0]
     : shape.type === "MultiPolygon" ? (shape.coordinates as Point[][][])?.[0]?.[0]

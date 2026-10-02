@@ -72,7 +72,11 @@ def load(db, entity_type_id: int) -> tuple[list[Shape], list[str]]:
 
 
 def _point(geometry) -> tuple[float, float]:
-    p = geometry if geometry.geom_type == "Point" else geometry.representative_point()
+    """Where a shape is, for a distance: a point itself, a line halfway along it, an area inside it."""
+    if geometry.geom_type == "LineString":
+        p = geometry.interpolate(0.5, normalized=True)
+    else:
+        p = geometry if geometry.geom_type == "Point" else geometry.representative_point()
     return float(p.x), float(p.y)
 
 
@@ -164,7 +168,8 @@ def touching(areas: list[Shape], tolerance_m: float = 1.0) -> list[tuple[int, in
 
 
 def overlap_m2(origins: list[Shape], targets: list[Shape]) -> list[tuple[int, int, float]]:
-    """(origin id, target id, m2 shared) for every pair of areas that overlap."""
+    """(origin id, target id, how much) for every origin that overlaps an area: m2 shared for an area,
+    metres along it for a line (a road through a construction zone)."""
     from pyproj import Geod
     from shapely.strtree import STRtree
 
@@ -175,15 +180,16 @@ def overlap_m2(origins: list[Shape], targets: list[Shape]) -> list[tuple[int, in
     tree = STRtree([t.geometry for t in tpolys])
     out = []
     for o in origins:
-        if o.geometry.geom_type not in ("Polygon", "MultiPolygon"):
+        line = o.geometry.geom_type in ("LineString", "MultiLineString")
+        if not line and o.geometry.geom_type not in ("Polygon", "MultiPolygon"):
             continue
         for j in (int(j) for j in tree.query(o.geometry)):
             shared = o.geometry.intersection(tpolys[j].geometry)
             if shared.is_empty:
                 continue
-            area = abs(geod.geometry_area_perimeter(shared)[0])
-            if area >= 0.5:
-                out.append((o.entity_id, tpolys[j].entity_id, round(area, 1)))
+            size = geod.geometry_length(shared) if line else abs(geod.geometry_area_perimeter(shared)[0])
+            if size >= 0.5:
+                out.append((o.entity_id, tpolys[j].entity_id, round(size, 1)))
     return out
 
 

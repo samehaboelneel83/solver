@@ -220,7 +220,7 @@ _DEFAULT_SHAPE = {
     "text": "string",
     "time": "string",
     "date": "string",
-    "geometry": "GeoJSON Point, Polygon or MultiPolygon",
+    "geometry": "GeoJSON Point, LineString, MultiLineString, Polygon or MultiPolygon",
     "reference": "nothing: a reference has no default",
 }
 

@@ -45,7 +45,10 @@ def places(db: Session, entity_type_id: int) -> tuple[list[Place], list[str]]:
             missing.append(key)
             continue
         point = shape(geometry)
-        if point.geom_type != "Point":
+        if point.geom_type == "LineString":
+            # A road or a canal is measured from halfway along it, as before lines were kept whole.
+            point = point.interpolate(0.5, normalized=True)
+        elif point.geom_type != "Point":
             point = point.representative_point()
         found.append(Place(entity_id, key, float(point.x), float(point.y)))
     return found, missing

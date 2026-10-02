@@ -151,7 +151,7 @@ def run_map(
 
 
 def _is_shape(value: Any) -> bool:
-    return (isinstance(value, dict) and value.get("type") in ("Point", "Polygon", "MultiPolygon")
+    return (isinstance(value, dict) and value.get("type") in ("Point", "LineString", "MultiLineString", "Polygon", "MultiPolygon")
             and isinstance(value.get("coordinates"), list))
 
 

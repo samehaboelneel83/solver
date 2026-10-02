@@ -11,6 +11,8 @@ function rings(g: Geometry): Position[][] {
     if (g.type === "Polygon") return g.coordinates as Position[][];
     if (g.type === "MultiPolygon") return (g.coordinates as Position[][][]).flat();
     if (g.type === "Point") return [[g.coordinates as Position]];
+    if (g.type === "LineString") return [g.coordinates as Position[]];
+    if (g.type === "MultiLineString") return g.coordinates as Position[][];
   } catch {
     // Not the shape its type says: nothing to draw.
   }
@@ -20,6 +22,7 @@ function rings(g: Geometry): Position[][] {
 export default function GeometryPreview({ geometry, size = 96 }: { geometry: unknown; size?: number }) {
   const g = (geometry && typeof geometry === "object" ? geometry : {}) as Geometry;
   const all = rings(g).filter(Array.isArray);
+  const line = g.type === "LineString" || g.type === "MultiLineString";
   const points = all.flat().filter((p) => Array.isArray(p) && p.length >= 2 && p.every((n) => typeof n === "number"));
   if (points.length === 0) return <span className="text-xs text-slate-500">No shape to draw</span>;
   const xs = points.map((p) => p[0]);
@@ -31,7 +34,7 @@ export default function GeometryPreview({ geometry, size = 96 }: { geometry: unk
   const x = (v: number) => pad + (((v - minX) * k) / span) * (size - 2 * pad);
   const y = (v: number) => size - pad - ((v - minY) / span) * (size - 2 * pad);
   const d = all
-    .map((ring) => ring.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ") + " Z")
+    .map((ring) => ring.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ") + (line ? "" : " Z"))
     .join(" ");
   return (
     <svg
@@ -45,7 +48,7 @@ export default function GeometryPreview({ geometry, size = 96 }: { geometry: unk
       {g.type === "Point" ? (
         <circle cx={x(points[0][0])} cy={y(points[0][1])} r={3} className="fill-blue-600" />
       ) : (
-        <path d={d} className="fill-blue-100 stroke-blue-700" strokeWidth={1} fillRule="evenodd" />
+        <path d={d} className={line ? "fill-none stroke-blue-700" : "fill-blue-100 stroke-blue-700"} strokeWidth={line ? 2 : 1} fillRule="evenodd" />
       )}
     </svg>
   );

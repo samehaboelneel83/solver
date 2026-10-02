@@ -162,16 +162,16 @@ lift are per point, averaged over the five problems.
 - [x] B8 No copy-to-keep question when the server copy is the same model; a draft already
       published is let go — `3a58d4f`.
 - [x] B9, B16, B24 fresh guided form; renamed items followed in every view; `[c, c2]` — `90fca40`.
-- [ ] B22 a recipe rule's note does not follow later edits — deferred (needs a marker for
-      machine-written notes).
+- [x] B22 a rule card asks whether its note still fits once the rule's arithmetic changes —
+      `a29a85a`.
 - [x] B10 a block the solver leaves empty keeps a start that holds; route rules no longer
       refused on the runs page — `714e2fa`.
 - [x] B11 workbook download with map shapes; message when there are no kinds — B15, B17, B23 —
       `83a1395`, `72d0fbe`.
-- [ ] B14 runs record the model version they solved (migration 0102), so comparisons, exports
-      and explanations read the right model — in progress.
-- [ ] B19 map layers to records: an id-like key, a name property for labels — in progress.
-- [ ] B20 lines kept as lines — moved to Phase 3 (G2a), the geometry field holds points and areas.
+- [x] B14 runs record the model version they solved (migration 0102) — `472418e`.
+- [x] B19 map layers to records: an id-like key, a name property for labels — `472418e`.
+- [x] B20 lines kept as lines: the geometry field holds LineString and MultiLineString (migration
+      0103); a road overlaps a zone by the metres inside it; maps and reports draw lines.
 
 ### Phase 1 — highest lift (target: coverage ≈ 88%)
 - [ ] **G1a Declare predictors in the model editor** (data list "Predictions" + a Boxes/Blocks

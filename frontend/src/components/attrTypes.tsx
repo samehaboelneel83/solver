@@ -3,6 +3,9 @@ import { ApiError } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { validationErrors, type AttrType, type EntityRole } from "../api/v1";
 
+/** The shapes a geometry field holds: places, lines (roads, canals) and areas. */
+export const GEOMETRY_KINDS = ["Point", "LineString", "MultiLineString", "Polygon", "MultiPolygon"];
+
 /*
  * The v1 attribute vocabulary and the form plumbing built on it, shared by
  * every screen that reads or writes `attribute_def` and `entity.attrs`:
@@ -157,8 +160,8 @@ export function parseAttrValue(
         return { ok: false, message: `${label}: must be GeoJSON, such as {"type": "Point", "coordinates": [31.2, 30.0]}.` };
       }
       const kind = (parsed as { type?: unknown } | null)?.type;
-      if (!parsed || typeof parsed !== "object" || !["Point", "Polygon", "MultiPolygon"].includes(String(kind))) {
-        return { ok: false, message: `${label}: must be a GeoJSON Point, Polygon or MultiPolygon.` };
+      if (!parsed || typeof parsed !== "object" || !GEOMETRY_KINDS.includes(String(kind))) {
+        return { ok: false, message: `${label}: must be a GeoJSON Point, LineString, MultiLineString, Polygon or MultiPolygon.` };
       }
       return { ok: true, value: parsed };
     }
