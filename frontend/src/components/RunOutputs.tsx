@@ -15,13 +15,17 @@ import { downloadFrom } from "../api/camps";
 import { formatApiError } from "../api/errors";
 import { BASEMAP_STORAGE_KEY, useBasemaps } from "../hooks/useBasemaps";
 import type { Id } from "../api/v1";
-import GeoMap, { type GeoGeometry, type GeoMark } from "./map/GeoMap";
+import GeoMap, { rampColour, type GeoGeometry, type GeoMark } from "./map/GeoMap";
 
 type AnswerFeature = {
   geometry: GeoGeometry;
-  properties: { layer: string; key: string; label?: string; status: "chosen" | "not_chosen" | "short" | "place"; title: string; value: unknown };
+  properties: {
+    layer: string; key: string; label?: string; status: "chosen" | "not_chosen" | "short" | "place"; title: string; value: unknown;
+    /** The place's number fields, to colour areas by (population, vulnerability). */
+    data?: Record<string, number>;
+  };
 };
-type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean };
+export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean };
 
 const COLOURS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#4f46e5"];
 const SHORT = "#dc2626";
@@ -80,6 +84,32 @@ export function marksOf(map: AnswerMap): { marks: GeoMark[]; legend: { layer: st
   });
   const legend = map.layers.map((l) => ({ layer: l.id, colour: colourOf.get(l.id) ?? CONTEXT, text: l.title }));
   return { marks, legend };
+}
+
+const isArea = (g: GeoGeometry) => g.type === "Polygon" || g.type === "MultiPolygon";
+
+/** The number fields the areas on an answer map carry: what they may be coloured by. */
+export function areaFields(map: AnswerMap): string[] {
+  const names = new Set<string>();
+  for (const f of map.features) if (isArea(f.geometry)) Object.keys(f.properties.data ?? {}).forEach((k) => names.add(k));
+  return [...names].sort();
+}
+
+/** Areas filled by a number on a scale (user trial: which covered zones are the vulnerable ones?). The
+ * answer still shows: a chosen area is filled deeper than one that is not. */
+export function colourAreas(map: AnswerMap, marks: GeoMark[], field: string): { marks: GeoMark[]; ramp: { title: string; min: number; max: number } | null } {
+  const values = map.features.filter((f) => isArea(f.geometry)).map((f) => f.properties.data?.[field]).filter((v): v is number => typeof v === "number");
+  if (!values.length) return { marks, ramp: null };
+  const min = Math.min(...values), max = Math.max(...values);
+  const out = marks.map((m, i) => {
+    const f = map.features[i];
+    const v = f && isArea(f.geometry) ? f.properties.data?.[field] : undefined;
+    if (typeof v !== "number") return m;
+    const chosen = f.properties.status === "chosen";
+    return { ...m, colour: rampColour(max > min ? (v - min) / (max - min) : 1), fill: chosen ? 0.75 : 0.3,
+      title: `${m.title} · ${field} ${v.toLocaleString("en-US")}` };
+  });
+  return { marks: out, ramp: { title: field, min, max } };
 }
 
 function KeepAsData({ runId, decisions }: { runId: Id; decisions: [string, { index?: string[]; domain?: string }][] }) {
@@ -150,6 +180,7 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
     retry: false,
   });
   const [failed, setFailed] = useState<string | null>(null);
+  const [colourBy, setColourBy] = useState("");
   const basemaps = useBasemaps();
   if (!answered) return null;
   const decisions = Object.entries(((ir?.variables ?? {}) as Record<string, { index?: string[]; domain?: string }>))
@@ -157,7 +188,10 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   // Only a whole answer map is drawn: a server from before it existed answers something else, or nothing.
   const usable = map.data && !map.data.none && Array.isArray(map.data.features) && Array.isArray(map.data.layers)
     && map.data.features.length > 0;
-  const drawn = usable && map.data ? marksOf(map.data) : null;
+  const plain = usable && map.data ? marksOf(map.data) : null;
+  const fields = usable && map.data ? areaFields(map.data) : [];
+  const coloured = plain && map.data && colourBy ? colourAreas(map.data, plain.marks, colourBy) : null;
+  const drawn = plain && coloured ? { ...plain, marks: coloured.marks } : plain;
   const report = () => {
     setFailed(null);
     // The report is an HTML page the browser prints or saves as PDF; fetched with the session, opened as a page.
@@ -188,15 +222,25 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
         <span className="font-semibold text-slate-900">Take the answer out</span>
         <button type="button" onClick={() => download("xlsx")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Excel</button>
         <button type="button" onClick={() => download("csv")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">CSV</button>
-        <button type="button" onClick={report} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">Printable report (PDF)</button>
+        <button type="button" onClick={report} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50" title="Opens the report with the print dialog: choose “Save as PDF” to keep a file.">Report — print or save as PDF</button>
         {drawn && <button type="button" onClick={() => download("geojson")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">GeoJSON (map)</button>}
         {failed && <span role="alert" className="text-xs text-red-700">{failed}</span>}
       </div>
       {drawn && (
         <div>
           <h3 className="mb-1 text-sm font-semibold text-slate-900">On the map</h3>
-          <GeoMap marks={drawn.marks} legend={drawn.legend}
-            caption={`${(map.data?.layers ?? []).map((l) => l.title).join(" · ")}${map.data?.truncated ? " · the first 20,000 shown" : ""}`} />
+          <GeoMap marks={drawn.marks} legend={drawn.legend} ramp={coloured?.ramp ?? undefined}
+            controls={fields.length > 0 ? (
+              <label className="flex items-center gap-1">Colour areas by
+                <select aria-label="Colour areas by" className="rounded border border-slate-300 px-1 py-0.5 text-xs" value={colourBy}
+                  onChange={(e) => setColourBy(e.target.value)}>
+                  <option value="">their layer</option>
+                  {fields.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </label>
+            ) : undefined}
+            caption={`${(map.data?.layers ?? []).map((l) => l.title).join(" · ")}${map.data?.truncated ? " · the first 20,000 shown" : ""}${
+              coloured?.ramp ? ` · areas filled by ${colourBy}; a chosen area deeper` : ""}`} />
         </div>
       )}
       <KeepAsData runId={runId} decisions={decisions} />

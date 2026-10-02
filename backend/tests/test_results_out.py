@@ -105,6 +105,15 @@ def test_any_answer_is_drawn_where_it_happens(db, placed, empty_queue):  # noqa:
     served = {f["properties"]["key"]: f for f in mapped["features"] if f["properties"]["layer"] == "reach_served"}
     assert served["D1|S1"]["geometry"]["type"] == "LineString" and "served from Depot D1" in served["D1|S1"]["properties"]["title"]
     assert served["S3"]["properties"]["status"] == "short" and "no chosen depot within reach" in served["S3"]["properties"]["title"]
+    # Each place carries its number fields, so the map can colour areas by one.
+    assert all(isinstance(f["properties"]["data"], dict) for f in mapped["features"] if f["properties"]["layer"] == "open")
+
+
+def test_a_place_s_number_fields_ride_on_the_map():
+    from app.api.answer_map import _numbers
+
+    assert _numbers({"id": "Z1", "population": 1200, "share": 0.2, "open": True, "name": "Imbaba", "bad": float("nan")}) == {
+        "population": 1200, "share": 0.2}
 
 
 def test_an_answer_exports_as_excel_csv_and_geojson(db, placed, empty_queue, client, auth_headers):  # noqa: F811

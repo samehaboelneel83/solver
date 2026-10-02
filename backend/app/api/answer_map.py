@@ -62,6 +62,12 @@ def _label(row: dict[str, Any], key: str) -> str:
     return key
 
 
+def _numbers(row: dict[str, Any]) -> dict[str, float]:
+    """A record's number fields, for a map that colours areas by one (population, vulnerability)."""
+    return {k: v for k, v in row.items()
+            if k != "id" and isinstance(v, (int, float)) and not isinstance(v, bool) and v == v}
+
+
 def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, Any] | None,
                amounts: dict[str, Any] | None, results: list[dict[str, Any]], labels: dict[str, dict[str, str]] | None = None
                ) -> dict[str, Any]:
@@ -74,7 +80,8 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
         for row in rows if isinstance(rows, list) else []:
             if isinstance(row, dict) and (geometry := _shape_of(row)) is not None:
                 key = str(row.get("id"))
-                members[key] = {"geometry": geometry, "label": (labels.get(set_name) or {}).get(key) or _label(row, key)}
+                members[key] = {"geometry": geometry, "label": (labels.get(set_name) or {}).get(key) or _label(row, key),
+                                "data": _numbers(row)}
         if members:
             placed[set_name] = members
     if not placed:
@@ -118,7 +125,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                     title = f"{member['label']}: {var} = {value:g}"
                 add({"type": "Feature", "geometry": member["geometry"],
                      "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": value,
-                                    "status": status, "title": title}})
+                                    "status": status, "title": title, "data": member["data"]}})
             layers.append({"id": var, "kind": "places", "set": s, "title": f"{var}: {on} of {len(placed[s])} {s}"})
         elif len(index) == 2 and len(placed_positions) == 2:
             a, b = index
@@ -155,7 +162,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                 shown = ", ".join(got[:8]) + (f" and {len(got) - 8} more" if len(got) > 8 else "")
                 add({"type": "Feature", "geometry": member["geometry"],
                      "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": len(got),
-                                    "status": "chosen" if got else "not_chosen",
+                                    "status": "chosen" if got else "not_chosen", "data": member["data"],
                                     "title": f"{member['label']}: {var} {len(got)}" + (f" — {shown}" if got else "")}})
             layers.append({"id": var, "kind": "counts", "set": s, "title": f"{var}: {total} over {len(placed[s])} {s}"})
 
@@ -199,7 +206,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
         for key, member in members.items():
             add({"type": "Feature", "geometry": member["geometry"],
                  "properties": {"layer": s, "set": s, "key": key, "label": member["label"], "value": None,
-                                "status": "place", "title": member["label"]}})
+                                "status": "place", "title": member["label"], "data": member["data"]}})
         layers.append({"id": s, "kind": "context", "set": s, "title": f"{s}: {len(members)}"})
     return {"layers": layers, "features": features, "truncated": len(features) >= MAX_FEATURES}
 
@@ -245,7 +252,7 @@ def _coverage(ir: dict[str, Any], data: dict[str, Any], placed: dict[str, dict[s
                 else:
                     features.append({"type": "Feature", "geometry": member["geometry"],
                                      "properties": {"layer": f"{par}_served", "set": item, "key": key, "label": member["label"],
-                                                    "value": 0, "status": "short",
+                                                    "value": 0, "status": "short", "data": member.get("data") or {},
                                                     "title": f"{member['label']}: no chosen {server} within {par}"}})
             out.append(({"id": f"{par}_served", "kind": "links", "set": f"{server}-{item}",
                          "title": f"{item} served from a chosen {server} ({par}): {served} of {len(placed[item])}"}, features))
