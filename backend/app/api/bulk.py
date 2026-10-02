@@ -274,15 +274,20 @@ def _file(name: str, columns: list[Column], rows: list[list[Any]], fmt: str) -> 
 
 def write_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
                *, first_row: int = 2) -> tuple[int, list[Fault], set[int]]:
-    """Parse each row and write it inside a savepoint; nothing is committed here. Returns the rows
-    written, the faults and the numbers of the rows that had any. Several files (a workbook's
-    sheets) can share one transaction this way."""
+    """Parse each row and write it; nothing is committed here. Returns the rows written, the faults
+    and the numbers of the rows that had any. Several files (a workbook's sheets) can share one
+    transaction this way.
+
+    A writer that can start again (`write_row.reset`) writes every row in one savepoint, which is
+    fast; only when the database refuses a row is the lot undone and written again a row per
+    savepoint, so that row is named and the others kept (benchmark, October 2026: 2,880 rows took
+    18 s a row at a time)."""
     faults = _check_header(header, columns)
     if faults:
         return 0, faults, set(range(first_row, first_row + len(rows)))
     kinds = {c.name: c for c in columns}
-    written = 0
     bad_rows: set[int] = set()
+    parsed: list[tuple[int, dict[str, Any]]] = []
     for offset, raw in enumerate(rows):
         number = offset + first_row  # the header is row 1
         if all(v is None or str(v).strip() == "" for v in raw):
@@ -298,32 +303,59 @@ def write_rows(db: Session, header: list[str], rows: list[list[Any]], columns: l
                 row_faults.append(Fault(row=number, column=name, message="is required"))
             else:
                 values[name] = value
-        if not row_faults:
-            savepoint = db.begin_nested()
-            try:
-                problem = write_row(values)
+        if row_faults:
+            faults += row_faults
+            bad_rows.add(number)
+        else:
+            parsed.append((number, values))
+
+    if hasattr(write_row, "reset"):
+        together = db.begin_nested()
+        try:
+            written, problems = 0, []
+            for number, values in parsed:
+                problem = write_row(dict(values))
                 if problem:
-                    row_faults.append(Fault(row=number, column=problem[0], message=problem[1]))
-                    savepoint.rollback()
+                    problems.append(Fault(row=number, column=problem[0], message=problem[1]))
                 else:
-                    db.flush()
-                    savepoint.commit()
-            except DBAPIError as exc:
+                    written += 1
+            db.flush()
+            together.commit()
+            faults += problems
+            bad_rows.update(f.row for f in problems)
+            return written, sorted(faults, key=lambda f: f.row or 0), bad_rows
+        except DBAPIError:
+            together.rollback()
+            write_row.reset()
+
+    written = 0
+    for number, values in parsed:
+        row_faults = []
+        savepoint = db.begin_nested()
+        try:
+            problem = write_row(values)
+            if problem:
+                row_faults.append(Fault(row=number, column=problem[0], message=problem[1]))
                 savepoint.rollback()
-                http = translate_db_error(exc, "bulk upload")
-                detail = http.detail
-                if isinstance(detail, list) and detail:
-                    loc = detail[0].get("loc") or []
-                    row_faults.append(Fault(row=number, column=str(loc[-1]) if len(loc) > 1 else None,
-                                            message=str(detail[0].get("msg"))))
-                else:
-                    row_faults.append(Fault(row=number, column=None, message=str(detail)))
+            else:
+                db.flush()
+                savepoint.commit()
+        except DBAPIError as exc:
+            savepoint.rollback()
+            http = translate_db_error(exc, "bulk upload")
+            detail = http.detail
+            if isinstance(detail, list) and detail:
+                loc = detail[0].get("loc") or []
+                row_faults.append(Fault(row=number, column=str(loc[-1]) if len(loc) > 1 else None,
+                                        message=str(detail[0].get("msg"))))
+            else:
+                row_faults.append(Fault(row=number, column=None, message=str(detail)))
         if row_faults:
             faults += row_faults
             bad_rows.add(number)
         else:
             written += 1
-    return written, faults, bad_rows
+    return written, sorted(faults, key=lambda f: f.row or 0), bad_rows
 
 
 def run_rows(db: Session, header: list[str], rows: list[list[Any]], columns: list[Column], write_row,
@@ -436,6 +468,14 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
     matchers = {a.name: LinkMatcher(db, a.target_type_id) for a in attributes
                 if a.data_type == "reference" and a.target_type_id is not None and a.name in header}
     same_kind = {a.name for a in attributes if a.data_type == "reference" and a.target_type_id == entity_type.id}
+    # The kind's records, read once: a query per row also flushed every row before it, one by one.
+    existing: dict[str, Entity] = {}
+
+    def load() -> None:
+        existing.clear()
+        existing.update({e.key: e for e in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)).scalars()})
+
+    load()
 
     def write(values: dict[str, Any]):
         key = values["key"]
@@ -447,7 +487,7 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
                 values[name], problem = matcher.resolve(values[name], seen if name in same_kind else set())
                 if problem:
                     return name, problem
-        found = db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id, Entity.key == key)).scalar_one_or_none()
+        found = existing.get(key)
         attrs = dict(found.attrs or {}) if found else {}
         for name in names & set(header):
             if values.get(name) is None:
@@ -457,6 +497,7 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
         if found is None:
             found = Entity(entity_type_id=entity_type.id, key=key, attrs=attrs)
             db.add(found)
+            existing[key] = found
         else:
             found.attrs = attrs
         if "label" in header:
@@ -474,7 +515,15 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
             if matcher.matched:
                 notes.append(f"{name}: {matcher.matched} value(s) matched their record by its label or a code")
 
+    def reset() -> None:
+        """Ready to write the same rows again, after what was written was undone."""
+        seen.clear()
+        for matcher in matchers.values():
+            matcher.matched = 0
+        load()
+
     write.finish = finish  # type: ignore[attr-defined]
+    write.reset = reset  # type: ignore[attr-defined]
     return columns, write
 
 

@@ -197,8 +197,12 @@ export default function BulkPanel({
             disabled={busy || twice.length > 0 || keyMissing}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
-            {busy ? "Checking…" : "Upload"}
+            {busy ? (dryRun ? "Checking…" : preview && preview.rows > 0 ? `Writing ${preview.rows.toLocaleString()} rows…` : "Writing…") : "Upload"}
           </button>
+          {busy && !dryRun && (preview?.rows ?? 0) >= 1000 && (
+            // A large file takes a while; without this the page looked as if nothing happened (benchmark, October 2026).
+            <span role="status" className="text-sm text-slate-600">A large file can take a minute; keep this page open.</span>
+          )}
         </div>
       )}
       {preview && can("domain.edit") && (

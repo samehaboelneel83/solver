@@ -222,3 +222,19 @@ def test_two_columns_read_as_one_target_are_refused(teams):
     got = teams["call"]("POST", f"/api/v1/entity-types/{teams['team']['id']}/upload", files=_csv(rows),
                         data={"mapping": json.dumps({"a": "key", "b": "key"})}, ok=None)
     assert got.status_code == 422 and "'key'" in got.text
+
+
+def test_a_refused_row_among_many_is_named_and_the_rest_kept_when_asked(shop):
+    """Rows are written together, and one at a time only when the database refuses one: that row is
+    still named, and with "write the clean rows" the others are kept."""
+    site = shop["site"]["id"]
+    path = f"/api/v1/entity-types/{site}/upload"
+    rows = [["key", "capacity", "tier"]] + [[f"s{i}", str(i), "a"] for i in range(300)]
+    rows[151][2] = "z"  # parses as text; the database refuses it as no tier choice
+    refused = _upload(shop, path, rows)
+    assert not refused["ok"] and refused["written"] == 0
+    assert [(f["row"], f["column"]) for f in refused["faults"]] == [(152, "tier")]
+    kept = _upload(shop, path, rows, clean_only=True)
+    assert kept["written"] == 299 and kept["skipped"] == 1
+    items = shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}&limit=500").json()["items"]
+    assert len(items) == 299
