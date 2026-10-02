@@ -103,8 +103,21 @@ def _noded(lines: list[tuple[list[list[float]], dict[str, Any]]]) -> list[tuple[
     return out
 
 
-def build(lines: list[tuple[list[list[float]], dict[str, Any]]], speed_field: str | None, default_kmh: float) -> Network:
-    """The network of `lines` -- (coordinates, properties) pairs in WGS 84."""
+_CLOSED = {"1", "true", "yes", "y", "closed", "blocked", "x"}
+
+
+def closed(value: Any) -> bool:
+    """A line's closure property read as yes or no: true, 1, "yes", "closed" close it."""
+    return value is True or (not isinstance(value, bool) and str(value).strip().lower() in _CLOSED)
+
+
+def build(lines: list[tuple[list[list[float]], dict[str, Any]]], speed_field: str | None, default_kmh: float,
+          *, closed_field: str | None = None, delay_field: str | None = None, avoid: list[Any] | None = None) -> Network:
+    """The network of `lines` -- (coordinates, properties) pairs in WGS 84.
+
+    Benchmark, October 2026 (flooded roads, closures): `closed_field` names a property that takes a
+    line out; `delay_field` a property of minutes added to travel along the whole line (spread over
+    its length); `avoid` shapely areas no segment may enter -- a flood zone, a no-go area."""
     from scipy.sparse import coo_matrix
     from scipy.spatial import cKDTree
 
@@ -112,7 +125,23 @@ def build(lines: list[tuple[list[list[float]], dict[str, Any]]], speed_field: st
         raise NetworkError("the layer has no lines to travel along")
     if default_kmh <= 0:
         raise NetworkError("a speed is more than 0 km/h")
+    if closed_field:
+        lines = [(c, p) for c, p in lines if not closed((p or {}).get(closed_field))]
+        if not lines:
+            raise NetworkError(f"every line is closed by {closed_field!r}")
+    if delay_field:
+        # The delay of a line spread over it by length, kept per line through noding and densifying.
+        from shapely.geometry import LineString
+
+        lines = [(c, {**p, "__delay_per_deg": _delay(p.get(delay_field)) / max(LineString([q[:2] for q in c]).length, 1e-12)})
+                 if len(c) >= 2 else (c, p) for c, p in lines]
     lines = [(_densified(coords), props) for coords, props in _noded([(c, p) for c, p in lines if len(c) >= 2])]
+    barrier = None
+    if avoid:
+        from shapely.ops import unary_union
+        from shapely.prepared import prep
+
+        barrier = prep(unary_union(avoid))
     allpts = np.array([p[:2] for coords, _ in lines for p in coords], dtype=float)
     origin = (float(allpts[:, 0].mean()), float(allpts[:, 1].mean()))
     xy_all = _local(allpts[:, 0], allpts[:, 1], origin)
@@ -142,16 +171,23 @@ def build(lines: list[tuple[list[list[float]], dict[str, Any]]], speed_field: st
                     speed = value
             except (TypeError, ValueError):
                 pass
-        for _ in range(len(coords) - 1):
+        per_deg = float(props.get("__delay_per_deg") or 0.0)
+        for k in range(len(coords) - 1):
             a, b = node_of[at], node_of[at + 1]
             at += 1
             if a == b:
                 continue
+            if barrier is not None:
+                from shapely.geometry import LineString
+
+                if barrier.intersects(LineString([coords[k][:2], coords[k + 1][:2]])):
+                    continue
             d = float(np.hypot(*(xy[a] - xy[b])))
+            extra = per_deg * float(np.hypot(coords[k + 1][0] - coords[k][0], coords[k + 1][1] - coords[k][1])) if per_deg else 0.0
             rows += [a, b]
             cols += [b, a]
             dist += [d, d]
-            mins += [d / 1000.0 / speed * 60.0] * 2
+            mins += [d / 1000.0 / speed * 60.0 + extra] * 2
         at += 1
         if len(rows) > 2 * MAX_SEGMENTS:
             raise NetworkError(f"the layer has more than {MAX_SEGMENTS:,} segments; use a smaller one")
@@ -159,6 +195,14 @@ def build(lines: list[tuple[list[list[float]], dict[str, Any]]], speed_field: st
     graph = coo_matrix((dist, (rows, cols)), shape=(n, n)).tocsr()
     minutes = coo_matrix((mins, (rows, cols)), shape=(n, n)).tocsr()
     return Network(xy, lonlat, graph, minutes, origin, len(lines), speed_field, default_kmh)
+
+
+def _delay(value: Any) -> float:
+    try:
+        minutes = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return minutes if minutes > 0 and minutes == minutes else 0.0
 
 
 def matrix(net: Network, origins: list[tuple[float, float]], targets: list[tuple[float, float]],

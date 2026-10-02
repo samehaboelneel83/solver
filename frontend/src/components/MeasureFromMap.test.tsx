@@ -130,4 +130,25 @@ describe("computing distances from the map (queue R16a)", () => {
     expect(url).toMatch(/\/spatial\/inside$/);
     expect(JSON.parse(init.body as string)).toEqual({ name: "area_of", from_type_id: 1, to_type_id: 2 });
   });
+
+  it("travels along my lines with closed roads, delays and areas to avoid (benchmark, October 2026)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.includes("/gis/datasets/5") ? { id: 5, name: "roads", layers: [{ id: 1, name: "ROADS", kinds: { line: 9 } }] }
+        : url.includes("/gis/datasets") ? { items: [{ id: 5, name: "roads" }], total: 1 }
+        : { parameter_id: 3, pairs: 4, missing: [], source: {} };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const zone = { ...shaped(9, "flood_zone"), role: "area" } as EntityType;
+    renderForm([shaped(1, "site"), shaped(2, "customer"), zone]);
+    fireEvent.change(screen.getByLabelText("Measured"), { target: { value: "network_time" } });
+    await screen.findByRole("option", { name: "ROADS" });
+    fireEvent.change(screen.getByLabelText("Closed when (a field, optional)"), { target: { value: "flooded" } });
+    fireEvent.change(screen.getByLabelText("Delay (minutes field, optional)"), { target: { value: "delay_min" } });
+    fireEvent.change(screen.getByLabelText("Never through (areas, optional)"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([u]) => String(u).endsWith("/distances"))).toBe(true));
+    const [, init] = fetchSpy.mock.calls.find(([u]) => String(u).endsWith("/distances")) as [string, RequestInit];
+    expect(JSON.parse(init.body as string).network).toEqual({ dataset_id: 5, layer: "ROADS", closed_field: "flooded", delay_field: "delay_min", avoid_type_id: 9 });
+  });
 });

@@ -133,3 +133,21 @@ def test_a_road_is_in_the_area_holding_most_of_it_and_crosses_each_area_it_passe
     assert set(crossed) == {10, 11}
     assert math.isclose(crossed[11] / crossed[10], 4, rel_tol=0.01)
     assert math.isclose(crossed[10], 952, rel_tol=0.02)  # 0.01 degree of longitude at 31.2 N
+
+
+def test_closed_roads_delays_and_no_go_areas_change_the_way_and_the_time():
+    """Benchmark, October 2026: a flooded road, a checkpoint and a flood zone could not be said."""
+    direct = [[30.0, 31.2], [30.01, 31.2]]        # ~950 m east
+    around = [[30.0, 31.2], [30.0, 31.21], [30.01, 31.21], [30.01, 31.2]]  # ~3.1 km round
+    lines = [(direct, {"flooded": "yes", "wait_min": 10}), (around, {"flooded": "no"})]
+    a, b = [(30.0, 31.2)], [(30.01, 31.2)]
+
+    def minutes(**kw):
+        return float(layer_network.matrix(layer_network.build(lines, None, 60, **kw), a, b, minutes=True)[0][0, 0])
+
+    assert minutes() < 1.0  # 950 m at 60 km/h
+    assert 3.0 < minutes(closed_field="flooded") < 3.3  # the way round
+    assert 3.0 < minutes(delay_field="wait_min") < 3.3  # going round is quicker than waiting 10 minutes
+    zone = Polygon([(30.004, 31.199), (30.006, 31.199), (30.006, 31.201), (30.004, 31.201)])  # over the direct road only
+    assert 3.0 < minutes(avoid=[zone]) < 3.3
+    assert layer_network.closed(True) and layer_network.closed("Closed") and not layer_network.closed(0) and not layer_network.closed(None)

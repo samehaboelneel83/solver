@@ -73,6 +73,9 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const [speedField, setSpeedField] = useState("");
   const [defaultKmh, setDefaultKmh] = useState("30");
   const [joinM, setJoinM] = useState("500");
+  const [closedField, setClosedField] = useState("");
+  const [delayField, setDelayField] = useState("");
+  const [avoidKind, setAvoidKind] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Kept on screen (a toast fades): places a travel time could not reach, and why.
   const [notice, setNotice] = useState<string | null>(null);
@@ -104,6 +107,9 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       ...(speedField.trim() ? { speed_field: speedField.trim() } : {}),
       ...(speed > 0 && speed !== 30 ? { default_kmh: speed } : {}),
       ...(Number(joinM) > 0 && Number(joinM) !== 500 ? { join_m: Number(joinM) } : {}),
+      ...(closedField.trim() ? { closed_field: closedField.trim() } : {}),
+      ...(delayField.trim() ? { delay_field: delayField.trim() } : {}),
+      ...(avoidKind ? { avoid_type_id: Number(avoidKind) } : {}),
     };
   }
 
@@ -266,6 +272,25 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
               <input id={`${id}-join`} className="w-20 rounded border px-2 py-1 text-sm" inputMode="decimal" value={joinM}
                      title="A place further than this from every line cannot join the network; its pairs are left out and named."
                      onChange={(event) => setJoinM(event.target.value)} />
+            </div>
+            <div>
+              <label htmlFor={`${id}-closed`} className="block text-xs text-slate-600">Closed when (a field, optional)</label>
+              <input id={`${id}-closed`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder="flooded" value={closedField}
+                     title="A line whose field is yes, true, 1 or “closed” is left out: a flooded or blocked road."
+                     onChange={(event) => setClosedField(event.target.value)} />
+            </div>
+            <div>
+              <label htmlFor={`${id}-delay`} className="block text-xs text-slate-600">Delay (minutes field, optional)</label>
+              <input id={`${id}-delay`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder="delay_min" value={delayField}
+                     title="Minutes added to travel along the whole line: a checkpoint, roadworks."
+                     onChange={(event) => setDelayField(event.target.value)} />
+            </div>
+            <div>
+              <label htmlFor={`${id}-avoid`} className="block text-xs text-slate-600">Never through (areas, optional)</label>
+              <select id={`${id}-avoid`} className="rounded border px-2 py-1 text-sm" value={avoidKind} onChange={(event) => setAvoidKind(event.target.value)}>
+                <option value="">nothing</option>
+                {areaKinds(placed).map((t) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
+              </select>
             </div>
           </>
         )}

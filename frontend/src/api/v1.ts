@@ -1392,7 +1392,11 @@ export type ComputedSource = {
 };
 export type Metric = "straight" | "road" | "time" | "network" | "network_time";
 /** A lines layer of imported map data to travel along (improvement plan 2.9). */
-export type NetworkSource = { dataset_id: number; layer: string; speed_field?: string; default_kmh?: number; join_m?: number };
+export type NetworkSource = {
+  dataset_id: number; layer: string; speed_field?: string; default_kmh?: number; join_m?: number;
+  /** A line property that closes it, one of minutes added along it, a kind of areas no route enters (benchmark, October 2026). */
+  closed_field?: string; delay_field?: string; avoid_type_id?: Id;
+};
 export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number; network?: NetworkSource };
 export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number; network?: NetworkSource; output?: "relationship" | "parameter" };
 export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>

@@ -51,6 +51,12 @@ class NetworkSource(BaseModel):
     default_kmh: float = Field(default=30.0, gt=0, le=300)
     #: How far off the lines a place may be and still join them, in metres.
     join_m: float = Field(default=500.0, gt=0, le=20_000)
+    #: A property of each line that closes it (true, yes, 1, "closed"): a flooded or blocked road.
+    closed_field: str | None = Field(default=None, max_length=255)
+    #: A property of each line with minutes added to travel along it: a checkpoint, roadworks.
+    delay_field: str | None = Field(default=None, max_length=255)
+    #: A kind of record whose areas no route may enter (flood zones, no-go areas).
+    avoid_type_id: int | None = None
 
 
 Metric = Literal["straight", "road", "time", "network", "network_time"]
@@ -122,8 +128,18 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
         if owner != domain_id:
             raise HTTPException(422, f"map data {network.dataset_id} is not in this workspace")
         try:
+            avoid = None
+            if network.avoid_type_id is not None:
+                from app.spatial import ops
+
+                if db.execute(text("SELECT domain_id FROM entity_type WHERE id = :t"), {"t": network.avoid_type_id}).scalar_one_or_none() != domain_id:
+                    raise HTTPException(422, f"kind {network.avoid_type_id} is not in this workspace")
+                avoid = [a.geometry for a in ops.load(db, network.avoid_type_id)[0] if a.geometry.geom_type in ("Polygon", "MultiPolygon")]
+                if not avoid:
+                    raise HTTPException(422, "the kind to avoid has no areas")
             net = layer_network.build(layer_network.from_layer(db, network.dataset_id, network.layer),
-                                      network.speed_field, network.default_kmh)
+                                      network.speed_field, network.default_kmh, closed_field=network.closed_field,
+                                      delay_field=network.delay_field, avoid=avoid)
             values, info = layer_network.matrix(net, [(o.lon, o.lat) for o in origins], [(t.lon, t.lat) for t in targets],
                                                 minutes=metric == "network_time", snap_m=network.join_m)
             # Name the places too far from any line to join it: their pairs are left out, not zero.
@@ -133,12 +149,26 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
                 info["off_network"] = sorted(set(off))[:200]
         except layer_network.NetworkError as exc:
             raise HTTPException(422, f"layer {network.layer!r}: {exc}") from exc
-        return values, {"metric": f"along layer {network.layer!r} of map data {network.dataset_id}", **info}
+        extra = {k: v for k, v in (("closed_by", network.closed_field), ("delay_by", network.delay_field),
+                                   ("avoiding", network.avoid_type_id)) if v is not None}
+        return values, {"metric": f"along layer {network.layer!r} of map data {network.dataset_id}", **extra, **info}
     from app.settings_resolve import resolve
     from app.spatial import roads
 
+    tiles = str(resolve(db, domain_id=domain_id)["spatial.tiles_index"].value or "").strip()
+    if not tiles:
+        # No road tiles set: the workspace's own imported roads, when it has a lines layer
+        # (benchmark, October 2026: road distances failed with a settings message instead).
+        found = db.execute(text(
+            "SELECT l.dataset_id, l.name FROM gis_layer l JOIN gis_dataset d ON d.id = l.dataset_id"
+            " WHERE d.domain_id = :d AND EXISTS (SELECT 1 FROM gis_feature f WHERE f.layer_id = l.id AND f.kind = 'line')"
+            " ORDER BY (l.name ~* '(road|street|route|highway|path)') DESC, l.id LIMIT 1"), {"d": domain_id}).first()
+        if found is not None:
+            values, info = _measure(db, domain_id, "network_time" if metric == "time" else "network", origins, targets,
+                                    NetworkSource(dataset_id=found[0], layer=found[1]))
+            return values, {**info, "note": "no road tiles are set, so the workspace's own lines layer was used"}
     try:
-        template = roads.vector_source(str(resolve(db, domain_id=domain_id)["spatial.tiles_index"].value or "").strip())
+        template = roads.vector_source(tiles)
         net = roads.network([*origins, *targets], template)
         values, info = roads.matrix(net, origins, targets, minutes=metric == "time")
     except roads.RoadsError as exc:
