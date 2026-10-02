@@ -21,7 +21,7 @@
  *     rule     := [ "for each" bindings ":" ] expr relation expr
  *     relation := "<=" | ">=" | "="
  *     expr     := product { ("+" | "-") product }
- *     product  := unary { "*" unary }
+ *     product  := unary { ("*" | "/" number) unary }
  *     unary    := "-" unary | atom
  *     atom     := number | "(" expr ")" | "sum(" expr "for" bindings ")"
  *              |  function "(" expr ")" | name "[" cells "]" | name
@@ -182,7 +182,7 @@ function tokenize(text: string): Token[] {
       continue;
     }
     const symbol = ch === "≤" ? "<=" : ch === "≥" ? ">=" : ch === "×" ? "*" : ch === "−" ? "-" : ch;
-    if ("+-*()[],:=<>".includes(symbol)) {
+    if ("+-*/()[],:=<>".includes(symbol)) {
       tokens.push({ kind: "op", value: symbol, at: i, end: i + 1 });
       i += 1;
       continue;
@@ -539,9 +539,21 @@ class Parser {
 
   private product(): Term {
     let term = this.unary();
-    while (this.isOp("*")) {
-      this.next();
-      term = { mul: [term, this.unary()] };
+    while (this.isOp("*") || this.isOp("/")) {
+      const op = this.next();
+      if (op.value === "*") {
+        term = { mul: [term, this.unary()] };
+        continue;
+      }
+      // Division by a number (benchmark re-test, October 2026: "/" was refused, and × 0.01 written instead).
+      const by = this.peek();
+      const divisor = this.unary();
+      if (!("const" in divisor)) {
+        throw new FormulaError("Divide by a number here (x / 4). A ratio of two fields is a computed field: Records → Compute and join.",
+          by.at, by.end);
+      }
+      if (divisor.const === 0) throw new FormulaError("Division by zero.", by.at, by.end);
+      term = { mul: [term, { const: 1 / divisor.const }] };
     }
     return term;
   }

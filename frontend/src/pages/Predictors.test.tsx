@@ -211,7 +211,7 @@ it("keeps one prediction per record and period, an input held at a number (bench
   fireEvent.change(within(card).getByLabelText("price held at"), { target: { value: "9.5" } });
   fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
   expect(await within(card).findByText(/14 predictions kept as the data value demand_forecast\[product, week\]/)).toBeInTheDocument();
-  expect(JSON.parse(write.mock.calls.at(-1)[1].body)).toEqual({ field: "demand_forecast", only_missing: false,
+  expect(JSON.parse(write.mock.calls.at(-1)![1].body)).toEqual({ field: "demand_forecast", only_missing: false,
     inputs: { price: 9.5 }, over: { kind: "week", feature: "promo" } });
   ENTITY_TYPES.items.pop();
 });

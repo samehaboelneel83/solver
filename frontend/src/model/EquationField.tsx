@@ -189,6 +189,8 @@ export function SyntaxCard({ sets }: { sets: string[] }) {
     [`capacity[${x}] * open[${x}]`, "a record's field (capacity of x), times a decision"],
     [`for each ${y} in ${b}: sum(reach[${x}, ${y}] * open[${x}] for ${x} in ${a}) >= 1`, "within reach: multiply by 0/1 data computed from the map"],
     [`sum(open[${x}] for ${x} in ${a} to ${y} by within_reach)`, "only those linked to y: walk a relationship"],
+    [`cost[${x}] / 1000`, "divided by a number (a ratio of two fields is a computed field: Records → Compute and join)"],
+    [`predict yield_model(water[${x}], rain[${x}])`, "a forecast; an input may be a decision (with an upper bound), chosen for the best prediction"],
   ];
   return (
     <details className="mt-1 text-xs text-slate-600">

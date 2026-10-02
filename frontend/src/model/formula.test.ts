@@ -329,3 +329,25 @@ describe("two items of one set compared (benchmark, October 2026)", () => {
     expect(printRule(parsed.value)).toBe(text);
   });
 });
+
+describe("division by a number (benchmark re-test, October 2026)", () => {
+  const ctx = { sets: ["item"], setIds: {}, attributes: { item: [{ name: "cost", data_type: "number" }] }, relationships: [],
+    variables: { x: { index: ["item"], domain: "integer" } }, parameters: {} } as never;
+  it("reads x / 4 as x times a quarter, and refuses a division by a field or by zero", () => {
+    const got = parseGoal("sum(x[i] / 4 for i in item)", ctx);
+    expect(got.ok && JSON.stringify(got.value)).toContain('"mul":[{"var":"x","index":["i"]},{"const":0.25}]');
+    const byField = parseGoal("sum(x[i] / cost[i] for i in item)", ctx);
+    expect(!byField.ok && byField.message).toMatch(/Divide by a number here/);
+    const byZero = parseGoal("sum(x[i] / 0 for i in item)", ctx);
+    expect(!byZero.ok && byZero.message).toBe("Division by zero.");
+  });
+});
+
+describe("a forecast over decisions (benchmark re-test, October 2026)", () => {
+  it("reads predict with a decision as an input inside a sum", () => {
+    const ctx = { sets: ["parcel"], setIds: {}, attributes: { parcel: [{ name: "rain", data_type: "number" }] }, relationships: [],
+      variables: { water: { index: ["parcel"], domain: "continuous" } }, parameters: {}, predictors: { yield_model: { inputs: 2 } } } as never;
+    const got = parseGoal("sum(predict yield_model(water[p], rain[p]) for p in parcel)", ctx);
+    expect(got.ok && JSON.stringify(got.value)).toContain('"predict":"yield_model","of":[{"var":"water","index":["p"]}');
+  });
+});

@@ -492,8 +492,11 @@ export default function Predictors() {
       <div>
         <h1 className="mb-1 text-lg font-semibold text-slate-900">Forecasts <span className="text-sm font-normal text-slate-500">(predictors)</span></h1>
         <p className="text-sm text-slate-500">
-          Trained models this domain holds. A rule or goal reads one as <code className="font-mono">predict name(inputs…)</code>;
+          Trained models this workspace holds. A rule or goal reads one as <code className="font-mono">predict name(inputs…)</code>;
           a run freezes the model it used, so retraining changes later runs, never earlier ones.
+          {/* Benchmark re-test, October 2026: a tester believed decisions could not be inputs. */}
+          {" "}An input may be a decision with an upper bound — <code className="font-mono">predict yield_model(water[p], rain[p])</code> —
+          and the solver then chooses it for the best prediction: water put where it raises the yield most.
         </p>
       </div>
       {list.fetchStatus === "paused" && !list.data ? <OfflineNotice subject="The predictors" />
