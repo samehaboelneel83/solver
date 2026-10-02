@@ -145,6 +145,10 @@ beforeEach(() => {
   localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
 });
 
+// A refusal comes back after the builder's debounce, a lazy chunk and a mocked request: under a full,
+// busy suite that has passed 5 s, so these waits get longer (still inside the 15 s test limit).
+const SERVER_ROUND_TRIP = 12_000;
+
 describe("Entities: the conditions panel", () => {
   it("starts closed, and the builder is not mounted until it is opened", async () => {
     serve();
@@ -343,7 +347,7 @@ describe("Entities: a refusal from the server", () => {
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
 
-    const problems = await screen.findByTestId("expression-problems");
+    const problems = await screen.findByTestId("expression-problems", {}, { timeout: SERVER_ROUND_TRIP });
     // Condition 1 is `rules[0]`; the message is the server's, verbatim.
     expect(problems).toHaveTextContent('Condition 1: "z" is not one of a, b, c.');
   });
@@ -359,7 +363,7 @@ describe("Entities: a refusal from the server", () => {
     await openPanel();
     fireEvent.click(screen.getByTestId("expression-add-rule"));
     fireEvent.change(screen.getAllByTestId("expression-field")[0], { target: { value: GRADE } });
-    const problems = await screen.findByTestId("expression-problems");
+    const problems = await screen.findByTestId("expression-problems", {}, { timeout: SERVER_ROUND_TRIP });
     // 2.1 -- read from `loc`, not from a `kind` (Ruling 30).
     expect(problems).toHaveTextContent("Condition 2.1: nope");
   });
