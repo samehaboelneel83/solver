@@ -40,6 +40,7 @@ def _forget_the_last_tenant(dbapi_connection, _record, _proxy) -> None:
     try:
         cursor.execute("RESET ROLE")
         cursor.execute("SELECT set_config('app.org_id', '', false)")
+        cursor.execute("SELECT set_config('app.actor', '', false)")
     finally:
         cursor.close()
     dbapi_connection.commit()

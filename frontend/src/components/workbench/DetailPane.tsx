@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client";
 import { formatApiError } from "../../api/errors";
 import EntityRelationships from "../EntityRelationships";
+import RecordHistory from "../RecordHistory";
 import RecordTrees from "../RecordTrees";
 import { useToast } from "../ToastProvider";
 import { useCapabilities } from "../../hooks/useCapability";
@@ -11,7 +12,7 @@ import { RecordPanel } from "../../pages/EntityRecord";
 import { useRecordValues, type RecordValues } from "../../api/workbench";
 import { useEntityRecord, useEntityType, type Id } from "../../api/v1";
 
-type Tab = "fields" | "linked" | "values" | "problems";
+type Tab = "fields" | "linked" | "values" | "problems" | "history";
 
 const WORDS: Record<string, string> = {
   loop: "It is in a chain that comes back on itself. Change one link in the chain.",
@@ -113,7 +114,8 @@ function Values({ entityId, domainId }: { entityId: Id; domainId: Id }) {
 
 /**
  * The right of the workbench: the record chosen, its fields as the record form, what links to it,
- * its parameter values (its own value editable in place) and what the quality checks say of it.
+ * its parameter values (its own value editable in place), what the quality checks say of it, and
+ * who changed what.
  */
 export default function DetailPane({
   entityId,
@@ -134,6 +136,7 @@ export default function DetailPane({
     ["linked", "Linked"],
     ["values", "Values"],
     ["problems", problems.length ? `Problems (${problems.length})` : "Problems"],
+    ["history", "History"],
   ];
   return (
     <section aria-label="Selected record" className="space-y-3">
@@ -172,6 +175,7 @@ export default function DetailPane({
           </div>
         )}
         {tab === "values" && <Values entityId={entityId} domainId={domainId} />}
+        {tab === "history" && <RecordHistory entityId={entityId} />}
         {tab === "problems" &&
           (problems.length === 0 ? (
             <p className="text-sm text-emerald-800">The quality checks find nothing wrong with this record.</p>

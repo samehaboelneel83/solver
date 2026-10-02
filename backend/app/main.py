@@ -42,6 +42,7 @@ from app.api.data_checks import router as data_checks_router
 from app.api.referrers import router as referrers_router
 from app.api.workbook import router as workbook_router
 from app.api.workbench import router as workbench_router
+from app.api.history import router as history_router
 from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
@@ -247,6 +248,7 @@ app.include_router(data_checks_router)
 app.include_router(referrers_router)
 app.include_router(workbook_router)
 app.include_router(workbench_router)
+app.include_router(history_router)
 app.include_router(quota_router)
 app.include_router(metrics_router)
 app.include_router(audit_router)

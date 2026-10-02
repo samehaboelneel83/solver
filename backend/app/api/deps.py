@@ -56,6 +56,10 @@ def get_current_user(
     # From here on the request sees only its own organization's rows: the
     # database enforces it (migration 0032), not each route.
     enter_tenant(db, user.organization_id)
+    # Who a record's history names (migration 0100): the account, or the key it acts through.
+    db.execute(text("SELECT set_config('app.actor', :a, false)"),
+               {"a": f"{user.username} (API key {key.id[:8]})" if key is not None else user.username})
+    db.commit()
     # For the request's log line (`app.main.log_request`): a dependency runs
     # in a copied context, so a context variable set here would not reach it.
     request.state.org_id = str(user.organization_id)

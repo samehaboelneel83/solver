@@ -3,6 +3,7 @@ import { FormEvent, useId, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AttrsForm, { attrField, buildAttrs, draftsFromAttrs, staleAttrKeys, type AttrDrafts } from "../components/AttrsForm";
 import EntityRelationships from "../components/EntityRelationships";
+import RecordHistory from "../components/RecordHistory";
 import RecordTrees from "../components/RecordTrees";
 import OfflineNotice from "../components/OfflineNotice";
 import StaleRecordNotice from "../components/StaleRecordNotice";
@@ -613,6 +614,15 @@ function RecordForm({
       {entity && !embedded && <RecordTrees entity={entity} />}
 
       {entity && !embedded && <EntityRelationships entity={entity} entityType={type} />}
+
+      {entity && !embedded && (
+        <details className="rounded-md border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-base font-semibold text-slate-900">History</summary>
+          <div className="mt-3">
+            <RecordHistory entityId={entity.id} />
+          </div>
+        </details>
+      )}
 
       {entity && canEdit && (
         <section aria-labelledby="delete-entity-heading" className="rounded-md border border-red-200 bg-white p-4">
