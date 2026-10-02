@@ -376,12 +376,30 @@ def predict_with(
     return out
 
 
+class Over(BaseModel):
+    """One prediction per record and period: the input `feature` takes each period's `field` (its key,
+    when that is a number) -- hour by hour, month by month."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: str = Field(pattern=_NAME, max_length=63)
+    feature: str = Field(max_length=63)
+    field: str = Field(default="key", max_length=63)
+
+
 class ApplyBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    #: The number field the predictions go into: made if the kind has none of that name.
+    #: The number field the predictions go into: made if the kind has none of that name. With `over`,
+    #: the data value `field[kind, period]` instead.
     field: str = Field(pattern=_NAME, max_length=63)
     #: Only the records whose own target is empty -- the future days, the new sites.
     only_missing: bool = False
+    #: The records predicted for: the kind trained on, or another (customers, for demand learnt from
+    #: orders) -- benchmark re-test, October 2026.
+    entity_type: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    #: Where each input comes from, when not a field of the same name: another field, a linked record's
+    #: field (`road.lanes`), or a number held fixed (`month: 7`).
+    inputs: dict[str, str | float] | None = None
+    over: Over | None = None
 
 
 @router.post("/predictors/{identity}/apply")
@@ -403,10 +421,48 @@ def apply_predictor(
     features, target = list(source["features"]), source.get("target")
     if body.field in features:
         raise HTTPException(422, f"{body.field} is one of {row['name']}'s inputs; choose another field for the predictions")
+    kind_name = body.entity_type or source["entity_type"]
     type_id = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
-                         {"d": row["domain_id"], "n": source["entity_type"]}).scalar_one_or_none()
+                         {"d": row["domain_id"], "n": kind_name}).scalar_one_or_none()
     if type_id is None:
-        raise HTTPException(422, f"the kind {source['entity_type']!r} it was trained on is gone")
+        raise HTTPException(422, f"there is no kind {kind_name!r} here" if body.entity_type else
+                            f"the kind {source['entity_type']!r} it was trained on is gone")
+    inputs = dict(body.inputs or {})
+    unknown = [k for k in inputs if k not in features]
+    if unknown:
+        raise HTTPException(422, f"{row['name']} has no input {unknown[0]!r}; its inputs are {', '.join(features)}")
+    if body.over is not None and body.over.feature not in features:
+        raise HTTPException(422, f"{row['name']} has no input {body.over.feature!r} for the periods to feed")
+    # Linked records' fields (`road.lanes`): each link field's target records, by key.
+    linked: dict[str, dict[str, dict[str, Any]]] = {}
+    for spec in inputs.values():
+        if isinstance(spec, str) and "." in spec:
+            link = spec.split(".", 1)[0]
+            if link in linked:
+                continue
+            target_type = db.execute(text(
+                "SELECT rt.to_type_id FROM attribute_def ad JOIN relationship_type rt ON rt.id = ad.references_id"
+                " WHERE ad.entity_type_id = ANY (entity_type_lineage(:t)) AND ad.name = :n"), {"t": type_id, "n": link}).scalar_one_or_none()
+            if target_type is None:
+                raise HTTPException(422, f"{link!r} is not a link field of {kind_name}")
+            linked[link] = {k: (a or {}) for k, a in db.execute(text(
+                "SELECT key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": target_type})}
+
+    def value_of(attrs: dict[str, Any], feature: str) -> Any:
+        spec = inputs.get(feature, feature)
+        if isinstance(spec, (int, float)) and not isinstance(spec, bool):
+            return spec
+        if "." in spec:
+            link, name = spec.split(".", 1)
+            return (linked[link].get(str(attrs.get(link))) or {}).get(name)
+        return attrs.get(spec)
+
+    model = row["model"]
+    written, skipped = 0, []
+    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
+                              " ORDER BY sort_order, key"), {"t": type_id}).all()
+    if body.over is not None:
+        return _apply_over(db, user, identity, row, body, type_id, records, features, value_of)
     kind = db.execute(text("SELECT data_type::text FROM attribute_def WHERE entity_type_id = ANY (entity_type_lineage(:t))"
                            " AND name = :n"), {"t": type_id, "n": body.field}).scalar_one_or_none()
     if kind is None:
@@ -414,15 +470,11 @@ def apply_predictor(
                    {"t": type_id, "n": body.field})
     elif kind not in ("number", "integer"):
         raise HTTPException(422, f"{body.field} is a {kind} field; predictions go into a number field")
-    model = row["model"]
-    written, skipped = 0, []
-    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
-                              " ORDER BY sort_order, key"), {"t": type_id}).all()
     for entity_id, key, attrs in records:
         attrs = dict(attrs or {})
         if body.only_missing and target and training._number(attrs.get(target)):
             continue
-        values = [attrs.get(f) for f in features]
+        values = [value_of(attrs, f) for f in features]
         if not all(training._number(v) for v in values):
             skipped.append(key)
             continue
@@ -432,7 +484,67 @@ def apply_predictor(
         written += 1
     _audit(db, user, "predictor.apply", identity)
     db.commit()
-    return {"field": body.field, "entity_type": source["entity_type"], "written": written,
+    return {"field": body.field, "entity_type": kind_name, "written": written,
+            "skipped": skipped[:50], "skipped_count": len(skipped)}
+
+
+#: The most predictions one "per period" writes.
+MAX_OVER_CELLS = 200_000
+
+
+def _apply_over(db: Session, user: UserAccount, identity: int, row: Any, body: ApplyBody, type_id: int,
+                records: list[Any], features: list[str], value_of) -> dict[str, Any]:
+    """A prediction for each record and each period, kept as the data value `field[kind, period]` a
+    rule reads (benchmark re-test, October 2026: a forecast could only be read with its inputs held
+    constant, not road by road and hour by hour)."""
+    over = body.over
+    assert over is not None
+    period_type = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                             {"d": row["domain_id"], "n": over.kind}).scalar_one_or_none()
+    if period_type is None:
+        raise HTTPException(422, f"there is no kind {over.kind!r}")
+    periods = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
+                              " ORDER BY sort_order, key"), {"t": period_type}).all()
+    if len(records) * len(periods) > MAX_OVER_CELLS:
+        raise HTTPException(422, f"{len(records) * len(periods):,} predictions is more than {MAX_OVER_CELLS:,}")
+    existing = db.execute(text("SELECT id, index_type_ids FROM parameter_def WHERE domain_id = :d AND name = :n"),
+                          {"d": row["domain_id"], "n": body.field}).mappings().one_or_none()
+    if existing is not None and list(existing["index_type_ids"]) != [type_id, period_type]:
+        raise HTTPException(409, f"there is already a data value {body.field!r} over other kinds; choose another name")
+    source = {"kind": "predicted", "predictor": row["name"], "over": over.kind, "feature": over.feature,
+              **({"inputs": body.inputs} if body.inputs else {})}
+    if existing is None:
+        parameter_id = db.execute(text(
+            "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value, source)"
+            " VALUES (:d, :n, :i, 0, CAST(:s AS jsonb)) RETURNING id"),
+            {"d": row["domain_id"], "n": body.field, "i": [type_id, period_type], "s": json.dumps(source)}).scalar_one()
+    else:
+        parameter_id = existing["id"]
+        db.execute(text("UPDATE parameter_def SET source = CAST(:s AS jsonb) WHERE id = :p"), {"s": json.dumps(source), "p": parameter_id})
+        db.execute(text("DELETE FROM parameter_value WHERE parameter_def_id = :p"), {"p": parameter_id})
+    model = row["model"]
+    written, skipped = 0, []
+    for entity_id, key, attrs in records:
+        attrs = dict(attrs or {})
+        base = [value_of(attrs, f) for f in features]
+        at = features.index(over.feature)
+        for period_id, period_key, period_attrs in periods:
+            fed = period_key if over.field == "key" else (period_attrs or {}).get(over.field)
+            try:
+                fed = float(fed)
+            except (TypeError, ValueError):
+                fed = None
+            values = [*base[:at], fed, *base[at + 1:]]
+            if not all(training._number(v) for v in values):
+                skipped.append(f"{key} · {period_key}")
+                continue
+            value = trees.predict(model, [float(v) for v in values])
+            db.execute(text("INSERT INTO parameter_value (parameter_def_id, entity_ids, value) VALUES (:p, :e, :v)"),
+                       {"p": parameter_id, "e": [entity_id, period_id], "v": round(float(value), 6)})
+            written += 1
+    _audit(db, user, "predictor.apply", identity)
+    db.commit()
+    return {"parameter_id": parameter_id, "parameter": body.field, "written": written,
             "skipped": skipped[:50], "skipped_count": len(skipped)}
 
 

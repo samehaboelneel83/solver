@@ -319,7 +319,10 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
   is still to do): allocation of an area/amount among options (crops),
   coverage with capacity and cost, network flow with an origin–destination table; read units and
   the thing to cover from the data's own names, not only from words. (P1, P3, P4)
-- **R2c Forecasts as data per record:** a forecast's inputs read from the record and its links
+- **R2c Forecasts as data per record** (done in part: "Predict and keep" predicts for another kind's
+  records, each input from a field, a linked record's field or a number, and one per record and
+  period into a data value `name[kind, period]`; training through a link is still by copying the
+  linked field first ("from a link"), and time-series features are still to do): a forecast's inputs read from the record and its links
   (road attributes through a link; customer fields), written as a data value per record and period
   to drive the plan — today a rule calls it with constants. Time-series features (lags, horizons).
   (P2, P3, P5)

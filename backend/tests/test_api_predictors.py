@@ -277,3 +277,56 @@ def test_a_yes_or_no_predictor_is_trained_and_a_forest_says_its_range(client, db
     assert predicted["ranges"][0]["low"] > 0.5 and predicted["ranges"][1]["high"] < 0.5
     wrong = http.post("/api/v1/predictors/train", json={**body, "name": "other", "positive": "maybe"}, headers=t["a"])
     assert wrong.status_code == 422 and "not one of" in wrong.text
+
+
+def test_a_forecast_is_kept_for_another_kind_and_per_period_with_inputs_mapped(client, db):  # noqa: F811
+    """Benchmark re-test, October 2026: demand learnt from orders could only be used with its inputs held
+    constant -- not per customer, month by month, nor from a linked record's fields."""
+    http, t = client
+    domain = t["domain_a"]
+
+    def kind(name, fields):
+        type_id = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, :n, CAST('other' AS entity_role)) RETURNING id"),
+                             {"d": domain, "n": name}).scalar_one()
+        for f in fields:
+            db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, CAST('number' AS attr_type))"),
+                       {"t": type_id, "n": f})
+        return type_id
+
+    order = kind("order", ["size", "month", "qty"])
+    rng = np.random.default_rng(1)
+    for i in range(150):
+        size, month = float(rng.uniform(1, 10)), float(rng.integers(1, 13))
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": order, "k": f"o{i}", "a": json.dumps({"size": size, "month": month, "qty": 10 * size + 5 * month})})
+    region = kind("region", ["scale"])
+    customer = kind("customer", [])
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'north', '{\"scale\": 8}')"), {"t": region})
+    db.commit()
+    link = http.post(f"/api/v1/entity-types/{customer}/attributes", json={"name": "in_region", "data_type": "reference", "target_type_id": region},
+                     headers=t["a"])
+    assert link.status_code == 201, link.text
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'c1', '{\"in_region\": \"north\"}')"), {"t": customer})
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'c2', '{}')"), {"t": customer})
+    month = kind("month_of_year", [])
+    for m in (1, 7):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, '{}')"), {"t": month, "k": str(m)})
+    db.commit()
+    trained = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "demand", "entity_type": "order",
+                                                          "features": ["size", "month"], "target": "qty", "trees": 30, "max_depth": 6},
+                        headers=t["a"]).json()
+    path = f"/api/v1/predictors/{trained['id']}/apply"
+    # For customers, size read through their region, one value a month, kept as demand_fc[customer, month].
+    kept = http.post(path, json={"field": "demand_fc", "entity_type": "customer", "inputs": {"size": "in_region.scale"},
+                                 "over": {"kind": "month_of_year", "feature": "month"}}, headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 2 and kept.json()["skipped_count"] == 2  # c2 has no region
+    cells = dict(db.execute(text("SELECT e.key, pv.value FROM parameter_value pv JOIN entity e ON e.id = pv.entity_ids[2]"
+                                 " WHERE pv.parameter_def_id = :p"), {"p": kept.json()["parameter_id"]}).all())
+    assert 70 < float(cells["1"]) < 100 and 100 < float(cells["7"]) < 130  # 10*8 + 5*1 = 85, 10*8 + 5*7 = 115
+    # A fixed number, into a field.
+    fixed = http.post(path, json={"field": "july_fc", "entity_type": "customer", "inputs": {"size": "in_region.scale", "month": 7}},
+                      headers=t["a"])
+    assert fixed.json()["written"] == 1
+    for bad in ({"inputs": {"colour": 1}}, {"inputs": {"size": "nowhere.scale"}}, {"over": {"kind": "month_of_year", "feature": "colour"}}):
+        assert http.post(path, json={"field": "x", "entity_type": "customer", **bad}, headers=t["a"]).status_code == 422, bad

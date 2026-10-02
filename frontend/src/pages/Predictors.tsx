@@ -17,6 +17,7 @@ import {
   usePredictorTraining,
   useTrainPredictor,
   useUploadPredictor,
+  type ApplyPredictorBody,
   type EntityType,
   type Predictor,
 } from "../api/v1";
@@ -196,32 +197,108 @@ function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] })
   );
 }
 
-/** A trained model's predictions kept in a number field: a forecast a model reads as data. */
+/** A trained model's predictions kept as data: in a number field of each record, or -- one per record
+ * and period -- in a data value `name[kind, period]`. The records may be another kind's, each input
+ * read from a field, a linked record's field, or held at a number (benchmark re-test, October 2026). */
 function KeepPredictions({ predictor }: { predictor: Predictor }) {
   const apply = useApplyPredictor();
+  const { domainId } = useDomain();
+  const kinds = useEntityTypes(domainId, { limit: 500, offset: 0 });
+  const trainedOn = predictor.training?.entity_type ?? "";
+  const features = predictor.training?.features ?? [];
   const target = predictor.training?.target ?? "value";
   const [field, setField] = useState(`${target}_forecast`);
   const [onlyMissing, setOnlyMissing] = useState(true);
+  const [forKind, setForKind] = useState(trainedOn);
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [numbers, setNumbers] = useState<Record<string, string>>({});
+  const [overKind, setOverKind] = useState("");
+  const [overFeature, setOverFeature] = useState("");
   const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
   if (!predictor.training?.entity_type || predictor.training.positive !== undefined) return null;
+  const all = kinds.data?.items ?? [];
+  const kind = all.find((k) => k.name === forKind);
+  const fields = (kind?.attributes ?? []).filter((a) => a.data_type === "number" || a.data_type === "integer").map((a) => a.name);
+  // A linked record's number fields: "road.lanes".
+  const through = (kind?.attributes ?? []).filter((a) => a.data_type === "reference").flatMap((a) =>
+    (all.find((k) => k.id === a.target_type_id)?.attributes ?? []).filter((b) => b.data_type === "number" || b.data_type === "integer")
+      .map((b) => `${a.name}.${b.name}`));
+  const sourceOf = (f: string) => inputs[f] ?? (fields.includes(f) ? f : "");
+  const body = (): ApplyPredictorBody => {
+    const mapped: Record<string, string | number> = {};
+    for (const f of features) {
+      if (overKind && f === overFeature) continue;
+      const from = sourceOf(f);
+      if (from === "#") { const n = Number(numbers[f]); if (Number.isFinite(n)) mapped[f] = n; }
+      else if (from && from !== f) mapped[f] = from;
+    }
+    return { field, only_missing: onlyMissing && !overKind && forKind === trainedOn,
+      ...(forKind !== trainedOn ? { entity_type: forKind } : {}), ...(Object.keys(mapped).length ? { inputs: mapped } : {}),
+      ...(overKind && overFeature ? { over: { kind: overKind, feature: overFeature } } : {}) };
+  };
+  const select = "rounded border border-slate-300 px-1 py-0.5 font-mono text-xs";
   return (
-    <form className="mt-3 flex flex-wrap items-center gap-2 text-sm" aria-label={`Keep ${predictor.name}'s predictions`}
+    <form className="mt-3 space-y-2 text-sm" aria-label={`Keep ${predictor.name}'s predictions`}
       onSubmit={(e) => {
         e.preventDefault();
-        apply.mutate({ id: predictor.id, body: { field, only_missing: onlyMissing } }, {
-          onSuccess: (done) => setSaid({ error: false, text: `${done.written} ${predictor.training?.entity_type} records now have ${done.field}${done.skipped_count ? `; ${done.skipped_count} lack an input (${done.skipped.slice(0, 5).join(", ")})` : ""}. A model reads it as data.` }),
+        apply.mutate({ id: predictor.id, body: body() }, {
+          onSuccess: (done) => setSaid({ error: false, text: (done.parameter
+            ? `${done.written} predictions kept as the data value ${done.parameter}[${forKind}, ${overKind}]`
+            : `${done.written} ${forKind} records now have ${done.field}`)
+            + `${done.skipped_count ? `; ${done.skipped_count} lack an input (${done.skipped.slice(0, 5).join(", ")})` : ""}. A model reads it as data.` }),
           onError: (err) => setSaid({ error: true, text: formatApiError(err) }),
         });
       }}>
-      <span>Keep its predictions for the {predictor.training.entity_type} records in</span>
-      <input aria-label="Field for the predictions" className="w-40 rounded border border-slate-300 px-2 py-0.5 font-mono text-xs"
-        value={field} onChange={(e) => setField(e.target.value)} />
-      <label className="inline-flex items-center gap-1 text-xs">
-        <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />
-        only those with no {target} yet</label>
-      <button type="submit" disabled={apply.isPending} className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-60">
+      <div className="flex flex-wrap items-center gap-2">
+        <span>Keep its predictions for the</span>
+        <select aria-label="Records to predict for" className={select} value={forKind} onChange={(e) => { setForKind(e.target.value); setInputs({}); }}>
+          {all.filter((k) => !k.is_abstract).map((k) => <option key={k.id} value={k.name}>{k.name}</option>)}
+        </select>
+        <span>records in</span>
+        <input aria-label="Field for the predictions" className="w-40 rounded border border-slate-300 px-2 py-0.5 font-mono text-xs"
+          value={field} onChange={(e) => setField(e.target.value)} />
+        {forKind === trainedOn && !overKind && (
+          <label className="inline-flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />
+            only those with no {target} yet</label>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <span>One per</span>
+        <select aria-label="One prediction per" className={select} value={overKind} onChange={(e) => setOverKind(e.target.value)}>
+          <option value="">record only</option>
+          {all.filter((k) => !k.is_abstract && k.name !== forKind).map((k) => <option key={k.id} value={k.name}>{k.name}</option>)}
+        </select>
+        {overKind && (
+          <label>its key feeds
+            <select aria-label="Input each period feeds" className={`${select} ml-1`} value={overFeature} onChange={(e) => setOverFeature(e.target.value)}>
+              <option value="">choose…</option>
+              {features.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <ul className="flex flex-wrap gap-3 text-xs text-slate-700" aria-label="Where each input comes from">
+        {features.filter((f) => !(overKind && f === overFeature)).map((f) => (
+          <li key={f}>
+            <label>{f} from
+              <select aria-label={`${f} comes from`} className={`${select} ml-1`} value={sourceOf(f)} onChange={(e) => setInputs({ ...inputs, [f]: e.target.value })}>
+                <option value="">choose…</option>
+                {fields.map((n) => <option key={n} value={n}>{n}</option>)}
+                {through.map((n) => <option key={n} value={n}>{n}</option>)}
+                <option value="#">a number…</option>
+              </select>
+            </label>
+            {sourceOf(f) === "#" && (
+              <input aria-label={`${f} held at`} inputMode="decimal" className="ml-1 w-16 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                value={numbers[f] ?? ""} onChange={(e) => setNumbers({ ...numbers, [f]: e.target.value })} />
+            )}
+          </li>
+        ))}
+      </ul>
+      <button type="submit" disabled={apply.isPending || (!!overKind && !overFeature)} className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-60">
         {apply.isPending ? "Predicting…" : "Predict and keep"}</button>
-      {said && <p role={said.error ? "alert" : "status"} className={`basis-full text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
+      {said && <p role={said.error ? "alert" : "status"} className={`text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
     </form>
   );
 }

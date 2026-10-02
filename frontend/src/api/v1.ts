@@ -1951,11 +1951,17 @@ export const predictWith = (id: Id, inputs: number[][]) =>
   send<{ predictions: number[]; ranges?: { low: number; high: number }[] }>("POST", `/api/v1/predictors/${id}/predict`, { inputs });
 
 /** Keep a trained predictor's predictions in a number field of its records (a forecast as data). */
-export const applyPredictor = (id: Id, body: { field: string; only_missing: boolean }) =>
-  send<{ field: string; entity_type: string; written: number; skipped: string[]; skipped_count: number }>(
+/** Where predictions go and what feeds them (benchmark re-test, October 2026): another kind's records,
+ * inputs from a field, a linked record's field ("road.lanes") or a fixed number, and one per period. */
+export type ApplyPredictorBody = {
+  field: string; only_missing: boolean; entity_type?: string; inputs?: Record<string, string | number>;
+  over?: { kind: string; feature: string; field?: string };
+};
+export const applyPredictor = (id: Id, body: ApplyPredictorBody) =>
+  send<{ field?: string; entity_type?: string; parameter?: string; parameter_id?: Id; written: number; skipped: string[]; skipped_count: number }>(
     "POST", `/api/v1/predictors/${id}/apply`, body);
 export const useApplyPredictor = () =>
-  useV1Mutation(({ id, body }: { id: Id; body: { field: string; only_missing: boolean } }) => applyPredictor(id, body));
+  useV1Mutation(({ id, body }: { id: Id; body: ApplyPredictorBody }) => applyPredictor(id, body));
 /** Number fields made from a date, a text or a linked record's number (`app/api/derive.py`). */
 export type DeriveBody = {
   op: "date_parts" | "categories" | "from_link" | "formula" | "linked_total" | "link_by"; field: string; of?: string; formula?: string;

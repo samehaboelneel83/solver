@@ -186,7 +186,7 @@ it("makes number fields from a text, and keeps a model's predictions as data (be
     : { field: "demand_forecast", entity_type: "product", written: 7, skipped: [], skipped_count: 0 })));
   renderPage();
   const card = await screen.findByTestId("predictor");
-  await screen.findByRole("option", { name: "product" });
+  await screen.findAllByRole("option", { name: "product" });
   fireEvent.change(screen.getByLabelText("Learn from records of"), { target: { value: "product" } });
   fireEvent.click(screen.getByRole("button", { name: "one yes/no field per value" }));
   expect(await screen.findByText(/Made label_a, label_b on 10 records/)).toBeInTheDocument();
@@ -197,4 +197,21 @@ it("makes number fields from a text, and keeps a model's predictions as data (be
   fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
   expect(await within(card).findByText(/7 product records now have demand_forecast/)).toBeInTheDocument();
   expect(JSON.parse(write.mock.calls[1][1].body)).toEqual({ field: "demand_forecast", only_missing: true });
+});
+
+it("keeps one prediction per record and period, an input held at a number (benchmark re-test, October 2026)", async () => {
+  ENTITY_TYPES.items.push({ id: 6, domain_id: 7, name: "week", role: "time", colour: null, icon: null, attributes: [] } as never);
+  const write = stub(vi.fn().mockResolvedValue({ parameter: "demand_forecast", parameter_id: 40, written: 14, skipped: [], skipped_count: 0 }));
+  renderPage();
+  const card = await screen.findByTestId("predictor");
+  await within(card).findAllByRole("option", { name: "week" });
+  fireEvent.change(within(card).getByLabelText("One prediction per"), { target: { value: "week" } });
+  fireEvent.change(within(card).getByLabelText("Input each period feeds"), { target: { value: "promo" } });
+  fireEvent.change(within(card).getByLabelText("price comes from"), { target: { value: "#" } });
+  fireEvent.change(within(card).getByLabelText("price held at"), { target: { value: "9.5" } });
+  fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
+  expect(await within(card).findByText(/14 predictions kept as the data value demand_forecast\[product, week\]/)).toBeInTheDocument();
+  expect(JSON.parse(write.mock.calls.at(-1)[1].body)).toEqual({ field: "demand_forecast", only_missing: false,
+    inputs: { price: 9.5 }, over: { kind: "week", feature: "promo" } });
+  ENTITY_TYPES.items.pop();
 });
