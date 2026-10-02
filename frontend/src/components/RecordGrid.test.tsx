@@ -76,23 +76,45 @@ describe("RecordGrid", () => {
     expect(await screen.findByRole("button", { name: "Save 0 changes" })).toBeDisabled();
   });
 
-  it("keeps a shape it cannot show, so saving a row does not erase it", async () => {
+  it("shows a place as lat, lon, keeps it on save, and takes a new one typed", async () => {
     mockFetch.mockClear();
     const parked = { type: "Point", coordinates: [31, 30] };
+    const area = { type: "Polygon", coordinates: [[[31, 30], [31.1, 30], [31.1, 30.1], [31, 30]]] };
     render(
       <QueryClientProvider client={editorQueryClient()}>
         <ToastProvider>
           <MemoryRouter>
-            <RecordGrid type={TYPE as never} records={[truck(3, "T3", { capacity: 1, parked })] as never} onDone={vi.fn()} />
+            <RecordGrid type={TYPE as never} records={[truck(3, "T3", { capacity: 1, parked }), truck(4, "T4", { parked: area })] as never}
+              onDone={vi.fn()} />
           </MemoryRouter>
         </ToastProvider>
       </QueryClientProvider>
     );
-    expect(screen.queryByLabelText("T3: parked")).toBeNull();
+    expect(screen.getByLabelText("T3: parked")).toHaveValue("30, 31");
+    expect(screen.getByLabelText("T4: parked")).toHaveTextContent("an area of 3 corners");
     fireEvent.change(screen.getByLabelText("T3: capacity"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save 1 change" }));
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(JSON.parse(String(writes()[0][1].body)).attrs).toEqual({ capacity: 2, parked });
+
+    const cell = screen.getByLabelText("T3: parked");
+    fireEvent.change(cell, { target: { value: "30.05, 31.25" } });
+    fireEvent.blur(cell);
+    fireEvent.click(await screen.findByRole("button", { name: "Save 1 change" }));
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    expect(JSON.parse(String(writes()[1][1].body)).attrs.parked).toEqual({ type: "Point", coordinates: [31.25, 30.05] });
+  });
+
+  it("makes places from latitude and longitude pasted as two columns", async () => {
+    renderGrid();
+    fireEvent.paste(screen.getByLabelText("T1: key"), {
+      clipboardData: { getData: () => "T1\tTruck one\t10\tdiesel\t30.1\t31.2\nT9\tTruck nine\t5\telectric\t29.9\t31.0\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save 2 changes" }));
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    const bodies = writes().map(([, init]) => JSON.parse(String(init.body)));
+    expect(bodies[0].attrs).toEqual({ capacity: 10, fuel: "diesel", parked: { type: "Point", coordinates: [31.2, 30.1] } });
+    expect(bodies[1]).toMatchObject({ key: "T9", attrs: { parked: { type: "Point", coordinates: [31, 29.9] } } });
   });
 
   it("fills right and down from a pasted Excel block, adding rows, and creates them", async () => {

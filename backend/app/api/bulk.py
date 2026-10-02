@@ -69,6 +69,7 @@ MAX_BYTES = 20 * 1024 * 1024
 MAX_TEMPLATE_CELLS = 100_000
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_LAT_LON = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
 class Fault(BaseModel):
@@ -169,10 +170,18 @@ def _parse(kind: str, raw: Any, values: list[str] | None) -> tuple[Any, str | No
     if kind == "geometry":
         from app.spatial.geometry import validate_geometry
 
+        # "30.04, 31.23" -- latitude first, as a map app copies it -- is a point.
+        place = _LAT_LON.match(raw) if isinstance(raw, str) else None
+        if place:
+            lat, lon = float(place.group(1)), float(place.group(2))
+            if abs(lat) > 90 or abs(lon) > 180:
+                return None, f"{raw!r} is not a latitude and longitude"
+            return {"type": "Point", "coordinates": [lon, lat]}, None
         try:
             shape = json.loads(raw) if isinstance(raw, str) else raw
         except ValueError:
-            return None, "must be GeoJSON, such as {\"type\": \"Point\", \"coordinates\": [31.2, 30.0]}"
+            return None, ("must be a latitude and longitude, such as 30.04, 31.23, or GeoJSON, such as "
+                          "{\"type\": \"Point\", \"coordinates\": [31.2, 30.0]}")
         fault = validate_geometry(shape)
         return (None, fault) if fault else (shape, None)
     # A spreadsheet stores 101 as a number; as a key or a text it is "101", not "101.0".

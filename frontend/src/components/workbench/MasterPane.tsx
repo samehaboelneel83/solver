@@ -2,12 +2,14 @@ import { useState } from "react";
 import { apiFetch } from "../../api/client";
 import { formatAttrValue } from "../AttrsForm";
 import RecordGrid from "../RecordGrid";
+import GeoMap, { type GeoMark } from "../map/GeoMap";
+import { asGeometry } from "../../lib/geoShape";
 import { useCapabilities } from "../../hooks/useCapability";
 import { useChildren, useGroups, usePlace, type ChildGroup, type TreeRecord, type WorkbenchSchema } from "../../api/workbench";
 import { useEntityRecord, useEntityType, type EntityType, type Id } from "../../api/v1";
 import type { TreeSelection } from "./WorkbenchTree";
 
-export type View = "cards" | "grid";
+export type View = "cards" | "grid" | "map";
 
 const TAB = "rounded-t-md border-b-2 px-3 py-1.5 text-sm";
 
@@ -50,6 +52,10 @@ function Cards({
               <span className="mt-2 flex flex-wrap gap-1 text-xs">
                 {r.children > 0 && <span className="rounded bg-slate-100 px-1.5 text-slate-600">{r.children} under it</span>}
                 {!r.active && <span className="rounded bg-slate-100 px-1.5 text-slate-600">switched off</span>}
+                {placed(type) &&
+                  !type.attributes.some((a) => a.data_type === "geometry" && asGeometry(r.attrs?.[a.name])) && (
+                    <span className="rounded bg-sky-50 px-1.5 text-sky-800">no place yet</span>
+                  )}
                 {codes?.length ? <span className="rounded bg-amber-100 px-1.5 text-amber-800">needs a look</span> : null}
               </span>
             </button>
@@ -57,6 +63,39 @@ function Cards({
         );
       })}
     </ul>
+  );
+}
+
+/** Whether a kind has a shape field, so its records can be shown on a map. */
+function placed(type: EntityType | undefined): boolean {
+  return (type?.attributes ?? []).some((a) => a.data_type === "geometry");
+}
+
+/** The listed records on the map, over their parent's shape; a record's mark opens it. */
+function ListMap({ type, items, parent, onOpen }: { type: EntityType; items: TreeRecord[]; parent: Id | null; onOpen: (id: Id) => void }) {
+  const parentRecord = useEntityRecord(parent);
+  const parentType = useEntityType(parentRecord.data?.entity_type_id ?? null);
+  const fields = type.attributes.filter((a) => a.data_type === "geometry").map((a) => a.name);
+  const marks: GeoMark[] = [];
+  let without = 0;
+  for (const p of (parentType.data?.attributes ?? []).filter((a) => a.data_type === "geometry")) {
+    const g = asGeometry(parentRecord.data?.attrs?.[p.name]);
+    if (g) marks.push({ id: `parent-${p.name}`, geometry: g, colour: "#94a3b8", fill: 0.08, size: 4, layer: "around",
+      title: `${parentRecord.data?.label || parentRecord.data?.key} (${p.name})` });
+  }
+  for (const r of items) {
+    const g = fields.map((f) => asGeometry(r.attrs?.[f])).find((x) => x);
+    if (!g) { without += 1; continue; }
+    marks.push({ id: String(r.id), geometry: g, colour: r.active ? "#2563eb" : "#94a3b8", size: 6, fill: 0.25, layer: type.name,
+      title: `${r.label || r.key}${r.label ? ` (${r.key})` : ""}`, label: r.label || r.key, pickable: true });
+  }
+  return (
+    <GeoMap
+      marks={marks}
+      onPick={(id) => onOpen(Number(id))}
+      caption={[`${marks.filter((m) => m.pickable).length} on the map — click one to open it`,
+        without ? `${without} without a place yet (open one, then Location)` : null].filter(Boolean).join(" · ")}
+    />
   );
 }
 
@@ -123,7 +162,9 @@ function List({
         </span>
       </div>
       {list.isError && <p className="text-sm text-red-700">Could not load these records.</p>}
-      {view === "grid" || adding ? (
+      {view === "map" && !adding && placed(type.data) ? (
+        <ListMap type={type.data} items={items} parent={parent} onOpen={onOpen} />
+      ) : view === "grid" || adding ? (
         <RecordGrid
           key={`${group}-${parent}-${q}-${adding}`}
           type={type.data}
@@ -182,12 +223,11 @@ export default function MasterPane({
   const leaf = groups.isSuccess && (groups.data?.groups.length ?? 0) === 0;
   const place = usePlace(domainId, recordId, leaf);
 
-  if (!selection) {
-    return <p className="p-6 text-sm text-slate-500">Choose a record or a kind in the tree.</p>;
-  }
   let tabs: ChildGroup[] = [];
   let current: { group: string; kindId: Id; title: string } | null = null;
-  if (selection.kind === "root") {
+  if (!selection) {
+    current = null;
+  } else if (selection.kind === "root") {
     const kind = schema.kinds.find((k) => k.id === selection.kindId);
     current = { group: `root:${selection.kindId}`, kindId: selection.kindId, title: `${kind?.name ?? ""} at the top` };
   } else {
@@ -201,6 +241,10 @@ export default function MasterPane({
     }
   }
   const siblingsOf = leaf && place.data ? place.data.parent : null;
+  const listType = useEntityType(current?.kindId ?? null);
+  if (!selection) {
+    return <p className="p-6 text-sm text-slate-500">Choose a record or a kind in the tree.</p>;
+  }
 
   return (
     <section aria-label="Records under the selection" className="space-y-3">
@@ -209,7 +253,7 @@ export default function MasterPane({
         {current && (
           <div className="flex items-center gap-2">
             <div role="group" aria-label="Show as" className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
-              {(["cards", "grid"] as const).map((v) => (
+              {(["cards", "grid", ...(placed(listType.data) ? (["map"] as const) : [])] as const).map((v) => (
                 <button
                   key={v}
                   type="button"
@@ -217,7 +261,7 @@ export default function MasterPane({
                   onClick={() => setView(v)}
                   className={`px-3 py-1 ${view === v ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
                 >
-                  {v === "cards" ? "Cards" : "Grid"}
+                  {v === "cards" ? "Cards" : v === "grid" ? "Grid" : "Map"}
                 </button>
               ))}
             </div>

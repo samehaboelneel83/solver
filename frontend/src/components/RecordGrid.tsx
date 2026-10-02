@@ -1,5 +1,7 @@
 import { ClipboardEvent, useEffect, useState } from "react";
 import { attrField, buildAttrs, draftsFromAttrs, type AttrDrafts } from "./AttrsForm";
+import { parseLatLon } from "../lib/campGeo";
+import { asGeometry, describeShape } from "../lib/geoShape";
 import RecordPicker from "./RecordPicker";
 import { useToast } from "./ToastProvider";
 import { entityServerErrors } from "../pages/EntityRecord";
@@ -52,9 +54,47 @@ function blank(type: EntityType, prefill: AttrDrafts = {}): Row {
 const isNew = (r: Row) => r.id === null;
 const isDirty = (r: Row) => r.remove || snapshot(r) !== r.original;
 
-/** The columns a grid can edit in a cell: everything but a shape, which is drawn on the record page. */
+/** The columns of the grid: every field. A shape is a "lat, lon" point here; lines and areas are drawn
+ * in the workbench's Location tab and only named in the cell. */
 function editable(type: EntityType): AttributeDef[] {
-  return type.attributes.filter((a) => a.data_type !== "geometry");
+  return type.attributes;
+}
+
+const NUMBER = /^-?\d+(?:\.\d+)?$/;
+
+/** A shape draft from text: "30.04, 31.23" (latitude first, as a map app copies it) becomes a point. */
+export function shapeDraft(text: string): string {
+  const p = parseLatLon(text);
+  return p ? JSON.stringify({ type: "Point", coordinates: p }) : text;
+}
+
+/** A shape draft as the cell shows it: a point as "lat, lon"; anything else by what it is. */
+function shapeText(draft: string): { text: string; editable: boolean } {
+  if (draft.trim() === "") return { text: "", editable: true };
+  try {
+    const g = asGeometry(JSON.parse(draft));
+    if (!g) return { text: draft, editable: true };
+    if (g.type === "Point") return { text: `${g.coordinates[1]}, ${g.coordinates[0]}`, editable: true };
+    return { text: describeShape(g), editable: false };
+  } catch {
+    return { text: draft, editable: true };
+  }
+}
+
+function ShapeCell({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+  const shown = shapeText(value);
+  const [text, setText] = useState(shown.text);
+  if (!shown.editable) return <span className="px-1.5 text-xs text-slate-600" aria-label={label}>{shown.text}</span>;
+  return (
+    <input
+      aria-label={label}
+      className={CELL}
+      placeholder="lat, lon"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => onChange(shapeDraft(text))}
+    />
+  );
 }
 
 /** Text pasted from a spreadsheet: rows by line, cells by tab. */
@@ -74,6 +114,9 @@ function Cell({
   onChange: (v: string) => void;
   label: string;
 }) {
+  if (attribute.data_type === "geometry") {
+    return <ShapeCell key={value} value={value} onChange={onChange} label={label} />;
+  }
   if (attribute.data_type === "reference") {
     return (
       <RecordPicker
@@ -158,6 +201,7 @@ export default function RecordGrid({
   const [saving, setSaving] = useState(false);
   const names = type.attributes.map((a) => a.name);
   const fields = ["key", "label", ...columns.map((a) => a.name)];
+  const shapes = new Set(columns.filter((a) => a.data_type === "geometry").map((a) => a.name));
 
   const changed = rows.filter(isDirty);
   // Unsaved cells are not lost to a closed tab or a reload without a word.
@@ -198,10 +242,18 @@ export default function RecordGrid({
         const at = rowIndex + i;
         while (next.length <= at) next.push(blank(type, prefill));
         let row = next[at];
-        cells.forEach((value, j) => {
-          const f = fields[start + j];
-          if (f) row = setField(row, f, value.trim());
-        });
+        // A shape column takes "lat, lon" in one cell, or latitude and longitude in two.
+        for (let j = 0, col = start; j < cells.length && col < fields.length; col += 1) {
+          const f = fields[col];
+          const value = cells[j].trim();
+          if (shapes.has(f) && NUMBER.test(value) && NUMBER.test((cells[j + 1] ?? "").trim())) {
+            row = setField(row, f, shapeDraft(`${value}, ${cells[j + 1].trim()}`));
+            j += 2;
+          } else {
+            row = setField(row, f, shapes.has(f) ? shapeDraft(value) : value);
+            j += 1;
+          }
+        }
         next[at] = row;
       });
       return next;
@@ -257,12 +309,12 @@ export default function RecordGrid({
     else toast.error(`${ok} saved; ${failed} row${failed === 1 ? "" : "s"} need${failed === 1 ? "s" : ""} attention (marked in red)`);
   }
 
-  const hidden = type.attributes.length - columns.length;
   return (
     <div className="space-y-3" data-testid="record-grid">
       <p className="text-sm text-slate-600">
         Edit cells directly, or paste a block copied from Excel into any cell — it fills right and down and adds rows.
-        {hidden > 0 && ` Shapes (${hidden}) are edited on each record's page.`}
+        {columns.some((a) => a.data_type === "geometry") &&
+          " A place is “lat, lon”, or latitude and longitude pasted as two columns; draw lines and areas in Location."}
       </p>
       <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
         <table className="w-full text-left text-sm" aria-label={`Edit ${type.name} records`}>

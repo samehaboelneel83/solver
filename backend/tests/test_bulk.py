@@ -157,3 +157,12 @@ def test_a_parameter_template_lists_every_cell_and_an_upload_fills_them(shop):
     cells = shop["call"]("GET", f"/api/v1/parameters/{par['id']}/values").json()["cells"]
     # The default (1) is not stored: the grid stays sparse.
     assert sorted(c["value"] for c in cells) == [2.5, 3]
+
+
+def test_a_place_cell_takes_a_latitude_and_longitude():
+    from app.api.bulk import _parse
+
+    assert _parse("geometry", "30.0444, 31.2357", None) == ({"type": "Point", "coordinates": [31.2357, 30.0444]}, None)
+    assert _parse("geometry", '{"type": "Point", "coordinates": [31.2, 30.0]}', None)[0] == {"type": "Point", "coordinates": [31.2, 30.0]}
+    assert "latitude and longitude" in _parse("geometry", "120, 31", None)[1]
+    assert "such as 30.04, 31.23" in _parse("geometry", "near the river", None)[1]

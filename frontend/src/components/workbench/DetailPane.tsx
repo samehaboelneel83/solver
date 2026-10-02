@@ -9,10 +9,13 @@ import RecordTrees from "../RecordTrees";
 import { useToast } from "../ToastProvider";
 import { useCapabilities } from "../../hooks/useCapability";
 import { RecordPanel } from "../../pages/EntityRecord";
-import { useRecordValues, type RecordValues } from "../../api/workbench";
-import { useEntityRecord, useEntityType, type Id } from "../../api/v1";
+import LocationEditor from "./LocationEditor";
+import { useChildren, usePlace, useRecordValues, type RecordValues } from "../../api/workbench";
+import { useEntityRecord, useEntityType, type Entity, type EntityType, type Id } from "../../api/v1";
+import { asGeometry } from "../../lib/geoShape";
+import type { GeoGeometry } from "../map/GeoMap";
 
-type Tab = "fields" | "linked" | "values" | "problems" | "history";
+type Tab = "fields" | "location" | "linked" | "values" | "problems" | "history";
 
 const WORDS: Record<string, string> = {
   loop: "It is in a chain that comes back on itself. Change one link in the chain.",
@@ -112,6 +115,28 @@ function Values({ entityId, domainId }: { entityId: Id; domainId: Id }) {
   );
 }
 
+/** Every shape a record holds, in any of its kind's shape fields. */
+function shapesOf(e: Entity | undefined | null, type: EntityType | undefined | null): GeoGeometry[] {
+  if (!e || !type) return [];
+  return type.attributes
+    .filter((a) => a.data_type === "geometry")
+    .map((a) => asGeometry(e.attrs?.[a.name]))
+    .filter((g): g is GeoGeometry => g !== null);
+}
+
+/** The location editor, with what is around the record drawn faintly: its parent's shape and its siblings'. */
+function Surroundings({ domainId, entity, type }: { domainId: Id; entity: Entity; type: EntityType }) {
+  const place = usePlace(domainId, entity.id);
+  const parent = useEntityRecord(place.data?.parent?.id ?? null);
+  const parentType = useEntityType(parent.data?.entity_type_id ?? null);
+  const siblings = useChildren(domainId, place.data?.group ?? null, place.data?.parent?.id ?? null, { limit: 200 });
+  const context = [
+    ...shapesOf(parent.data, parentType.data),
+    ...(siblings.data?.items ?? []).filter((s) => s.id !== entity.id).flatMap((s) => shapesOf(s, type)),
+  ];
+  return <LocationEditor key={`${entity.id}-${entity.updated_at}`} entity={entity} type={type} context={context} />;
+}
+
 /**
  * The right of the workbench: the record chosen, its fields as the record form, what links to it,
  * its parameter values (its own value editable in place), what the quality checks say of it, and
@@ -131,8 +156,10 @@ export default function DetailPane({
   const [tab, setTab] = useState<Tab>("fields");
   const record = useEntityRecord(entityId);
   const type = useEntityType(record.data?.entity_type_id ?? null);
+  const placed = (type.data?.attributes ?? []).some((a) => a.data_type === "geometry");
   const tabs: [Tab, string][] = [
     ["fields", "Fields"],
+    ...(placed ? ([["location", "Location"]] as [Tab, string][]) : []),
     ["linked", "Linked"],
     ["values", "Values"],
     ["problems", problems.length ? `Problems (${problems.length})` : "Problems"],
@@ -173,6 +200,9 @@ export default function DetailPane({
             <RecordTrees entity={record.data} />
             <EntityRelationships entity={record.data} entityType={type.data} />
           </div>
+        )}
+        {tab === "location" && record.data && type.data && (
+          <Surroundings domainId={domainId} entity={record.data} type={type.data} />
         )}
         {tab === "values" && <Values entityId={entityId} domainId={domainId} />}
         {tab === "history" && <RecordHistory entityId={entityId} />}

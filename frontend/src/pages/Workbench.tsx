@@ -22,7 +22,8 @@ const VIEW_KEY = "solver_workbench_view";
 
 function storedView(): View {
   try {
-    return localStorage.getItem(VIEW_KEY) === "grid" ? "grid" : "cards";
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === "grid" || v === "map" ? v : "cards";
   } catch {
     return "cards";
   }

@@ -31,6 +31,8 @@ export type GeoMark = {
   /** Drawn beside the mark when shown. */
   label?: string;
   layer: string;
+  /** A mark that can be picked (opened); without it the mark is only shown. */
+  pickable?: boolean;
 };
 
 const WIDTH = 720;
@@ -109,8 +111,10 @@ function Mark({ mark, at, showLabel }: { mark: GeoMark; at: (p: number[]) => num
   );
 }
 
-export default function GeoMap({ marks, legend, caption }: {
+export default function GeoMap({ marks, legend, caption, onPick }: {
   marks: GeoMark[];
+  /** A pickable mark clicked (or Enter on it): its id. */
+  onPick?: (id: string) => void;
   /** One row per layer: its name, colour and what it means. */
   legend?: { layer: string; colour: string; text: string }[];
   caption?: string;
@@ -158,7 +162,15 @@ export default function GeoMap({ marks, legend, caption }: {
             <image key={`${tile.z}/${tile.x}/${tile.y}/${tile.left}`} href={tileUrl(chosen.url, tile)} x={tile.left} y={tile.top}
               width={tile.size + 0.5} height={tile.size + 0.5} opacity={0.85} />
           ))}
-          {sorted.map((m) => <Mark key={m.id} mark={m} at={frame.at} showLabel={labels} />)}
+          {sorted.map((m) =>
+            onPick && m.pickable ? (
+              <g key={m.id} role="button" tabIndex={0} aria-label={`Open ${m.title}`} className="cursor-pointer"
+                onClick={() => onPick(m.id)} onKeyDown={(e) => { if (e.key === "Enter") onPick(m.id); }}>
+                <Mark mark={m} at={frame.at} showLabel={labels} />
+              </g>
+            ) : (
+              <Mark key={m.id} mark={m} at={frame.at} showLabel={labels} />
+            ))}
         </svg>
       </div>
       {legend && legend.length > 0 && layers.length <= 1 && (
