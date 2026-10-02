@@ -51,7 +51,7 @@ def prior_run(db: Session, run_id: int) -> tuple[int, dict[str, Any], dict[str, 
             "   AND r.id <> :me"
             # A why-not probe answers a question with cells forced: not a plan to start from.
             "   AND r.purpose = 'plan'"
-            " ORDER BY (sc.model_version_id = msc.model_version_id) DESC, r.id DESC"
+            " ORDER BY (r.model_version_id = me.model_version_id) DESC, r.id DESC"
             " LIMIT 1"
         ),
         {"me": run_id},

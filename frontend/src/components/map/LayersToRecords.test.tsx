@@ -38,3 +38,25 @@ it("will not quietly add features to a kind that already exists", async () => {
   fireEvent.click(screen.getByLabelText("Yes, add them to point"));
   expect(make).toBeEnabled();
 });
+
+it("names the records by a property, and a property left as the key comes back as a field when the key changes", async () => {
+  const field = (property: string, skip = false) => ({ property, name: property, data_type: "text", enum_values: null, samples: [], skip });
+  const plan = { ...PLAN, name: "base", exists: false, key: "base_id", key_candidates: ["base_id", "name"], label: "name",
+    fields: [field("base_id", true), field("name"), field("terrain")] };
+  const sent: unknown[] = [];
+  vi.mocked(apiFetch).mockImplementation(((path: string, init?: { body?: string }) => {
+    if (path.includes("/records/propose")) return Promise.resolve(plan);
+    if (init?.body) { sent.push(JSON.parse(init.body)); return Promise.resolve({ made: 4, faults: [] }); }
+    return Promise.resolve({ items: [], total: 0 });
+  }) as never);
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter><LayersToRecords dataset={DATASET} canEdit /></MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Show what it would make" }));
+  expect(await screen.findByLabelText("Name property")).toHaveValue("name");
+  fireEvent.change(screen.getByLabelText("Key property"), { target: { value: "name" } });
+  expect(screen.getByLabelText("Keep base_id")).toBeChecked();
+  expect(screen.getByLabelText("Keep name")).not.toBeChecked();
+});

@@ -685,7 +685,8 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             "SELECT r.dataset_id, r.params, r.seed, r.organization_id, s.patch, s.problem_id, mv.ir, d.data"
             "  FROM run r"
             "  JOIN scenario s ON s.id = r.scenario_id"
-            "  JOIN model_version mv ON mv.id = s.model_version_id"
+            # The version the run was queued with, as its data was frozen then (migration 0102).
+            "  JOIN model_version mv ON mv.id = r.model_version_id"
             "  JOIN dataset d ON d.id = r.dataset_id"
             " WHERE r.id = :r"
         ),

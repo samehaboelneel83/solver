@@ -153,18 +153,25 @@ lift are per point, averaged over the five problems.
 
 ### Phase 0 — correctness (bugs that give wrong answers or lose work)
 - [x] B1 API freeze on solve — `529520c`.
-- [ ] B2 After publishing, offer to move every scenario on the old version (default yes); the solve
-      button names the version it solves. *Check:* publish v2, Solve → run is on v2.
-- [ ] B3 Exports: one row per decision cell with its real value; Excel sheets without duplicates.
-      *Check:* export test on a model with integer + continuous + binary decisions.
-- [ ] B4 Scenario record changes persist and apply. *Check:* scenario with one changed value solves
-      differently, and Edit shows the change.
-- [ ] B7 Large upload writes on the first try or says why not. *Check:* 3,000-row upload test.
-- [ ] B8 Draft conflicts: no 409 when the same user reopens; publish after equation edits works.
-- [ ] B9, B16, B22, B24 model-editor correctness (reset index boxes; renames propagate; notes
-      follow edits; shape fills `[c, c2]`).
-- [ ] B10 Routing returns the best route found (warm start) instead of "unknown".
-- [ ] B11, B14, B15, B17, B19, B20, B23 smaller fixes.
+- [x] B2 Solving a scenario left on an older version moves it to the latest first; "Solve version N
+      as it is" keeps it — `59b9bd8`.
+- [x] B3 Exports: one row per decision cell with its real value — `59b9bd8`.
+- [x] B4 A record typed in full in a picker is taken (the scenario change was dropped) — `59b9bd8`.
+- [x] B7 Large uploads: rows written together, faster record check (migration 0101), "Writing N
+      rows…" — `f968cbb`.
+- [x] B8 No copy-to-keep question when the server copy is the same model; a draft already
+      published is let go — `3a58d4f`.
+- [x] B9, B16, B24 fresh guided form; renamed items followed in every view; `[c, c2]` — `90fca40`.
+- [ ] B22 a recipe rule's note does not follow later edits — deferred (needs a marker for
+      machine-written notes).
+- [x] B10 a block the solver leaves empty keeps a start that holds; route rules no longer
+      refused on the runs page — `714e2fa`.
+- [x] B11 workbook download with map shapes; message when there are no kinds — B15, B17, B23 —
+      `83a1395`, `72d0fbe`.
+- [ ] B14 runs record the model version they solved (migration 0102), so comparisons, exports
+      and explanations read the right model — in progress.
+- [ ] B19 map layers to records: an id-like key, a name property for labels — in progress.
+- [ ] B20 lines kept as lines — moved to Phase 3 (G2a), the geometry field holds points and areas.
 
 ### Phase 1 — highest lift (target: coverage ≈ 88%)
 - [ ] **G1a Declare predictors in the model editor** (data list "Predictions" + a Boxes/Blocks

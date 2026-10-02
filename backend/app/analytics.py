@@ -40,7 +40,7 @@ COLUMNS = [
 _PENDING = text(
     """
     SELECT r.id AS run_id, r.organization_id, p.domain_id, s.problem_id, r.scenario_id,
-           s.model_version_id, r.solver, coalesce(r.params->>'classified_as', '') AS model_class,
+           r.model_version_id, r.solver, coalesce(r.params->>'classified_as', '') AS model_class,
            r.status::text AS status, coalesce(r.optimality, '') AS optimality,
            r.objective::float8 AS objective, r.best_bound, r.gap, r.wall_time_s,
            coalesce((r.params->>'time_limit_s')::float8, 0) AS time_limit_s,

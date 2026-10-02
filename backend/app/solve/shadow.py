@@ -93,7 +93,7 @@ def _compare(db: Session, real_id: int, shadow_id: int) -> None:
             text(
                 "SELECT r.id, r.status, r.objective, r.wall_time_s, r.error, so.assignments, mv.ir -> 'objective' ->> 'sense' AS sense"
                 "  FROM run r JOIN scenario s ON s.id = r.scenario_id"
-                "  JOIN model_version mv ON mv.id = coalesce((r.params ->> 'model_version_id')::bigint, s.model_version_id)"
+                "  JOIN model_version mv ON mv.id = r.model_version_id"
                 "  LEFT JOIN solution so ON so.run_id = r.id WHERE r.id IN (:a, :b)"
             ),
             {"a": real_id, "b": shadow_id},

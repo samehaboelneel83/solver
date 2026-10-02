@@ -70,7 +70,7 @@ def ask(db: Session, run_id: int, force: list[dict[str, Any]],
         text(
             "SELECT r.id, r.status, r.purpose, r.params, r.seed, r.scenario_id, r.dataset_id, r.solver,"
             "       r.compiler_version, s.patch, mv.ir, so.assignments"
-            "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = s.model_version_id"
+            "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
             "  LEFT JOIN solution so ON so.run_id = r.id"
             " WHERE r.id = :r"
         ),

@@ -804,7 +804,7 @@ def _vocabulary(db: Session, run_id: int) -> tuple[dict[str, Any], dict[str, Any
             "  FROM run r"
             "  JOIN dataset d ON d.id = r.dataset_id"
             "  JOIN scenario s ON s.id = r.scenario_id"
-            "  JOIN model_version mv ON mv.id = s.model_version_id"
+            "  JOIN model_version mv ON mv.id = r.model_version_id"
             " WHERE r.id = :r"
         ),
         {"r": run_id},
@@ -836,7 +836,7 @@ def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], d
         text(
             "SELECT mv.ir AS ir, d.data -> 'sets' AS sets, p.domain_id AS domain"
             "  FROM run r JOIN dataset d ON d.id = r.dataset_id JOIN scenario s ON s.id = r.scenario_id"
-            "  JOIN problem p ON p.id = s.problem_id JOIN model_version mv ON mv.id = s.model_version_id"
+            "  JOIN problem p ON p.id = s.problem_id JOIN model_version mv ON mv.id = r.model_version_id"
             " WHERE r.id = :r"
         ),
         {"r": run_id},

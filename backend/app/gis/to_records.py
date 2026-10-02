@@ -116,20 +116,24 @@ def propose(features: list[dict[str, Any]], layers: list[str], existing: set[str
     n = len(usable)
     key_candidates = [c for c, values in columns.items()
                       if len(values) == n and len({_as_key(v) for v in values}) == n]
-    preferred = [c for c in key_candidates if to_name(c) in ("id", "key", "code", "name") or to_name(c).endswith("_id")]
-    key = (preferred or key_candidates or [None])[0]
+    # An id or a code tells records apart better than a name, which is what people read (benchmark,
+    # October 2026: "name" became the key, and the records were shown as "—").
+    coded = [c for c in key_candidates if to_name(c) in ("id", "key", "code") or to_name(c).endswith(("_id", "_code"))]
+    named = [c for c in key_candidates if to_name(c) == "name"]
+    key = (coded or named or key_candidates or [None])[0]
+    label = next((c for c in columns if c != key and (to_name(c) in ("name", "label", "title") or to_name(c).endswith("_name"))),
+                 None)
     fields = []
     for column, values in columns.items():
-        if column == key:
-            continue
         data_type, choices = infer(values)
+        # The key is offered too, left out: choosing another key keeps it as a field.
         fields.append({"property": column, "name": to_name(column) or "field", "data_type": data_type,
-                       "enum_values": choices, "samples": [_as_key(v) for v in values[:3]], "skip": False})
+                       "enum_values": choices, "samples": [_as_key(v) for v in values[:3]], "skip": column == key})
     kinds = sorted({f.get("kind") for f in usable})
     name = kind_name(layers, dataset)
     return {
         "layers": layers, "name": name, "exists": name in existing, "features": n,
-        "skipped_text": len(features) - n, "shapes": kinds, "key": key, "key_candidates": key_candidates,
+        "skipped_text": len(features) - n, "shapes": kinds, "key": key, "key_candidates": key_candidates, "label": label,
         "fields": fields, "geometry_field": GEOMETRY_FIELD,
         "measures": [m for m, k in (("area_m2", "polygon"), ("length_m", "line")) if k in kinds],
     }

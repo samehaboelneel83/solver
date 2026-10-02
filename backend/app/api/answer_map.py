@@ -275,7 +275,7 @@ def _gap(a: list[float], b: list[float]) -> float:
 def _map_of(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
         text("SELECT r.status, mv.ir, d.data, sol.assignments, sol.amounts FROM run r"
-             " JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = s.model_version_id"
+             " JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
              " JOIN dataset d ON d.id = r.dataset_id LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"),
         {"r": run_id},
     ).mappings().one_or_none()

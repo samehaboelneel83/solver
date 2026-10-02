@@ -31,6 +31,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    FetchedValue,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
@@ -208,6 +209,11 @@ class Run(Base):
     )
     dataset_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("dataset.id"), nullable=False
+    )
+    # Migration 0102: the model version this run solved, set by a trigger as it is queued -- its
+    # scenario may later move to another.
+    model_version_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("model_version.id", ondelete="CASCADE"), nullable=False, server_default=FetchedValue()
     )
     status: Mapped[str] = mapped_column(RUN_STATUS, nullable=False, server_default="queued")
     solver: Mapped[str] = mapped_column(Text, nullable=False, server_default="cp-sat")

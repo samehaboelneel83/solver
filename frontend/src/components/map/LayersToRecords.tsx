@@ -113,9 +113,21 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
               )}
               <label className="block">told apart by{" "}
                 <select aria-label="Key property" className={INPUT} value={plan.key ?? ""}
-                  onChange={(e) => setPlan({ ...plan, key: e.target.value || null })}>
+                  onChange={(e) => {
+                    // The key is not also a field; the one it was becomes one again.
+                    const key = e.target.value || null;
+                    setPlan({ ...plan, key, fields: plan.fields.map((f) => (f.property === key ? { ...f, skip: true }
+                      : f.property === plan.key ? { ...f, skip: false } : f)) });
+                  }}>
                   <option value="">its number</option>
                   {plan.key_candidates.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+              <label className="block">and named by{" "}
+                <select aria-label="Name property" className={INPUT} value={plan.label ?? ""}
+                  onChange={(e) => setPlan({ ...plan, label: e.target.value || null })}>
+                  <option value="">no name</option>
+                  {plan.fields.map((f) => <option key={f.property} value={f.property}>{f.property}</option>)}
                 </select>
               </label>
               <p className="text-slate-600">

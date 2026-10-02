@@ -120,7 +120,7 @@ def _run(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
         text(
             f"SELECT {_FIELDS}, s.name AS scenario_name, s.patch, s.problem_id,"
-            "        s.model_version_id"
+            "        run.model_version_id"
             "   FROM run JOIN scenario s ON s.id = run.scenario_id"
             "  WHERE run.id = :r"
         ),

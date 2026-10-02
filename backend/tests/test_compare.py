@@ -209,3 +209,23 @@ def test_one_difference_is_named_as_the_cause_and_several_are_not():
     from app.solve.compare import _note
     assert _note(["solver"]) == "these runs differ only by solver, so the change in the answer is down to it"
     assert "cannot be attributed" in _note(["data", "solver"])
+
+
+def test_runs_before_and_after_a_scenario_moved_differ_by_its_model_version(db):
+    """Benchmark, October 2026: a run read its model through its scenario, so once the scenario was
+    moved to version 2 its version-1 runs were compared (and exported) as version 2."""
+    first, _ = _feasible(db, demand_value=1)
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": first}).scalar_one()
+    ir = db.execute(text("SELECT ir FROM model_version WHERE id = :v"), {"v": first}).scalar_one()
+    second = db.execute(text("INSERT INTO model_version (problem_id, ir, note) VALUES (:p, CAST(:ir AS jsonb), 'v2')"
+                             " RETURNING id"), {"p": problem, "ir": __import__("json").dumps(ir)}).scalar_one()
+    db.commit()
+    scenario = _scenario(db, first, "moved")
+    before = _solved(db, scenario)
+    db.execute(text("UPDATE scenario SET model_version_id = :v WHERE id = :s"), {"v": second, "s": scenario})
+    db.commit()
+    after = _solved(db, scenario)
+
+    assert db.execute(text("SELECT model_version_id FROM run WHERE id = :r"), {"r": before}).scalar_one() == first
+    assert db.execute(text("SELECT model_version_id FROM run WHERE id = :r"), {"r": after}).scalar_one() == second
+    assert compare(db, before, after).differs_by[0] == "model version"

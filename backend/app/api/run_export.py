@@ -42,7 +42,7 @@ def _record(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
         text("SELECT r.id, r.status, r.objective, r.solver, r.params, r.error, r.finished_at, mv.ir, d.data,"
              "       sol.assignments, sol.amounts, s.name AS scenario, p.name AS problem, p.domain_id"
-             "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = s.model_version_id"
+             "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
              "  JOIN problem p ON p.id = s.problem_id JOIN dataset d ON d.id = r.dataset_id"
              "  LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"),
         {"r": run_id},

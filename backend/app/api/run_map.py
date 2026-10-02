@@ -62,7 +62,7 @@ def run_features(db: Session, run_id: int) -> list[dict[str, Any]]:
     row = db.execute(
         text(
             "SELECT mv.ir, d.data, sol.assignments FROM run r JOIN scenario s ON s.id = r.scenario_id"
-            " JOIN model_version mv ON mv.id = s.model_version_id JOIN dataset d ON d.id = r.dataset_id"
+            " JOIN model_version mv ON mv.id = r.model_version_id JOIN dataset d ON d.id = r.dataset_id"
             " LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"
         ),
         {"r": run_id},
