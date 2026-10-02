@@ -13,6 +13,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { parseRouteId } from "../lib/routeId";
 import { useWords } from "../lib/words";
 import { useEntityTypes } from "../api/v1";
+import SolveEffort, { useSolveSeconds } from "../components/SolveEffort";
 
 const card = "rounded-2xl border border-slate-200 bg-white p-5";
 const link = "inline-flex items-center gap-2 rounded-md py-2 text-sm font-semibold text-blue-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
@@ -137,11 +138,12 @@ export function ProblemOverview() {
   const [failure, setFailure] = useState<string | null>(null);
   useDocumentTitle(`${readiness.data?.problem.name ?? "Problem"} · Overview`);
   const base = `/domains/${domainId}/problems/${problemId}`;
+  const [seconds] = useSolveSeconds();
   const solve = useMutation({
     mutationFn: async (publishFirst: boolean) => {
       const draft = readiness.data?.draft;
       if (publishFirst && draft) await publishDraft(problemId as number, draft.revision, "Published from the problem page to solve");
-      return solveProblem(problemId as number);
+      return solveProblem(problemId as number, seconds);
     },
     onSuccess: (run) => {
       void client.invalidateQueries();
@@ -204,6 +206,7 @@ export function ProblemOverview() {
       {data.check?.ready && mayRun && next.kind !== "solve" && next.kind !== "publish-and-solve" && (
         <button type="button" className={secondary} disabled={solve.isPending} onClick={() => solveNow()}>{data.last_run ? "Solve again" : "Solve"}</button>
       )}
+      {mayRun && <SolveEffort />}
       <span className="text-sm text-slate-600">{data.workers.says}.</span>
     </div>;
     return data.last_run ? <Link className={link} to={`${base}/runs/${data.last_run.id}`}>Open run {String(data.last_run.id)}</Link> : null;

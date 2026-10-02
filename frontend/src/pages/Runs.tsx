@@ -58,6 +58,7 @@ import { planWords, type PlanWords } from "../lib/planWords";
 import RunOutputs, { CompareMap } from "../components/RunOutputs";
 import { ruleSentence } from "../model/ruleSentence";
 import type { Constraint } from "../model/terms";
+import SolveEffort, { useSolveSeconds } from "../components/SolveEffort";
 
 /**
  * Solving, and what came of it.
@@ -103,7 +104,7 @@ const STATUS_NOTE: Record<RunStatus, string> = {
   infeasible: "No answer exists: the rules cannot all hold at once.",
   unbounded: "The goal can improve forever: a decision is missing a limit, or a rule is missing.",
   error: "The model could not be solved. The reason is below.",
-  unknown: "The solver stopped without deciding. Try a longer time limit.",
+  unknown: "The solver stopped without deciding. Give it longer (“Look for” beside Solve) and solve again.",
   queued: "Waiting to start.",
   running: "Solving.",
   cancelled: "Stopped before an answer.",
@@ -591,6 +592,7 @@ function ScenarioRuns({
     wasSettling.current = settling;
   }, [settling, refetchPreflight]);
   const createRun = useCreateRun();
+  const [seconds] = useSolveSeconds();
   const toast = useToast();
   const [againstId, setAgainstId] = useState<Id | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -651,7 +653,7 @@ function ScenarioRuns({
       {
         scenarioId,
         body: {
-          time_limit_s: 30,
+          time_limit_s: seconds,
           ...(solver ? { solver } : {}),
           ...(how === "front" ? { pareto_steps: 10 } : {}),
           ...(how === "robust" ? { robust: true } : {}),
@@ -706,6 +708,7 @@ function ScenarioRuns({
             {createRun.isPending || moveScenario.isPending ? "Queueing…"
               : movesFirst ? `Solve version ${newer.latest_version} (${scenarioName} scenario)` : `Solve (${scenarioName} scenario)`}
           </button>
+          <SolveEffort />
           {movesFirst && (
             <button type="button" onClick={() => solve("plain", true)} disabled={createRun.isPending || blocked}
               className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60">

@@ -35,6 +35,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDomain } from "../hooks/useDomain";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import ContextMismatch from "../components/ContextMismatch";
+import { useSolveSeconds } from "../components/SolveEffort";
 
 /**
  * Scenarios: the same model, asked a different question.
@@ -137,13 +138,14 @@ function ForProblem({ problemId }: { problemId: Id }) {
   const toast = useToast();
   const [solving, setSolving] = useState<Id | null>(null);
   const [solvingBase, setSolvingBase] = useState(false);
+  const [seconds] = useSolveSeconds();
   const runsOf = (scenarioId: Id, runId?: Id) =>
     `/runs?problem=${problemId}&scenario=${scenarioId}${runId === undefined ? "" : `&run=${runId}`}`;
   // One click: the run starts here, and the runs page follows it (user trial: "Solve" only opened that page).
   function solve(scenarioId: Id) {
     setSolving(scenarioId);
     createRun.mutate(
-      { scenarioId, body: { time_limit_s: 30 } },
+      { scenarioId, body: { time_limit_s: seconds } },
       {
         onSuccess: (run) => navigate(runsOf(scenarioId, run.id)),
         onError: (error: unknown) => {
@@ -202,7 +204,7 @@ function ForProblem({ problemId }: { problemId: Id }) {
               disabled={solvingBase}
               onClick={() => {
                 setSolvingBase(true);
-                solveProblem(problemId)
+                solveProblem(problemId, seconds)
                   .then((run) => navigate(runsOf(run.scenario_id, run.id)))
                   .catch((error: unknown) => toast.error(formatApiError(error)))
                   .finally(() => setSolvingBase(false));

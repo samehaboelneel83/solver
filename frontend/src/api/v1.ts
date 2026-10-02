@@ -989,7 +989,8 @@ export function useReadiness(problemId: Id | null) {
     refetchInterval: 10_000 });
 }
 /** Solve the latest published version on the problem's "Base" scenario, made or moved forward first. */
-export const solveProblem = (problemId: Id) => send<Run>("POST", `/api/v1/problems/${problemId}/solve`, {});
+export const solveProblem = (problemId: Id, timeLimitS?: number) =>
+  send<Run>("POST", `/api/v1/problems/${problemId}/solve`, timeLimitS ? { time_limit_s: timeLimitS } : {});
 /** Publish the caller's draft as the next version. */
 export const publishDraft = (problemId: Id, expectedRevision: number, note: string) =>
   send<ModelVersionSummary>("POST", `/api/v1/problems/${problemId}/draft/publish`, { expected_revision: expectedRevision, note });

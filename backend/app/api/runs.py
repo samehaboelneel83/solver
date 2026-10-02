@@ -47,7 +47,10 @@ router = APIRouter(prefix="/api/v1", tags=["runs"])
 # Bounded because a solve holds a worker for its duration. Ten seconds
 # answers the demo a thousand times over; the ceiling is what stops one run
 # starving every other.
-TimeLimit = Annotated[float, Field(gt=0, le=60)]
+#: Up to half an hour: a hard model may need minutes to prove its best, and there was no way to ask for more
+#: than a minute (benchmark, October 2026: a 10 s run stopped at a 2.9% gap, and "try a longer time limit"
+#: named nothing to change).
+TimeLimit = Annotated[float, Field(gt=0, le=1800)]
 Seed = Annotated[int, Field(ge=0, le=2**31 - 1)]
 
 

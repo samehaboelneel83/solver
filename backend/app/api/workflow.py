@@ -16,11 +16,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.deps import capabilities_of, get_current_user, requires
 from app.api.preflight import model_findings, worker_status
+from app.api.runs import TimeLimit
 from app.core.db import get_db
 from app.models.iam import UserAccount
 
@@ -97,11 +99,18 @@ def readiness(problem_id: int, db: Session = Depends(get_db), user: UserAccount 
     }
 
 
+class SolveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: How long the solver may look; the workspace's setting when left out.
+    time_limit_s: TimeLimit | None = None
+
+
 @router.post("/problems/{problem_id}/solve", status_code=201)
 def solve(
     problem_id: int,
     request: Request,
     response: Response,
+    body: SolveBody | None = None,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("run.submit")),
 ):
@@ -134,4 +143,4 @@ def solve(
             scenario_id = base["id"]
     else:
         scenario_id = base["id"]
-    return create_run(scenario_id, response, RunRequest(), db, user, None)
+    return create_run(scenario_id, response, RunRequest(time_limit_s=body.time_limit_s if body else None), db, user, None)

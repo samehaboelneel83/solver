@@ -117,6 +117,13 @@ def test_one_solve_keeps_a_base_scenario_on_the_latest_version(world, db, auth_h
     body = client.get(f"/api/v1/problems/{world['problem']}/readiness", headers=auth_headers).json()
     assert body["last_run"]["id"] == second.json()["id"]
 
+    # How long it may look, chosen at the button -- minutes if need be (benchmark, October 2026).
+    longer = client.post(solve, json={"time_limit_s": 300}, headers=auth_headers)
+    assert longer.status_code == 201, longer.text
+    params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": longer.json()["id"]}).scalar_one()
+    assert params["time_limit_s"] == 300
+    assert client.post(solve, json={"time_limit_s": 4000}, headers=auth_headers).status_code == 422
+
 
 def test_the_scenario_preflight_names_missing_values_in_place_of_the_compiler_refusal(world, db, auth_headers):  # noqa: F811
     version = make_model_version(db, world["problem"], IR)
