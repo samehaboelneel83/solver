@@ -72,6 +72,36 @@ describe("RecordPicker", () => {
     expect(screen.getByTestId("value")).toHaveTextContent("D850");
   });
 
+  it("takes a key or name typed in full without it being clicked", async () => {
+    renderPicker();
+    const input = screen.getByTestId("picker");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "D850" } });
+    await screen.findByRole("option", { name: "D850 — Depot 850" });
+    fireEvent.blur(input);
+    expect(screen.getByTestId("value")).toHaveTextContent("D850");
+    await new Promise((resolve) => setTimeout(resolve, 150)); // the list closes after a blur
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Depot 12" } });
+    await screen.findByRole("option", { name: "D129 — Depot 129" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("value")).toHaveTextContent("D12");
+    expect(screen.getByTestId("value")).not.toHaveTextContent("D129");
+  });
+
+  it("leaves a partly typed key unpicked", async () => {
+    renderPicker();
+    const input = screen.getByTestId("picker");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "D85" } });
+    await screen.findByRole("option", { name: "D850 — Depot 850" });
+    fireEvent.change(input, { target: { value: "D8" } });
+    await waitFor(() => expect(mockFetch.mock.calls.some(([url]) => String(url).includes("q=D8&"))).toBe(true));
+    fireEvent.blur(input);
+    expect(screen.getByTestId("value")).toHaveTextContent("");
+  });
+
   it("lists a blocked record with its reason and does not take it", async () => {
     renderPicker({ blocked: new Map([["D12", "would make a loop"]]) });
     const input = screen.getByTestId("picker");

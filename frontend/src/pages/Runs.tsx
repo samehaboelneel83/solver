@@ -630,8 +630,21 @@ function ScenarioRuns({
   const anyComparable = [...comparable, ...elsewhere];
   const against = anyComparable.some((row) => row.id === againstId) ? againstId : null;
 
-  function solve(how: "plain" | "front" | "robust" | "alternatives" = "plain") {
+  // A scenario left on an older version after a publish (benchmark, October 2026: "Solve" quietly ran
+  // version 1 after version 2 was published). Solving moves it forward first; "as it is" keeps it.
+  const newer = preflight.data?.findings.find((f) => f.code === "newer_version" && f.latest_version_id != null);
+  const movesFirst = newer !== undefined && can("model.publish");
+
+  async function solve(how: "plain" | "front" | "robust" | "alternatives" = "plain", asItIs = false) {
     setFailure(null);
+    if (movesFirst && !asItIs) {
+      try {
+        await moveScenario.mutateAsync({ id: scenarioId, body: { model_version_id: newer.latest_version_id as Id } });
+      } catch (error) {
+        setFailure(formatApiError(error));
+        return;
+      }
+    }
     createRun.mutate(
       {
         scenarioId,
@@ -688,8 +701,15 @@ function ScenarioRuns({
             disabled={createRun.isPending || blocked}
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {createRun.isPending ? "Queueing…" : `Solve (${scenarioName} scenario)`}
+            {createRun.isPending || moveScenario.isPending ? "Queueing…"
+              : movesFirst ? `Solve version ${newer.latest_version} (${scenarioName} scenario)` : `Solve (${scenarioName} scenario)`}
           </button>
+          {movesFirst && (
+            <button type="button" onClick={() => solve("plain", true)} disabled={createRun.isPending || blocked}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+              Solve version {version.data?.version ?? "it is on"} as it is
+            </button>
+          )}
           {!simple && twoGoals && (
             <button
               type="button"

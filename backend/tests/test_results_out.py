@@ -400,3 +400,22 @@ def test_a_report_fetches_no_internet_imagery_when_the_installation_keeps_its_si
     assert basemap_of(object(), 1, "builtin-satellite") == BUILTIN_BASEMAPS["builtin-satellite"]
     setting(False)
     assert basemap_of(object(), 1, "builtin-satellite") is None
+
+
+def test_an_export_has_one_row_per_cell_with_its_amount():
+    """Benchmark, October 2026: a whole-number or continuous decision is listed in the roster and again
+    in the amounts, and the export wrote both -- a spurious 1 next to every real amount."""
+    from app.api.run_export import decision_rows, to_csv
+
+    ir = {"variables": {"open": {"index": ["site"], "domain": "binary"},
+                        "ship": {"index": ["site", "customer"], "domain": "continuous"},
+                        "trucks": {"index": ["site"], "domain": "integer"}}}
+    rec = {"ir": ir, "assignments": {"open": [["S1"]], "ship": [["S1", "C1"], ["S1", "C2"]], "trucks": [["S1"]]},
+           "amounts": {"ship": [{"index": ["S1", "C1"], "value": 30.5}, {"index": ["S1", "C2"], "value": 2.0}],
+                       "trucks": [{"index": ["S1"], "value": 5}]},
+           "problem": "p", "id": 1}
+    rows = decision_rows(rec)
+    assert rows["open"][1] == [["S1", 1]]
+    assert rows["ship"][1] == [["S1", "C1", 30.5], ["S1", "C2", 2.0]]
+    assert rows["trucks"][1] == [["S1", 5.0]]
+    assert to_csv(rec).count("ship,") == 2

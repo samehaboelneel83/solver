@@ -72,13 +72,17 @@ def decision_rows(rec: dict[str, Any]) -> dict[str, tuple[list[str], list[list[A
     out: dict[str, tuple[list[str], list[list[Any]]]] = {}
     for var, spec in variables.items():
         index = list(spec.get("index") or [])
-        rows: list[list[Any]] = []
-        for cell in (rec["assignments"] or {}).get(var, []):
-            rows.append([*map(str, cell), 1])
+        # A solution lists every non-zero cell under assignments, and the amount of a decision that is
+        # not yes/no again under amounts: one row per cell, with its amount when it has one.
+        cells: dict[tuple[str, ...], Any] = {tuple(map(str, cell)): 1 for cell in (rec["assignments"] or {}).get(var, [])}
         for entry in (rec["amounts"] or {}).get(var, []):
+            key = tuple(map(str, entry.get("index") or []))
             value = float(entry.get("value") or 0)
             if abs(value) > 1e-9:
-                rows.append([*map(str, entry.get("index") or []), value])
+                cells[key] = value
+            else:
+                cells.pop(key, None)
+        rows = [[*key, value] for key, value in cells.items()]
         out[var] = (index, sorted(rows, key=lambda r: [str(x) for x in r[:-1]]))
     return out
 

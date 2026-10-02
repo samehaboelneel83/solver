@@ -973,6 +973,27 @@ describe("Runs", () => {
     expect(screen.queryByRole("button", { name: /^solve/i })).not.toBeInTheDocument();
   });
 
+  it("moves a scenario left on an older version forward before solving, unless asked not to", async () => {
+    const writes: string[] = [];
+    stub({ write: (path: string, options?: { method?: string; body?: string }) => {
+      writes.push(`${options?.method} ${path} ${options?.body ?? ""}`);
+      return Promise.resolve(path.endsWith("/runs") ? { ...RUN_SUMMARY, id: 99 } : SCENARIOS.items[0]);
+    } });
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: unknown) => path.endsWith("/preflight")
+      ? Promise.resolve({ scenario_id: 1, version: 1, ready: true, model_class: "MILP", planner: [], solvers: [],
+          workers: { state: "online", online: 1, solving: 0, queued: 0, last_seen: null, says: "A worker is ready" },
+          findings: [{ kind: "warning", code: "newer_version", says: "This scenario solves version 1; version 2 is the latest published.",
+            latest_version: 2, latest_version_id: 44 }] })
+      : base(path, options));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Solve version 2 \(/ }));
+    await waitFor(() => expect(writes.some((w) => w.includes("/runs"))).toBe(true));
+    expect(writes[0]).toMatch(/^PATCH \/api\/v1\/scenarios\/\d+ .*"model_version_id":44/);
+    expect(screen.getByRole("button", { name: /as it is$/ })).toBeInTheDocument();
+  });
+
   it("reports a failed solve without losing the runs already listed", async () => {
     const { ApiError } = await import("../api/client");
     stub({ write: () => Promise.reject(new ApiError(500, JSON.stringify({ detail: "boom" }))) });

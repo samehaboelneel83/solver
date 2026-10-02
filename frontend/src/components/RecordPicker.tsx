@@ -42,7 +42,7 @@ function optionText(e: Pick<Entity, "key" | "label">): string {
  * loaded the first 500 and showed any later value as "not found".
  *
  * The chosen key is kept until another is picked or the field is cleared; text typed and
- * not picked never becomes the value. Keys in `blocked` are listed, greyed, with the reason.
+ * not picked becomes the value only when it is exactly one record's key or name. Keys in `blocked` are listed, greyed, with the reason.
  */
 export default function RecordPicker({
   typeId,
@@ -111,6 +111,11 @@ export default function RecordPicker({
     }
   }
 
+  // The one option whose key or name is exactly what was typed, ignoring case.
+  const exactMatches = typed === "" || search !== typed ? []
+    : options.filter((e) => e.key.toLowerCase() === typed.toLowerCase() || (e.label ?? "").toLowerCase() === typed.toLowerCase());
+  const exact = exactMatches.length === 1 && !blocked?.has(valueOf(exactMatches[0])) ? exactMatches[0] : null;
+
   function pick(key: string) {
     if (blocked?.has(key)) return;
     onChange(key);
@@ -130,6 +135,9 @@ export default function RecordPicker({
     } else if (event.key === "Enter" && open && active >= 0 && options[active]) {
       event.preventDefault();
       pick(valueOf(options[active]));
+    } else if (event.key === "Enter" && exact) {
+      event.preventDefault();
+      pick(valueOf(exact));
     } else if (event.key === "Escape") {
       setOpen(false);
       setText("");
@@ -158,7 +166,12 @@ export default function RecordPicker({
             setOpen(true);
             setText("");
           }}
-          onBlur={() => setTimeout(() => setOpen(false), 120)}
+          onBlur={() => {
+            // A key or name typed in full is that record, picked or not (benchmark, October 2026: "C36"
+            // typed and tabbed past was dropped, and the scenario's change with it).
+            if (exact && open) pick(valueOf(exact));
+            setTimeout(() => setOpen(false), 120);
+          }}
           onChange={(event) => {
             setText(event.target.value);
             setOpen(true);
