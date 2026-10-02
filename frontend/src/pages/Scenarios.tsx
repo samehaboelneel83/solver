@@ -15,6 +15,7 @@ import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import RecordPicker from "../components/RecordPicker";
 import {
+  solveProblem,
   useCreateRun,
   useEntityTypes,
   useCreateScenario,
@@ -132,6 +133,7 @@ function ForProblem({ problemId }: { problemId: Id }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [solving, setSolving] = useState<Id | null>(null);
+  const [solvingBase, setSolvingBase] = useState(false);
   const runsOf = (scenarioId: Id, runId?: Id) =>
     `/runs?problem=${problemId}&scenario=${scenarioId}${runId === undefined ? "" : `&run=${runId}`}`;
   // One click: the run starts here, and the runs page follows it (user trial: "Solve" only opened that page).
@@ -190,6 +192,22 @@ function ForProblem({ problemId }: { problemId: Id }) {
       ) : items.length === 0 ? (
         <Note>
           <p>No scenarios yet. One that changes nothing still works: it asks the model as written.</p>
+          {canSolve && versionItems.length > 0 && (
+            <button
+              type="button"
+              className="mt-2 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+              disabled={solvingBase}
+              onClick={() => {
+                setSolvingBase(true);
+                solveProblem(problemId)
+                  .then((run) => navigate(runsOf(run.scenario_id, run.id)))
+                  .catch((error: unknown) => toast.error(formatApiError(error)))
+                  .finally(() => setSolvingBase(false));
+              }}
+            >
+              {solvingBase ? "Starting…" : "Solve the model as written (Base)"}
+            </button>
+          )}
         </Note>
       ) : (
         <ul className="mb-4 space-y-2">

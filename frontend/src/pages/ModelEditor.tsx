@@ -1,3 +1,4 @@
+import CoverageRecipeForm from "../model/CoverageRecipeForm";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -711,6 +712,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
+      {canEdit && !graphFocus && (
+        <CoverageRecipeForm
+          kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
+          data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
+          onApply={(edit) => setDraft((current) => current && edit(current))}
+        />
+      )}
       <div hidden={focusedPart === "rules" || focusedPart === "objective" || (stepByStep && !["sets", "data", "decisions"].includes(step))} id="declarations-editor" tabIndex={-1} aria-label="Declarations editor">
       <DeclarationsEditor
         sets={draft.sets}
