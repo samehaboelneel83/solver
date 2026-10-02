@@ -78,7 +78,8 @@ def test_layers_become_records_with_shapes_fields_and_measures(town, db):  # noq
     http, t, ds = town
     plan, made = _make(http, t, ds, "DEPOTS")
     assert plan["name"] == "depot" and plan["key"] == "name"
-    assert {f["name"]: f["data_type"] for f in plan["fields"]} == {"capacity": "integer"}
+    # The key is listed too, left out (benchmark, October 2026: a changed key kept the old one as a field).
+    assert {f["name"]: f["data_type"] for f in plan["fields"] if not f["skip"]} == {"capacity": "integer"}
     assert made["made"] == 2 and made["updated"] == 0
     rows = dict(db.execute(text("SELECT e.key, e.attrs FROM entity e WHERE e.entity_type_id = :t"),
                            {"t": made["entity_type_id"]}).all())

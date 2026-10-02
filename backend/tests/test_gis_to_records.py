@@ -20,8 +20,20 @@ def test_a_proposal_picks_the_name_as_key_and_types_the_rest():
     feats = [_point("Y1", 29.90, 31.18, max_trucks=6), _point("Y2", 29.94, 31.18, max_trucks=12)]
     plan = to_records.propose(feats, ["YARDS"], set())
     assert plan["name"] == "yard" and plan["key"] == "name"
-    assert [(f["name"], f["data_type"]) for f in plan["fields"]] == [("max_trucks", "integer")]
+    # The key is offered as a field too, left out, so choosing another key keeps it.
+    assert [(f["name"], f["data_type"], f["skip"]) for f in plan["fields"]] == [("name", "text", True), ("max_trucks", "integer", False)]
     assert plan["geometry_field"] == "shape" and plan["measures"] == []
+
+
+def test_a_proposal_keys_by_an_id_and_names_by_the_name():
+    """Benchmark, October 2026: "name" became the key and the records were shown as "-"."""
+    feats = [_point("Arish", 33.8, 31.1, base_id="B04"), _point("El Tor", 33.6, 28.2, base_id="B15")]
+    plan = to_records.propose(feats, ["bases"], set())
+    assert plan["key"] == "base_id" and plan["label"] == "name"
+    seed, faults = to_records.build_seed(feats, plan)
+    assert not faults
+    assert [(e["key"], e["label"]) for e in seed["entities"]] == [("B04", "Arish"), ("B15", "El Tor")]
+    assert "name" in seed["entities"][0]["attrs"] and "base_id" not in seed["entities"][0]["attrs"]
 
 
 def test_records_carry_their_shape_and_fields():
