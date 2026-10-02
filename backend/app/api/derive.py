@@ -42,7 +42,7 @@ _NAME = r"^[a-z][a-z0-9_]*$"
 
 class DeriveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["date_parts", "categories", "from_link", "formula", "linked_total"]
+    op: Literal["date_parts", "categories", "from_link", "formula", "linked_total", "link_by"]
     #: The field read -- for `formula`, the name of the field made.
     field: str = Field(pattern=_NAME, max_length=63)
     #: For `from_link`: the number field of the linked kind to copy.
@@ -53,6 +53,10 @@ class DeriveBody(BaseModel):
     from_kind: str | None = Field(default=None, pattern=_NAME, max_length=63)
     link: str | None = Field(default=None, pattern=_NAME, max_length=63)
     how: Literal["count", "sum", "mean", "max", "min"] = "count"
+    #: For `link_by`: the kind linked to, and what of it the field matches -- its key (also its label),
+    #: or one of its fields.
+    to_kind: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    match: str = Field(default="key", max_length=63)
 
 
 def _slug(value: Any) -> str:
@@ -68,7 +72,7 @@ def _fields(db: Session, type_id: int) -> dict[str, dict[str, Any]]:
 @router.post("/entity-types/{entity_type_id}/derive")
 def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
            user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
-    kind = db.execute(text("SELECT id, name FROM entity_type WHERE id = :t"), {"t": entity_type_id}).mappings().one_or_none()
+    kind = db.execute(text("SELECT id, name, domain_id FROM entity_type WHERE id = :t"), {"t": entity_type_id}).mappings().one_or_none()
     if kind is None:
         raise HTTPException(404, "entity type not found")
     fields = _fields(db, entity_type_id)
@@ -76,6 +80,8 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
         return _formula_field(db, user, kind, fields, body)
     if body.op == "linked_total":
         return _linked_total(db, user, kind, fields, body)
+    if body.op == "link_by":
+        return _link_by(db, user, kind, fields, body)
     source = fields.get(body.field)
     if source is None:
         raise HTTPException(422, f"{kind['name']} has no field {body.field!r}")
@@ -262,6 +268,74 @@ def _linked_total(db: Session, user: UserAccount, kind: Any, fields: dict[str, d
                  object_type="entity_type", object_id=kind["id"])
     db.commit()
     return {"made": [body.field], "records": written, "left_empty": 0}
+
+
+def _fold(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[str, Any]], body: DeriveBody) -> dict[str, Any]:
+    """A link field from each record to the record of another kind its field names -- call history to
+    its district by `dist_code`, yield rows to their parcel -- matched on the other kind's key (or
+    label), or one of its fields, case and spaces aside. No links file made outside the app
+    (benchmark re-test, October 2026). The links follow the field, as for any link field."""
+    if not body.of or not body.to_kind:
+        raise HTTPException(422, "name the field holding the code (of) and the kind it names (to_kind)")
+    if body.of not in fields:
+        raise HTTPException(422, f"{kind['name']} has no field {body.of!r}")
+    target = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                        {"d": kind["domain_id"], "n": body.to_kind}).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(422, f"there is no kind {body.to_kind!r}")
+    if body.match != "key" and body.match not in _fields(db, target):
+        raise HTTPException(422, f"{body.to_kind} has no field {body.match!r}")
+    existing = fields.get(body.field)
+    if existing is not None:
+        if existing["data_type"] != "reference":
+            raise HTTPException(409, f"{body.field} already exists as a {existing['data_type']} field; choose another name")
+        to = db.execute(text("SELECT to_type_id FROM relationship_type WHERE id = :r"), {"r": existing["references_id"]}).scalar_one()
+        if to != target:
+            raise HTTPException(409, f"{body.field} already links to another kind; choose another name")
+    else:
+        if db.execute(text("SELECT 1 FROM relationship_type WHERE domain_id = :d AND name = :n"),
+                      {"d": kind["domain_id"], "n": body.field}).first():
+            raise HTTPException(409, f"there is already a link called {body.field!r}; choose another name")
+        rel = db.execute(text(
+            "INSERT INTO relationship_type (domain_id, name, from_type_id, to_type_id, cardinality)"
+            " VALUES (:d, :n, :a, :b, 'many_to_one') RETURNING id"),
+            {"d": kind["domain_id"], "n": body.field, "a": kind["id"], "b": target}).scalar_one()
+        db.execute(text(
+            "INSERT INTO attribute_def (entity_type_id, name, data_type, references_id, sort_order)"
+            " VALUES (:t, :n, 'reference', :r, coalesce((SELECT max(sort_order) + 1 FROM attribute_def WHERE entity_type_id = :t), 0))"),
+            {"t": kind["id"], "n": body.field, "r": rel})
+    # What each value names: a key, then a label (or the chosen field). Two records answering to one
+    # value make it ambiguous; it is listed, not guessed.
+    names: dict[str, set[str]] = {}
+    for key, label, attrs in db.execute(text(
+            "SELECT key, label, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": target}):
+        said = [key, label] if body.match == "key" else [(attrs or {}).get(body.match)]
+        for value in said:
+            if value not in (None, ""):
+                names.setdefault(_fold(value), set()).add(key)
+    linked, unmatched, ambiguous = 0, [], []
+    for entity_id, key, attrs in db.execute(text(
+            "SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t)) ORDER BY key"), {"t": kind["id"]}).all():
+        value = (attrs or {}).get(body.of)
+        if value in (None, ""):
+            continue
+        found = names.get(_fold(value), set())
+        if len(found) != 1:
+            (ambiguous if found else unmatched).append(f"{key}: {value}")
+            continue
+        db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object(:f, CAST(:v AS text)) WHERE id = :i"),
+                   {"f": body.field, "v": next(iter(found)), "i": entity_id})
+        linked += 1
+    audit.record(db, organization_id=user.organization_id, actor_id=user.id,
+                 api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
+                 object_type="entity_type", object_id=kind["id"])
+    db.commit()
+    return {"made": [body.field], "records": linked, "left_empty": len(unmatched) + len(ambiguous),
+            "unmatched": unmatched[:20], "ambiguous": ambiguous[:20]}
 
 
 # --- data values computed from records and other data values -------------------------------------

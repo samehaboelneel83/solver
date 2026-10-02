@@ -77,6 +77,12 @@ describe("BulkPanel (queue R21)", () => {
     expect(screen.getByText(/Two columns are read as label/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
     fireEvent.change(screen.getByRole("combobox", { name: "notes is read as" }), { target: { value: "" } });
+    // A key column whose values repeat says two columns can make one (re-test, October 2026).
+    fireEvent.change(screen.getByRole("combobox", { name: "team is read as" }), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Doctors on duty is read as" }), { target: { value: "key" } });
+    expect(screen.getByText(/values repeat, so it cannot name each record alone/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Doctors on duty is read as" }), { target: { value: "__new__" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "team is read as" }), { target: { value: "key" } });
     // Two columns as the key make one key (benchmark, October 2026).
     fireEvent.change(screen.getByRole("combobox", { name: "hospital is read as" }), { target: { value: "key" } });
     expect(screen.getByText(/The key is made of .* joined by/)).toBeInTheDocument();

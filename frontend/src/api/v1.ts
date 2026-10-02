@@ -1956,7 +1956,9 @@ export const useApplyPredictor = () =>
   useV1Mutation(({ id, body }: { id: Id; body: { field: string; only_missing: boolean } }) => applyPredictor(id, body));
 /** Number fields made from a date, a text or a linked record's number (`app/api/derive.py`). */
 export type DeriveBody = {
-  op: "date_parts" | "categories" | "from_link" | "formula" | "linked_total"; field: string; of?: string; formula?: string;
+  op: "date_parts" | "categories" | "from_link" | "formula" | "linked_total" | "link_by"; field: string; of?: string; formula?: string;
+  /** link_by: the kind the field's code names, and what of it it matches ("key", or a field). */
+  to_kind?: string; match?: string;
   /** linked_total: the kind whose records link here, by which link, totalled how. */
   from_kind?: string; link?: string; how?: "count" | "sum" | "mean" | "max" | "min";
 };

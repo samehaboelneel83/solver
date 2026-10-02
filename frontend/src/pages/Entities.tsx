@@ -37,6 +37,7 @@ import { useWords } from "../lib/words";
 import { useEditorLevel } from "../model/editorLevel";
 import FormulaField from "../components/FormulaField";
 import LinkedTotalField from "../components/LinkedTotalField";
+import LinkByField from "../components/LinkByField";
 
 // Lazy, like the graph's filter bar. The builder is the only module that
 // imports react-querybuilder, which Task 14c measured at +47.6 kB gz on a
@@ -592,12 +593,18 @@ function EntityTable({
   const placed = geometryFields(type).length > 0;
   return (
     <>
-      {/* Ratios and travel times as data, in Simple as in Expert (benchmark, October 2026). */}
+      {/* Ratios and travel times as data, in Simple as in Expert (benchmark, October 2026); joins named in
+          the title, where testers looked for them (re-test, October 2026). */}
       <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
         <summary className="cursor-pointer select-none text-sm font-medium text-slate-800">
-          Compute a field from others (a ratio, a time from a length and a speed)
+          Compute and join: a field from others, link by a code (a join), totals of linked records
         </summary>
-        <div className="mt-2"><FormulaField kind={type} /><LinkedTotalField kind={type} /></div>
+        <div className="mt-2"><FormulaField kind={type} /><LinkByField kind={type} /><LinkedTotalField kind={type} /></div>
+        <p className="mt-3 text-xs text-slate-600">
+          A value for each pair of records — a parcel&apos;s suitability for each crop read through its soil, 1 or 0 by a
+          comparison — is made under{" "}
+          <Link className="text-blue-700 underline" to={`/domains/${type.domain_id}/data/parameters`}>Data values → A data value computed from the records</Link>.
+        </p>
       </details>
       {/* One door for bringing records in (improvement plan 4.5): a file of rows, or the features of a map layer. */}
       <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">

@@ -266,7 +266,18 @@ export default function BulkPanel({
               ))}
             </tbody>
           </table>
-          {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key.</p>}
+          {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key — or several columns, read together as one key.</p>}
+          {(() => {
+            // A key whose values repeat: say that two columns can make one (benchmark re-test, October 2026:
+            // a road and a month were given a key column outside the app).
+            const keys = preview.columns.filter((c) => choices[c.name] === "key");
+            return keys.length === 1 && !keys[0].unique ? (
+              <p role="note" className="mt-1 text-sm text-amber-800">
+                {keys[0].name}&apos;s values repeat, so it cannot name each record alone. Read a second column as the key too
+                (a road and a month): the two make one key, such as R1_2026-01.
+              </p>
+            ) : null;
+          })()}
           {keyParts.length > 1 && (
             <p className="mt-1 text-sm text-slate-700">The key is made of {keyParts.join(" and ")}, joined by “_”: {keyParts.map((k) => preview.columns.find((c) => c.name === k)?.sample[0] ?? "…").join("_")}.</p>
           )}

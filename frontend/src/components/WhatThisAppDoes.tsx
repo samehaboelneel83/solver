@@ -16,7 +16,7 @@ export const STAGES: { title: string; steps: Step[] }[] = [
     { what: "Import data", how: "Upload a CSV or Excel file of records; columns are matched for you.", page: "records", where: "Records → Many records at once" },
     { what: "Combine tables and maps", how: "Turn map layers into records, or give spreadsheet rows a place from lat/lon.", page: "map-data", where: "Map data → Use in models" },
     { what: "Explore the data", how: "Browse kinds, records and their links side by side.", page: "workbench", where: "Data workbench" },
-    { what: "Link and join records", how: "Links between records, totals of linked records, values looked up through a link.", page: "relationships", where: "Links between records · Data values" },
+    { what: "Link and join records", how: "Link records by a code they hold (a join), totals of linked records, values looked up through a link.", page: "records", where: "Records → Compute and join" },
     { what: "Measure from the map", how: "Distances, travel times, within reach, which area, along your own roads.", page: "parameters", where: "Data values → From the map" },
   ] },
   { title: "Write the model", steps: [

@@ -186,3 +186,38 @@ def test_a_value_is_read_through_a_relationship_from_either_end(tenants, db):  #
     values = {tuple(c["entity_ids"]): c["value"] for c in
               http.get(f"/api/v1/parameters/{back['parameter_id']}/values", headers=h).json()["cells"]}
     assert values == {(ids["d1"],): 15, (ids["d2"],): 20}
+
+
+def test_records_are_linked_by_a_code_they_hold(tenants, db):  # noqa: F811
+    """Benchmark re-test, October 2026: call history was linked to districts by `dist_code` only through
+    a links file made outside the app."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        got = http.post(path, json=body, headers=h)
+        assert got.status_code in (200, 201), got.text
+        return got.json()
+
+    district = post("/api/v1/entity-types", {"domain_id": domain, "name": "district", "role": "location"})
+    post(f"/api/v1/entity-types/{district['id']}/attributes", {"name": "code", "data_type": "text"})
+    call = post("/api/v1/entity-types", {"domain_id": domain, "name": "call", "role": "other"})
+    post(f"/api/v1/entity-types/{call['id']}/attributes", {"name": "dist_code", "data_type": "text"})
+    post(f"/api/v1/entity-types/{call['id']}/attributes", {"name": "district_name", "data_type": "text"})
+    for key, label, code in (("D1", "Dokki", "GZ-01"), ("D2", "Imbaba", "GZ-02")):
+        post("/api/v1/entities", {"entity_type_id": district["id"], "key": key, "label": label, "attrs": {"code": code}})
+    for key, code, name in (("c1", "gz-01", "dokki"), ("c2", "GZ-02 ", "Imbaba"), ("c3", "GZ-99", "nowhere"), ("c4", None, None)):
+        post("/api/v1/entities", {"entity_type_id": call["id"], "key": key, "attrs": {k: v for k, v in (("dist_code", code), ("district_name", name)) if v}})
+
+    path = f"/api/v1/entity-types/{call['id']}/derive"
+    by_code = post(path, {"op": "link_by", "field": "in_district", "of": "dist_code", "to_kind": "district", "match": "code"})
+    assert by_code["records"] == 2 and by_code["unmatched"] == ["c3: GZ-99"]
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": call["id"]}, headers=h).json()["items"]}
+    assert items["c1"]["in_district"] == "D1" and items["c2"]["in_district"] == "D2" and "in_district" not in items["c4"]
+    # The links are there for a model to walk, and a total of linked records reads them.
+    totals = post(f"/api/v1/entity-types/{district['id']}/derive", {"op": "linked_total", "field": "calls", "from_kind": "call", "link": "in_district"})
+    assert totals["records"] == 2
+    # By name (the label), into the same link: computed again, it replaces.
+    by_name = post(path, {"op": "link_by", "field": "in_district", "of": "district_name", "to_kind": "district"})
+    assert by_name["records"] == 2
+    refused = http.post(path, json={"op": "link_by", "field": "dist_code", "of": "dist_code", "to_kind": "district"}, headers=h)
+    assert refused.status_code == 409
