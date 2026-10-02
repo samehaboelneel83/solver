@@ -238,3 +238,46 @@ def test_a_refused_row_among_many_is_named_and_the_rest_kept_when_asked(shop):
     assert kept["written"] == 299 and kept["skipped"] == 1
     items = shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}&limit=500").json()["items"]
     assert len(items) == 299
+
+
+def test_an_import_finds_stored_records_by_key_whatever_its_case_and_says_what_it_would_make(shop):
+    """Benchmark, October 2026: "h001" made a second H001, the name column was taken for the key,
+    and "Check only" said every row was clean."""
+    site = shop["site"]["id"]
+    path = f"/api/v1/entity-types/{site}/upload"
+    _upload(shop, path, [["key", "capacity"], ["H001", "5"], ["H002", "6"]])
+    files = _csv([["name", "site_code", "capacity"], ["Tanta", "h001 ", "7"], ["Banha", "H002", "8"], ["Zagazig", "H003", "9"]])
+    preview = shop["call"]("POST", f"{path}/preview", files=files).json()
+    guess = {c["name"]: c for c in preview["columns"]}
+    assert preview["existing"] == 2 and guess["site_code"]["suggestion"] == "key" and guess["site_code"]["matches_keys"] == 2
+    mapping = {"name": "label", "site_code": "key", "capacity": "capacity"}
+    checked = shop["call"]("POST", f"{path}?dry_run=true", files=_csv([["name", "site_code", "capacity"], ["Tanta", "h001 ", "7"],
+                           ["Banha", "H002", "8"], ["Zagazig", "H003", "9"]]), data={"mapping": json.dumps(mapping)}).json()
+    assert checked["ok"] and (checked["created"], checked["updated"]) == (1, 2)
+    done = shop["call"]("POST", path, files=_csv([["name", "site_code", "capacity"], ["Tanta", "h001 ", "7"],
+                        ["Banha", "H002", "8"], ["Zagazig", "H003", "9"]]), data={"mapping": json.dumps(mapping)}).json()
+    assert done["written"] == 3
+    items = {e["key"]: e for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}").json()["items"]}
+    assert sorted(items) == ["H001", "H002", "H003"] and items["H001"]["attrs"]["capacity"] == 7 and items["H001"]["label"] == "Tanta"
+
+
+def test_latitude_and_longitude_columns_put_the_records_on_the_map(shop):
+    kind = shop["post"]("/api/v1/entity-types", {"domain_id": shop["domain"], "name": "call", "role": "other"})
+    report = _upload(shop, f"/api/v1/entity-types/{kind['id']}/upload",
+                     [["key", "lat", "lon"], ["c1", "30.05", "31.24"], ["c2", "", "31.2"]], add_fields=True)
+    assert report["ok"], report
+    assert any("1 rows placed on the map in location" in n for n in report["notes"])
+    items = {e["key"]: e["attrs"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={kind['id']}").json()["items"]}
+    assert items["c1"]["location"] == {"type": "Point", "coordinates": [31.24, 30.05]} and "location" not in items["c2"]
+
+
+def test_several_records_are_deleted_at_once_or_none(shop):
+    site = shop["site"]["id"]
+    _upload(shop, f"/api/v1/entity-types/{site}/upload", [["key", "capacity"], ["a", "1"], ["b", "2"], ["c", "3"]])
+    items = {e["key"]: e["id"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}").json()["items"]}
+    missing = shop["call"]("POST", "/api/v1/entities/delete", {"ids": [items["a"], 999999999]}, ok=None)
+    assert missing.status_code == 404
+    assert len(shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}").json()["items"]) == 3  # none of them
+    done = shop["call"]("POST", "/api/v1/entities/delete", {"ids": [items["a"], items["b"]]}).json()
+    assert done == {"deleted": 2}
+    assert [e["key"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}").json()["items"]] == ["c"]

@@ -278,3 +278,19 @@ describe("Entities: the list", () => {
     await waitFor(() => expect(paths().some((p) => p.includes("offset=50"))).toBe(true));
   });
 });
+
+describe("Entities: deleting several at once (benchmark, October 2026)", () => {
+  it("deletes the ticked records in one request, after asking", async () => {
+    serve({ "/api/v1/entities/delete": { deleted: 2 } });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage();
+    await screen.findByRole("link", { name: "zoe" });
+    fireEvent.click(screen.getByLabelText("Select every record on this page"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete 2 selected" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(await screen.findByText("2 records deleted.")).toBeInTheDocument();
+    const call = mockFetch.mock.calls.find(([p]) => p === "/api/v1/entities/delete")!;
+    expect(JSON.parse(call[1].body)).toEqual({ ids: [42, 43] });
+    confirm.mockRestore();
+  });
+});

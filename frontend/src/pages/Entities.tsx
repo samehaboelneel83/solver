@@ -12,6 +12,7 @@ import OfflineNotice from "../components/OfflineNotice";
 import Skeleton from "../components/Skeleton";
 import { formatApiError } from "../api/errors";
 import {
+  useDeleteEntities,
   useEntities,
   useEntityTypes,
   useRelationshipTypes,
@@ -395,6 +396,21 @@ function EntityTable({
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
   const filtered = Boolean(q) || applied !== null;
+  // Records ticked to delete together: an import gone wrong is undone in one step (benchmark, October 2026).
+  const [picked, setPicked] = useState<Set<Id>>(() => new Set());
+  const removeMany = useDeleteEntities();
+  const [removal, setRemoval] = useState<{ error: boolean; text: string } | null>(null);
+  const canDelete = can("domain.edit");
+  useEffect(() => setPicked(new Set()), [type.id, q, applied, offset]);
+  const allPicked = rows.length > 0 && rows.every((e) => picked.has(e.id));
+  function deletePicked() {
+    const ids = [...picked];
+    if (!ids.length || !window.confirm(`Delete ${ids.length} ${type.name} record${ids.length === 1 ? "" : "s"}? Their links and values go with them. This cannot be undone.`)) return;
+    removeMany.mutate(ids, {
+      onSuccess: (done) => { setPicked(new Set()); setRemoval({ error: false, text: `${done.deleted} records deleted.` }); },
+      onError: (e) => setRemoval({ error: true, text: formatApiError(e) }),
+    });
+  }
 
   const conditions = (
     <Conditions
@@ -470,10 +486,27 @@ function EntityTable({
   } else {
     body = (
       <>
+        {canDelete && picked.size > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">
+            <span>{picked.size} selected</span>
+            <button type="button" disabled={removeMany.isPending} onClick={deletePicked}
+              className="rounded-md bg-red-600 px-3 py-1 text-white disabled:opacity-60">
+              {removeMany.isPending ? "Deleting…" : `Delete ${picked.size} selected`}
+            </button>
+            <button type="button" className="underline" onClick={() => setPicked(new Set())}>Clear</button>
+          </div>
+        )}
+        {removal && <p role={removal.error ? "alert" : "status"} className={`mb-2 text-sm ${removal.error ? "text-red-700" : "text-green-800"}`}>{removal.text}</p>}
         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
           <table className="w-full text-left text-sm" aria-label={`Entities of type ${type.name}`}>
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
               <tr>
+                {canDelete && (
+                  <th scope="col" className="w-8 px-3 py-2">
+                    <input type="checkbox" aria-label="Select every record on this page" checked={allPicked}
+                      onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
+                  </th>
+                )}
                 <th scope="col" className="px-3 py-2 font-semibold">
                   Key
                 </th>
@@ -498,6 +531,17 @@ function EntityTable({
             <tbody>
               {rows.map((entity) => (
                 <tr key={entity.id} className="border-b border-slate-100 last:border-0">
+                  {canDelete && (
+                    <td className="px-3 py-2">
+                      <input type="checkbox" aria-label={`Select ${entity.key}`} checked={picked.has(entity.id)}
+                        onChange={(e) => setPicked((now) => {
+                          const next = new Set(now);
+                          if (e.target.checked) next.add(entity.id);
+                          else next.delete(entity.id);
+                          return next;
+                        })} />
+                    </td>
+                  )}
                   <th scope="row" className="px-3 py-2 font-normal">
                     <Link to={`/entities/${entity.id}`} className="inline-block rounded py-1 font-mono text-blue-600 underline">
                       {entity.key}

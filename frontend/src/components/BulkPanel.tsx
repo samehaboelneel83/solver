@@ -14,12 +14,17 @@ export type UploadReport = {
   faults: { row: number; column: string | null; message: string }[];
   /** What was done unasked: links matched by a label or a code. */
   notes?: string[];
+  /** Records the rows made new, and stored ones they updated (or, on a check, would). */
+  created?: number | null;
+  updated?: number | null;
 };
 
 /** A records file read against its kind before anything is written (`/upload/preview`). */
 export type UploadPreview = {
   rows: number;
-  columns: { name: string; sample: string[]; unique: boolean; suggestion: string | null }[];
+  /** Records of the kind already stored. */
+  existing?: number;
+  columns: { name: string; sample: string[]; unique: boolean; suggestion: string | null; matches_keys?: number }[];
   targets: { name: string; kind: string; required: boolean; links_to?: string | null }[];
 };
 
@@ -247,6 +252,20 @@ export default function BulkPanel({
             </tbody>
           </table>
           {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key.</p>}
+          {(() => {
+            // A key that matches none of the records already stored makes every row a new record
+            // (benchmark, October 2026: duplicates in three of five problems, and the check said "clean").
+            const keyColumn = preview.columns.find((c) => choices[c.name] === "key");
+            const stored = preview.existing ?? 0;
+            if (!keyColumn || stored === 0 || (keyColumn.matches_keys ?? 0) > 0) return null;
+            const better = preview.columns.find((c) => (c.matches_keys ?? 0) > 0);
+            return (
+              <p role="alert" className="mt-1 text-sm text-amber-800">
+                {keyColumn.name} matches none of the {stored} {what} already stored: every row would be a new record.
+                {better ? ` ${better.name} matches ${better.matches_keys} of them — read it as the key to update them instead.` : ""}
+              </p>
+            );
+          })()}
           {twice.length > 0 && <p className="mt-1 text-sm text-amber-800">Two columns are read as {twice.join(", ")}; choose one.</p>}
         </div>
       )}
@@ -260,10 +279,11 @@ export default function BulkPanel({
           <p className={report.ok ? "text-green-700" : "text-amber-800"}>
             {report.dry_run
               ? report.ok
-                ? `All ${report.rows} rows are clean; nothing was written (check only).`
+                ? `All ${report.rows} rows are clean${typeof report.created === "number" ? `: they would make ${report.created} new record${report.created === 1 ? "" : "s"} and update ${report.updated ?? 0}` : ""}; nothing was written (check only).`
                 : `${report.faults.length} fault(s) in ${report.rows} rows; nothing was written (check only).`
               : report.written > 0
-                ? `${report.written} row(s) written` + (report.skipped ? `, ${report.skipped} skipped for their faults.` : ".")
+                ? `${report.written} row(s) written` + (typeof report.created === "number" ? ` (${report.created} new, ${report.updated ?? 0} updated)` : "")
+                  + (report.skipped ? `, ${report.skipped} skipped for their faults.` : ".")
                 : `Nothing was written: ${report.faults.length} fault(s) to fix first.`}
           </p>
           {(report.notes ?? []).map((n) => (

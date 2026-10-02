@@ -336,6 +336,26 @@ def update_entity(
     return EntityRead.model_validate(entity)
 
 
+class EntityDeleteMany(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+@router.post("/entities/delete")
+def delete_entities(
+    body: EntityDeleteMany,
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(requires("domain.edit")),
+) -> dict[str, int]:
+    """Several records at once, all or none -- an import that went wrong is undone in one step
+    (benchmark, October 2026: 12 duplicate warehouses, deleted one by one). What one delete removes
+    with a record, each of these removes too."""
+    found = [_get_entity(db, entity_id) for entity_id in dict.fromkeys(body.ids)]
+    for entity in found:
+        db.delete(entity)
+    _commit(db)
+    return {"deleted": len(found)}
+
+
 @router.delete("/entities/{entity_id}", status_code=204)
 def delete_entity(
     entity_id: int,

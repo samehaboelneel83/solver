@@ -304,6 +304,8 @@ export const getEntity = (id: Id) => apiFetch<Entity>(`/api/v1/entities/${id}`);
 export const createEntity = (body: EntityCreate) => send<Entity>("POST", "/api/v1/entities", body);
 export const updateEntity = (id: Id, body: EntityUpdate) => send<Entity>("PATCH", `/api/v1/entities/${id}`, body);
 export const deleteEntity = (id: Id) => remove(`/api/v1/entities/${id}`);
+/** Several records at once, all or none (`POST /entities/delete`). */
+export const deleteEntities = (ids: Id[]) => send<{ deleted: number }>("POST", "/api/v1/entities/delete", { ids });
 
 // --- relationship types and relationships (Task 7) --------------------------
 
@@ -1226,6 +1228,7 @@ export const useCreateEntity = () => useV1Mutation(createEntity);
 export const useUpdateEntity = () =>
   useV1Mutation(({ id, body }: { id: Id; body: EntityUpdate }) => updateEntity(id, body));
 export const useDeleteEntity = () => useV1Mutation(deleteEntity);
+export const useDeleteEntities = () => useV1Mutation(deleteEntities);
 
 // relationship types and relationships
 export function useRelationshipTypes(

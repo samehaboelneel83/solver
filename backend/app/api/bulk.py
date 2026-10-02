@@ -87,6 +87,9 @@ class UploadReport(BaseModel):
     faults: list[Fault]
     #: What was done that the person did not spell out: links matched by a name or a code.
     notes: list[str] = []
+    #: Of the rows written (or, on a check, that would be): records made new, and stored ones updated.
+    created: int | None = None
+    updated: int | None = None
 
 
 # --- columns -----------------------------------------------------------------
@@ -470,10 +473,18 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
     same_kind = {a.name for a in attributes if a.data_type == "reference" and a.target_type_id == entity_type.id}
     # The kind's records, read once: a query per row also flushed every row before it, one by one.
     existing: dict[str, Entity] = {}
+    # The same key in another case or spacing is the same record ("h001" is H001): matching it exactly
+    # only made 22 hospitals twice (benchmark, October 2026).
+    folded: dict[str, Entity | None] = {}
+    counts = {"created": 0, "updated": 0}
 
     def load() -> None:
         existing.clear()
+        folded.clear()
+        counts.update(created=0, updated=0)
         existing.update({e.key: e for e in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)).scalars()})
+        for e in existing.values():
+            folded[_fold(e.key)] = None if _fold(e.key) in folded else e  # two that fold alike match neither
 
     load()
 
@@ -487,7 +498,12 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
                 values[name], problem = matcher.resolve(values[name], seen if name in same_kind else set())
                 if problem:
                     return name, problem
-        found = existing.get(key)
+        found = existing.get(key) or folded.get(_fold(key))
+        if found is not None and found.key != key:
+            if found.key in seen:
+                return "key", f"{key!r} is {found.key!r} again, which appears earlier in this file"
+            seen.add(found.key)
+        counts["updated" if found is not None else "created"] += 1
         attrs = dict(found.attrs or {}) if found else {}
         for name in names & set(header):
             if values.get(name) is None:
@@ -498,6 +514,7 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
             found = Entity(entity_type_id=entity_type.id, key=key, attrs=attrs)
             db.add(found)
             existing[key] = found
+            folded[_fold(key)] = found
         else:
             found.attrs = attrs
         if "label" in header:
@@ -524,6 +541,7 @@ def entity_writer(db: Session, entity_type: EntityType, header: list[str], notes
 
     write.finish = finish  # type: ignore[attr-defined]
     write.reset = reset  # type: ignore[attr-defined]
+    write.counts = counts  # type: ignore[attr-defined]
     return columns, write
 
 
@@ -589,6 +607,41 @@ def _mapping(raw: str | None) -> dict[str, str]:
     return found
 
 
+_LAT = ("lat", "latitude", "y_lat")
+_LON = ("lon", "lng", "long", "longitude", "x_lon")
+
+
+def with_places(db: Session, entity_type: EntityType, header: list[str], rows: list[list[Any]],
+                notes: list[str]) -> tuple[list[str], list[list[Any]]]:
+    """A sheet with a latitude and a longitude column gives each row a place: a point in the kind's
+    geometry field (made, as `location`, when it has none). The columns themselves stay, to be kept
+    or left out like any other. Benchmark, October 2026: the page said so, and the records got
+    two number fields and no place."""
+    norm = [re.sub(r"[^a-z0-9]+", "_", (h or "").strip().lower()).strip("_") for h in header]
+    lat = next((i for i, n in enumerate(norm) if n in _LAT), None)
+    lon = next((i for i, n in enumerate(norm) if n in _LON), None)
+    if lat is None or lon is None:
+        return header, rows
+    geometry = next((a.name for a in _attributes(db, entity_type_id=entity_type.id) if a.data_type == "geometry"), None)
+    if geometry is None:
+        geometry = "location"
+        db.add(AttributeDef(entity_type_id=entity_type.id, name=geometry, data_type="geometry"))
+        db.flush()
+    if geometry in header:
+        return header, rows
+
+    def point(row: list[Any]) -> str | None:
+        try:
+            y, x = float(row[lat]), float(row[lon])
+        except (TypeError, ValueError, IndexError):
+            return None
+        return json.dumps({"type": "Point", "coordinates": [x, y]}) if -90 <= y <= 90 and -180 <= x <= 180 else None
+
+    placed = [point(r) for r in rows]
+    notes.append(f"{header[lat]} and {header[lon]}: {sum(p is not None for p in placed)} rows placed on the map in {geometry}")
+    return [*header, geometry], [[*r, p] for r, p in zip(rows, placed)]
+
+
 @router.post("/entity-types/{entity_type_id}/upload")
 def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File(...), clean_only: bool = False,
                   dry_run: bool = False, add_fields: bool = False, mapping: str | None = Form(None),
@@ -600,15 +653,17 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
     if entity_type.is_abstract:
         raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
     header, rows = _read(file)
+    notes: list[str] = []
+    header, rows = with_places(db, entity_type, header, rows, notes)
     header, rows = apply_mapping(header, rows, _mapping(mapping))
     if add_fields:
         add_new_fields(db, entity_type, header, rows)
-    notes: list[str] = []
     columns, write = entity_writer(db, entity_type, header, notes)
     report = run_rows(db, header, rows, columns, write, clean_only, dry_run,
                       user=user, request=request, audit_object=("entity_type", entity_type_id))
     write.finish()
     report.notes = notes
+    report.created, report.updated = write.counts["created"], write.counts["updated"]
     return report
 
 
@@ -619,6 +674,8 @@ class ColumnGuess(BaseModel):
     unique: bool
     #: What it is read as unless the person says otherwise: key, label, a field, or None (new or left out).
     suggestion: str | None
+    #: How many of its values are the key of a record already stored (case and spaces aside).
+    matches_keys: int = 0
 
 
 class Target(BaseModel):
@@ -631,6 +688,8 @@ class Target(BaseModel):
 
 class UploadPreview(BaseModel):
     rows: int
+    #: Records of the kind already stored: a key column that matches none of them makes them all again.
+    existing: int = 0
     columns: list[ColumnGuess]
     targets: list[Target]
 
@@ -639,7 +698,8 @@ _KEYISH = ("key", "code", "id", "ref", "no", "number")
 _LABELISH = ("label", "name", "title", "description")
 
 
-def suggest_mapping(header: list[str], rows: list[list[Any]], entity_type: EntityType, targets: list[Target]) -> dict[str, str | None]:
+def suggest_mapping(header: list[str], rows: list[list[Any]], entity_type: EntityType, targets: list[Target],
+                    existing: set[str] | None = None) -> dict[str, str | None]:
     """A first reading of a file's columns against a kind: the same name; a link named after the kind
     it links to; a key from a code-like, then any all-different column; a label from a name-like one."""
     norm = {h: re.sub(r"[^a-z0-9]+", "_", (h or "").strip().lower()).strip("_") for h in header}
@@ -666,7 +726,11 @@ def suggest_mapping(header: list[str], rows: list[list[Any]], entity_type: Entit
         keyish = [h for h in free if norm[h] in _KEYISH or norm[h] in (kind, f"{kind}_id", f"{kind}_code")
                   or norm[h].endswith(("_code", "_id", "_key"))]
         named = [h for h in free if norm[h] in _LABELISH]
-        pick = (keyish or free[:1] or named[:1])
+        # A kind with records already: the column holding their keys is the key, whatever it is called
+        # (benchmark, October 2026: the warehouses' names were taken for the key and 12 came in twice).
+        matching = sorted(((sum(_fold(v) in existing for v in column(h)), h) for h in free), reverse=True) if existing else []
+        stored = [h for n, h in matching if n * 2 >= len(column(h)) and n > 0][:1]
+        pick = (stored or keyish or free[:1] or named[:1])
         if pick:
             guess[pick[0]] = "key"
     if "label" not in guess.values():
@@ -687,13 +751,14 @@ def entity_upload_preview(entity_type_id: int, file: UploadFile = File(...), db:
     kinds = {t.id: t.name for t in db.execute(select(EntityType).where(EntityType.domain_id == entity_type.domain_id)).scalars()}
     links = {a.name: kinds.get(a.target_type_id) for a in attributes if a.data_type == "reference"}
     targets = [Target(name=c.name, kind=c.kind, required=c.structural or c.required, links_to=links.get(c.name)) for c in columns]
-    guess = suggest_mapping(header, rows, entity_type, targets)
+    existing = {_fold(k) for k in db.execute(select(Entity.key).where(Entity.entity_type_id == entity_type.id)).scalars()}
+    guess = suggest_mapping(header, rows, entity_type, targets, existing)
     out = []
     for i, h in enumerate(header):
         values = [str(r[i]).strip() for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
         out.append(ColumnGuess(name=h, sample=values[:3], unique=bool(values) and len(values) == len(rows) and len(set(values)) == len(values),
-                               suggestion=guess.get(h)))
-    return UploadPreview(rows=len(rows), columns=out, targets=targets)
+                               suggestion=guess.get(h), matches_keys=sum(_fold(v) in existing for v in values)))
+    return UploadPreview(rows=len(rows), existing=len(existing), columns=out, targets=targets)
 
 
 # --- relationship types ------------------------------------------------------------

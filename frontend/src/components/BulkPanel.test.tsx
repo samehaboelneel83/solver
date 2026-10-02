@@ -83,4 +83,36 @@ describe("BulkPanel (queue R21)", () => {
       team: "key", hospital: "base_hospital", "Doctors on duty": "doctors_on_duty", notes: "",
     });
   });
+
+  it("warns when the key matches none of the stored records, and says what a check would make", async () => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith("/upload/preview")
+          ? {
+              rows: 3, existing: 12,
+              columns: [
+                { name: "name", sample: ["Tanta DC"], unique: true, suggestion: "key", matches_keys: 0 },
+                { name: "wh_id", sample: ["WH01"], unique: true, suggestion: null, matches_keys: 3 },
+              ],
+              targets: [{ name: "key", kind: "text", required: true }, { name: "label", kind: "text", required: false }],
+            }
+          : { ok: true, rows: 3, written: 0, skipped: 0, dry_run: true, faults: [], created: 0, updated: 3 },
+      ) as never,
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BulkPanel base="/api/v1/entity-types/9" what="warehouse records" />
+      </QueryClientProvider>
+    );
+    fireEvent.change(screen.getByLabelText("File to upload"), { target: { files: [new File(["x"], "w.csv")] } });
+    expect(await screen.findByText(/name matches none of the 12 warehouse records already stored/)).toBeInTheDocument();
+    expect(screen.getByText(/wh_id matches 3 of them/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("wh_id is read as"), { target: { value: "key" } });
+    fireEvent.change(screen.getByLabelText("name is read as"), { target: { value: "label" } });
+    expect(screen.queryByText(/matches none of the/)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Check only"));
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    expect(await screen.findByText(/would make 0 new records and update 3/)).toBeInTheDocument();
+  });
 });
