@@ -212,16 +212,24 @@ lift are per point, averaged over the five problems.
 - [x] **G7a Scenario "scale a field"** for all or filtered records (+30 % demand) — `f1976eb`.
 
 ### Phase 3 — GIS and results depth (target: coverage ≈ 95%)
-- [ ] **G2a Keep line geometry end to end:** records keep LineStrings; records table, layers and
-      result map draw lines; line-in-polygon test for rules.
-- [ ] **G2b Road network from an imported lines layer** (snap, build graph, travel time with the
-      user's threshold) as the fallback when no tile index is set; no-go polygons as barriers;
-      per-road delay/closure fields used per scenario. Point 6: 80 → ~95.
-- [ ] **G5a Objective breakdown** by goal term and per record on the run page, PDF and exports.
-      Point 15: 70 → ~90.
-- [ ] **G5b Result map overlays** of any layer (roads, zones, incident heat) and flows drawn along
-      roads. Point 14: 70 → ~90.
-- [ ] **G6b Routing:** depot from another kind, several depots, fractional distances.
+- [x] **G2a Keep line geometry end to end:** lines kept as lines (B20); the records' glance map draws
+      roads and areas as themselves; a line is in the area holding most of its length; new "From the
+      map → the areas each line passes through" links each line to the areas it crosses, with the
+      metres inside each — `2256630`.
+- [x] **G2b Road network from an imported lines layer:** with no road tiles set, road distances and
+      times use the workspace's own lines layer (and say so); a line property that closes a road, one
+      of minutes of delay, and a kind of areas no route may enter (flood zones) — each a field of the
+      "From the map" form, so a scenario's closures are a second data value computed with them —
+      `20cd6eb`.
+- [x] **G5a Objective breakdown:** each goal term's value and share, and the records it comes from,
+      recorded on every run; shown on the run page, as a "Goal" sheet in Excel and a table in the
+      PDF/print report — `2256630`.
+- [x] **G5b Result map overlays:** "Show under it" puts any imported map data under the answer;
+      "Flows along" draws each flow along the chosen lines layer's roads instead of straight —
+      `eac7df4`.
+- [x] **G6b Routing:** `depot_of` gives each vehicle its own depot (several depots; a depot of
+      another kind through a parent kind holding both); the routing start scales fractional
+      distances instead of refusing them — `da4a78a`.
 
 ### Phase 4 — navigation (target: UX ≈ 78%)
 - [ ] **G8b Simple-mode entry points** for equations, predictors and relationships (with a one-line
