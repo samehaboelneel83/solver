@@ -105,19 +105,20 @@ def depths(child_to_parents: dict[int, list[int]], nodes: set[int]) -> dict[int,
     return level
 
 
-def _records(db: Session, ids: list[int]) -> list[dict[str, Any]]:
+def _records(db: Session, ids: list[int], sample: int | None = SAMPLE) -> list[dict[str, Any]]:
     if not ids:
         return []
     rows = db.execute(text("SELECT id, key, label FROM entity WHERE id = ANY(:ids) ORDER BY key"),
-                      {"ids": ids[:SAMPLE]}).mappings()
+                      {"ids": ids[:sample] if sample else ids}).mappings()
     return [dict(r) for r in rows]
 
 
-def _finding(db: Session, code: str, severity: str, subject: dict[str, Any], says: str, ids: list[int]) -> dict[str, Any]:
-    return {"code": code, "severity": severity, **subject, "says": says, "count": len(ids), "records": _records(db, ids)}
+def _finding(db: Session, code: str, severity: str, subject: dict[str, Any], says: str, ids: list[int],
+             sample: int | None = SAMPLE) -> dict[str, Any]:
+    return {"code": code, "severity": severity, **subject, "says": says, "count": len(ids), "records": _records(db, ids, sample)}
 
 
-def recursive_checks(db: Session, domain_id: int, max_depth: int) -> list[dict[str, Any]]:
+def recursive_checks(db: Session, domain_id: int, max_depth: int, sample: int | None = SAMPLE) -> list[dict[str, Any]]:
     found = []
     types = db.execute(text(
         "SELECT rt.id, rt.name, rt.is_hierarchy, rt.from_type_id, rt.to_type_id, ad.name AS via_attribute"
@@ -136,7 +137,7 @@ def recursive_checks(db: Session, domain_id: int, max_depth: int) -> list[dict[s
         if looped:
             found.append(_finding(db, "loop", "error", subject,
                                   f"{len(looped)} loop{'s' if len(looped) != 1 else ''} through “{rt['name']}”: following it "
-                                  "comes back to where it started. Change one link in each to break it.", sorted(in_loop)))
+                                  "comes back to where it started. Change one link in each to break it.", sorted(in_loop), sample=sample))
         parents: dict[int, list[int]] = defaultdict(list)
         for p, c in down:
             parents[c].append(p)
@@ -148,18 +149,18 @@ def recursive_checks(db: Session, domain_id: int, max_depth: int) -> list[dict[s
         if deep:
             found.append(_finding(db, "too_deep", "warning", subject,
                                   f"More than {max_depth} levels below the top of “{rt['name']}” (the deepest is "
-                                  f"{max(level.values())}).", deep))
+                                  f"{max(level.values())}).", deep, sample=sample))
         linked = {n for e in down for n in e}
         if linked:
             alone = sorted(set(kind) - linked)
             if alone:
                 found.append(_finding(db, "outside_tree", "warning", subject,
                                       f"Not placed in “{rt['name']}”: no parent and nothing below, while "
-                                      f"{len(linked)} other records are.", alone))
+                                      f"{len(linked)} other records are.", alone, sample=sample))
     return found
 
 
-def reference_checks(db: Session, domain_id: int) -> list[dict[str, Any]]:
+def reference_checks(db: Session, domain_id: int, sample: int | None = SAMPLE) -> list[dict[str, Any]]:
     found = []
     attrs = db.execute(text(
         "SELECT ad.id, ad.name, ad.required, ad.entity_type_id, t.name AS kind, ad.references_id"
@@ -175,7 +176,7 @@ def reference_checks(db: Session, domain_id: int) -> list[dict[str, Any]]:
         if inactive:
             found.append(_finding(db, "inactive_target", "warning", subject,
                                   f"“{a['kind']}.{a['name']}” names a record that is switched off; a solve leaves it out, "
-                                  "so these references point at nothing there.", list(inactive)))
+                                  "so these references point at nothing there.", list(inactive), sample=sample))
         if not a["required"]:
             empty = db.execute(text(
                 "SELECT id FROM entity WHERE entity_type_id = ANY(entity_type_family(:t)) AND active"
@@ -184,7 +185,7 @@ def reference_checks(db: Session, domain_id: int) -> list[dict[str, Any]]:
             if empty:
                 found.append(_finding(db, "empty_reference", "info", subject,
                                       f"“{a['kind']}.{a['name']}” is empty on {len(empty)} record{'s' if len(empty) != 1 else ''}.",
-                                      list(empty)))
+                                      list(empty), sample=sample))
     return found
 
 
