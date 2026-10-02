@@ -16,7 +16,12 @@ depots, depots before trucks. A workbook brings them together, so this module pu
    against its type, each row against the database's triggers in a savepoint -- inside one
    transaction, kept only if the whole workbook is clean; `dry_run` checks and keeps nothing.
 
-Sheets named after no kind are reported as ignored; `about` (the template's notes) is skipped.
+4. **Then links and values.** A sheet `links <relationship>` holds that relationship's rows (from,
+   to, ...) and `values <parameter>` that parameter's cells, written after every record, so they
+   may name records added by this same workbook. A reference field's own relationship is not a
+   sheet: it is written through its field, on the kind's sheet.
+
+Sheets named after nothing here are reported as ignored; `about` (the template's notes) is skipped.
 """
 from __future__ import annotations
 
@@ -29,17 +34,48 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.api.bulk import MAX_BYTES, MAX_ROWS, _entity_columns, entity_writer, write_rows
+from app.api.bulk import (
+    MAX_BYTES,
+    MAX_ROWS,
+    _entity_columns,
+    _parameter_columns,
+    _relationship_columns,
+    entity_writer,
+    parameter_writer,
+    relationship_writer,
+    write_rows,
+)
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
-from app.models.v1_domain import Entity, EntityType
+from app.models.v1_domain import AttributeDef, Entity, EntityType, ParameterDef, RelationshipType
 
 router = APIRouter(prefix="/api/v1", tags=["bulk"])
 
 #: Excel's limit on a sheet's name.
 SHEET_NAME = 31
 NOTES = "about"
+
+
+LINKS = "links "
+VALUES = "values "
+
+
+def sheet_name(prefix: str, name: str) -> str:
+    return (prefix + name)[:SHEET_NAME]
+
+
+def _links(db: Session, domain_id: int) -> list[RelationshipType]:
+    """Relationship types written as rows: all but a reference field's mirror."""
+    mirrors = select(AttributeDef.references_id).where(AttributeDef.references_id.is_not(None))
+    return list(db.execute(select(RelationshipType).where(RelationshipType.domain_id == domain_id,
+                                                          RelationshipType.id.not_in(mirrors))
+                           .order_by(RelationshipType.name)).scalars())
+
+
+def _values(db: Session, domain_id: int) -> list[ParameterDef]:
+    return list(db.execute(select(ParameterDef).where(ParameterDef.domain_id == domain_id)
+                           .order_by(ParameterDef.name)).scalars())
 
 
 def _kinds(db: Session, domain_id: int) -> list[EntityType]:
@@ -160,6 +196,35 @@ def workbook_template(domain_id: int, rows: bool = False, db: Session = Depends(
             names = sorted(by_id[t].name for t in refers[kid].get(c.name, set()))
             notes.append([kind.name, c.name, c.kind, "yes" if c.required else "", ", ".join(c.values or []),
                           ", ".join(names), "second pass" if c.name in deferred[kid] else "", c.note])
+    for rel in _links(db, domain_id):
+        columns, attributes = _relationship_columns(db, rel)
+        name = sheet_name(LINKS, rel.name)
+        sheet = book.create_sheet(name)
+        sheet.append([c.name for c in columns])
+        if rows:
+            for a, b, valid_from, valid_to, attrs in db.execute(text(
+                    "SELECT ef.key, et.key, r.valid_from, r.valid_to, r.attrs FROM relationship r"
+                    " JOIN entity ef ON ef.id = r.from_entity_id JOIN entity et ON et.id = r.to_entity_id"
+                    " WHERE r.relationship_type_id = :t ORDER BY ef.key, et.key"), {"t": rel.id}).all():
+                sheet.append([a, b, valid_from, valid_to, *[(attrs or {}).get(x.name) for x in attributes]])
+        notes += [[name, c.name, c.kind, "yes" if c.required else "", ", ".join(c.values or []), "", "after the records", c.note]
+                  for c in columns]
+    for parameter in _values(db, domain_id):
+        columns, _heads = _parameter_columns(db, parameter)
+        name = sheet_name(VALUES, parameter.name)
+        sheet = book.create_sheet(name)
+        sheet.append([c.name for c in columns])
+        if rows:
+            for keys, value, of in db.execute(text(
+                    "SELECT ARRAY(SELECT e.key FROM unnest(pv.entity_ids) WITH ORDINALITY u(id, n)"
+                    "              JOIN entity e ON e.id = u.id ORDER BY u.n),"
+                    "       pv.value, (SELECT key FROM entity WHERE id = pv.value_entity_id)"
+                    "  FROM parameter_value pv WHERE pv.parameter_def_id = :p ORDER BY 1"), {"p": parameter.id}).all():
+                sheet.append([*keys, of if parameter.value_type_id else (float(value) if value is not None else None)])
+        notes += [[name, c.name, c.kind, "yes" if c.required else "", "", "", "after the records", c.note] for c in columns]
+    for sheet in book.worksheets:
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
     about = book.create_sheet(NOTES)
     about.append(["sheet", "column", "type", "required", "allowed values", "refers to", "written", "note"])
     for cell in about[1]:
@@ -181,7 +246,6 @@ def workbook_upload(domain_id: int, request: Request, file: UploadFile = File(..
     by_id = {k.id: k for k in kinds}
     book = _read_book(file)
     matched = {k.id: s for k in kinds if (s := _sheet_for(k, list(book)))}
-    ignored = [s for s in book if s not in matched.values() and s != NOTES]
     refers = _refers(db, kinds)
     order, deferred = plan([k for k in matched], {k: {f: t & set(matched) for f, t in v.items()} for k, v in refers.items() if k in matched})
 
@@ -192,8 +256,8 @@ def workbook_upload(domain_id: int, request: Request, file: UploadFile = File(..
         h1, r1 = _project(header, rows, first)
         columns, write = entity_writer(db, by_id[kid], h1)
         written, faults, bad = write_rows(db, h1, r1, columns, write)
-        reports[kid] = {"sheet": matched[kid], "kind": by_id[kid].name, "rows": len(rows), "written": written,
-                        "faults": faults, "bad": bad, "second_pass": sorted(deferred[kid] & set(header))}
+        reports[kid] = {"sheet": matched[kid], "kind": by_id[kid].name, "what": "records", "rows": len(rows),
+                        "written": written, "faults": faults, "bad": bad, "second_pass": sorted(deferred[kid] & set(header))}
     for kid in order:
         later = [h for h in (deferred[kid] & set(book[matched[kid]][0]))]
         if not later:
@@ -206,18 +270,34 @@ def workbook_upload(domain_id: int, request: Request, file: UploadFile = File(..
         # A row refused in the first pass is refused again here only for want of itself: say it once.
         report["faults"] += [f for f in faults if f.row not in report["bad"]]
         report["bad"] |= bad
+    done = [reports[k] for k in order]
 
-    total_faults = sum(len(r["faults"]) for r in reports.values())
+    # Links and values last: their writers look records up when made, so every record above is there.
+    for what, prefix, items, writer in (
+            ("links", LINKS, _links(db, domain_id), lambda r, h: relationship_writer(db, r, h)),
+            ("values", VALUES, _values(db, domain_id), lambda p, h: parameter_writer(db, p))):
+        for item in items:
+            name = sheet_name(prefix, item.name)
+            if name not in book:
+                continue
+            header, rows = book[name]
+            columns, write = writer(item, header)
+            written, faults, _bad = write_rows(db, header, rows, columns, write)
+            done.append({"sheet": name, "kind": item.name, "what": what, "rows": len(rows), "written": written,
+                         "faults": faults, "second_pass": []})
+    used = {r["sheet"] for r in done}
+    ignored = [n for n in book if n not in used and n != NOTES]
+
+    total_faults = sum(len(r["faults"]) for r in done)
     keep = not dry_run and total_faults == 0
     if keep:
         audit.write(db, user, request, action="bulk.workbook", object_type="domain", object_id=domain_id,
-                    after={"sheets": [r["sheet"] for r in reports.values()], "rows": sum(r["written"] for r in reports.values())})
+                    after={"sheets": [r["sheet"] for r in done], "rows": sum(r["written"] for r in done)})
         db.commit()
     else:
         db.rollback()
-    sheets = [{"sheet": r["sheet"], "kind": r["kind"], "rows": r["rows"],
+    sheets = [{"sheet": r["sheet"], "kind": r["kind"], "what": r["what"], "rows": r["rows"],
                "written": r["written"] if keep else 0, "second_pass": r["second_pass"],
-               "faults": [f.model_dump() for f in r["faults"][:500]]}
-              for r in (reports[k] for k in order)]
-    return {"ok": total_faults == 0, "dry_run": dry_run, "kept": keep, "order": [by_id[k].name for k in order],
+               "faults": [f.model_dump() for f in r["faults"][:500]]} for r in done]
+    return {"ok": total_faults == 0, "dry_run": dry_run, "kept": keep, "order": [r["sheet"] for r in done],
             "sheets": sheets, "ignored": ignored}

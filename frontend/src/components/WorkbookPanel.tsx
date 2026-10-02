@@ -14,6 +14,8 @@ export type WorkbookReport = {
   sheets: {
     sheet: string;
     kind: string;
+    /** Records of a kind, a relationship's links, or a parameter's values. */
+    what?: "records" | "links" | "values";
     rows: number;
     written: number;
     second_pass: string[];
@@ -84,8 +86,9 @@ export default function WorkbookPanel({ domainId }: { domainId: Id }) {
         All records in one workbook
       </h2>
       <p className="mt-1 text-sm text-slate-600">
-        One sheet per kind of record. Kinds are read in the order they depend on each other, and references within a
-        sheet (a parent, a manager) are filled in once every record exists.
+        One sheet per kind of record, plus “links …” sheets for relationships and “values …” sheets for parameters.
+        Kinds are read in the order they depend on each other, references within a sheet (a parent, a manager) are
+        filled in once every record exists, and links and values come last.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="text-sm text-slate-600">Download:</span>
@@ -181,7 +184,7 @@ export default function WorkbookPanel({ domainId }: { domainId: Id }) {
           </table>
           {report.ignored.length > 0 && (
             <p className="text-xs text-slate-500">
-              Not a kind of record here, so not read: {report.ignored.join(", ")}.
+              Not a kind of record, relationship or parameter here, so not read: {report.ignored.join(", ")}.
             </p>
           )}
         </div>

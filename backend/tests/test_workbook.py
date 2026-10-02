@@ -111,3 +111,35 @@ def test_the_template_has_a_sheet_per_kind_in_writing_order_and_notes(auth_heade
     notes = {(r[0], r[1]): r for r in book["about"].iter_rows(min_row=2, values_only=True)}
     assert notes[("depot", "region")][5] == "region"
     assert notes[("region", "parent")][6] == "second pass"
+
+
+def test_links_and_values_sheets_come_after_the_records_they_name(auth_headers, domain_id):  # noqa: F811
+    region, depot = _setup(auth_headers, domain_id)
+    serves = client.post("/api/v1/relationship-types", json={"domain_id": domain_id, "name": "serves",
+                         "from_type_id": depot, "to_type_id": region}, headers=auth_headers)
+    assert serves.status_code == 201, serves.text
+    demand = client.post("/api/v1/parameters", json={"domain_id": domain_id, "name": "demand",
+                         "index_type_ids": [depot], "default_value": 0}, headers=auth_headers)
+    assert demand.status_code == 201, demand.text
+
+    # Sheet order on purpose: links and values first, naming depots and regions made below them.
+    sheets = {"values demand": [["depot", "value"], ["D1", 40], ["D2", 15]],
+              "links serves": [["from", "to"], ["D1", "giza"], ["D2", "cairo"]], **SHEETS}
+    report = _upload(auth_headers, domain_id, _book(sheets)).json()
+    assert report["kept"] is True, report
+    assert report["order"] == ["region", "depot", "links serves", "values demand"]
+    assert [s["written"] for s in report["sheets"]] == [3, 2, 2, 2]
+    links = client.get("/api/v1/relationships", params={"relationship_type_id": serves.json()["id"]}, headers=auth_headers).json()
+    assert links["total"] == 2
+
+    bad = {**sheets, "links serves": [["from", "to"], ["D9", "giza"]]}
+    refused = _upload(auth_headers, domain_id, _book(bad)).json()
+    fault = next(s for s in refused["sheets"] if s["sheet"] == "links serves")["faults"][0]
+    assert refused["kept"] is False and (fault["row"], fault["column"]) == (2, "from") and "D9" in fault["message"]
+
+    template = load_workbook(io.BytesIO(client.get(f"/api/v1/domains/{domain_id}/workbook", params={"rows": True},
+                                                   headers=auth_headers).content))
+    assert template.sheetnames == ["region", "depot", "links serves", "values demand", "about"]
+    assert [r for r in template["values demand"].iter_rows(min_row=2, values_only=True)] == [("D1", 40), ("D2", 15)]
+    # A reference field's own relationship is written through its field, so it gets no sheet.
+    assert not any(n.startswith("links region") or n.startswith("links depot") for n in template.sheetnames)

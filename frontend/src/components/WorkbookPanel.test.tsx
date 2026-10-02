@@ -40,7 +40,7 @@ describe("WorkbookPanel", () => {
     expect(mockFetch).toHaveBeenLastCalledWith("/api/v1/domains/7/workbook?dry_run=true", expect.objectContaining({ method: "POST" }));
     const rows = within(screen.getByTestId("workbook-report")).getAllByRole("row").slice(1);
     expect(rows.map((r) => r.textContent)).toEqual(["1region3noneparent", "2depot3none—"]);
-    expect(screen.getByText("Not a kind of record here, so not read: notes.")).toBeInTheDocument();
+    expect(screen.getByText("Not a kind of record, relationship or parameter here, so not read: notes.")).toBeInTheDocument();
 
     mockFetch.mockResolvedValueOnce({ ok: true, dry_run: false, kept: true, order: ["region", "depot"],
       sheets: [{ ...sheet("region"), written: 3 }, { ...sheet("depot"), written: 2 }], ignored: [] });
