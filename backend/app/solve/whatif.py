@@ -14,13 +14,15 @@ reproducible and two scenarios on the same data can be compared:
   its default, times a factor;
 - `set_attr`: [{set, key, attr, value}] -- a record's field changed;
 - `scale_attr`: [{set, attr, factor, where?}] -- a field of every record of a set, or of those the
-  conditions keep, times a factor (demand +30%).
+  conditions keep, times a factor (demand +30%);
+- `rederive`: [{param, source, op, limit}] -- 0/1 data made again from a data value after the changes
+  above: "within 30 minutes" from travel times scaled +40% (benchmark re-test, October 2026).
 """
 from __future__ import annotations
 
 from typing import Any
 
-DATA_KEYS = ("remove", "set_param", "scale_param", "set_attr", "scale_attr")
+DATA_KEYS = ("remove", "set_param", "scale_param", "set_attr", "scale_attr", "rederive")
 
 
 def has_data_changes(patch: dict[str, Any] | None) -> bool:
@@ -41,10 +43,11 @@ def apply(data: dict[str, Any], ir: dict[str, Any], patch: dict[str, Any] | None
     sets = {name: [dict(r) for r in rows] for name, rows in (data.get("sets") or {}).items()}
     parameters = {name: [dict(r) for r in rows] for name, rows in (data.get("parameters") or {}).items()}
     relationships = {name: [dict(r) for r in rows] for name, rows in (data.get("relationships") or {}).items()}
-    defaults = dict(data.get("defaults") or {})
+    # The compiler's name for them: under "defaults" a scaled default was never read (re-test, October 2026).
+    defaults = dict(data.get("parameter_defaults") or {})
     out = {**data, "sets": sets, "parameters": parameters, "relationships": relationships}
     if defaults:
-        out["defaults"] = defaults
+        out["parameter_defaults"] = defaults
 
     removed: dict[str, set[str]] = {s: {str(k) for k in keys} for s, keys in (patch.get("remove") or {}).items()}
     for set_name, keys in removed.items():
@@ -86,7 +89,26 @@ def apply(data: dict[str, Any], ir: dict[str, Any], patch: dict[str, Any] | None
     if patch.get("set_param"):
         out = overridden(out, ir, [{"param": c["param"], "index": c["index"], "value": c["value"]}
                                    for c in patch["set_param"]])
+
+    for again in patch.get("rederive") or []:
+        out = _rederived(out, again)
     return out
+
+
+def _rederived(data: dict[str, Any], again: dict[str, Any]) -> dict[str, Any]:
+    """`param` made again from `source`: 1 in each cell where the source holds and passes the limit, else
+    0 -- the default too. A cell the source has no value for is 0 (not reachable is not within)."""
+    rows = (data.get("parameters") or {}).get(again["source"]) or []
+    limit, op = float(again["limit"]), again.get("op", "<=")
+
+    def passes(value: Any) -> bool:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        return value <= limit if op == "<=" else value >= limit
+
+    made = [{**{k: v for k, v in row.items() if k != "value"}, "value": 1} for row in rows if passes(row.get("value"))]
+    defaults = {**(data.get("parameter_defaults") or {}), again["param"]: 0}
+    return {**data, "parameters": {**(data.get("parameters") or {}), again["param"]: made}, "parameter_defaults": defaults}
 
 
 def describe(patch: dict[str, Any] | None) -> list[str]:
@@ -105,4 +127,6 @@ def describe(patch: dict[str, Any] | None) -> list[str]:
     for c in patch.get("scale_attr") or []:
         kept = " where " + " and ".join(f"{f['attr']} {f['op']} {f['value']}" for f in c["where"]) if c.get("where") else ""
         said.append(f"{c['attr']} × {c['factor']:g} for every {c['set']}{kept}")
+    for c in patch.get("rederive") or []:
+        said.append(f"{c['param']} made again: 1 where {c['source']} {'≤' if c.get('op', '<=') == '<=' else '≥'} {c['limit']:g}")
     return said

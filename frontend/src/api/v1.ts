@@ -517,6 +517,8 @@ export type ScenarioPatch = {
   scale_attr?: { set: string; attr: string; factor: number; where?: { attr: string; op: string; value: unknown }[] }[];
   /** A rule's limit (the side of it that is one number), changed for this scenario. */
   set_limit?: Record<string, number>;
+  /** 0/1 data made again from a data value after the changes: "within 30 min" from scaled travel times. */
+  rederive?: { param: string; source: string; op: "<=" | ">="; limit: number }[];
 };
 
 export type Scenario = {

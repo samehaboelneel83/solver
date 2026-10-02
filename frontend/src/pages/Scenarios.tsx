@@ -21,6 +21,7 @@ import {
   solveProblem,
   useCreateRun,
   useEntityTypes,
+  useParameters,
   useCreateScenario,
   useDeleteScenario,
   useScenarios,
@@ -559,7 +560,29 @@ export function dataOf(patch: ScenarioPatch): ScenarioPatch {
   if (patch.set_param?.length) out.set_param = patch.set_param;
   if (patch.set_attr?.length) out.set_attr = patch.set_attr;
   if (patch.scale_attr?.length) out.scale_attr = patch.scale_attr;
+  if (patch.rederive?.length) out.rederive = patch.rederive;
   return out;
+}
+
+type Made = { name: string; index_type_ids: unknown[]; source?: Record<string, unknown> | null };
+
+/** The 0/1 "within" data made from the same places and measure as `param`, made again from it once it is
+ * scaled -- in its units (benchmark re-test, October 2026: a sandstorm scaled travel times +40% and the
+ * "within 30 minutes" data, and so coverage, stayed as it was). */
+export function rederivesFor(param: string, made: Made[], ir?: WhatIfIr): NonNullable<ScenarioPatch["rederive"]> {
+  const from = made.find((m) => m.name === param);
+  const src = from?.source as { kind?: string; metric?: string; from?: string; to?: string; unit?: string } | null | undefined;
+  if (!src || src.kind === "within") return [];
+  const same = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  return made.flatMap((w) => {
+    const ws = w.source as { kind?: string; metric?: string; from?: string; to?: string; request?: { max_min?: number; max_m?: number } } | null | undefined;
+    if (!ws || ws.kind !== "within" || ws.metric !== src.metric || ws.from !== src.from || ws.to !== src.to) return [];
+    if (!same(w.index_type_ids, from!.index_type_ids) || (ir?.parameters && !ir.parameters[w.name])) return [];
+    const r = ws.request ?? {};
+    const limit = r.max_min != null ? (src.unit === "s" ? r.max_min * 60 : src.unit === "min" ? r.max_min : null)
+      : r.max_m != null ? (src.unit === "km" ? r.max_m / 1000 : src.unit === "m" ? r.max_m : null) : null;
+    return limit == null ? [] : [{ param: w.name, source: param, op: "<=" as const, limit }];
+  });
 }
 
 /**
@@ -568,8 +591,9 @@ export function dataOf(patch: ScenarioPatch): ScenarioPatch {
  * stored data never changes and the scenarios can be compared run by run.
  */
 function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPatch; onChange: (next: ScenarioPatch) => void }) {
-  const sets = ir?.sets ?? [];
   const { domainId } = useDomain();
+  const made = (useParameters(domainId, { limit: 500 }).data?.items ?? []) as Made[];
+  const sets = ir?.sets ?? [];
   const kinds = useEntityTypes(domainId, { limit: 500 });
   const kindOf = (set: string) => kinds.data?.items.find((k) => k.name === set) ?? null;
   const [fieldSet, setFieldSet] = useState("");
@@ -729,7 +753,9 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
                 const f = Number(factor);
                 if (!scaleParam || !(f >= 0)) return setProblem("Choose data to scale and a factor of 0 or more.");
                 setProblem(null);
-                onChange({ ...value, scale_param: { ...(value.scale_param ?? {}), [scaleParam]: f } });
+                const again = rederivesFor(scaleParam, made, ir);
+                onChange({ ...value, scale_param: { ...(value.scale_param ?? {}), [scaleParam]: f },
+                  ...(again.length ? { rederive: [...(value.rederive ?? []).filter((c) => !again.some((a) => a.param === c.param)), ...again] } : {}) });
               }}>Add</button>
           </div>
           <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
@@ -769,6 +795,7 @@ export function describeData(patch: ScenarioPatch): string[] {
   const said: string[] = [];
   for (const [set, keys] of Object.entries(patch.remove ?? {})) said.push(`without ${set} ${keys.join(", ")}`);
   for (const [param, f] of Object.entries(patch.scale_param ?? {})) said.push(`${param} × ${f}`);
+  for (const c of patch.rederive ?? []) said.push(`${c.param} made again: 1 where ${c.source} ${c.op === "<=" ? "≤" : "≥"} ${c.limit}`);
   for (const c of patch.set_param ?? []) said.push(`${c.param}[${c.index.join(", ")}] = ${c.value}`);
   for (const c of patch.set_attr ?? []) said.push(`${c.set} ${c.key}: ${c.attr} = ${String(c.value)}`);
   for (const c of patch.scale_attr ?? []) said.push(`${c.attr} × ${c.factor} for every ${c.set}`);

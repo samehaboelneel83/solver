@@ -222,6 +222,17 @@ def test_the_api_refuses_a_what_if_on_a_set_the_model_does_not_have(db, placed, 
     assert got.status_code == 422 and "whatif_unknown" in got.text
 
 
+def test_the_api_refuses_making_data_again_from_unknown_or_differently_indexed_data(db, placed, client, auth_headers):  # noqa: F811
+    for bad in ({"param": "reach", "source": "nothing", "limit": 30}, {"param": "nothing", "source": "reach", "limit": 30}):
+        got = client.post("/api/v1/scenarios", json={"problem_id": placed["problem"], "model_version_id": placed["version"],
+                                                      "name": "bad", "patch": {"rederive": [bad]}}, headers=auth_headers)
+        assert got.status_code == 422 and "whatif_unknown" in got.text, got.text
+    ok = client.post("/api/v1/scenarios", json={"problem_id": placed["problem"], "model_version_id": placed["version"],
+                                                 "name": "again", "patch": {"rederive": [{"param": "reach", "source": "reach", "limit": 1}]}},
+                     headers=auth_headers)
+    assert ok.status_code == 201, ok.text
+
+
 def test_an_answer_is_kept_as_data_for_the_next_problem(db, placed, empty_queue, client, auth_headers):  # noqa: F811
     run, _ = _solve(db, _scenario(db, placed))
     kept = client.post(f"/api/v1/runs/{run}/promote", json={"decision": "serve", "name": "served_by", "as": "relationship"},
@@ -432,3 +443,20 @@ def test_an_export_has_one_row_per_cell_with_its_amount():
     assert rows["ship"][1] == [["S1", "C1", 30.5], ["S1", "C2", 2.0]]
     assert rows["trucks"][1] == [["S1", 5.0]]
     assert to_csv(rec).count("ship,") == 2
+
+
+def test_a_what_if_makes_within_data_again_from_scaled_times():
+    """Benchmark re-test, October 2026: a sandstorm scaled travel times +40% and coverage did not move,
+    for the 0/1 "within 30 minutes" data was not made again."""
+    data = {"sets": {}, "relationships": {},
+            "parameters": {"travel_min": [{"depot": "D1", "site": "S1", "value": 20}, {"depot": "D1", "site": "S2", "value": 25}],
+                           "within_30": [{"depot": "D1", "site": "S1", "value": 1}, {"depot": "D1", "site": "S2", "value": 1}]},
+            "parameter_defaults": {"travel_min": 999, "within_30": 0}}
+    out = whatif.apply(data, IR, {"scale_param": {"travel_min": 1.4},
+                                  "rederive": [{"param": "within_30", "source": "travel_min", "op": "<=", "limit": 30}]})
+    # 20 × 1.4 = 28 still within; 25 × 1.4 = 35 no longer.
+    assert out["parameters"]["within_30"] == [{"depot": "D1", "site": "S1", "value": 1}]
+    assert out["parameter_defaults"] == {"travel_min": 999 * 1.4, "within_30": 0}
+    assert data["parameters"]["within_30"][1]["value"] == 1  # the frozen data is untouched
+    assert whatif.describe({"rederive": [{"param": "within_30", "source": "travel_min", "op": "<=", "limit": 30}]}) == [
+        "within_30 made again: 1 where travel_min ≤ 30"]

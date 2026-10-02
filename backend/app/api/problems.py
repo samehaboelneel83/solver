@@ -261,6 +261,19 @@ class AttrScale(BaseModel):
     where: list[dict[str, Any]] | None = None
 
 
+class Rederive(BaseModel):
+    """0/1 data computed again from a data value the scenario changed: "within 30 minutes" from travel
+    times scaled +40% (benchmark re-test, October 2026: a sandstorm left coverage unchanged)."""
+
+    model_config = ConfigDict(extra="forbid")
+    #: The 0/1 data value made again, and the data value it is made from (the same index).
+    param: StrictStr
+    source: StrictStr
+    #: 1 where the source is at most (or at least) this, else 0.
+    op: Literal["<=", ">="] = "<="
+    limit: Annotated[float, Field(allow_inf_nan=False)]
+
+
 class AttrCell(BaseModel):
     """One record's field changed in a what-if (improvement plan 3.3)."""
 
@@ -291,6 +304,7 @@ class ScenarioPatch(BaseModel):
     scale_param: dict[StrictStr, Annotated[float, Field(ge=0, le=1000)]] = None  # type: ignore[assignment]
     set_attr: list[AttrCell] = None  # type: ignore[assignment]
     scale_attr: list[AttrScale] = None  # type: ignore[assignment]
+    rederive: list[Rederive] = None  # type: ignore[assignment]
     # A rule's limit -- the number on one side of it -- changed (user trial: "what if the budget were
     # 80,000?"), without publishing a new version.
     set_limit: dict[ConstraintId, Annotated[float, Field(allow_inf_nan=False)]] = None  # type: ignore[assignment]
@@ -526,6 +540,15 @@ def _check_data_changes(model_version_id: int, ir: dict[str, Any], patch: "Scena
         if cell.set not in sets:
             raise field_error(["patch", "set_attr", position, "set"],
                               f"whatif_unknown: model version {model_version_id} has no set {cell.set!r}", cell.set)
+    for position, again in enumerate(patch.rederive or []):
+        for part in ("param", "source"):
+            name = getattr(again, part)
+            if name not in parameters:
+                raise field_error(["patch", "rederive", position, part],
+                                  f"whatif_unknown: model version {model_version_id} reads no parameter {name!r}", name)
+        if parameters[again.param].get("index") != parameters[again.source].get("index"):
+            raise field_error(["patch", "rederive", position, "source"],
+                              f"{again.source!r} is not indexed as {again.param!r} is, so it cannot make it", again.source)
     for position, scale in enumerate(patch.scale_attr or []):
         if scale.set not in sets:
             raise field_error(["patch", "scale_attr", position, "set"],
@@ -541,7 +564,7 @@ def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "Sc
     names are this version's, a cell has as many keys as its decision has sets, and an earlier run
     is an answered run of this problem. The rest -- a value within today's bounds, an amount that
     run kept, the attribute a horizon compares -- is refused when the run is compiled."""
-    if patch.remove or patch.set_param or patch.scale_param or patch.set_attr or patch.scale_attr:
+    if patch.remove or patch.set_param or patch.scale_param or patch.set_attr or patch.scale_attr or patch.rederive:
         _check_data_changes(model_version_id, db.execute(select(_version_columns.ir).where(
             _version_columns.id == model_version_id)).scalar_one(), patch)
     if not patch.lock and not patch.stay_close:
