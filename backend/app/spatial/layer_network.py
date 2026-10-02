@@ -297,5 +297,16 @@ def paths(net: Network, pairs: list[tuple[tuple[float, float], tuple[float, floa
         if at != s:
             out.append(None)
             continue
-        out.append([list(a), *[[float(x), float(y)] for x, y in net.lonlat[way[::-1]]], list(b)])
+        points = [list(a), *[[float(x), float(y)] for x, y in net.lonlat[way[::-1]]], list(b)]
+        out.append(_simplified(points))
     return out
+
+
+def _simplified(points: list[list[float]], tolerance_deg: float = 0.0001) -> list[list[float]]:
+    """A drawn way without the vertices `build` added every DENSIFY_M (about 11 m of tolerance): a
+    flow along 200 km of road was 10,000 points, and the map took seconds to answer."""
+    from shapely.geometry import LineString
+
+    if len(points) < 3:
+        return points
+    return [[float(x), float(y)] for x, y in LineString(points).simplify(tolerance_deg, preserve_topology=False).coords]

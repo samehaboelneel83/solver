@@ -99,3 +99,13 @@ def test_a_kind_is_named_after_the_map_data_when_its_layer_is_only_points_or_pol
     assert kind_name(["points"], "Candidate Sites") == "candidate_site"
     assert kind_name(["clinics"], "survey 2027") == "clinic"
     assert kind_name(["points"], None) == "point"
+
+
+def test_a_kind_named_in_words_is_made_with_a_name():
+    """Benchmark re-test, October 2026: "grid cell" refused the whole layer with only "fix these first"."""
+    feats = [_point("A", 31.2, 30.0, cell_id="C1")]
+    plan = {**to_records.propose(feats, ["cells"], set()), "name": "Grid cell"}
+    seed, faults = to_records.build_seed(feats, plan)
+    assert not faults and seed["entity_types"][0]["name"] == "grid_cell"
+    _, faults = to_records.build_seed(feats, {**plan, "name": " - "})
+    assert faults and "named" in faults[0]

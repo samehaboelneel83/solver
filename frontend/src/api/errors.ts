@@ -132,6 +132,13 @@ export function formatApiError(err: unknown): string {
       // (benchmark, October 2026).
       const o = (detail ?? {}) as Record<string, unknown>;
       const said = [o.message, o.says, o.detail].find((v) => typeof v === "string" && v.trim());
+      // "Nothing was made: fix these first." with what to fix under it, not the headline alone
+      // (benchmark re-test, October 2026).
+      const faults = Array.isArray(o.faults) ? o.faults.filter((f): f is string => typeof f === "string") : [];
+      if (said && faults.length) {
+        const more = typeof o.more === "number" && o.more > 0 ? `\n… and ${o.more} more` : "";
+        return `${said}\n${faults.map((f) => `- ${f}`).join("\n")}${more}`;
+      }
       if (said) return said as string;
       return Object.entries(o).map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "string" ? v : JSON.stringify(v)}`).join("; ");
     }

@@ -315,7 +315,11 @@ def _along(db: Session, run_id: int, found: dict[str, Any], dataset_id: int, lay
         net = layer_network.build(layer_network.from_layer(db, dataset_id, layer), None, 30.0)
     except layer_network.NetworkError as exc:
         raise HTTPException(422, f"layer {layer!r}: {exc}") from exc
-    ways = layer_network.paths(net, [(tuple(f["geometry"]["coordinates"][0]), tuple(f["geometry"]["coordinates"][1])) for f in flows])
+    # Places may sit far off the roads (benchmark re-test, October 2026: customers up to 20 km away, and
+    # every flow stayed straight at 500 m): a drawing joins them at the nearest road as far as the
+    # distance tool does, the stretch to the road drawn straight.
+    ways = layer_network.paths(net, [(tuple(f["geometry"]["coordinates"][0]), tuple(f["geometry"]["coordinates"][1])) for f in flows],
+                               snap_m=20_000)
     straight = 0
     for feature, way in zip(flows, ways, strict=True):
         if way is None:

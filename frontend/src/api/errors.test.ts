@@ -189,3 +189,8 @@ describe("validation in plain words (benchmark, October 2026)", () => {
     expect(plainValidation("something else")).toBe("something else");
   });
 });
+
+it("lists the faults under the headline of a refusal that carries them (benchmark re-test, October 2026)", () => {
+  const body = JSON.stringify({ detail: { message: "Nothing was made: fix these first.", faults: ["feature 3: the key 'A' is used twice"], more: 2 } });
+  expect(formatApiError(new ApiError(422, body))).toBe("Nothing was made: fix these first.\n- feature 3: the key 'A' is used twice\n… and 2 more");
+});

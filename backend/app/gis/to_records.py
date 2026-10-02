@@ -26,6 +26,8 @@ records it made, by key: places move, fields change.
 """
 from __future__ import annotations
 
+import re
+
 import json
 from typing import Any
 
@@ -141,7 +143,11 @@ def build_seed(features: list[dict[str, Any]], plan: dict[str, Any]) -> tuple[di
     from app.api.validation import validate_name
 
     faults: list[str] = []
-    name = plan["name"]
+    # "Grid cell" is grid_cell: the words a person types, made a name (benchmark re-test, October
+    # 2026: a space refused the whole layer with only "fix these first").
+    name = re.sub(r"[^a-z0-9]+", "_", str(plan["name"]).strip().lower()).strip("_")
+    if name and name[0].isdigit():
+        name = f"kind_{name}"
     try:
         validate_name(name)
     except ValueError:

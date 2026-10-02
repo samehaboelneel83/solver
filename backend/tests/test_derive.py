@@ -145,3 +145,44 @@ def test_data_values_computed_by_lookup_and_by_comparison(tenants, db):  # noqa:
         assert http.post(path, json=bad, headers=h).status_code == 422, bad
     assert http.post(path, json={"op": "compare", "name": "x4", "kind": "parcel", "field": "prev_crop", "other": "crop"},
                      headers=tenants["b"]).status_code in (403, 404, 422)
+
+
+def test_a_value_is_read_through_a_relationship_from_either_end(tenants, db):  # noqa: F811
+    """Benchmark re-test, October 2026: "read through a link" offered no links where the kinds were
+    linked by relationships (from the map, imported), not by a link field. A cell in two districts
+    takes the mean of theirs."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        got = http.post(path, json=body, headers=h)
+        assert got.status_code in (200, 201), got.text
+        return got.json()
+
+    district = post("/api/v1/entity-types", {"domain_id": domain, "name": "district", "role": "location"})
+    cell = post("/api/v1/entity-types", {"domain_id": domain, "name": "cell", "role": "location"})
+    hour = post("/api/v1/entity-types", {"domain_id": domain, "name": "hour", "role": "time"})
+    ids = {k: post("/api/v1/entities", {"entity_type_id": t["id"], "key": k, "attrs": {}})["id"]
+           for t, k in ((district, "d1"), (district, "d2"), (cell, "c1"), (cell, "c2"), (cell, "c3"), (hour, "h1"))}
+    in_district = post("/api/v1/relationship-types", {"domain_id": domain, "name": "in_district", "from_type_id": cell["id"],
+                                                      "to_type_id": district["id"]})
+    for c, d in (("c1", "d1"), ("c2", "d1"), ("c2", "d2")):
+        post("/api/v1/relationships", {"relationship_type_id": in_district["id"], "from_entity_id": ids[c], "to_entity_id": ids[d]})
+    rate = post("/api/v1/parameters", {"domain_id": domain, "name": "call_rate", "index_type_ids": [district["id"], hour["id"]], "default_value": 0})
+    http.put(f"/api/v1/parameters/{rate['id']}/values", json={"cells": [
+        {"entity_ids": [ids["d1"], ids["h1"]], "value": 4}, {"entity_ids": [ids["d2"], ids["h1"]], "value": 8}]}, headers=h)
+
+    made = post(f"/api/v1/domains/{domain}/derive-value",
+                {"op": "lookup", "name": "cell_rate", "kind": "cell", "field": "in_district", "source": "call_rate"})
+    values = {tuple(c["entity_ids"]): c["value"] for c in
+              http.get(f"/api/v1/parameters/{made['parameter_id']}/values", headers=h).json()["cells"]}
+    assert values == {(ids["c1"], ids["h1"]): 4, (ids["c2"], ids["h1"]): 6}  # c3 in no district: the default
+
+    # From the district end: a district reads its cells' value (the mean of them).
+    pop = post("/api/v1/parameters", {"domain_id": domain, "name": "cell_pop", "index_type_ids": [cell["id"]], "default_value": 0})
+    http.put(f"/api/v1/parameters/{pop['id']}/values", json={"cells": [
+        {"entity_ids": [ids["c1"]], "value": 10}, {"entity_ids": [ids["c2"]], "value": 20}]}, headers=h)
+    back = post(f"/api/v1/domains/{domain}/derive-value",
+                {"op": "lookup", "name": "district_pop", "kind": "district", "field": "in_district", "source": "cell_pop"})
+    values = {tuple(c["entity_ids"]): c["value"] for c in
+              http.get(f"/api/v1/parameters/{back['parameter_id']}/values", headers=h).json()["cells"]}
+    assert values == {(ids["d1"],): 15, (ids["d2"],): 20}

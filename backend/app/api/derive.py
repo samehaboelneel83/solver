@@ -311,25 +311,49 @@ def derive_value(domain_id: int, body: DeriveValueBody, db: Session = Depends(ge
     cells: list[tuple[list[int], float]] = []
     default = 0.0
     if body.op == "lookup":
+        # Through a link field of the kind, or a relationship between the kinds (made from the map, or
+        # imported) read from either end (benchmark re-test, October 2026: only link fields were offered).
         link = mine.get(body.field)
-        if not link or link["data_type"] != "reference" or not link["references_id"]:
-            raise HTTPException(422, f"{body.field} is not a link field of {body.kind}")
-        b = db.execute(text("SELECT to_type_id FROM relationship_type WHERE id = :r"), {"r": link["references_id"]}).scalar_one()
+        targets: dict[int, list[int]] = {}
+        if link and link["data_type"] == "reference" and link["references_id"]:
+            b = db.execute(text("SELECT to_type_id FROM relationship_type WHERE id = :r"), {"r": link["references_id"]}).scalar_one()
+            by_key = {k: i for i, k in db.execute(text("SELECT id, key FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": b})}
+            for entity_id, _key, attrs in records:
+                through = by_key.get(str((attrs or {}).get(body.field)))
+                if through is not None:
+                    targets[entity_id] = [through]
+        else:
+            rel = db.execute(text(
+                "SELECT id, from_type_id, to_type_id FROM relationship_type WHERE domain_id = :d AND name = :n"
+                " AND (:a = ANY (entity_type_family(from_type_id)) OR from_type_id = ANY (entity_type_lineage(:a))"
+                "      OR :a = ANY (entity_type_family(to_type_id)) OR to_type_id = ANY (entity_type_lineage(:a)))"),
+                {"d": domain_id, "n": body.field, "a": a}).mappings().first()
+            if rel is None:
+                raise HTTPException(422, f"{body.field} is not a link field of {body.kind}, nor a link between {body.kind} and another kind")
+            forward = a in db.execute(text("SELECT unnest(entity_type_family(:t))"), {"t": rel["from_type_id"]}).scalars().all() \
+                or rel["from_type_id"] in db.execute(text("SELECT unnest(entity_type_lineage(:a))"), {"a": a}).scalars().all()
+            b = rel["to_type_id"] if forward else rel["from_type_id"]
+            mine_end, other_end = ("from_entity_id", "to_entity_id") if forward else ("to_entity_id", "from_entity_id")
+            for x, y in db.execute(text(f"SELECT {mine_end}, {other_end} FROM relationship WHERE relationship_type_id = :r"), {"r": rel["id"]}):
+                targets.setdefault(x, []).append(y)
         src = db.execute(text("SELECT id, index_type_ids, default_value FROM parameter_def WHERE domain_id = :d AND name = :n"),
                          {"d": domain_id, "n": body.source}).mappings().one_or_none()
         if src is None or not src["index_type_ids"] or src["index_type_ids"][0] != b:
             raise HTTPException(422, f"{body.source!r} is not a data value whose first index is the kind {body.field} links to")
         index = [a, *src["index_type_ids"][1:]]
         default = float(src["default_value"])
-        by_key = {k: i for i, k in db.execute(text("SELECT id, key FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": b})}
         rows: dict[int, list[tuple[list[int], float]]] = {}
         for ids, value in db.execute(text("SELECT entity_ids, value FROM parameter_value WHERE parameter_def_id = :p AND value IS NOT NULL"),
                                      {"p": src["id"]}):
             rows.setdefault(ids[0], []).append((list(ids[1:]), float(value)))
-        for entity_id, _key, attrs in records:
-            through = by_key.get(str((attrs or {}).get(body.field)))
-            for rest, value in rows.get(through, []):
-                cells.append(([entity_id, *rest], value))
+        for entity_id, _key, _attrs in records:
+            # Several linked records (a cell in two districts): the mean of theirs.
+            gathered: dict[tuple[int, ...], list[float]] = {}
+            for through in targets.get(entity_id, []):
+                for rest, value in rows.get(through, []):
+                    gathered.setdefault(tuple(rest), []).append(value)
+            for rest, values in gathered.items():
+                cells.append(([entity_id, *rest], sum(values) / len(values)))
         how = {"op": "lookup", "through": body.field, "source": body.source}
     else:
         if body.field not in mine:

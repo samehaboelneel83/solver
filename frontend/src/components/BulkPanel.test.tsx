@@ -132,6 +132,7 @@ describe("BulkPanel (queue R21)", () => {
                 { name: "Weekday", sample: ["mon"], unique: true, suggestion: "day" },
                 { name: "Where", sample: ["north"], unique: true, suggestion: null },
                 { name: "score", sample: ["4"], unique: true, suggestion: "value" },
+                { name: "safety_stock", sample: ["9"], unique: true, suggestion: null },
               ],
               targets: [{ name: "site", kind: "text", required: true, links_to: "site" },
                         { name: "day", kind: "text", required: true, links_to: "day" }, { name: "value", kind: "number", required: false }] }
@@ -148,6 +149,7 @@ describe("BulkPanel (queue R21)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBe(2));
     const body = vi.mocked(apiFetch).mock.calls[1][1]!.body as FormData;
-    expect(JSON.parse(String(body.get("mapping")))).toEqual({ Weekday: "day", Where: "site", score: "value" });
+    expect(screen.getByRole("combobox", { name: "safety_stock is read as" })).toHaveValue("");
+    expect(JSON.parse(String(body.get("mapping")))).toEqual({ Weekday: "day", Where: "site", score: "value", safety_stock: "" });
   });
 });

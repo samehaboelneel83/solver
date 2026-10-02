@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatApiError } from "../api/errors";
-import { useDeriveValue, useParameters, type EntityType, type Id } from "../api/v1";
+import { useDeriveValue, useParameters, useRelationshipTypes, type EntityType, type Id } from "../api/v1";
 
 /**
  * A data value computed once from the records (benchmark, October 2026: worked out in a
@@ -13,6 +13,7 @@ export default function ComputedValue({ domainId, entityTypes, onMade }: {
 }) {
   const derive = useDeriveValue();
   const parameters = useParameters(domainId, { limit: 500 });
+  const relationships = useRelationshipTypes(domainId, { limit: 500 });
   const [op, setOp] = useState<"lookup" | "compare">("lookup");
   const [kindName, setKindName] = useState("");
   const [field, setField] = useState("");
@@ -24,10 +25,18 @@ export default function ComputedValue({ domainId, entityTypes, onMade }: {
   const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
   const kind = entityTypes.find((k) => k.name === kindName);
   const otherKind = entityTypes.find((k) => k.name === other);
-  const fields = (kind?.attributes ?? []).filter((a) => (op === "lookup" ? a.data_type === "reference" : a.data_type !== "geometry"));
-  const link = fields.find((a) => a.name === field);
-  // Data values whose first index is the kind the chosen link names.
-  const sources = (parameters.data?.items ?? []).filter((p) => link?.target_type_id != null && p.index_type_ids[0] === link.target_type_id);
+  // Lookup: a link field of the kind, or a relationship between it and another kind, from either end
+  // (benchmark re-test, October 2026: links made from the map or imported were not offered).
+  const links: { name: string; to: Id | null | undefined }[] = kind ? [
+    ...(kind.attributes ?? []).filter((a) => a.data_type === "reference").map((a) => ({ name: a.name, to: a.target_type_id })),
+    ...(relationships.data?.items ?? []).flatMap((r) =>
+      r.from_type_id === kind.id ? [{ name: r.name, to: r.to_type_id }] : r.to_type_id === kind.id ? [{ name: r.name, to: r.from_type_id }] : []),
+  ].filter((l, i, all) => all.findIndex((m) => m.name === l.name) === i) : [];
+  const fields = op === "lookup" ? links.map((l) => ({ name: l.name }))
+    : (kind?.attributes ?? []).filter((a) => a.data_type !== "geometry");
+  const link = op === "lookup" ? links.find((l) => l.name === field) : undefined;
+  // Data values whose first index is the kind the chosen link leads to.
+  const sources = (parameters.data?.items ?? []).filter((p) => link?.to != null && p.index_type_ids[0] === link.to);
   const ready = /^[a-z][a-z0-9_]*$/.test(name.trim()) && kind && field && (op === "lookup" ? source : other);
   const select = "ml-1 rounded border border-slate-300 px-2 py-1 font-mono text-sm";
   return (
@@ -97,7 +106,7 @@ export default function ComputedValue({ domainId, entityTypes, onMade }: {
         </button>
       </div>
       {op === "lookup" && link && sources.length === 0 && (
-        <p className="mt-2 text-xs text-amber-800">No data value is indexed first by the kind {field} links to.</p>
+        <p className="mt-2 text-xs text-amber-800">No data value is indexed first by the kind {field} leads to.</p>
       )}
       {said && <p role={said.error ? "alert" : "status"} className={`mt-2 ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
     </form>

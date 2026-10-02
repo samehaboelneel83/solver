@@ -27,7 +27,9 @@ type AnswerFeature = {
     data?: Record<string, number>;
   };
 };
-export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean };
+export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean;
+  /** Flows drawn along a lines layer: how many, and how many stayed straight (no way along the roads). */
+  along?: { layer: string; flows: number; straight: number } };
 
 const COLOURS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#4f46e5"];
 const SHORT = "#dc2626";
@@ -306,6 +308,8 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
               )}
             </>}
             caption={`${(map.data?.layers ?? []).map((l) => l.title).join(" · ")}${map.data?.truncated ? " · the first 20,000 shown" : ""}${
+              map.data?.along ? ` · ${map.data.along.flows - map.data.along.straight} of ${map.data.along.flows} flows along ${map.data.along.layer}${
+                map.data.along.straight ? ` (${map.data.along.straight} straight: no way between them on it)` : ""}` : ""}${
               coloured?.ramp ? ` · areas filled by ${colourBy}; a chosen area deeper` : ""}`} />
         </div>
       )}

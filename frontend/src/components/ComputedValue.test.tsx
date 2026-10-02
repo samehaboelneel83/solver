@@ -19,7 +19,9 @@ function mount(onMade = vi.fn()) {
   vi.mocked(apiFetch).mockReset();
   vi.mocked(apiFetch).mockImplementation(async (path: string) =>
     (String(path).includes("derive-value") ? { parameter_id: 77, name: "made", cells: 6, index: [3, 2] }
-      : { items: [{ id: 8, name: "suitability", index_type_ids: [1, 2] }, { id: 9, name: "cost", index_type_ids: [2] }], total: 2 }) as never);
+      : String(path).includes("relationship-types") ? { items: [{ id: 4, name: "in_district", from_type_id: 3, to_type_id: 5 }], total: 1 }
+      : { items: [{ id: 8, name: "suitability", index_type_ids: [1, 2] }, { id: 9, name: "cost", index_type_ids: [2] },
+          { id: 10, name: "call_rate", index_type_ids: [5, 2] }], total: 3 }) as never);
   render(<QueryClientProvider client={new QueryClient()}><ComputedValue domainId={1} entityTypes={KINDS} onMade={onMade} /></QueryClientProvider>);
   return onMade;
 }
@@ -50,4 +52,13 @@ it("makes 1 or 0 by comparing a field with the other kind's key", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Compute" }));
   await screen.findByRole("status");
   expect(sent()).toEqual({ op: "compare", name: "rotation_ok", kind: "parcel", field: "prev_crop", other: "crop", against: "key", compare: "!=" });
+});
+
+it("reads through a relationship too, not only a link field (benchmark re-test, October 2026)", async () => {
+  mount();
+  fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "parcel" } });
+  await screen.findByRole("option", { name: "in_district" });
+  fireEvent.change(screen.getByLabelText("Link"), { target: { value: "in_district" } });
+  await screen.findByRole("option", { name: "call_rate" });
+  expect(screen.queryByRole("option", { name: "suitability" })).toBeNull();
 });

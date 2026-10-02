@@ -106,7 +106,9 @@ export default function BulkPanel({
       const found = await apiFetch<UploadPreview>(`${base}/upload/preview`, { method: "POST", body });
       if (!Array.isArray(found?.columns)) return;
       setPreview(found);
-      setChoices(Object.fromEntries(found.columns.map((c) => [c.name, c.suggestion ?? (fieldName(c.name) ? NEW_FIELD : LEAVE_OUT)])));
+      // A values file has no new fields: a column nothing matched is left out, not read as an index
+      // (benchmark re-test, October 2026: safety_stock was taken for the key and the upload failed).
+      setChoices(Object.fromEntries(found.columns.map((c) => [c.name, c.suggestion ?? (recordsUpload && fieldName(c.name) ? NEW_FIELD : LEAVE_OUT)])));
     } catch (err) {
       setProblem(formatApiError(err));
     }
