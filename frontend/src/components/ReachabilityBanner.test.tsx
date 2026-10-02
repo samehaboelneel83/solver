@@ -63,18 +63,18 @@ describe("ReachabilityBanner", () => {
   }
 
   it("keeps an analytics-only fault from people who cannot fix it", async () => {
-    sessionStorage.clear();
+    localStorage.clear();
     renderAs(["domain.edit"]);
     await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("degraded-notice")).not.toBeInTheDocument();
   });
 
   it("tells an administrator, who may hide it for the session", async () => {
-    sessionStorage.clear();
+    localStorage.clear();
     renderAs(["settings.edit"]);
     expect(await screen.findByTestId("degraded-notice")).toHaveTextContent("The analytics store reported an error");
-    fireEvent.click(screen.getByRole("button", { name: "Hide for now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide until it is back" }));
     expect(screen.queryByTestId("degraded-notice")).not.toBeInTheDocument();
-    expect(sessionStorage.getItem("solver_analytics_notice_hidden")).toBe("1");
+    expect(localStorage.getItem("solver_analytics_notice_hidden")).toBe("1");
   });
 });

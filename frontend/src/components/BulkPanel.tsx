@@ -24,7 +24,7 @@ export type UploadPreview = {
   rows: number;
   /** Records of the kind already stored. */
   existing?: number;
-  columns: { name: string; sample: string[]; unique: boolean; suggestion: string | null; matches_keys?: number }[];
+  columns: { name: string; sample: string[]; unique: boolean; suggestion: string | null; matches_keys?: number; filled?: number | null }[];
   targets: { name: string; kind: string; required: boolean; links_to?: string | null }[];
 };
 
@@ -224,7 +224,7 @@ export default function BulkPanel({
             <thead>
               <tr className="text-xs text-slate-600">
                 <th scope="col" className="px-2 py-1">Column in the file</th>
-                <th scope="col" className="px-2 py-1">First values</th>
+                <th scope="col" className="px-2 py-1">Its values</th>
                 <th scope="col" className="px-2 py-1">Read as</th>
               </tr>
             </thead>
@@ -232,7 +232,12 @@ export default function BulkPanel({
               {preview.columns.map((c) => (
                 <tr key={c.name} className="border-t border-slate-100">
                   <td className="px-2 py-1 font-mono">{c.name || "(no name)"}</td>
-                  <td className="px-2 py-1 text-xs text-slate-600">{c.sample.join(", ")}</td>
+                  <td className="px-2 py-1 text-xs text-slate-600">
+                    {c.sample.join(", ")}
+                    {c.filled != null && c.filled < preview.rows && (
+                      <span className="text-slate-400"> · {c.filled === 0 ? "empty" : `${c.filled.toLocaleString()} of ${preview.rows.toLocaleString()} rows filled`}</span>
+                    )}
+                  </td>
                   <td className="px-2 py-1">
                     <select
                       aria-label={`${c.name} is read as`}

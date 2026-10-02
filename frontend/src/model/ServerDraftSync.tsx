@@ -15,7 +15,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { baseOfServerDraft, fetchServerDraft, saveServerDraft, type ServerDraft } from "../api/drafts";
 import { isStaleRecordError, formatApiError } from "../api/errors";
 import { canonicalJson, readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
-import { useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 
 /** How long after the last edit a draft is saved to the server by itself. */
 export const AUTOSAVE_MS = 2000;
@@ -34,7 +33,25 @@ function time(iso: string): string {
  * new revision was never noted here (benchmark, October 2026: reopening the editor, and publishing
  * after it, asked which copy to keep). A different copy is still the caller's to resolve.
  */
-export async function saveToServer(draft: ModelDraft, expected: number | null): Promise<ServerDraft> {
+/** One save at a time per problem: a save sent while another was still answering read the same
+ * revision and was refused as stale (benchmark re-test, October 2026: 409s when adding rules quickly,
+ * and during Publish). The later save goes after the earlier, from the revision it left. */
+const queued = new Map<number, Promise<unknown>>();
+
+export function saveToServer(draft: ModelDraft, expected: number | null): Promise<ServerDraft> {
+  const before = readServerLink(draft.problemId)?.revision ?? null;
+  const prior = queued.get(draft.problemId) ?? Promise.resolve();
+  const next = prior.catch(() => undefined).then(() => {
+    // The caller read the link before the save ahead of it answered: go on from the revision that save left.
+    const now = readServerLink(draft.problemId)?.revision ?? null;
+    return saveNow(draft, expected === before && now !== before ? now : expected);
+  });
+  queued.set(draft.problemId, next);
+  void next.finally(() => { if (queued.get(draft.problemId) === next) queued.delete(draft.problemId); }).catch(() => undefined);
+  return next;
+}
+
+async function saveNow(draft: ModelDraft, expected: number | null): Promise<ServerDraft> {
   const body = {
     ir: draft.ir,
     base_version_id: draft.base === "scratch" ? null : Number(draft.base.slice("version-".length)),
@@ -159,7 +176,9 @@ function Linked({ draft, link, busy, disabled, remote, message, save }: {
   remote: Remote; message: string; save: () => Promise<void>;
 }) {
   const saved = link !== null && link.savedEditedAt === draft.editedAt;
-  useUnsavedChangesGuard(!saved, "Your newest changes are not saved to the server yet (they are kept in this browser). Leave anyway?");
+  // No "leave anyway?" here: the draft is kept in this browser with every edit, and saved to the server
+  // when it is next open -- nothing is lost by leaving, and the prompt (a blank browser dialog) only
+  // stopped people (benchmark re-test, October 2026).
   // Save by itself once the edits pause; a conflict with another tab still asks (above).
   // A failed save waits for the next edit rather than retrying on a loop; the button still works.
   const ready = remote.state === "ready";

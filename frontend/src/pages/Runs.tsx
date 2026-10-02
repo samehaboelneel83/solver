@@ -877,7 +877,9 @@ function ScenarioRuns({
                   </td>
                   <td className="py-2 pr-3 font-mono">{row.objective == null ? "—" : formatGoal(row.objective)}</td>
                   <td className="py-2 pr-3">{row.wall_time_s === null ? "—" : `${row.wall_time_s}s`}</td>
-                  <td className="py-2 text-slate-600">{row.solver_version ?? row.solver}</td>
+                  {/* A queued run's solver is chosen when it starts (benchmark re-test, October 2026: "cp-sat
+                      queued" for minutes, then solved by HiGHS). */}
+                  <td className="py-2 text-slate-600">{row.status === "queued" ? "chosen when it starts" : row.solver_version ?? row.solver}</td>
                 </tr>
               ))}
             </tbody>
@@ -1367,7 +1369,7 @@ function RunDetail({
           <Fact label="Best bound" value={data.best_bound == null ? "—" : String(Number(data.best_bound.toPrecision(10)))} />
           <Fact label="Gap" value={data.gap == null ? "—" : formatGap(data.gap)} />
           <Fact label="Solved in" value={data.wall_time_s === null ? "—" : `${data.wall_time_s}s`} />
-          <Fact label="Solver" value={data.solver_version ?? data.solver} />
+          <Fact label="Solver" value={data.status === "queued" ? "chosen when it starts" : data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
           {params.selector && <Fact label={params.selector.acted ? "Learned selector (chose the solver)" : "Learned selector (not acting)"} value={selectorText(params.selector)} />}

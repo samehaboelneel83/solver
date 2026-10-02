@@ -682,7 +682,11 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
 
 class ColumnGuess(BaseModel):
     name: str
+    #: Its first different values (benchmark re-test, October 2026: a sparse column read "bus lane
+    #: planned, bus lane planned, bus lane planned" while most rows were empty).
     sample: list[str]
+    #: How many rows have a value in it.
+    filled: int | None = None
     #: Every non-empty value differs: it could be the key.
     unique: bool
     #: What it is read as unless the person says otherwise: key, label, a field, or None (new or left out).
@@ -769,7 +773,8 @@ def entity_upload_preview(entity_type_id: int, file: UploadFile = File(...), db:
     out = []
     for i, h in enumerate(header):
         values = [str(r[i]).strip() for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
-        out.append(ColumnGuess(name=h, sample=values[:3], unique=bool(values) and len(values) == len(rows) and len(set(values)) == len(values),
+        out.append(ColumnGuess(name=h, sample=list(dict.fromkeys(values))[:3], filled=len(values),
+                               unique=bool(values) and len(values) == len(rows) and len(set(values)) == len(values),
                                suggestion=guess.get(h), matches_keys=sum(_fold(v) in existing for v in values)))
     return UploadPreview(rows=len(rows), existing=len(existing), columns=out, targets=targets)
 
@@ -1025,6 +1030,6 @@ def parameter_upload_preview(parameter_id: int, file: UploadFile = File(...), db
         pick = named or [h for h in header if guess[h] is None and numeric(h)][:1]
         if pick:
             guess[pick[0]] = "value"
-    out = [ColumnGuess(name=h, sample=column(h)[:3], unique=len(set(column(h))) == len(column(h)) == len(rows) and bool(rows),
+    out = [ColumnGuess(name=h, sample=list(dict.fromkeys(column(h)))[:3], filled=len(column(h)), unique=len(set(column(h))) == len(column(h)) == len(rows) and bool(rows),
                        suggestion=guess[h]) for h in header]
     return UploadPreview(rows=len(rows), columns=out, targets=targets)

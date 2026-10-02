@@ -5,9 +5,11 @@ import OfflineNotice from "./OfflineNotice";
 
 const HIDDEN_KEY = "solver_analytics_notice_hidden";
 
-function hiddenThisSession(): boolean {
+/** Hidden in this browser until the analytics store is back: it was on every page of every session for
+ * every tester (benchmark re-test, October 2026), though planning works without it. */
+function hiddenHere(): boolean {
   try {
-    return sessionStorage.getItem(HIDDEN_KEY) === "1";
+    return localStorage.getItem(HIDDEN_KEY) === "1";
   } catch {
     return false;
   }
@@ -20,7 +22,7 @@ function hiddenThisSession(): boolean {
 export default function ReachabilityBanner() {
   const health = useHealth();
   const { can } = useCapabilities();
-  const [hidden, setHidden] = useState(hiddenThisSession);
+  const [hidden, setHidden] = useState(hiddenHere);
 
   if (health.fetchStatus === "paused" && !health.data) {
     return (
@@ -39,6 +41,14 @@ export default function ReachabilityBanner() {
   }
 
   const databaseDown = health.data?.postgres === "error";
+  if (hidden && health.data && health.data.clickhouse !== "error") {
+    // Back: the next outage is news again.
+    try {
+      localStorage.removeItem(HIDDEN_KEY);
+    } catch {
+      /* nothing kept */
+    }
+  }
   // The analytics store alone being down leaves planning working: it is news for whoever runs the
   // platform, not a banner on every page for everyone (user trial). They may hide it for the session.
   const analyticsDown = health.data?.clickhouse === "error" && can("settings.edit") && !hidden;
@@ -59,14 +69,14 @@ export default function ReachabilityBanner() {
             className="ml-3 underline"
             onClick={() => {
               try {
-                sessionStorage.setItem(HIDDEN_KEY, "1");
+                localStorage.setItem(HIDDEN_KEY, "1");
               } catch {
                 /* this page only */
               }
               setHidden(true);
             }}
           >
-            Hide for now
+            Hide until it is back
           </button>
         )}
       </div>

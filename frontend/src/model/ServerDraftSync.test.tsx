@@ -128,3 +128,23 @@ it("still refuses when the newer server copy is a different model", async () => 
   await expect(saveToServer(local, 4)).rejects.toBe(STALE);
   expect(mockFetch).toHaveBeenCalledTimes(2);
 });
+
+it("sends a second save after the first, from the revision the first left (benchmark re-test, October 2026)", async () => {
+  const { saveToServer } = await import("./ServerDraftSync");
+  const draft = writeDraft({ problemId: 77, base: "scratch", baseVersion: null, ir: { version: 2 } as never });
+  writeServerLink(77, { revision: 1, savedEditedAt: "x" });
+  let answer!: (value: unknown) => void;
+  mockFetch.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }))
+    .mockResolvedValueOnce(server(3));
+  const first = saveToServer(draft, 1);
+  const second = saveToServer({ ...draft, ir: { version: 2, sets: ["a"] } as never }, 1);
+  await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+  await new Promise((r) => setTimeout(r, 10));
+  expect(mockFetch).toHaveBeenCalledTimes(1); // the second waits for the first
+  answer(server(2));
+  await first;
+  await second;
+  const sent = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
+  expect(sent.expected_revision).toBe(2);
+  clearDraft(77);
+});

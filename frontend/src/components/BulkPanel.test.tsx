@@ -44,7 +44,7 @@ describe("BulkPanel (queue R21)", () => {
                 { name: "team", sample: ["T1", "T2"], unique: true, suggestion: "key" },
                 { name: "hospital", sample: ["H1", "Haram Hospital"], unique: true, suggestion: "base_hospital" },
                 { name: "Doctors on duty", sample: ["2", "1"], unique: false, suggestion: null },
-                { name: "notes", sample: ["x"], unique: false, suggestion: null },
+                { name: "notes", sample: ["x"], unique: false, suggestion: null, filled: 1 },
               ],
               targets: [
                 { name: "key", kind: "text", required: true },
@@ -64,6 +64,8 @@ describe("BulkPanel (queue R21)", () => {
     const file = new File(["team,hospital\n"], "teams.csv", { type: "text/csv" });
     fireEvent.change(screen.getByLabelText("File to upload"), { target: { files: [file] } });
     const hospital = await screen.findByRole("combobox", { name: "hospital is read as" });
+    // A sparse column says how sparse it is (benchmark re-test, October 2026).
+    expect(screen.getByText(/1 of 2 rows filled/)).toBeInTheDocument();
     expect(hospital).toHaveValue("base_hospital");
     expect(within(hospital).getByRole("option", { name: /base_hospital — a link to a hospital, by key, name or code/ })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Doctors on duty is read as" })).toHaveValue("__new__");
