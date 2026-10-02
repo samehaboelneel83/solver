@@ -232,11 +232,16 @@ lift are per point, averaged over the five problems.
       distances instead of refusing them — `da4a78a`.
 
 ### Phase 4 — navigation (target: UX ≈ 78%)
-- [ ] **G8b Simple-mode entry points** for equations, predictors and relationships (with a one-line
-      hint), and one vocabulary across levels (Workspace / Data values in Expert too).
-- [ ] **G8c Home "What can this app do"** with the 16-step path and where each step lives
-      (point 1: 75 → ~90; orientation +).
-- [ ] B21 equation help stays open; consistent page after delete (B23).
+- [x] **G8b Simple-mode entry points and one vocabulary:** Workspace, Data values and Forecasts at
+      both levels (menus, page titles, headings; the page search still finds "domain", "parameters",
+      "predictors"); Simple's menus gain "Links between records", and its view switch the Equation
+      view, with a one-line hint on the view shown; Simple opens on sentences and remembers its own
+      choice — `3b807ab`.
+- [x] **G8c Home "What can this app do":** the 16 steps in four stages, each linked to its page in
+      the selected workspace (a problem's pages to the problem list until one is open); closing it
+      is remembered — `001aaa1`.
+- [x] B21 the equation help stays on screen and open when clicked; B23 was fixed in Phase 0 —
+      `001aaa1`.
 
 ### Re-test
 - [ ] Re-run the same five problems with fresh testers after Phase 1 and after Phase 3, same brief
