@@ -2,7 +2,7 @@ import { KeyboardEvent, useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { formatApiError } from "../api/errors";
-import { listEntities, useCreateEntity, type Entity, type Id } from "../api/v1";
+import { getEntity, listEntities, useCreateEntity, type Entity, type Id } from "../api/v1";
 
 const DEBOUNCE_MS = 200;
 const PAGE = 20;
@@ -10,8 +10,10 @@ const PAGE = 20;
 export type RecordPickerProps = {
   /** The kind of record to choose from; records of kinds inheriting from it are offered too. */
   typeId: Id | null;
-  /** The chosen record's key, or "" for none. */
+  /** The chosen record's key (or its id, with `by="id"`), or "" for none. */
   value: string;
+  /** What `value`, `onChange` and `blocked` speak in: a reference field stores keys, a relationship ids. */
+  by?: "key" | "id";
   onChange: (key: string) => void;
   id?: string;
   className?: string;
@@ -57,7 +59,9 @@ export default function RecordPicker({
   blocked,
   allowCreate,
   kindName,
+  by = "key",
 }: RecordPickerProps) {
+  const valueOf = (e: Pick<Entity, "id" | "key">) => (by === "id" ? String(e.id) : e.key);
   const create = useCreateEntity();
   const [createError, setCreateError] = useState<string | null>(null);
   const listId = useId();
@@ -78,10 +82,13 @@ export default function RecordPicker({
   });
   // The chosen record's label, wherever it sits in the list.
   const chosen = useQuery({
-    queryKey: ["record-picker", typeId, "key", value],
-    queryFn: () => listEntities({ entityTypeId: typeId, q: value, family: true, limit: PAGE }),
+    queryKey: ["record-picker", typeId, by, value],
+    queryFn: async (): Promise<Entity | null> => {
+      if (by === "id") return getEntity(Number(value));
+      const page = await listEntities({ entityTypeId: typeId, q: value, family: true, limit: PAGE });
+      return page.items.find((e) => e.key === value) ?? null;
+    },
     enabled: typeId != null && value !== "",
-    select: (page) => page.items.find((e) => e.key === value) ?? null,
   });
 
   const options = results.data?.items ?? [];
@@ -98,7 +105,7 @@ export default function RecordPicker({
     setCreateError(null);
     try {
       const made = await create.mutateAsync({ entity_type_id: typeId as Id, key: typed });
-      pick(made.key);
+      pick(valueOf(made));
     } catch (err) {
       setCreateError(formatApiError(err));
     }
@@ -122,7 +129,7 @@ export default function RecordPicker({
       setActive((i) => Math.max(i - 1, 0));
     } else if (event.key === "Enter" && open && active >= 0 && options[active]) {
       event.preventDefault();
-      pick(options[active].key);
+      pick(valueOf(options[active]));
     } else if (event.key === "Escape") {
       setOpen(false);
       setText("");
@@ -191,20 +198,20 @@ export default function RecordPicker({
             <li className="px-3 py-1.5 text-slate-500">{search ? `Nothing matches “${search}”.` : "No records yet."}</li>
           )}
           {options.map((e, i) => {
-            const why = blocked?.get(e.key);
+            const why = blocked?.get(valueOf(e));
             return (
               <li
                 key={e.id}
                 id={`${listId}-${i}`}
                 role="option"
-                aria-selected={e.key === value}
+                aria-selected={valueOf(e) === value}
                 aria-disabled={why ? true : undefined}
                 className={`px-3 py-1.5 ${why ? "cursor-not-allowed text-slate-400" : "cursor-pointer"} ${
                   i === active ? "bg-slate-100" : ""
-                } ${e.key === value ? "font-medium" : ""}`}
+                } ${valueOf(e) === value ? "font-medium" : ""}`}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  pick(e.key);
+                  pick(valueOf(e));
                 }}
               >
                 {optionText(e)}

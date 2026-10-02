@@ -1266,6 +1266,8 @@ export function useRelationship(id: Id | null | undefined) {
  * way every other v1 screen does, and report when a list was cut off
  * rather than quietly showing part of one. */
 const MAX_PAGE = 500;
+/** The most entities one list request returns; a kind with this many is searched, not listed. */
+export const ENTITY_PAGE = MAX_PAGE;
 
 type MultiList<T> = {
   items: T[];

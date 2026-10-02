@@ -161,3 +161,40 @@ describe("NewRelationshipForm, anchored to an entity of a hierarchy's own type",
     expect(options("relationship-other-select")).toContain("unlabelled");
   });
 });
+
+describe("NewRelationshipForm, for a kind with more records than one page", () => {
+  // 500 units listed (the page limit), so the form searches instead of listing.
+  const MANY = Array.from({ length: 500 }, (_, i) => unit(1000 + i, `u${i}`, `Unit ${i}`));
+  const FAR = unit(9999, "far", "Far Unit");
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve({ id: 1, relationship_type_id: 6, from_entity_id: 22, to_entity_id: 9999, attrs: {} });
+      if (path.includes("/trees")) return Promise.resolve({ entity_id: 22, trees: [] });
+      if (path.includes("q=far")) return Promise.resolve({ items: [FAR], total: 1 });
+      return Promise.resolve({ items: MANY.slice(0, 20), total: 501 });
+    });
+  });
+
+  it("searches the server for the other end and links the record found, past the first page", async () => {
+    render(
+      <QueryClientProvider client={editorQueryClient()}>
+        <ToastProvider>
+          <MemoryRouter>
+            <NewRelationshipForm types={[REPORTS_TO]} entitiesByType={new Map<Id, Entity[]>([[2, MANY]])}
+              entityTypeNames={new Map([[2, "unit"]])} subject={{ id: 22, entityTypeId: 2, label: "North Region" }}
+              heading="Add a relationship" />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const other = screen.getByTestId("relationship-other-select");
+    expect(other).toHaveAttribute("role", "combobox");
+    fireEvent.focus(other);
+    fireEvent.change(other, { target: { value: "far" } });
+    fireEvent.mouseDown(await screen.findByRole("option", { name: "far — Far Unit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+    await waitFor(() => expect(writes()).toEqual([{ relationship_type_id: 6, from_entity_id: 22, to_entity_id: 9999 }]));
+  });
+});

@@ -4,9 +4,11 @@ import { ErrorSummary, FieldError, FieldLabel, INPUT_CLASS, describedBy, useFiel
 import { useToast } from "./ToastProvider";
 import { useCapabilities } from "../hooks/useCapability";
 import { formatApiError } from "../api/errors";
+import RecordPicker from "./RecordPicker";
 import {
   useCreateRelationship,
   useEntityTrees,
+  ENTITY_PAGE,
   useDeleteRelationship,
   type Entity,
   type Id,
@@ -300,6 +302,38 @@ export function NewRelationshipForm({
     !tree ? [] : option?.role === "to" ? tree.descendants.map((n) => n.id) : tree.ancestors.map((n) => n.id)
   );
 
+  // A kind with more records than one page is searched rather than listed: a dropdown of the first
+  // page would hide the rest.
+  const searched = (typeId: Id) => choicesFor(typeId).length >= ENTITY_PAGE;
+  const picker = (props: {
+    id: string;
+    typeId: Id;
+    value: string;
+    onChange: (v: string) => void;
+    testId: string;
+    invalid: boolean;
+    describedBy: string | undefined;
+    exclude?: Id;
+  }) => (
+    <RecordPicker
+      by="id"
+      typeId={props.typeId}
+      value={props.value}
+      onChange={props.onChange}
+      id={props.id}
+      data-testid={props.testId}
+      className={INPUT_CLASS}
+      aria-invalid={props.invalid ? "true" : undefined}
+      aria-describedby={props.describedBy}
+      blocked={
+        new Map<string, string>([
+          ...(props.exclude != null ? [[String(props.exclude), "this record"] as [string, string]] : []),
+          ...[...loopIds].map((i) => [String(i), option?.role === "to" ? "below it: a loop" : "above it: a loop"] as [string, string]),
+        ])
+      }
+    />
+  );
+
   if (!can("domain.edit")) return null;
 
   if (options.length === 0) {
@@ -404,6 +438,18 @@ export function NewRelationshipForm({
               <FieldLabel htmlFor={id("other")} required>
                 {option?.role === "from" ? "To entity" : "From entity"}
               </FieldLabel>
+              {option && searched(option.otherTypeId) ? (
+                picker({
+                  id: id("other"),
+                  typeId: option.otherTypeId,
+                  value: otherId,
+                  onChange: setOtherId,
+                  testId: "relationship-other-select",
+                  invalid: Boolean(errors.to_entity_id || errors.from_entity_id),
+                  describedBy: describedBy(id("other-hint"), (errors.to_entity_id || errors.from_entity_id) && errorId("other")),
+                  exclude: subject.id,
+                })
+              ) : (
               <select
                 id={id("other")}
                 className={INPUT_CLASS}
@@ -429,6 +475,7 @@ export function NewRelationshipForm({
                     </option>
                   ))}
               </select>
+              )}
               <p id={id("other-hint")} className="mt-1 text-xs text-slate-500">
                 Only {option ? typeName(option.otherTypeId) : "entity"} records are offered — this relationship type
                 accepts nothing else at that end.
@@ -444,6 +491,17 @@ export function NewRelationshipForm({
                 <FieldLabel htmlFor={id("from")} required>
                   From entity
                 </FieldLabel>
+                {option && searched(option.type.from_type_id) ? (
+                  picker({
+                    id: id("from"),
+                    typeId: option.type.from_type_id,
+                    value: fromId,
+                    onChange: setFromId,
+                    testId: "relationship-from-select",
+                    invalid: Boolean(errors.from_entity_id),
+                    describedBy: describedBy(id("from-hint"), errors.from_entity_id && errorId("from_entity_id")),
+                  })
+                ) : (
                 <select
                   id={id("from")}
                   className={INPUT_CLASS}
@@ -460,6 +518,7 @@ export function NewRelationshipForm({
                     </option>
                   ))}
                 </select>
+                )}
                 <p id={id("from-hint")} className="mt-1 text-xs text-slate-500">
                   {option?.type.is_hierarchy ? "The parent." : "The end the type's name reads from."}
                 </p>
@@ -469,6 +528,17 @@ export function NewRelationshipForm({
                 <FieldLabel htmlFor={id("to")} required>
                   To entity
                 </FieldLabel>
+                {option && searched(option.type.to_type_id) ? (
+                  picker({
+                    id: id("to"),
+                    typeId: option.type.to_type_id,
+                    value: toId,
+                    onChange: setToId,
+                    testId: "relationship-to-select",
+                    invalid: Boolean(errors.to_entity_id),
+                    describedBy: describedBy(id("to-hint"), errors.to_entity_id && errorId("to_entity_id")),
+                  })
+                ) : (
                 <select
                   id={id("to")}
                   className={INPUT_CLASS}
@@ -485,6 +555,7 @@ export function NewRelationshipForm({
                     </option>
                   ))}
                 </select>
+                )}
                 <p id={id("to-hint")} className="mt-1 text-xs text-slate-500">
                   {option?.type.is_hierarchy ? "The child." : "The end the type's name reads to."}
                 </p>
