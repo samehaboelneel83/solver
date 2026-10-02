@@ -191,19 +191,25 @@ lift are per point, averaged over the five problems.
       what to do; the join limit shown up front — `a92be2a`.
 
 ### Phase 2 — modelling reach (target: coverage ≈ 92%)
-- [ ] **G3a Division of data and scalar data values** in formulas and the IR (data only, so models
-      stay linear). *Check:* `volume[r] / capacity[r]` as a weight.
-- [ ] **G3b Index comparisons in rule conditions** (`a != b`, `a < b`) and shapes for "at least k
-      sites within reach" and "chosen sites at least d apart".
-- [ ] **G3c Describe → draft model:** from the description and the workspace's kinds and computed
-      data, propose sets, decisions, rules and goals (reusing recipes) for review, not just pointers.
-      Point 10: 75 → ~90.
-- [ ] **G3d New recipes:** budgeted project selection; network design (capacity, single sourcing,
-      shortage, fleet by vehicle type); multi-period phasing with yearly budgets.
-- [ ] **G4b Computed joins:** lookup table → data value; field comparison → 0/1; total/count of
-      linked records into a field; composite keys and column mapping for data-value imports.
-      Point 5: 85 → ~95.
-- [ ] **G7a Scenario "scale a field"** for all or filtered records (+30 % demand). Point 13 +5.
+- [x] **G3a Division of data and scalar data values:** a field computed from a record's numbers
+      (`volume / capacity`, kept as data, so models stay linear); data values may be one number
+      (migration 0104) read as `budget` — `c5bc682`, `209da97`.
+- [x] **G3b Index comparisons in rule conditions** (`b > a`, `b != a`) in every view, and the shape
+      "chosen items at least d apart" — `74bf1c5`.
+- [x] **G3c Describe → draft model:** in the model editor, "Describe the problem in words" picks the
+      recipe the words call for, fills it from the workspace's kinds, fields and data values and
+      the numbers written (a budget, "at most 3"), says why for each choice and what is missing,
+      and writes it into the draft on request — `0dc011a`.
+- [x] **G3d New recipes:** projects within a budget (at most N, always-chosen flag); supply network
+      (open, capacity, one supplier each, shortage at a price, vehicles by type); phasing over
+      periods with each period's budget, sooner worth more. Each solves to the hand-worked answer
+      (`tests/test_recipes.py`) — `da05fee`.
+- [x] **G4b Computed joins:** a data value read through a link (`suit[parcel, crop]` from
+      `suitability[soil, crop]`) or 1/0 by comparison (`rotation_ok`); totals/counts/means of
+      linked records into a field; several key columns make one key; values uploads read columns
+      as mapped, with a preview that guesses the index columns from their keys — `2c38f76`,
+      `166524c`, `7cba819`, `9c8539b`.
+- [x] **G7a Scenario "scale a field"** for all or filtered records (+30 % demand) — `f1976eb`.
 
 ### Phase 3 — GIS and results depth (target: coverage ≈ 95%)
 - [ ] **G2a Keep line geometry end to end:** records keep LineStrings; records table, layers and
