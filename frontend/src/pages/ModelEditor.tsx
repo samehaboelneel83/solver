@@ -1762,23 +1762,11 @@ function ObjectiveEditor({
                     <label className="block text-xs text-slate-600" htmlFor={`obj-${position}-weight`}>
                       Weight
                     </label>
-                    <input
-                      id={`obj-${position}-weight`}
-                      inputMode="numeric"
-                      className={`${INPUT_CLASS} w-24 text-sm`}
-                      value={String(term.weight)}
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
-                        if (/^[+-]?\d*$/.test(event.target.value) && Number.isSafeInteger(next)) {
-                          onChange({
-                            ...objective,
-                            terms: objective.terms.map((t, i) =>
-                              i === position ? { ...t, weight: next } : t
-                            ),
-                          });
-                        }
-                      }}
-                    />
+                    <WeightInput id={`obj-${position}-weight`} weight={term.weight}
+                      onWeight={(next) => onChange({
+                        ...objective,
+                        terms: objective.terms.map((t, i) => (i === position ? { ...t, weight: next } : t)),
+                      })} />
                   </div>
                 )}
               </div>
@@ -2068,5 +2056,39 @@ function OneLine({ name, text, problems }: { name: string; text: string; problem
       <span className="min-w-0 truncate text-slate-900" title={text}>{text}</span>
       {problems > 0 && <span className="shrink-0 text-xs text-rose-700">{problems} to fix</span>}
     </span>
+  );
+}
+
+
+/** A goal's weight as typed: 0.5 and 2.25 as well as whole numbers (benchmark re-test, October 2026:
+ * "0.5" was reset to 1). The text is kept while it is being typed ("0.", "-"); the model takes it once
+ * it reads as a number. */
+function WeightInput({ id, weight, onWeight }: { id: string; weight: number; onWeight: (next: number) => void }) {
+  const [text, setText] = useState(String(weight));
+  const [shownFor, setShownFor] = useState(weight);
+  if (shownFor !== weight && Number(text) !== weight) {
+    setShownFor(weight);
+    setText(String(weight));
+  }
+  const reads = /^[+-]?(\d+\.?\d*|\.\d+)$/.test(text.trim()) && Number.isFinite(Number(text));
+  return (
+    <>
+      <input
+        id={id}
+        inputMode="decimal"
+        aria-invalid={reads ? undefined : true}
+        className={`${INPUT_CLASS} w-24 text-sm`}
+        value={text}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(next.trim()) && Number.isFinite(Number(next))) {
+            setShownFor(Number(next));
+            onWeight(Number(next));
+          }
+        }}
+      />
+      {!reads && <span className="block text-xs text-red-700">A weight is a number, such as 2 or 0.5.</span>}
+    </>
   );
 }

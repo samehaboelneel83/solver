@@ -359,7 +359,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "objective_term_malformed",
     where: "shape",
-    text: "each objective term carries an `id`, an integer `weight` and an `expression`",
+    text: "each objective term carries an `id`, a number `weight` and an `expression`",
   },
   {
     code: "objective_term_id_duplicated",

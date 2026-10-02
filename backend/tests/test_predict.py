@@ -219,3 +219,25 @@ def test_a_run_freezes_the_predictor_and_solves_over_it(db, empty_queue):  # noq
     assert data["predictors"] == {}
     db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
     db.commit()
+
+
+def test_the_readiness_check_reads_the_workspace_s_predictors(db):  # noqa: F811
+    """Benchmark re-test, October 2026: a model reading a forecast was reported "the dataset carries
+    no predictor ...; it was frozen before the model declared it" on the problem's Overview, and
+    offered no Solve -- the check built today's data without the trained models."""
+    from app.api.preflight import model_findings
+    from app.solve.preview import live_data
+
+    model = _fitted("boosting")
+    domain = make_domain(db, "predict_check")
+    db.execute(
+        text("INSERT INTO predictor (domain_id, name, inputs, model) VALUES (:d, 'm', :i, CAST(:m AS jsonb))"),
+        {"d": domain, "i": model["inputs"], "m": json.dumps(model)},
+    )
+    problem = make_problem(db, domain)
+    ir = _ir(PREDICT, constraints=[BUDGET])
+    assert live_data(db, domain, ir)["predictors"]["m"]["model"] == model
+    found = model_findings(db, domain, problem, ir)
+    assert not [f for f in found["findings"] if f["code"] == "does_not_compile"], found["findings"]
+    db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+    db.commit()

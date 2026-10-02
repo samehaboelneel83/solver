@@ -108,6 +108,17 @@ describe("planning overviews", () => {
     expect(vi.mocked(apiFetch).mock.calls.some(([path, options]) => path === "/api/v1/problems/9/solve" && options?.method === "POST")).toBe(true);
   });
 
+  it("takes the person to what stops the solve, focused and lit (benchmark re-test, October 2026)", async () => {
+    readiness = { ...ready(), check: { ready: false, model_class: "IP", sets: { employee: 2 }, findings: [{
+      kind: "blocker", code: "does_not_compile", says: "c_cover reads a field no employee has." }] } };
+    mount("/domains/7/problems/9/overview");
+    fireEvent.click(await screen.findByRole("button", { name: /See what stops it/ }));
+    const check = screen.getByRole("listitem", { name: /^Step 3, Check/ });
+    expect(check).toHaveFocus();
+    expect(check.className).toContain("ring-2");
+    expect(check).toHaveTextContent("c_cover reads a field no employee has.");
+  });
+
   it("fills a missing value in place, from the step that needs it", async () => {
     readiness = { ...ready(), check: { ready: false, model_class: "IP", sets: { employee: 2 }, findings: [{
       kind: "blocker", code: "missing_values", says: "1 employee record has no hours_per_week, which the model reads as a number.",

@@ -407,7 +407,7 @@ class Constraint(_Model):
 
 class ObjectiveTerm(_Model):
     id: Name
-    weight: StrictInt
+    weight: Number
     expression: Term
 
 

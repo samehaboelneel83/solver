@@ -279,6 +279,25 @@ describe("ModelEditor", () => {
     expect(sent.constraints).toHaveLength(1);
   });
 
+  it("takes a goal weight of 0.5 and publishes it (benchmark re-test, October 2026)", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write, ir: { ...IR_V2, objective: { sense: "minimize", terms: [
+      { id: "o_cost", weight: 1, expression: { const: 0 } }, { id: "o_time", weight: 1, expression: { const: 1 } }] } } });
+    renderPage();
+    await screen.findByDisplayValue("o_time");
+    const weight = screen.getAllByLabelText(/^weight$/i)[1];
+    fireEvent.change(weight, { target: { value: "0." } });
+    expect(weight).toHaveValue("0.");
+    fireEvent.change(weight, { target: { value: "0.5" } });
+    expect(weight).toHaveValue("0.5");
+    fireEvent.change(weight, { target: { value: "abc" } });
+    expect(screen.getByText("A weight is a number, such as 2 or 0.5.")).toBeInTheDocument();
+    fireEvent.change(weight, { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body).ir.objective.terms[1].weight).toBe(0.5);
+  });
+
   it("declaring a set makes it available to the rules immediately", async () => {
     stub({ versions: { items: [], total: 0 } });
     renderPage();

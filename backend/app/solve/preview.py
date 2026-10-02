@@ -124,12 +124,22 @@ def live_data(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]
             default=[],
         )
 
+    # The trained models the model declares, as a snapshot freezes them (migration 0087) -- without
+    # them every check of a model that reads a forecast said "the dataset carries no predictor"
+    # (benchmark re-test, October 2026).
+    predictors: dict[str, Any] = {}
+    declared = ir.get("predictors") if isinstance(ir.get("predictors"), dict) else {}
+    for name in declared:
+        model = _json(db, "SELECT model FROM predictor WHERE domain_id = :d AND name = :n", domain_id, name, default=None)
+        if model is not None:
+            predictors[name] = {"model": model}
     return {
         "labels": labels,
         "sets": sets,
         "parameters": parameters,
         "parameter_defaults": defaults,
         "relationships": relationships,
+        **({"predictors": predictors} if predictors else {}),
     }
 
 

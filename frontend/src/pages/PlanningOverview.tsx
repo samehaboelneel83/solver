@@ -136,6 +136,7 @@ export function ProblemOverview() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [failure, setFailure] = useState<string | null>(null);
+  const [lit, setLit] = useState<StepKey | null>(null);
   useDocumentTitle(`${readiness.data?.problem.name ?? "Problem"} · Overview`);
   const base = `/domains/${domainId}/problems/${problemId}`;
   const [seconds] = useSolveSeconds();
@@ -160,7 +161,15 @@ export function ProblemOverview() {
   const next = nextAction(data, can("model.publish"));
   const mayRun = can("run.submit");
   const solveNow = (publishFirst = false) => { setFailure(null); solve.mutate(publishFirst); };
-  const jump = (key: StepKey) => document.getElementById(`step-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Scrolled to, focused and lit for a moment: when the step is already on screen a scroll alone
+  // changed nothing, and the button seemed to do nothing (benchmark re-test, October 2026).
+  const jump = (key: StepKey) => {
+    const step = document.getElementById(`step-${key}`);
+    step?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    step?.focus({ preventScroll: true });
+    setLit(key);
+    window.setTimeout(() => setLit((now) => (now === key ? null : now)), 2500);
+  };
 
   const nextButton = (() => {
     switch (next.kind) {
@@ -227,7 +236,8 @@ export function ProblemOverview() {
     <ol aria-label="Steps" className="space-y-3">
       {steps.map((step, i) => {
         const mark = MARK[step.state];
-        return <li key={step.key} id={`step-${step.key}`} className={card} aria-label={`Step ${i + 1}, ${step.title}: ${mark.words}`}>
+        return <li key={step.key} id={`step-${step.key}`} tabIndex={-1}
+          className={`${card} ${lit === step.key ? "ring-2 ring-amber-400 ring-offset-2" : ""} outline-none`} aria-label={`Step ${i + 1}, ${step.title}: ${mark.words}`}>
           <div className="flex items-start gap-3">
             <span aria-hidden="true" className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${mark.style}`}>{mark.text}</span>
             <div className="min-w-0 flex-1">

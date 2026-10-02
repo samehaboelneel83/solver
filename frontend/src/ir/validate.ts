@@ -2078,11 +2078,12 @@ class ShapeChecker {
         );
       }
       seen.add(term.id);
-      if (!isInt(term.weight)) {
+      // A number, not only a whole one (benchmark re-test, October 2026).
+      if (!isFiniteNumber(term.weight)) {
         return refusal(
           "objective_term_malformed",
           [...at, "weight"],
-          `the term '${term.id}' must carry an integer weight`
+          `the term '${term.id}' must carry a number weight`
         );
       }
       if (!("expression" in term)) {

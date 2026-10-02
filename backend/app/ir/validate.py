@@ -1926,11 +1926,13 @@ class _ShapeChecker:
                     f"the objective term id {term['id']!r} is used twice",
                 )
             seen.add(term["id"])
-            if not _is_int(term.get("weight")):
+            # A number, not only a whole one: 0.5 of a cost beside another goal (benchmark re-test,
+            # October 2026: the editor reset 0.5 to 1, and the contract refused it).
+            if not _is_number(term.get("weight")):
                 return Refusal(
                     "objective_term_malformed",
                     [*at, "weight"],
-                    f"the term {term['id']!r} must carry an integer weight",
+                    f"the term {term['id']!r} must carry a number weight",
                 )
             if "expression" not in term:
                 return Refusal(

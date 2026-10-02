@@ -4827,6 +4827,173 @@
           ]
         }
       }
+    },
+    {
+      "name": "goal_weight_fraction",
+      "why": "A goal weighted 0.5 beside another (benchmark re-test, October 2026: weights were whole numbers only).",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "project"
+        ],
+        "parameters": {},
+        "variables": {
+          "choose": {
+            "index": [
+              "project"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "budget",
+            "note": "the chosen project cost at most 500",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "i",
+                      "name": "capex"
+                    }
+                  },
+                  {
+                    "var": "choose",
+                    "index": [
+                      "i"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 500
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "at_most_chosen",
+            "note": "at most 3 project are chosen",
+            "left": {
+              "sum": {
+                "var": "choose",
+                "index": [
+                  "i"
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "must_have",
+            "note": "every project marked committed is chosen",
+            "left": {
+              "var": "choose",
+              "index": [
+                "i"
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard",
+            "forall": [
+              {
+                "index": "i",
+                "set": "project",
+                "where": [
+                  {
+                    "attr": "committed",
+                    "op": "=",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "value_chosen",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "i",
+                        "name": "benefit"
+                      }
+                    },
+                    {
+                      "var": "choose",
+                      "index": [
+                        "i"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "project"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "cost_half",
+              "weight": 0.5,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "i",
+                        "name": "benefit"
+                      }
+                    },
+                    {
+                      "var": "choose",
+                      "index": [
+                        "i"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "project"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
