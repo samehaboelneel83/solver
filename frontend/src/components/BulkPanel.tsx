@@ -79,6 +79,8 @@ export default function BulkPanel({
   const [dryRun, setDryRun] = useState(false);
   // Records only: a column the kind has no field for becomes a new field, typed from its values.
   const recordsUpload = base.includes("/entity-types/");
+  // A values file is read against the data value's index columns and `value` (benchmark, October 2026).
+  const valuesUpload = base.includes("/parameters/");
   const [addFields, setAddFields] = useState(false);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<UploadReport | null>(null);
@@ -86,14 +88,18 @@ export default function BulkPanel({
   const [preview, setPreview] = useState<UploadPreview | null>(null);
   const [choices, setChoices] = useState<Record<string, string>>({});
   const chosen = Object.values(choices);
-  const twice = [...new Set(chosen.filter((c) => c !== LEAVE_OUT && c !== NEW_FIELD && chosen.indexOf(c) !== chosen.lastIndexOf(c)))];
-  const keyMissing = preview != null && !chosen.includes("key");
+  // Several columns read as the key make one key, joined by "_" (a route and a stop: R1_3).
+  const twice = [...new Set(chosen.filter((c) => c !== LEAVE_OUT && c !== NEW_FIELD && (c !== "key" || !recordsUpload)
+    && chosen.indexOf(c) !== chosen.lastIndexOf(c)))];
+  const keyMissing = preview != null && recordsUpload && !chosen.includes("key");
+  const keyParts = recordsUpload ? Object.keys(choices).filter((c) => choices[c] === "key") : [];
+  const unread = valuesUpload && preview != null ? preview.targets.filter((t) => !chosen.includes(t.name)).map((t) => t.name) : [];
 
   async function readColumns() {
     const file = input.current?.files?.[0];
     setPreview(null);
     setReport(null);
-    if (!file || !recordsUpload) return;
+    if (!file || !(recordsUpload || valuesUpload)) return;
     try {
       const body = new FormData();
       body.append("file", file);
@@ -199,7 +205,7 @@ export default function BulkPanel({
           <button
             type="button"
             onClick={() => upload()}
-            disabled={busy || twice.length > 0 || keyMissing}
+            disabled={busy || twice.length > 0 || keyMissing || unread.length > 0}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
             {busy ? (dryRun ? "Checking…" : preview && preview.rows > 0 ? `Writing ${preview.rows.toLocaleString()} rows…` : "Writing…") : "Upload"}
@@ -232,16 +238,18 @@ export default function BulkPanel({
                       value={choices[c.name] ?? LEAVE_OUT}
                       onChange={(e) => setChoices({ ...choices, [c.name]: e.target.value })}
                     >
-                      <option value="key">the key{c.unique ? "" : " (values repeat!)"}</option>
-                      <option value="label">the label (the name shown)</option>
+                      {recordsUpload && <option value="key">the key{c.unique ? "" : " (values repeat!)"}</option>}
+                      {recordsUpload && <option value="label">the label (the name shown)</option>}
                       {preview.targets
                         .filter((t) => !["key", "label"].includes(t.name))
                         .map((t) => (
                           <option key={t.name} value={t.name}>
-                            {t.links_to ? `${t.name} — a link to a ${t.links_to}, by key, name or code` : t.name}
+                            {valuesUpload
+                              ? (t.links_to ? `${t.name} — the ${t.links_to} by key` : `the ${t.name}`)
+                              : t.links_to ? `${t.name} — a link to a ${t.links_to}, by key, name or code` : t.name}
                           </option>
                         ))}
-                      {fieldName(c.name) && !preview.targets.some((t) => t.name === fieldName(c.name)) && (
+                      {recordsUpload && fieldName(c.name) && !preview.targets.some((t) => t.name === fieldName(c.name)) && (
                         <option value={NEW_FIELD}>a new field “{fieldName(c.name)}”</option>
                       )}
                       <option value={LEAVE_OUT}>leave it out</option>
@@ -252,6 +260,10 @@ export default function BulkPanel({
             </tbody>
           </table>
           {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key.</p>}
+          {keyParts.length > 1 && (
+            <p className="mt-1 text-sm text-slate-700">The key is made of {keyParts.join(" and ")}, joined by “_”: {keyParts.map((k) => preview.columns.find((c) => c.name === k)?.sample[0] ?? "…").join("_")}.</p>
+          )}
+          {unread.length > 0 && <p className="mt-1 text-sm text-amber-800">Choose the column read as {unread.join(", ")}.</p>}
           {(() => {
             // A key that matches none of the records already stored makes every row a new record
             // (benchmark, October 2026: duplicates in three of five problems, and the check said "clean").

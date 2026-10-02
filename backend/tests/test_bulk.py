@@ -303,3 +303,14 @@ def test_several_records_are_deleted_at_once_or_none(shop):
     done = shop["call"]("POST", "/api/v1/entities/delete", {"ids": [items["a"], items["b"]]}).json()
     assert done == {"deleted": 2}
     assert [e["key"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={site}").json()["items"]] == ["c"]
+
+
+def test_a_values_preview_reads_index_columns_by_name_or_by_their_keys(shop):
+    for key in ("north", "south"):
+        shop["post"]("/api/v1/entities", {"entity_type_id": shop["site"]["id"], "key": key, "attrs": {"capacity": 1}})
+    par = shop["post"]("/api/v1/parameters", {"domain_id": shop["domain"], "name": "demand", "default_value": 0,
+                                              "index_type_ids": [shop["site"]["id"], shop["day"]["id"]]})
+    rows = [["Weekday", "Where", "score", "comment"], ["mon", "North", "4", "x"], ["tue", "south", "2", "y"]]
+    got = shop["call"]("POST", f"/api/v1/parameters/{par['id']}/upload/preview", files=_csv(rows)).json()
+    assert {c["name"]: c["suggestion"] for c in got["columns"]} == {"Weekday": "day", "Where": "site", "score": "value", "comment": None}
+    assert [t["name"] for t in got["targets"]] == ["site", "day", "value"] and got["targets"][0]["links_to"] == "site"

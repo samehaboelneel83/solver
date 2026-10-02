@@ -69,10 +69,16 @@ describe("BulkPanel (queue R21)", () => {
     expect(screen.getByRole("combobox", { name: "Doctors on duty is read as" })).toHaveValue("__new__");
     fireEvent.change(screen.getByRole("combobox", { name: "notes is read as" }), { target: { value: "" } });
 
-    // Two columns as the key: refused before anything is sent.
-    fireEvent.change(screen.getByRole("combobox", { name: "hospital is read as" }), { target: { value: "key" } });
-    expect(screen.getByText(/Two columns are read as key/)).toBeInTheDocument();
+    // Two columns as the label: refused before anything is sent.
+    fireEvent.change(screen.getByRole("combobox", { name: "hospital is read as" }), { target: { value: "label" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "notes is read as" }), { target: { value: "label" } });
+    expect(screen.getByText(/Two columns are read as label/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
+    fireEvent.change(screen.getByRole("combobox", { name: "notes is read as" }), { target: { value: "" } });
+    // Two columns as the key make one key (benchmark, October 2026).
+    fireEvent.change(screen.getByRole("combobox", { name: "hospital is read as" }), { target: { value: "key" } });
+    expect(screen.getByText(/The key is made of .* joined by/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled();
     fireEvent.change(screen.getByRole("combobox", { name: "hospital is read as" }), { target: { value: "base_hospital" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -114,5 +120,34 @@ describe("BulkPanel (queue R21)", () => {
     fireEvent.click(screen.getByLabelText("Check only"));
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
     expect(await screen.findByText(/would make 0 new records and update 3/)).toBeInTheDocument();
+  });
+
+  it("reads a values file's columns as the index and the value (benchmark, October 2026)", async () => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith("/upload/preview")
+          ? { rows: 2,
+              columns: [
+                { name: "Weekday", sample: ["mon"], unique: true, suggestion: "day" },
+                { name: "Where", sample: ["north"], unique: true, suggestion: null },
+                { name: "score", sample: ["4"], unique: true, suggestion: "value" },
+              ],
+              targets: [{ name: "site", kind: "text", required: true, links_to: "site" },
+                        { name: "day", kind: "text", required: true, links_to: "day" }, { name: "value", kind: "number", required: false }] }
+          : { ok: true, rows: 2, written: 2, skipped: 0, dry_run: false, faults: [] },
+      ) as never,
+    );
+    render(<QueryClientProvider client={new QueryClient()}><BulkPanel base="/api/v1/parameters/7" what="demand cells" exportRows={false} /></QueryClientProvider>);
+    fireEvent.change(screen.getByLabelText("File to upload"), { target: { files: [new File(["a\n"], "d.csv")] } });
+    const where = await screen.findByRole("combobox", { name: "Where is read as" });
+    expect(within(where).queryByRole("option", { name: /the key/ })).toBeNull();
+    expect(screen.getByText("Choose the column read as site.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
+    fireEvent.change(where, { target: { value: "site" } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBe(2));
+    const body = vi.mocked(apiFetch).mock.calls[1][1]!.body as FormData;
+    expect(JSON.parse(String(body.get("mapping")))).toEqual({ Weekday: "day", Where: "site", score: "value" });
   });
 });

@@ -981,3 +981,50 @@ def parameter_upload(parameter_id: int, request: Request, file: UploadFile = Fil
     columns, write = parameter_writer(db, parameter)
     return run_rows(db, header, rows, columns, write, clean_only, dry_run,
                 user=user, request=request, audit_object=("parameter", parameter_id))
+
+
+@router.post("/parameters/{parameter_id}/upload/preview")
+def parameter_upload_preview(parameter_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                             _: UserAccount = Depends(get_current_user)) -> UploadPreview:
+    """A values file's columns and what each would be read as: an index by its name or by holding
+    that kind's keys, the value by its name or as the one column left of numbers (benchmark,
+    October 2026: a sheet of `Crop`, `Soil type`, `score` had to be renamed before it went in)."""
+    parameter = _get(db, ParameterDef, parameter_id, "parameter")
+    header, rows = _read(file)
+    columns, heads = _parameter_columns(db, parameter)
+    names = {t.id: t.name for t in db.execute(select(EntityType).where(EntityType.id.in_(parameter.index_type_ids))).scalars()}
+    targets = [Target(name=c.name, kind=c.kind, required=c.structural, links_to=names.get(t) if c.structural else None)
+               for c, t in zip(columns, [*parameter.index_type_ids, None])]
+    keys = [{_fold(k) for k in _keyed(db, t)} for t in parameter.index_type_ids]
+    norm = {h: re.sub(r"[^a-z0-9]+", "_", (h or "").strip().lower()).strip("_") for h in header}
+
+    def column(h: str) -> list[str]:
+        i = header.index(h)
+        return [str(r[i]).strip() for r in rows if i < len(r) and r[i] is not None and str(r[i]).strip() != ""]
+
+    guess: dict[str, str | None] = {h: None for h in header}
+    for head, kind in zip(heads, [names.get(t) for t in parameter.index_type_ids]):
+        by_name = [h for h in header if guess[h] is None and norm[h] in (head, kind, f"{kind}_id", f"{kind}_key", f"{kind}_code")]
+        if by_name:
+            guess[by_name[0]] = head
+    for head, known in zip(heads, keys):
+        if head in guess.values():
+            continue
+        best = max(((sum(_fold(v) in known for v in column(h)), h) for h in header if guess[h] is None), default=(0, None))
+        if best[0] > 0 and best[0] * 2 >= len(column(best[1])):
+            guess[best[1]] = head
+    if "value" not in guess.values():
+        named = [h for h in header if guess[h] is None and norm[h] in ("value", "amount", "score", "number", parameter.name)]
+
+        def numeric(h: str) -> bool:
+            try:
+                return bool(column(h)) and all(float(v) == float(v) for v in column(h))
+            except ValueError:
+                return False
+
+        pick = named or [h for h in header if guess[h] is None and numeric(h)][:1]
+        if pick:
+            guess[pick[0]] = "value"
+    out = [ColumnGuess(name=h, sample=column(h)[:3], unique=len(set(column(h))) == len(column(h)) == len(rows) and bool(rows),
+                       suggestion=guess[h]) for h in header]
+    return UploadPreview(rows=len(rows), columns=out, targets=targets)
