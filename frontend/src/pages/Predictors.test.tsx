@@ -215,3 +215,21 @@ it("keeps one prediction per record and period, an input held at a number (bench
     inputs: { price: 9.5 }, over: { kind: "week", feature: "promo" } });
   ENTITY_TYPES.items.pop();
 });
+
+it("trains on earlier values in time, each series its own (benchmark re-test, October 2026)", async () => {
+  const write = stub(vi.fn().mockResolvedValue({ training_id: 9, state: "running" }));
+  renderPage();
+  await screen.findByTestId("predictor");
+  fireEvent.change(screen.getByLabelText("Name of the model"), { target: { value: "sales_model" } });
+  fireEvent.change(screen.getByLabelText("Learn from records of"), { target: { value: "product" } });
+  fireEvent.change(screen.getByLabelText("Predict"), { target: { value: "demand" } });
+  fireEvent.click(screen.getByLabelText("price"));
+  fireEvent.change(screen.getByLabelText("In the order of"), { target: { value: "label" } });
+  fireEvent.change(screen.getByLabelText("Records back"), { target: { value: "7, 1" } });
+  expect(screen.getByText(/Adds demand_lag1, demand_lag7 as inputs/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Train" }));
+  await waitFor(() => expect(write).toHaveBeenCalled());
+  expect(JSON.parse(write.mock.calls[0][1].body)).toMatchObject({
+    features: ["price", "demand_lag1", "demand_lag7"], lags: { order_by: "label", steps: [1, 7] },
+  });
+});

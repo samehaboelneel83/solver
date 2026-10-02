@@ -1915,12 +1915,16 @@ export type Predictor = {
   /** How it was trained, or null for an uploaded model. */
   training: {
     kind?: string; entity_type?: string; features?: string[]; target?: string; trees?: number; max_depth?: number; positive?: string;
+    lags?: PredictorLags & { field: string };
   } | null;
   summary: { inputs?: number; trees?: number; nodes?: number; leaves?: number; aggregation?: string } | null;
   created_at: string;
   updated_at: string;
 };
 
+/** Inputs from earlier records in time (benchmark re-test, October 2026): `field` (the target by default)
+ * `steps` records earlier, in `order_by` order, each `group_by` value its own series. */
+export type PredictorLags = { order_by: string; group_by?: string; field?: string; steps: number[] };
 export type PredictorTrain = {
   domain_id: number;
   name: string;
@@ -1934,6 +1938,7 @@ export type PredictorTrain = {
   trees?: number;
   max_depth?: number;
   replace?: boolean;
+  lags?: PredictorLags;
 };
 
 export const listPredictors = (domainId: Id) =>

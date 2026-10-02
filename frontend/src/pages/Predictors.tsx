@@ -80,6 +80,7 @@ function PredictorCard({ predictor, canEdit }: { predictor: Predictor; canEdit: 
           <p className="mt-1 text-xs text-slate-500">
             {trained?.entity_type
               ? `${METHODS[trained.kind ?? ""] ?? "Random forest"} on ${trained.entity_type}, predicting ${m.predicts ?? trained.target}`
+                + (trained.lags ? `, from its ${trained.lags.field} ${trained.lags.steps.join(", ")} back by ${trained.lags.order_by}${trained.lags.group_by ? ` per ${trained.lags.group_by}` : ""}` : "")
               : "Uploaded"}
             {predictor.summary?.trees ? ` · ${predictor.summary.trees} trees, ${predictor.summary.leaves ?? "?"} leaves` : ""}
             {updated ? ` · updated ${updated}` : ""}
@@ -315,6 +316,10 @@ function TrainForm({ domainId }: { domainId: number }) {
   const yesOrNo = kind === "random_forest_classifier";
   const [trees, setTrees] = useState("50");
   const [depth, setDepth] = useState("6");
+  // Earlier values as inputs (benchmark re-test, October 2026): yesterday's, last week's.
+  const [lagOrder, setLagOrder] = useState("");
+  const [lagGroup, setLagGroup] = useState("");
+  const [lagSteps, setLagSteps] = useState("1, 7");
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
   // Training goes on after the request (operator trial F31): this is the one being waited for.
   const [trainingId, setTrainingId] = useState<number | null>(null);
@@ -335,12 +340,21 @@ function TrainForm({ domainId }: { domainId: number }) {
     [chosen, numeric, yesOrNo],
   );
   const targetType = chosen?.attributes?.find((a) => a.name === target)?.data_type;
+  // A linked record's numbers, read through the link at training and when predicting (benchmark re-test, October 2026).
+  const throughLinks = useMemo(() => (chosen?.attributes ?? []).filter((a) => a.data_type === "reference").flatMap((a) =>
+    ((types.data?.items ?? []).find((k) => k.id === a.target_type_id)?.attributes ?? []).filter((x) => NUMERIC.has(x.data_type)).map((x) => `${a.name}.${x.name}`)),
+  [chosen, types.data]);
+  const steps = [...new Set(lagSteps.split(/[\s,]+/).filter(Boolean).map(Number))].sort((a, b) => a - b);
+  const stepsOk = steps.length > 0 && steps.length <= 5 && steps.every((n) => Number.isInteger(n) && n >= 1 && n <= 366);
+  const lagged = !yesOrNo && lagOrder !== "";
+  const lagNames = lagged && stepsOk ? steps.map((n) => `${target}_lag${n}`) : [];
   const problem = !NAME.test(name)
     ? "Name it with lower-case letters, digits and underscores, starting with a letter."
     : !chosen ? "Choose the records to learn from."
       : !target ? "Choose what to predict."
-        : features.length === 0 ? "Choose at least one input."
-          : null;
+        : lagged && !stepsOk ? "Earlier values: whole numbers of records back, 1 to 366, at most five (1, 7)."
+          : features.length === 0 && lagNames.length === 0 ? "Choose at least one input."
+            : null;
 
   return (
     <form
@@ -352,7 +366,9 @@ function TrainForm({ domainId }: { domainId: number }) {
         setMessage(null);
         train.mutate(
           {
-            domain_id: domainId, name, entity_type: entityType, target, features, kind,
+            domain_id: domainId, name, entity_type: entityType, target, kind,
+            features: [...features, ...lagNames.filter((n) => !features.includes(n))],
+            ...(lagNames.length ? { lags: { order_by: lagOrder, ...(lagGroup ? { group_by: lagGroup } : {}), steps } } : {}),
             ...(yesOrNo && positive.trim() ? { positive: positive.trim() } : {}),
             trees: Number(trees) || 50, max_depth: Number(depth) || 6,
           },
@@ -406,15 +422,44 @@ function TrainForm({ domainId }: { domainId: number }) {
         <fieldset>
           <legend className="text-sm">From these inputs</legend>
           <div className="mt-1 flex flex-wrap gap-3">
-            {numeric.filter((a) => a !== target).map((a) => (
+            {[...numeric.filter((a) => a !== target), ...throughLinks].map((a) => (
               <label key={a} className="inline-flex items-center gap-1.5 text-sm">
                 <input type="checkbox" checked={features.includes(a)}
                   onChange={(e) => setFeatures((f) => (e.target.checked ? [...f, a] : f.filter((x) => x !== a)))} />
-                {a}
+                {a.includes(".") ? `${a.split(".")[1]} of its ${a.split(".")[0]}` : a}
               </label>
             ))}
           </div>
           <MakeNumbers kind={chosen} kinds={typeItems} />
+          {!yesOrNo && target && (
+            <div className="mt-2 flex flex-wrap items-end gap-3 text-sm" role="group" aria-label="Earlier values as inputs">
+              <label className="block">Earlier {target}, in the order of
+                <select aria-label="In the order of" className={INPUT_CLASS} value={lagOrder} onChange={(e) => setLagOrder(e.target.value)}>
+                  <option value="">no earlier values</option>
+                  {(chosen.attributes ?? []).filter((a) => ["date", "datetime", "text", "integer", "number"].includes(a.data_type) && a.name !== target)
+                    .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+                </select>
+              </label>
+              {lagOrder && (
+                <>
+                  <label className="block">each its own series by
+                    <select aria-label="Each its own series by" className={INPUT_CLASS} value={lagGroup} onChange={(e) => setLagGroup(e.target.value)}>
+                      <option value="">one series</option>
+                      {(chosen.attributes ?? []).filter((a) => ["text", "enum", "reference", "integer"].includes(a.data_type) && a.name !== target && a.name !== lagOrder)
+                        .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">records back
+                    <input aria-label="Records back" className={INPUT_CLASS} value={lagSteps} onChange={(e) => setLagSteps(e.target.value)} placeholder="1, 7" />
+                  </label>
+                  <p className="w-full text-xs text-slate-500">
+                    Adds {lagNames.join(", ") || "…"} as inputs. When predicting, a record with no {target} yet passes its
+                    forecast on to the next: tomorrow reads today&apos;s forecast.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
         </fieldset>
       )}
       <details>

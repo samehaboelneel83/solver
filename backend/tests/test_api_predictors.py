@@ -330,3 +330,77 @@ def test_a_forecast_is_kept_for_another_kind_and_per_period_with_inputs_mapped(c
     assert fixed.json()["written"] == 1
     for bad in ({"inputs": {"colour": 1}}, {"inputs": {"size": "nowhere.scale"}}, {"over": {"kind": "month_of_year", "feature": "colour"}}):
         assert http.post(path, json={"field": "x", "entity_type": "customer", **bad}, headers=t["a"]).status_code == 422, bad
+
+
+def test_a_forecast_learns_from_earlier_days_per_store_and_carries_its_own_forecasts_forward(client, db):  # noqa: F811
+    """Benchmark re-test, October 2026: time-series inputs (yesterday's demand) were not to be had."""
+    http, t = client
+    domain = t["domain_a"]
+    day = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'store_day', CAST('other' AS entity_role)) RETURNING id"),
+                     {"d": domain}).scalar_one()
+    for name, data_type in (("store", "text"), ("date", "text"), ("demand", "number")):
+        db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, CAST(:k AS attr_type))"),
+                   {"t": day, "n": name, "k": data_type})
+    # Each store's demand alternates 10, 20, 10, ...: yesterday's says today's. Store b starts high.
+    for store, first in (("a", 10), ("b", 20)):
+        for d in range(1, 41):
+            known = d <= 36
+            value = first if d % 2 else 30 - first
+            attrs = {"store": store, "date": f"2026-03-{d:02d}" if d <= 31 else f"2026-04-{d - 31:02d}", **({"demand": value} if known else {})}
+            db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                       {"t": day, "k": f"{store}{d}", "a": json.dumps(attrs)})
+    db.commit()
+    got = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "daily", "entity_type": "store_day",
+                                                      "features": [], "target": "demand", "trees": 20, "max_depth": 4,
+                                                      "lags": {"order_by": "date", "group_by": "store", "steps": [1]}}, headers=t["a"])
+    assert got.status_code == 422  # no features at all: one is needed besides the lags
+    got = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "daily", "entity_type": "store_day",
+                                                      "features": ["demand_lag1"], "target": "demand", "trees": 20, "max_depth": 4,
+                                                      "lags": {"order_by": "date", "group_by": "store", "steps": [1, 2]}}, headers=t["a"])
+    assert got.status_code == 201, got.text
+    trained = got.json()
+    assert trained["training"]["features"] == ["demand_lag1", "demand_lag2"]
+    assert trained["training"]["lags"] == {"order_by": "date", "group_by": "store", "field": "demand", "steps": [1, 2]}
+    kept = http.post(f"/api/v1/predictors/{trained['id']}/apply", json={"field": "demand_fc", "only_missing": True}, headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 8
+    fc = {k: float(v) for k, v in db.execute(text("SELECT key, (attrs->>'demand_fc')::float FROM entity WHERE entity_type_id = :t"
+                                                   " AND attrs ? 'demand_fc'"), {"t": day}).all()}
+    # Day 36 was 20 for a; the forecasts go on alternating, each reading the one before it.
+    assert [round(fc[f"a{d}"]) for d in range(37, 41)] == [10, 20, 10, 20]
+    assert [round(fc[f"b{d}"]) for d in range(37, 41)] == [20, 10, 20, 10]
+
+
+def test_a_predictor_trains_on_a_linked_record_s_field(client, db):  # noqa: F811
+    """Benchmark re-test, October 2026: an input through a link had to be copied into a field first."""
+    http, t = client
+    domain = t["domain_a"]
+    area = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'area', CAST('other' AS entity_role)) RETURNING id"),
+                      {"d": domain}).scalar_one()
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, 'income', 'number')"), {"t": area})
+    site = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'shop', CAST('other' AS entity_role)) RETURNING id"),
+                      {"d": domain}).scalar_one()
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, 'sales', 'number')"), {"t": site})
+    for i in range(30):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": area, "k": f"z{i}", "a": json.dumps({"income": i})})
+    db.commit()
+    link = http.post(f"/api/v1/entity-types/{site}/attributes", json={"name": "in_area", "data_type": "reference", "target_type_id": area},
+                     headers=t["a"])
+    assert link.status_code == 201, link.text
+    for i in range(30):
+        attrs = {"in_area": f"z{i}", **({"sales": 3 * i} if i < 25 else {})}
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": site, "k": f"s{i}", "a": json.dumps(attrs)})
+    db.commit()
+    got = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "by_area", "entity_type": "shop",
+                                                      "features": ["in_area.income"], "target": "sales", "trees": 20}, headers=t["a"])
+    assert got.status_code == 201, got.text
+    assert got.json()["metrics"]["rows"] == 25
+    kept = http.post(f"/api/v1/predictors/{got.json()['id']}/apply", json={"field": "sales_fc", "only_missing": True}, headers=t["a"])
+    assert kept.status_code == 200 and kept.json()["written"] == 5, kept.text
+    fc = float(db.execute(text("SELECT (attrs->>'sales_fc')::float FROM entity WHERE entity_type_id = :t AND key = 's26'"), {"t": site}).scalar_one())
+    assert 60 < fc < 80  # 3 x 26 = 78, near the edge of what it saw (up to 72)
+    bad = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "nowhere", "entity_type": "shop",
+                                                      "features": ["nowhere.income"], "target": "sales"}, headers=t["a"])
+    assert bad.status_code == 422 and "not a link field" in bad.text

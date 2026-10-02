@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import engine, enter_tenant, get_db
+from app.ml import lags as lagging
 from app.ml import train as training
 from app.ml import trees
 from app.models.iam import UserAccount
@@ -58,6 +59,17 @@ class UploadBody(BaseModel):
     model: dict[str, Any]
 
 
+class Lags(BaseModel):
+    """Inputs from earlier in time (benchmark re-test, October 2026): `field` (the target, by default) as
+    it was `steps` records earlier, in `order_by` order, each `group_by` value its own series."""
+
+    model_config = ConfigDict(extra="forbid")
+    order_by: str = Field(min_length=1, max_length=63)
+    group_by: str | None = Field(default=None, max_length=63)
+    field: str | None = Field(default=None, max_length=63)
+    steps: list[int] = Field(min_length=1, max_length=lagging.MAX_LAGS)
+
+
 class TrainBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     domain_id: int = Field(gt=0)
@@ -76,6 +88,8 @@ class TrainBody(BaseModel):
     seed: int = Field(default=0, ge=0, le=2**31 - 1)
     #: Retrain a predictor of this name in place rather than refuse the name.
     replace: bool = False
+    #: Inputs from earlier records in time: `<field>_lag<k>` (benchmark re-test, October 2026).
+    lags: Lags | None = None
 
 
 class PredictBody(BaseModel):
@@ -221,26 +235,71 @@ def _type_id(db: Session, body: "TrainBody") -> int:
     return type_id
 
 
+def _reader(db: Session, type_id: int, kind_name: str, specs: list[Any]):
+    """How an input is read from a record: a number held fixed, a linked record's field (`road.lanes`,
+    through the link field `road`), or a field of its own."""
+    linked: dict[str, dict[str, dict[str, Any]]] = {}
+    for spec in specs:
+        if isinstance(spec, str) and "." in spec:
+            link = spec.split(".", 1)[0]
+            if link in linked:
+                continue
+            target_type = db.execute(text(
+                "SELECT rt.to_type_id FROM attribute_def ad JOIN relationship_type rt ON rt.id = ad.references_id"
+                " WHERE ad.entity_type_id = ANY (entity_type_lineage(:t)) AND ad.name = :n"), {"t": type_id, "n": link}).scalar_one_or_none()
+            if target_type is None:
+                raise HTTPException(422, f"{link!r} is not a link field of {kind_name}")
+            linked[link] = {k: (a or {}) for k, a in db.execute(text(
+                "SELECT key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": target_type})}
+
+    def read(attrs: dict[str, Any], spec: Any) -> Any:
+        if isinstance(spec, (int, float)) and not isinstance(spec, bool):
+            return spec
+        if "." in spec:
+            link, name = spec.split(".", 1)
+            return (linked[link].get(str(attrs.get(link))) or {}).get(name)
+        return attrs.get(spec)
+
+    return read
+
+
 def _train(db: Session, body: "TrainBody", user: UserAccount) -> dict[str, Any]:
     """Read the records, train, and store the predictor; the request and a background training share it."""
-    rows = db.execute(
+    type_id = _type_id(db, body)
+    rows = [dict(r or {}) for r in db.execute(
         text(
             "SELECT e.attrs FROM entity e"
             " WHERE e.active AND e.entity_type_id = ANY (entity_type_family(:t))"
             " ORDER BY e.id LIMIT :cap"
         ),
-        {"t": _type_id(db, body), "cap": training.MAX_ROWS + 1},
-    ).scalars().all()
+        {"t": type_id, "cap": training.MAX_ROWS + 1},
+    ).scalars().all()]
+    features = list(body.features)
+    # Inputs through a link (`road.lanes`), read at training as when predicting (benchmark re-test, October 2026).
+    through = [f for f in features if "." in f]
+    if through:
+        read = _reader(db, type_id, body.entity_type, through)
+        rows = [{**row, **{f: read(row, f) for f in through}} for row in rows]
+    lag = body.lags
+    if lag is not None:
+        if any(not 1 <= k <= lagging.MAX_STEP for k in lag.steps) or len(set(lag.steps)) != len(lag.steps):
+            raise HTTPException(422, f"lags are distinct steps from 1 to {lagging.MAX_STEP}")
+        field = lag.field or body.target
+        rows = lagging.add(rows, field, sorted(lag.steps), lag.order_by, lag.group_by)
+        features += [n for n in (lagging.name(field, k) for k in sorted(lag.steps)) if n not in features]
+        if len(features) > trees.MAX_INPUTS:
+            raise HTTPException(422, f"{len(features)} inputs with the lags; a predictor takes at most {trees.MAX_INPUTS}")
     try:
         trained = training.train(
-            [dict(r or {}) for r in rows], body.features, body.target, kind=body.kind, trees=body.trees,
+            rows, features, body.target, kind=body.kind, trees=body.trees,
             max_depth=body.max_depth, min_samples_leaf=body.min_samples_leaf, seed=body.seed,
             positive=body.positive,
         )
     except training.TrainingError as exc:
         raise HTTPException(422, str(exc)) from exc
     source = {
-        "kind": body.kind, "entity_type": body.entity_type, "features": body.features, "target": body.target,
+        "kind": body.kind, "entity_type": body.entity_type, "features": features, "target": body.target,
+        **({"lags": {**lag.model_dump(exclude_none=True), "field": lag.field or body.target, "steps": sorted(lag.steps)}} if lag else {}),
         "trees": body.trees, "max_depth": body.max_depth, "min_samples_leaf": body.min_samples_leaf,
         "seed": body.seed,
         **({"positive": trained.metrics["positive"]} if "positive" in trained.metrics else {}),
@@ -433,29 +492,14 @@ def apply_predictor(
         raise HTTPException(422, f"{row['name']} has no input {unknown[0]!r}; its inputs are {', '.join(features)}")
     if body.over is not None and body.over.feature not in features:
         raise HTTPException(422, f"{row['name']} has no input {body.over.feature!r} for the periods to feed")
-    # Linked records' fields (`road.lanes`): each link field's target records, by key.
-    linked: dict[str, dict[str, dict[str, Any]]] = {}
-    for spec in inputs.values():
-        if isinstance(spec, str) and "." in spec:
-            link = spec.split(".", 1)[0]
-            if link in linked:
-                continue
-            target_type = db.execute(text(
-                "SELECT rt.to_type_id FROM attribute_def ad JOIN relationship_type rt ON rt.id = ad.references_id"
-                " WHERE ad.entity_type_id = ANY (entity_type_lineage(:t)) AND ad.name = :n"), {"t": type_id, "n": link}).scalar_one_or_none()
-            if target_type is None:
-                raise HTTPException(422, f"{link!r} is not a link field of {kind_name}")
-            linked[link] = {k: (a or {}) for k, a in db.execute(text(
-                "SELECT key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": target_type})}
+    lag = source.get("lags")
+    lag_at = {lagging.name(lag["field"], k): i for i, k in enumerate(lag["steps"])} if lag else {}
+    if lag and body.over is not None:
+        raise HTTPException(422, f"{row['name']} reads earlier records (lags): it predicts record by record, not per period")
+    read = _reader(db, type_id, kind_name, [inputs.get(f, f) for f in features if f not in lag_at])
 
     def value_of(attrs: dict[str, Any], feature: str) -> Any:
-        spec = inputs.get(feature, feature)
-        if isinstance(spec, (int, float)) and not isinstance(spec, bool):
-            return spec
-        if "." in spec:
-            link, name = spec.split(".", 1)
-            return (linked[link].get(str(attrs.get(link))) or {}).get(name)
-        return attrs.get(spec)
+        return read(attrs, inputs.get(feature, feature))
 
     model = row["model"]
     written, skipped = 0, []
@@ -470,15 +514,33 @@ def apply_predictor(
                    {"t": type_id, "n": body.field})
     elif kind not in ("number", "integer"):
         raise HTTPException(422, f"{body.field} is a {kind} field; predictions go into a number field")
-    for entity_id, key, attrs in records:
+    # With lags, records go in time order, each series on its own; a record with no value of its own
+    # passes its forecast on to the next (benchmark re-test, October 2026).
+    series = lagging.Series(lag["steps"]) if lag else None
+    if lag:
+        timed = lagging.ordered(records, lambda r: dict(r[2] or {}), lag["order_by"], lag.get("group_by"))
+        in_series = {r[0] for _, r in timed}
+        skipped += [r[1] for r in records if r[0] not in in_series]
+        sequence = [(k, r) for k, r in timed]
+    else:
+        sequence = [(None, r) for r in records]
+    for at, (entity_id, key, attrs) in sequence:
         attrs = dict(attrs or {})
+        earlier = series.lags(at) if series else []
+        actual = lagging.number(attrs.get(lag["field"])) if lag else None
         if body.only_missing and target and training._number(attrs.get(target)):
+            if series:
+                series.push(at, actual)
             continue
-        values = [value_of(attrs, f) for f in features]
+        values = [earlier[lag_at[f]] if f in lag_at else value_of(attrs, f) for f in features]
         if not all(training._number(v) for v in values):
             skipped.append(key)
+            if series:
+                series.push(at, actual)
             continue
         value = trees.predict(model, [float(v) for v in values])
+        if series:
+            series.push(at, actual if actual is not None or lag["field"] != target else float(value))
         db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object(:f, CAST(:v AS numeric)) WHERE id = :id"),
                    {"f": body.field, "v": round(float(value), 6), "id": entity_id})
         written += 1
