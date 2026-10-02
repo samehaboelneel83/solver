@@ -103,6 +103,25 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(proposeDraft(text, kinds, data)!.missing[0]).toMatch(/each linked twice to zone/);
   });
 
+  it("orders stock per product, week and warehouse from a forecast, within room, lost sales at a cost (benchmark re-test, October 2026)", () => {
+    const kinds: Kind[] = [
+      { name: "sku", attributes: [n("unit_cost"), n("holding_cost"), n("pallets")] },
+      { name: "week", role: "time", attributes: [] },
+      { name: "warehouse", role: "location", attributes: [n("pallet_capacity")] },
+    ];
+    const data = [{ name: "demand_forecast", index: ["sku", "warehouse", "week"] }, { name: "on_hand", index: ["warehouse", "sku"] }];
+    const text = "How much of each SKU to reorder every week at each warehouse to meet the forecast; lost sales cost 40 a unit";
+    expect(recipeFor(text)[0].recipe).toBe("inventory");
+    const p = proposeDraft(text, kinds, data)!;
+    expect(p.missing).toEqual([]);
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.variables.order).toMatchObject({ index: ["sku", "warehouse", "week"] });
+    expect(d.constraints.map((c) => c.id)).toEqual(["stock_balance", "storage"]);
+    expect(JSON.stringify(d.constraints[0])).toContain('"par":"on_hand","index":["l","p"]');
+    expect(d.objective.terms.map((x) => [x.id, x.weight])).toEqual([["ordering_cost", 1], ["holding_cost", 1], ["lost_sales", 40]]);
+  });
+
   it("covers what the reach data joins the sites to, not a kind only named, with seats and the budget in the costs' units", () => {
     const kinds: Kind[] = [
       { name: "candidate_site", attributes: [n("monthly_cost_k"), n("capacity")] },

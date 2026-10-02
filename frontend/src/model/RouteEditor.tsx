@@ -35,6 +35,11 @@ export default function RouteEditor({
   // Fields of a vehicle that can name its own depot: text, a choice, or a link (several depots).
   const vehicleFields = (context.attributes[body.vehicles.set] ?? [])
     .filter((a) => ["text", "enum", "reference"].includes(a.data_type)).map((a) => a.name);
+  // Relationships between vehicles and stops, either way: where an earlier plan placed each vehicle.
+  const placements = context.relationships
+    .filter((r) => (r.from === body.vehicles.set && r.to === body.stops.set) || (r.from === body.stops.set && r.to === body.vehicles.set))
+    .map((r) => r.name);
+  const mode = body.depot_by !== undefined ? "linked" : body.depot_of !== undefined ? "own" : "one";
   const loaded = body.demand !== undefined && body.capacity !== undefined;
   // Queue R15c: the parameters that can be a travel time -- over [stop, stop].
   const travels = Object.entries(context.parameters)
@@ -77,16 +82,25 @@ export default function RouteEditor({
         </div>
         <div>
           <label className="block text-xs text-slate-600">
-            <select aria-label="Where vehicles start" className="rounded border px-1 py-0.5 text-xs" value={body.depot_of !== undefined ? "own" : "one"}
+            <select aria-label="Where vehicles start" className="rounded border px-1 py-0.5 text-xs" value={mode}
               onChange={(event) => {
-                const { depot: _d, depot_of: _o, ...rest } = body;
-                write(event.target.value === "own" ? { ...rest, depot_of: vehicleFields[0] ?? "depot" } : { ...rest, depot: "depot" });
+                const { depot: _d, depot_of: _o, depot_by: _b, ...rest } = body;
+                const to = event.target.value;
+                write(to === "own" ? { ...rest, depot_of: vehicleFields[0] ?? "depot" }
+                  : to === "linked" ? { ...rest, depot_by: placements[0] ?? "placed_at" } : { ...rest, depot: "depot" });
               }}>
               <option value="one">One depot for all</option>
               <option value="own">Each {body.vehicles.set || "vehicle"} from its own</option>
+              <option value="linked">Each from where it is linked (an earlier plan placed it)</option>
             </select>
           </label>
-          {body.depot_of !== undefined ? (
+          {body.depot_by !== undefined ? (
+            <select id={depotId} aria-label={`The links placing each ${body.vehicles.set || "vehicle"}`} className="rounded border px-2 py-1"
+              value={body.depot_by} onChange={(event) => write({ ...body, depot_by: event.target.value })}>
+              {!placements.includes(body.depot_by) && <option value={body.depot_by}>{body.depot_by}</option>}
+              {placements.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          ) : body.depot_of !== undefined ? (
             <select id={depotId} aria-label={`The ${body.vehicles.set || "vehicle"} field naming its depot`} className="rounded border px-2 py-1"
               value={body.depot_of} onChange={(event) => write({ ...body, depot_of: event.target.value })}>
               {!vehicleFields.includes(body.depot_of) && <option value={body.depot_of}>{body.depot_of}</option>}

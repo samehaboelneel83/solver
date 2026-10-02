@@ -639,7 +639,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "route_malformed",
     where: "shape",
-    text: "a `route` names `visit`, `vehicles`, `stops` and `depot` -- or `depot_of`, the field of each vehicle naming its own -- and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`",
+    text: "a `route` names `visit`, `vehicles`, `stops` and `depot` -- or `depot_of`, the field of each vehicle naming its own, or `depot_by`, a declared relationship linking each vehicle to its own -- and optionally `demand` and `capacity` (both or neither), and is not also an expression or inside a `forall`",
   },
   {
     code: "route_not_binary",
@@ -757,7 +757,7 @@ export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "
 
 /** What a `route` rule names; `demand` and `capacity` are optional, both or neither (`ROUTE_KEYS`). */
 export const ROUTE_KEYS: readonly string[] = [
-  "visit", "vehicles", "stops", "depot", "depot_of", "demand", "capacity",
+  "visit", "vehicles", "stops", "depot", "depot_of", "depot_by", "demand", "capacity",
   // Time windows (queue R15c): a travel-time parameter and stop attributes.
   "travel", "earliest", "latest", "service",
 ];

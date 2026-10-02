@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import RouteEditor from "./RouteEditor";
-import { describeRoute, newRouteRule, routeChoices, type Constraint, type ModelContext } from "./terms";
+import { declaredRelationships, describeRoute, newRouteRule, routeChoices, type Constraint, type ModelContext } from "./terms";
 
 const CONTEXT: ModelContext = {
   sets: ["truck", "stop"],
@@ -103,5 +103,19 @@ describe("time windows on the route rule (queue R15c)", () => {
     fireEvent.change(screen.getByLabelText("Where vehicles start"), { target: { value: "one" } });
     expect(shown().route).toMatchObject({ depot: "depot" });
     expect(shown().route!.depot_of).toBeUndefined();
+  });
+
+  it("lets each vehicle start where an earlier plan placed it, by a relationship either way (benchmark re-test, October 2026)", () => {
+    const context = { ...CONTEXT, relationships: [...CONTEXT.relationships, { name: "placed_at", from: "stop", to: "truck" }] } as ModelContext;
+    function Linked() {
+      const [rule, setRule] = useState(newRouteRule("c_1", context)!);
+      return <><RouteEditor constraint={rule} context={context} onChange={setRule} /><pre data-testid="rule">{JSON.stringify(rule)}</pre></>;
+    }
+    render(<Linked />);
+    fireEvent.change(screen.getByLabelText("Where vehicles start"), { target: { value: "linked" } });
+    expect(shown().route).toMatchObject({ depot_by: "placed_at" });
+    expect(shown().route!.depot).toBeUndefined();
+    expect(describeRoute(shown())).toBe("every stop but the depots visited once by a truck from the stop it is linked to by placed_at and back");
+    expect(declaredRelationships([shown()], [])).toEqual(["placed_at"]);
   });
 });

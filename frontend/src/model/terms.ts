@@ -132,9 +132,11 @@ export type RouteBody = {
   visit: { var: string; index: string[] };
   vehicles: { index: string; set: string };
   stops: { index: string; set: string };
-  /** One depot for all, or `depot_of`: a field of each vehicle naming its own (several depots). */
+  /** One depot for all, or `depot_of`: a field of each vehicle naming its own (several depots), or
+   * `depot_by`: the relationship linking each vehicle to its own (placed there by an earlier plan). */
   depot?: string;
   depot_of?: string;
+  depot_by?: string;
   demand?: string;
   capacity?: string;
   /** Time windows (queue R15c): a parameter over [stop, stop], and stop attributes. */
@@ -152,6 +154,8 @@ export function describeRoute(rule: { route?: unknown }): string | null {
   const windows = r.travel
     ? `, arriving between ${r.earliest || "0"} and ${r.latest || "any time"} after ${r.travel}${r.service ? ` and ${r.service} at each` : ""}`
     : "";
+  if (r.depot_by)
+    return `every ${r.stops?.set || "stop"} but the depots visited once by a ${r.vehicles?.set || "vehicle"} from the ${r.stops?.set || "stop"} it is linked to by ${r.depot_by} and back${load}${windows}`;
   if (r.depot_of)
     return `every ${r.stops?.set || "stop"} but the depots visited once by a ${r.vehicles?.set || "vehicle"} from its own ${r.depot_of} and back${load}${windows}`;
   return `every ${r.stops?.set || "stop"} but ${r.depot || "?"} visited once by a ${r.vehicles?.set || "vehicle"} from ${r.depot || "?"} and back${load}${windows}`;
@@ -601,6 +605,7 @@ export function declaredRelationships(
     fromBindings(constraint.no_overlap?.over);
     fromBindings(constraint.cumulative?.over);
     if (constraint.connected?.via) found.add(constraint.connected.via);
+    if (constraint.route?.depot_by) found.add(constraint.route.depot_by);
   }
   for (const term of objectiveTerms) fromTerm(term.expression);
 

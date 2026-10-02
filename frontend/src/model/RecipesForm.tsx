@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyFlow, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, applyInventory, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
 type Data = { name: string; index: string[] };
-type Which = "selection" | "network" | "phasing" | "allocation" | "flow";
+type Which = "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory";
 
 const SELECT = "ml-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numbers = (kind: Kind | undefined) =>
@@ -31,7 +31,8 @@ function Row({ children }: { children: ReactNode }) {
 
 /**
  * More recipes (benchmark, October 2026): projects within a budget, a supply network, projects
- * phased over periods, land among crops, traffic over roads -- each writes its decisions, rules and goals into the draft.
+ * phased over periods, land among crops, traffic over roads, stock over periods -- each writes its
+ * decisions, rules and goals into the draft.
  */
 export default function RecipesForm({ kinds, data, links = [], onApply }: {
   kinds: Kind[];
@@ -146,6 +147,53 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         )}
       </>
     );
+  } else if (which === "inventory") {
+    // Stock per product over periods, at each location (benchmark re-test, October 2026).
+    const shape = [f.products, f.periods, ...(f.locations ? [f.locations] : [])];
+    const needed = data.filter((d) => f.products && f.periods && d.index.length === shape.length && shape.every((k) => d.index.includes(k)));
+    const demand = needed.find((d) => d.name === f.demand) ?? needed[0];
+    const startData = data.filter((d) => f.locations && d.index.length === 2 && d.index.includes(f.products) && d.index.includes(f.locations));
+    const start = startData.find((d) => d.name === f.initial);
+    const room = toNumber(get("room"));
+    const penalty = toNumber(get("penalty"));
+    ready = !!(f.products && f.periods && new Set(shape).size === shape.length && demand);
+    apply = (d) => applyInventory(d, { products: f.products, periods: f.periods, ...(f.locations ? { locations: f.locations } : {}),
+      demand: { data: demand!.name, index: demand!.index },
+      ...(start ? { initial: { data: start.name, index: start.index } } : f.initial ? { initial: { field: f.initial } } : {}),
+      ...(f.unitCost ? { unitCost: f.unitCost } : {}), ...(f.holdCost ? { holdCost: f.holdCost } : {}), ...(f.orderMax ? { orderMax: f.orderMax } : {}),
+      ...(f.locations && f.capacity ? { storage: { capacity: f.capacity, ...(f.size ? { size: f.size } : {}) } }
+        : room !== undefined && Number.isFinite(room) ? { storage: { capacity: room, ...(f.size ? { size: f.size } : {}) } } : {}),
+      ...(penalty !== undefined && Number.isFinite(penalty) ? { shortagePenalty: penalty } : {}) });
+    body = (
+      <>
+        <Row>
+          <Pick label="Stock of" value={get("products")} onChange={set("products")} options={names} />
+          <Pick label="Each" value={get("periods")} onChange={set("periods")} options={names} />
+          <Pick label="At each" value={get("locations")} onChange={set("locations")} options={names} optional />
+          <Pick label="Needed" value={demand?.name ?? ""} onChange={set("demand")} options={needed.map((d) => d.name)} />
+        </Row>
+        {f.products && f.periods && needed.length === 0 && (
+          <p className="text-xs text-amber-800">No data value is indexed by {shape.join(", ")}: upload what is needed (a forecast) as one first.</p>
+        )}
+        <Row>
+          <Pick label="On hand at the start" value={get("initial")} onChange={set("initial")} options={[...numbers(kind("products")), ...startData.map((d) => d.name)]} optional />
+          <Pick label="Cost to order a unit" value={get("unitCost")} onChange={set("unitCost")} options={numbers(kind("products"))} optional />
+          <Pick label="Cost to hold a unit" value={get("holdCost")} onChange={set("holdCost")} options={numbers(kind("products"))} optional />
+          <Pick label="Most ordered at once" value={get("orderMax")} onChange={set("orderMax")} options={numbers(kind("products"))} optional />
+        </Row>
+        <Row>
+          {f.locations
+            ? <Pick label="Room in store" value={get("capacity")} onChange={set("capacity")} options={numbers(kind("locations"))} optional />
+            : <label className="text-xs text-slate-700">Room in store
+              <input aria-label="Room in store" className={`${SELECT} w-24`} inputMode="decimal" value={get("room")} onChange={(e) => set("room")(e.target.value)} />
+            </label>}
+          <Pick label="A unit takes" value={get("size")} onChange={set("size")} options={numbers(kind("products"))} optional />
+          <label className="text-xs text-slate-700">Lost sales allowed, a unit costs
+            <input aria-label="Lost sale cost" className={`${SELECT} w-24`} inputMode="decimal" value={get("penalty")} onChange={(e) => set("penalty")(e.target.value)} />
+          </label>
+        </Row>
+      </>
+    );
   } else if (which === "network") {
     const costs = data.filter((d) => d.index.length === 2 && f.sources && f.customers && d.index.includes(f.sources) && d.index.includes(f.customers));
     const unit = costs.find((d) => d.name === f.unitCost) ?? costs[0];
@@ -207,7 +255,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
   return (
     <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
-        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads
+        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads, stock over periods
       </summary>
       <form aria-label="More recipes" className="mt-3 space-y-3 text-sm text-slate-800"
         onSubmit={(e) => {
@@ -219,7 +267,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         <div role="radiogroup" aria-label="Recipe" className="flex flex-wrap gap-3 text-xs">
           {([["selection", "Choose projects within a budget"], ["network", "Supply network: open, ship, fleet"],
             ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"],
-            ["flow", "Traffic: trips over the roads"]] as [Which, string][]).map(([w, words]) => (
+            ["flow", "Traffic: trips over the roads"], ["inventory", "Stock: order each period"]] as [Which, string][]).map(([w, words]) => (
             <label key={w}><input type="radio" checked={which === w} onChange={() => { setWhich(w); setF({}); setDone(null); }} /> {words}</label>
           ))}
         </div>

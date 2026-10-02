@@ -73,7 +73,7 @@ def start(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, *, secon
     stops = [row["id"] for row in stop_rows]
     from app.solve.route import depots_of
 
-    home = depots_of(body, data["sets"].get(body["vehicles"]["set"], []), stops, rule_id)
+    home = depots_of(body, data["sets"].get(body["vehicles"]["set"], []), stops, rule_id, data.get("relationships"))
     starts = [stops.index(home[v]) for v in vehicles]
     depot_nodes = set(starts)
     if "demand" in body:

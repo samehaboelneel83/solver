@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyAllocation, applyFlow, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
 import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 
@@ -78,6 +78,20 @@ describe("more recipes (benchmark, October 2026)", () => {
     });
     expect(published.relationships).toEqual(["road_from", "road_to"]);
     made.flow = published;
+  });
+
+  it("orders each product each week at each depot to meet what is needed, within storage (benchmark re-test, October 2026)", () => {
+    const d = applyInventory(empty, { products: "product", periods: "week", locations: "depot", demand: { data: "forecast", index: ["week", "product", "depot"] },
+      initial: { field: "on_hand" }, unitCost: "unit_cost", holdCost: "hold_cost", orderMax: "max_order",
+      storage: { capacity: "capacity", size: "size" }, shortagePenalty: 50 });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(rules(d)).toEqual({
+      stock_balance: "for each p in product, l in depot, t in week: stock[p, l, t] = on_hand[p] + sum(order[p, l, s] for s in week where s <= t) + sum(short[p, l, s] for s in week where s <= t) - sum(forecast[s, p, l] for s in week where s <= t)",
+      order_limit: "for each p in product, l in depot, t in week: order[p, l, t] <= max_order[p]",
+      storage: "for each l in depot, t in week: sum(size[p] * stock[p, l, t] for p in product) <= capacity[l]",
+    });
+    expect(d.objective.terms.map((x) => x.id)).toEqual(["ordering_cost", "holding_cost", "lost_sales"]);
+    made.inventory = ir(d);
     if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
   });
 

@@ -39,13 +39,14 @@ function numberOr(text: string, fallback: number | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Every relationship a piece of IR walks: `via.rel` in any binding, `connected.via`. */
+/** Every relationship a piece of IR walks: `via.rel` in any binding, `connected.via`, a route's `depot_by`. */
 function walkedIn(value: unknown, into: Set<string>) {
   if (Array.isArray(value)) value.forEach((v) => walkedIn(v, into));
   else if (value && typeof value === "object") {
     const x = value as Json;
     if (x.via && typeof x.via === "object" && typeof (x.via as Json).rel === "string") into.add((x.via as Json).rel as string);
     if (x.connected && typeof x.connected === "object" && typeof (x.connected as Json).via === "string") into.add((x.connected as Json).via as string);
+    if (x.route && typeof x.route === "object" && typeof (x.route as Json).depot_by === "string") into.add((x.route as Json).depot_by as string);
     Object.values(x).forEach((v) => walkedIn(v, into));
   }
 }
@@ -283,7 +284,8 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
           visit: { var: fieldOf(r, "VAR"), index: [v, i, fieldOf(r, "TO_INDEX")] },
           vehicles: { index: v, set: fieldOf(r, "V_SET") },
           stops: { index: i, set: fieldOf(r, "S_SET") },
-          ...(fieldOf(r, "DEPOT_MODE") === "own" ? { depot_of: fieldOf(r, "DEPOT") } : { depot: fieldOf(r, "DEPOT") }),
+          ...({ own: { depot_of: fieldOf(r, "DEPOT") }, linked: { depot_by: fieldOf(r, "DEPOT") } }[fieldOf(r, "DEPOT_MODE") as string]
+            ?? { depot: fieldOf(r, "DEPOT") }),
           ...(demand || capacity ? { demand, capacity } : {}),
           ...timing,
         },

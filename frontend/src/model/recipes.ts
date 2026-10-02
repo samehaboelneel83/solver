@@ -7,6 +7,7 @@
  *   customer, shortage at a penalty, a fleet by vehicle type;
  * - phasing: which project to start in which period, within each period's budget, sooner worth more.
  * - flow: trips between zones routed over the roads, within capacity (widened within a budget), least time.
+ * - inventory: how much of each product to order each period (at each location), within storage, least cost.
  */
 import type { Binding, Constraint, ObjectiveTerm, Term } from "./terms";
 import type { FormDraft } from "./draftIr";
@@ -348,5 +349,89 @@ export function applyFlow(draft: FormDraft, r: FlowRecipe): FormDraft {
     constraints,
     objective: { sense: "minimize", mode: "weighted", terms: [
       { id: name("travel_time"), weight: 1, expression: sum(mul(attr(a, r.time), onRoad), [a, r.arcs], [o, r.nodes]) } as ObjectiveTerm] },
+  };
+}
+
+// --- inventory over periods ----------------------------------------------------------------------
+
+export type InventoryRecipe = {
+  /** What is stocked (products), over what periods, and, if more than one, where (stores, warehouses). */
+  products: string;
+  periods: string;
+  locations?: string;
+  /** Data over the product, the period and the location if any, in any order: how much is needed. */
+  demand: { data: string; index: string[] };
+  /** What is on hand at the start: a number field of the product, or data over product and location. */
+  initial?: { field: string } | { data: string; index: string[] };
+  /** Number fields of a product: what a unit costs to order, and to hold for a period. */
+  unitCost?: string;
+  holdCost?: string;
+  /** The most ordered of a product in one period: a number field of the product. */
+  orderMax?: string;
+  /** What fits in store: a number field of the location, or a number; a product's size, if it is not 1. */
+  storage?: { capacity: string | number; size?: string };
+  /** Demand may go unmet (lost sales) at this cost a unit, instead of the model having no answer. */
+  shortagePenalty?: number;
+};
+
+/**
+ * How much of each product to order in each period (at each location), so that what is on hand
+ * meets what is needed, within storage, for the least cost of ordering and holding. Stock at the end
+ * of a period is what was there at the start, plus all ordered so far, less all needed so far: the
+ * periods are read in the order of their keys (2026-01, 2026-02, ... or w01, w02, ...).
+ */
+export function applyInventory(draft: FormDraft, r: InventoryRecipe): FormDraft {
+  const name = namer(draft);
+  const p = "p", l = "l", t = "t", s = "s";
+  const kindIndex: Record<string, string> = { [r.products]: p, [r.periods]: t, ...(r.locations ? { [r.locations]: l } : {}) };
+  const at = (index: string[], period = t) => index.map((kind) => (kind === r.periods ? period : kindIndex[kind] ?? kind));
+  const where = (period: string): string[] => [p, ...(r.locations ? [l] : []), period];
+  const shape = [r.products, ...(r.locations ? [r.locations] : []), r.periods];
+  const order = name("order"), stock = name("stock");
+  const variables = { ...draft.variables,
+    [order]: { index: shape, domain: "continuous", lower: 0 },
+    [stock]: { index: shape, domain: "continuous", lower: 0 } } as Variables;
+  const upTo = (of: Term): Term => ({ sum: of, over: [{ index: s, set: r.periods, where: [{ index: t, op: "<=" }] }] }) as Term;
+  const parts: Term[] = [];
+  if (r.initial) parts.push("field" in r.initial ? attr(p, r.initial.field) : ({ par: r.initial.data, index: at(r.initial.index) } as Term));
+  parts.push(upTo(v(order, where(s))));
+  let short: string | null = null;
+  if (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty)) {
+    short = name("short");
+    variables[short] = { index: shape, domain: "continuous", lower: 0 } as Variables[string];
+    parts.push(upTo(v(short, where(s))));
+  }
+  parts.push(mul(k(-1), upTo({ par: r.demand.data, index: at(r.demand.index, s) } as Term)));
+  const every = each([p, r.products], ...(r.locations ? [[l, r.locations] as [string, string]] : []), [t, r.periods]);
+  const here = r.locations ? ` at each ${say(r.locations)}` : "";
+  const constraints: Constraint[] = [...draft.constraints,
+    rule(name("stock_balance"), `the ${say(r.products)} in stock${here} at the end of a ${say(r.periods)} is what was there at the start, `
+      + `plus all ordered${short ? " and all short" : ""} so far, less all needed so far`, v(stock, where(t)), "=", { add: parts } as Term, every)];
+  if (r.orderMax) {
+    constraints.push(rule(name("order_limit"), `at most its ${say(r.orderMax)} of a ${say(r.products)} is ordered in a ${say(r.periods)}`,
+      v(order, where(t)), "<=", attr(p, r.orderMax), every));
+  }
+  if (r.storage) {
+    const cap: Term = typeof r.storage.capacity === "number" ? k(r.storage.capacity) : attr(r.locations ? l : t, r.storage.capacity);
+    const held = r.storage.size ? mul(attr(p, r.storage.size), v(stock, where(t))) : v(stock, where(t));
+    constraints.push(rule(name("storage"), `what is in stock${here} fits its ${typeof r.storage.capacity === "number" ? r.storage.capacity : say(r.storage.capacity)}`,
+      sum(held, [p, r.products]), "<=", cap, each(...(r.locations ? [[l, r.locations] as [string, string]] : []), [t, r.periods])));
+  }
+  const over: [string, string][] = [[p, r.products], ...(r.locations ? [[l, r.locations] as [string, string]] : []), [t, r.periods]];
+  const terms: ObjectiveTerm[] = [];
+  if (r.unitCost) terms.push({ id: name("ordering_cost"), weight: 1, expression: sum(mul(attr(p, r.unitCost), v(order, where(t))), ...over) } as ObjectiveTerm);
+  if (r.holdCost) terms.push({ id: name("holding_cost"), weight: 1, expression: sum(mul(attr(p, r.holdCost), v(stock, where(t))), ...over) } as ObjectiveTerm);
+  if (short) terms.push({ id: name("lost_sales"), weight: r.shortagePenalty!, expression: sum(v(short, where(t)), ...over) } as ObjectiveTerm);
+  // With no costs at all, the least stock held is the goal.
+  if (!terms.length) terms.push({ id: name("stock_held"), weight: 1, expression: sum(v(stock, where(t)), ...over) } as ObjectiveTerm);
+  const data: FormDraft["parameters"] = { ...draft.parameters, [r.demand.data]: draft.parameters[r.demand.data] ?? { index: r.demand.index } };
+  if (r.initial && "data" in r.initial) data[r.initial.data] = draft.parameters[r.initial.data] ?? { index: r.initial.index };
+  return {
+    ...draft,
+    sets: [...new Set([...draft.sets, ...shape])],
+    parameters: data,
+    variables,
+    constraints,
+    objective: { sense: "minimize", mode: "weighted", terms },
   };
 }

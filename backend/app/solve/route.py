@@ -36,7 +36,7 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
     vehicles = compiler.sets.get(body["vehicles"]["set"], [])
     stop_rows = compiler.sets.get(body["stops"]["set"], [])
     stops = [row["id"] for row in stop_rows]
-    home = depots_of(body, vehicles, stops, rule)
+    home = depots_of(body, vehicles, stops, rule, compiler.edges)
     depots = set(home.values()) or ({body["depot"]} if body.get("depot") else set())
     one, zero = Decimal(1), Decimal(0)
     others = [s for s in stops if s not in depots]
@@ -120,13 +120,31 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
     compiler.routes.append(rule)
 
 
-def depots_of(body: dict[str, Any], vehicles: list[dict[str, Any]], stops: list[str], rule: str) -> dict[str, str]:
-    """Each vehicle's depot: the one `depot` for all, or the stop its `depot_of` field names (several
-    depots; benchmark, October 2026)."""
+def depots_of(body: dict[str, Any], vehicles: list[dict[str, Any]], stops: list[str], rule: str,
+              edges: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, str]:
+    """Each vehicle's depot: the one `depot` for all, the stop its `depot_of` field names (several
+    depots; benchmark, October 2026), or the stop it is linked to by the relationship `depot_by` --
+    placed there by an earlier plan and kept as links (benchmark re-test, October 2026)."""
     from app.solve.compile import Unsupported
 
+    linked: dict[str, set[str]] = {}
+    if body.get("depot_by"):
+        at = set(stops)
+        for edge in (edges or {}).get(body["depot_by"], []):
+            a, b = str(edge["from"]), str(edge["to"])
+            for vehicle, stop in ((a, b), (b, a)):
+                if stop in at and vehicle != stop:
+                    linked.setdefault(vehicle, set()).add(stop)
     home: dict[str, str] = {}
     for vehicle in vehicles:
+        if body.get("depot_by"):
+            found = sorted(linked.get(str(vehicle["id"]), ()))
+            if len(found) != 1:
+                raise Unsupported(f"{rule}: the vehicle {vehicle['id']} is linked by {body['depot_by']} to "
+                                  + (f"{len(found)} {body['stops']['set']} ({', '.join(found)})" if found else f"no {body['stops']['set']}")
+                                  + "; each vehicle starts from one")
+            home[vehicle["id"]] = found[0]
+            continue
         depot = body["depot"] if body.get("depot") else vehicle.get(body["depot_of"])
         if depot is None or str(depot) not in stops:
             where = f"the depot {depot!r}" if body.get("depot") else f"the vehicle {vehicle['id']}'s {body['depot_of']} {depot!r}"
@@ -149,7 +167,7 @@ def _windows(compiler: Any, spec: dict[str, Any], stop_rows: list[dict[str, Any]
 
     body, rule = spec["route"], spec["id"]
     stops = [r["id"] for r in stop_rows]
-    depots = set(depots_of(body, vehicles, stops, rule).values())
+    depots = set(depots_of(body, vehicles, stops, rule, compiler.edges).values())
     one, zero = Decimal(1), Decimal(0)
 
     def attribute(r: dict[str, Any], name: str | None) -> Decimal | None:

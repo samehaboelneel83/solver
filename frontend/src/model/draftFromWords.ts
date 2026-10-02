@@ -7,12 +7,12 @@
  */
 import { applyCoverage, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyFlow, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type FlowRecipe, type Link,
+import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type FlowRecipe, type InventoryRecipe, type Link,
   type NetworkRecipe, type PhasingRecipe, type SelectionRecipe } from "./recipes";
 
 export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string }[] };
 export type Data = { name: string; index: string[] };
-export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow";
+export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory";
 
 export type Proposal = {
   recipe: Recipe;
@@ -31,6 +31,7 @@ const TITLES: Record<Recipe, string> = {
   phasing: "Start projects over periods within each period's budget",
   allocation: "Share each one out among options (land among crops)",
   flow: "Traffic: route the trips between zones over the roads",
+  inventory: "Stock: how much of each product to order each period",
 };
 
 const SIGNALS: Record<Recipe, RegExp> = {
@@ -42,6 +43,8 @@ const SIGNALS: Record<Recipe, RegExp> = {
   allocation: /\b(allocat\w*|crops?|plant\w*|feddans?|hectares?|acres?|land|grow\w*|share\w* (out|of)|split|mix|irrigat\w*|sow\w*|area to)\b/g,
   // Benchmark re-test, October 2026: a trips table over a road network matched no recipe.
   flow: /\b(traffic|congest\w*|trips?|commut\w*|junctions?|intersections?|roads?|od matrix|origin-destination|lanes?|widen\w*|travel times?)\b/g,
+  // Benchmark re-test, October 2026: stock per product over periods matched no recipe.
+  inventory: /\b(inventor\w*|stock\w*|reorder\w*|replenish\w*|holding|safety stock|skus?|lost sales?|backorders?|on hand|order quantit\w*|forecasts?|products?)\b/g,
 };
 
 const words = (name: string) => name.toLowerCase().split(/_+/).filter(Boolean);
@@ -238,6 +241,48 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const recipe = missing.length ? null : ({ nodes: nodes!.kind.name, arcs: arcs!.kind.name, startsAt: startsAt!, endsAt: endsAt!, trips: trips!.name,
       time: time!, ...(capacity ? { capacity } : {}), ...(upgrade ? { upgrade } : {}) } satisfies FlowRecipe);
     return { recipe: "flow", title: TITLES.flow, choices, missing, apply: recipe ? (d) => applyFlow(d, recipe) : null };
+  }
+
+  if (best.recipe === "inventory") {
+    const time = (k: Kind) => k.role === "time" || /week|month|period|day|quarter|year|season/.test(k.name);
+    const periods = pick(text, kinds, /week|month|period|day|quarter|year/, time);
+    const products = pick(text, kinds, /product|item|sku|part|material|good|article/, (k) => !time(k), periods ? [periods.kind.name] : []);
+    note("Stock of", products?.kind.name, products?.why ?? "");
+    note("Each", periods?.kind.name, periods?.why ?? "");
+    need(products, "a kind of record for what is stocked (products)");
+    need(periods, "a kind of record for the periods (weeks, months)");
+    // What is needed: data over the product and the period, and a location when it has one.
+    const over = data.filter((d) => products && periods && d.index.includes(products.kind.name) && d.index.includes(periods.kind.name)
+      && d.index.length <= 3 && new Set(d.index).size === d.index.length);
+    const demand = over.find((d) => /demand|forecast|sales|need|order|requirement/.test(d.name)) ?? over[0];
+    note("Needed", demand?.name, "data over both kinds");
+    if (products && periods) need(demand, `a data value over ${products.kind.name} and ${periods.kind.name}: how much is needed (a forecast)`);
+    const where = demand?.index.find((k) => k !== products?.kind.name && k !== periods?.kind.name);
+    const locations = where ? kinds.find((k) => k.name === where) : undefined;
+    note("At each", locations?.name, "the data is kept per one");
+    const startData = locations ? data.find((d) => d.index.length === 2 && d.index.includes(products!.kind.name) && d.index.includes(locations.name)
+      && /on_?hand|initial|opening|start|stock/.test(d.name)) : undefined;
+    const startField = field(products?.kind, /on_?hand|initial|opening|start|stock/);
+    note("On hand at the start", startData?.name ?? startField, "its name");
+    const unitCost = numeric(products?.kind).find((n) => /cost|price/.test(n) && !/hold|carry|storage|order_?fixed/.test(n));
+    const holdCost = field(products?.kind, /hold|carry|storage_cost/);
+    const orderMax = field(products?.kind, /max_?order|order_?max|max_?qty|supply_?limit|max_per/);
+    note("Cost to order a unit", unitCost, "its name");
+    note("Cost to hold a unit", holdCost, "its name");
+    note("Most ordered at once", orderMax, "its name");
+    const room = locations ? field(locations, /capacity|space|room|storage/) : amount(text, ["storage", "room for", "space for", "capacity"]);
+    const size = field(products?.kind, /size|volume|space|pallets?|m3/);
+    note("Room in store", room, locations ? "its name" : "the number you wrote");
+    note("A unit takes", room !== undefined ? size : undefined, "its name");
+    const shortage = /\b(lost sales?|short\w*|stock-?outs?|unmet|backorders?|penalt\w*)\b/i.test(text) ? amount(text, ["penalty", "lost sales?", "costs?"]) ?? 1000 : undefined;
+    note("Lost sales allowed, a unit costs", shortage, "you wrote of shortage");
+    const recipe = missing.length ? null : ({ products: products!.kind.name, periods: periods!.kind.name, ...(locations ? { locations: locations.name } : {}),
+      demand: { data: demand!.name, index: demand!.index },
+      ...(startData ? { initial: { data: startData.name, index: startData.index } } : startField ? { initial: { field: startField } } : {}),
+      ...(unitCost ? { unitCost } : {}), ...(holdCost ? { holdCost } : {}), ...(orderMax ? { orderMax } : {}),
+      ...(room !== undefined ? { storage: { capacity: room, ...(size ? { size } : {}) } } : {}),
+      ...(shortage !== undefined ? { shortagePenalty: shortage } : {}) } satisfies InventoryRecipe);
+    return { recipe: "inventory", title: TITLES.inventory, choices, missing, apply: recipe ? (d) => applyInventory(d, recipe) : null };
   }
 
   if (best.recipe === "network") {

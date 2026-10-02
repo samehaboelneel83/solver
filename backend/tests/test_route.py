@@ -205,3 +205,43 @@ def test_a_vehicle_whose_depot_is_not_a_stop_is_named():
     data["sets"]["vehicle"][1]["home"] = "nowhere"
     with pytest.raises(Unsupported, match="t_south's home 'nowhere'"):
         compile_model(ir, data)
+
+
+def _placed():
+    """Benchmark re-test, October 2026: the depots an earlier plan placed the trucks at, kept as links."""
+    ir, data = _two_depots()
+    body = ir["constraints"][0]["route"]
+    del body["depot_of"]
+    body["depot_by"] = "placed_at"
+    ir["relationships"] = [*ir.get("relationships", []), "placed_at"]
+    for row in data["sets"]["vehicle"]:
+        del row["home"]
+    data["relationships"] = {"placed_at": [{"from": "north", "to": "t_north"}, {"from": "t_south", "to": "south"}]}
+    return ir, data
+
+
+def test_each_vehicle_starts_from_the_stop_it_is_linked_to_either_way():
+    ir, data = _placed()
+    assert check_shape(ir) is None
+    compiled = compile_model(ir, data)
+    assert float(by_name("highs").solve(compiled, time_limit=30, workers=1, seed=1).objective) == pytest.approx(13.5)
+    _, record = routing.start(ir, data, compiled, seconds=2)
+    assert record["feasible"] is True and float(record["objective"]) == pytest.approx(13.5)
+
+
+def test_a_vehicle_linked_to_no_stop_or_two_is_named():
+    ir, data = _placed()
+    data["relationships"]["placed_at"] = data["relationships"]["placed_at"][:1]
+    with pytest.raises(Unsupported, match="t_south is linked by placed_at to no stop"):
+        compile_model(ir, data)
+    data["relationships"]["placed_at"] += [{"from": "north", "to": "t_south"}, {"from": "south", "to": "t_south"}]
+    with pytest.raises(Unsupported, match=r"t_south is linked by placed_at to 2 stop \(north, south\)"):
+        compile_model(ir, data)
+
+
+def test_depot_by_is_one_way_of_three_and_its_relationship_is_declared():
+    ir, _ = _placed()
+    body = ir["constraints"][0]["route"]
+    assert check_shape({**ir, "relationships": []}).loc[-1] == "depot_by"
+    body["depot"] = "north"
+    assert "one way" in check_shape(ir).message

@@ -288,6 +288,37 @@
             "data_type": "number"
           }
         ]
+      },
+      {
+        "name": "product",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "on_hand",
+            "data_type": "number"
+          },
+          {
+            "name": "unit_cost",
+            "data_type": "number"
+          },
+          {
+            "name": "hold_cost",
+            "data_type": "number"
+          },
+          {
+            "name": "max_order",
+            "data_type": "number"
+          },
+          {
+            "name": "size",
+            "data_type": "number"
+          }
+        ]
+      },
+      {
+        "name": "week",
+        "role": "time",
+        "attributes": []
       }
     ],
     "parameters": [
@@ -347,6 +378,15 @@
           "junction"
         ],
         "default_value": 0
+      },
+      {
+        "name": "forecast",
+        "index": [
+          "week",
+          "product",
+          "depot"
+        ],
+        "default_value": 0
       }
     ],
     "relationshipTypes": [
@@ -383,6 +423,13 @@
         "from": "road",
         "to": "junction",
         "cardinality": "many_to_one",
+        "is_hierarchy": false
+      },
+      {
+        "name": "placed_at",
+        "from": "stop",
+        "to": "vehicle",
+        "cardinality": "one_to_many",
         "is_hierarchy": false
       }
     ],
@@ -5552,6 +5599,463 @@
             }
           ]
         }
+      }
+    },
+    {
+      "name": "recipe_inventory",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "product",
+          "depot",
+          "week"
+        ],
+        "parameters": {
+          "forecast": {
+            "index": [
+              "week",
+              "product",
+              "depot"
+            ]
+          }
+        },
+        "variables": {
+          "order": {
+            "index": [
+              "product",
+              "depot",
+              "week"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "stock": {
+            "index": [
+              "product",
+              "depot",
+              "week"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "short": {
+            "index": [
+              "product",
+              "depot",
+              "week"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          }
+        },
+        "constraints": [
+          {
+            "id": "stock_balance",
+            "note": "the product in stock at each depot at the end of a week is what was there at the start, plus all ordered and all short so far, less all needed so far",
+            "forall": [
+              {
+                "index": "p",
+                "set": "product"
+              },
+              {
+                "index": "l",
+                "set": "depot"
+              },
+              {
+                "index": "t",
+                "set": "week"
+              }
+            ],
+            "left": {
+              "var": "stock",
+              "index": [
+                "p",
+                "l",
+                "t"
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "add": [
+                {
+                  "attr": {
+                    "of": "p",
+                    "name": "on_hand"
+                  }
+                },
+                {
+                  "sum": {
+                    "var": "order",
+                    "index": [
+                      "p",
+                      "l",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "s",
+                      "set": "week",
+                      "where": [
+                        {
+                          "index": "t",
+                          "op": "<="
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "sum": {
+                    "var": "short",
+                    "index": [
+                      "p",
+                      "l",
+                      "s"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "s",
+                      "set": "week",
+                      "where": [
+                        {
+                          "index": "t",
+                          "op": "<="
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "mul": [
+                    {
+                      "const": -1
+                    },
+                    {
+                      "sum": {
+                        "par": "forecast",
+                        "index": [
+                          "s",
+                          "p",
+                          "l"
+                        ]
+                      },
+                      "over": [
+                        {
+                          "index": "s",
+                          "set": "week",
+                          "where": [
+                            {
+                              "index": "t",
+                              "op": "<="
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "order_limit",
+            "note": "at most its max order of a product is ordered in a week",
+            "forall": [
+              {
+                "index": "p",
+                "set": "product"
+              },
+              {
+                "index": "l",
+                "set": "depot"
+              },
+              {
+                "index": "t",
+                "set": "week"
+              }
+            ],
+            "left": {
+              "var": "order",
+              "index": [
+                "p",
+                "l",
+                "t"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "p",
+                "name": "max_order"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "storage",
+            "note": "what is in stock at each depot fits its capacity",
+            "forall": [
+              {
+                "index": "l",
+                "set": "depot"
+              },
+              {
+                "index": "t",
+                "set": "week"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "p",
+                      "name": "size"
+                    }
+                  },
+                  {
+                    "var": "stock",
+                    "index": [
+                      "p",
+                      "l",
+                      "t"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "p",
+                  "set": "product"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "l",
+                "name": "capacity"
+              }
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "ordering_cost",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "p",
+                        "name": "unit_cost"
+                      }
+                    },
+                    {
+                      "var": "order",
+                      "index": [
+                        "p",
+                        "l",
+                        "t"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "p",
+                    "set": "product"
+                  },
+                  {
+                    "index": "l",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "t",
+                    "set": "week"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "holding_cost",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "p",
+                        "name": "hold_cost"
+                      }
+                    },
+                    {
+                      "var": "stock",
+                      "index": [
+                        "p",
+                        "l",
+                        "t"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "p",
+                    "set": "product"
+                  },
+                  {
+                    "index": "l",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "t",
+                    "set": "week"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "lost_sales",
+              "weight": 50,
+              "expression": {
+                "sum": {
+                  "var": "short",
+                  "index": [
+                    "p",
+                    "l",
+                    "t"
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "p",
+                    "set": "product"
+                  },
+                  {
+                    "index": "l",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "t",
+                    "set": "week"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "route_depot_linked",
+      "why": "Benchmark re-test, October 2026: each vehicle starts from the stop it is linked to -- placed there by an earlier plan.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "distance": {
+            "index": [
+              "stop",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "demand": "demand",
+              "capacity": "capacity",
+              "depot_by": "placed_at"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_distance",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "distance",
+                      "index": [
+                        "i",
+                        "j"
+                      ]
+                    },
+                    {
+                      "var": "visit",
+                      "index": [
+                        "v",
+                        "i",
+                        "j"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "relationships": [
+          "placed_at"
+        ]
       }
     }
   ],
@@ -18445,6 +18949,116 @@
             }
           ]
         }
+      }
+    },
+    {
+      "code": "route_malformed",
+      "loc": [
+        "constraints",
+        0,
+        "route",
+        "depot_by"
+      ],
+      "why": "one depot for all, or each vehicle's own, one way",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "vehicle",
+          "stop"
+        ],
+        "parameters": {
+          "distance": {
+            "index": [
+              "stop",
+              "stop"
+            ]
+          }
+        },
+        "variables": {
+          "visit": {
+            "index": [
+              "vehicle",
+              "stop",
+              "stop"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_routes",
+            "severity": "hard",
+            "route": {
+              "visit": {
+                "var": "visit",
+                "index": [
+                  "v",
+                  "i",
+                  "j"
+                ]
+              },
+              "vehicles": {
+                "index": "v",
+                "set": "vehicle"
+              },
+              "stops": {
+                "index": "i",
+                "set": "stop"
+              },
+              "demand": "demand",
+              "capacity": "capacity",
+              "depot_by": "placed_at",
+              "depot": "north"
+            }
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "o_distance",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "par": "distance",
+                      "index": [
+                        "i",
+                        "j"
+                      ]
+                    },
+                    {
+                      "var": "visit",
+                      "index": [
+                        "v",
+                        "i",
+                        "j"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "v",
+                    "set": "vehicle"
+                  },
+                  {
+                    "index": "i",
+                    "set": "stop"
+                  },
+                  {
+                    "index": "j",
+                    "set": "stop"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "relationships": [
+          "placed_at"
+        ]
       }
     }
   ]

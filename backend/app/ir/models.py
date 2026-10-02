@@ -341,6 +341,8 @@ class RouteBody(_Model):
     depot: Optional[Name] = None
     #: A field of each vehicle naming the stop it starts from and returns to: several depots.
     depot_of: Optional[Name] = None
+    # Or the stop each vehicle is linked to by this relationship: placed by an earlier plan, kept as links.
+    depot_by: Optional[Name] = None
     demand: Optional[Name] = None
     capacity: Optional[Name] = None
     # Time windows (queue R15c): the travel-time parameter, and stop attributes.
@@ -357,8 +359,8 @@ class RouteBody(_Model):
 
     @model_validator(mode="after")
     def _one_depot_or_each_own(self) -> "RouteBody":
-        if (self.depot is None) == (self.depot_of is None):
-            raise ValueError("a route names one depot for all, or depot_of: each vehicle's own")
+        if sum(x is not None for x in (self.depot, self.depot_of, self.depot_by)) != 1:
+            raise ValueError("a route names one depot for all, or each vehicle's own: depot_of a field, depot_by a relationship")
         return self
 
     @model_validator(mode="after")

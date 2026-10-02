@@ -87,3 +87,25 @@ def test_flow_routes_trips_over_the_quickest_roads_within_capacity_and_widens_wi
     # Widening b-c too is now beyond the budget. a-b alone carries the 2 to b and 10 on over b-c (its limit); 5 take
     # the slow road: 2 + 20 + 25 = 47.
     assert round(float(_solve("recipe_flow", data).objective), 6) == 47
+
+
+def test_inventory_orders_ahead_within_the_order_limit_and_storage_and_counts_lost_sales():
+    """Benchmark re-test, October 2026: stock per product over periods had no recipe."""
+    data = {
+        "sets": {
+            "product": [{"id": "a", "on_hand": 5, "unit_cost": 1, "hold_cost": 1, "max_order": 6, "size": 1},
+                        {"id": "b", "on_hand": 0, "unit_cost": 1, "hold_cost": 1, "max_order": 15, "size": 2}],
+            "depot": [{"id": "d", "capacity": 100}],
+            "week": [{"id": "w1"}, {"id": "w2"}, {"id": "w3"}],
+        },
+        "parameters": {"forecast": [{"week": "w1", "product": "a", "depot": "d", "value": 10},
+                                    {"week": "w2", "product": "a", "depot": "d", "value": 10},
+                                    {"week": "w2", "product": "b", "depot": "d", "value": 20}]},
+        "parameter_defaults": {"forecast": 0},
+    }
+    # a: 5 on hand, 6 a week at most. Week 1 orders 6 (1 left, held a week), week 2 orders 6 and is 3 short:
+    # 12 + 1 + 3*50 = 163. b: 20 in week 2, 15 at most, so 5 are ordered in week 1 and held: 20 + 5 = 25.
+    assert round(float(_solve("recipe_inventory", data).objective), 6) == 188
+    # Room for 9: a's 1 and 4 of b (size 2) are held over; b is 1 short: 163 + (19 + 4 + 50) = 236.
+    data["sets"]["depot"] = [{"id": "d", "capacity": 9}]
+    assert round(float(_solve("recipe_inventory", data).objective), 6) == 236

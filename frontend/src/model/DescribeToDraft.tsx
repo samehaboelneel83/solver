@@ -4,7 +4,8 @@ import { keptWords, proposeDraft, type Data, type Kind, type Recipe } from "./dr
 import type { Link } from "./recipes";
 
 const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["selection", "projects within a budget"],
-  ["network", "a supply network"], ["phasing", "projects over periods"], ["allocation", "land among crops"], ["flow", "traffic over roads"]];
+  ["network", "a supply network"], ["phasing", "projects over periods"], ["allocation", "land among crops"], ["flow", "traffic over roads"],
+  ["inventory", "stock over periods"]];
 
 /**
  * Describe the problem, get a first draft (benchmark, October 2026, G3c): the recipe the words call

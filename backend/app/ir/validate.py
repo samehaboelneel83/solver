@@ -992,14 +992,17 @@ class _ShapeChecker:
                 odd, what = key, "missing"
                 break
         # One depot for all, or each vehicle's own (`depot_of`, a field of the vehicles; benchmark, October 2026).
-        if odd is None and ("depot" in body) == ("depot_of" in body):
-            odd, what = ("depot", "missing (or depot_of: the field of each vehicle naming its own depot)") if "depot" not in body \
-                else ("depot_of", "given with depot: name one depot for all, or each vehicle's own")
+        # Or `depot_by`: the stop each vehicle is linked to (benchmark re-test, October 2026).
+        homes = [key for key in ("depot", "depot_of", "depot_by") if key in body]
+        if odd is None and len(homes) != 1:
+            odd, what = ("depot", "missing (or depot_of: the field of each vehicle naming its own depot; or depot_by: a relationship"
+                                  " linking each vehicle to its own)") if not homes \
+                else (homes[1], f"given with {homes[0]}: name one depot for all, or each vehicle's own, one way")
         if odd is None:
             odd = next((key for key in body if key not in ROUTE_KEYS), None)
             what = "not one of them"
         if odd is None:
-            odd = next((key for key in ("depot", "depot_of", "demand", "capacity", "travel", "earliest", "latest", "service")
+            odd = next((key for key in ("depot", "depot_of", "depot_by", "demand", "capacity", "travel", "earliest", "latest", "service")
                         if key in body and not (isinstance(body[key], str) and body[key])), None)
             what = "not a name"
         if odd is None and ("demand" in body) != ("capacity" in body):
@@ -1015,6 +1018,13 @@ class _ShapeChecker:
                 [*loc, odd],
                 "a route rule names visit, vehicles, stops and depot, and optionally demand and "
                 f"capacity (both or neither); {odd!r} is {what}",
+            )
+        if "depot_by" in body and body["depot_by"] not in self.relationships:
+            return Refusal(
+                "route_malformed",
+                [*loc, "depot_by"],
+                f"{json.dumps(body['depot_by'])} is not a relationship this model declares in "
+                "relationships, so no dataset would carry its links",
             )
         for key in ("severity", "weight", "when"):
             if key in constraint and (key != "severity" or constraint[key] != "hard"):

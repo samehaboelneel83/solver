@@ -333,8 +333,13 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
   value's default is now scaled too; per-period road speeds still to do): a scenario that scales travel times should recompute
   the 0/1 "within 30 minutes" data, or let reach be written as `travel_min <= 30` over the scaled
   times; per-period road speeds. (P1)
-- **R2e Multi-product inventory and routing tied to location:** stock and flows per product; vehicle
-  routes from the depots the location model opens. (P5)
+- **R2e Multi-product inventory and routing tied to location** (done: a stock recipe — how much of each
+  product to order each period, at each location if the forecast has one, from what is on hand, within
+  an order limit and the room in store, lost sales at a cost, least ordering and holding cost; stock
+  carries over by the periods' order (`s <= t`), so no new model syntax. A route's vehicles may start
+  from the stop each is linked to (`depot_by`, a relationship either way): a location plan's
+  placement, kept as links ("Keep as data", following the approved plan), sets where the routes
+  start): stock and flows per product; vehicle routes from the depots the location model opens. (P5)
 - **R2f Water as a decision feeding a yield model** (a predictor over a decision). (P4)
 - **R2g Make the existing joins findable** (done: the records' panel is "Compute and join" and points to
   the computed data values; the import says two columns can make one key when a key's values repeat): the composite key ("several columns read as the key"),

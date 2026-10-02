@@ -80,3 +80,21 @@ it("routes trips over the roads from the form, the road's two ends read from the
   expect(d.constraints.map((c) => c.id)).toEqual(["trips_arrive", "road_capacity"]);
   expect(JSON.stringify(d.constraints[0])).toContain('"via":{"rel":"road_to","to":"n"}');
 });
+
+it("orders stock each period from the form, the room as a number when there is one store (benchmark re-test, October 2026)", () => {
+  const onApply = vi.fn();
+  const kinds = [{ name: "product", attributes: [{ name: "on_hand", data_type: "number" }, { name: "cost", data_type: "number" }] },
+    { name: "month", attributes: [] }];
+  render(<RecipesForm kinds={kinds} data={[{ name: "demand", index: ["product", "month"] }]} onApply={onApply} />);
+  fireEvent.click(screen.getByLabelText(/Stock: order each period/));
+  fireEvent.change(screen.getByLabelText("Stock of"), { target: { value: "product" } });
+  fireEvent.change(screen.getByLabelText("Each"), { target: { value: "month" } });
+  expect(screen.getByLabelText("Needed")).toHaveValue("demand");
+  fireEvent.change(screen.getByLabelText("On hand at the start"), { target: { value: "on_hand" } });
+  fireEvent.change(screen.getByLabelText("Cost to order a unit"), { target: { value: "cost" } });
+  fireEvent.change(screen.getByLabelText("Room in store"), { target: { value: "500" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write it into the model" }));
+  const d = onApply.mock.calls[0][0](empty) as FormDraft;
+  expect(d.constraints.map((c) => c.id)).toEqual(["stock_balance", "storage"]);
+  expect(d.constraints[1]).toMatchObject({ right: { const: 500 } });
+});

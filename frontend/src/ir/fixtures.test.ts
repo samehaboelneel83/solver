@@ -179,3 +179,14 @@ describe("the limits", () => {
     expect(refusal?.message).toMatch(/4\d{5} bytes/);
   });
 });
+
+describe("a route's depots placed by links (benchmark re-test, October 2026)", () => {
+  it("refuses a depot_by relationship the model does not declare, where the server would", () => {
+    // Not a fixture: taking `depot_by` away leaves the depot missing, not the document valid.
+    const linked = FIXTURES.valid.find((entry) => entry.name === "route_depot_linked")!.ir as Record<string, unknown>;
+    const { relationships: _r, ...undeclared } = linked;
+    const refusal = checkIrShape(undeclared);
+    expect(refusal?.code).toBe("route_malformed");
+    expect(refusal?.loc).toEqual(["constraints", 0, "route", "depot_by"]);
+  });
+});

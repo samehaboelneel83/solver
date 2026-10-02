@@ -914,18 +914,20 @@ class ShapeChecker {
     let what = "";
     odd = ["visit", "vehicles", "stops"].find((key) => !(key in body));
     if (odd !== undefined) what = "missing";
-    // One depot for all, or each vehicle's own (`depot_of`; benchmark, October 2026).
-    if (odd === undefined && ("depot" in body) === ("depot_of" in body)) {
-      [odd, what] = !("depot" in body)
-        ? ["depot", "missing (or depot_of: the field of each vehicle naming its own depot)"]
-        : ["depot_of", "given with depot: name one depot for all, or each vehicle's own"];
+    // One depot for all, or each vehicle's own (`depot_of`; benchmark, October 2026), or the stop each
+    // vehicle is linked to (`depot_by`; benchmark re-test, October 2026).
+    const homes = ["depot", "depot_of", "depot_by"].filter((key) => key in body);
+    if (odd === undefined && homes.length !== 1) {
+      [odd, what] = homes.length === 0
+        ? ["depot", "missing (or depot_of: the field of each vehicle naming its own depot; or depot_by: a relationship linking each vehicle to its own)"]
+        : [homes[1], `given with ${homes[0]}: name one depot for all, or each vehicle's own, one way`];
     }
     if (odd === undefined) {
       odd = Object.keys(body).find((key) => !ROUTE_KEYS.includes(key));
       what = "not one of them";
     }
     if (odd === undefined) {
-      odd = ["depot", "depot_of", "demand", "capacity", "travel", "earliest", "latest", "service"].find(
+      odd = ["depot", "depot_of", "depot_by", "demand", "capacity", "travel", "earliest", "latest", "service"].find(
         (key) => key in body && !(typeof body[key] === "string" && body[key] !== "")
       );
       what = "not a name";
@@ -944,6 +946,13 @@ class ShapeChecker {
         "route_malformed",
         [...loc, odd],
         `a route rule names visit, vehicles, stops and depot, and optionally demand and capacity (both or neither); '${odd}' is ${what}`
+      );
+    }
+    if ("depot_by" in body && !this.relationships.has(body.depot_by as string)) {
+      return refusal(
+        "route_malformed",
+        [...loc, "depot_by"],
+        `${show(body.depot_by)} is not a relationship this model declares in relationships, so no dataset would carry its links`
       );
     }
     for (const key of ["severity", "weight", "when"]) {
