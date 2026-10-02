@@ -72,6 +72,20 @@ describe("a plan in plain words", () => {
   });
 });
 
+describe("a cost among maximised goals", () => {
+  it("is said as the cost, positive and kept low, not as a negative number (emergency coverage)", () => {
+    const run = { ...base, params: { objective_mode: "lex", objective_terms: [
+      { id: "o_risk_covered", value: 355 }, { id: "o_running_cost", value: -247000 }] } } as unknown as Run;
+    const emergency = { objective: { sense: "maximize", mode: "lex", terms: [
+      { id: "o_risk_covered", weight: 1, expression: { sum: { var: "covered", index: ["p"] } } },
+      { id: "o_running_cost", weight: 1, expression: { mul: [{ const: -1 }, { sum: { var: "open", index: ["s"] } }] } },
+    ] }, variables: ir.variables };
+    expect(planWords(run, emergency as never)?.lines[0]).toBe(
+      "Goals, in order: risk covered 355 as high as it can go, then running cost 247,000 as low as it can go — each given the ones before it."
+    );
+  });
+});
+
 describe("goals the editor named o_1, o_2", () => {
   it("are said by what they add up, not as “o 1” (user test, Alexandria)", () => {
     const run = { ...base, params: { objective_mode: "lex", objective_terms: [{ id: "o_1", value: 60000 }, { id: "o_2", value: 4 }] } } as unknown as Run;

@@ -11,7 +11,7 @@ import {
 } from "./attrTypes";
 import RecordPicker from "./RecordPicker";
 import { useCapabilities } from "../hooks/useCapability";
-import { type AttrType, type AttributeDef, type Id } from "../api/v1";
+import { useEntityType, type AttrType, type AttributeDef, type Id } from "../api/v1";
 
 /**
  * The typed part of an entity form: one control per `attribute_def` row of
@@ -338,6 +338,7 @@ function ReferenceControl({
   blocked?: ReadonlyMap<string, string>;
 }) {
   const { can } = useCapabilities();
+  const target = useEntityType((attribute.target_type_id as Id | null) ?? null);
   return (
     <RecordPicker
       typeId={(attribute.target_type_id as Id | null) ?? null}
@@ -351,6 +352,7 @@ function ReferenceControl({
       required={attribute.required}
       blocked={blocked}
       allowCreate={can("domain.edit")}
+      kindName={target.data?.name}
     />
   );
 }

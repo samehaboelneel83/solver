@@ -218,6 +218,13 @@ def basemap_of(db: Session | None, domain_id: int | None, basemap: str | None) -
     if not basemap or basemap == "none":
         return None
     if basemap in BUILTIN_BASEMAPS:
+        if db is not None:
+            from app.settings_resolve import resolve
+
+            # An installation that keeps its sites inside (spatial.internet_basemaps = false) fetches no
+            # internet imagery for a report either.
+            if resolve(db, domain_id=domain_id)["spatial.internet_basemaps"].value is False:
+                return None
         return BUILTIN_BASEMAPS[basemap]
     if db is None:
         return None
@@ -387,6 +394,17 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
             f'style="border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc">{under}{"".join(out)}</svg>')
 
 
+def _negated(term: dict[str, Any] | None) -> bool:
+    """A goal counted backwards: a negative weight, or its expression multiplied by a negative constant."""
+    if not term:
+        return False
+    if isinstance(term.get("weight"), (int, float)) and term["weight"] < 0:
+        return True
+    factors = (term.get("expression") or {}).get("mul") if isinstance(term.get("expression"), dict) else None
+    return isinstance(factors, list) and any(isinstance(f, dict) and isinstance(f.get("const"), (int, float)) and f["const"] < 0
+                                             for f in factors)
+
+
 def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str, str] | None = None) -> str:
     """A report a person prints or saves as PDF: what a field supervisor takes away."""
     from html import escape
@@ -399,8 +417,11 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
              f"{' · finished ' + e(rec['finished_at'].strftime('%Y-%m-%d %H:%M')) if rec['finished_at'] else ''}</p>"]
     if params.get("objective_mode") == "lex" and params.get("objective_terms"):
         terms = {t.get("id"): t for t in ((rec["ir"] or {}).get("objective") or {}).get("terms") or [] if isinstance(t, dict)}
-        goals = ", then ".join(f"{e(_goal_name(terms.get(t['id']), t['id']))} <b>{float(t['value']):,.6g}</b>"
-                               for t in params["objective_terms"] if t.get("id") not in ("stay_close", "preferences"))
+        # A cost among maximised goals is written "maximise minus the cost": print it as the cost.
+        goals = ", then ".join(
+            f"{e(_goal_name(terms.get(t['id']), t['id']))} <b>{(-1 if _negated(terms.get(t['id'])) else 1) * float(t['value']):,.6g}</b>"
+            + (" (kept as low as it can go)" if _negated(terms.get(t["id"])) else "")
+            for t in params["objective_terms"] if t.get("id") not in ("stay_close", "preferences"))
         parts.append(f"<p>Goals, in order: {goals}.</p>")
     elif rec["objective"] is not None:
         parts.append(f"<p>Goal: <b>{float(rec['objective']):g}</b></p>")

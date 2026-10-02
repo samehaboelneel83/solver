@@ -325,3 +325,33 @@ def test_a_whole_number_answer_is_kept_once_per_cell_with_its_amount(db, placed,
     values = db.execute(text("SELECT pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
                              " WHERE pd.name = 'trucks_placed'")).scalars().all()
     assert sorted(float(v) for v in values) == [3.0, 3.0]
+
+
+def test_the_printed_report_says_a_cost_among_maximised_goals_as_a_positive_cost():
+    from datetime import datetime
+
+    from app.api.run_export import to_html
+
+    ir = {"objective": {"sense": "maximize", "mode": "lex", "terms": [
+        {"id": "o_risk", "weight": 1, "note": "risk covered", "expression": {"sum": {"var": "covered"}}},
+        {"id": "o_cost", "weight": 1, "note": "running cost", "expression": {"mul": [{"const": -1}, {"sum": {"var": "open"}}]}}]}}
+    rec = {"id": 8, "problem": "p", "scenario": "Base", "status": "optimal", "solver": "cp-sat", "finished_at": datetime(2026, 10, 1),
+           "params": {"objective_mode": "lex", "objective_terms": [{"id": "o_risk", "value": 355}, {"id": "o_cost", "value": -247000}]},
+           "objective": 355, "error": None, "ir": ir, "data": {}, "assignments": None, "amounts": None, "results": []}
+    html = to_html(rec)
+    assert "<b>247,000</b> (kept as low as it can go)" in html and "-247" not in html
+
+
+def test_a_report_fetches_no_internet_imagery_when_the_installation_keeps_its_sites_inside(monkeypatch):
+    from types import SimpleNamespace
+
+    import app.settings_resolve as settings_resolve
+    from app.api.run_export import BUILTIN_BASEMAPS, basemap_of
+
+    def setting(value):
+        monkeypatch.setattr(settings_resolve, "resolve", lambda db, **_: {"spatial.internet_basemaps": SimpleNamespace(value=value)})
+
+    setting(True)
+    assert basemap_of(object(), 1, "builtin-satellite") == BUILTIN_BASEMAPS["builtin-satellite"]
+    setting(False)
+    assert basemap_of(object(), 1, "builtin-satellite") is None

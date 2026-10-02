@@ -61,6 +61,15 @@ function list(items: string[]): string {
   return items.length > SHOWN ? `${shown} and ${items.length - SHOWN} more` : shown;
 }
 
+type GoalTerm = { weight?: number; expression?: unknown };
+
+/** A goal term counted backwards: a negative weight, or an expression multiplied by a negative constant. */
+export function negated(term: GoalTerm): boolean {
+  if (typeof term.weight === "number" && term.weight < 0) return true;
+  const e = term.expression as { mul?: unknown[] } | undefined;
+  return Array.isArray(e?.mul) && e.mul.some((f) => typeof (f as { const?: unknown })?.const === "number" && (f as { const: number }).const < 0);
+}
+
 /** Ordered goals (lexicographic) are not one total: each term, by name, with its own value. */
 function lexGoalLine(run: Run, ir: Ir): string | null {
   const params = (run as { params?: { objective_mode?: string; objective_terms?: { id: string; value: number }[] } }).params;
@@ -73,11 +82,24 @@ function lexGoalLine(run: Run, ir: Ir): string | null {
   const how = minimise
     ? proven ? "as low as it can go" : "the lowest found"
     : proven ? "as high as it can go" : "the highest found";
-  const parts = values
-    .filter((t) => t.id !== "stay_close" && t.id !== "preferences")
-    .map((t) => `${notes.get(t.id) ?? plain(t.id)} ${number(t.value)}`);
-  if (!parts.length) return null;
-  return `Goals, in order: ${parts.join(", then ")} — each ${how} given the ones before it.`;
+  // A cost among goals that are maximised is written "maximise minus the cost" (one sense for
+  // all): say it as the cost, positive, kept as low as it can go -- not "running cost -247,000".
+  const flipped = new Set(
+    (ir.objective?.terms ?? []).filter((t) => negated(t as GoalTerm)).map((t) => t.id ?? "")
+  );
+  const shown = values.filter((t) => t.id !== "stay_close" && t.id !== "preferences");
+  if (!shown.length) return null;
+  if (!shown.some((t) => flipped.has(t.id))) {
+    const parts = shown.map((t) => `${notes.get(t.id) ?? plain(t.id)} ${number(t.value)}`);
+    return `Goals, in order: ${parts.join(", then ")} — each ${how} given the ones before it.`;
+  }
+  const low = proven ? "as low as it can go" : "the lowest found";
+  const high = proven ? "as high as it can go" : "the highest found";
+  const parts = shown.map((t) => {
+    const down = flipped.has(t.id) ? minimise === false : minimise;
+    return `${notes.get(t.id) ?? plain(t.id)} ${number(flipped.has(t.id) ? -t.value : t.value)} ${down ? low : high}`;
+  });
+  return `Goals, in order: ${parts.join(", then ")} — each given the ones before it.`;
 }
 
 function goalLine(run: Run, ir: Ir): string | null {

@@ -14,6 +14,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useBasemaps } from "../../hooks/useBasemaps";
+import { useDomain } from "../../hooks/useDomain";
+import { useSettings } from "../../api/v1";
 import type { Pt, Ring } from "../../api/camps";
 import { toLocal, toLonLat } from "../../lib/campGeo";
 import { tileUrl, type Basemap } from "../../lib/tiles";
@@ -77,7 +79,11 @@ function niceLength(metres: number): number {
 /** The backgrounds a map offers: the organization's tile index first, then the built-in ones; the choice is remembered. */
 export function useSiteBasemap(storageKey = "solver_site_basemap"): { options: Basemap[]; chosen: Basemap | null; choose: (id: string) => void } {
   const org = useBasemaps();
-  const options = [...org.basemaps, ...BUILTIN_BASEMAPS];
+  // `spatial.internet_basemaps` false: an offline installation, or one whose sites stay inside it.
+  const { domainId } = useDomain();
+  const settings = useSettings({ domainId });
+  const internet = settings.data?.items?.find((item) => item.key === "spatial.internet_basemaps")?.value !== false;
+  const options = [...org.basemaps, ...(internet ? BUILTIN_BASEMAPS : [])];
   const [choice, setChoice] = useState<string | null>(() => {
     try { return localStorage.getItem(storageKey); } catch { return null; }
   });
