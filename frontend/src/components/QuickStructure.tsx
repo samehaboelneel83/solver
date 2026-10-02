@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatApiError } from "../api/errors";
-import { createAttribute, createEntityType, type AttrType, type EntityType, type Id } from "../api/v1";
+import { createAttribute, createEntityType, useEntityTypes, type AttrType, type EntityType, type Id } from "../api/v1";
 
 const INPUT = "rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900";
 const BUTTON = "rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50";
@@ -25,6 +25,7 @@ const KINDS: [AttrType, string][] = [
   ["boolean", "yes or no"],
   ["date", "a date"],
   ["enum", "one of a list"],
+  ["reference", "a link to another record"],
 ];
 
 function useSave() {
@@ -75,14 +76,18 @@ export function NewFieldForm({ type, onDone }: { type: EntityType; onDone: () =>
   const [text, setText] = useState("");
   const [kind, setKind] = useState<AttrType>("number");
   const [choices, setChoices] = useState("");
+  const [target, setTarget] = useState<Id | "">("");
   const { busy, problem, save } = useSave();
+  const kinds = useEntityTypes(type.domain_id, { limit: 500 });
   const name = toName(text);
   const list = choices.split(",").map((c) => c.trim()).filter(Boolean);
+  const targets = kinds.data?.items ?? [];
   return (
     <form className="flex flex-wrap items-center gap-2" aria-label={`New field on ${type.name}`}
       onSubmit={async (event) => {
         event.preventDefault();
-        const made = await save(() => createAttribute(type.id, { name, data_type: kind, ...(kind === "enum" ? { enum_values: list } : {}) }));
+        const extra = kind === "enum" ? { enum_values: list } : kind === "reference" ? { target_type_id: target === "" ? null : target } : {};
+        const made = await save(() => createAttribute(type.id, { name, data_type: kind, ...extra }));
         if (made) onDone();
       }}>
       <label className="text-sm text-slate-700">
@@ -101,8 +106,22 @@ export function NewFieldForm({ type, onDone }: { type: EntityType; onDone: () =>
           <input className={INPUT} value={choices} onChange={(event) => setChoices(event.target.value)} placeholder="junior, senior" />
         </label>
       )}
+      {kind === "reference" && (
+        <label className="text-sm text-slate-700">
+          to a{" "}
+          <select className={INPUT} value={String(target)} onChange={(event) => setTarget(event.target.value === "" ? "" : Number(event.target.value))}>
+            <option value="">choose a kind…</option>
+            {targets.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.id === type.id ? `${k.name} (another ${k.name}, such as a parent)` : k.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {name && name !== text.trim() && <span className="text-xs text-slate-500">saved as <code>{name}</code></span>}
-      <button type="submit" className={PRIMARY} disabled={busy || !name || (kind === "enum" && list.length === 0)}>Add</button>
+      <button type="submit" className={PRIMARY}
+        disabled={busy || !name || (kind === "enum" && list.length === 0) || (kind === "reference" && target === "")}>Add</button>
       <button type="button" className="text-sm text-slate-600 underline" onClick={onDone}>Cancel</button>
       {problem && <p role="alert" className="w-full text-sm text-red-700">{problem}</p>}
     </form>

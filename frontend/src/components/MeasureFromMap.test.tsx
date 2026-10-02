@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EntityType } from "../api/v1";
 import MeasureFromMap from "./MeasureFromMap";
@@ -12,9 +13,11 @@ const shaped = (id: number, name: string, geometry = true) =>
 function renderForm(types: EntityType[]) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <ToastProvider>
-        <MeasureFromMap domainId={7} entityTypes={types} />
-      </ToastProvider>
+      <MemoryRouter>
+        <ToastProvider>
+          <MeasureFromMap domainId={7} entityTypes={types} />
+        </ToastProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -53,6 +56,16 @@ describe("computing distances from the map (queue R16a)", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(/\/within$/);
     expect(JSON.parse(init.body as string)).toEqual({ name: "within_reach", from_type_id: 1, to_type_id: 2, metric: "straight", max_m: 2500 });
+    // Kept on screen with where the result went: a toast alone fades.
+    const status = await screen.findByText(/within_reach: 3 pairs within 2.5 km linked/, { selector: "p[role=status]" });
+    expect(status.querySelector("a")).toHaveAttribute("href", "/domains/7/data/relationships");
+  });
+
+  it("asks again when a reach in km looks like metres", () => {
+    renderForm([shaped(1, "site"), shaped(2, "customer")]);
+    fireEvent.change(screen.getByLabelText("Make"), { target: { value: "within_flag" } });
+    fireEvent.change(screen.getByLabelText(/Within \(km\)/), { target: { value: "1500" } });
+    expect(screen.getByText(/1,500 km — did you mean 1.5 km/)).toBeInTheDocument();
   });
 
   it("measures a reach in road travel time, in minutes", async () => {

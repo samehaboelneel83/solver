@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useDataset, useDatasets } from "../api/gis";
 import {
   useComputeDistances, useComputeSpatial, useComputeWithin,
@@ -36,6 +37,14 @@ const MAKES: [Make, string, string][] = [
 
 const MEASURED = new Set<Make>(["distances", "within", "within_flag"]);
 
+/** Where each result is kept, so the line that reports it can take the person there. */
+export function resultPlace(kind: Make, domainId: Id): { to: string; words: string } {
+  if (kind === "distances" || kind === "within_flag" || kind === "overlap")
+    return { to: `/domains/${domainId}/data/parameters`, words: "Open it under Parameters" };
+  if (kind === "count" || kind === "elevation") return { to: `/domains/${domainId}/data/records`, words: "See it on the records" };
+  return { to: `/domains/${domainId}/data/relationships`, words: "See the links under Relationships" };
+}
+
 export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id; entityTypes: EntityType[] }) {
   const id = useId();
   const placed = entityTypes.filter((t) => t.attributes.some((a) => a.data_type === "geometry"));
@@ -58,6 +67,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const [error, setError] = useState<string | null>(null);
   // Kept on screen (a toast fades): places a travel time could not reach, and why.
   const [notice, setNotice] = useState<string | null>(null);
+  // The last result, kept on screen with where it went: a toast alone is easy to miss.
+  const [last, setLast] = useState<{ text: string; kind: Make } | null>(null);
   const distances = useComputeDistances();
   const within = useComputeWithin();
   const spatial = useComputeSpatial();
@@ -89,6 +100,11 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
     event.preventDefault();
     setError(null);
     setNotice(null);
+    setLast(null);
+    const report = (text: string) => {
+      toast.success(text);
+      setLast({ text, kind });
+    };
     if (!/^[a-z][a-z0-9_]*$/.test(name)) return setError("A name is lower case letters, digits and _, starting with a letter.");
     if (from === "" || (kind !== "touching" && kind !== "elevation" && to === "")) return setError("Choose both kinds.");
     const fromId = from as Id;
@@ -101,7 +117,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         const keep = nearest.trim() === "" ? undefined : Number(nearest);
         if (keep !== undefined && !(Number.isInteger(keep) && keep >= 1)) return setError("Keep the nearest: a whole number, 1 or more, or blank for all.");
         const done = await distances.mutateAsync({ domainId, name, from_type_id: fromId, to_type_id: toId, metric, unit, ...(keep ? { nearest: keep } : {}), ...along });
-        toast.success(`${name}: ${done.pairs.toLocaleString("en-US")} ${timed ? "travel times" : "distances"} computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
+        report(`${name}: ${done.pairs.toLocaleString("en-US")} ${timed ? "travel times" : "distances"} computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
         setNotice(leftOut(done.source, Number(joinM) || 500));
       } else if (kind === "within" || kind === "within_flag") {
         const max = Number(timed ? minutes : km);
@@ -111,29 +127,29 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
           domainId, name, from_type_id: fromId, to_type_id: toId, metric, ...reach, ...along,
           ...(kind === "within_flag" ? { output: "parameter" as const } : {}),
         });
-        toast.success(`${name}: ${done.edges.toLocaleString("en-US")} pairs within ${max} ${timed ? "min" : "km"} ${kind === "within_flag" ? "marked 1" : "linked"}`);
+        report(`${name}: ${done.edges.toLocaleString("en-US")} pairs within ${max} ${timed ? "min" : "km"} ${kind === "within_flag" ? "marked 1" : "linked"}`);
         setNotice(leftOut(done.source, Number(joinM) || 500));
       } else if (kind === "elevation") {
         const done = await spatial.mutateAsync({ domainId, op: "elevation", name, type_id: fromId });
         const off = done.uncovered?.length ? `; ${done.uncovered.length} outside the terrain tiles` : "";
-        toast.success(`${name} and ${done.slope_field ?? `${name}_slope`}: set on ${done.records ?? 0} records${off}`);
+        report(`${name} and ${done.slope_field ?? `${name}_slope`}: set on ${done.records ?? 0} records${off}`);
       } else if (kind === "touching") {
         const done = await spatial.mutateAsync({ domainId, op: "touching", name, type_id: fromId });
-        toast.success(`${name}: ${done.links ?? 0} links between areas sharing a border`);
+        report(`${name}: ${done.links ?? 0} links between areas sharing a border`);
       } else if (kind === "count") {
         const metres = Number(radius);
         if (!(metres > 0)) return setError("Count within: a distance above 0 metres.");
         const done = await spatial.mutateAsync({ domainId, op: "count", name, from_type_id: fromId, to_type_id: toId, max_m: metres });
-        toast.success(`${name}: counted for ${done.records ?? 0} records, ${done.with_any ?? 0} with at least one within ${metres} m`);
+        report(`${name}: counted for ${done.records ?? 0} records, ${done.with_any ?? 0} with at least one within ${metres} m`);
       } else if (kind === "nearest") {
         const many = Number(k);
         if (!(Number.isInteger(many) && many >= 1 && many <= 50)) return setError("Nearest: a whole number from 1 to 50.");
         const done = await spatial.mutateAsync({ domainId, op: "nearest", name, from_type_id: fromId, to_type_id: toId, k: many });
-        toast.success(`${name}: ${done.links ?? 0} links to the nearest ${many}`);
+        report(`${name}: ${done.links ?? 0} links to the nearest ${many}`);
       } else {
         const done = await spatial.mutateAsync({ domainId, op: kind, name, from_type_id: fromId, to_type_id: toId });
         const outside = done.outside?.length ? `; ${done.outside.length} in no area` : "";
-        toast.success(kind === "inside" ? `${name}: ${done.links ?? 0} places linked to their area${outside}` : `${name}: ${done.pairs ?? 0} overlapping pairs`);
+        report(kind === "inside" ? `${name}: ${done.links ?? 0} places linked to their area${outside}` : `${name}: ${done.pairs ?? 0} overlapping pairs`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -273,6 +289,11 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
             <label htmlFor={`${id}-km`} className="block text-xs text-slate-600">Within (km)</label>
             <input id={`${id}-km`} className="w-24 rounded border px-2 py-1 text-sm" inputMode="decimal" value={km}
                    onChange={(event) => setKm(event.target.value)} />
+            {Number(km) >= 100 && (
+              <p className="mt-1 max-w-[16rem] text-xs text-amber-800">
+                That is {Number(km).toLocaleString("en-US")} km — did you mean {Number(km) / 1000} km ({Number(km).toLocaleString("en-US")} m)?
+              </p>
+            )}
           </div>
         ))}
         {kind === "count" && (
@@ -301,6 +322,13 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         </p>
       )}
       {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+      {last && (
+        <p role="status" className="mt-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm text-emerald-900">
+          ✓ {last.text}.{" "}
+          <Link className="font-medium underline" to={resultPlace(last.kind, domainId).to}>{resultPlace(last.kind, domainId).words}</Link>
+          {" "}— a model reads it once it is ticked under “Data this model reads”.
+        </p>
+      )}
       {notice && <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-amber-900">{notice}</p>}
     </section>
   );

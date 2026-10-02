@@ -6,6 +6,8 @@
 import { Link } from "react-router-dom";
 import { Database, FileUp, Layers } from "lucide-react";
 import { useDatasets } from "../api/gis";
+import { useEntityTypes } from "../api/v1";
+import MeasureFromMap from "../components/MeasureFromMap";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
 import MapDataTabs from "../components/map/MapDataTabs";
@@ -18,6 +20,8 @@ export default function MapData() {
   useDocumentTitle("Map data");
   const { domainId } = useDomain();
   const list = useDatasets(domainId);
+  const kinds = useEntityTypes(domainId, { limit: 500 });
+  const placed = (kinds.data?.items ?? []).filter((t) => t.attributes.some((a) => a.data_type === "geometry"));
   const { can } = useCapabilities();
   if (domainId === null) return <p className="text-sm text-slate-600">Choose a domain first.</p>;
   return (
@@ -70,6 +74,14 @@ export default function MapData() {
               ))}
             </ul>
           )}
+          {can("domain.edit") && list.data!.items.length > 0 && (placed.length > 0 ? (
+            <MeasureFromMap domainId={domainId} entityTypes={kinds.data?.items ?? []} />
+          ) : (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              Next: open a layer and choose <strong>Use in models</strong> to make its features records. Then distances,
+              what is within reach and which area each place is in can be computed here, for a model to read.
+            </p>
+          ))}
           <p className="flex items-center gap-1.5 text-xs text-slate-500">
             <Database className="h-3.5 w-3.5" aria-hidden />
             {list.data!.postgis

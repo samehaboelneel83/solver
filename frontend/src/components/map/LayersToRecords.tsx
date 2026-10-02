@@ -179,7 +179,7 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
           {done.text}{" "}
           <Link className="underline" to={`/domains/${dataset.domain_id}/data/records${done.typeId ? `?type=${done.typeId}` : ""}`}>Open the records</Link>
           {" · "}
-          <Link className="underline" to={`/domains/${dataset.domain_id}/data/parameters`}>Measure distances from them</Link>
+          <Link className="underline" to={`/domains/${dataset.domain_id}/map-data`}>Compute distances and reach from them</Link>
         </p>
       )}
     </div>

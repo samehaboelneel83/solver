@@ -12,7 +12,10 @@ vi.mock("../api/client", async () => {
 });
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
+let kinds: object[] = [];
+
 beforeEach(() => {
+  kinds = [];
   mockFetch.mockReset();
   mockFetch.mockImplementation((path: string) => {
     if (path.startsWith("/api/v1/gis/datasets")) return Promise.resolve({ postgis: true, items: [{
@@ -20,9 +23,33 @@ beforeEach(() => {
       placement: { kind: "epsg", code: 32636, name: "WGS 84 / UTM zone 36N" }, bbox: [31.2, 30.0, 31.3, 30.1],
       stats: { features: 1234 }, notes: [], created_at: "2026-10-01T09:00:00Z", updated_at: "2026-10-01T09:00:00Z",
     }] });
+    if (path.startsWith("/api/v1/entity-types")) return Promise.resolve({ total: kinds.length, items: kinds });
     if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "a", display_name: null, capabilities: ["domain.edit"] });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
+});
+
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/domains/7/map-data"]}>
+        <Routes><Route path="/domains/:domainId/map-data" element={<DomainRouteProvider><MapData /></DomainRouteProvider>} /></Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+it("says what comes next while no layer has been made records", async () => {
+  renderPage();
+  expect(await screen.findByText(/choose/)).toHaveTextContent("Next: open a layer and choose Use in models");
+  expect(screen.queryByRole("form", { name: "Compute from the map" })).toBeNull();
+});
+
+it("computes distances and reach right here once records have shapes", async () => {
+  kinds = [{ id: 1, domain_id: 7, name: "site", role: "location", attributes: [{ id: 10, name: "shape", data_type: "geometry" }] }];
+  renderPage();
+  expect(await screen.findByRole("form", { name: "Compute from the map" })).toBeInTheDocument();
 });
 
 it("lists imported drawings with their layers, size and coordinate system", async () => {

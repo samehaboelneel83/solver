@@ -167,6 +167,33 @@ describe("Entities: choosing what to show", () => {
   });
 });
 
+describe("Entities: a link field from the records page", () => {
+  it("adds a field that links to a record of another kind", async () => {
+    serve({ "/api/v1/me": { username: "modeller", capabilities: ["domain.edit"] } });
+    const writes: [string, unknown][] = [];
+    const served = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((path: string, options?: { method?: string; body?: string }) => {
+      if (options?.method === "POST") {
+        writes.push([path, JSON.parse(options.body ?? "{}")]);
+        return Promise.resolve({ id: 91 });
+      }
+      return served(path, options);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /\+ Add a field to/ }));
+    fireEvent.change(screen.getByPlaceholderText("hours per week"), { target: { value: "usual shift" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /which is/ }), { target: { value: "reference" } });
+    const add = screen.getByRole("button", { name: "Add" });
+    expect(add).toBeDisabled();
+    const to = screen.getByRole("combobox", { name: /to a/ });
+    await waitFor(() => expect(within(to).getByRole("option", { name: "shift" })).toBeInTheDocument());
+    fireEvent.change(to, { target: { value: "9" } });
+    fireEvent.click(add);
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0][1]).toEqual({ name: "usual_shift", data_type: "reference", target_type_id: 9 });
+  });
+});
+
 describe("Entities: the list", () => {
   it("shows each entity's key, label, sort order and active flag in the API's order", async () => {
     serve();
