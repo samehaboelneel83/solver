@@ -11,6 +11,7 @@ Nothing here knows what the places are.
 - `count_within`: how many of the others lie within so many metres
   (schools near a hotspot, customers near a depot).
 - `nearest`: each place's k nearest others, ranked, with the metres.
+- `crossing`: each line and the areas it passes through, with the metres inside each.
 - `touching`: areas that share a border (fields, districts, zones).
 - `overlap_m2`: the area two shapes share, in square metres.
 
@@ -109,6 +110,13 @@ def inside(places: list[Shape], areas: list[Shape]) -> tuple[list[tuple[int, int
     for place in places:
         from shapely.geometry import Point
 
+        if place.geometry.geom_type in ("LineString", "MultiLineString"):
+            # A road is in the area holding most of its length, not the one its middle falls in
+            # (benchmark, October 2026).
+            through = crossing([place], polys)
+            if through:
+                pairs.append((place.entity_id, max(through, key=lambda r: (r[2], -r[1]))[1]))
+                continue
         pt = Point(*_point(place.geometry))
         hits = [polys[int(i)] for i in tree.query(pt) if polys[int(i)].geometry.covers(pt)]
         if not hits:
@@ -118,6 +126,28 @@ def inside(places: list[Shape], areas: list[Shape]) -> tuple[list[tuple[int, int
         best = min(hits, key=lambda a: (a.geometry.boundary.distance(pt) * (-1 if a.geometry.contains(pt) else 1), a.key))
         pairs.append((place.entity_id, best.entity_id))
     return pairs, outside
+
+
+def crossing(lines: list[Shape], areas: list[Shape]) -> list[tuple[int, int, float]]:
+    """(line id, area id, metres of the line inside it) for every area each line passes through:
+    a road and the districts it crosses, a canal and the flood zones along it."""
+    from pyproj import Geod
+    from shapely.strtree import STRtree
+
+    geod = Geod(ellps="WGS84")
+    polys = [a for a in areas if a.geometry.geom_type in ("Polygon", "MultiPolygon")]
+    if not polys:
+        return []
+    tree = STRtree([a.geometry for a in polys])
+    out = []
+    for line in lines:
+        for i in tree.query(line.geometry):
+            area = polys[int(i)]
+            part = line.geometry.intersection(area.geometry)
+            metres = geod.geometry_length(part) if not part.is_empty else 0.0
+            if metres > 0 or (part.geom_type == "Point" and not part.is_empty):
+                out.append((line.entity_id, area.entity_id, round(float(metres), 1)))
+    return out
 
 
 def count_within(origins: list[Shape], targets: list[Shape], max_m: float) -> list[int]:

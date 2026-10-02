@@ -23,13 +23,14 @@ import { formatApiError } from "../api/errors";
  *
  * Only kinds with a geometry field are offered; computing again replaces.
  */
-type Make = "distances" | "within" | "within_flag" | "inside" | "count" | "nearest" | "touching" | "overlap" | "elevation";
+type Make = "distances" | "within" | "within_flag" | "inside" | "crosses" | "count" | "nearest" | "touching" | "overlap" | "elevation";
 
 const MAKES: [Make, string, string][] = [
   ["distances", "a distance or travel-time parameter", "distance"],
   ["within", "a within relationship", "within_reach"],
   ["within_flag", "a 0/1 within parameter (for rules)", "reach"],
   ["inside", "which area each place is in (a link)", "area_of"],
+  ["crosses", "the areas each line passes through (links, with metres)", "passes_through"],
   ["count", "how many lie within a distance (a field)", "near_count"],
   ["nearest", "links to the nearest few", "nearest"],
   ["touching", "links between areas sharing a border", "next_to"],
@@ -161,7 +162,9 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       } else {
         const done = await spatial.mutateAsync({ domainId, op: kind, name, from_type_id: fromId, to_type_id: toId });
         const outside = done.outside?.length ? `; ${done.outside.length} in no area` : "";
-        report(kind === "inside" ? `${name}: ${done.links ?? 0} places linked to their area${outside}` : `${name}: ${done.pairs ?? 0} overlapping pairs`);
+        report(kind === "inside" ? `${name}: ${done.links ?? 0} places linked to their area${outside}`
+          : kind === "crosses" ? `${name}: ${done.links ?? 0} links from lines to the areas they pass through`
+          : `${name}: ${done.pairs ?? 0} overlapping pairs`);
       }
     } catch (err) {
       setError(formatApiError(err));
@@ -177,8 +180,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       </select>
     </div>
   );
-  const fromLabel = kind === "inside" ? "Places" : kind === "elevation" ? "Places" : kind === "touching" ? "Areas" : kind === "count" ? "For each" : "From";
-  const toLabel = kind === "inside" ? "Areas" : kind === "count" ? "Count" : "To";
+  const fromLabel = kind === "crosses" ? "Lines" : kind === "inside" ? "Places" : kind === "elevation" ? "Places" : kind === "touching" ? "Areas" : kind === "count" ? "For each" : "From";
+  const toLabel = kind === "inside" || kind === "crosses" ? "Areas" : kind === "count" ? "Count" : "To";
 
   return (
     <section aria-labelledby={`${id}-heading`} className="mb-6 rounded-md border border-slate-200 bg-white p-4">
@@ -200,7 +203,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
                     if (!named) setName(MAKES.find(([value]) => value === next)?.[2] ?? "result");
                     // Operations on areas start from a kind that looks like areas, not the first kind with a shape.
                     const area = areaKinds(placed)[0];
-                    if (area && (next === "inside" || next === "overlap") && !areaKinds(placed).some((t) => t.id === to)) setTo(area.id);
+                    if (area && (next === "inside" || next === "crosses" || next === "overlap") && !areaKinds(placed).some((t) => t.id === to)) setTo(area.id);
                     if (area && next === "touching" && !areaKinds(placed).some((t) => t.id === from)) setFrom(area.id);
                   }}>
             {MAKES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}

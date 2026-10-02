@@ -3,6 +3,7 @@
     POST /api/v1/domains/{id}/spatial/inside    {name, from_type_id, to_type_id}        -> a link: each place to its area
     POST /api/v1/domains/{id}/spatial/count     {name, from_type_id, to_type_id, max_m} -> a whole-number field on `from`
     POST /api/v1/domains/{id}/spatial/nearest   {name, from_type_id, to_type_id, k}     -> links to the k nearest, rank + metres
+    POST /api/v1/domains/{id}/spatial/crosses   {name, from_type_id, to_type_id}        -> links from each line to the areas it crosses, + metres
     POST /api/v1/domains/{id}/spatial/touching  {name, type_id}                         -> links between areas sharing a border
     POST /api/v1/domains/{id}/spatial/overlap   {name, from_type_id, to_type_id}        -> a parameter name[from, to] in m2
     POST /api/v1/domains/{id}/spatial/elevation {name, type_id}                         -> number fields `name` (m) and `name`_slope (%)
@@ -176,6 +177,25 @@ def make_nearest(domain_id: int, body: NearestBody, db: Session = Depends(get_db
     _links(db, rel, [(a, b, {"rank": rank, "metres": int(round(m))}) for a, b, rank, m in rows])
     db.commit()
     return {"relationship_type_id": rel.id, "links": len(rows), "missing": (missing_o + missing_t)[:200], "source": source}
+
+
+@router.post("/domains/{domain_id}/spatial/crosses", status_code=201)
+def make_crosses(domain_id: int, body: Pair, db: Session = Depends(get_db),
+                 _: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """Each line (a road, a canal) linked to every area it passes through, each link with the
+    `metres` of the line inside it: "no truck on a road through a closed zone" (benchmark, October 2026)."""
+    line_type = _type(db, domain_id, body.from_type_id, "from_type_id")
+    area_type = _type(db, domain_id, body.to_type_id, "to_type_id")
+    lines, missing_l = _shapes(db, line_type)
+    areas, missing_a = _shapes(db, area_type)
+    if not any(s.geometry.geom_type in ("LineString", "MultiLineString") for s in lines):
+        raise HTTPException(422, f"no {line_type.name} is a line; crossing reads lines (roads, canals) against areas")
+    rows = ops.crossing(lines, areas)
+    source = {"kind": "crosses", "from": line_type.name, "to": area_type.name, "links": len(rows), "computed_at": _now()}
+    rel = _relationship(db, domain_id, body.name, line_type, area_type, "many_to_many", source, {"metres": "m"})
+    _links(db, rel, [(a, b, {"metres": m}) for a, b, m in rows])
+    db.commit()
+    return {"relationship_type_id": rel.id, "links": len(rows), "missing": (missing_l + missing_a)[:200], "source": source}
 
 
 @router.post("/domains/{domain_id}/spatial/touching", status_code=201)

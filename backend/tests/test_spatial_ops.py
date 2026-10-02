@@ -121,3 +121,15 @@ def test_a_place_too_far_from_the_lines_is_named_and_the_limit_can_widen():
     assert np.isnan(values[0, 0]) and info["off_targets"][0][0] == 0 and info["off_targets"][0][1] > 500
     values, info = ln.matrix(net, [(0.0, 0.0)], [far], minutes=True, snap_m=1000)
     assert np.isfinite(values[0, 0]) and "off_targets" not in info
+
+
+def test_a_road_is_in_the_area_holding_most_of_it_and_crosses_each_area_it_passes():
+    """Benchmark, October 2026: a road was placed by its middle point and its crossings were unknown."""
+    # From 29.99 to 30.04 at latitude 31.2: 0.01 in the west, 0.04 in the east.
+    road = _s(1, "r1", LineString([(29.99, 31.2), (30.04, 31.2)]))
+    pairs, outside = ops.inside([road], DISTRICTS)
+    assert pairs == [(1, 11)] and outside == []
+    crossed = {area: m for _, area, m in ops.crossing([road], DISTRICTS)}
+    assert set(crossed) == {10, 11}
+    assert math.isclose(crossed[11] / crossed[10], 4, rel_tol=0.01)
+    assert math.isclose(crossed[10], 952, rel_tol=0.02)  # 0.01 degree of longitude at 31.2 N

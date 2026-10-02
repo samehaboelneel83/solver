@@ -1,6 +1,7 @@
 import { useEntities, type EntityType } from "../api/v1";
 import { formatAmount } from "../lib/runViews";
 import { MapView } from "./RunViews";
+import GeoMap, { type GeoGeometry } from "./map/GeoMap";
 import { binsOf } from "./SpreadView";
 
 type Point = [number, number];
@@ -47,6 +48,12 @@ export default function EntityPicture({ type }: { type: EntityType }) {
         return at ? [{ set: type.name, key: e.key, at, chosen: true, value: null }] : [];
       })
     : [];
+  const geometries = shapes.length ? items.map((e) => [e, e.attrs?.[shapes[0].name] as GeoGeometry | undefined] as const) : [];
+  const shaped = geometries.some(([, g]) => g && typeof g === "object" && g.type !== "Point" && Array.isArray(g.coordinates))
+    ? geometries.flatMap(([e, g]) => (g && typeof g === "object" && Array.isArray(g.coordinates)
+      ? [{ id: e.key, geometry: g, colour: "#2563eb", size: g.type === "Point" ? 4 : 2, fill: 0.15, title: e.label ?? e.key, layer: type.name }]
+      : []))
+    : [];
   if (numbers.length === 0 && points.length === 0 && days.length === 0) return null;
   return (
     <section aria-label={`${type.name} at a glance`} className="mt-6 rounded-md border border-slate-200 bg-white p-3">
@@ -63,7 +70,13 @@ export default function EntityPicture({ type }: { type: EntityType }) {
         })}
       </div>
       {days.length > 0 && <CalendarView days={days} by={dated!.name} />}
-      {points.length > 0 && (
+      {points.length > 0 && shaped.length > 0 ? (
+        // Roads, canals and areas drawn as themselves, not as one point each (benchmark, October 2026).
+        <div className="mt-3">
+          <p className="mb-1 text-xs text-slate-600">Where they are ({points.length} placed, by {shapes[0].name})</p>
+          <GeoMap marks={shaped} />
+        </div>
+      ) : points.length > 0 && (
         <div className="mt-3">
           <p className="mb-1 text-xs text-slate-600">Where they are ({points.length} placed, by {shapes[0].name})</p>
           <MapView marks={{ points, lines: [] }} name={(_, key) => items.find((e) => e.key === key)?.label ?? key} />

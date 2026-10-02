@@ -1466,6 +1466,13 @@ def _execute(
                     compiled.objective_term_ids, compiled.objective_terms, strict=True
                 )
             ]
+    if result.assignments and len(compiled.objective_terms) > 0:
+        # What the goal is made of, by term and by record (benchmark, October 2026).
+        from app.solve.breakdown import objective_breakdown
+
+        made_of = objective_breakdown(ir, compiled, result.assignments)
+        if made_of:
+            extra["objective_breakdown"] = made_of
     events.stage("post_processing")
     planners_model = not (solving_model is not compiled or compiled.objective_mode == "lex"
                           or stochastic_record is not None or record_model is not None

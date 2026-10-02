@@ -115,8 +115,23 @@ def to_xlsx(rec: dict[str, Any]) -> bytes:
         summary.append(["Error", rec["error"]])
     for cell in summary["A"]:
         cell.font = Font(bold=True)
+    made_of = params.get("objective_breakdown")
+    if made_of and made_of.get("terms"):
+        # What the goal is made of, by term and by record (benchmark, October 2026).
+        goal = wb.create_sheet("Goal")
+        goal.append(["Goal term", "Weight", "Value", "Share", "Kind", "Record", "Record's part"])
+        for cell in goal[1]:
+            cell.font = Font(bold=True)
+        for t in made_of["terms"]:
+            goal.append([t["id"], t["weight"], t["value"], t["share"]])
+            for r in t.get("records") or []:
+                goal.append([t["id"], None, None, None, r["kind"], r["key"], r["value"]])
+            if t.get("rest"):
+                goal.append([t["id"], None, None, None, None, f"{t['rest']['records']} others", t["rest"]["value"]])
+        if made_of.get("soft_rules"):
+            goal.append(["soft rules broken", None, made_of["soft_rules"]])
     labels = _labels(rec["data"] or {})
-    taken: set[str] = {"Summary", "Rules"}
+    taken: set[str] = {"Summary", "Rules", "Goal"}
     for var, (index, rows) in decision_rows(rec).items():
         title = var[:31]
         while title in taken:
@@ -436,6 +451,15 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
         parts.append(f"<p>Goals, in order: {goals}.</p>")
     elif rec["objective"] is not None:
         parts.append(f"<p>Goal: <b>{float(rec['objective']):g}</b></p>")
+    made_of = params.get("objective_breakdown") or {}
+    shown = [t for t in made_of.get("terms") or [] if t.get("id") not in ("stay_close", "preferences")]
+    if len(shown) > 1 or (shown and len(shown[0].get("records") or []) > 1):
+        rows = "".join(
+            f"<tr><td>{e(t['id'].replace('_', ' '))}</td><td>{t['value']:,.6g}</td><td>{t['share'] * 100:.1f}%</td>"
+            f"<td>{e(', '.join(str((labels.get(r['kind']) or {}).get(r['key'], r['key'])) + ' ' + format(r['value'], ',.6g') for r in (t.get('records') or [])[:5]))}</td></tr>"
+            for t in shown)
+        parts.append("<h2>What the goal is made of</h2><table><tr><th>Goal term</th><th>Value</th><th>Share</th><th>Most of it from</th></tr>"
+                     f"{rows}</table>")
     if rec["error"]:
         parts.append(f"<p class=bad>{e(rec['error'])}</p>")
     if rec["assignments"] is not None or rec["amounts"] is not None:

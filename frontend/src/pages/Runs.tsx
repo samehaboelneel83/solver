@@ -1,4 +1,5 @@
 import EmptyRanges from "../components/EmptyRanges";
+import GoalBreakdown, { type Breakdown } from "../components/GoalBreakdown";
 import LoadFailure from "../components/LoadFailure";
 import { useEditorLevel } from "../model/editorLevel";
 import MissingValues from "../components/MissingValues";
@@ -1114,6 +1115,7 @@ function RunDetail({
     classified_as?: string;
     objective_mode?: string;
     objective_terms?: { id: string; value: number }[];
+    objective_breakdown?: Breakdown;
     structure?: ModelStructure;
     selector?: SelectorRecord;
     connected_start_run?: ConnectedStartRecord;
@@ -1169,6 +1171,7 @@ function RunDetail({
       ) : null}
       {tab !== "guided" && (
       <>
+      <GoalBreakdown breakdown={params.objective_breakdown} />
       <ApprovePlanPanel runId={id} scenarioId={data.scenario_id} status={data.status} />
       <RunOutputs runId={id} status={data.status} ir={solvedVersion.data?.ir as Record<string, unknown> | undefined} />
       {data.reused_from != null && (

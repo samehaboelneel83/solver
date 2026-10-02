@@ -1404,9 +1404,9 @@ export const computeWithin = ({ domainId, ...body }: WithinBody & { domainId: Id
 export const useComputeDistances = () => useV1Mutation(computeDistances);
 
 // The other "From the map" operations (improvement plan, phase 2): each writes a link, a field or a parameter.
-export type SpatialOp = "inside" | "count" | "nearest" | "touching" | "overlap" | "elevation";
+export type SpatialOp = "inside" | "crosses" | "count" | "nearest" | "touching" | "overlap" | "elevation";
 export type SpatialOpBody =
-  | { op: "inside" | "overlap"; name: string; from_type_id: Id; to_type_id: Id }
+  | { op: "inside" | "crosses" | "overlap"; name: string; from_type_id: Id; to_type_id: Id }
   | { op: "count"; name: string; from_type_id: Id; to_type_id: Id; max_m: number }
   | { op: "nearest"; name: string; from_type_id: Id; to_type_id: Id; k: number }
   | { op: "touching" | "elevation"; name: string; type_id: Id };

@@ -39,6 +39,15 @@ describe("input views (queue R17b)", () => {
     expect(screen.getByRole("img", { name: "Map of 1 chosen of 1 places and 0 lines" })).toBeInTheDocument();
   });
 
+  it("draws a road as a line, not as its middle point (benchmark, October 2026)", () => {
+    sites[1] = { ...sites[1], attrs: { size: 30, place: { type: "LineString", coordinates: [[31, 30], [31.1, 30.1]] } } } as never;
+    const type = { id: 20, name: "site", attributes: [{ name: "place", data_type: "geometry", unit: null }] } as unknown as EntityType;
+    const { container } = mount(<EntityPicture type={type} />);
+    expect(screen.getByText(/Where they are \(2 placed/)).toBeInTheDocument();
+    expect(container.querySelector("polyline, path")).not.toBeNull();
+    sites[1] = { id: 6, entity_type_id: 20, key: "s", label: null, attrs: { size: 30 } } as never;
+  });
+
   it("places a shape at the middle of its outer ring", () => {
     expect(placeOf({ type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]] })).toEqual([1, 2]);
     expect(placeOf({ type: "Point", coordinates: [3, 4] })).toEqual([3, 4]);
