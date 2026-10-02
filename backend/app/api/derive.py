@@ -42,13 +42,17 @@ _NAME = r"^[a-z][a-z0-9_]*$"
 
 class DeriveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["date_parts", "categories", "from_link", "formula"]
+    op: Literal["date_parts", "categories", "from_link", "formula", "linked_total"]
     #: The field read -- for `formula`, the name of the field made.
     field: str = Field(pattern=_NAME, max_length=63)
     #: For `from_link`: the number field of the linked kind to copy.
     of: str | None = Field(default=None, pattern=_NAME, max_length=63)
     #: For `formula`: the arithmetic over the record's number fields.
     formula: str | None = Field(default=None, max_length=500)
+    #: For `linked_total`: the kind whose records link here, by which link field, and how to total.
+    from_kind: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    link: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    how: Literal["count", "sum", "mean", "max", "min"] = "count"
 
 
 def _slug(value: Any) -> str:
@@ -70,6 +74,8 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
     fields = _fields(db, entity_type_id)
     if body.op == "formula":
         return _formula_field(db, user, kind, fields, body)
+    if body.op == "linked_total":
+        return _linked_total(db, user, kind, fields, body)
     source = fields.get(body.field)
     if source is None:
         raise HTTPException(422, f"{kind['name']} has no field {body.field!r}")
@@ -201,3 +207,161 @@ def _formula_field(db: Session, user: UserAccount, kind: Any, fields: dict[str, 
                  object_type="entity_type", object_id=kind["id"])
     db.commit()
     return {"made": [body.field], "records": written, "left_empty": len(empty), "empty": empty[:20]}
+
+
+def _linked_total(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[str, Any]], body: DeriveBody) -> dict[str, Any]:
+    """Each record's count -- or the sum, mean, max or min of a number -- over the records of another kind
+    that link to it: calls per district, demand per warehouse (benchmark, October 2026)."""
+    if not body.from_kind or not body.link:
+        raise HTTPException(422, "name the kind whose records link here (from_kind) and its link field (link)")
+    source = db.execute(text("SELECT id FROM entity_type WHERE domain_id = (SELECT domain_id FROM entity_type WHERE id = :t)"
+                             " AND name = :n"), {"t": kind["id"], "n": body.from_kind}).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(422, f"there is no kind {body.from_kind!r}")
+    theirs = _fields(db, source)
+    link = theirs.get(body.link)
+    target = db.execute(text("SELECT to_type_id FROM relationship_type WHERE id = :r"),
+                        {"r": link["references_id"]}).scalar_one() if link and link["references_id"] else None
+    if target is None or kind["id"] not in db.execute(text("SELECT unnest(entity_type_lineage(:t))"), {"t": target}).scalars().all() \
+            and target != kind["id"]:
+        raise HTTPException(422, f"{body.link} is not a link from {body.from_kind} to {kind['name']}")
+    if body.how != "count" and (body.of is None or (theirs.get(body.of) or {}).get("data_type") not in ("number", "integer")):
+        raise HTTPException(422, f"a {body.how} needs a number field of {body.from_kind} (of)")
+    existing = fields.get(body.field)
+    if existing is not None and existing["data_type"] not in ("number", "integer"):
+        raise HTTPException(409, f"{body.field} already exists as a {existing['data_type']} field; choose another name")
+    groups: dict[str, list[float]] = {}
+    for (attrs,) in db.execute(text("SELECT attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"),
+                               {"t": source}):
+        attrs = attrs or {}
+        to = attrs.get(body.link)
+        if to in (None, ""):
+            continue
+        if body.how == "count":
+            groups.setdefault(str(to), []).append(1.0)
+        else:
+            v = attrs.get(body.of)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                groups.setdefault(str(to), []).append(float(v))
+    reduce = {"count": len, "sum": sum, "mean": lambda xs: sum(xs) / len(xs), "max": max, "min": min}[body.how]
+    if existing is None:
+        db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, 'number')"),
+                   {"t": kind["id"], "n": body.field})
+    written = 0
+    for entity_id, key in db.execute(text("SELECT id, key FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
+                                     {"t": kind["id"]}):
+        xs = groups.get(key, [])
+        value = reduce(xs) if xs else (0.0 if body.how in ("count", "sum") else None)
+        if value is None:
+            continue
+        db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object(:f, CAST(:v AS numeric)) WHERE id = :id"),
+                   {"f": body.field, "v": round(float(value), 9), "id": entity_id})
+        written += 1
+    audit.record(db, organization_id=user.organization_id, actor_id=user.id,
+                 api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
+                 object_type="entity_type", object_id=kind["id"])
+    db.commit()
+    return {"made": [body.field], "records": written, "left_empty": 0}
+
+
+# --- data values computed from records and other data values -------------------------------------
+
+
+class DeriveValueBody(BaseModel):
+    """A data value computed once from the records (benchmark, October 2026: suitability by soil and
+    crop, and "not the crop grown last year", were worked out outside the app and uploaded):
+
+    - `lookup`: `name[kind, ...]` = `source[kind's link, ...]` -- a parcel's suitability for each crop,
+      read through the parcel's soil from `suitability[soil, crop]`;
+    - `compare`: `name[kind, other]` = 1 where the kind's `field` is (`=`) or is not (`!=`) the other
+      record -- its key, or its `against` field -- else 0: `rotation_ok[parcel, crop]`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    op: Literal["lookup", "compare"]
+    name: str = Field(pattern=_NAME, max_length=63)
+    kind: str = Field(pattern=_NAME, max_length=63)
+    #: lookup: the kind's link field; compare: the kind's field compared.
+    field: str = Field(pattern=_NAME, max_length=63)
+    #: lookup: the data value read through the link.
+    source: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    #: compare: the other kind, what of it is compared, and how.
+    other: str | None = Field(default=None, pattern=_NAME, max_length=63)
+    against: str = Field(default="key", max_length=63)
+    compare: Literal["=", "!="] = "="
+
+MAX_CELLS = 200_000
+
+
+@router.post("/domains/{domain_id}/derive-value", status_code=201)
+def derive_value(domain_id: int, body: DeriveValueBody, db: Session = Depends(get_db),
+                 user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    def kind_id(name: str) -> int:
+        found = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"), {"d": domain_id, "n": name}).scalar_one_or_none()
+        if found is None:
+            raise HTTPException(422, f"there is no kind {name!r}")
+        return found
+
+    if db.execute(text("SELECT 1 FROM parameter_def WHERE domain_id = :d AND name = :n"), {"d": domain_id, "n": body.name}).first():
+        raise HTTPException(409, f"there is already a data value called {body.name!r}; choose another name")
+    a = kind_id(body.kind)
+    mine = _fields(db, a)
+    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
+                              " ORDER BY sort_order, key"), {"t": a}).all()
+    cells: list[tuple[list[int], float]] = []
+    default = 0.0
+    if body.op == "lookup":
+        link = mine.get(body.field)
+        if not link or link["data_type"] != "reference" or not link["references_id"]:
+            raise HTTPException(422, f"{body.field} is not a link field of {body.kind}")
+        b = db.execute(text("SELECT to_type_id FROM relationship_type WHERE id = :r"), {"r": link["references_id"]}).scalar_one()
+        src = db.execute(text("SELECT id, index_type_ids, default_value FROM parameter_def WHERE domain_id = :d AND name = :n"),
+                         {"d": domain_id, "n": body.source}).mappings().one_or_none()
+        if src is None or not src["index_type_ids"] or src["index_type_ids"][0] != b:
+            raise HTTPException(422, f"{body.source!r} is not a data value whose first index is the kind {body.field} links to")
+        index = [a, *src["index_type_ids"][1:]]
+        default = float(src["default_value"])
+        by_key = {k: i for i, k in db.execute(text("SELECT id, key FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": b})}
+        rows: dict[int, list[tuple[list[int], float]]] = {}
+        for ids, value in db.execute(text("SELECT entity_ids, value FROM parameter_value WHERE parameter_def_id = :p AND value IS NOT NULL"),
+                                     {"p": src["id"]}):
+            rows.setdefault(ids[0], []).append((list(ids[1:]), float(value)))
+        for entity_id, _key, attrs in records:
+            through = by_key.get(str((attrs or {}).get(body.field)))
+            for rest, value in rows.get(through, []):
+                cells.append(([entity_id, *rest], value))
+        how = {"op": "lookup", "through": body.field, "source": body.source}
+    else:
+        if body.field not in mine:
+            raise HTTPException(422, f"{body.kind} has no field {body.field!r}")
+        if not body.other:
+            raise HTTPException(422, "name the other kind (other)")
+        b = kind_id(body.other)
+        others = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
+                                 " ORDER BY sort_order, key"), {"t": b}).all()
+        if body.against != "key" and body.against not in _fields(db, b):
+            raise HTTPException(422, f"{body.other} has no field {body.against!r}")
+        if len(records) * len(others) > MAX_CELLS:
+            raise HTTPException(422, f"{len(records) * len(others):,} cells is more than {MAX_CELLS:,}; narrow the kinds first")
+        index = [a, b]
+        for entity_id, _key, attrs in records:
+            mine_value = (attrs or {}).get(body.field)
+            for other_id, other_key, other_attrs in others:
+                theirs = other_key if body.against == "key" else (other_attrs or {}).get(body.against)
+                same = mine_value is not None and str(mine_value).strip().casefold() == str(theirs).strip().casefold()
+                cells.append(([entity_id, other_id], 1.0 if same == (body.compare == "=") else 0.0))
+        how = {"op": "compare", "field": body.field, "other": body.other, "against": body.against, "compare": body.compare}
+    if len(cells) > MAX_CELLS:
+        raise HTTPException(422, f"{len(cells):,} cells is more than {MAX_CELLS:,}")
+    parameter_id = db.execute(text(
+        "INSERT INTO parameter_def (domain_id, name, index_type_ids, default_value, source)"
+        " VALUES (:d, :n, :i, :dv, CAST(:s AS jsonb)) RETURNING id"),
+        {"d": domain_id, "n": body.name, "i": index, "dv": default, "s": json.dumps({"kind": "derived", **how})}).scalar_one()
+    for ids, value in cells:
+        db.execute(text("INSERT INTO parameter_value (parameter_def_id, entity_ids, value) VALUES (:p, :e, :v)"),
+                   {"p": parameter_id, "e": ids, "v": value})
+    audit.record(db, organization_id=user.organization_id, actor_id=user.id,
+                 api_key_id=getattr(user, "api_key_id", None), action="parameter.derive",
+                 object_type="parameter", object_id=parameter_id)
+    db.commit()
+    return {"parameter_id": parameter_id, "name": body.name, "cells": len(cells), "index": index}

@@ -63,3 +63,85 @@ def test_a_formula_over_a_record_s_numbers_becomes_a_field(tenants, db):  # noqa
     assert items["a"]["vc_ratio"] == 0.75 and "vc_ratio" not in items["b"]
     for bad in ("volume / label_text", "__import__('os')", "volume ** 2", "volume /"):
         assert http.post(path, json={"op": "formula", "field": "x", "formula": bad}, headers=h).status_code == 422, bad
+
+
+def test_totals_of_linked_records_become_a_field(tenants, db):  # noqa: F811
+    """Benchmark, October 2026: calls per district were counted outside the app."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        got = http.post(path, json=body, headers=h)
+        assert got.status_code in (200, 201), got.text
+        return got.json()
+
+    district = post("/api/v1/entity-types", {"domain_id": domain, "name": "district", "role": "location"})
+    call = post("/api/v1/entity-types", {"domain_id": domain, "name": "call", "role": "other"})
+    post(f"/api/v1/entity-types/{call['id']}/attributes", {"name": "minutes", "data_type": "number"})
+    post(f"/api/v1/entity-types/{call['id']}/attributes", {"name": "district", "data_type": "reference", "target_type_id": district["id"]})
+    for key in ("north", "south", "east"):
+        post("/api/v1/entities", {"entity_type_id": district["id"], "key": key, "attrs": {}})
+    for key, where, minutes in (("c1", "north", 10), ("c2", "north", 30), ("c3", "south", 5), ("c4", None, 99)):
+        post("/api/v1/entities", {"entity_type_id": call["id"], "key": key, "attrs": {"minutes": minutes, **({"district": where} if where else {})}})
+
+    path = f"/api/v1/entity-types/{district['id']}/derive"
+    assert post(path, {"op": "linked_total", "field": "calls", "from_kind": "call", "link": "district"})["records"] == 3
+    post(path, {"op": "linked_total", "field": "minutes_total", "from_kind": "call", "link": "district", "how": "sum", "of": "minutes"})
+    post(path, {"op": "linked_total", "field": "minutes_mean", "from_kind": "call", "link": "district", "how": "mean", "of": "minutes"})
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": district["id"]}, headers=h).json()["items"]}
+    assert (items["north"]["calls"], items["south"]["calls"], items["east"]["calls"]) == (2, 1, 0)
+    assert items["north"]["minutes_total"] == 40 and items["east"]["minutes_total"] == 0
+    assert items["north"]["minutes_mean"] == 20 and "minutes_mean" not in items["east"]  # no mean of nothing
+    for bad in ({"from_kind": "call", "link": "minutes"}, {"from_kind": "nope", "link": "district"},
+                {"from_kind": "call", "link": "district", "how": "sum"}):
+        got = http.post(path, json={"op": "linked_total", "field": "x", **bad}, headers=h)
+        assert got.status_code == 422, (bad, got.text)
+
+
+def test_data_values_computed_by_lookup_and_by_comparison(tenants, db):  # noqa: F811
+    """Benchmark, October 2026: suitability by soil and crop, and "not last year's crop", were
+    worked out in a spreadsheet and uploaded."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        got = http.post(path, json=body, headers=h)
+        assert got.status_code in (200, 201), got.text
+        return got.json()
+
+    soil = post("/api/v1/entity-types", {"domain_id": domain, "name": "soil", "role": "other"})
+    crop = post("/api/v1/entity-types", {"domain_id": domain, "name": "crop", "role": "other"})
+    parcel = post("/api/v1/entity-types", {"domain_id": domain, "name": "parcel", "role": "location"})
+    post(f"/api/v1/entity-types/{parcel['id']}/attributes", {"name": "soil", "data_type": "reference", "target_type_id": soil["id"]})
+    post(f"/api/v1/entity-types/{parcel['id']}/attributes", {"name": "prev_crop", "data_type": "text"})
+    ids = {}
+    for kind, key in ((soil, "clay"), (soil, "sand"), (crop, "wheat"), (crop, "maize")):
+        ids[key] = post("/api/v1/entities", {"entity_type_id": kind["id"], "key": key, "attrs": {}})["id"]
+    for key, attrs in (("p1", {"soil": "clay", "prev_crop": "Wheat"}), ("p2", {"soil": "sand", "prev_crop": "maize"}), ("p3", {})):
+        ids[key] = post("/api/v1/entities", {"entity_type_id": parcel["id"], "key": key, "attrs": attrs})["id"]
+    suit = post("/api/v1/parameters", {"domain_id": domain, "name": "suitability", "index_type_ids": [soil["id"], crop["id"]], "default_value": 0})
+    cells = [{"entity_ids": [ids[s], ids[c]], "value": v} for s, c, v in
+             (("clay", "wheat", 0.9), ("clay", "maize", 0.4), ("sand", "wheat", 0.3), ("sand", "maize", 0.8))]
+    assert http.put(f"/api/v1/parameters/{suit['id']}/values", json={"cells": cells}, headers=h).status_code == 200
+
+    path = f"/api/v1/domains/{domain}/derive-value"
+    made = post(path, {"op": "lookup", "name": "parcel_suit", "kind": "parcel", "field": "soil", "source": "suitability"})
+    assert made["cells"] == 4 and made["index"] == [parcel["id"], crop["id"]]
+    grid = http.get(f"/api/v1/parameters/{made['parameter_id']}/values", headers=h).json()
+    values = {tuple(c["entity_ids"]): c["value"] for c in grid["cells"]}
+    assert values[(ids["p1"], ids["wheat"])] == 0.9 and values[(ids["p2"], ids["maize"])] == 0.8
+    assert (ids["p3"], ids["wheat"]) not in values  # no soil: the default, nothing made up
+
+    rot = post(path, {"op": "compare", "name": "rotation_ok", "kind": "parcel", "field": "prev_crop", "other": "crop", "compare": "!="})
+    assert rot["cells"] == 6
+    grid = http.get(f"/api/v1/parameters/{rot['parameter_id']}/values", headers=h).json()
+    values = {tuple(c["entity_ids"]): c["value"] for c in grid["cells"]}
+    assert values[(ids["p1"], ids["wheat"])] == 0 and values[(ids["p1"], ids["maize"])] == 1
+    assert values[(ids["p3"], ids["wheat"])] == 1
+
+    assert http.post(path, json={"op": "compare", "name": "rotation_ok", "kind": "parcel", "field": "prev_crop", "other": "crop"},
+                     headers=h).status_code == 409
+    for bad in ({"op": "lookup", "name": "x1", "kind": "parcel", "field": "prev_crop", "source": "suitability"},
+                {"op": "lookup", "name": "x2", "kind": "crop", "field": "soil", "source": "suitability"},
+                {"op": "compare", "name": "x3", "kind": "parcel", "field": "prev_crop", "other": "nope"}):
+        assert http.post(path, json=bad, headers=h).status_code == 422, bad
+    assert http.post(path, json={"op": "compare", "name": "x4", "kind": "parcel", "field": "prev_crop", "other": "crop"},
+                     headers=tenants["b"]).status_code in (403, 404, 422)
