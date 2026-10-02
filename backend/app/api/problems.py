@@ -250,6 +250,17 @@ class ParamCell(BaseModel):
     value: float
 
 
+class AttrScale(BaseModel):
+    """A field of every record of a set -- or of those a `where` keeps -- times a factor: demand +30%
+    (benchmark, October 2026: a surge could only be typed one record at a time)."""
+
+    model_config = ConfigDict(extra="forbid")
+    set: StrictStr
+    attr: StrictStr
+    factor: Annotated[float, Field(ge=0, le=1000)]
+    where: list[dict[str, Any]] | None = None
+
+
 class AttrCell(BaseModel):
     """One record's field changed in a what-if (improvement plan 3.3)."""
 
@@ -279,6 +290,7 @@ class ScenarioPatch(BaseModel):
     set_param: list[ParamCell] = None  # type: ignore[assignment]
     scale_param: dict[StrictStr, Annotated[float, Field(ge=0, le=1000)]] = None  # type: ignore[assignment]
     set_attr: list[AttrCell] = None  # type: ignore[assignment]
+    scale_attr: list[AttrScale] = None  # type: ignore[assignment]
     # A rule's limit -- the number on one side of it -- changed (user trial: "what if the budget were
     # 80,000?"), without publishing a new version.
     set_limit: dict[ConstraintId, Annotated[float, Field(allow_inf_nan=False)]] = None  # type: ignore[assignment]
@@ -514,6 +526,14 @@ def _check_data_changes(model_version_id: int, ir: dict[str, Any], patch: "Scena
         if cell.set not in sets:
             raise field_error(["patch", "set_attr", position, "set"],
                               f"whatif_unknown: model version {model_version_id} has no set {cell.set!r}", cell.set)
+    for position, scale in enumerate(patch.scale_attr or []):
+        if scale.set not in sets:
+            raise field_error(["patch", "scale_attr", position, "set"],
+                              f"whatif_unknown: model version {model_version_id} has no set {scale.set!r}", scale.set)
+        for k, f in enumerate(scale.where or []):
+            if not (isinstance(f.get("attr"), str) and isinstance(f.get("op"), str) and "value" in f):
+                raise field_error(["patch", "scale_attr", position, "where", k],
+                                  "a condition is {attr, op, value}, as a rule's where", f)
 
 
 def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "ScenarioPatch") -> None:
@@ -521,7 +541,7 @@ def _check_locks(db: Session, problem_id: int, model_version_id: int, patch: "Sc
     names are this version's, a cell has as many keys as its decision has sets, and an earlier run
     is an answered run of this problem. The rest -- a value within today's bounds, an amount that
     run kept, the attribute a horizon compares -- is refused when the run is compiled."""
-    if patch.remove or patch.set_param or patch.scale_param or patch.set_attr:
+    if patch.remove or patch.set_param or patch.scale_param or patch.set_attr or patch.scale_attr:
         _check_data_changes(model_version_id, db.execute(select(_version_columns.ir).where(
             _version_columns.id == model_version_id)).scalar_one(), patch)
     if not patch.lock and not patch.stay_close:

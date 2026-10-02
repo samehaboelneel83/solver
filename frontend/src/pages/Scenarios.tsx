@@ -558,6 +558,7 @@ export function dataOf(patch: ScenarioPatch): ScenarioPatch {
   if (patch.scale_param && Object.keys(patch.scale_param).length) out.scale_param = patch.scale_param;
   if (patch.set_param?.length) out.set_param = patch.set_param;
   if (patch.set_attr?.length) out.set_attr = patch.set_attr;
+  if (patch.scale_attr?.length) out.scale_attr = patch.scale_attr;
   return out;
 }
 
@@ -585,6 +586,9 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
   const [cellKeys, setCellKeys] = useState("");
   const [cellValue, setCellValue] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [scaleSet, setScaleSet] = useState("");
+  const [scaleField, setScaleField] = useState("");
+  const [scaleBy, setScaleBy] = useState("1.3");
   if (!sets.length) return null;
   const said = describeData(value);
   const keysOf = (text: string) => text.split(",").map((k) => k.trim()).filter(Boolean);
@@ -676,6 +680,38 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
           </>
         )}
       </div>
+      <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
+        {/* Benchmark, October 2026: "demand +30% everywhere" was one record at a time. */}
+        <label>Scale
+          <select aria-label="Scale a field of" className={`${input} ml-1`} value={scaleSet}
+            onChange={(e) => { setScaleSet(e.target.value); setScaleField(""); }}>
+            <option value="">kind…</option>
+            {sets.filter((s) => kindOf(s)).map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        {scaleSet && (
+          <>
+            <label>’s
+              <select aria-label="Field to scale" className={`${input} ml-1`} value={scaleField} onChange={(e) => setScaleField(e.target.value)}>
+                <option value="">field…</option>
+                {(kindOf(scaleSet)?.attributes ?? []).filter((a) => a.data_type === "integer" || a.data_type === "number")
+                  .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+              </select>
+            </label>
+            <label>for every record, by ×
+              <input aria-label="Field scale factor" inputMode="decimal" className={`${input} ml-1 w-20`} value={scaleBy} onChange={(e) => setScaleBy(e.target.value)} />
+            </label>
+            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+              onClick={() => {
+                const f = Number(scaleBy);
+                if (!scaleField || !(f >= 0)) return setProblem("Choose a field and a factor of 0 or more (1.3 for +30%).");
+                setProblem(null);
+                onChange({ ...value, scale_attr: [...(value.scale_attr ?? []).filter((c) => !(c.set === scaleSet && c.attr === scaleField)),
+                  { set: scaleSet, attr: scaleField, factor: f }] });
+              }}>Add</button>
+          </>
+        )}
+      </div>
       {numbers.length > 0 && (
         <>
           <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
@@ -735,6 +771,7 @@ export function describeData(patch: ScenarioPatch): string[] {
   for (const [param, f] of Object.entries(patch.scale_param ?? {})) said.push(`${param} × ${f}`);
   for (const c of patch.set_param ?? []) said.push(`${c.param}[${c.index.join(", ")}] = ${c.value}`);
   for (const c of patch.set_attr ?? []) said.push(`${c.set} ${c.key}: ${c.attr} = ${String(c.value)}`);
+  for (const c of patch.scale_attr ?? []) said.push(`${c.attr} × ${c.factor} for every ${c.set}`);
   return said;
 }
 

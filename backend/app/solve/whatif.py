@@ -12,13 +12,15 @@ reproducible and two scenarios on the same data can be compared:
 - `set_param`: [{param, index, value}] -- one value changed (or given);
 - `scale_param`: {param: factor} -- every stored value of a parameter, and
   its default, times a factor;
-- `set_attr`: [{set, key, attr, value}] -- a record's field changed.
+- `set_attr`: [{set, key, attr, value}] -- a record's field changed;
+- `scale_attr`: [{set, attr, factor, where?}] -- a field of every record of a set, or of those the
+  conditions keep, times a factor (demand +30%).
 """
 from __future__ import annotations
 
 from typing import Any
 
-DATA_KEYS = ("remove", "set_param", "scale_param", "set_attr")
+DATA_KEYS = ("remove", "set_param", "scale_param", "set_attr", "scale_attr")
 
 
 def has_data_changes(patch: dict[str, Any] | None) -> bool:
@@ -65,6 +67,15 @@ def apply(data: dict[str, Any], ir: dict[str, Any], patch: dict[str, Any] | None
             if str(row.get("id")) == str(change["key"]):
                 row[change["attr"]] = change["value"]
 
+    if patch.get("scale_attr"):
+        from app.solve.compile import _passes
+
+        for change in patch["scale_attr"]:
+            for row in sets.get(change["set"], []):
+                value = row.get(change["attr"])
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and _passes(row, change.get("where") or []):
+                    row[change["attr"]] = value * change["factor"]
+
     for param, factor in (patch.get("scale_param") or {}).items():
         for row in parameters.get(param, []):
             if isinstance(row.get("value"), (int, float)):
@@ -91,4 +102,7 @@ def describe(patch: dict[str, Any] | None) -> list[str]:
         said.append(f"{c['param']}[{', '.join(map(str, c['index']))}] = {c['value']:g}")
     for c in patch.get("set_attr") or []:
         said.append(f"{c['set']} {c['key']}: {c['attr']} = {c['value']}")
+    for c in patch.get("scale_attr") or []:
+        kept = " where " + " and ".join(f"{f['attr']} {f['op']} {f['value']}" for f in c["where"]) if c.get("where") else ""
+        said.append(f"{c['attr']} × {c['factor']:g} for every {c['set']}{kept}")
     return said

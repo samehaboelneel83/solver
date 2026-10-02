@@ -203,6 +203,19 @@ def test_a_what_if_scales_and_sets_values_on_a_copy():
     assert whatif.describe({"remove": {"depot": ["D2"]}, "scale_param": {"rain": 1.3}}) == ["without depot D2", "rain × 1.3"]
 
 
+def test_a_what_if_scales_a_field_of_every_record_or_of_those_kept():
+    """Benchmark, October 2026: "demand +30%" could only be typed one record at a time."""
+    data = {"sets": {"zone": [{"id": "Z1", "pop": 100, "urban": True}, {"id": "Z2", "pop": 50, "urban": False}, {"id": "Z3"}]},
+            "parameters": {}, "relationships": {}}
+    every = whatif.apply(data, IR, {"scale_attr": [{"set": "zone", "attr": "pop", "factor": 1.3}]})
+    assert [r.get("pop") for r in every["sets"]["zone"]] == [130.0, 65.0, None]
+    urban = whatif.apply(data, IR, {"scale_attr": [{"set": "zone", "attr": "pop", "factor": 2,
+                                                    "where": [{"attr": "urban", "op": "=", "value": True}]}]})
+    assert [r.get("pop") for r in urban["sets"]["zone"]] == [200, 50, None]
+    assert data["sets"]["zone"][0]["pop"] == 100  # the frozen data is untouched
+    assert whatif.describe({"scale_attr": [{"set": "zone", "attr": "pop", "factor": 1.3}]}) == ["pop × 1.3 for every zone"]
+
+
 def test_the_api_refuses_a_what_if_on_a_set_the_model_does_not_have(db, placed, client, auth_headers):  # noqa: F811
     got = client.post("/api/v1/scenarios", json={"problem_id": placed["problem"], "model_version_id": placed["version"],
                                                   "name": "bad", "patch": {"remove": {"truck": ["T1"]}}}, headers=auth_headers)

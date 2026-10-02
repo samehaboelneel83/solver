@@ -283,3 +283,12 @@ describe("rule limits", () => {
     expect(describePatch({ set_limit: { budget: 80000 } })).toBe("budget limit 80,000");
   });
 });
+
+describe("a field scaled for every record (benchmark, October 2026)", () => {
+  it("is kept with the scenario's data changes and said in words", async () => {
+    const { dataOf, describeData } = await import("./Scenarios");
+    const patch = { disable: ["c_cap"], scale_attr: [{ set: "zone", attr: "population", factor: 1.3 }] };
+    expect(dataOf(patch)).toEqual({ scale_attr: [{ set: "zone", attr: "population", factor: 1.3 }] });
+    expect(describeData(patch)).toEqual(["population × 1.3 for every zone"]);
+  });
+});
