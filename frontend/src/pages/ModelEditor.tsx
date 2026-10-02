@@ -20,6 +20,7 @@ import {
   useCreateParameter,
   useEntityTypes,
   useParameters,
+  usePredictors,
   useRelationshipTypes,
   useTemplates,
   useVersion,
@@ -28,6 +29,7 @@ import {
   type Id,
 } from "../api/v1";
 import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
+import { declareCalled, offered } from "../model/predictors";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
 import RouteEditor from "../model/RouteEditor";
@@ -215,6 +217,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const [scratch, setScratch] = useState(false);
   const entityTypes = useEntityTypes(domainId, { limit: 500, offset: 0 });
   const relationshipTypes = useRelationshipTypes(domainId, { limit: 500, offset: 0 });
+  const predictors = usePredictors(domainId);
   const parameters = useParameters(domainId, { limit: 500, offset: 0 });
   const createVersion = useCreateVersion();
   const queryClient = useQueryClient();
@@ -381,12 +384,16 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           attributes: (rel.attributes ?? []).map((a) => ({ name: a.name, data_type: a.data_type })),
         }))
         .filter((rel) => sets.includes(rel.from) && sets.includes(rel.to)),
-      // Declared in the IR itself; the form draft does not carry them.
-      predictors: ((workingIr as Record<string, unknown> | null)?.predictors ?? {}) as ModelContext["predictors"],
+      // The workspace's trained predictors, and any the document declares: a formula may call
+      // any of them, and the ones it calls are declared on save (`model/predictors`).
+      predictors: offered((workingIr as Record<string, unknown> | null)?.predictors as ModelContext["predictors"],
+        predictors.data?.items ?? []),
     };
-  }, [ir, draft, workingIr, entityTypes.data, relationshipTypes.data]);
+  }, [ir, draft, workingIr, entityTypes.data, relationshipTypes.data, predictors.data]);
 
-  const nextIr = useMemo(() => (workingIr && draft ? publishable(withFormDraft(workingIr, draft)) : null), [workingIr, draft]);
+  const nextIr = useMemo(() => (workingIr && draft
+    ? publishable(declareCalled(withFormDraft(workingIr, draft), predictors.data?.items ?? [])) : null),
+  [workingIr, draft, predictors.data]);
   // Why Publish would be refused: the contract's shape rules at once, the
   // domain's own from the server's dry run a moment later (`useDraftRefusal`).
   const refusal = useDraftRefusal(problemId, canEdit ? (nextIr as Record<string, unknown> | null) : null);
@@ -753,6 +760,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         view={equationView}
         onView={setEquationView}
         simple={simple}
+        predictors={(predictors.data?.items ?? []).map((p) => ({ name: p.name, inputs: p.inputs, r2: p.metrics?.r2 ?? null }))}
         onlyGroup={stepByStep && (step === "sets" || step === "data" || step === "decisions") ? step : undefined}
         opening={opening && (opening.kind === "variable" || opening.kind === "parameter") ? { name: opening.id, seq: opening.seq } : null}
         {...(canShape ? {

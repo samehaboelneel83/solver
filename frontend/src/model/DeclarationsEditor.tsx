@@ -35,6 +35,8 @@ import { useCardView, ViewToggle, type EquationView } from "./ViewToggle";
  */
 
 export type DeclarationsEditorProps = {
+  /** The workspace's trained predictors: a rule or goal calls one as `predict name(inputs...)`. */
+  predictors?: { name: string; inputs: string[]; r2?: number | null }[];
   sets: string[];
   parameters: Record<string, ParameterSpec>;
   variables: Record<string, VariableSpec>;
@@ -87,6 +89,7 @@ export default function DeclarationsEditor({
   simple = false,
   onlyGroup,
   opening = null,
+  predictors = [],
 }: DeclarationsEditorProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [ownView, setOwnView] = useState<EquationView>("equation");
@@ -352,6 +355,24 @@ export default function DeclarationsEditor({
         </Group>
 
         <Group hidden={onlyGroup !== undefined && onlyGroup !== "data"} title={simple ? "Data" : "Parameters"} hint="Numbers the domain already holds, read by the rules.">
+          {predictors.length > 0 && (
+            // Benchmark, October 2026: a trained model could not be used -- nothing here named it.
+            <section aria-label="Trained predictors" className="mb-2 rounded border border-violet-200 bg-violet-50 p-2 text-sm">
+              <p className="font-medium text-violet-900">Trained predictors a rule or goal can use</p>
+              <ul className="mt-1 space-y-0.5">
+                {predictors.map((p) => (
+                  <li key={p.name}>
+                    <code className="font-mono text-xs">predict {p.name}({p.inputs.join(", ")})</code>
+                    {typeof p.r2 === "number" && <span className="ml-1 text-xs text-slate-600">· R² {p.r2.toFixed(2)}</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-slate-600">
+                Write it in a rule or goal with its inputs in this order, e.g. from fields of the records a rule runs over;
+                the model declares it when it is published.
+              </p>
+            </section>
+          )}
           {Object.entries(parameters).map(([name, spec]) => (
             <DeclarationCard key={name} kind="parameter" name={name} openSignal={opening?.name === name ? opening.seq : undefined} heading={`${name}[${spec.index.join(", ")}]`} view={view} simple={simple}
               summary={declarationSentence("parameter", name, spec, [], units[name])}
