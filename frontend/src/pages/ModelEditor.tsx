@@ -240,7 +240,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const simple = level === "simple";
   const equationView = viewAt(storedView, simple);
   // Step by step at Simple (ModelSteps.tsx): which step is on screen, or all of them.
-  const [stepsOn, setStepsOn] = useStepByStep();
+  const [simpleSteps, setSimpleSteps] = useStepByStep();
+  // Expert may go step by step too (user trial: the whole editor on one page is a long scroll);
+  // off unless asked, so the page an expert knows stays as it was.
+  const [expertSteps, setExpertSteps] = useState(false);
   const [step, setStep] = useState<Step>("sets");
   // “Go to it” from the list of things to fix: which card to open; `seq` changes each time.
   const [opening, setOpening] = useState<{ kind: "rule" | "goal" | "variable" | "parameter"; id: string; seq: number } | null>(null);
@@ -528,7 +531,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     clearDraft(Number(problemId));
   }
 
-  const stepByStep = simple && stepsOn;
+  const stepsOn = simple ? simpleSteps : expertSteps;
+  const setStepsOn = simple ? setSimpleSteps : setExpertSteps;
+  const stepByStep = stepsOn;
   const currentStep: Step = view === "review" ? "check" : step;
   function goToStep(next: Step) {
     if (next === "check") {
@@ -671,7 +676,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       {stepByStep && (
         <Stepper current={currentStep} status={stepStatus} onStep={goToStep} onAll={() => setStepsOn(false)} />
       )}
-      {simple && !stepsOn && (
+      {!stepsOn && view !== "graph" && view !== "blocks" && view !== "ir" && (
         <p className="mb-3 text-xs">
           <button type="button" className="text-blue-700 underline" onClick={() => setStepsOn(true)}>Go step by step</button>
         </p>
@@ -707,12 +712,12 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => setGraphFocus(null)}>Show all model editors</button>
       </div>}
       <fieldset disabled={!canEdit} aria-label={canEdit ? undefined : "The model, read only"} className="m-0 min-w-0 border-0 p-0">
-      {canEdit && !simple && <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
+      {canEdit && !simple && !stepByStep && <GuidedCreation draft={draft} availableSets={(entityTypes.data?.items ?? []).map(type => type.name)}
         onApply={command => setDraft(current => current && applyGuidedCommand(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         onPattern={command => setDraft(current => current && applyPattern(current, command, (entityTypes.data?.items ?? []).map(type => type.name)))}
         relationships={context?.relationships ?? []}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))} />}
-      {canEdit && !graphFocus && (
+      {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
         <CoverageRecipeForm
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}

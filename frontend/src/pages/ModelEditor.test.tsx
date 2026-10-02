@@ -1551,3 +1551,21 @@ describe("step by step, at the Simple level", () => {
     expect(await screen.findByDisplayValue("c_bad")).toBeInTheDocument();
   });
 });
+
+describe("step by step, at the Expert level", () => {
+  beforeEach(() => {
+    localStorage.setItem("solver_editor_level", "expert");
+    localStorage.removeItem("solver_editor_steps");
+  });
+
+  it("stays on one page until asked, then shows one step at a time", async () => {
+    renderPage();
+    expect(await screen.findByText("What must be true")).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Steps" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Go step by step" }));
+    expect(screen.getByRole("navigation", { name: "Steps" })).toBeInTheDocument();
+    expect(screen.getByText("What must be true")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Show all steps on one page" }));
+    expect(screen.getByText("What must be true")).toBeVisible();
+  });
+});
