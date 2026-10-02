@@ -325,6 +325,31 @@ def test_solved_at_once_is_the_monolithic_answer(seed, backend):
     assert record["blocks"] == len(blocks(compiled)) and record["groups"] <= MAX_PARALLEL
 
 
+def test_a_piece_the_solver_leaves_empty_keeps_a_start_that_holds_and_only_then():
+    """Benchmark, October 2026: a routing start covered the route's block, the solver ran out of time
+    on it, and the run ended "unknown" with no plan."""
+    from app.solve.result import Solution
+
+    ir, data = _knapsacks()
+    compiled = compile_model(ir, data)
+    parts = blocks(compiled)
+    a_keys = {key for key in compiled.variables if key[1] and key[1][0].startswith("a")}
+
+    def gives_up_on_a(piece, workers, hint):
+        if set(piece.variables) & a_keys:
+            return Solution("unknown", False, None, {}, 1.0, "cp-sat"), None
+        return solve_compiled(by_name("cp-sat"), piece, time_limit=10, seed=1, workers=workers)
+
+    start = {("take", ("a1",)): 1, ("take", ("a2",)): 0, ("take", ("a3",)): 1}  # 5 + 3 fits 8: worth 15
+    merged, _, record = solve_blocks(compiled, parts, gives_up_on_a, workers=2, optimal_gap=1e-6, hint=start)
+    assert merged.status == "feasible" and round(float(merged.objective)) == 21
+    assert record["started_from"] and "optimal" not in record["statuses"][record["started_from"][0]]
+
+    too_heavy = {**start, ("take", ("a2",)): 1}  # 12 does not fit 8: not an answer
+    merged, _, record = solve_blocks(compiled, parts, gives_up_on_a, workers=2, optimal_gap=1e-6, hint=too_heavy)
+    assert merged.status == "unknown" and "started_from" not in record
+
+
 # -- through a run ---------------------------------------------------------------------------------------
 
 from sqlalchemy import text  # noqa: E402

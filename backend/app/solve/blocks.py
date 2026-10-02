@@ -256,6 +256,9 @@ def solve(compiled: Compiled, parts: list[Block], run_one, *, workers: int, opti
     `solve_compiled` does; each group gets its share of the threads."""
     from concurrent.futures import ThreadPoolExecutor
 
+    from app.solve.evolve import holds
+    from app.solve.partition import as_answer
+
     groups = grouped(parts, MAX_PARALLEL)
     pieces = split(compiled, groups)
     share = max(1, workers // len(pieces))
@@ -263,13 +266,23 @@ def solve(compiled: Compiled, parts: list[Block], run_one, *, workers: int, opti
     with ThreadPoolExecutor(max_workers=len(pieces)) as pool:
         outcomes = list(pool.map(lambda args: run_one(args[0], share, args[1]), zip(pieces, hints)))
     results = [result for result, _ in outcomes]
-    reason = next((r for _, r in outcomes if r is not None), None)
+    # A piece the solver ended with nothing on keeps its start when the start sets every decision of
+    # it and holds there -- feasible, no claim -- as a whole solve does (benchmark, October 2026: a
+    # routing start of 119 stops, then "unknown" and no plan, because the route was one block of many).
+    kept = []
+    for i, (piece, result, piece_hint) in enumerate(zip(pieces, results, hints)):
+        if (not result.assignments and piece_hint and all(key in piece_hint for key in piece.variables)
+                and holds(piece, piece_hint)):
+            results[i] = as_answer(piece, piece_hint, result.solver, result.wall_seconds)
+            kept.append(i)
+    reason = next((r for (_, r), result in zip(outcomes, results) if r is not None and not result.assignments), None)
     record = {
         "blocks": len(parts),
         "groups": len(pieces),
         "sizes": [len(p.variables) for p in pieces],
         "statuses": [r.status for r in results],
         "seconds": [round(r.wall_seconds, 3) for r in results],
+        **({"started_from": kept} if kept else {}),
     }
     return merge(pieces, results, optimal_gap=optimal_gap), reason, record
 

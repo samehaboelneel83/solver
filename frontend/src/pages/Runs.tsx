@@ -490,11 +490,13 @@ export function unexpressedRules(ir: Record<string, unknown> | undefined): strin
       (rule) =>
         rule &&
         (rule.left === undefined || rule.right === undefined) &&
-        // A scheduling or connected rule has no left or right: it is
-        // expressed differently, and solves.
+        // A scheduling, connected or route rule has no left or right: it is
+        // expressed differently, and solves (benchmark, October 2026: a route
+        // rule was refused as "published before rules could be written as arithmetic").
         rule.no_overlap === undefined &&
         rule.cumulative === undefined &&
-        rule.connected === undefined
+        rule.connected === undefined &&
+        rule.route === undefined
     )
     .map((rule) => String(rule.id ?? "?"));
 }

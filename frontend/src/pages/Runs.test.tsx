@@ -293,6 +293,10 @@ describe("unexpressedRules", () => {
     ).toEqual(["c_old"]);
     expect(unexpressedRules({ constraints: [] })).toEqual([]);
     expect(unexpressedRules(undefined)).toEqual([]);
+    // Rules of another shape solve: routes, connected regions, schedules.
+    expect(unexpressedRules({ constraints: [
+      { id: "routes", route: { visit: { var: "x" } } }, { id: "region", connected: {} }, { id: "crew", no_overlap: {} },
+    ] })).toEqual([]);
   });
 });
 
