@@ -81,20 +81,20 @@ function TypeList({ domainId }: { domainId: Id }) {
   const total = data?.total ?? 0;
   const search = (q || total > TYPE_PAGE) && (
     <div className="mb-3">
-      <SearchBox label="entity types" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
+      <SearchBox label="record types" initial={q} onSearch={(text) => { setQ(text); setOffset(0); }} />
     </div>
   );
 
-  if (fetchStatus === "paused" && !data) return <OfflineNotice subject="The entity type list" />;
+  if (fetchStatus === "paused" && !data) return <OfflineNotice subject="The record type list" />;
   if (isLoading && !data) return <Skeleton rows={3} cols={3} />;
-  if (error && !data) return <LoadFailure subject="The entity type list" error={error} retry={() => void refetch()} />;
+  if (error && !data) return <LoadFailure subject="The record type list" error={error} retry={() => void refetch()} />;
 
   const types = data?.items ?? [];
-  if (types.length === 0 && q) return <>{search}<NoMatches label="entity types" q={q} /></>;
+  if (types.length === 0 && q) return <>{search}<NoMatches label="record types" q={q} /></>;
   if (types.length === 0) {
     return (
       <p className="mb-6 text-sm text-slate-600">
-        No entity types in this domain yet. Create the first one below.
+        No record types in this domain yet. Create the first one below.
       </p>
     );
   }
@@ -151,7 +151,7 @@ function TypeList({ domainId }: { domainId: Id }) {
         </tbody>
       </table>
     </div>
-    <Pager label="Entity type" offset={offset} size={TYPE_PAGE} total={total} onOffset={setOffset} />
+    <Pager label="Record type" offset={offset} size={TYPE_PAGE} total={total} onOffset={setOffset} />
     </>
   );
 }
@@ -289,7 +289,7 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
         ...(isAbstract ? { is_abstract: true } : {}),
         ...(inheritedFrom !== null ? { inherited_from: inheritedFrom } : {}),
       });
-      toast.success(`Entity type "${created.name}" created`);
+      toast.success(`Record type "${created.name}" created`);
       navigate(`/entity-types/${created.id}`);
     } catch (err) {
       const result = serverFieldErrors(err, TYPE_FIELDS, "entity type");
@@ -301,9 +301,9 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
   return (
     <section aria-labelledby="new-entity-type-heading" className="rounded-md border border-slate-200 bg-white p-4">
       <h2 id="new-entity-type-heading" className="mb-3 text-base font-semibold text-slate-900">
-        New entity type
+        New record type
       </h2>
-      <form aria-label="New entity type" onSubmit={handleSubmit} noValidate className="space-y-4">
+      <form aria-label="New record type" onSubmit={handleSubmit} noValidate className="space-y-4">
         <ErrorSummary errors={errors} order={TYPE_FIELDS} summaryRef={summaryRef} />
         {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
         <EntityTypeFields
@@ -336,7 +336,7 @@ function CreateTypeForm({ domainId }: { domainId: Id }) {
           disabled={createType.isPending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {createType.isPending ? "Saving…" : "Create entity type"}
+          {createType.isPending ? "Saving…" : "Create record type"}
         </button>
       </form>
     </section>

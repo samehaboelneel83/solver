@@ -258,7 +258,7 @@ export function serverFieldErrors(
           ? "Name: this domain already has a parameter with this name."
           : noun === "relationship type"
             ? "Name: this domain already has a relationship type with this name."
-            : "Name: this domain already has an entity type with this name.";
+            : "Name: this domain already has a record type with this name.";
     return { fields: { name: text }, general: null };
   }
   return { fields: {}, general: message };

@@ -89,7 +89,7 @@ async function loaded() {
 }
 
 function typeForm() {
-  return screen.getByRole("form", { name: "Entity type" });
+  return screen.getByRole("form", { name: "Record type" });
 }
 
 function attributesTable() {
@@ -148,7 +148,7 @@ describe("EntityTypeDetail", () => {
 
     fireEvent.change(within(typeForm()).getByLabelText(/^Name/), { target: { value: "staff" } });
     fireEvent.change(within(typeForm()).getByLabelText(/^Role/), { target: { value: "resource" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0]).toEqual({
@@ -158,7 +158,7 @@ describe("EntityTypeDetail", () => {
       // save, so the server can refuse one built on a superseded read.
       body: { name: "staff", role: "resource", colour: null, icon: null, updated_at: "2026-09-20T09:00:00+00:00" },
     });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type saved/i));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/record type saved/i));
   });
 
   it("marks the field a 422 names on the type form, not the other one", async () => {
@@ -169,7 +169,7 @@ describe("EntityTypeDetail", () => {
     );
     renderPage();
     await loaded();
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     const role = within(typeForm()).getByLabelText(/^Role/);
     await waitFor(() => expect(role).toHaveAttribute("aria-invalid", "true"));
@@ -186,11 +186,11 @@ describe("EntityTypeDetail", () => {
     renderPage();
     await loaded();
     fireEvent.change(within(typeForm()).getByLabelText(/^Name/), { target: { value: "shift" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     const name = within(typeForm()).getByLabelText(/^Name/);
     await waitFor(() => expect(name).toHaveAttribute("aria-invalid", "true"));
-    expect(name).toHaveAccessibleDescription(/already has an entity type with this name/i);
+    expect(name).toHaveAccessibleDescription(/already has a record type with this name/i);
   });
 
   it("adds an attribute to this type with a typed default", async () => {
@@ -324,7 +324,7 @@ describe("EntityTypeDetail", () => {
       renderPage();
       await loaded();
 
-      fireEvent.click(screen.getByRole("button", { name: "Delete entity type" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete record type" }));
       const text = confirm.mock.calls[0][0] as string;
       expect(text).toMatch(/"employee"/);
       expect(text).toMatch(/its 3 attribute definitions/);
@@ -342,22 +342,22 @@ describe("EntityTypeDetail", () => {
       renderPage();
       await loaded();
 
-      fireEvent.click(screen.getByRole("button", { name: "Delete entity type" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete record type" }));
       await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/entity-types$/));
       expect(writes()).toEqual([{ method: "DELETE", path: "/api/v1/entity-types/5", body: undefined }]);
-      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type "employee" deleted/i));
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/record type "employee" deleted/i));
     });
   });
 
   it("says the type was not found on a 404", async () => {
     serve();
     renderPage("/entity-types/999");
-    expect(await screen.findByText(/entity type not found/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /back to entity types/i })).toHaveAttribute("href", "/entity-types");
+    expect(await screen.findByText(/record type not found/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to record types/i })).toHaveAttribute("href", "/entity-types");
     // Every other state of this page has one; without it here the page has
     // no level-1 heading at all, which is an axe `page-has-heading-one`
     // violation and leaves a screen-reader user with nothing to land on.
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/entity type not found/i);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/record type not found/i);
   });
 
   // --- Task 14b: colour --------------------------------------------------
@@ -369,7 +369,7 @@ describe("EntityTypeDetail", () => {
 
     expect(within(typeForm()).getByTestId("colour-hex")).toHaveValue("");
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#FF8800" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect(writes()[0]).toEqual({
@@ -387,7 +387,7 @@ describe("EntityTypeDetail", () => {
 
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#ff8800" } });
     fireEvent.click(within(typeForm()).getByTestId("colour-clear"));
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect((writes()[0].body as Record<string, unknown>).colour).toBeNull();
@@ -405,7 +405,7 @@ describe("EntityTypeDetail", () => {
     await loaded();
 
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#zzz" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
     await flush();
     expect(writes()).toHaveLength(0);
     // Both places every other refused field appears: the summary at the
@@ -414,7 +414,7 @@ describe("EntityTypeDetail", () => {
       /Colour: Use a six-digit hex colour/i
     );
     expect(within(typeForm()).getByTestId("colour-hex")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.queryByText("Entity type saved")).not.toBeInTheDocument();
+    expect(screen.queryByText("Record type saved")).not.toBeInTheDocument();
   });
 
   it("saves once the colour is corrected, with the error gone", async () => {
@@ -423,12 +423,12 @@ describe("EntityTypeDetail", () => {
     await loaded();
 
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "banana" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
     await flush();
     expect(writes()).toHaveLength(0);
 
     fireEvent.change(within(typeForm()).getByTestId("colour-hex"), { target: { value: "#00aa00" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
     await waitFor(() => expect(writes()).toHaveLength(1));
     expect((writes()[0].body as Record<string, unknown>).colour).toBe("#00aa00");
     expect(within(typeForm()).queryByTestId("form-errors")).not.toBeInTheDocument();
@@ -457,7 +457,7 @@ describe("EntityTypeDetail: a concurrent edit (Ruling 42)", () => {
     answerGetsWith(TYPE);
     renderPage();
     await loaded();
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
 
     const notice = await screen.findByTestId("stale-record");
     expect(notice).toHaveAttribute("role", "alert");
@@ -470,7 +470,7 @@ describe("EntityTypeDetail: a concurrent edit (Ruling 42)", () => {
     renderPage();
     await loaded();
     fireEvent.change(within(typeForm()).getByLabelText(/^Name/), { target: { value: "staff" } });
-    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save entity type" }));
+    fireEvent.click(within(typeForm()).getByRole("button", { name: "Save record type" }));
     await screen.findByTestId("stale-record");
 
     answerGetsWith(CHANGED);

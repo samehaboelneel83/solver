@@ -1,3 +1,4 @@
+import { plainText } from "../lib/words";
 import { MouseEvent, useEffect, useRef, useState, Suspense } from "react";
 import PageLoading from "./PageLoading";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -252,6 +253,7 @@ function AppShellContent() {
   const [openMenu, setOpenMenu] = useState<null | "user" | "runs">(null);
   const { username } = useCapabilities();
   const where = whereAmI(location.pathname);
+  const say = (text: string) => plainText(text, level === "simple");
 
   function toggleCollapsed() {
     setCollapsedChoice((current) => {
@@ -588,16 +590,16 @@ function AppShellContent() {
           <ol className="flex items-center gap-1.5">
             {where.group && where.group !== where.page && (
               <>
-                <li className="text-slate-500">{where.group}</li>
+                <li className="text-slate-500">{say(where.group)}</li>
                 <li aria-hidden="true" className="text-slate-400">
                   <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />
                 </li>
               </>
             )}
-            <li aria-current="page" className="font-semibold text-slate-900">{where.page}</li>
+            <li aria-current="page" className="font-semibold text-slate-900">{say(where.page)}</li>
           </ol>
           {where.purpose && (
-            <p className="mt-0.5 truncate text-xs font-normal text-slate-500">{where.purpose}</p>
+            <p className="mt-0.5 truncate text-xs font-normal text-slate-500">{say(where.purpose)}</p>
           )}
         </nav>
         <ContextHeader />

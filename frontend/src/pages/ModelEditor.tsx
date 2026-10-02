@@ -1,3 +1,4 @@
+import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -1952,7 +1953,7 @@ function StartFromTemplates({
             );
           }}
         >
-          {apply.isPending ? "Starting…" : `Start from ${row.name}`}
+          {apply.isPending ? "Starting…" : `Start from “${exampleWords(row.name).title}”`}
         </button>
       ))}
       {failure && (

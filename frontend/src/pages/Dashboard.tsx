@@ -1,3 +1,4 @@
+import { exampleWords } from "../lib/examples";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useEntityList } from "../api/entities";
@@ -201,9 +202,9 @@ export default function Dashboard() {
                   >
                     <span className={HOME_ICON} aria-hidden="true"><LayoutTemplate size={16} /></span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-900">{row.name}</span>
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        {existing ? "Open your problem made from it" : apply.isPending ? "Starting…" : "Create a starting model"}
+                      <span className="block truncate text-sm font-semibold text-slate-900">{exampleWords(row.name).title}</span>
+                      <span className="mt-0.5 line-clamp-2 block text-xs text-slate-500">
+                        {existing ? "Open your problem made from it" : apply.isPending ? "Starting…" : exampleWords(row.name).says || "Create a starting model"}
                       </span>
                     </span>
                     {existing && <span className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-xs text-slate-600">In use</span>}

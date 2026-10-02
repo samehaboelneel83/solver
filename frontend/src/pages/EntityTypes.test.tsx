@@ -101,7 +101,7 @@ describe("EntityTypes list page", () => {
     localStorage.setItem(DOMAIN_STORAGE_KEY, "7");
     mockFetch.mockResolvedValue({ items: [], total: 0 });
     renderPage();
-    expect(await screen.findByText(/no entity types in this domain yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no record types in this domain yet/i)).toBeInTheDocument();
   });
 
   it("shows a load failure with a retry", async () => {
@@ -127,13 +127,13 @@ describe("EntityTypes list page", () => {
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
     fireEvent.change(screen.getByLabelText(/^Role/), { target: { value: "org" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/entity-types/44"));
     const post = mockFetch.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === "POST");
     expect(post?.[0]).toBe("/api/v1/entity-types");
     expect(JSON.parse(post?.[1].body as string)).toEqual({ domain_id: 7, name: "unit", role: "org", colour: null });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/entity type "unit" created/i));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/record type "unit" created/i));
   });
 
   it("refuses a name the server would reject, before sending", async () => {
@@ -143,7 +143,7 @@ describe("EntityTypes list page", () => {
     await screen.findByRole("link", { name: "employee" });
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Employee" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     expect(screen.getByLabelText(/^Name/)).toHaveAttribute("aria-invalid", "true");
     expect(mockFetch.mock.calls.some((call) => (call[1] as RequestInit | undefined)?.method === "POST")).toBe(false);
@@ -163,10 +163,10 @@ describe("EntityTypes list page", () => {
     await screen.findByRole("link", { name: "employee" });
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "employee" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() => expect(screen.getByLabelText(/^Name/)).toHaveAttribute("aria-invalid", "true"));
-    expect(screen.getByLabelText(/^Name/)).toHaveAccessibleDescription(/already has an entity type with this name/i);
+    expect(screen.getByLabelText(/^Name/)).toHaveAccessibleDescription(/already has a record type with this name/i);
     expect(screen.getByLabelText(/^Role/)).not.toHaveAttribute("aria-invalid");
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/entity-types$/);
   });
@@ -185,7 +185,7 @@ describe("EntityTypes list page", () => {
     await screen.findByRole("link", { name: "employee" });
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() => expect(screen.getByLabelText(/^Role/)).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByLabelText(/^Name/)).not.toHaveAttribute("aria-invalid");
@@ -221,7 +221,7 @@ describe("EntityTypes list page", () => {
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
     fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "#B8860B" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() => {
       const post = mockFetch.mock.calls.find((call) => (call[1] as RequestInit | undefined)?.method === "POST");
@@ -254,7 +254,7 @@ describe("EntityTypes list page", () => {
     await screen.findByRole("link", { name: "employee" });
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() => expect(screen.getByTestId("form-errors")).toHaveTextContent(/colour must be #rrggbb/i));
     expect(screen.getByTestId("colour-hex")).toHaveAttribute("aria-invalid", "true");
@@ -273,7 +273,7 @@ describe("EntityTypes list page", () => {
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "unit" } });
     fireEvent.change(screen.getByTestId("colour-hex"), { target: { value: "banana" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create entity type" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create record type" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("form-errors")).toHaveTextContent(/Colour: Use a six-digit hex colour/i)
@@ -286,7 +286,7 @@ describe("EntityTypes list page", () => {
     mockFetch.mockResolvedValue({ items: TYPES, total: 2 });
     renderPage(VIEWER_ME);
     expect(await screen.findByRole("link", { name: "employee" })).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "New entity type" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create entity type" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "New record type" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create record type" })).not.toBeInTheDocument();
   });
 });

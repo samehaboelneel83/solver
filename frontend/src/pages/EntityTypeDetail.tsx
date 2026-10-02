@@ -54,7 +54,7 @@ export default function EntityTypeDetail() {
   const { id: rawId } = useParams();
   const id = parseRouteId(rawId);
   const { data, error, isError, refetch, fetchStatus } = useEntityType(id);
-  useDocumentTitle(data ? `Entity type ${data.name}` : "Entity type");
+  useDocumentTitle(data ? `Record type ${data.name}` : "Record type");
 
   if (id === null || (isError && error instanceof ApiError && error.status === 404)) {
     return (
@@ -62,15 +62,15 @@ export default function EntityTypeDetail() {
         {/* Every page needs a level-1 heading, including this one: without
             it the page has none at all (axe `page-has-heading-one`) and a
             screen-reader user has nothing to land on. */}
-        <h1 className="mb-2 text-lg font-semibold text-slate-900">Entity type not found.</h1>
+        <h1 className="mb-2 text-lg font-semibold text-slate-900">Record type not found.</h1>
         <Link to="/entity-types" className={BACK_LINK}>
-          Back to entity types
+          Back to record types
         </Link>
       </div>
     );
   }
-  if (fetchStatus === "paused" && !data) return <OfflineNotice subject="This entity type" />;
-  if (isError && !data) return <LoadFailure subject="The entity type" error={error} retry={() => void refetch()} />;
+  if (fetchStatus === "paused" && !data) return <OfflineNotice subject="This record type" />;
+  if (isError && !data) return <LoadFailure subject="The record type" error={error} retry={() => void refetch()} />;
 
   if (!data) return <p className="text-sm text-slate-500">Loading…</p>;
 
@@ -90,11 +90,11 @@ function Editor({ type, reload }: { type: EntityType; reload: () => Promise<Enti
       <div>
         <nav aria-label="Breadcrumb" className="mb-2 text-sm">
           <Link to="/entity-types" className={BACK_LINK}>
-            Entity types
+            Record types
           </Link>
         </nav>
         <h1 className="text-lg font-semibold text-slate-900">
-          <span className="sr-only">Entity type </span>
+          <span className="sr-only">Record type </span>
           <span className="font-mono">{type.name}</span>
         </h1>
       </div>
@@ -199,7 +199,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
       });
       setUpdatedAt(saved.updated_at);
       seeded.current = typeDraftsOf(saved);
-      toast.success("Entity type saved");
+      toast.success("Record type saved");
     } catch (err) {
       if (isStaleRecordError(err)) {
         setServerErrors(null);
@@ -218,7 +218,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
       <h2 id="type-heading" className="mb-3 text-base font-semibold text-slate-900">
         Type
       </h2>
-      <form aria-label="Entity type" onSubmit={handleSubmit} noValidate className="space-y-4">
+      <form aria-label="Record type" onSubmit={handleSubmit} noValidate className="space-y-4">
         <ErrorSummary errors={errors} order={ENTITY_TYPE_FIELDS} summaryRef={summaryRef} />
         {stale && <StaleRecordNotice message={stale} onReload={handleReload} reloading={reloading} />}
         {general && <p className="whitespace-pre-line text-sm text-red-600">{general}</p>}
@@ -275,7 +275,7 @@ function TypeForm({ type, reload }: { type: EntityType; reload: () => Promise<En
             disabled={updateType.isPending}
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {updateType.isPending ? "Saving…" : "Save entity type"}
+            {updateType.isPending ? "Saving…" : "Save record type"}
           </button>
         )}
       </form>
@@ -298,7 +298,7 @@ function Attributes({ type }: { type: EntityType }) {
   // A reference says what it refers to (queue R20a): "Reference to unit".
   const typeLabel = (attribute: AttributeDef) =>
     attribute.data_type === "reference"
-      ? `Reference to ${types.data?.items.find((t) => t.id === attribute.target_type_id)?.name ?? "an entity type"}`
+      ? `Reference to ${types.data?.items.find((t) => t.id === attribute.target_type_id)?.name ?? "a record type"}`
       : dataTypeLabel(attribute.data_type);
   const canEdit = can("domain.edit");
   const [editing, setEditing] = useState<Editing>(null);
@@ -539,14 +539,14 @@ function DeleteType({ type }: { type: EntityType }) {
     // references relationship_type. parameter_def.index_type_ids is a
     // plain bigint[] with no foreign key, so it is left dangling.
     const confirmed = window.confirm(
-      `Delete entity type "${type.name}"? This also deletes ${attributes}, every entity of this type, ` +
+      `Delete record type "${type.name}"? This also deletes ${attributes}, every entity of this type, ` +
         `all relationship types that use it, and their relationships. Parameters indexed by it are not deleted, ` +
         `but are left pointing at a type that no longer exists. This cannot be undone.`
     );
     if (!confirmed) return;
     try {
       await deleteType.mutateAsync(type.id);
-      toast.success(`Entity type "${type.name}" deleted`);
+      toast.success(`Record type "${type.name}" deleted`);
       navigate("/entity-types");
     } catch (err) {
       toast.error(formatApiError(err));
@@ -569,7 +569,7 @@ function DeleteType({ type }: { type: EntityType }) {
         disabled={deleteType.isPending}
         className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
       >
-        Delete entity type
+        Delete record type
       </button>
     </section>
   );

@@ -239,7 +239,7 @@ describe("ModelEditor", () => {
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /start from weekly_rota/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /start from “weekly staff rota”/i }));
 
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(write.mock.calls[0][0]).toBe("/api/v1/templates/1/apply");
