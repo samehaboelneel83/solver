@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { FormDraft } from "./draftIr";
-import { applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyNetwork, applyPhasing, applySelection } from "./recipes";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
 type Data = { name: string; index: string[] };
-type Which = "selection" | "network" | "phasing";
+type Which = "selection" | "network" | "phasing" | "allocation";
 
 const SELECT = "ml-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numbers = (kind: Kind | undefined) =>
@@ -69,6 +69,39 @@ export default function RecipesForm({ kinds, data, onApply }: {
         <Pick label="Always chosen when" value={get("mustHave")} onChange={set("mustHave")} options={yesNo(kind("items"))} optional />
       </Row>
     );
+  } else if (which === "allocation") {
+    // Land among crops (benchmark re-test, October 2026).
+    const over = data.filter((d) => d.index.length === 2 && f.items && f.options && d.index.includes(f.items) && d.index.includes(f.options));
+    const worthData = over.find((d) => d.name === f.worth);
+    const allowed = over.find((d) => d.name === f.allowed);
+    const limit = toNumber(get("limit"));
+    ready = !!(f.items && f.options && f.items !== f.options && f.size && f.worth);
+    apply = (d) => applyAllocation(d, { items: f.items, options: f.options, size: f.size,
+      worth: worthData ? { data: worthData.name, index: worthData.index } : { field: f.worth },
+      ...(f.use && limit !== undefined && Number.isFinite(limit) ? { use: { field: f.use, limit } } : {}),
+      ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
+      ...(f.minShare ? { minShare: f.minShare } : {}), ...(f.maxShare ? { maxShare: f.maxShare } : {}),
+      ...(f.all === "yes" ? { all: true } : {}) });
+    body = (
+      <>
+        <Row>
+          <Pick label="Share out each" value={get("items")} onChange={set("items")} options={names} />
+          <Pick label="Among" value={get("options")} onChange={set("options")} options={names} />
+          <Pick label="Its size" value={get("size")} onChange={set("size")} options={numbers(kind("items"))} />
+          <Pick label="A unit is worth" value={get("worth")} onChange={set("worth")} options={[...numbers(kind("options")), ...over.map((d) => d.name)]} />
+        </Row>
+        <Row>
+          <Pick label="Uses" value={get("use")} onChange={set("use")} options={numbers(kind("options"))} optional />
+          <label className="text-xs text-slate-700">up to
+            <input aria-label="Shared limit" className={`${SELECT} w-28`} inputMode="decimal" value={get("limit")} onChange={(e) => set("limit")(e.target.value)} />
+          </label>
+          <Pick label="Only where" value={get("allowed")} onChange={set("allowed")} options={over.map((d) => d.name)} optional />
+          <Pick label="Least share" value={get("minShare")} onChange={set("minShare")} options={numbers(kind("options"))} optional />
+          <Pick label="Most share" value={get("maxShare")} onChange={set("maxShare")} options={numbers(kind("options"))} optional />
+          <Pick label="All of it given out" value={get("all")} onChange={set("all")} options={["yes"]} optional />
+        </Row>
+      </>
+    );
   } else if (which === "network") {
     const costs = data.filter((d) => d.index.length === 2 && f.sources && f.customers && d.index.includes(f.sources) && d.index.includes(f.customers));
     const unit = costs.find((d) => d.name === f.unitCost) ?? costs[0];
@@ -130,7 +163,7 @@ export default function RecipesForm({ kinds, data, onApply }: {
   return (
     <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
-        More recipes: projects within a budget, a supply network, projects over years
+        More recipes: projects within a budget, a supply network, projects over years, land among crops
       </summary>
       <form aria-label="More recipes" className="mt-3 space-y-3 text-sm text-slate-800"
         onSubmit={(e) => {
@@ -141,7 +174,7 @@ export default function RecipesForm({ kinds, data, onApply }: {
         }}>
         <div role="radiogroup" aria-label="Recipe" className="flex flex-wrap gap-3 text-xs">
           {([["selection", "Choose projects within a budget"], ["network", "Supply network: open, ship, fleet"],
-            ["phasing", "Phase projects over periods"]] as [Which, string][]).map(([w, words]) => (
+            ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"]] as [Which, string][]).map(([w, words]) => (
             <label key={w}><input type="radio" checked={which === w} onChange={() => { setWhich(w); setF({}); setDone(null); }} /> {words}</label>
           ))}
         </div>

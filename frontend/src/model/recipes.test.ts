@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyNetwork, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
 import { EMPTY_MODEL, type FormDraft } from "./draftIr";
 
@@ -51,6 +51,19 @@ describe("more recipes (benchmark, October 2026)", () => {
     });
     expect(d.objective.terms[0].id).toBe("value_sooner");
     made.phasing = ir(d);
+  });
+
+  it("shares land among crops within a water limit, only where allowed, within shares (benchmark re-test, October 2026)", () => {
+    const d = applyAllocation(empty, { items: "parcel", options: "crop", size: "area", worth: { field: "profit" },
+      use: { field: "water", limit: 100 }, allowed: { data: "suitable", index: ["parcel", "crop"] }, maxShare: "max_share", all: false });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(rules(d)).toEqual({
+      size_of_each: "for each i in parcel: sum(amount[i, o] for o in crop) <= area[i]",
+      shared_limit: "sum(water[o] * amount[i, o] for i in parcel, o in crop) <= 100",
+      only_where_allowed: "for each i in parcel, o in crop: amount[i, o] <= area[i] * suitable[i, o]",
+      most_share: "for each o in crop: sum(amount[i, o] for i in parcel) <= max_share[o] * sum(area[i] for i in parcel)",
+    });
+    made.allocation = ir(d);
     if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
   });
 

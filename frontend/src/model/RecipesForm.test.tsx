@@ -42,3 +42,21 @@ it("offers a network only with a cost a unit between the two kinds", () => {
   expect(Object.keys(d.variables)).toEqual(["ship", "open"]);
   expect(d.parameters.km).toEqual({ index: ["store", "depot"] });
 });
+
+it("shares land among crops from the form (benchmark re-test, October 2026)", () => {
+  const onApply = vi.fn();
+  const kinds = [{ name: "parcel", attributes: [{ name: "area", data_type: "number" }] },
+    { name: "crop", attributes: [{ name: "profit", data_type: "number" }, { name: "water", data_type: "number" }] }];
+  render(<RecipesForm kinds={kinds} data={[{ name: "suitable", index: ["parcel", "crop"] }]} onApply={onApply} />);
+  fireEvent.click(screen.getByLabelText(/Share land among crops/));
+  fireEvent.change(screen.getByLabelText("Share out each"), { target: { value: "parcel" } });
+  fireEvent.change(screen.getByLabelText("Among"), { target: { value: "crop" } });
+  fireEvent.change(screen.getByLabelText("Its size"), { target: { value: "area" } });
+  fireEvent.change(screen.getByLabelText("A unit is worth"), { target: { value: "profit" } });
+  fireEvent.change(screen.getByLabelText("Uses"), { target: { value: "water" } });
+  fireEvent.change(screen.getByLabelText("Shared limit"), { target: { value: "100" } });
+  fireEvent.change(screen.getByLabelText("Only where"), { target: { value: "suitable" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write it into the model" }));
+  const d = onApply.mock.calls[0][0](empty) as FormDraft;
+  expect(d.constraints.map((c) => c.id)).toEqual(["size_of_each", "shared_limit", "only_where_allowed"]);
+});

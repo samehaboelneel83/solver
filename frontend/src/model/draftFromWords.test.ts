@@ -65,4 +65,40 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(proposeDraft("help", KINDS, DATA)).toBeNull();
     expect(recipeFor("ship from depots to customers by truck")[0].recipe).toBe("network");
   });
+
+  it("shares land among crops: size, worth through data, a water limit, where allowed, shares (benchmark re-test, October 2026)", () => {
+    const kinds: Kind[] = [
+      { name: "parcel", attributes: [n("area_feddan")] },
+      { name: "crop", attributes: [n("water_m3_per_feddan"), n("min_share"), n("max_share")] },
+    ];
+    const data = [{ name: "profit_per_feddan", index: ["parcel", "crop"] }, { name: "suitable", index: ["crop", "parcel"] }];
+    const p = proposeDraft("Which crops to plant on each parcel, all the land, with a water quota of 18,920,000 m3", kinds, data)!;
+    expect(p.recipe).toBe("allocation");
+    expect(p.missing).toEqual([]);
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.variables.amount).toMatchObject({ index: ["parcel", "crop"], domain: "continuous" });
+    expect(d.constraints.map((c) => c.id)).toEqual(["size_of_each", "shared_limit", "only_where_allowed", "least_share", "most_share"]);
+    expect(d.constraints[0].relation).toBe("=");
+    expect(d.constraints[1]).toMatchObject({ right: { const: 18920000 } });
+    expect(JSON.stringify(d.constraints[2])).toContain('"par":"suitable","index":["o","i"]');
+  });
+
+  it("covers what the reach data joins the sites to, not a kind only named, with seats and the budget in the costs' units", () => {
+    const kinds: Kind[] = [
+      { name: "candidate_site", attributes: [n("monthly_cost_k"), n("capacity")] },
+      { name: "town", attributes: [n("population")] },
+      { name: "restricted_zone", attributes: [] },
+    ];
+    const data = [{ name: "within_30_min", index: ["candidate_site", "town"] }];
+    const p = proposeDraft("Open candidate sites away from the restricted zone so people are within 30 minutes; budget of 150,000 a month, capacity matters", kinds, data)!;
+    expect(p.recipe).toBe("coverage");
+    expect(p.choices.join("\n")).toMatch(/Cover: town —/);
+    expect(p.choices.join("\n")).not.toMatch(/Cover: restricted_zone/);
+    expect(p.choices.join("\n")).toMatch(/Budget in the costs' units: 150/);
+    const d = p.apply!(empty);
+    valid(d);
+    expect(Object.keys(d.variables)).toContain("seated");
+    expect(d.constraints.find((c) => c.id === "budget")).toMatchObject({ right: { const: 150 } });
+  });
 });

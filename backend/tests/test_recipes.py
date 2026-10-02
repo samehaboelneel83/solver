@@ -49,3 +49,19 @@ def test_phasing_keeps_each_year_within_its_budget_and_starts_the_best_first():
     }}
     # One project a year: a in year 1 (20), b in year 2 (8).
     assert round(float(_solve("recipe_phasing", data).objective)) == 28
+
+
+def test_allocation_puts_the_land_where_it_is_worth_most_within_water_suitability_and_shares():
+    """Benchmark re-test, October 2026: crop planning matched no recipe."""
+    data = {
+        "sets": {
+            "parcel": [{"id": "p1", "area": 10}, {"id": "p2", "area": 10}],
+            "crop": [{"id": "rice", "profit": 5, "water": 8, "max_share": 0.5}, {"id": "wheat", "profit": 3, "water": 2, "max_share": 1}],
+        },
+        "parameters": {"suitable": [{"0": "p1", "1": "rice", "value": 1}, {"0": "p1", "1": "wheat", "value": 1},
+                                    {"0": "p2", "1": "wheat", "value": 1}]},
+        "parameter_defaults": {"suitable": 0},
+    }
+    # Rice is suitable on p1 only and worth more: all 10 of p1 (its share cap is 10 of 20), using 80 water.
+    # The other 20 water grows 10 wheat on p2. Profit 10*5 + 10*3 = 80.
+    assert round(float(_solve("recipe_allocation", data).objective), 6) == 80

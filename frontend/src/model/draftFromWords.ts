@@ -7,11 +7,12 @@
  */
 import { applyCoverage, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
-import { applyNetwork, applyPhasing, applySelection, type NetworkRecipe, type PhasingRecipe, type SelectionRecipe } from "./recipes";
+import { applyAllocation, applyNetwork, applyPhasing, applySelection, type AllocationRecipe, type NetworkRecipe, type PhasingRecipe,
+  type SelectionRecipe } from "./recipes";
 
 export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string }[] };
 export type Data = { name: string; index: string[] };
-export type Recipe = "coverage" | "selection" | "network" | "phasing";
+export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation";
 
 export type Proposal = {
   recipe: Recipe;
@@ -28,6 +29,7 @@ const TITLES: Record<Recipe, string> = {
   selection: "Choose projects within a budget",
   network: "A supply network: open, ship, deliver",
   phasing: "Start projects over periods within each period's budget",
+  allocation: "Share each one out among options (land among crops)",
 };
 
 const SIGNALS: Record<Recipe, RegExp> = {
@@ -35,6 +37,8 @@ const SIGNALS: Record<Recipe, RegExp> = {
   selection: /\b(projects?|portfolio|select\w*|invest\w*|proposals?|candidates?|fund\w*|shortlist\w*|options?)\b/g,
   network: /\b(ship\w*|deliver\w*|supply|suppl(y|ier)s?|warehouses?|depots?|customers?|stores?|flows?|transport\w*|distribut\w*|trucks?|fleet|vehicles?)\b/g,
   phasing: /\b(years?|yearly|annual\w*|quarters?|periods?|phas\w*|over time|month\w*|multi-?year|horizon)\b/g,
+  // Benchmark re-test, October 2026: crop planning matched no recipe.
+  allocation: /\b(allocat\w*|crops?|plant\w*|feddans?|hectares?|acres?|land|grow\w*|share\w* (out|of)|split|mix|irrigat\w*|sow\w*|area to)\b/g,
 };
 
 const words = (name: string) => name.toLowerCase().split(/_+/).filter(Boolean);
@@ -69,6 +73,17 @@ function amount(text: string, leads: string[]): number | undefined {
     if (Number.isFinite(n)) return n;
   }
   return undefined;
+}
+
+/** A budget typed in pounds against costs kept in millions or thousands (`cost_megp`, `capex_m`):
+ * in the costs' units, said (benchmark re-test, October 2026: 150 million against costs in mEGP). */
+function inUnitsOf(budget: number | undefined, cost: string | undefined, choices: string[]): number | undefined {
+  if (budget === undefined || !cost) return budget;
+  const scale = /(^|_)(m|mn|megp|musd|million|millions)($|_)|megp|_m$/i.test(cost) ? 1e6
+    : /(^|_)(k|kegp|thousand|thousands)($|_)|kegp|_k$/i.test(cost) ? 1e3 : 1;
+  if (scale === 1 || budget < scale) return budget;
+  choices.push(`Budget in the costs' units: ${budget / scale} (${cost} is in ${scale === 1e6 ? "millions" : "thousands"})`);
+  return budget / scale;
 }
 
 /** The kind the text names that best fits a part: by its name, else its role or fields. */
@@ -140,7 +155,7 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
         ...(weight ? { weight } : {}), ...(all ? { all } : {}) } satisfies PhasingRecipe);
       return { recipe: "phasing", title: TITLES.phasing, choices, missing, apply: recipe ? (d) => applyPhasing(d, recipe) : null };
     }
-    const budget = amount(text, ["budget", "spend", "afford", "invest"]);
+    const budget = inUnitsOf(amount(text, ["budget", "spend", "afford", "invest"]), cost, choices);
     const atMost = amount(text, ["at most", "no more than", "up to", "maximum of", "max"]);
     note("Budget", budget, "the number you wrote");
     need(budget, "the budget: write it, e.g. “a budget of 2 million”");
@@ -151,6 +166,42 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const recipe = missing.length ? null : ({ items: items!.kind.name, value: value!, cost: cost!, budget: budget!,
       ...(most !== undefined ? { atMost: most } : {}), ...(mustHave ? { mustHave } : {}) } satisfies SelectionRecipe);
     return { recipe: "selection", title: TITLES.selection, choices, missing, apply: recipe ? (d) => applySelection(d, recipe) : null };
+  }
+
+  if (best.recipe === "allocation") {
+    const options = pick(text, kinds, /crop|option|product|use|activit|treatment|variet/);
+    const items = pick(text, kinds, /parcel|field|plot|farm|land|area|block|zone|site/, (k) => numeric(k).length > 0,
+      options ? [options.kind.name] : []);
+    note("Shared out", items?.kind.name, items?.why ?? "");
+    note("Among", options?.kind.name, options?.why ?? "");
+    need(items, "a kind of record to share out (parcels), with a number field for its size");
+    need(options, "a kind of record to share among (crops)");
+    const size = field(items?.kind, /area|size|feddan|hectare|acre|capacity|amount|ha$/) ?? numeric(items?.kind)[0];
+    note("Its size", size, "its name");
+    if (items) need(size, `a number field of ${items.kind.name} for how much of it there is`);
+    // Worth: data over both (yield × price per parcel and crop) before a field of the option (profit per unit).
+    const over = data.filter((d) => d.index.length === 2 && items && options && d.index.includes(items.kind.name) && d.index.includes(options.kind.name));
+    const worthData = over.find((d) => /profit|margin|worth|value|return|revenue|yield|income/.test(d.name));
+    const worthField = field(options?.kind, /profit|margin|worth|value|return|revenue|price|income/);
+    note("Worth a unit", worthData?.name ?? worthField, worthData ? "data over both kinds" : "its name");
+    if (items && options) need(worthData ?? worthField, `what a unit of ${options.kind.name} is worth: a number field (profit) or data over ${items.kind.name} and ${options.kind.name}`);
+    const allowed = over.find((d) => d !== worthData && /suit|allow|ok|rotation|can|fit|eligible/.test(d.name));
+    note("Only where", allowed?.name, "0/1 data over both kinds");
+    const useField = field(options?.kind, /water|use|need|requirement|labou?r|m3|input/);
+    const limit = amount(text, ["water", "limit", "budget", "quota", "at most", "no more than"]);
+    if (useField && limit !== undefined) choices.push(`Shared limit: ${useField} up to ${limit} — its name and the number you wrote`);
+    const minShare = field(options?.kind, /min.*share|share.*min|min_?pct|min_?frac|least/);
+    const maxShare = field(options?.kind, /max.*share|share.*max|max_?pct|max_?frac|most/);
+    note("Least share", minShare, "its name");
+    note("Most share", maxShare, "its name");
+    const all = /\b(all|every|whole|entire) (the )?(land|area|feddans?|parcels?)\b/i.test(text);
+    if (all) choices.push("All of it given out — you wrote it");
+    const recipe = missing.length ? null : ({ items: items!.kind.name, options: options!.kind.name, size: size!,
+      worth: worthData ? { data: worthData.name, index: worthData.index } : { field: worthField! },
+      ...(useField && limit !== undefined ? { use: { field: useField, limit } } : {}),
+      ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
+      ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(all ? { all } : {}) } satisfies AllocationRecipe);
+    return { recipe: "allocation", title: TITLES.allocation, choices, missing, apply: recipe ? (d) => applyAllocation(d, recipe) : null };
   }
 
   if (best.recipe === "network") {
@@ -189,8 +240,15 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
   }
 
   const sites = pick(text, kinds, /site|depot|centre|center|station|clinic|candidate|facilit|yard|shelter|base|hospital/);
-  const places = pick(text, kinds, /zone|area|district|place|neighbou?rhood|village|hotspot|block|tract|community|demand|household/,
-    () => true, sites ? [sites.kind.name] : []);
+  // What is covered is what the 0/1 reach data joins the sites to, when there is such data: a word
+  // alone took "restricted zones" for it (benchmark re-test, October 2026).
+  const reachable = sites ? data.filter((d) => d.index.length === 2 && d.index.includes(sites.kind.name)
+    && d.index.some((k) => k !== sites.kind.name) && /within|reach|cover|near|minutes|min\b/.test(d.name)) : [];
+  const reachKinds = [...new Set(reachable.map((d) => d.index.find((k) => k !== sites!.kind.name)!))];
+  const named = pick(text, kinds, /zone|area|district|place|neighbou?rhood|village|hotspot|block|tract|community|demand|household|town|cit/,
+    (k) => reachKinds.length === 0 || reachKinds.includes(k.name), sites ? [sites.kind.name] : []);
+  const fromData = !named && reachKinds.length === 1 ? kinds.find((k) => k.name === reachKinds[0]) : undefined;
+  const places = named ?? (fromData ? { kind: fromData, why: "the reach data joins the sites to it" } : null);
   note("Open", sites?.kind.name, sites?.why ?? "");
   note("Cover", places?.kind.name, places?.why ?? "");
   need(sites, "a kind of record to open (sites, centres)");
@@ -200,15 +258,21 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
   note("Within reach by", reach?.name, "0/1 data over both kinds");
   if (sites && places) need(reach, `0/1 data over ${sites.kind.name} and ${places.kind.name}: who is within reach (Data values → From the map → within)`);
   const cost = field(sites?.kind, /cost|price|rent|capex/);
-  const budget = amount(text, ["budget", "spend", "afford"]);
+  const budget = inUnitsOf(amount(text, ["budget", "spend", "afford"]), cost, choices);
   const weights = numeric(places?.kind).filter((n) => /population|people|vulnerab|risk|demand|weight|households?|elderly/.test(n));
   const coverAll = /\b(every|all|each) (\w+ ){0,2}(is |are |must be |should be )?(covered|served|reached)\b/i.test(text) && budget === undefined;
   note("Cost", cost, "its name");
   note("Budget", budget, "the number you wrote");
   if (weights.length) choices.push(`Worth covering: ${weights.join(" × ")} — their names`);
   if (coverAll) choices.push("Every one covered, at the least cost — you wrote it");
+  // Capacity as well as reach: sites with a capacity seat the people of the places they cover
+  // (benchmark re-test, October 2026: coverage with capacity was left out of the draft).
+  const capacity = /\b(capacit\w*|seats?|beds?|units? per|how many)\b/i.test(text) || field(sites?.kind, /capacity|seats|beds/) ? field(sites?.kind, /capacity|seats|beds|max_units|units/) : undefined;
+  const people = numeric(places?.kind).filter((n) => /population|people|demand|calls|patients|households?/.test(n)).slice(0, 1);
+  const seats = !coverAll && capacity && people.length ? { capacity, demand: people } : undefined;
+  if (seats) choices.push(`Each open ${sites!.kind.name} serves at most its ${capacity}, of the ${people[0]} it covers — their names`);
   const recipe = missing.length ? null : ({ sites: sites!.kind.name, places: places!.kind.name, reach: reach!.name, reachIndex: reach!.index,
-    ...(cost ? { cost } : {}), ...(budget !== undefined ? { budget } : {}), weights, coverAll } satisfies CoverageRecipe);
+    ...(cost ? { cost } : {}), ...(budget !== undefined ? { budget } : {}), weights, coverAll, ...(seats ? { seats } : {}) } satisfies CoverageRecipe);
   return { recipe: "coverage", title: TITLES.coverage, choices, missing, apply: recipe ? (d) => applyCoverage(d, recipe) : null };
 }
 

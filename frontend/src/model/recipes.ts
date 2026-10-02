@@ -216,3 +216,67 @@ export function applyPhasing(draft: FormDraft, r: PhasingRecipe): FormDraft {
       { id: name(r.weight ? "value_sooner" : "value_started"), weight: 1, expression: sum(worth, [i, r.items], [t, r.periods]) } as ObjectiveTerm] },
   };
 }
+
+// --- allocation of an amount among options ---------------------------------------------------------
+
+export type AllocationRecipe = {
+  /** What is shared out (parcels), and among what (crops). */
+  items: string;
+  options: string;
+  /** A number field of an item: how much of it there is (feddan); all of it, or at most. */
+  size: string;
+  /** What a unit given to an option is worth: a number field of the option, or data over both. */
+  worth: { field: string } | { data: string; index: string[] };
+  /** What a unit of an option uses of a shared resource (water per feddan), and how much there is. */
+  use?: { field: string; limit: number };
+  /** 0/1 data over both: where an option may go at all (suitable soil, rotation). */
+  allowed?: { data: string; index: string[] };
+  /** Number fields of an option: its least and most share of everything, 0..1. */
+  minShare?: string;
+  maxShare?: string;
+  /** Every unit of every item is given out (else at most). */
+  all?: boolean;
+};
+
+export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraft {
+  const name = namer(draft);
+  const i = "i", o = "o";
+  const give = name("amount");
+  const cell = v(give, [i, o]);
+  const worth: Term = "field" in r.worth ? attr(o, r.worth.field)
+    : ({ par: r.worth.data, index: r.worth.index[0] === r.items ? [i, o] : [o, i] } as Term);
+  const everything: Term = sum(attr(i, r.size), [i, r.items]);
+  const constraints: Constraint[] = [...draft.constraints,
+    rule(name("size_of_each"), r.all ? `all of each ${say(r.items)}'s ${say(r.size)} is given out` : `each ${say(r.items)} gives out at most its ${say(r.size)}`,
+      sum(cell, [o, r.options]), r.all ? "=" : "<=", attr(i, r.size), each([i, r.items]))];
+  if (r.use) {
+    constraints.push(rule(name("shared_limit"), `what is given out uses at most ${r.use.limit} of ${say(r.use.field)}`,
+      sum(mul(attr(o, r.use.field), cell), [i, r.items], [o, r.options]), "<=", k(r.use.limit)));
+  }
+  if (r.allowed) {
+    const ok: Term = { par: r.allowed.data, index: r.allowed.index[0] === r.items ? [i, o] : [o, i] } as Term;
+    constraints.push(rule(name("only_where_allowed"), `a ${say(r.options)} goes only where ${say(r.allowed.data)} allows it`,
+      cell, "<=", mul(attr(i, r.size), ok), each([i, r.items], [o, r.options])));
+  }
+  if (r.minShare) {
+    constraints.push(rule(name("least_share"), `each ${say(r.options)} gets at least its ${say(r.minShare)} of the whole`,
+      sum(cell, [i, r.items]), ">=", mul(attr(o, r.minShare), everything), each([o, r.options])));
+  }
+  if (r.maxShare) {
+    constraints.push(rule(name("most_share"), `each ${say(r.options)} gets at most its ${say(r.maxShare)} of the whole`,
+      sum(cell, [i, r.items]), "<=", mul(attr(o, r.maxShare), everything), each([o, r.options])));
+  }
+  const data: FormDraft["parameters"] = { ...draft.parameters };
+  for (const d of [("data" in r.worth ? r.worth : null), r.allowed ?? null]) {
+    if (d) data[d.data] = draft.parameters[d.data] ?? { index: d.index };
+  }
+  return {
+    ...draft,
+    sets: [...new Set([...draft.sets, r.items, r.options])],
+    parameters: data,
+    variables: { ...draft.variables, [give]: { index: [r.items, r.options], domain: "continuous", lower: 0 } } as Variables,
+    constraints,
+    objective: { sense: "maximize", mode: "weighted", terms: [
+      { id: name("worth"), weight: 1, expression: sum(mul(worth, cell), [i, r.items], [o, r.options]) } as ObjectiveTerm] },
+  };
+}

@@ -3,7 +3,7 @@ import type { FormDraft } from "./draftIr";
 import { keptWords, proposeDraft, type Data, type Kind, type Recipe } from "./draftFromWords";
 
 const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["selection", "projects within a budget"],
-  ["network", "a supply network"], ["phasing", "projects over periods"]];
+  ["network", "a supply network"], ["phasing", "projects over periods"], ["allocation", "land among crops"]];
 
 /**
  * Describe the problem, get a first draft (benchmark, October 2026, G3c): the recipe the words call

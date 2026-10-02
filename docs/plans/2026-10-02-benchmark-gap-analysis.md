@@ -308,10 +308,15 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
   index (P5 — fixed below).
 
 ### Gaps found in round 2 (R2a–R2h)
-- **R2a Join on a matching field:** link records of two kinds where a field of one equals the key
+- **R2a Join on a matching field** (done: "Link records by a code they hold" under Records → Compute and
+  join, matching another kind's key, name or a field, case and spaces aside, listing what did not match): link records of two kinds where a field of one equals the key
   (or a field) of the other — call history to districts by `dist_code`, yield history to parcels —
   without a links file. (P1, P2, P4)
-- **R2b Describe → draft for more shapes:** allocation of an area/amount among options (crops),
+- **R2b Describe → draft for more shapes** (done in part: an allocation recipe — land among crops, a
+  shared limit, where allowed, least and most shares — in words and as a form; coverage covers what the
+  reach data joins the sites to and seats people where sites have a capacity; a budget typed in pounds
+  is read in the costs' units, millions or thousands. Network flow with an origin–destination table
+  is still to do): allocation of an area/amount among options (crops),
   coverage with capacity and cost, network flow with an origin–destination table; read units and
   the thing to cover from the data's own names, not only from words. (P1, P3, P4)
 - **R2c Forecasts as data per record:** a forecast's inputs read from the record and its links
@@ -324,7 +329,8 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
 - **R2e Multi-product inventory and routing tied to location:** stock and flows per product; vehicle
   routes from the depots the location model opens. (P5)
 - **R2f Water as a decision feeding a yield model** (a predictor over a decision). (P4)
-- **R2g Make the existing joins findable:** the composite key ("several columns read as the key"),
+- **R2g Make the existing joins findable** (done: the records' panel is "Compute and join" and points to
+  the computed data values; the import says two columns can make one key when a key's values repeat): the composite key ("several columns read as the key"),
   computed data values and "read through a link" were not found by two testers who needed them.
 - **R2h Analytics banner** (done: hidden until it is back): "the analytics store reported an error" shows on every page when
   ClickHouse is not running (all five); say it once, where analytics are used.

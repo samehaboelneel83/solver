@@ -20,7 +20,7 @@ export const STAGES: { title: string; steps: Step[] }[] = [
     { what: "Measure from the map", how: "Distances, travel times, within reach, which area, along your own roads.", page: "parameters", where: "Data values → From the map" },
   ] },
   { title: "Write the model", steps: [
-    { what: "Describe it in words", how: "Get a first draft of decisions, rules and goals from a description.", page: "model", where: "Model → Describe the problem in words" },
+    { what: "Describe it in words", how: "Get a first draft of decisions, rules and goals from a description: places within reach, projects within a budget, a supply network, projects over years, land among crops.", page: "model", where: "Model → Describe the problem in words" },
     { what: "Decisions", how: "What the answer chooses: open a site, ship an amount, assign a person.", page: "model", where: "Model → Decisions" },
     { what: "Goals", how: "What makes one answer better: least cost, most covered, in order.", page: "model", where: "Model → Goals" },
     { what: "Rules", how: "What must hold, in sentences, boxes or equations; recipes write common ones.", page: "model", where: "Model → Rules" },

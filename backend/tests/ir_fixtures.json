@@ -233,6 +233,34 @@
             "data_type": "number"
           }
         ]
+      },
+      {
+        "name": "parcel",
+        "role": "location",
+        "attributes": [
+          {
+            "name": "area",
+            "data_type": "number"
+          }
+        ]
+      },
+      {
+        "name": "crop",
+        "role": "resource",
+        "attributes": [
+          {
+            "name": "profit",
+            "data_type": "number"
+          },
+          {
+            "name": "water",
+            "data_type": "number"
+          },
+          {
+            "name": "max_share",
+            "data_type": "number"
+          }
+        ]
       }
     ],
     "parameters": [
@@ -274,6 +302,14 @@
         "index": [
           "stop",
           "stop"
+        ],
+        "default_value": 0
+      },
+      {
+        "name": "suitable",
+        "index": [
+          "parcel",
+          "crop"
         ],
         "default_value": 0
       }
@@ -4987,6 +5023,238 @@
                   {
                     "index": "i",
                     "set": "project"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "recipe_allocation",
+      "why": "Recipe (benchmark re-test, October 2026): land shared among crops within a water limit, only where suitable, within each crop's most share.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "parcel",
+          "crop"
+        ],
+        "parameters": {
+          "suitable": {
+            "index": [
+              "parcel",
+              "crop"
+            ]
+          }
+        },
+        "variables": {
+          "amount": {
+            "index": [
+              "parcel",
+              "crop"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          }
+        },
+        "constraints": [
+          {
+            "id": "size_of_each",
+            "note": "each parcel gives out at most its area",
+            "forall": [
+              {
+                "index": "i",
+                "set": "parcel"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "amount",
+                "index": [
+                  "i",
+                  "o"
+                ]
+              },
+              "over": [
+                {
+                  "index": "o",
+                  "set": "crop"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "attr": {
+                "of": "i",
+                "name": "area"
+              }
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "shared_limit",
+            "note": "what is given out uses at most 100 of water",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "o",
+                      "name": "water"
+                    }
+                  },
+                  {
+                    "var": "amount",
+                    "index": [
+                      "i",
+                      "o"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "parcel"
+                },
+                {
+                  "index": "o",
+                  "set": "crop"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 100
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "only_where_allowed",
+            "note": "a crop goes only where suitable allows it",
+            "forall": [
+              {
+                "index": "i",
+                "set": "parcel"
+              },
+              {
+                "index": "o",
+                "set": "crop"
+              }
+            ],
+            "left": {
+              "var": "amount",
+              "index": [
+                "i",
+                "o"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "attr": {
+                    "of": "i",
+                    "name": "area"
+                  }
+                },
+                {
+                  "par": "suitable",
+                  "index": [
+                    "i",
+                    "o"
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "most_share",
+            "note": "each crop gets at most its max share of the whole",
+            "forall": [
+              {
+                "index": "o",
+                "set": "crop"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "amount",
+                "index": [
+                  "i",
+                  "o"
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "parcel"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "attr": {
+                    "of": "o",
+                    "name": "max_share"
+                  }
+                },
+                {
+                  "sum": {
+                    "attr": {
+                      "of": "i",
+                      "name": "area"
+                    }
+                  },
+                  "over": [
+                    {
+                      "index": "i",
+                      "set": "parcel"
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "maximize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "worth",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "o",
+                        "name": "profit"
+                      }
+                    },
+                    {
+                      "var": "amount",
+                      "index": [
+                        "i",
+                        "o"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "parcel"
+                  },
+                  {
+                    "index": "o",
+                    "set": "crop"
                   }
                 ]
               }
