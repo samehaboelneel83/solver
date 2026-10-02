@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import select
+import threading
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -81,49 +82,78 @@ async def records(run_id: int, after: int) -> AsyncIterator[tuple]:
 
     Shared by the events stream and the GenUI stream (`app.api.genui`).
     """
-    raw = engine.raw_connection()
+    # Every use of this connection runs off the event loop and under one lock: a query on the loop
+    # stalls every request the server is handling, and psycopg2 does not take one connection from two
+    # threads at once. (Benchmark, October 2026: a page left while its run solved closed the stream
+    # mid-wait; the UNLISTEN on the loop then hung the whole API.)
+    raw = await asyncio.to_thread(engine.raw_connection)
     connection = raw.driver_connection
-    try:
+    lock = threading.Lock()
+
+    def locked(fn, *args):
+        with lock:
+            return fn(*args)
+
+    def run(fn, *args):
+        return asyncio.to_thread(locked, fn, *args)
+
+    def opening():
         # Autocommit, because LISTEN must not sit inside a transaction that
         # holds a snapshot: this connection has to see rows the worker
         # commits while it watches. Put back before the connection returns
         # to the pool -- an autocommit connection handed to the next borrower
         # cannot take a savepoint, and SQLAlchemy uses those.
         connection.autocommit = True
-        cursor = connection.cursor()
+        cur = connection.cursor()
         # This connection reads by run id, as system code: whether the caller
         # may watch this run was settled before the stream opened. Said here
         # rather than assumed, because a pooled connection last used by a
         # request would otherwise still be acting as that tenant -- and a
         # tenant with no organization set sees nothing at all.
-        cursor.execute("RESET ROLE")
-        cursor.execute("SELECT set_config('app.org_id', '', false)")
-        cursor.execute(f'LISTEN "run_{run_id}"')
+        cur.execute("RESET ROLE")
+        cur.execute("SELECT set_config('app.org_id', '', false)")
+        cur.execute(f'LISTEN "run_{run_id}"')
+        return cur
+
+    def closing(cur) -> None:
+        with lock:  # after any wait still in its thread has let go of the connection
+            try:
+                cur.execute(f'UNLISTEN "run_{run_id}"')
+            except Exception:  # pragma: no cover -- a closed connection needs no unlisten
+                pass
+            try:
+                connection.autocommit = False
+            finally:
+                raw.close()
+
+    cursor = None
+    try:
+        cursor = await run(opening)
         last = after
         while True:
             ended = False
-            for seq, kind, payload, at in _rows(cursor, run_id, last):
+            for seq, kind, payload, at in await run(_rows, cursor, run_id, last):
                 last = seq
                 yield ("event", seq, kind, payload, at)
                 if kind == "stage" and payload.get("stage") == "settled":
                     ended = True
             if ended:
-                yield ("settled", _final(cursor, run_id), False)
+                yield ("settled", await run(_final, cursor, run_id), False)
                 break
             # A run that settled before this stream opened has no further
             # events to wait for; one still going is waited on.
-            if _status(cursor, run_id) in SETTLED and not _rows(cursor, run_id, last):
-                yield ("settled", _final(cursor, run_id), True)
+            if await run(_status, cursor, run_id) in SETTLED and not await run(_rows, cursor, run_id, last):
+                yield ("settled", await run(_final, cursor, run_id), True)
                 break
-            await asyncio.to_thread(_wait, connection, HEARTBEAT_SECONDS)
+            await run(_wait, connection, HEARTBEAT_SECONDS)
             yield ("alive",)
     finally:
-        try:
-            cursor.execute(f'UNLISTEN "run_{run_id}"')
-        except Exception:  # pragma: no cover -- a closed connection needs no unlisten
-            pass
-        connection.autocommit = False
-        raw.close()
+        if cursor is None:
+            raw.close()
+        else:
+            # On its own thread, never awaited: a stream closed by a client that left must not wait,
+            # on the loop, for a wait still running in another thread.
+            threading.Thread(target=closing, args=(cursor,), daemon=True).start()
 
 
 def _final(cursor, run_id: int) -> dict[str, Any]:

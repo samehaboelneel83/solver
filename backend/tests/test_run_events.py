@@ -207,3 +207,43 @@ def test_a_run_settled_in_presolve_still_has_a_point_to_show(db):
     progress = [payload for kind, payload in _events(db, run_id) if kind == "incumbent"]
     objective = db.execute(text("SELECT objective FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
     assert progress[-1]["objective"] == float(objective)
+
+
+def test_watching_a_queued_run_never_holds_up_the_server(db, monkeypatch):
+    # A run nobody has picked up yet: the stream waits for news. That wait,
+    # and the closing when the viewer leaves, happen off the event loop, so
+    # every other request keeps being served (a blocking wait once hung the
+    # whole API).
+    import asyncio
+    import time
+
+    from app.api import run_events
+
+    version = make_model_version(db, make_problem(db, make_domain(db, "events-waiting")), IR)
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}).scalar_one()
+    scenario = db.execute(
+        text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 'base') RETURNING id"),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.commit()
+    run_id = enqueue_run(db, scenario, time_limit=10.0)
+    monkeypatch.setattr(run_events, "HEARTBEAT_SECONDS", 3.0)
+
+    async def watch() -> tuple[int, float]:
+        stream = run_events.records(run_id, 0)
+        waiting = asyncio.ensure_future(stream.__anext__())
+        ticks = 0
+        for _ in range(20):
+            await asyncio.sleep(0.02)
+            ticks += 1
+        started = time.monotonic()
+        waiting.cancel()
+        try:
+            await waiting
+        except (asyncio.CancelledError, StopAsyncIteration):
+            pass
+        return ticks, time.monotonic() - started
+
+    ticks, closing = asyncio.run(watch())
+    assert ticks == 20
+    assert closing < 1.0
