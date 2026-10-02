@@ -326,7 +326,7 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
 - **R2f Water as a decision feeding a yield model** (a predictor over a decision). (P4)
 - **R2g Make the existing joins findable:** the composite key ("several columns read as the key"),
   computed data values and "read through a link" were not found by two testers who needed them.
-- **R2h Analytics banner:** "the analytics store reported an error" shows on every page when
+- **R2h Analytics banner** (done: hidden until it is back): "the analytics store reported an error" shows on every page when
   ClickHouse is not running (all five); say it once, where analytics are used.
 
 ### Bugs from round 2, and what was fixed after it
@@ -356,8 +356,8 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
 - [x] Read-back dropped brackets (P2, P3) and said "whose after c" (P1).
 - [x] A note kept "at least 10000 apart" after the rule became 5 (P1): a note follows its rule's one
       changed number.
-- [ ] HTTP 409 on draft saves when adding rules quickly (P1, P4, P5) — the rules were kept.
-- [ ] Import preview repeats the first value of a sparse column (P3).
-- [ ] Empty browser dialogs when leaving the model editor (P2).
-- [ ] A scenario run labelled "cp-sat queued" for 3 minutes, then solved by HiGHS (P2).
+- [x] HTTP 409 on draft saves when adding rules quickly (P1, P4, P5): saves go one at a time per problem.
+- [x] Import preview repeated a sparse column's first value (P3): its different values, and how many rows are filled.
+- [x] Empty browser dialogs when leaving the model editor (P2): no prompt for a draft kept in the browser.
+- [x] A queued run named a solver it did not use (P2): "chosen when it starts".
 
