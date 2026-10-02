@@ -2,6 +2,7 @@ import { useEffect, lazy, Suspense } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell";
+import PageLoading from "./components/PageLoading";
 import AliasRedirect from "./components/AliasRedirect";
 import CapabilityGate from "./components/CapabilityGate";
 import { LegacyDomainRedirect, LegacyProblemRedirect } from "./components/LegacyRedirect";
@@ -9,47 +10,52 @@ import DomainChooser from "./pages/DomainChooser";
 import DomainScope from "./components/DomainScope";
 import ProblemQueryBridge from "./components/ProblemQueryBridge";
 import Login from "./pages/Login";
-import EntityList from "./pages/EntityList";
-import EntityDetail from "./pages/EntityDetail";
-import Dashboard from "./pages/Dashboard";
 import Health from "./pages/Health";
-import FieldPlan from "./pages/FieldPlan";
-import People from "./pages/People";
-import StartProblem from "./pages/StartProblem";
-import CampList from "./pages/CampList";
-import CampEditor, { CampRedirect } from "./pages/CampEditor";
-import MapData from "./pages/MapData";
-import MapImport from "./pages/MapImport";
-import MapView from "./pages/MapView";
-import { DomainOverview, ProblemOverview } from "./pages/PlanningOverview";
-import GraphDemo from "./pages/GraphDemo";
-import EntityTypes from "./pages/EntityTypes";
-import EntityTypeDetail from "./pages/EntityTypeDetail";
-import RelationshipTypes from "./pages/RelationshipTypes";
-import RelationshipTypeDetail from "./pages/RelationshipTypeDetail";
-import Relationships from "./pages/Relationships";
-import Entities from "./pages/Entities";
-// Its own chunk: the workbench is a large page most visits never open.
-const Workbench = lazy(() => import("./pages/Workbench"));
-import EntityRecord from "./pages/EntityRecord";
-import Parameters from "./pages/Parameters";
-import ModelVersions from "./pages/ModelVersions";
-import Runs from "./pages/Runs";
-import Workspace from "./pages/Workspace";
-import ApiKeys from "./pages/ApiKeys";
-import Solvers from "./pages/Solvers";
-import OpsQueue from "./pages/OpsQueue";
-import OpsAudit from "./pages/OpsAudit";
-import OpsBackups from "./pages/OpsBackups";
-import Settings from "./pages/Settings";
-import Help from "./pages/Help";
-import ModelEditor from "./pages/ModelEditor";
-import Scenarios from "./pages/Scenarios";
-import NavigationHub from "./pages/NavigationHub";
-import { ImportWizard, SourcesPage } from "./pages/Sources";
-import Predictors from "./pages/Predictors";
 import NotFound from "./pages/NotFound";
 import { currentLocationParam, getToken } from "./api/client";
+
+// Each page is its own chunk, fetched when first opened: the first screen does not wait for
+// Blockly, the graph and map libraries, or any page the visit never reaches.
+const Workbench = lazy(() => import("./pages/Workbench"));
+const EntityList = lazy(() => import("./pages/EntityList"));
+const EntityDetail = lazy(() => import("./pages/EntityDetail"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const FieldPlan = lazy(() => import("./pages/FieldPlan"));
+const People = lazy(() => import("./pages/People"));
+const StartProblem = lazy(() => import("./pages/StartProblem"));
+const CampList = lazy(() => import("./pages/CampList"));
+const CampEditor = lazy(() => import("./pages/CampEditor"));
+const CampRedirect = lazy(() => import("./pages/CampEditor").then((m) => ({ default: m.CampRedirect })));
+const MapData = lazy(() => import("./pages/MapData"));
+const MapImport = lazy(() => import("./pages/MapImport"));
+const MapView = lazy(() => import("./pages/MapView"));
+const DomainOverview = lazy(() => import("./pages/PlanningOverview").then((m) => ({ default: m.DomainOverview })));
+const ProblemOverview = lazy(() => import("./pages/PlanningOverview").then((m) => ({ default: m.ProblemOverview })));
+const GraphDemo = lazy(() => import("./pages/GraphDemo"));
+const EntityTypes = lazy(() => import("./pages/EntityTypes"));
+const EntityTypeDetail = lazy(() => import("./pages/EntityTypeDetail"));
+const RelationshipTypes = lazy(() => import("./pages/RelationshipTypes"));
+const RelationshipTypeDetail = lazy(() => import("./pages/RelationshipTypeDetail"));
+const Relationships = lazy(() => import("./pages/Relationships"));
+const Entities = lazy(() => import("./pages/Entities"));
+const EntityRecord = lazy(() => import("./pages/EntityRecord"));
+const Parameters = lazy(() => import("./pages/Parameters"));
+const ModelVersions = lazy(() => import("./pages/ModelVersions"));
+const Runs = lazy(() => import("./pages/Runs"));
+const Workspace = lazy(() => import("./pages/Workspace"));
+const ApiKeys = lazy(() => import("./pages/ApiKeys"));
+const Solvers = lazy(() => import("./pages/Solvers"));
+const OpsQueue = lazy(() => import("./pages/OpsQueue"));
+const OpsAudit = lazy(() => import("./pages/OpsAudit"));
+const OpsBackups = lazy(() => import("./pages/OpsBackups"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Help = lazy(() => import("./pages/Help"));
+const ModelEditor = lazy(() => import("./pages/ModelEditor"));
+const Scenarios = lazy(() => import("./pages/Scenarios"));
+const NavigationHub = lazy(() => import("./pages/NavigationHub"));
+const ImportWizard = lazy(() => import("./pages/Sources").then((m) => ({ default: m.ImportWizard })));
+const SourcesPage = lazy(() => import("./pages/Sources").then((m) => ({ default: m.SourcesPage })));
+const Predictors = lazy(() => import("./pages/Predictors"));
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const location = useLocation();
@@ -78,6 +84,7 @@ export default function App() {
     };
   }, [queryClient]);
   return (
+    <Suspense fallback={<PageLoading />}>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/health" element={<Health />} />
@@ -106,7 +113,7 @@ export default function App() {
           <Route path="data/predictors" element={<Predictors />} />
           <Route path="data/sources" element={<SourcesPage />} />
           <Route path="data/sources/:connectionId/jobs/:jobId/import" element={<ImportWizard />} />
-          <Route path="data/workbench" element={<Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}><Workbench /></Suspense>} />
+          <Route path="data/workbench" element={<Workbench />} />
           <Route path="data/records" element={<Entities />} />
           <Route path="data/records/new" element={<EntityRecord />} />
           <Route path="data/records/:id" element={<EntityRecord />} />
@@ -190,5 +197,6 @@ export default function App() {
         </Route>
       </Route>
     </Routes>
+    </Suspense>
   );
 }

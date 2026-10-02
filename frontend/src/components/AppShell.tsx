@@ -1,4 +1,5 @@
-import { MouseEvent, useEffect, useRef, useState } from "react";
+import { MouseEvent, useEffect, useRef, useState, Suspense } from "react";
+import PageLoading from "./PageLoading";
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Activity, Archive, Bell, BookOpen, Boxes, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Database, FileStack, FlaskConical, FolderTree,
@@ -698,7 +699,10 @@ function AppShellContent() {
         // specifically to stay outside this containing block.)
         className="min-h-0 min-w-0 flex-1 overflow-y-auto contain-layout bg-slate-50 px-shell py-shell-lg focus:outline-none sm:px-shell-lg"
       >
-        <Outlet />
+        {/* Pages load as they are opened (App.tsx): the shell and its menu stay while one does. */}
+        <Suspense fallback={<PageLoading />}>
+          <Outlet />
+        </Suspense>
       </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} can={can} />

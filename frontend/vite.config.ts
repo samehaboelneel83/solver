@@ -1,8 +1,37 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+/** Large libraries in chunks of their own: cached across deploys of the app's own code, and fetched
+ * only by the pages that use them (the model editor's blocks, the graph, the flow and rule views). */
+const LIBRARY_CHUNKS: [RegExp, string][] = [
+  [/node_modules\/blockly\//, "blockly"],
+  [/node_modules\/(cytoscape|cytoscape-[\w-]+|elkjs)\//, "graph"],
+  [/node_modules\/(rete|rete-[\w-]+|styled-components)\//, "rete"],
+  [/node_modules\/@xyflow\//, "flow"],
+  [/node_modules\/framer-motion\//, "motion"],
+  [/node_modules\/react-querybuilder\//, "querybuilder"],
+  [/node_modules\/lucide-react\//, "icons"],
+  [/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run|@tanstack)\//, "react"],
+];
+
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // The two chunks over 500 kB are libraries fetched only by their pages (the graph's layout engine,
+    // Blockly), never by the first screen; the warning is kept for anything larger than those.
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          for (const [pattern, name] of LIBRARY_CHUNKS) if (pattern.test(id)) return name;
+          return undefined;
+        },
+      },
+    },
+  },
+  preview: {
+    proxy: { "/api/": "http://localhost:8010" },
+  },
   server: {
     proxy: {
       // "/api/", not "/api": a page such as /api-keys is the app's, not the server's (operator trial F15).

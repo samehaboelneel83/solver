@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatApiError } from "../api/errors";
 import { getEntity, updateEntity, type Id } from "../api/v1";
 import {
+  usePlace,
   useProblems,
   useWorkbenchSchema,
   useWorkbenchSearch,
@@ -30,7 +31,7 @@ function storedView(): View {
 }
 
 /** The tree branches to open so a record found by search is in view. */
-export function pathNodes(hit: Pick<SearchHit, "path" | "entity_type_id">, roots: Id[]): string[] {
+export function pathNodes(hit: Pick<SearchHit, "path">, roots: Id[]): string[] {
   const nodes = roots.map(rootNode);
   for (const step of hit.path) nodes.push(recordNode(step.id), groupNode(step.child_group, step.id));
   return nodes;
@@ -128,6 +129,12 @@ export default function Workbench() {
     if (roots) setExpanded((now) => new Set([...now, ...roots.map(rootNode)]));
   }, [roots]);
   // With nothing chosen, the first root kind is: never an empty page.
+  // A record opened from a link: open the branches above it, so the tree shows where it is.
+  const opened = usePlace(domainId, selectedRecord);
+  const openedPath = opened.data?.path;
+  useEffect(() => {
+    if (openedPath && roots) setExpanded((now) => new Set([...now, ...pathNodes({ path: openedPath }, roots)]));
+  }, [openedPath, roots]);
   const nothingChosen = selectedRecord == null && selectedRoot == null;
   useEffect(() => {
     if (nothingChosen && roots?.length) setParams({ kind: String(roots[0]) }, { replace: true });

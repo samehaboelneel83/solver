@@ -108,6 +108,8 @@ export type Place = {
   kind_id: Id;
   group: string;
   parent: { id: Id; key: string; label: string | null; entity_type_id: Id } | null;
+  /** Every record above, top first, each with the group its child is listed in. */
+  path: PathStep[];
 };
 
 /** Where a record sits: the list its siblings are in. */

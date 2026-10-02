@@ -104,6 +104,7 @@ def test_a_record_s_place_is_the_list_its_siblings_are_in(auth_headers, world): 
     d, ids, k = world["domain"], world["ids"], world["kinds"]
     placed = _get(f"/api/v1/domains/{d}/workbench/place", auth_headers, entity=ids["T3"])
     assert placed["parent"]["key"] == "D2" and placed["group"].startswith("ref:")
+    assert [p["key"] for p in placed["path"]] == ["egypt", "cairo", "D2"]
     top = _get(f"/api/v1/domains/{d}/workbench/place", auth_headers, entity=ids["mona"])
     assert top["parent"] is None and top["group"] == f"root:{k['staff']}"
 

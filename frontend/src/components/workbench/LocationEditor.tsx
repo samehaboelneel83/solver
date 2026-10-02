@@ -74,9 +74,13 @@ export default function LocationEditor({
   // The first view frames the record (or its surroundings) once the map's origin is known.
   const framed = useMemo(() => {
     if (!origin) return null;
-    const shapes = stored ? [stored] : context;
-    const rings = shapes.map((g) => positionsOf(g).map((p) => toLocal(p, origin)));
-    return fitRings(rings.length ? rings : [[[-200, -200], [200, 200]]], 520, HEIGHT) ?? { cx: 0, cy: 0, mpp: 2 };
+    // The record and what is around it, and never less than 400 m across: a lone point is not a 1 m map.
+    const points = [...(stored ? [stored] : []), ...context].flatMap(positionsOf).map((p) => toLocal(p, origin));
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
+    const [cx, cy] = points.length ? [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2] : [0, 0];
+    const half = Math.max(200, ...xs.map((x) => Math.abs(x - cx)), ...ys.map((y) => Math.abs(y - cy)));
+    return fitRings([[[cx - half, cy - half], [cx + half, cy + half]]], 520, HEIGHT) ?? { cx: 0, cy: 0, mpp: 2 };
   }, [origin, stored, context]);
   const shownView = view ?? framed;
 

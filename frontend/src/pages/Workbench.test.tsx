@@ -58,7 +58,10 @@ function serve(path: string) {
       ? { parent: 20, groups: [{ group: "ref:10", kind_id: 2, kind: "depot", field: "region", via: "reference", required: true, count: 1 }] }
       : { parent: Number(q.get("parent")), groups: [] };
   if (p.endsWith("/workbench/place"))
-    return { entity: 21, kind_id: 2, group: "ref:10", parent: { id: 20, key: "egypt", label: "Egypt", entity_type_id: 1 } };
+    return q.get("entity") === "21"
+      ? { entity: 21, kind_id: 2, group: "ref:10", parent: { id: 20, key: "egypt", label: "Egypt", entity_type_id: 1 },
+          path: [{ id: 20, key: "egypt", label: "Egypt", entity_type_id: 1, child_group: "ref:10" }] }
+      : { entity: Number(q.get("entity")), kind_id: 1, group: "root:1", parent: null, path: [] };
   if (p.endsWith("/workbench/search")) return { items: [] };
   const type = p.match(/^\/api\/v1\/entity-types\/(\d+)$/);
   if (type) return TYPES[Number(type[1])];
@@ -113,8 +116,9 @@ describe("Data workbench", () => {
     expect(screen.getByLabelText("Selected record")).toHaveTextContent("Egypt");
   });
 
-  it("shows a record nothing can sit under among the records beside it", async () => {
+  it("shows a record nothing can sit under among the records beside it, its branch open in the tree", async () => {
     renderAt("?record=21");
+    expect(await screen.findByRole("button", { name: "Collapse egypt" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "depot under Egypt" })).toBeInTheDocument();
     expect(screen.getByText(/Nothing sits under a depot/)).toBeInTheDocument();
   });

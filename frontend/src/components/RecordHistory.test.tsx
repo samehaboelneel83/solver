@@ -38,7 +38,7 @@ describe("RecordHistory", () => {
     expect(latest).toHaveTextContent("Changed");
     expect(latest).toHaveTextContent("mona");
     expect(within(latest).getByRole("rowheader", { name: "depot" }).nextSibling).toHaveTextContent("D3→ became D7");
-    expect(latest).toHaveTextContent("a Point");
+    expect(latest).toHaveTextContent("—→ became 2.00000, 1.00000");
     expect(first).toHaveTextContent("Created");
     expect(first).toHaveTextContent("the system");
     expect(mockFetch).toHaveBeenCalledWith("/api/v1/entities/21/history?limit=20");

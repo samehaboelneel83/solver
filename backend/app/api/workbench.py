@@ -263,7 +263,7 @@ def place(domain_id: int, entity: int, db: Session = Depends(get_db), _: UserAcc
         raise HTTPException(404, "entity not found")
     above = path_above(db, domain_id, entity)
     if not above:
-        return {"entity": entity, "kind_id": kind, "parent": None, "group": f"root:{kind}"}
+        return {"entity": entity, "kind_id": kind, "parent": None, "group": f"root:{kind}", "path": []}
     parent = above[-1]
-    return {"entity": entity, "kind_id": kind, "group": parent["child_group"],
+    return {"entity": entity, "kind_id": kind, "group": parent["child_group"], "path": above,
             "parent": {k: parent[k] for k in ("id", "key", "label", "entity_type_id")}}

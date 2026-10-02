@@ -177,7 +177,7 @@ export default function DetailPane({
           Open on its own page
         </Link>
       </header>
-      <div role="tablist" aria-label="About this record" className="flex gap-1 border-b border-slate-200">
+      <div role="tablist" aria-label="About this record" className="flex flex-wrap gap-x-1 border-b border-slate-200">
         {tabs.map(([key, label]) => (
           <button
             key={key}
@@ -185,7 +185,7 @@ export default function DetailPane({
             type="button"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`rounded-t-md border-b-2 px-3 py-1.5 text-sm ${
+            className={`rounded-t-md border-b-2 px-2 py-1.5 text-sm ${
               tab === key ? "border-blue-600 font-medium text-blue-800" : "border-transparent text-slate-600"
             } ${key === "problems" && problems.length ? "text-amber-700" : ""}`}
           >

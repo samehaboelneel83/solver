@@ -21,9 +21,13 @@ function when(at: string): string {
   return Number.isNaN(d.getTime()) ? at : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** A value as the form shows it; a shape is named, not printed. */
+/** A value as the form shows it; a point by where it is, any other shape by what it is. */
 function shown(value: unknown): string {
-  if (value && typeof value === "object" && "type" in (value as object)) return `a ${(value as { type: string }).type}`;
+  const shape = value as { type?: string; coordinates?: number[] } | null;
+  if (shape && typeof shape === "object" && shape.type === "Point" && Array.isArray(shape.coordinates)) {
+    return `${shape.coordinates[1].toFixed(5)}, ${shape.coordinates[0].toFixed(5)}`;
+  }
+  if (shape && typeof shape === "object" && "type" in shape) return `a ${shape.type}`;
   return formatAttrValue(value);
 }
 
