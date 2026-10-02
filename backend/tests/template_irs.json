@@ -860,6 +860,538 @@
   },
   "version": 1
  },
+ "heatwave_cooling": {
+  "constraints": [
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "zone"
+     }
+    ],
+    "id": "covered_needs_open",
+    "left": {
+     "index": [
+      "p"
+     ],
+     "var": "covered"
+    },
+    "note": "a zone counts as covered only with an open site within reach",
+    "relation": "<=",
+    "right": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "index": [
+         "p",
+         "s"
+        ],
+        "par": "covers"
+       },
+       {
+        "index": [
+         "s"
+        ],
+        "var": "open"
+       }
+      ]
+     }
+    },
+    "severity": "hard"
+   },
+   {
+    "id": "budget",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site"
+      }
+     ],
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "name": "cost_egp_day",
+         "of": "s"
+        }
+       },
+       {
+        "index": [
+         "s"
+        ],
+        "var": "open"
+       }
+      ]
+     }
+    },
+    "note": "the open sites cost at most 60000 a day",
+    "relation": "<=",
+    "right": {
+     "const": 60000
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "zone"
+     }
+    ],
+    "id": "seats_for_covered",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site"
+      }
+     ],
+     "sum": {
+      "index": [
+       "p",
+       "s"
+      ],
+      "var": "seated"
+     }
+    },
+    "note": "a covered zone has seats for 5% of its over-65s",
+    "relation": ">=",
+    "right": {
+     "mul": [
+      {
+       "mul": [
+        {
+         "mul": [
+          {
+           "attr": {
+            "name": "population",
+            "of": "p"
+           }
+          },
+          {
+           "attr": {
+            "name": "share_over65",
+            "of": "p"
+           }
+          }
+         ]
+        },
+        {
+         "const": 0.05
+        }
+       ]
+      },
+      {
+       "index": [
+        "p"
+       ],
+       "var": "covered"
+      }
+     ]
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "p",
+      "set": "zone"
+     },
+     {
+      "index": "s",
+      "set": "site"
+     }
+    ],
+    "id": "seats_within_reach",
+    "left": {
+     "index": [
+      "p",
+      "s"
+     ],
+     "var": "seated"
+    },
+    "note": "people are seated only at sites within reach",
+    "relation": "<=",
+    "right": {
+     "mul": [
+      {
+       "mul": [
+        {
+         "mul": [
+          {
+           "attr": {
+            "name": "population",
+            "of": "p"
+           }
+          },
+          {
+           "attr": {
+            "name": "share_over65",
+            "of": "p"
+           }
+          }
+         ]
+        },
+        {
+         "const": 0.05
+        }
+       ]
+      },
+      {
+       "index": [
+        "p",
+        "s"
+       ],
+       "par": "covers"
+      }
+     ]
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "site"
+     }
+    ],
+    "id": "seats_capacity",
+    "left": {
+     "over": [
+      {
+       "index": "p",
+       "set": "zone"
+      }
+     ],
+     "sum": {
+      "index": [
+       "p",
+       "s"
+      ],
+      "var": "seated"
+     }
+    },
+    "note": "an open site seats at most its seats, a closed one none",
+    "relation": "<=",
+    "right": {
+     "mul": [
+      {
+       "attr": {
+        "name": "seats",
+        "of": "s"
+       }
+      },
+      {
+       "index": [
+        "s"
+       ],
+       "var": "open"
+      }
+     ]
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "site"
+     }
+    ],
+    "id": "one_per_open_site",
+    "left": {
+     "over": [
+      {
+       "index": "t",
+       "set": "medical_team"
+      }
+     ],
+     "sum": {
+      "index": [
+       "t",
+       "s"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "each open site has one medical team, a closed one none",
+    "relation": "=",
+    "right": {
+     "index": [
+      "s"
+     ],
+     "var": "open"
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "t",
+      "set": "medical_team"
+     }
+    ],
+    "id": "staff_capacity",
+    "left": {
+     "over": [
+      {
+       "index": "s",
+       "set": "site"
+      }
+     ],
+     "sum": {
+      "index": [
+       "t",
+       "s"
+      ],
+      "var": "assign"
+     }
+    },
+    "note": "a medical team serves at most its max centres",
+    "relation": "<=",
+    "right": {
+     "attr": {
+      "name": "max_centres",
+      "of": "t"
+     }
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "t",
+      "set": "medical_team"
+     },
+     {
+      "index": "s",
+      "set": "site"
+     }
+    ],
+    "id": "staff_reach",
+    "left": {
+     "index": [
+      "t",
+      "s"
+     ],
+     "var": "assign"
+    },
+    "note": "a medical team serves only sites its base hospital reaches",
+    "relation": "<=",
+    "right": {
+     "over": [
+      {
+       "index": "h",
+       "set": "hospital",
+       "via": {
+        "from": "t",
+        "rel": "base_hospital"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "h",
+       "s"
+      ],
+      "par": "hosp_reach"
+     }
+    },
+    "severity": "hard"
+   },
+   {
+    "forall": [
+     {
+      "index": "s",
+      "set": "site",
+      "where": [
+       {
+        "attr": "has_generator",
+        "op": "=",
+        "value": false
+       }
+      ]
+     }
+    ],
+    "id": "avoid_outage_area",
+    "left": {
+     "over": [
+      {
+       "index": "a",
+       "set": "outage_area",
+       "via": {
+        "from": "s",
+        "rel": "in_outage_area"
+       }
+      }
+     ],
+     "sum": {
+      "index": [
+       "s"
+      ],
+      "var": "open"
+     }
+    },
+    "note": "no site in an outage area is opened unless it has a generator",
+    "relation": "<=",
+    "right": {
+     "const": 0
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "mode": "lex",
+   "sense": "maximize",
+   "terms": [
+    {
+     "expression": {
+      "over": [
+       {
+        "index": "p",
+        "set": "zone"
+       }
+      ],
+      "sum": {
+       "mul": [
+        {
+         "mul": [
+          {
+           "mul": [
+            {
+             "attr": {
+              "name": "population",
+              "of": "p"
+             }
+            },
+            {
+             "attr": {
+              "name": "vulnerability",
+              "of": "p"
+             }
+            }
+           ]
+          },
+          {
+           "attr": {
+            "name": "share_over65",
+            "of": "p"
+           }
+          }
+         ]
+        },
+        {
+         "index": [
+          "p"
+         ],
+         "var": "covered"
+        }
+       ]
+      }
+     },
+     "id": "covered_worth",
+     "weight": 1
+    },
+    {
+     "expression": {
+      "mul": [
+       {
+        "const": -1
+       },
+       {
+        "over": [
+         {
+          "index": "s",
+          "set": "site"
+         }
+        ],
+        "sum": {
+         "mul": [
+          {
+           "attr": {
+            "name": "cost_egp_day",
+            "of": "s"
+           }
+          },
+          {
+           "index": [
+            "s"
+           ],
+           "var": "open"
+          }
+         ]
+        }
+       }
+      ]
+     },
+     "id": "cost",
+     "weight": 1
+    }
+   ]
+  },
+  "parameters": {
+   "covers": {
+    "index": [
+     "zone",
+     "site"
+    ]
+   },
+   "hosp_reach": {
+    "index": [
+     "hospital",
+     "site"
+    ]
+   }
+  },
+  "relationships": [
+   "base_hospital",
+   "in_outage_area"
+  ],
+  "sets": [
+   "site",
+   "zone",
+   "hospital",
+   "medical_team",
+   "outage_area"
+  ],
+  "variables": {
+   "assign": {
+    "domain": "binary",
+    "index": [
+     "medical_team",
+     "site"
+    ]
+   },
+   "covered": {
+    "domain": "binary",
+    "index": [
+     "zone"
+    ]
+   },
+   "open": {
+    "domain": "binary",
+    "index": [
+     "site"
+    ]
+   },
+   "seated": {
+    "domain": "continuous",
+    "index": [
+     "zone",
+     "site"
+    ],
+    "lower": 0
+   }
+  },
+  "version": 2
+ },
  "load_balance": {
   "constraints": [
    {

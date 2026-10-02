@@ -68,6 +68,21 @@ describe("start a problem", () => {
       expect.objectContaining({ body: JSON.stringify({ domain_id: 7, name: "Pig feed" }) }));
   });
 
+  it("opens an example in a workspace of its own when this one already has records", async () => {
+    const served = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path, options) => {
+      if (path.startsWith("/api/v1/entity-types")) return { items: [{ id: 1, name: "hospital" }], total: 1 };
+      if (path === "/api/v1/templates/3/apply") return { problem_id: 32, domain_id: 9, template_id: 3, model_version_id: 1, scenario_id: 1 };
+      return served(path, options);
+    });
+    mount();
+    expect(await screen.findByText(/opens in a new workspace named after it/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("heading", { name: "Cheapest feed blend" }).closest("li")!).getByRole("button", { name: "Use this example" }));
+    expect(await screen.findByText("problem 32")).toBeInTheDocument();
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith("/api/v1/templates/3/apply",
+      expect.objectContaining({ body: JSON.stringify({ domain_name: "Cheapest feed blend", name: "Cheapest feed blend" }) }));
+  });
+
   it("starts from scratch once it has a name", async () => {
     mount();
     fireEvent.click(screen.getByRole("radio", { name: /From scratch/ }));

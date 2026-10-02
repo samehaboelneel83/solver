@@ -830,8 +830,9 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
 
 
 def _measure(db: Session, domain_id: int, seed: dict[str, Any], types: dict[str, EntityType]) -> None:
-    """A seed's `distances` ({name, from, to, unit?, nearest?}) and `within` ({name, from, to, max_m}),
-    computed as `POST .../distances` and `.../within` do. A name the domain already has is left alone,
+    """A seed's `distances` ({name, from, to, unit?, nearest?}), `within` ({name, from, to, max_m,
+    output?: "parameter" for 0/1 data}) and `inside` ({name, from, to}), computed as `POST .../distances`,
+    `.../within` and `.../spatial/inside` do. A name the domain already has is left alone,
     as every other name in a seed is."""
     from app.api.distances import DistanceRequest, WithinRequest, write_distances, write_within
 
@@ -850,9 +851,22 @@ def _measure(db: Session, domain_id: int, seed: dict[str, Any], types: dict[str,
         if db.execute(select(RelationshipType.id).where(RelationshipType.domain_id == domain_id,
                                                         RelationshipType.name == spec.get("name"))).scalar_one_or_none():
             continue
+        if spec.get("output") == "parameter" and db.execute(select(ParameterDef.id).where(
+                ParameterDef.domain_id == domain_id, ParameterDef.name == spec.get("name"))).scalar_one_or_none():
+            continue
         write_within(db, domain_id, WithinRequest(
             name=spec["name"], from_type_id=types[spec["from"]].id, to_type_id=types[spec["to"]].id,
-            max_m=spec["max_m"]), commit=False)
+            max_m=spec["max_m"], output=spec.get("output", "relationship")), commit=False)
+    # Which area each place lies in: a link a rule walks (`inside`, as POST .../spatial/inside makes).
+    from app.api.spatial_ops import Pair, write_inside
+
+    for spec in seed.get("inside") or []:
+        if not isinstance(spec, dict) or spec.get("from") not in types or spec.get("to") not in types:
+            continue
+        if db.execute(select(RelationshipType.id).where(RelationshipType.domain_id == domain_id,
+                                                        RelationshipType.name == spec.get("name"))).scalar_one_or_none():
+            continue
+        write_inside(db, domain_id, Pair(name=spec["name"], from_type_id=types[spec["from"]].id, to_type_id=types[spec["to"]].id))
 
 
 def _plant_grid(db: Session, domain_id: int, spec: Any, entities: dict[tuple[str, str], Entity]) -> None:

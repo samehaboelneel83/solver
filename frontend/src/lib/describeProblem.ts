@@ -9,6 +9,8 @@ export type Suggestion = { kind: "example" | "tool"; key: string; title: string;
 type Signal = { words: RegExp; key: string; title: string; where: string; kind: "example" | "tool" };
 
 const SIGNALS: Signal[] = [
+  { kind: "example", key: "heatwave_cooling", title: "Cooling centres in a heatwave", where: "Start a problem → From a ready example",
+    words: /\b(heat\w*|cool\w*|shelter\w*|seat\w*|vulnerab\w*|elderly|older|over-?65s?|outage\w*|generator\w*|power cut\w*)\b/gi },
   { kind: "example", key: "emergency_coverage", title: "Cover places at risk", where: "Start a problem → From a ready example",
     words: /\b(risk|emergenc\w*|respon\w*|ambulance\w*|fire|flood\w*|hotspot\w*|backup|critical|incident\w*)\b/gi },
   { kind: "example", key: "facility_coverage", title: "Where to open sites", where: "Start a problem → From a ready example",

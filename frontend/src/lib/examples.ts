@@ -34,6 +34,10 @@ export const EXAMPLES: Record<string, ExampleWords> = {
     title: "Cover places at risk",
     says: "Choose where to keep response units so places at risk are within reach on the map, the critical ones twice, most risk first and then the least cost.",
   },
+  heatwave_cooling: {
+    title: "Cooling centres in a heatwave",
+    says: "Open cooling centres from the map so vulnerable older people find a seat within reach, each with a medical team, none in a power-cut area without a generator, within a daily budget.",
+  },
   cairo_university_lectures: {
     title: "Lecture timetable",
     says: "Put university sections into days, times and rooms with no clashes, keeping to room sizes and preferring mornings.",

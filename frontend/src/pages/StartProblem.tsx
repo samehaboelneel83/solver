@@ -17,6 +17,7 @@ import {
   importSpreadsheet,
   proposeSpreadsheet,
   useApplyTemplate,
+  useEntityTypes,
   useTemplates,
   type AttrType,
   type Id,
@@ -72,7 +73,7 @@ function Start({ domainId }: { domainId: Id }) {
   const [way, setWay] = useState<Way>("example");
   const [name, setName] = useState("");
   const navigate = useNavigate();
-  const land = (problemId: Id) => navigate(`/domains/${domainId}/problems/${problemId}`);
+  const land = (problemId: Id, inDomain: Id = domainId) => navigate(`/domains/${inDomain}/problems/${problemId}`);
   const ways: [Way, string, string][] = [
     ["example", "From a ready example", "A working problem with its data and model, to solve at once and change."],
     ["sheet", "From a spreadsheet", "Your own data from Excel or CSV: each sheet becomes a kind of record."],
@@ -150,8 +151,13 @@ function Problems({ items }: { items: string[] }) {
   );
 }
 
-function FromExample({ domainId, name, onMade }: { domainId: Id; name: string; onMade: (id: Id) => void }) {
+function FromExample({ domainId, name, onMade }: { domainId: Id; name: string; onMade: (id: Id, domainId?: Id) => void }) {
   const templates = useTemplates();
+  // An example brings its own records; put into a workspace that has some, its kinds would mix with
+  // them (user trial: a hospital kind with the workspace's four and the example's four). It gets a
+  // workspace of its own then.
+  const kinds = useEntityTypes(domainId, { limit: 1 });
+  const ownWorkspace = (kinds.data?.total ?? 0) > 0;
   const apply = useApplyTemplate();
   const { can } = useCapabilities();
   const [problems, setProblems] = useState<string[]>([]);
@@ -161,6 +167,7 @@ function FromExample({ domainId, name, onMade }: { domainId: Id; name: string; o
   return (
     <section aria-label="Ready examples" className="space-y-3">
       {!can("model.publish") && <p className="text-sm text-amber-800">An example comes with a model; this account may not publish one.</p>}
+      {ownWorkspace && <p className="text-sm text-slate-600">This workspace has data of its own, so an example opens in a new workspace named after it.</p>}
       <ul className="grid gap-3 md:grid-cols-2">
         {items.map((row) => {
           const words = exampleWords(row.name);
@@ -171,8 +178,10 @@ function FromExample({ domainId, name, onMade }: { domainId: Id; name: string; o
               <button type="button" className={`${PRIMARY} mt-3`} disabled={apply.isPending || !can("model.publish")}
                 onClick={() => {
                   setProblems([]);
-                  apply.mutate({ id: row.id, body: { domain_id: domainId, name: name.trim() || words.title } }, {
-                    onSuccess: (made) => onMade(made.problem_id),
+                  const body = ownWorkspace ? { domain_name: words.title, name: name.trim() || words.title }
+                    : { domain_id: domainId, name: name.trim() || words.title };
+                  apply.mutate({ id: row.id, body }, {
+                    onSuccess: (made) => onMade(made.problem_id, made.domain_id),
                     onError: (error) => setProblems([formatApiError(error)]),
                   });
                 }}>

@@ -109,6 +109,13 @@ def _links(db: Session, rel: RelationshipType, rows: list[tuple[int, int, dict[s
 def make_inside(domain_id: int, body: Pair, db: Session = Depends(get_db),
                 _: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
     """Each place linked to the area it lies in (many to one): a rule walks it as `via name`."""
+    found = write_inside(db, domain_id, body)
+    db.commit()
+    return found
+
+
+def write_inside(db: Session, domain_id: int, body: Pair) -> dict[str, Any]:
+    """`make_inside` without the commit: a template's seed links its places too."""
     places_type = _type(db, domain_id, body.from_type_id, "from_type_id")
     areas_type = _type(db, domain_id, body.to_type_id, "to_type_id")
     places, missing_p = _shapes(db, places_type)
@@ -119,7 +126,7 @@ def make_inside(domain_id: int, body: Pair, db: Session = Depends(get_db),
               **({"missing": (missing_p + missing_a)[:200]} if missing_p or missing_a else {}), "computed_at": _now()}
     rel = _relationship(db, domain_id, body.name, places_type, areas_type, "many_to_one", source, {})
     _links(db, rel, [(a, b, {}) for a, b in pairs])
-    db.commit()
+    db.flush()
     return {"relationship_type_id": rel.id, "links": len(pairs), "outside": outside[:200],
             "missing": (missing_p + missing_a)[:200], "source": source}
 

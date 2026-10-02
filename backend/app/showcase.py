@@ -55,6 +55,9 @@ from sqlalchemy.orm import Session
 from app.models.v1_problem import Template
 from app.facilities import FACILITY_COVERAGE
 from app.emergency_coverage import EMERGENCY_COVERAGE
+from app.heatwave import HEATWAVE_COOLING
+from app.heatwave import build_ir as heatwave_ir
+from app.heatwave import build_seed as heatwave_seed
 from app.emergency_coverage import build_ir as emergency_ir
 from app.emergency_coverage import build_seed as emergency_seed
 from app.facilities import build_ir as facility_ir
@@ -297,6 +300,7 @@ SHOWCASE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     FACILITY_COVERAGE: (facility_seed(), facility_ir()),
     CAIRO_UNIVERSITY_LECTURES: (lectures_seed(), lectures_ir()),
     EMERGENCY_COVERAGE: (emergency_seed(), emergency_ir()),
+    HEATWAVE_COOLING: (heatwave_seed(), heatwave_ir()),
 }
 
 
