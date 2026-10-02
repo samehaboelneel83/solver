@@ -59,6 +59,32 @@ def _finding(kind: str, code: str, says: str, **extra: Any) -> dict[str, Any]:
     return {"kind": kind, "code": code, "says": says, **extra}
 
 
+#: How many places an empty-range finding names before "and N more".
+_NAMED = 5
+
+
+def empty_range_findings(empties: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One finding per rule and kind of range, however many of its instances matched nobody: a rule
+    filtered to the few sites inside an outage area matches nobody at every other site, and fifteen
+    lines saying so hide everything else. `detail` is the first instance, `instances` all of them."""
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for empty in empties:
+        grouped.setdefault((str(empty.get("constraint_id", "A rule")), str(empty.get("kind", "range"))), []).append(empty)
+    out = []
+    for (rule, kind), items in grouped.items():
+        places = [", ".join(f"{k} = {v}" for k, v in (e.get("index") or {}).items()) for e in items]
+        places = [p for p in places if p]
+        if len(items) == 1:
+            where = f" (at {places[0]})" if places else ""
+            says = f"{rule} has a {kind} that matches nobody{where}: it holds vacuously or counts as zero, often a data gap."
+        else:
+            named = "; ".join(places[:_NAMED]) + (f"; and {len(places) - _NAMED} more" if len(places) > _NAMED else "")
+            says = (f"{rule} has a {kind} that matches nobody at {len(items)} places ({named}): there it holds vacuously "
+                    "or counts as zero. Expected when the rule only concerns some of them; otherwise a data gap.")
+        out.append(_finding("warning", "empty_range", says, detail=items[0], instances=len(items)))
+    return out
+
+
 _HOLDS = {"<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b, "=": lambda a, b: a == b}
 
 
@@ -218,12 +244,7 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
     except Exception as exc:  # pragma: no cover -- a compiler bug is still a finding, not a 500
         findings.append(_finding("blocker", "does_not_compile", f"The model could not be built: {exc}"))
 
-    for empty in (compiled.empty_ranges if compiled is not None else []):
-        where = ", ".join(f"{k} = {v}" for k, v in (empty.get("index") or {}).items())
-        findings.append(_finding("warning", "empty_range",
-                                 f"{empty.get('constraint_id', 'A rule')} has a {empty.get('kind', 'range')} that matches nobody"
-                                 f"{f' (at {where})' if where else ''}: it holds vacuously or counts as zero, often a data gap.",
-                                 detail=empty))
+    findings += empty_range_findings(compiled.empty_ranges if compiled is not None else [])
 
     # A hard rule that, on today's data, comes to numbers alone -- a sum that matched
     # nobody counts as 0, so "protein >= 20" reads 0 >= 20 -- and those numbers break it.

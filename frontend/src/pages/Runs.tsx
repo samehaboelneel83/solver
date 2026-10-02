@@ -1,3 +1,4 @@
+import EmptyRanges from "../components/EmptyRanges";
 import LoadFailure from "../components/LoadFailure";
 import { useEditorLevel } from "../model/editorLevel";
 import MissingValues from "../components/MissingValues";
@@ -1238,16 +1239,7 @@ function RunDetail({
           <p className="mb-2 text-sm text-slate-700">
             A rule that matches nobody never constrains anyone. Check the filter, or the data it ranges over.
           </p>
-          <ul className="space-y-1 text-sm text-slate-800">
-            {emptyRanges.map((item) => (
-              <li key={`${item.constraint_id}:${item.kind}:${Object.values(item.index).join(",")}`}>
-                <span className="font-mono">{item.constraint_id}</span>
-                {item.kind === "forall"
-                  ? " never applied to anyone"
-                  : ` counted nobody${emptyRangeWhere(item, data.labels)}`}
-              </li>
-            ))}
-          </ul>
+          <EmptyRanges items={emptyRanges} name={(key) => labelOf(key, data.labels)} />
         </section>
       )}
 
@@ -1355,16 +1347,11 @@ function PlanSummary({ said }: { said: PlanWords }) {
   );
 }
 
-function emptyRangeWhere(item: EmptyRange, labels: Run["labels"]): string {
-  const keys = Object.values(item.index);
-  if (keys.length === 0) return "";
-  const named = keys.map((key) => {
-    for (const table of Object.values(labels)) {
-      if (key in table) return table[key];
-    }
-    return key;
-  });
-  return ` at ${named.join(" · ")}`;
+function labelOf(key: string, labels: Run["labels"]): string {
+  for (const table of Object.values(labels)) {
+    if (key in table) return table[key];
+  }
+  return key;
 }
 
 function outcomeLead(data: Run): string | null {

@@ -137,3 +137,14 @@ def test_a_scenario_s_left_out_records_are_checked_before_solving(db, monkeypatc
     plain = {f["code"] for f in preflight.model_findings(db, 0, 0, ir)["findings"]}
     without = {f["code"] for f in preflight.model_findings(db, 0, 0, ir, {"remove": {"yard": ["Y1"]}})["findings"]}
     assert "set_empty" not in plain and "set_empty" in without
+
+
+def test_a_rule_empty_at_many_places_is_one_finding_naming_a_few():
+    from app.api.preflight import empty_range_findings
+
+    empties = [{"constraint_id": "no_outage", "kind": "sum", "index": {"s": f"S{i}"}} for i in range(1, 16)]
+    empties.append({"constraint_id": "cap", "kind": "forall", "index": {}})
+    found = empty_range_findings(empties)
+    assert [f["instances"] for f in found] == [15, 1]
+    assert "matches nobody at 15 places (s = S1; s = S2; s = S3; s = S4; s = S5; and 10 more)" in found[0]["says"]
+    assert found[1]["says"] == "cap has a forall that matches nobody: it holds vacuously or counts as zero, often a data gap."

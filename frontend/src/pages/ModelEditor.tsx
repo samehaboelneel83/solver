@@ -1,3 +1,4 @@
+import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -22,7 +23,6 @@ import {
   useVersion,
   useVersions,
   type ApplyTemplateResult,
-  type EmptyRange,
   type Id,
 } from "../api/v1";
 import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
@@ -112,12 +112,6 @@ import ProblemReadiness from "../components/ProblemReadiness";
 
 
 type Draft = FormDraft;
-
-function emptyRangeWhere(item: EmptyRange): string {
-  const keys = Object.values(item.index);
-  if (keys.length === 0) return "";
-  return ` at ${keys.join(" · ")}`;
-}
 
 export default function ModelEditor() {
   useDocumentTitle("Model editor");
@@ -991,16 +985,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             A rule that matches nobody never constrains anyone. Check the filter, or the data it ranges
             over.
           </p>
-          <ul className="space-y-1 text-sm text-slate-800">
-            {classification.data?.empty_ranges.map((item) => (
-              <li key={`${item.constraint_id}:${item.kind}:${Object.values(item.index).join(",")}`}>
-                <span className="font-mono">{item.constraint_id}</span>
-                {item.kind === "forall"
-                  ? " never applied to anyone"
-                  : ` counted nobody${emptyRangeWhere(item)}`}
-              </li>
-            ))}
-          </ul>
+          <EmptyRanges items={classification.data?.empty_ranges ?? []} />
         </aside>
       )}
 
