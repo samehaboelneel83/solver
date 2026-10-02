@@ -1,6 +1,6 @@
 # Five-problem benchmark — unified gap analysis and to-do plan
 
-**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** Phases 0–4 done; re-tested (§6)
+**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** Phases 0–4 and round-2 gaps done; re-tested twice (§6, §7)
 
 Five testers, each a new user with one hard real-world problem, worked only through the UI with no
 prepared workflow. Each brought synthetic tabular data (CSV/Excel) and GIS data (GeoJSON points,
@@ -382,4 +382,91 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
 - [x] Import preview repeated a sparse column's first value (P3): its different values, and how many rows are filled.
 - [x] Empty browser dialogs when leaving the model editor (P2): no prompt for a draft kept in the browser.
 - [x] A queued run named a solver it did not use (P2): "chosen when it starts".
+
+## 7. Round 3 (after the round-2 gaps)
+
+Five fresh testers, the same five problems, brief and rubric, on `baa63ba` (all of R2a–R2h done); each
+made its own data and workspace ("ROUND3 n — …"). Raw results: `/tmp/claude-0/bench3/<n>/result.json`
+and `notes.md` (not in the repository). No bug blocked any tester; every solve was proven optimal or
+within 0.2%.
+
+| Problem | Coverage R1 → R2 → R3 | Navigation/UX R1 → R2 → R3 |
+| --- | --- | --- |
+| 1. Emergency base and supply deployment | 82.8% → 89.1% → **90.6%** | 68.6% → 75.0% → **77.9%** |
+| 2. Ambulance and hospital network | 82.8% → 93.8% → **93.8%** | 67.9% → 79.3% → **80.0%** |
+| 3. City traffic and infrastructure | 85.9% → 89.1% → **90.6%** | 67.1% → 79.3% → **75.7%** |
+| 4. Precision irrigation and crop planning | 62.5% → 81.2% → **90.6%** | 56.4% → 70.0% → **81.0%** |
+| 5. National warehouse and distribution | 84.4% → 93.8% → **93.8%** | 67.1% → 79.3% → **77.9%** |
+| **Overall** | **79.7% → 89.4% → 91.9%** | **65.4% → 76.6% → 78.5%** |
+
+No point below Usable; every point Sufficient for at least one tester except 4 and 10.
+
+| # | Point | R1 | R2 | R3 | | # | Point | R1 | R2 | R3 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Understand the app | 75 | 100 | 100 | | 9 | Constraints | 85 | 85 | 95 |
+| 2 | Import data | 80 | 80 | **95** | | 10 | Verbal → equations | 75 | 70 | 75 |
+| 3 | Tabular + GIS | 90 | 95 | 100 | | 11 | Run optimization | 85 | 100 | 100 |
+| 4 | Explore | 75 | 85 | **75** | | 12 | Prediction / ML | 60 | 75 | 80 |
+| 5 | Relationships / joins | 85 | 80 | **90** | | 13 | What-if | 80 | 95 | 95 |
+| 6 | GIS layers | 80 | 95 | 85 | | 14 | Solution on the map | 70 | 85 | 95 |
+| 7 | Variables | 100 | 100 | 100 | | 15 | Understand the result | 70 | 100 | 95 |
+| 8 | Objectives | 85 | 90 | 90 | | 16 | Export / share | 80 | 95 | 100 |
+
+UX sub-scores, R2 → R3: orientation 88 → 89, finding features 75 → 77, wording 77 → 76, feedback
+74 → **81**, consistency 67 → 67, speed 71 → 74, results 84 → 85.
+
+### What held it back
+- **Point 10 (75, all five Usable).** The drafter now knows seven recipes but still reads data wrongly:
+  minutes of travel taken as 0/1 reach data (P2), "150000 kEGP" as 150 and "never chosen" as "always
+  chosen" (P3), coverage weighted by population when incidents were meant (P1), profit as price × area
+  without yield and cost (P4); the traffic recipe found no trips table in P3's data. Testers wrote
+  60–70% of each model by hand.
+- **Point 4 (75, all five).** No charts when exploring records, no map coloured by a field, no spatial
+  filter.
+- **Consistency (67).** The same HTTP 409 on draft saves (five of five), the analytics banner back
+  (four of five), weighted goals described by their unweighted values (P3, P4, P5).
+
+### Gaps found in round 3 (R3a–R3h)
+- [ ] **R3a Safe defaults (wrong answers labelled best).** The minimum-distance template fills in
+      10,000 km and shows "Complete" (P1); "Make these preferences" sets a penalty of 100, which gave a
+      plan opening nothing (P1). A default that changes the answer should be asked for, not guessed.
+- [ ] **R3b What-ifs on whole data values and reach.** Scaling a whole data value needs keys picked and
+      fails with "Choose data, its keys and a number" (P1); remaking "within" from scaled travel times
+      was not found (P1).
+- [ ] **R3c Import keeps key columns.** A key of several columns is not kept as fields (P3, P5): joins
+      on them and a "month" input to a forecast were lost. Join on the other table's key (P1).
+- [ ] **R3d Explore: charts and colour by field.** A histogram / bar chart of a field, and the map
+      coloured by a field (underserved districts, P2; flows by volume, P3).
+- [ ] **R3e Draft from words reads data and words better.** Units in the words (kEGP, mEGP), negation
+      ("never", "not"), 0/1 data vs. minutes, the weight the words name (incidents vs. population),
+      products of fields (yield × price − cost); the traffic recipe and its form link (P3).
+- [ ] **R3f Comparing fields of two kinds.** `salinity[p] <= tolerance[c]` as a 0/1 condition or a rule
+      over parcel × crop (P4); 0/1 data from a list field ("LOAM;CLAY", P4).
+- [ ] **R3g Goals in both directions.** A goal that is minimised inside a maximise model without a
+      negative weight, and a trade-off view (P4).
+- [ ] **R3h Features not found.** Earlier values as forecast inputs (P2: "cannot"), route rules (P5:
+      "under Expert" but not found), predictions per parcel × crop (P4).
+
+### Bugs from round 3
+- [ ] Draft saves return HTTP 409 (all five), with nothing shown; edits kept.
+- [ ] The analytics banner shows on every page again (P1, P2, P3, P5).
+- [ ] Discard in the model editor does not discard the saved draft (P1).
+- [ ] A scenario keeps describing a rule's old number after it is fixed (P1).
+- [ ] The goal breakdown shows a weighted goal's unweighted value (P4, P5); the PDF drops the weight.
+- [ ] Run headlines describe weighted goals wrongly ("the total of benefit and cost", P3).
+- [ ] Run compare reads in reverse and lists codes instead of names (P2, P5).
+- [ ] Link-by-code always says "20 not linked" (P3).
+- [ ] A rejected equation reverts to "0 <= 0", losing the typed text (P3).
+- [ ] A new goal opens in boxes with equations chosen; blank rules linger (P5).
+- [ ] A values upload silently took the first number column as the value (P5).
+- [ ] The links page undercounts ("500" for 1,584 links, P5).
+- [ ] Re-import says every row is new, then updates them all (P4).
+- [ ] "One yes/no field per value" fails above 12 values (HTTP 422, P4) and gives no feedback (P3).
+- [ ] A duplicate scenario name is a bare HTTP 409 (P4).
+- [ ] Link names must be unique across the workspace (P2).
+- [ ] Problem words carry over into a new problem in the same workspace (P3).
+- [ ] A stale "Camps" tab on a workspace's map data page (P2); the data-value grid cuts numbers (P2).
+- [ ] Record keys sort as text, 1, 10, 100 (P1).
+- [ ] Test harness: the brief puts `/tmp/claude-0` first on the import path, so one tester loaded
+      another's script; use a per-tester folder next round.
 
