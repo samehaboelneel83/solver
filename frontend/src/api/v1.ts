@@ -1399,8 +1399,10 @@ export type NetworkSource = {
   /** A line property that closes it, one of minutes added along it, a kind of areas no route enters (benchmark, October 2026). */
   closed_field?: string; delay_field?: string; avoid_type_id?: Id;
 };
-export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number; network?: NetworkSource };
-export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number; network?: NetworkSource; output?: "relationship" | "parameter" };
+/** Travel times per period (benchmark re-test, October 2026): each period names the lines' speed field, or scales every speed. */
+export type ByPeriod = { type_id: Id; speed_field_from?: string; factor_from?: string };
+export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number; network?: NetworkSource; by_period?: ByPeriod };
+export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number; network?: NetworkSource; output?: "relationship" | "parameter"; by_period?: ByPeriod };
 export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>
   send<{ parameter_id: Id; pairs: number; missing: string[]; source: ComputedSource }>(
     "POST", `/api/v1/domains/${domainId}/distances`, body);

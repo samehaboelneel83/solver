@@ -330,7 +330,9 @@ feedback 71 → 74, consistency 61 → 67, speed 59 → 71, results 66 → **84*
   (P2, P3, P5)
 - **R2d What-ifs that recompute map data** (done: a scenario that scales a distance or a travel time
   makes the "within" 0/1 data computed from it again, in its units -- `rederive` -- and a scaled data
-  value's default is now scaled too; per-period road speeds still to do): a scenario that scales travel times should recompute
+  value's default is now scaled too; travel times and "within" by period: each period of a kind names
+  the lines' speed field for it (`speed_am`), or a number scaling every speed (0.6 at the peak), and the
+  data is indexed [from, to, period]): a scenario that scales travel times should recompute
   the 0/1 "within 30 minutes" data, or let reach be written as `travel_min <= 30` over the scaled
   times; per-period road speeds. (P1)
 - **R2e Multi-product inventory and routing tied to location** (done: a stock recipe — how much of each

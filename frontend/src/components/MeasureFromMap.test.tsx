@@ -151,4 +151,19 @@ describe("computing distances from the map (queue R16a)", () => {
     const [, init] = fetchSpy.mock.calls.find(([u]) => String(u).endsWith("/distances")) as [string, RequestInit];
     expect(JSON.parse(init.body as string).network).toEqual({ dataset_id: 5, layer: "ROADS", closed_field: "flooded", delay_field: "delay_min", avoid_type_id: 9 });
   });
+
+  it("measures travel times for each period, each period's speeds scaled (benchmark re-test, October 2026)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ parameter_id: 4, pairs: 6, missing: [], source: {} }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    const slot = { ...shaped(3, "slot", false), role: "time", attributes: [{ id: 31, name: "factor", data_type: "number" }] } as unknown as EntityType;
+    renderForm([shaped(1, "site"), shaped(2, "customer"), slot]);
+    fireEvent.change(screen.getByLabelText("Measured"), { target: { value: "time" } });
+    fireEvent.change(screen.getByLabelText("By period (optional)"), { target: { value: "3" } });
+    expect(screen.getByLabelText("Each period's speeds")).toHaveValue("factor:factor");
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).by_period).toEqual({ type_id: 3, factor_from: "factor" });
+  });
 });

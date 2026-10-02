@@ -44,8 +44,9 @@ TOWN = {"type": "FeatureCollection", "features": [
     _f("SITES", _pt(30.035, 31.215), name="S3", risk=5),
     _f("CLINICS", _pt(30.0302, 31.2052), name="C1"),
     # One straight road along 31.201 at 60 km/h, then up the east side at 20 km/h.
-    _f("ROADS", {"type": "LineString", "coordinates": [[30.0, 31.201], [30.02, 31.201], [30.04, 31.201]]}, speed=60),
-    _f("ROADS", {"type": "LineString", "coordinates": [[30.04, 31.201], [30.04, 31.215]]}, speed=20),
+    _f("ROADS", {"type": "LineString", "coordinates": [[30.0, 31.201], [30.02, 31.201], [30.04, 31.201]]}, speed=60,
+       speed_am=30),
+    _f("ROADS", {"type": "LineString", "coordinates": [[30.04, 31.201], [30.04, 31.215]]}, speed=20, speed_am=10),
 ]}
 
 
@@ -202,3 +203,64 @@ def test_roads_cross_zones_and_stand_in_for_road_tiles(town, db):  # noqa: F811
     assert road.status_code == 201, road.text
     assert road.json()["source"]["metric"].startswith("along layer 'ROADS'")
     assert "no road tiles are set" in road.json()["source"]["note"]
+
+
+def test_travel_times_by_period_read_each_period_s_speeds_or_scale_them(town, db):  # noqa: F811
+    """Benchmark re-test, October 2026: road speeds differ by period (the morning peak)."""
+    http, t, ds = town
+    _, depots = _make(http, t, ds, "DEPOTS")
+    _, sites = _make(http, t, ds, "SITES")
+    d = t["domain_a"]
+    slot = http.post("/api/v1/entity-types", json={"domain_id": d, "name": "slot"}, headers=t["a"]).json()
+    for name, data_type in (("speeds", "text"), ("factor", "number")):
+        got = http.post(f"/api/v1/entity-types/{slot['id']}/attributes", json={"name": name, "data_type": data_type}, headers=t["a"])
+        assert got.status_code == 201, got.text
+    for key, speeds, factor in (("am", "speed_am", 0.5), ("night", "speed", 1)):
+        got = http.post("/api/v1/entities", json={"entity_type_id": slot["id"], "key": key, "attrs": {"speeds": speeds, "factor": factor}},
+                        headers=t["a"])
+        assert got.status_code == 201, got.text
+    network = {"dataset_id": ds["id"], "layer": "ROADS", "speed_field": "speed"}
+    ask = {"from_type_id": depots["entity_type_id"], "to_type_id": sites["entity_type_id"], "metric": "network_time", "unit": "min",
+           "network": network}
+
+    def minutes(name, by):
+        got = http.post(f"/api/v1/domains/{d}/distances", json={"name": name, **ask, "by_period": {"type_id": slot["id"], **by}},
+                        headers=t["a"])
+        assert got.status_code == 201, got.text
+        rows = db.execute(text(
+            "SELECT a.key, b.key, p.key, pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
+            " JOIN entity a ON a.id = pv.entity_ids[1] JOIN entity b ON b.id = pv.entity_ids[2] JOIN entity p ON p.id = pv.entity_ids[3]"
+            " WHERE pd.name = :n"), {"n": name}).all()
+        return got.json(), {(a, b, p): float(v) for a, b, p, v in rows}
+
+    report, by_speeds = minutes("drive_by_slot", {"speed_field_from": "speeds"})
+    assert report["pairs"] == 12 and report["source"]["by_period"] == {"kind": "slot", "speed_field_from": "speeds", "periods": 2}
+
+    def plain(name, speed_field):
+        got = http.post(f"/api/v1/domains/{d}/distances", json={"name": name, **ask, "network": {**network, "speed_field": speed_field}},
+                        headers=t["a"])
+        assert got.status_code == 201, got.text
+        return {(a, b): float(v) for a, b, v in db.execute(text(
+            "SELECT a.key, b.key, pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
+            " JOIN entity a ON a.id = pv.entity_ids[1] JOIN entity b ON b.id = pv.entity_ids[2] WHERE pd.name = :n"), {"n": name}).all()}
+
+    # Each period reads the roads at its own speeds: the morning as a plain measure at speed_am, the night at speed.
+    # (The short way from a place to the nearest road is at the default speed in every period.)
+    am, night = plain("drive_am", "speed_am"), plain("drive_night", "speed")
+    assert {(a, b): v for (a, b, p), v in by_speeds.items() if p == "am"} == am
+    assert {(a, b): v for (a, b, p), v in by_speeds.items() if p == "night"} == night
+    assert all(am[k] > night[k] for k in am if night[k] > 0)
+    # A factor scales the whole time: half the speed, twice the minutes.
+    _, by_factor = minutes("drive_by_factor", {"factor_from": "factor"})
+    assert {(a, b): v for (a, b, p), v in by_factor.items() if p == "am"} == pytest.approx({k: 2 * v for k, v in night.items()}, abs=0.11)
+    # Within reach by period is a 0/1 parameter over [from, to, period].
+    reach = http.post(f"/api/v1/domains/{d}/within", json={"name": "reach_by_slot", **{k: v for k, v in ask.items() if k != "unit"},
+                                                           "max_min": 4, "output": "parameter",
+                                                           "by_period": {"type_id": slot["id"], "factor_from": "factor"}}, headers=t["a"])
+    assert reach.status_code == 201, reach.text
+    within = {k for k, v in by_factor.items() if v <= 4}
+    assert reach.json()["edges"] == len(within) and 0 < len(within) < 12
+    refused = http.post(f"/api/v1/domains/{d}/within", json={"name": "reach_links", **{k: v for k, v in ask.items() if k != "unit"},
+                                                             "max_min": 4, "by_period": {"type_id": slot["id"], "factor_from": "factor"}},
+                        headers=t["a"])
+    assert refused.status_code == 422 and "output parameter" in refused.text

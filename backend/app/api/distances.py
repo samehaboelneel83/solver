@@ -62,6 +62,16 @@ class NetworkSource(BaseModel):
 Metric = Literal["straight", "road", "time", "network", "network_time"]
 
 
+class ByPeriod(BaseModel):
+    """Travel times per period (benchmark re-test, October 2026: road speeds differ at the morning peak).
+    A kind of record for the periods, and on each either the name of the lines' property holding its
+    speeds (`speed_field_from`: a field of the period, "am_peak" -> "speed_am"), or a number scaling
+    every speed (`factor_from`: 0.6 at the peak). The data is then indexed [from, to, period]."""
+    type_id: int
+    speed_field_from: str | None = Field(default=None, max_length=255)
+    factor_from: str | None = Field(default=None, max_length=255)
+
+
 class DistanceRequest(BaseModel):
     name: str = Field(pattern=NAME, max_length=63)
     from_type_id: int
@@ -75,6 +85,7 @@ class DistanceRequest(BaseModel):
     unit: Literal["m", "km", "s", "min"] = "m"
     #: Keep each place's nearest this many; the rest take a recorded "far" default, never 0.
     nearest: int | None = Field(default=None, ge=1, le=10_000)
+    by_period: ByPeriod | None = None
 
 
 class DistanceReport(BaseModel):
@@ -96,6 +107,8 @@ class WithinRequest(BaseModel):
     #: For a straight line or the road: metres. For time: minutes.
     max_m: float | None = Field(default=None, gt=0, le=20_000_000)
     max_min: float | None = Field(default=None, gt=0, le=100_000)
+    #: Within reach in each period, as a parameter name[from, to, period].
+    by_period: ByPeriod | None = None
 
 
 class WithinReport(BaseModel):
@@ -176,6 +189,46 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
     return values, {"metric": roads.describe(template), **info}
 
 
+def _by_period(db: Session, domain_id: int, body, origins, targets) -> tuple[list[tuple[int | None, np.ndarray]], dict, int | None]:
+    """The measure once, or once per period: [(period entity id or None, values)], what the source says, and the
+    period kind's id for the index."""
+    if body.by_period is None:
+        values, how = _measure(db, domain_id, body.metric, origins, targets, body.network)
+        return [(None, values)], how, None
+    ask = body.by_period
+    if body.metric not in _TIMED:
+        raise HTTPException(422, "a measure by period is a travel time: metric time or network_time")
+    if (ask.speed_field_from is None) == (ask.factor_from is None):
+        raise HTTPException(422, "by period, each period names the lines' speed field (speed_field_from) or scales every speed (factor_from)")
+    kind = db.execute(select(EntityType).where(EntityType.domain_id == domain_id, EntityType.id == ask.type_id)).scalar_one_or_none()
+    if kind is None:
+        raise HTTPException(422, f"kind {ask.type_id} is not in this workspace")
+    periods = db.execute(text("SELECT id, key, attrs FROM entity WHERE entity_type_id = :t AND active ORDER BY sort_order, key"),
+                         {"t": kind.id}).all()
+    if not periods:
+        raise HTTPException(422, f"there are no {kind.name} records to measure for")
+    field = ask.speed_field_from or ask.factor_from
+    out: list[tuple[int | None, np.ndarray]] = []
+    how: dict = {}
+    if ask.factor_from:
+        values, how = _measure(db, domain_id, body.metric, origins, targets, body.network)
+        for pid, key, attrs in periods:
+            factor = (attrs or {}).get(field)
+            if isinstance(factor, bool) or not isinstance(factor, (int, float)) or factor <= 0:
+                raise HTTPException(422, f"the {kind.name} {key} has {field} {factor!r}: a speed factor is a number above 0")
+            out.append((pid, values / float(factor)))  # half the speed, twice the time
+    else:
+        if body.metric != "network_time" or body.network is None:
+            raise HTTPException(422, "speeds by period are read from an imported lines layer: metric network_time with its network")
+        for pid, key, attrs in periods:
+            speed = (attrs or {}).get(field)
+            if not isinstance(speed, str) or not speed.strip():
+                raise HTTPException(422, f"the {kind.name} {key} has no {field}: the lines' property holding its speeds")
+            values, how = _measure(db, domain_id, body.metric, origins, targets, body.network.model_copy(update={"speed_field": speed.strip()}))
+            out.append((pid, values))
+    return out, {**how, "by_period": {"kind": kind.name, ("speed_field_from" if ask.speed_field_from else "factor_from"): field,
+                                      "periods": len(periods)}}, kind.id
+
 
 def _types(db: Session, domain_id: int, from_id: int, to_id: int) -> tuple[EntityType, EntityType]:
     found = {t.id: t for t in db.execute(select(EntityType).where(EntityType.domain_id == domain_id,
@@ -205,26 +258,29 @@ def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commi
                                  "keep each place's nearest few (`nearest`) instead")
     parameter = db.execute(select(ParameterDef).where(ParameterDef.domain_id == domain_id,
                                                       ParameterDef.name == body.name)).scalar_one_or_none()
-    index = [origin_type.id, target_type.id]
+    measured, how, period_type = _by_period(db, domain_id, body, origins, targets)
+    index = [origin_type.id, target_type.id, *([period_type] if period_type else [])]
     if parameter is not None and list(parameter.index_type_ids) != index:
         raise HTTPException(409, f"{body.name!r} is already a parameter over other types; choose another name")
-    values, how = _measure(db, domain_id, body.metric, origins, targets, body.network)
+    if len(measured) * len(origins) * min(len(targets), body.nearest or len(targets)) > MAX_PAIRS * 4:
+        raise HTTPException(422, f"{len(measured)} periods of {len(origins)} x {len(targets)} pairs is too many: keep each place's nearest few")
     scale, places_ = _SCALE[body.unit]
-    reached = values[~np.isnan(values)]
-    longest = float(reached.max(initial=0.0))
+    longest = max(float(values[~np.isnan(values)].max(initial=0.0)) for _, values in measured)
     keep = body.nearest if body.nearest is not None else len(targets)
     cells, left_out = [], 0
-    for i, origin in enumerate(origins):
-        row = values[i]
-        order = np.argsort(np.where(np.isnan(row), np.inf, row), kind="stable")
-        for j in order[:keep]:
-            if np.isnan(row[j]):
-                left_out += 1  # no road joins them: left to the far default, never guessed
-                continue
-            value = 0 if origin.entity_id == targets[j].entity_id else round(float(row[j]) / scale, places_)
-            if places_ == 0:
-                value = int(value)
-            cells.append({"entity_ids": [origin.entity_id, targets[int(j)].entity_id], "value": value})
+    for period, values in measured:
+        tail = [period] if period is not None else []
+        for i, origin in enumerate(origins):
+            row = values[i]
+            order = np.argsort(np.where(np.isnan(row), np.inf, row), kind="stable")
+            for j in order[:keep]:
+                if np.isnan(row[j]):
+                    left_out += 1  # no road joins them: left to the far default, never guessed
+                    continue
+                value = 0 if origin.entity_id == targets[j].entity_id else round(float(row[j]) / scale, places_)
+                if places_ == 0:
+                    value = int(value)
+                cells.append({"entity_ids": [origin.entity_id, targets[int(j)].entity_id, *tail], "value": value})
     far = None
     if keep < len(targets) or left_out:
         # Pairs left out are far, not free: ten times the longest measured.
@@ -264,6 +320,8 @@ def write_within(db: Session, domain_id: int, body: WithinRequest, *, commit: bo
     targets, missing_t = _places(db, target_type)
     if len(origins) * len(targets) > 4_000_000:
         raise HTTPException(422, f"{len(origins)} x {len(targets)} places is too many to compare at once")
+    if body.by_period is not None and body.output != "parameter":
+        raise HTTPException(422, "within reach by period is a 0/1 parameter name[from, to, period]: output parameter")
     if body.output == "parameter":
         return _within_parameter(db, domain_id, body, origin_type, target_type, origins, targets,
                                  missing_o + missing_t, limit, commit=commit)
@@ -317,15 +375,19 @@ def _within_parameter(db: Session, domain_id: int, body: WithinRequest, origin_t
     """Within reach as a 0/1 parameter name[from, to]: 1 where the pair is within `limit`, else the default 0."""
     parameter = db.execute(select(ParameterDef).where(ParameterDef.domain_id == domain_id,
                                                       ParameterDef.name == body.name)).scalar_one_or_none()
-    index = [origin_type.id, target_type.id]
+    measured, how, period_type = _by_period(db, domain_id, body, origins, targets)
+    index = [origin_type.id, target_type.id, *([period_type] if period_type else [])]
     if parameter is not None and list(parameter.index_type_ids) != index:
         raise HTTPException(409, f"{body.name!r} is already a parameter over other types; choose another name")
-    values, how = _measure(db, domain_id, body.metric, origins, targets, body.network)
     timed = body.metric in _TIMED
     cells = []
-    for i, origin in enumerate(origins):
-        for j in np.flatnonzero(values[i] <= limit):
-            cells.append({"entity_ids": [origin.entity_id, targets[int(j)].entity_id], "value": 1})
+    for period, values in measured:
+        tail = [period] if period is not None else []
+        for i, origin in enumerate(origins):
+            for j in np.flatnonzero(values[i] <= limit):
+                cells.append({"entity_ids": [origin.entity_id, targets[int(j)].entity_id, *tail], "value": 1})
+        if len(cells) > MAX_EDGES * 5:
+            raise HTTPException(422, f"more than {MAX_EDGES * 5:,} pairs are within {limit:g}; choose a shorter reach")
     source = {"kind": "within", "output": "parameter", **how,
               **({"max_min": body.max_min} if timed else {"max_m": body.max_m}),
               "from": origin_type.name, "to": target_type.name, "pairs": len(cells),

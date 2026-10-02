@@ -76,6 +76,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const [closedField, setClosedField] = useState("");
   const [delayField, setDelayField] = useState("");
   const [avoidKind, setAvoidKind] = useState<string>("");
+  const [periodKind, setPeriodKind] = useState<string>("");
+  const [periodField, setPeriodField] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Kept on screen (a toast fades): places a travel time could not reach, and why.
   const [notice, setNotice] = useState<string | null>(null);
@@ -95,6 +97,18 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
   const dataset = useDataset(onLayer ? chosenDataset : null);
   const lineLayers = (dataset.data?.layers ?? []).filter((l) => (l.kinds?.line ?? 0) > 0);
   const busy = distances.isPending || within.isPending || spatial.isPending;
+
+  // By period (benchmark re-test, October 2026): a kind of record for the periods, and on it a text field naming
+  // the lines' speed field for that period (along a layer), or a number scaling every speed.
+  const periodType = entityTypes.find((t) => String(t.id) === periodKind);
+  const periodFields = (periodType?.attributes ?? []).flatMap((a) =>
+    ["number", "integer"].includes(a.data_type) ? [[`factor:${a.name}`, `${a.name} (scales every speed)`]]
+      : a.data_type === "text" && metric === "network_time" ? [[`speed:${a.name}`, `${a.name} (names the lines' speed field)`]] : []);
+  const chosenPeriodField = periodFields.some(([v]) => v === periodField) ? periodField : periodFields[0]?.[0] ?? "";
+  const byPeriod = timed && (kind === "distances" || kind === "within_flag") && periodType && chosenPeriodField
+    ? { by_period: { type_id: periodType.id, ...(chosenPeriodField.startsWith("speed:")
+      ? { speed_field_from: chosenPeriodField.slice(6) } : { factor_from: chosenPeriodField.slice(7) }) } }
+    : {};
 
   if (placed.length === 0) return null;
 
@@ -135,8 +149,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
       if (kind === "distances") {
         const keep = nearest.trim() === "" ? undefined : Number(nearest);
         if (keep !== undefined && !(Number.isInteger(keep) && keep >= 1)) return setError("Keep the nearest: a whole number, 1 or more, or blank for all.");
-        const done = await distances.mutateAsync({ domainId, name, from_type_id: fromId, to_type_id: toId, metric, unit, ...(keep ? { nearest: keep } : {}), ...along });
-        report(`${name}: ${done.pairs.toLocaleString("en-US")} ${timed ? "travel times" : "distances"} computed${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
+        const done = await distances.mutateAsync({ domainId, name, from_type_id: fromId, to_type_id: toId, metric, unit, ...(keep ? { nearest: keep } : {}), ...along, ...byPeriod });
+        report(`${name}: ${done.pairs.toLocaleString("en-US")} ${timed ? "travel times" : "distances"} computed${"by_period" in byPeriod ? ` (by ${periodType!.name})` : ""}${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
         setNotice(leftOut(done.source, Number(joinM) || 500));
       } else if (kind === "within" || kind === "within_flag") {
         const max = Number(timed ? minutes : km);
@@ -144,7 +158,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         const reach = timed ? { max_min: max } : { max_m: max * 1000 };
         const done = await within.mutateAsync({
           domainId, name, from_type_id: fromId, to_type_id: toId, metric, ...reach, ...along,
-          ...(kind === "within_flag" ? { output: "parameter" as const } : {}),
+          ...(kind === "within_flag" ? { output: "parameter" as const, ...byPeriod } : {}),
         });
         report(`${name}: ${done.edges.toLocaleString("en-US")} pairs within ${max} ${timed ? "min" : "km"} ${kind === "within_flag" ? "marked 1" : "linked"}`);
         setNotice(leftOut(done.source, Number(joinM) || 500));
@@ -319,6 +333,27 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
                      onChange={(event) => setNearest(event.target.value)} />
             </div>
           </>
+        )}
+        {timed && (kind === "distances" || kind === "within_flag") && (
+          <div>
+            <label htmlFor={`${id}-period`} className="block text-xs text-slate-600">By period (optional)</label>
+            <select id={`${id}-period`} className="rounded border px-2 py-1 text-sm" value={periodKind}
+                    title="Travel times for each period: each period's own road speeds, or every speed scaled (0.6 at the peak)."
+                    onChange={(event) => { setPeriodKind(event.target.value); setPeriodField(""); }}>
+              <option value="">the same at all times</option>
+              {entityTypes.map((t) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
+            </select>
+            {periodType && (periodFields.length ? (
+              <select aria-label="Each period's speeds" className="ml-1 rounded border px-2 py-1 text-sm" value={chosenPeriodField}
+                      onChange={(event) => setPeriodField(event.target.value)}>
+                {periodFields.map(([v, words]) => <option key={v} value={v}>{words}</option>)}
+              </select>
+            ) : (
+              <span className="ml-1 text-xs text-amber-800">
+                {periodType.name} needs a number field scaling the speeds{metric === "network_time" ? ", or a text field naming the lines' speed field" : ""}
+              </span>
+            ))}
+          </div>
         )}
         {(kind === "within" || kind === "within_flag") && (timed ? (
           <div>
