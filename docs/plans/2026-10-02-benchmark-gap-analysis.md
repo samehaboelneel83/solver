@@ -174,20 +174,21 @@ lift are per point, averaged over the five problems.
       0103); a road overlaps a zone by the metres inside it; maps and reports draw lines.
 
 ### Phase 1 — highest lift (target: coverage ≈ 88%)
-- [ ] **G1a Declare predictors in the model editor** (data list "Predictions" + a Boxes/Blocks
-      term) and **score a predictor into a data value** for chosen records (e.g. every parcel ×
-      crop). *Check:* yield predictor → `yield[parcel, crop]` → used in the crop-plan goal. Point
-      12: 60 → ~80.
-- [ ] **G1b Predictors in the menu (both levels)**, a "predict for these records" table, date parts
-      as features. Point 12 → ~85; UX finding +.
-- [ ] **G4a Import safety:** key guess prefers a column whose values match existing keys;
-      case/space-insensitive match; "Check only" reports "will update N / create M" and warns
-      when it would create duplicates; bulk delete of selected records; lat/lon → places (B5).
-      Point 2: 80 → ~95.
-- [ ] **G6a Solve settings:** time limit and gap target on Solve (Simple: "quick / thorough /
-      until proven"). Point 11 +5.
-- [ ] **G8a Errors in words:** map every 4xx `detail` to a sentence with the next step; field
-      maxima shown up front (B12, B13). UX feedback +.
+- [x] **G1a Predictors in models:** formulas may call any trained predictor of the workspace; the
+      document declares those it calls on publish; the data section lists them with their inputs —
+      `76635d0`. (A rule calling `predict m(field[p], field[c])` scores every parcel × crop in place,
+      so no separate "score into a data value" step was needed.)
+- [x] **G1b Forecasts:** in the Data menu at both levels; "Predict and keep" writes predictions into
+      a number field (all records, or those with no target yet); number fields made from a date
+      (weekday, month, day of year), a text (one yes/no per value) or a linked record's number —
+      `a3f3be1`.
+- [x] **G4a Import safety:** key guessed from stored keys; case/space-insensitive key match; the
+      check says how many it makes and updates; a warning when the key matches none of the stored
+      records; lat/lon → places (B5); bulk delete — `ca92a35`.
+- [x] **G6a Solve settings:** "Look for" beside every Solve (10 s … 30 min, remembered); runs may
+      take up to 1,800 s — `890f16b`. (A gap target was not added: the time choice covered the need.)
+- [x] **G8a Errors in words:** no raw JSON; plain validation phrases; road/terrain messages say
+      what to do; the join limit shown up front — `a92be2a`.
 
 ### Phase 2 — modelling reach (target: coverage ≈ 92%)
 - [ ] **G3a Division of data and scalar data values** in formulas and the IR (data only, so models
