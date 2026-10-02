@@ -1084,6 +1084,13 @@ function ConstraintCard({
 }) {
   const idField = useId();
   const noteField = useId();
+  // What the rule said when its note was last written or confirmed: a note written for one rule
+  // (a recipe's "each open base has one vehicle") is not silently kept for another after an edit
+  // (benchmark, October 2026). Remembered for this visit.
+  const { note: _note, id: _id, ...arithmetic } = constraint;
+  const said = canonicalJson(arithmetic);
+  const [noteFits, setNoteFits] = useState(said);
+  const noteStale = Boolean(constraint.note?.trim()) && said !== noteFits;
   // Condition, chance and the structure tree: advanced, so folded away unless
   // the rule already uses a chance.
   const [structure, setStructure] = useState(Boolean(constraint.chance));
@@ -1133,8 +1140,19 @@ function ConstraintCard({
               id={noteField}
               className={`${INPUT_CLASS} text-sm`}
               value={constraint.note ?? ""}
-              onChange={(event) => onChange({ ...constraint, note: event.target.value })}
+              aria-describedby={noteStale ? `${noteField}-stale` : undefined}
+              onChange={(event) => { setNoteFits(said); onChange({ ...constraint, note: event.target.value }); }}
             />
+            {noteStale && (
+              <p id={`${noteField}-stale`} role="note" className="mt-1 text-xs text-amber-800">
+                The rule has changed since this was written; does it still say what the rule does?{" "}
+                <button type="button" className="underline" onClick={() => setNoteFits(said)}>Keep it</button>{" · "}
+                <button type="button" className="underline" onClick={() => {
+                  setNoteFits(said);
+                  onChange({ ...constraint, note: ruleSentence(constraint, context.relationships) });
+                }}>Use the rule&apos;s own words</button>
+              </p>
+            )}
           </div>
         </div>
       }

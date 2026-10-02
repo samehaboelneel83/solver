@@ -1403,6 +1403,19 @@ describe("equations as drill-down diagrams", () => {
     expect(await screen.findByTestId("goal-blocks")).toBeInTheDocument();
   });
 
+  it("asks whether a rule's note still fits once the rule is changed (benchmark, October 2026)", async () => {
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    expect(screen.queryByText(/has changed since this was written/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a sentence" }));
+    fireEvent.change(within(screen.getByTestId("rule-sentence")).getByLabelText("comparison"), { target: { value: "=" } });
+    expect(screen.getByText(/has changed since this was written/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use the rule's own words" }));
+    expect(screen.queryByDisplayValue("each day is staffed")).toBeNull();
+    expect(screen.getAllByLabelText("What it means").map((e) => (e as HTMLInputElement).value).join("|")).toMatch(/must be exactly/);
+    expect(screen.queryByText(/has changed since this was written/)).toBeNull();
+  });
+
   it("reads a rule as a sentence, then edits it in boxes and publishes the change", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({ write });
