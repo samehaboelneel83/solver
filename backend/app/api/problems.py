@@ -279,6 +279,9 @@ class ScenarioPatch(BaseModel):
     set_param: list[ParamCell] = None  # type: ignore[assignment]
     scale_param: dict[StrictStr, Annotated[float, Field(ge=0, le=1000)]] = None  # type: ignore[assignment]
     set_attr: list[AttrCell] = None  # type: ignore[assignment]
+    # A rule's limit -- the number on one side of it -- changed (user trial: "what if the budget were
+    # 80,000?"), without publishing a new version.
+    set_limit: dict[ConstraintId, Annotated[float, Field(allow_inf_nan=False)]] = None  # type: ignore[assignment]
 
     @model_validator(mode="after")
     def _one_instruction_per_constraint(self) -> "ScenarioPatch":
@@ -440,8 +443,29 @@ def _constraint_ids(db: Session, model_version_id: int) -> set[str] | None:
     }
 
 
+def rule_limit(rule: dict[str, Any]) -> tuple[str, float] | None:
+    """The side of a rule that is one plain number, and that number: what `set_limit` may change."""
+    for side in ("right", "left"):
+        term = rule.get(side)
+        if isinstance(term, dict) and set(term) == {"const"} and isinstance(term["const"], (int, float)) \
+                and not isinstance(term["const"], bool):
+            return side, float(term["const"])
+    return None
+
+
 def _check_patch_ids(db: Session, model_version_id: int, patch: "ScenarioPatch") -> None:
     """Task 9's gap: a patch names constraints of the version it patches."""
+    if patch.set_limit:
+        ir = db.execute(select(_version_columns.ir).where(_version_columns.id == model_version_id)).scalar_one_or_none()
+        rules = {c.get("id"): c for c in (ir or {}).get("constraints") or [] if isinstance(c, dict)}
+        for constraint_id in patch.set_limit:
+            rule = rules.get(constraint_id)
+            if rule is None:
+                raise field_error(["patch", "set_limit", constraint_id],
+                                  f"model version {model_version_id} declares no constraint {constraint_id!r}", constraint_id)
+            if rule_limit(rule) is None:
+                raise field_error(["patch", "set_limit", constraint_id],
+                                  f"{constraint_id!r} has no side that is a single number to change", constraint_id)
     known = _constraint_ids(db, model_version_id)
     if known is None:
         return

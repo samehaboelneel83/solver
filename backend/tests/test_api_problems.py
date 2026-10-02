@@ -1078,3 +1078,27 @@ def test_database_refuses_a_scenario_on_another_problems_version(db, crossed):
         text("SELECT count(*) FROM model_version WHERE id = :m"), {"m": crossed["b1"]}
     ).scalar_one() == 0
 
+
+
+def test_a_scenario_may_change_a_rule_s_limit(client, auth_headers, crossed):
+    """User trial: "what if the budget were 80,000?" without publishing a new version."""
+    ok = _scenario_post(client, auth_headers, crossed["a"], crossed["a1"], "budget", {"set_limit": {"c_x": 2.5}})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["patch"] == {"set_limit": {"c_x": 2.5}}
+    missing = _scenario_post(client, auth_headers, crossed["a"], crossed["a1"], "typo", {"set_limit": {"no_such_c": 3}})
+    assert missing.status_code == 422 and missing.json()["detail"][0]["loc"] == ["body", "patch", "set_limit", "no_such_c"]
+
+
+def test_set_limit_replaces_the_number_side_and_only_that():
+    from app.api.problems import rule_limit
+    from app.solve.service import patched
+
+    ir = _ir("a1")
+    ir["constraints"].append({"id": "c_sum", "left": {"const": 4}, "relation": ">=",
+                              "right": {"var": "a1", "index": ["d"]}, "severity": "hard"})
+    out = patched(ir, {"set_limit": {"c_x": 80000, "c_sum": 2.5}})
+    rules = {c["id"]: c for c in out["constraints"]}
+    assert rules["c_x"]["right"] == {"const": 80000} and rules["c_y"]["right"] == {"const": 1}
+    assert rules["c_sum"]["left"] == {"const": 2.5}
+    assert ir["constraints"][0]["right"] == {"const": 1}  # the version itself is untouched
+    assert rule_limit({"left": {"var": "x"}, "right": {"par": "cap", "index": []}}) is None

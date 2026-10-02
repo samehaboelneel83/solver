@@ -511,6 +511,8 @@ export type ScenarioPatch = {
   set_param?: { param: string; index: string[]; value: number }[];
   scale_param?: Record<string, number>;
   set_attr?: { set: string; key: string; attr: string; value: unknown }[];
+  /** A rule's limit (the side of it that is one number), changed for this scenario. */
+  set_limit?: Record<string, number>;
 };
 
 export type Scenario = {

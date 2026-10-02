@@ -13,8 +13,10 @@ import SearchBox, { NoMatches } from "../components/SearchBox";
 const SCENARIO_PAGE = 50;
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
+import RecordPicker from "../components/RecordPicker";
 import {
   useCreateRun,
+  useEntityTypes,
   useCreateScenario,
   useDeleteScenario,
   useScenarios,
@@ -282,12 +284,16 @@ function ScenarioForm({
     fromPatch(scenario?.patch ?? {})
   );
   const [failure, setFailure] = useState<string | null>(null);
+  // A rule's limit, as typed: "80000" puts that number where the version has 60000.
+  const [limits, setLimits] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(scenario?.patch?.set_limit ?? {}).map(([id, v]) => [id, String(v)]))
+  );
   // Data what-ifs (improvement plan 3.3): kept beside the rule choices, sent with them.
   const [dataChanges, setDataChanges] = useState<ScenarioPatch>(() => dataOf(scenario?.patch ?? {}));
 
   const version = useVersion(modelVersionId);
   const constraints = (
-    version.data?.ir as { constraints?: { id: string; note?: string; severity?: string }[] } | undefined
+    version.data?.ir as { constraints?: RuleSides[] } | undefined
   )?.constraints;
 
   useEffect(() => {
@@ -307,7 +313,9 @@ function ScenarioForm({
     // Locks and stay-close a scenario was made with are kept; the form edits rules and data.
     const kept = { ...(scenario?.patch?.lock ? { lock: scenario.patch.lock } : {}),
       ...(scenario?.patch?.stay_close ? { stay_close: scenario.patch.stay_close } : {}) };
-    const body = { name, model_version_id: modelVersionId, patch: { ...kept, ...toPatch(choices), ...dataChanges } };
+    const setLimit = limitsOf(limits, constraints ?? []);
+    const body = { name, model_version_id: modelVersionId,
+      patch: { ...kept, ...toPatch(choices), ...dataChanges, ...(Object.keys(setLimit).length ? { set_limit: setLimit } : {}) } };
     const onError = (error: unknown) => setFailure(formatApiError(error));
     if (scenario) {
       update.mutate(
@@ -420,6 +428,19 @@ function ScenarioForm({
                     </label>
                   )}
                 </div>
+                {ruleLimit(constraint) !== null && current !== "disable" && (
+                  <label className="mt-1 flex items-center gap-1 text-xs text-slate-600">
+                    its limit, {ruleLimit(constraint)!.toLocaleString("en-US")} in the model, here
+                    <input
+                      aria-label={`New limit for ${constraint.id}`}
+                      inputMode="decimal"
+                      className={`${INPUT_CLASS} w-28 text-xs`}
+                      placeholder={String(ruleLimit(constraint))}
+                      value={limits[constraint.id] ?? ""}
+                      onChange={(event) => setLimits({ ...limits, [constraint.id]: event.target.value })}
+                    />
+                  </label>
+                )}
                 {constraint.note && <p className="mt-1 text-xs text-slate-500">{constraint.note}</p>}
               </li>
             );
@@ -467,6 +488,31 @@ function ScenarioForm({
   );
 }
 
+type RuleSides = { id: string; note?: string; severity?: string; left?: unknown; right?: unknown };
+
+/** The number on the side of a rule that is one number -- what a scenario may change -- or null. */
+export function ruleLimit(rule: RuleSides): number | null {
+  for (const side of [rule.right, rule.left]) {
+    if (side && typeof side === "object" && Object.keys(side).length === 1 && typeof (side as { const?: unknown }).const === "number") {
+      return (side as { const: number }).const;
+    }
+  }
+  return null;
+}
+
+/** The limits typed that are numbers and differ from the model's own. */
+export function limitsOf(typed: Record<string, string>, rules: RuleSides[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const rule of rules) {
+    const text = (typed[rule.id] ?? "").trim().replace(/,/g, "");
+    const was = ruleLimit(rule);
+    if (text === "" || was === null) continue;
+    const value = Number(text);
+    if (Number.isFinite(value) && value !== was) out[rule.id] = value;
+  }
+  return out;
+}
+
 export function fromPatch(patch: ScenarioPatch): Record<string, { choice: Choice; weight: number }> {
   const choices: Record<string, { choice: Choice; weight: number }> = {};
   (patch.disable ?? []).forEach((id) => (choices[id] = { choice: "disable", weight: 100 }));
@@ -506,6 +552,14 @@ export function dataOf(patch: ScenarioPatch): ScenarioPatch {
  */
 function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPatch; onChange: (next: ScenarioPatch) => void }) {
   const sets = ir?.sets ?? [];
+  const { domainId } = useDomain();
+  const kinds = useEntityTypes(domainId, { limit: 500 });
+  const kindOf = (set: string) => kinds.data?.items.find((k) => k.name === set) ?? null;
+  const [fieldSet, setFieldSet] = useState("");
+  const [fieldKey, setFieldKey] = useState("");
+  const [fieldName, setFieldName] = useState("");
+  const [fieldValue, setFieldValue] = useState("");
+  const fields = (kindOf(fieldSet)?.attributes ?? []).filter((a) => ["integer", "number", "boolean", "text", "enum"].includes(a.data_type));
   const numbers = Object.entries(ir?.parameters ?? {}).filter(([, spec]) => !spec.entity).map(([name]) => name);
   const [removeSet, setRemoveSet] = useState("");
   const [removeKeys, setRemoveKeys] = useState("");
@@ -538,14 +592,73 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
             {sets.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
-        <input aria-label="Keys to leave out" className={`${input} w-40 font-mono`} placeholder="Y3, Y5" value={removeKeys} onChange={(e) => setRemoveKeys(e.target.value)} />
-        <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
-          onClick={() => {
-            if (!removeSet || !keysOf(removeKeys).length) return setProblem("Choose a kind and the keys to leave out.");
-            setProblem(null);
-            onChange({ ...value, remove: { ...(value.remove ?? {}), [removeSet]: [...new Set([...(value.remove?.[removeSet] ?? []), ...keysOf(removeKeys)])] } });
-            setRemoveKeys("");
-          }}>Add</button>
+        {removeSet && kindOf(removeSet) ? (
+          // Found by typing a key or a name, like any link (user trial: keys had to be typed from memory).
+          <div className="w-64">
+            <RecordPicker typeId={kindOf(removeSet)!.id} value="" aria-label="Record to leave out" kindName={removeSet}
+              placeholder={`find a ${removeSet}…`}
+              onChange={(key) => {
+                if (!key) return;
+                setProblem(null);
+                onChange({ ...value, remove: { ...(value.remove ?? {}), [removeSet]: [...new Set([...(value.remove?.[removeSet] ?? []), key])] } });
+              }} />
+          </div>
+        ) : (
+          <>
+            <input aria-label="Keys to leave out" className={`${input} w-40 font-mono`} placeholder="Y3, Y5" value={removeKeys} onChange={(e) => setRemoveKeys(e.target.value)} />
+            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+              onClick={() => {
+                if (!removeSet || !keysOf(removeKeys).length) return setProblem("Choose a kind and the keys to leave out.");
+                setProblem(null);
+                onChange({ ...value, remove: { ...(value.remove ?? {}), [removeSet]: [...new Set([...(value.remove?.[removeSet] ?? []), ...keysOf(removeKeys)])] } });
+                setRemoveKeys("");
+              }}>Add</button>
+          </>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
+        <label>Change
+          <select aria-label="Change a field of" className={`${input} ml-1`} value={fieldSet}
+            onChange={(e) => { setFieldSet(e.target.value); setFieldKey(""); setFieldName(""); }}>
+            <option value="">kind…</option>
+            {sets.filter((s) => kindOf(s)).map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        {fieldSet && kindOf(fieldSet) && (
+          <>
+            <div className="w-56">
+              <RecordPicker typeId={kindOf(fieldSet)!.id} value={fieldKey} aria-label="Record to change" kindName={fieldSet}
+                placeholder={`find a ${fieldSet}…`} onChange={setFieldKey} />
+            </div>
+            <label>its
+              <select aria-label="Field to change" className={`${input} ml-1`} value={fieldName} onChange={(e) => setFieldName(e.target.value)}>
+                <option value="">field…</option>
+                {fields.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
+              </select>
+            </label>
+            <label>to
+              <input aria-label="New field value" className={`${input} ml-1 w-24`} value={fieldValue} onChange={(e) => setFieldValue(e.target.value)} />
+            </label>
+            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-slate-800 hover:bg-slate-50"
+              onClick={() => {
+                const field = fields.find((f) => f.name === fieldName);
+                if (!fieldKey || !field || fieldValue.trim() === "") return setProblem("Choose a record, its field and the new value.");
+                let v: unknown = fieldValue.trim();
+                if (field.data_type === "integer" || field.data_type === "number") {
+                  v = Number(String(v).replace(/,/g, ""));
+                  if (!Number.isFinite(v as number)) return setProblem(`${field.name} is a number.`);
+                } else if (field.data_type === "boolean") {
+                  const word = String(v).toLowerCase();
+                  if (!["yes", "no", "true", "false"].includes(word)) return setProblem(`${field.name} is yes or no.`);
+                  v = word === "yes" || word === "true";
+                }
+                setProblem(null);
+                onChange({ ...value, set_attr: [...(value.set_attr ?? []).filter((c) => !(c.set === fieldSet && c.key === fieldKey && c.attr === field.name)),
+                  { set: fieldSet, key: fieldKey, attr: field.name, value: v }] });
+                setFieldValue("");
+              }}>Add</button>
+          </>
+        )}
       </div>
       {numbers.length > 0 && (
         <>
@@ -615,6 +728,8 @@ export function describePatch(patch: ScenarioPatch): string {
   if (patch.harden?.length) parts.push(`insists on ${patch.harden.join(", ")}`);
   const soften = Object.entries(patch.soften ?? {});
   if (soften.length) parts.push(soften.map(([id, w]) => `bends ${id} at ${w}`).join(", "));
+  const limits = Object.entries(patch.set_limit ?? {});
+  if (limits.length) parts.push(limits.map(([id, v]) => `${id} limit ${v.toLocaleString("en-US")}`).join(", "));
   return parts.length > 0 ? parts.join("; ") : "asks the model as written";
 }
 

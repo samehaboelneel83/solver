@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import Scenarios, { describePatch, fromPatch, toPatch } from "./Scenarios";
+import Scenarios, { describePatch, fromPatch, limitsOf, toPatch } from "./Scenarios";
 import { ToastProvider } from "../components/ToastProvider";
 import { DOMAIN_STORAGE_KEY } from "../hooks/useDomain";
 
@@ -25,7 +25,7 @@ const VERSIONS = {
 const IR_22 = {
   constraints: [
     { id: "c_cover_demand", note: "each day/shift is staffed", severity: "hard" },
-    { id: "c_max_hours", note: "weekly hours", severity: "hard" },
+    { id: "c_max_hours", note: "weekly hours", severity: "hard", left: { var: "h" }, relation: "<=", right: { const: 40 } },
   ],
 };
 // Version 1 has a rule version 2 does not: choosing it must drop a choice
@@ -180,6 +180,23 @@ describe("Scenarios", () => {
     expect(body.patch).toEqual({ disable: ["c_max_hours"] });
   });
 
+  it("changes a rule's limit for the scenario, and only when it differs", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 8 });
+    stub({ write });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /new scenario/i }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "longer_weeks" } });
+    // A rule with no single-number side has no limit to change.
+    await screen.findByLabelText(/what to do with c_cover_demand/i);
+    expect(screen.queryByLabelText("New limit for c_cover_demand")).toBeNull();
+    const limit = screen.getByLabelText("New limit for c_max_hours");
+    expect(limit).toHaveAttribute("placeholder", "40");
+    fireEvent.change(limit, { target: { value: "48" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body).patch).toEqual({ set_limit: { c_max_hours: 48 } });
+  });
+
   it("drops a choice that the newly chosen version does not have", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
@@ -252,5 +269,17 @@ describe("Scenarios: choosing the problem", () => {
     expect(await screen.findByText(/The problem list could not be loaded\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry loading the problem list" })).toBeInTheDocument();
     expect(screen.queryByText(/has no problems yet/)).toBeNull();
+  });
+});
+
+describe("rule limits", () => {
+  const rules = [{ id: "budget", left: { sum: {} }, right: { const: 60000 } }, { id: "flow", left: { var: "x" }, right: { var: "y" } }];
+  it("keeps the limits typed that are numbers and differ from the model's", () => {
+    expect(limitsOf({ budget: "80,000", flow: "3" }, rules)).toEqual({ budget: 80000 });
+    expect(limitsOf({ budget: "60000" }, rules)).toEqual({});
+    expect(limitsOf({ budget: "lots" }, rules)).toEqual({});
+  });
+  it("says a changed limit in the scenario list", () => {
+    expect(describePatch({ set_limit: { budget: 80000 } })).toBe("budget limit 80,000");
   });
 });

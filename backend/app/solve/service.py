@@ -1669,7 +1669,8 @@ def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
 
     `ProblemIR.patched()`'s three verbs, and what each one means here:
     `disable` drops a constraint, `harden` makes a soft one hard, and
-    `soften` makes a hard one soft at the given penalty. The ids were checked
+    `soften` makes a hard one soft at the given penalty. `set_limit` puts a
+    new number on the side of a rule that is one number (its limit). The ids were checked
     against this version when the scenario was created, so an unknown id
     cannot arrive here.
     """
@@ -1678,6 +1679,7 @@ def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     disabled = set(patch.get("disable", []))
     hardened = set(patch.get("harden", []))
     softened = patch.get("soften", {}) or {}
+    limits = patch.get("set_limit", {}) or {}
 
     constraints = []
     for spec in ir.get("constraints", []):
@@ -1693,6 +1695,13 @@ def patched(ir: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         elif spec["id"] in softened:
             spec["severity"] = "soft"
             spec["weight"] = int(softened[spec["id"]])
+        if spec["id"] in limits:
+            from app.api.problems import rule_limit
+
+            found = rule_limit(spec)
+            if found is not None:
+                value = limits[spec["id"]]
+                spec[found[0]] = {"const": int(value) if float(value).is_integer() else value}
         constraints.append(spec)
     return {**ir, "constraints": constraints}
 
