@@ -27,6 +27,18 @@ def test_selection_takes_the_most_value_within_the_budget():
     assert round(float(_solve("recipe_selection", {"sets": {"project": projects}}).objective)) == 14
 
 
+def test_selection_keeps_to_a_limit_per_type_and_one_in_every_district():
+    """Benchmark round 4: "at most 8 parking projects" and "every district gets at least one"."""
+    projects = [{"id": "a", "benefit": 10, "capex": 100, "type": "parking", "in_district": "d1"},
+                {"id": "b", "benefit": 9, "capex": 100, "type": "parking", "in_district": "d1"},
+                {"id": "c", "benefit": 2, "capex": 100, "type": "signal", "in_district": "d2"},
+                {"id": "d", "benefit": 1, "capex": 100, "type": "signal", "in_district": "d1"}]
+    data = {"sets": {"project": projects, "district": [{"id": "d1"}, {"id": "d2"}]},
+            "relationships": {"in_district": [{"from": "a", "to": "d1"}, {"from": "b", "to": "d1"}, {"from": "c", "to": "d2"}, {"from": "d", "to": "d1"}]}}
+    # One parking at most (a, 10); d2 needs c (2); the budget of 500 leaves room for d (1): 13.
+    assert round(float(_solve("recipe_selection_limits", data).objective)) == 13
+
+
 def test_network_opens_ships_and_buys_trucks_at_the_least_cost():
     data = {
         "sets": {
@@ -62,9 +74,10 @@ def test_allocation_puts_the_land_where_it_is_worth_most_within_water_suitabilit
                                     {"0": "p2", "1": "wheat", "value": 1}]},
         "parameter_defaults": {"suitable": 0},
     }
-    # Rice is suitable on p1 only and worth more: all 10 of p1 (its share cap is 10 of 20), using 80 water.
-    # The other 20 water grows 10 wheat on p2. Profit 10*5 + 10*3 = 80.
-    assert round(float(_solve("recipe_allocation", data).objective), 6) == 80
+    # Rice is suitable on p1 only and worth more, but at most half the land that can hold it (benchmark
+    # round 4): 5 of p1, using 40 water. Wheat fills the other 5 of p1 and all 10 of p2 (30 water).
+    # Profit 5*5 + 15*3 = 70.
+    assert round(float(_solve("recipe_allocation", data).objective), 6) == 70
 
 
 def test_flow_routes_trips_over_the_quickest_roads_within_capacity_and_widens_within_budget():

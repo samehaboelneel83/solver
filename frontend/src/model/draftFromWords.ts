@@ -10,7 +10,7 @@ import type { FormDraft } from "./draftIr";
 import { applyAllocation, applyAssignment, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type AssignmentRecipe, type FlowRecipe, type InventoryRecipe, type Link,
   type NetworkRecipe, type PhasingRecipe, type SelectionRecipe } from "./recipes";
 
-export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string }[] };
+export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string; enum_values?: string[] | null }[] };
 export type Data = { name: string; index: string[] };
 export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory" | "assignment";
 
@@ -67,9 +67,18 @@ function mentions(text: string, kind: Kind): string | null {
 const numeric = (k: Kind | undefined) =>
   (k?.attributes ?? []).filter((a) => a.data_type === "number" || a.data_type === "integer").map((a) => a.name);
 
-/** The first field of a kind whose name fits, and the words that made it fit. */
+/** The first field of a kind whose name fits: at the start of the name or of one of its words, so
+ * "rent" does not fit `current_inventory_t` (benchmark round 4: it was taken as the opening cost). */
 function field(k: Kind | undefined, pattern: RegExp, of: (k: Kind | undefined) => string[] = numeric): string | undefined {
-  return of(k).find((n) => pattern.test(n));
+  const flags = pattern.flags.replace("g", "");
+  const atWord = new RegExp(`(?:^|_)(?:${pattern.source})`, flags);
+  return of(k).find((n) => atWord.test(n));
+}
+
+/** A number field of a kind the text names whole ("veh_hours_saved_per_day", or with spaces), not one of `not`. */
+function namedField(k: Kind | undefined, text: string, not: RegExp = /$^/): string | undefined {
+  return numeric(k).filter((n) => !not.test(n))
+    .find((n) => new RegExp(`(^|[^a-z0-9_])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/_/g, "[_ ]")}($|[^a-z0-9_])`, "i").test(text));
 }
 
 /** A number in the text after the first of these words found, in this order: "a budget of 2.5 million", "at most 3". */
@@ -94,6 +103,39 @@ function inUnitsOf(budget: number | undefined, cost: string | undefined, choices
   if (scale === 1 || budget < scale) return budget;
   choices.push(`Budget in the costs' units: ${budget / scale} (${cost} is in ${scale === 1e6 ? "millions" : "thousands"})`);
   return budget / scale;
+}
+
+/** "at most 8 parking projects": the word before the items is a value of one of their fields -- a list
+ * field holding it, else a text field for the type (type, category, kind, class, group). */
+function limitsPerType(text: string, items: Kind): { field: string; value: string; atMost: number; said: string }[] {
+  const nouns = [...new Set([...words(items.name), ...words(items.name).flatMap(plural), "ones", "of them"])].join("|");
+  const found: { field: string; value: string; atMost: number; said: string }[] = [];
+  const pattern = new RegExp(`\\b(?:at most|no more than|up to|maximum of|max)\\s+([0-9]+)\\s+([a-z][a-z-]*)\\s+(?:${nouns})\\b`, "gi");
+  for (const m of text.matchAll(pattern)) {
+    const word = m[2].toLowerCase();
+    const listed = items.attributes.find((a) => (a.enum_values ?? []).some((x) => x.toLowerCase() === word));
+    const typed = items.attributes.find((a) => a.data_type === "text" && /(^|_)(type|category|kind|class|group|sort)($|_)/.test(a.name));
+    const f = listed ?? typed;
+    if (!f) continue;
+    const value = listed ? listed.enum_values!.find((x) => x.toLowerCase() === word)! : word;
+    found.push({ field: f.name, value, atMost: Number(m[1]), said: m[0] });
+  }
+  return found;
+}
+
+/** "every district gets at least one", "at least one project in each district": the kind, and the link
+ * from the items to it when there is one. */
+function onePer(text: string, items: Kind, kinds: Kind[], links: Link[]):
+  { kind: string; said: string; link?: string } | null {
+  const m = text.match(/\b(?:every|each)\s+([a-z_]+)\b[^.;]{0,40}\bat least (?:one|1)\b/i)
+    ?? text.match(/\bat least (?:one|1)\b[^.;]{0,40}\b(?:in|for|per|of) (?:every|each)\s+([a-z_]+)\b/i);
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  const kind = kinds.find((k) => k.name !== items.name && [words(k.name).join("_"), words(k.name).join(" "), words(k.name).at(-1)!]
+    .flatMap(plural).includes(word));
+  if (!kind) return null;
+  const link = links.find((l) => l.from === items.name && l.to === kind.name);
+  return { kind: kind.name, said: m[0], link: link?.name };
 }
 
 /** The kind the text names that best fits a part: by its name, else its role or fields. */
@@ -144,8 +186,12 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
   if (best.recipe === "selection" || best.recipe === "phasing") {
     const time = (k: Kind) => k.role === "time" || /year|period|quarter|month|phase|season/.test(k.name);
     const items = pick(text, kinds, /project|option|proposal|candidate|investment|initiative|asset/, (k) => !time(k) && numeric(k).length >= 2);
-    const value = field(items?.kind, /benefit|value|score|return|npv|worth|impact|priority|gain/);
-    const cost = field(items?.kind, /cost|capex|price|spend|invest|amount/);
+    // A field the words name whole is the worth (benchmark round 4: benefit_per_megp was taken when
+    // veh_hours_saved_per_day was written).
+    const costLike = /(^|_)(cost|capex|price|spend|invest|amount|budget)/;
+    const value = namedField(items?.kind, text, costLike) ?? field(items?.kind, /benefit|value|score|return|npv|worth|impact|priority|gain/);
+    const cost = numeric(items?.kind).filter((n) => costLike.test(n)).find((n) => namedField(items?.kind, text) === n
+      || new RegExp(`\\b${n.replace(/_/g, "[_ ]")}\\b`, "i").test(text)) ?? field(items?.kind, /cost|capex|price|spend|invest|amount/);
     note("Chosen from", items?.kind.name, items?.why ?? "");
     note("Worth", value, "its name");
     note("Cost", cost, "its name");
@@ -170,11 +216,18 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
       return { recipe: "phasing", title: TITLES.phasing, choices, missing, apply: recipe ? (d) => applyPhasing(d, recipe) : null };
     }
     const budget = inUnitsOf(amount(text, ["budget", "spend", "afford", "invest"]), cost, choices);
-    const atMost = amount(text, ["at most", "no more than", "up to", "maximum of", "max"]);
+    // "at most 8 parking projects": a limit on those of one type, not on all (benchmark round 4).
+    const perType = items ? limitsPerType(text, items.kind) : [];
+    for (const t of perType) choices.push(`At most ${t.atMost} with ${t.field} = ${t.value} — you wrote “${t.said}”`);
+    const atMost = amount(perType.reduce((left, t) => left.replace(t.said, " "), text), ["at most", "no more than", "up to", "maximum of", "max"]);
     note("Budget", budget, "the number you wrote");
     need(budget, "the budget: write it, e.g. “a budget of 2 million”");
     const most = atMost !== undefined && atMost !== budget && atMost < 1000 ? atMost : undefined;
     note("At most chosen", most, "the number you wrote");
+    // "every district gets at least one project": one or more chosen per record linked to (benchmark round 4).
+    const per = items ? onePer(text, items.kind, kinds, links) : null;
+    if (per?.link) choices.push(`At least one in every ${per.kind} — you wrote “${per.said}”; through ${per.link}`);
+    if (per && !per.link) choices.push(`Not added: at least one in every ${per.kind} — you wrote “${per.said}”, but no ${items!.kind.name} is linked to a ${per.kind}; link them under Records → Compute and join, then describe it again`);
     const flags = (k: Kind | undefined) => (k?.attributes ?? []).filter((a) => a.data_type === "boolean").map((a) => a.name);
     // Whole words: "blocked" is not "locked" (benchmark round 3: blocked projects were made a must).
     const named = (n: string) => new RegExp(`\\b${n.replace(/_/g, "[_ ]")}\\b`, "i").test(text) || words(n).some((w) => w.length > 3 && new RegExp(`\\b${w}`, "i").test(text));
@@ -184,7 +237,9 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     note("Always chosen when", mustHave, "its name");
     note("Never chosen when", never, "its name and your words");
     const recipe = missing.length ? null : ({ items: items!.kind.name, value: value!, cost: cost!, budget: budget!,
-      ...(most !== undefined ? { atMost: most } : {}), ...(mustHave ? { mustHave } : {}), ...(never ? { never } : {}) } satisfies SelectionRecipe);
+      ...(most !== undefined ? { atMost: most } : {}), ...(mustHave ? { mustHave } : {}), ...(never ? { never } : {}),
+      ...(perType.length ? { perType: perType.map(({ field: f, value: x, atMost: n }) => ({ field: f, value: x, atMost: n })) } : {}),
+      ...(per?.link ? { atLeastOnePer: { kind: per.kind, link: per.link } } : {}) } satisfies SelectionRecipe);
     return { recipe: "selection", title: TITLES.selection, choices, missing, apply: recipe ? (d) => applySelection(d, recipe) : null };
   }
 
@@ -218,17 +273,24 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const useField = field(options?.kind, /water|use|need|requirement|labou?r|m3|input/);
     const limit = amount(text, ["water", "limit", "budget", "quota", "at most", "no more than"]);
     if (useField && limit !== undefined) choices.push(`Shared limit: ${useField} up to ${limit} — its name and the number you wrote`);
-    const minShare = field(options?.kind, /min.*share|share.*min|min_?pct|min_?frac|least/);
-    const maxShare = field(options?.kind, /max.*share|share.*max|max_?pct|max_?frac|most/);
+    // A share by its name (share, pct, frac); any other least or most is an amount in the size's units
+    // (benchmark round 4: min_area_feddan was written as a share of all the land).
+    const minShare = field(options?.kind, /min\w*(share|pct|frac|percent)|(share|pct|frac|percent)\w*min|least\w*(share|pct|frac)/);
+    const maxShare = field(options?.kind, /max\w*(share|pct|frac|percent)|(share|pct|frac|percent)\w*max|most\w*(share|pct|frac)/);
+    const minAmount = minShare ? undefined : field(options?.kind, /min(imum)?($|_)|least/);
+    const maxAmount = maxShare ? undefined : field(options?.kind, /max(imum)?($|_)|most/);
     note("Least share", minShare, "its name");
     note("Most share", maxShare, "its name");
+    note("Least in all", minAmount, "its name");
+    note("Most in all", maxAmount, "its name");
     const all = /\b(all|every|whole|entire) (the )?(land|area|feddans?|parcels?)\b/i.test(text);
     if (all) choices.push("All of it given out — you wrote it");
     const recipe = missing.length ? null : ({ items: items!.kind.name, options: options!.kind.name, size: size!,
       worth: worthData ? { data: worthData.name, index: worthData.index } : built ?? { field: worthField! },
       ...(useField && limit !== undefined ? { use: { field: useField, limit } } : {}),
       ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
-      ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(all ? { all } : {}) } satisfies AllocationRecipe);
+      ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(minAmount ? { minAmount } : {}), ...(maxAmount ? { maxAmount } : {}),
+      ...(all ? { all } : {}) } satisfies AllocationRecipe);
     return { recipe: "allocation", title: TITLES.allocation, choices, missing, apply: recipe ? (d) => applyAllocation(d, recipe) : null };
   }
 
@@ -338,13 +400,14 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     note("Room in store", room, locations ? "its name" : "the number you wrote");
     note("A unit takes", room !== undefined ? size : undefined, "its name");
     const shortage = /\b(lost sales?|short\w*|stock-?outs?|unmet|backorders?|penalt\w*)\b/i.test(text) ? amount(text, ["penalty", "lost sales?", "costs?"]) ?? 1000 : undefined;
-    note("Lost sales allowed, a unit costs", shortage, "you wrote of shortage");
+    const shortageField = shortage !== undefined ? field(products?.kind, /penalt|shortage|stockout|lost/) : undefined;
+    note("Lost sales allowed, a unit costs", shortageField ?? shortage, shortageField ? "its name; the price is in the lost sales goal's equation" : "you wrote of shortage; the price is in the lost sales goal's equation, to change there");
     const recipe = missing.length ? null : ({ products: products!.kind.name, periods: periods!.kind.name, ...(locations ? { locations: locations.name } : {}),
       demand: { data: demand!.name, index: demand!.index },
       ...(startData ? { initial: { data: startData.name, index: startData.index } } : startField ? { initial: { field: startField } } : {}),
       ...(unitCost ? { unitCost } : {}), ...(holdCost ? { holdCost } : {}), ...(orderMax ? { orderMax } : {}),
       ...(room !== undefined ? { storage: { capacity: room, ...(size ? { size } : {}) } } : {}),
-      ...(shortage !== undefined ? { shortagePenalty: shortage } : {}) } satisfies InventoryRecipe);
+      ...(shortage !== undefined ? { shortagePenalty: shortage } : {}), ...(shortageField ? { shortageField } : {}) } satisfies InventoryRecipe);
     return { recipe: "inventory", title: TITLES.inventory, choices, missing, apply: recipe ? (d) => applyInventory(d, recipe) : null };
   }
 
@@ -364,13 +427,17 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     note("Cost a unit", unit?.name, "data over both kinds");
     if (sources && customers) need(unit, `a data value over ${sources.kind.name} and ${customers.kind.name}: a cost, a distance or a travel time`);
     const capacity = field(sources?.kind, /capacity|cap|supply|max|limit|throughput/);
-    const openCost = /\b(open|close|which (depot|warehouse|site)s?|fixed)\w*/i.test(text) ? field(sources?.kind, /fixed|open|setup|rent|overhead/) : undefined;
+    // A cost field of the source the words name first (benchmark round 4: fixed_cost_egp_yr was written,
+    // current_inventory_t taken).
+    const openCost = /\b(open|close|which (depot|warehouse|site)s?|fixed)\w*/i.test(text)
+      ? namedField(sources?.kind, text, /capacit|inventor|stock|supply|demand/) ?? field(sources?.kind, /fixed|open|setup|rent|overhead/) : undefined;
     note("Capacity", capacity, "its name");
     note("Opening cost", openCost, "you asked which to open");
     const single = /\b(single[- ]sourc\w*|one (depot|warehouse|supplier|source)|only one (depot|warehouse|supplier|source)|a single (depot|warehouse|supplier))\b/i.test(text);
     if (single) choices.push("One supplier each — you wrote it");
     const shortage = /\b(short\w*|unmet|stock-?outs?|penalt\w*|lost sales?)\b/i.test(text) ? amount(text, ["penalty", "lost sales?", "costs?"]) ?? 1000 : undefined;
-    note("Shortage allowed, a unit costs", shortage, "you wrote of shortage");
+    const shortageField = shortage !== undefined ? field(customers?.kind, /penalt|shortage|unmet|lost/) : undefined;
+    note("Shortage allowed, a unit costs", shortageField ?? shortage, shortageField ? `its name; the price is in the shortage goal's equation` : "you wrote of shortage; the price is in the shortage goal's equation, to change there");
     const fleetKind = /\b(fleet|vehicle|truck|van|lorr)\w*/i.test(text)
       ? kinds.find((k) => /vehicle|truck|van|fleet|lorry/.test(k.name) && k.name !== sources?.kind.name && k.name !== customers?.kind.name) : undefined;
     const load = field(fleetKind, /capacity|load|payload|size/);
@@ -378,7 +445,7 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     if (fleetKind && load && price) choices.push(`Vehicles by type: ${fleetKind.name}, each carries ${load}, costs ${price} — you wrote of a fleet`);
     const recipe = missing.length ? null : ({ sources: sources!.kind.name, customers: customers!.kind.name, demand: demand!, unitCost: unit!.name,
       unitCostIndex: unit!.index, ...(capacity ? { capacity } : {}), ...(openCost ? { openCost } : {}), ...(single ? { singleSource: true } : {}),
-      ...(shortage !== undefined ? { shortagePenalty: shortage } : {}),
+      ...(shortage !== undefined ? { shortagePenalty: shortage } : {}), ...(shortageField ? { shortageField } : {}),
       ...(fleetKind && load && price ? { fleet: { kind: fleetKind.name, capacity: load, cost: price } } : {}) } satisfies NetworkRecipe);
     return { recipe: "network", title: TITLES.network, choices, missing, apply: recipe ? (d) => applyNetwork(d, recipe) : null };
   }

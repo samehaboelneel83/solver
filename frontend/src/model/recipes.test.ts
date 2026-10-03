@@ -23,6 +23,19 @@ describe("more recipes (benchmark, October 2026)", () => {
     made.selection = ir(d);
   });
 
+  it("chooses at most so many of one type, and at least one in every district (benchmark round 4)", () => {
+    const d = applySelection(empty, { items: "project", value: "benefit", cost: "capex", budget: 500,
+      perType: [{ field: "type", value: "parking", atMost: 1 }], atLeastOnePer: { kind: "district", link: "in_district" } });
+    const published = publishable(ir(d));
+    expect(checkIrShape(published)).toBeNull();
+    expect(rules(d)).toEqual({
+      budget: "sum(capex[i] * choose[i] for i in project) <= 500",
+      at_most_parking: "sum(choose[i] for i in project where type = \"parking\") <= 1",
+      one_per_district: "for each d in district: sum(choose[i] for i in project to d by in_district) >= 1",
+    });
+    made.selection_limits = published;
+  });
+
   it("designs a network: open depots, ship, one supplier each, shortage at a price, a fleet by type", () => {
     const d = applyNetwork(empty, { sources: "depot", customers: "store", demand: "demand", unitCost: "unit_cost", unitCostIndex: ["depot", "store"],
       capacity: "capacity", openCost: "fixed_cost", singleSource: true, shortagePenalty: 1000, fleet: { kind: "truck_type", capacity: "load", cost: "price" } });
@@ -33,7 +46,9 @@ describe("more recipes (benchmark, October 2026)", () => {
     expect(r.ship_only_if_served).toBe("for each s in depot, c in store: ship[s, c] <= demand[c] * served_by[s, c]");
     expect(r.source_capacity).toBe("for each s in depot: sum(ship[s, c] for c in store) <= capacity[s] * open[s]");
     expect(r.fleet_carries).toBe("for each s in depot: sum(ship[s, c] for c in store) <= sum(load[t] * vehicles[s, t] for t in truck_type)");
-    expect(d.objective.terms.map((t) => [t.id, t.weight])).toEqual([["shipping_cost", 1], ["opening_cost", 1], ["fleet_cost", 1], ["shortage", 1000]]);
+    expect(d.objective.terms.map((t) => [t.id, t.weight])).toEqual([["shipping_cost", 1], ["opening_cost", 1], ["fleet_cost", 1], ["shortage", 1]]);
+    // The price is in the equation, not a hidden weight (benchmark round 4).
+    expect(d.objective.terms.at(-1)!.expression).toEqual({ sum: { mul: [{ const: 1000 }, { var: "short", index: ["c"] }] }, over: [{ index: "c", set: "store" }] });
     expect(d.sets).toEqual(["depot", "store", "truck_type"]);
     made.network = ir(d);
     // The plainest form: ship from fixed sources, nothing else.
@@ -61,7 +76,7 @@ describe("more recipes (benchmark, October 2026)", () => {
       size_of_each: "for each i in parcel: sum(amount[i, o] for o in crop) <= area[i]",
       shared_limit: "sum(water[o] * amount[i, o] for i in parcel, o in crop) <= 100",
       only_where_allowed: "for each i in parcel, o in crop: amount[i, o] <= area[i] * suitable[i, o]",
-      most_share: "for each o in crop: sum(amount[i, o] for i in parcel) <= max_share[o] * sum(area[i] for i in parcel)",
+      most_share: "for each o in crop: sum(amount[i, o] for i in parcel) <= max_share[o] * sum(area[i] * suitable[i, o] for i in parcel)",
     });
     made.allocation = ir(d);
   });

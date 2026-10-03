@@ -179,6 +179,10 @@
             "name": "committed",
             "data_type": "boolean",
             "default_value": false
+          },
+          {
+            "name": "type",
+            "data_type": "text"
           }
         ]
       },
@@ -430,6 +434,13 @@
         "from": "stop",
         "to": "vehicle",
         "cardinality": "one_to_many",
+        "is_hierarchy": false
+      },
+      {
+        "name": "in_district",
+        "from": "project",
+        "to": "district",
+        "cardinality": "many_to_one",
         "is_hierarchy": false
       }
     ],
@@ -4695,12 +4706,19 @@
             },
             {
               "id": "shortage",
-              "weight": 1000,
+              "weight": 1,
               "expression": {
                 "sum": {
-                  "var": "short",
-                  "index": [
-                    "c"
+                  "mul": [
+                    {
+                      "const": 1000
+                    },
+                    {
+                      "var": "short",
+                      "index": [
+                        "c"
+                      ]
+                    }
                   ]
                 },
                 "over": [
@@ -5268,7 +5286,7 @@
           },
           {
             "id": "most_share",
-            "note": "each crop gets at most its max share of the whole",
+            "note": "each crop gets at most its max share of the area that can hold it",
             "forall": [
               {
                 "index": "o",
@@ -5301,10 +5319,21 @@
                 },
                 {
                   "sum": {
-                    "attr": {
-                      "of": "i",
-                      "name": "area"
-                    }
+                    "mul": [
+                      {
+                        "attr": {
+                          "of": "i",
+                          "name": "area"
+                        }
+                      },
+                      {
+                        "par": "suitable",
+                        "index": [
+                          "i",
+                          "o"
+                        ]
+                      }
+                    ]
                   },
                   "over": [
                     {
@@ -5925,14 +5954,21 @@
             },
             {
               "id": "lost_sales",
-              "weight": 50,
+              "weight": 1,
               "expression": {
                 "sum": {
-                  "var": "short",
-                  "index": [
-                    "p",
-                    "l",
-                    "t"
+                  "mul": [
+                    {
+                      "const": 50
+                    },
+                    {
+                      "var": "short",
+                      "index": [
+                        "p",
+                        "l",
+                        "t"
+                      ]
+                    }
                   ]
                 },
                 "over": [
@@ -6408,6 +6444,159 @@
                   {
                     "index": "p",
                     "set": "store"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "recipe_selection_limits",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "project",
+          "district"
+        ],
+        "parameters": {},
+        "variables": {
+          "choose": {
+            "index": [
+              "project"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "budget",
+            "note": "the chosen project cost at most 500",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "i",
+                      "name": "capex"
+                    }
+                  },
+                  {
+                    "var": "choose",
+                    "index": [
+                      "i"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 500
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "at_most_parking",
+            "note": "at most 1 project with type parking are chosen",
+            "left": {
+              "sum": {
+                "var": "choose",
+                "index": [
+                  "i"
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project",
+                  "where": [
+                    {
+                      "attr": "type",
+                      "op": "=",
+                      "value": "parking"
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "one_per_district",
+            "note": "every district has at least one project chosen",
+            "forall": [
+              {
+                "index": "d",
+                "set": "district"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "choose",
+                "index": [
+                  "i"
+                ]
+              },
+              "over": [
+                {
+                  "index": "i",
+                  "set": "project",
+                  "via": {
+                    "rel": "in_district",
+                    "to": "d"
+                  }
+                }
+              ]
+            },
+            "relation": ">=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          }
+        ],
+        "relationships": [
+          "in_district"
+        ],
+        "objective": {
+          "sense": "maximize",
+          "terms": [
+            {
+              "id": "value_chosen",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "i",
+                        "name": "benefit"
+                      }
+                    },
+                    {
+                      "var": "choose",
+                      "index": [
+                        "i"
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "i",
+                    "set": "project"
                   }
                 ]
               }

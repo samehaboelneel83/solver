@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { EMPTY_MODEL, type FormDraft } from "./draftIr";
+import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 import { proposeDraft, recipeFor, type Kind } from "./draftFromWords";
 
 const empty: FormDraft = { sets: [], parameters: {}, variables: {}, constraints: [], objective: { sense: "minimize", mode: "weighted", terms: [] } };
@@ -46,7 +46,7 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     const d = p.apply!(empty);
     valid(d);
     expect(Object.keys(d.variables)).toEqual(["ship", "open", "short", "served_by", "vehicles"]);
-    expect(d.objective.terms.find((t) => t.id === "shortage")!.weight).toBe(500);
+    expect(d.objective.terms.find((t) => t.id === "shortage")!.expression).toMatchObject({ sum: { mul: [{ const: 500 }, {}] } });
   });
 
   it("reads coverage, and says what is missing instead of guessing", () => {
@@ -119,7 +119,7 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(d.variables.order).toMatchObject({ index: ["sku", "warehouse", "week"] });
     expect(d.constraints.map((c) => c.id)).toEqual(["stock_balance", "storage"]);
     expect(JSON.stringify(d.constraints[0])).toContain('"par":"on_hand","index":["l","p"]');
-    expect(d.objective.terms.map((x) => [x.id, x.weight])).toEqual([["ordering_cost", 1], ["holding_cost", 1], ["lost_sales", 40]]);
+    expect(d.objective.terms.map((x) => [x.id, x.weight])).toEqual([["ordering_cost", 1], ["holding_cost", 1], ["lost_sales", 1]]);
   });
 
   it("covers what the reach data joins the sites to, not a kind only named, with seats and the budget in the costs' units", () => {
@@ -218,5 +218,66 @@ describe("each place to its nearest open site (benchmark round 4)", () => {
     expect(d.constraints.map((c) => c.id)).toEqual(["one_site_each", "only_from_open", "within_reach", "sites_open", "existing_stay_open"]);
     expect(d.constraints.find((c) => c.id === "within_reach")).toMatchObject({ right: { const: 15 } });
     expect(JSON.stringify(d.objective.terms[0].expression)).toContain('"name":"calls_per_day"');
+  });
+});
+
+describe("reading more of the words (benchmark round 4)", () => {
+  const text = (a: string, data_type = "text", enum_values: string[] | null = null) => ({ name: a, data_type, enum_values });
+  const projects: Kind[] = [
+    { name: "project", attributes: [n("benefit_per_megp"), n("veh_hours_saved_per_day"), n("cost_megp"), text("type"), text("in_district")] },
+    { name: "district", attributes: [n("population")] },
+  ];
+
+  it("takes the worth the words name, a limit per type, and at least one in every district through the link", () => {
+    const p = proposeDraft("Fund projects with a budget of 250 M EGP for the most veh_hours_saved_per_day: at most 8 parking projects, "
+      + "and every district gets at least one project", projects, [], undefined, [{ name: "in_district", from: "project", to: "district" }])!;
+    expect(p.recipe).toBe("selection");
+    expect(p.missing).toEqual([]);
+    expect(p.choices.join("\n")).toMatch(/Worth: veh_hours_saved_per_day/);
+    expect(p.choices.join("\n")).not.toMatch(/At most chosen/);
+    const d = p.apply!(empty);
+    expect(checkIrShape(publishable({ ...EMPTY_MODEL, ...d }))).toBeNull();
+    expect(d.constraints.map((c) => c.id)).toEqual(["budget", "at_most_parking", "one_per_district"]);
+    expect(d.constraints[1]).toMatchObject({ right: { const: 8 }, left: { sum: { var: "choose" }, over: [{ set: "project", where: [{ attr: "type", op: "=", value: "parking" }] }] } });
+    expect(d.constraints[2]).toMatchObject({ relation: ">=", forall: [{ index: "d", set: "district" }],
+      left: { over: [{ set: "project", via: { rel: "in_district", to: "d" } }] } });
+    expect(d.objective.terms[0].expression).toMatchObject({ sum: { mul: [{ attr: { name: "veh_hours_saved_per_day" } }, {}] } });
+  });
+
+  it("takes the value from a list field holding the word, and says what is missing for a district rule with no link", () => {
+    const kinds: Kind[] = [{ name: "project", attributes: [n("benefit"), n("cost"), text("category", "enum", ["Widening", "Parking", "Signal"])] },
+      { name: "district", attributes: [] }];
+    const p = proposeDraft("Fund projects with a budget of 100: no more than 2 signal projects, at least one in every district", kinds, [])!;
+    const d = p.apply!(empty);
+    expect(d.constraints[1]).toMatchObject({ id: "at_most_signal", left: { over: [{ where: [{ attr: "category", value: "Signal" }] }] } });
+    expect(d.constraints).toHaveLength(2);
+    expect(p.choices.join("\n")).toMatch(/Not added: at least one in every district .* no project is linked to a district/);
+  });
+
+  it("takes the opening cost the words name, never `rent` inside `current_inventory_t`", () => {
+    const kinds: Kind[] = [{ name: "warehouse", attributes: [n("current_inventory_t"), n("capacity_t"), n("fixed_cost_egp_yr")] },
+      { name: "store", attributes: [n("demand_t"), n("shortage_penalty")] }];
+    const data = [{ name: "unit_cost", index: ["warehouse", "store"] }];
+    const p = proposeDraft("Which warehouses to open (fixed_cost_egp_yr), ship to every store, unmet demand allowed at a penalty", kinds, data)!;
+    expect(p.recipe).toBe("network");
+    expect(p.choices.join("\n")).toMatch(/Opening cost: fixed_cost_egp_yr/);
+    const d = p.apply!(empty);
+    expect(d.objective.terms.find((t) => t.id === "shortage")).toMatchObject({ weight: 1,
+      expression: { sum: { mul: [{ attr: { of: "c", name: "shortage_penalty" } }, { var: "short" }] } } });
+    const q = proposeDraft("Which warehouses to open, ship to every store", [{ name: "warehouse", attributes: [n("current_inventory_t"), n("capacity_t")] },
+      { name: "store", attributes: [n("demand_t")] }], data)!;
+    expect(q.choices.join("\n")).not.toMatch(/Opening cost/);
+  });
+
+  it("takes a crop's least and most area as amounts, and a share as of the land that can hold it", () => {
+    const kinds: Kind[] = [{ name: "parcel", attributes: [n("area_feddan")] }, { name: "crop", attributes: [n("profit"), n("min_area"), n("max_area")] }];
+    const data = [{ name: "suitable", index: ["parcel", "crop"] }];
+    const p = proposeDraft("Allocate land among crops on each parcel for the most profit", kinds, data)!;
+    expect(p.recipe).toBe("allocation");
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.constraints.find((c) => c.id === "least_amount")).toMatchObject({ relation: ">=", right: { attr: { name: "min_area" } } });
+    expect(d.constraints.find((c) => c.id === "most_amount")).toMatchObject({ relation: "<=", right: { attr: { name: "max_area" } } });
+    expect(d.constraints.some((c) => c.id === "least_share" || c.id === "most_share")).toBe(false);
   });
 });

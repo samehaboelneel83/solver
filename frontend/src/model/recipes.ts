@@ -60,6 +60,10 @@ export type SelectionRecipe = {
   mustHave?: string;
   /** A yes/no field: items with it set are never chosen (blocked by construction). */
   never?: string;
+  /** At most so many of those whose field holds a value: "at most 8 parking projects". */
+  perType?: { field: string; value: string; atMost: number }[];
+  /** At least one chosen for every record of a kind the items link to: "every district at least one". */
+  atLeastOnePer?: { kind: string; link: string };
 };
 
 export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft {
@@ -83,9 +87,19 @@ export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft 
     constraints.push({ ...rule(name("never_chosen"), `no ${say(r.items)} marked ${say(r.never)} is chosen`, chosen, "<=", k(0)),
       forall: [{ index: i, set: r.items, where: [{ attr: r.never, op: "=", value: true }] }] } as Constraint);
   }
+  for (const t of r.perType ?? []) {
+    constraints.push(rule(name(`at_most_${t.value.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`), `at most ${t.atMost} ${say(r.items)} with ${say(t.field)} ${t.value} are chosen`,
+      { sum: chosen, over: [{ index: i, set: r.items, where: [{ attr: t.field, op: "=", value: t.value }] }] } as Term, "<=", k(t.atMost)));
+  }
+  if (r.atLeastOnePer) {
+    const d = "d";
+    constraints.push(rule(name(`one_per_${r.atLeastOnePer.kind}`), `every ${say(r.atLeastOnePer.kind)} has at least one ${say(r.items)} chosen`,
+      { sum: chosen, over: [{ index: i, set: r.items, via: { rel: r.atLeastOnePer.link, to: d } }] } as Term, ">=", k(1),
+      each([d, r.atLeastOnePer.kind])));
+  }
   return {
     ...draft,
-    sets: [...new Set([...draft.sets, r.items])],
+    sets: [...new Set([...draft.sets, r.items, ...(r.atLeastOnePer ? [r.atLeastOnePer.kind] : [])])],
     variables: { ...draft.variables, [pick]: { index: [r.items], domain: "binary" } } as Variables,
     constraints,
     objective: { sense: "maximize", mode: "weighted", terms: [
@@ -110,8 +124,10 @@ export type NetworkRecipe = {
   openCost?: string;
   /** Each customer is served by one source only. */
   singleSource?: boolean;
-  /** Demand may go unmet at this cost a unit, instead of the model having no answer. */
+  /** Demand may go unmet at this cost a unit, instead of the model having no answer; or at a number
+   * field of the customer's (a penalty per unit), when it has one. */
   shortagePenalty?: number;
+  shortageField?: string;
   /** Vehicles by type, bought per source: a number field each of their capacity and their cost. */
   fleet?: { kind: string; capacity: string; cost: string };
 };
@@ -134,7 +150,7 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
     terms.push({ id: name("opening_cost"), weight: 1, expression: sum(mul(attr(s, r.openCost), v(open, [s])), [s, r.sources]) } as ObjectiveTerm);
   }
   let short: string | null = null;
-  if (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty)) {
+  if (r.shortageField || (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty))) {
     short = name("short");
     variables[short] = { index: [r.customers], domain: "continuous", lower: 0 } as Variables[string];
   }
@@ -174,7 +190,10 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
     sets.push(f.kind);
   }
   terms.unshift({ id: name("shipping_cost"), weight: 1, expression: sum(mul(unit, flow), [s, r.sources], [c, r.customers]) } as ObjectiveTerm);
-  if (short) terms.push({ id: name("shortage"), weight: r.shortagePenalty!, expression: sum(v(short, [c]), [c, r.customers]) } as ObjectiveTerm);
+  // The price is in the goal's equation, weight 1, to read and change there (benchmark round 4: a hidden
+  // weight of 15000 on this goal was found late and counted twice).
+  if (short) terms.push({ id: name("shortage"), weight: 1,
+    expression: sum(mul(r.shortageField ? attr(c, r.shortageField) : k(r.shortagePenalty!), v(short, [c])), [c, r.customers]) } as ObjectiveTerm);
   return {
     ...draft,
     sets: [...new Set([...draft.sets, ...sets])],
@@ -243,6 +262,9 @@ export type AllocationRecipe = {
   /** Number fields of an option: its least and most share of everything, 0..1. */
   minShare?: string;
   maxShare?: string;
+  /** Number fields of an option: its least and most in all, in the items' size units (min_area_feddan). */
+  minAmount?: string;
+  maxAmount?: string;
   /** Every unit of every item is given out (else at most). */
   all?: boolean;
 };
@@ -270,13 +292,25 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
     constraints.push(rule(name("only_where_allowed"), `a ${say(r.options)} goes only where ${say(r.allowed.data)} allows it`,
       cell, "<=", mul(attr(i, r.size), ok), each([i, r.items], [o, r.options])));
   }
+  // A share is of the land that can hold the option, when only some can (benchmark round 4: a least
+  // share of all the land, for a crop most land cannot hold, could not be met).
+  const whole: Term = r.allowed ? sum(mul(attr(i, r.size), { par: r.allowed.data, index: r.allowed.index[0] === r.items ? [i, o] : [o, i] } as Term), [i, r.items]) : everything;
+  const ofWhole = r.allowed ? `of the ${say(r.size)} that can hold it` : "of the whole";
   if (r.minShare) {
-    constraints.push(rule(name("least_share"), `each ${say(r.options)} gets at least its ${say(r.minShare)} of the whole`,
-      sum(cell, [i, r.items]), ">=", mul(attr(o, r.minShare), everything), each([o, r.options])));
+    constraints.push(rule(name("least_share"), `each ${say(r.options)} gets at least its ${say(r.minShare)} ${ofWhole}`,
+      sum(cell, [i, r.items]), ">=", mul(attr(o, r.minShare), whole), each([o, r.options])));
   }
   if (r.maxShare) {
-    constraints.push(rule(name("most_share"), `each ${say(r.options)} gets at most its ${say(r.maxShare)} of the whole`,
-      sum(cell, [i, r.items]), "<=", mul(attr(o, r.maxShare), everything), each([o, r.options])));
+    constraints.push(rule(name("most_share"), `each ${say(r.options)} gets at most its ${say(r.maxShare)} ${ofWhole}`,
+      sum(cell, [i, r.items]), "<=", mul(attr(o, r.maxShare), whole), each([o, r.options])));
+  }
+  if (r.minAmount) {
+    constraints.push(rule(name("least_amount"), `each ${say(r.options)} gets at least its ${say(r.minAmount)} in all`,
+      sum(cell, [i, r.items]), ">=", attr(o, r.minAmount), each([o, r.options])));
+  }
+  if (r.maxAmount) {
+    constraints.push(rule(name("most_amount"), `each ${say(r.options)} gets at most its ${say(r.maxAmount)} in all`,
+      sum(cell, [i, r.items]), "<=", attr(o, r.maxAmount), each([o, r.options])));
   }
   const data: FormDraft["parameters"] = { ...draft.parameters };
   for (const d of [("data" in w ? w : null), r.allowed ?? null]) {
@@ -380,8 +414,10 @@ export type InventoryRecipe = {
   orderMax?: string;
   /** What fits in store: a number field of the location, or a number; a product's size, if it is not 1. */
   storage?: { capacity: string | number; size?: string };
-  /** Demand may go unmet (lost sales) at this cost a unit, instead of the model having no answer. */
+  /** Demand may go unmet (lost sales) at this cost a unit, instead of the model having no answer; or at
+   * a number field of the product's (a penalty per unit), when it has one. */
   shortagePenalty?: number;
+  shortageField?: string;
 };
 
 /**
@@ -406,7 +442,7 @@ export function applyInventory(draft: FormDraft, r: InventoryRecipe): FormDraft 
   if (r.initial) parts.push("field" in r.initial ? attr(p, r.initial.field) : ({ par: r.initial.data, index: at(r.initial.index) } as Term));
   parts.push(upTo(v(order, where(s))));
   let short: string | null = null;
-  if (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty)) {
+  if (r.shortageField || (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty))) {
     short = name("short");
     variables[short] = { index: shape, domain: "continuous", lower: 0 } as Variables[string];
     parts.push(upTo(v(short, where(s))));
@@ -431,7 +467,8 @@ export function applyInventory(draft: FormDraft, r: InventoryRecipe): FormDraft 
   const terms: ObjectiveTerm[] = [];
   if (r.unitCost) terms.push({ id: name("ordering_cost"), weight: 1, expression: sum(mul(attr(p, r.unitCost), v(order, where(t))), ...over) } as ObjectiveTerm);
   if (r.holdCost) terms.push({ id: name("holding_cost"), weight: 1, expression: sum(mul(attr(p, r.holdCost), v(stock, where(t))), ...over) } as ObjectiveTerm);
-  if (short) terms.push({ id: name("lost_sales"), weight: r.shortagePenalty!, expression: sum(v(short, where(t)), ...over) } as ObjectiveTerm);
+  if (short) terms.push({ id: name("lost_sales"), weight: 1,
+    expression: sum(mul(r.shortageField ? attr(p, r.shortageField) : k(r.shortagePenalty!), v(short, where(t))), ...over) } as ObjectiveTerm);
   // With no costs at all, the least stock held is the goal.
   if (!terms.length) terms.push({ id: name("stock_held"), weight: 1, expression: sum(v(stock, where(t)), ...over) } as ObjectiveTerm);
   const data: FormDraft["parameters"] = { ...draft.parameters, [r.demand.data]: draft.parameters[r.demand.data] ?? { index: r.demand.index } };

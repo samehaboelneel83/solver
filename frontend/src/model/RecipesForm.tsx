@@ -84,6 +84,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
       ...(f.use && limit !== undefined && Number.isFinite(limit) ? { use: { field: f.use, limit } } : {}),
       ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
       ...(f.minShare ? { minShare: f.minShare } : {}), ...(f.maxShare ? { maxShare: f.maxShare } : {}),
+      ...(f.minAmount ? { minAmount: f.minAmount } : {}), ...(f.maxAmount ? { maxAmount: f.maxAmount } : {}),
       ...(f.all === "yes" ? { all: true } : {}) });
     body = (
       <>
@@ -101,6 +102,8 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
           <Pick label="Only where" value={get("allowed")} onChange={set("allowed")} options={over.map((d) => d.name)} optional />
           <Pick label="Least share" value={get("minShare")} onChange={set("minShare")} options={numbers(kind("options"))} optional />
           <Pick label="Most share" value={get("maxShare")} onChange={set("maxShare")} options={numbers(kind("options"))} optional />
+          <Pick label="Least in all" value={get("minAmount")} onChange={set("minAmount")} options={numbers(kind("options"))} optional />
+          <Pick label="Most in all" value={get("maxAmount")} onChange={set("maxAmount")} options={numbers(kind("options"))} optional />
           <Pick label="All of it given out" value={get("all")} onChange={set("all")} options={["yes"]} optional />
         </Row>
       </>
