@@ -154,10 +154,12 @@ function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] })
   const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
   const [linkOf, setLinkOf] = useState<Record<string, string>>({});
   const fields = kind.attributes ?? [];
-  const dates = fields.filter((a) => (a.data_type as string) === "date");
+  const dates = fields.filter((a) => ["date", "datetime"].includes(a.data_type as string));
+  // The record's own key, read as a date or a time (benchmark round 4: an hourly series keyed by its timestamp).
+  const keyed = !fields.some((a) => a.name === "key");
   const texts = fields.filter((a) => a.data_type === "text" || a.data_type === "enum");
   const links = fields.filter((a) => a.data_type === "reference");
-  if (!dates.length && !texts.length && !links.length) return null;
+  if (!dates.length && !texts.length && !links.length && !keyed) return null;
   const numbersOf = (a: (typeof fields)[number]) => {
     const target = kinds.find((k) => k.id === a.target_type_id);
     return (target?.attributes ?? []).filter((x) => NUMERIC.has(x.data_type)).map((x) => x.name);
@@ -172,13 +174,18 @@ function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] })
   const button = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50 disabled:opacity-60";
   return (
     <div className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-sm" aria-label="Make number fields">
-      <p className="text-xs text-slate-600">Not a number yet? Make number fields from it:</p>
+      <p className="text-xs text-slate-600">Not a number yet? Make number fields from it (records imported later get them too):</p>
       <ul className="mt-1 space-y-1">
         {dates.map((a) => (
           <li key={a.name}><span className="font-mono text-xs">{a.name}</span>{" "}
             <button type="button" className={button} disabled={derive.isPending} onClick={() => run({ op: "date_parts", field: a.name })}>
-              weekday, month and day of year</button></li>
+              weekday, month, day of year (and hour, for a time)</button></li>
         ))}
+        {keyed && (
+          <li><span className="text-xs">its key, when it is a date or a time</span>{" "}
+            <button type="button" className={button} disabled={derive.isPending} onClick={() => run({ op: "date_parts", field: "key" })}>
+              weekday, month, day of year and hour</button></li>
+        )}
         {texts.map((a) => (
           <li key={a.name}><span className="font-mono text-xs">{a.name}</span>{" "}
             <button type="button" className={button} disabled={derive.isPending} onClick={() => run({ op: "categories", field: a.name })}>
@@ -228,7 +235,16 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
   const through = (kind?.attributes ?? []).filter((a) => a.data_type === "reference").flatMap((a) =>
     (all.find((k) => k.id === a.target_type_id)?.attributes ?? []).filter((b) => b.data_type === "number" || b.data_type === "integer")
       .map((b) => `${a.name}.${b.name}`));
-  const sourceOf = (f: string) => inputs[f] ?? (fields.includes(f) ? f : "");
+  // An input read through a link of the kind trained on (`of_crop.water`): per crop, the crop's own field;
+  // for the kind predicted for, its own (benchmark round 4: "'of_crop' is not a link field of parcel").
+  const trainedKind = all.find((k) => k.name === trainedOn);
+  const linkLeadsTo = (f: string) => {
+    if (!f.includes(".")) return undefined;
+    const link = (trainedKind?.attributes ?? []).find((a) => a.name === f.split(".")[0] && a.data_type === "reference");
+    return all.find((k) => k.id === link?.target_type_id)?.name;
+  };
+  const byLink = (f: string) => { const to = linkLeadsTo(f); return !!to && ((!!overKind && to === overKind) || (to === forKind && forKind !== trainedOn)); };
+  const sourceOf = (f: string) => inputs[f] ?? (fields.includes(f) ? f : byLink(f) ? "link" : "");
   // With one per crop (period), an input may also come from each crop: its fields, or 1 for one crop
   // (benchmark round 3: a yield model's crop inputs could not all be fed).
   const overFields = ((all.find((k) => k.name === overKind)?.attributes) ?? []).filter((a) => a.data_type === "number" || a.data_type === "integer").map((a) => a.name);
@@ -241,12 +257,14 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
       if (from === "#") { const n = Number(numbers[f]); if (Number.isFinite(n)) mapped[f] = n; }
       else if (overKind && from === "over:is") { if (numbers[f]?.trim()) more[f] = `key=${numbers[f].trim()}`; }
       else if (overKind && from.startsWith("over:")) more[f] = from.slice(5);
-      else if (from && from !== f) mapped[f] = from;
+      else if (from && from !== f && from !== "link") mapped[f] = from;
     }
     return { field, only_missing: onlyMissing && !overKind && forKind === trainedOn,
       ...(forKind !== trainedOn ? { entity_type: forKind } : {}), ...(Object.keys(mapped).length ? { inputs: mapped } : {}),
-      ...(overKind && overFeature ? { over: { kind: overKind, feature: overFeature, ...(Object.keys(more).length ? { more } : {}) } } : {}) };
+      ...(overKind ? { over: { kind: overKind, ...(overFeature ? { feature: overFeature } : {}), ...(Object.keys(more).length ? { more } : {}) } } : {}) };
   };
+  // Said, not only disabled (benchmark round 4: "Predict and keep" stayed grey with no reason).
+  const unsaid = features.filter((f) => !(overKind && f === overFeature) && !sourceOf(f));
   const select = "rounded border border-slate-300 px-1 py-0.5 font-mono text-xs";
   return (
     <form className="mt-3 space-y-2 text-sm" aria-label={`Keep ${predictor.name}'s predictions`}
@@ -283,7 +301,7 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
         {overKind && (
           <label>its key feeds
             <select aria-label="Input each period feeds" className={`${select} ml-1`} value={overFeature} onChange={(e) => setOverFeature(e.target.value)}>
-              <option value="">choose…</option>
+              <option value="">no input (optional)</option>
               {features.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
           </label>
@@ -295,6 +313,7 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
             <label>{f} from
               <select aria-label={`${f} comes from`} className={`${select} ml-1`} value={sourceOf(f)} onChange={(e) => setInputs({ ...inputs, [f]: e.target.value })}>
                 <option value="">choose…</option>
+                {byLink(f) && <option value="link">{linkLeadsTo(f) === overKind ? `each ${overKind}'s ${f.split(".")[1]}` : `its own ${f.split(".")[1]}`} (through {f.split(".")[0]})</option>}
                 {fields.map((n) => <option key={n} value={n}>{n}</option>)}
                 {through.map((n) => <option key={n} value={n}>{n}</option>)}
                 {overKind && overFields.map((n) => <option key={`over-${n}`} value={`over:${n}`}>each {overKind}&apos;s {n}</option>)}
@@ -313,7 +332,8 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
           </li>
         ))}
       </ul>
-      <button type="submit" disabled={apply.isPending || (!!overKind && !overFeature)} className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-60">
+      {unsaid.length > 0 && <p className="text-xs text-amber-800">Say where {unsaid.join(", ")} come{unsaid.length === 1 ? "s" : ""} from; records lacking one are skipped.</p>}
+      <button type="submit" disabled={apply.isPending} className="rounded bg-blue-600 px-2 py-1 text-xs text-white disabled:opacity-60">
         {apply.isPending ? "Predicting…" : "Predict and keep"}</button>
       {said && <p role={said.error ? "alert" : "status"} className={`text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
     </form>
@@ -453,6 +473,7 @@ function TrainForm({ domainId }: { domainId: number }) {
               <label className="block">Earlier {target}, in the order of
                 <select aria-label="In the order of" className={INPUT_CLASS} value={lagOrder} onChange={(e) => setLagOrder(e.target.value)}>
                   <option value="">no earlier values</option>
+                  {!(chosen.attributes ?? []).some((a) => a.name === "key") && <option value="key">its key (a date or a time)</option>}
                   {(chosen.attributes ?? []).filter((a) => ["date", "datetime", "text", "integer", "number"].includes(a.data_type) && a.name !== target)
                     .map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
                 </select>

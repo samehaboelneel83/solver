@@ -1966,7 +1966,7 @@ export const predictWith = (id: Id, inputs: number[][]) =>
 export type ApplyPredictorBody = {
   field: string; only_missing: boolean; entity_type?: string; inputs?: Record<string, string | number>;
   /** One per record and period; `more`: other inputs from each period's record (a field, `key`, or `key=wheat`). */
-  over?: { kind: string; feature: string; field?: string; more?: Record<string, string> };
+  over?: { kind: string; feature?: string; field?: string; more?: Record<string, string> };
 };
 export const applyPredictor = (id: Id, body: ApplyPredictorBody) =>
   send<{ field?: string; entity_type?: string; parameter?: string; parameter_id?: Id; written: number; skipped: string[]; skipped_count: number }>(

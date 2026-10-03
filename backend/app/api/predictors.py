@@ -266,14 +266,16 @@ def _reader(db: Session, type_id: int, kind_name: str, specs: list[Any]):
 def _train(db: Session, body: "TrainBody", user: UserAccount) -> dict[str, Any]:
     """Read the records, train, and store the predictor; the request and a background training share it."""
     type_id = _type_id(db, body)
-    rows = [dict(r or {}) for r in db.execute(
+    # A record's key is its time when lags are in the order of "key" and no field has that name: an
+    # hourly series is often keyed by its timestamp (benchmark round 4).
+    rows = [{"key": key, **dict(r or {})} for key, r in db.execute(
         text(
-            "SELECT e.attrs FROM entity e"
+            "SELECT e.key, e.attrs FROM entity e"
             " WHERE e.active AND e.entity_type_id = ANY (entity_type_family(:t))"
             " ORDER BY e.id LIMIT :cap"
         ),
         {"t": type_id, "cap": training.MAX_ROWS + 1},
-    ).scalars().all()]
+    ).all()]
     features = list(body.features)
     # Inputs through a link (`road.lanes`), read at training as when predicting (benchmark re-test, October 2026).
     through = [f for f in features if "." in f]
@@ -441,7 +443,10 @@ class Over(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(pattern=_NAME, max_length=63)
-    feature: str = Field(max_length=63)
+    #: The input each period's `field` feeds; none when `more` and the links say where every input comes
+    #: from (benchmark round 4: a yield per parcel and crop read the crop through a link, and no input
+    #: took the crop's key -- "its key feeds" was demanded all the same).
+    feature: str | None = Field(default=None, max_length=63)
     field: str = Field(default="key", max_length=63)
     #: More inputs from each period's own record (benchmark round 3: a yield model per parcel and crop
     #: read the crop's base yield and its yes/no "is it wheat" inputs, and only one could be fed):
@@ -494,7 +499,7 @@ def apply_predictor(
     unknown = [k for k in inputs if k not in features]
     if unknown:
         raise HTTPException(422, f"{row['name']} has no input {unknown[0]!r}; its inputs are {', '.join(features)}")
-    if body.over is not None and body.over.feature not in features:
+    if body.over is not None and body.over.feature is not None and body.over.feature not in features:
         raise HTTPException(422, f"{row['name']} has no input {body.over.feature!r} for the periods to feed")
     if body.over is not None and (odd := [f for f in body.over.more if f not in features]):
         raise HTTPException(422, f"{row['name']} has no input {odd[0]!r}; its inputs are {', '.join(features)}")
@@ -502,9 +507,15 @@ def apply_predictor(
     lag_at = {lagging.name(lag["field"], k): i for i, k in enumerate(lag["steps"])} if lag else {}
     if lag and body.over is not None:
         raise HTTPException(422, f"{row['name']} reads earlier records (lags): it predicts record by record, not per period")
-    read = _reader(db, type_id, kind_name, [inputs.get(f, f) for f in features if f not in lag_at])
+    # Per period, an input read through a link of the kind trained on (`of_crop.water`) is the period's
+    # own field when that link leads to the periods' kind, and the record's own when it leads to the
+    # kind predicted for (benchmark round 4: "'of_crop' is not a link field of parcel").
+    through = _through_over(db, row, source, body, type_id, features, inputs) if body.over is not None else {}
+    read = _reader(db, type_id, kind_name, [inputs.get(f, f) for f in features if f not in lag_at and f not in through])
 
     def value_of(attrs: dict[str, Any], feature: str) -> Any:
+        if through.get(feature, ("", ""))[0] == "own":
+            return attrs.get(through[feature][1])
         return read(attrs, inputs.get(feature, feature))
 
     model = row["model"]
@@ -512,7 +523,8 @@ def apply_predictor(
     records = db.execute(text("SELECT id, key, attrs FROM entity WHERE active AND entity_type_id = ANY (entity_type_family(:t))"
                               " ORDER BY sort_order, key"), {"t": type_id}).all()
     if body.over is not None:
-        return _apply_over(db, user, identity, row, body, type_id, records, features, value_of)
+        return _apply_over(db, user, identity, row, body, type_id, records, features, value_of,
+                           {f: name for f, (where, name) in through.items() if where == "period"})
     kind = db.execute(text("SELECT data_type::text FROM attribute_def WHERE entity_type_id = ANY (entity_type_lineage(:t))"
                            " AND name = :n"), {"t": type_id, "n": body.field}).scalar_one_or_none()
     if kind is None:
@@ -524,7 +536,7 @@ def apply_predictor(
     # passes its forecast on to the next (benchmark re-test, October 2026).
     series = lagging.Series(lag["steps"]) if lag else None
     if lag:
-        timed = lagging.ordered(records, lambda r: dict(r[2] or {}), lag["order_by"], lag.get("group_by"))
+        timed = lagging.ordered(records, lambda r: {"key": r[1], **dict(r[2] or {})}, lag["order_by"], lag.get("group_by"))
         in_series = {r[0] for _, r in timed}
         skipped += [r[1] for r in records if r[0] not in in_series]
         sequence = [(k, r) for k, r in timed]
@@ -560,8 +572,33 @@ def apply_predictor(
 MAX_OVER_CELLS = 200_000
 
 
+def _through_over(db: Session, row: Any, source: dict[str, Any], body: ApplyBody, type_id: int, features: list[str],
+                  inputs: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    """Inputs read through a link of the kind trained on, when predicting per record and period:
+    feature -> ("period", field) or ("own", field)."""
+    assert body.over is not None
+    trained = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                         {"d": row["domain_id"], "n": source["entity_type"]}).scalar_one_or_none()
+    period = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                        {"d": row["domain_id"], "n": body.over.kind}).scalar_one_or_none()
+    out: dict[str, tuple[str, str]] = {}
+    for f in features:
+        spec = inputs.get(f, f)
+        if f in body.over.more or f == body.over.feature or not isinstance(spec, str) or "." not in spec or trained is None:
+            continue
+        link, name = spec.split(".", 1)
+        to = db.execute(text(
+            "SELECT rt.to_type_id FROM attribute_def ad JOIN relationship_type rt ON rt.id = ad.references_id"
+            " WHERE ad.entity_type_id = ANY (entity_type_lineage(:t)) AND ad.name = :n"), {"t": trained, "n": link}).scalar_one_or_none()
+        if to is not None and to == period:
+            out[f] = ("period", name)
+        elif to is not None and to == type_id:
+            out[f] = ("own", name)
+    return out
+
+
 def _apply_over(db: Session, user: UserAccount, identity: int, row: Any, body: ApplyBody, type_id: int,
-                records: list[Any], features: list[str], value_of) -> dict[str, Any]:
+                records: list[Any], features: list[str], value_of, linked: dict[str, str] | None = None) -> dict[str, Any]:
     """A prediction for each record and each period, kept as the data value `field[kind, period]` a
     rule reads (benchmark re-test, October 2026: a forecast could only be read with its inputs held
     constant, not road by road and hour by hour)."""
@@ -604,7 +641,7 @@ def _apply_over(db: Session, user: UserAccount, identity: int, row: Any, body: A
             return 1.0 if str(period_key).strip().casefold() == spec[4:].strip().casefold() else 0.0
         return number(period_key if spec == "key" else period_attrs.get(spec))
 
-    from_period = {over.feature: over.field, **over.more}
+    from_period = {**(linked or {}), **({over.feature: over.field} if over.feature else {}), **over.more}
     for entity_id, key, attrs in records:
         attrs = dict(attrs or {})
         base = {f: value_of(attrs, f) for f in features if f not in from_period}

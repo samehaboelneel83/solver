@@ -444,3 +444,72 @@ def test_a_forecast_per_parcel_and_crop_reads_several_inputs_from_the_crop(clien
     cells = dict(db.execute(text("SELECT e.key, pv.value FROM parameter_value pv JOIN entity e ON e.id = pv.entity_ids[2]"
                                  " WHERE pv.parameter_def_id = :p"), {"p": kept.json()["parameter_id"]}).all())
     assert 10 < float(cells["wheat"]) < 14 and 3 < float(cells["maize"]) < 5  # 3 x 4 = 12, 1 x 4 = 4
+
+
+def test_a_yield_per_parcel_and_crop_reads_the_crop_through_the_link_it_was_trained_with(client, db):  # noqa: F811
+    """Benchmark round 4: trained on history rows reading `of_crop.base` through a link, the forecast per
+    parcel and crop failed ("'of_crop' is not a link field of parcel"), and an input had to take the crop's key."""
+    http, t = client
+    domain = t["domain_a"]
+
+    def kind(name, fields):
+        type_id = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, :n, CAST('other' AS entity_role)) RETURNING id"),
+                             {"d": domain, "n": name}).scalar_one()
+        for f in fields:
+            db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, CAST('number' AS attr_type))"),
+                       {"t": type_id, "n": f})
+        return type_id
+
+    crop = kind("crop_type", ["base"])
+    plot = kind("plot", ["water"])
+    for key, base in (("wheat", 3), ("maize", 1)):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": crop, "k": key, "a": json.dumps({"base": base})})
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'p1', '{\"water\": 4}')"), {"t": plot})
+    history = kind("harvest", ["water", "yield_t"])
+    db.commit()
+    for name, to in (("of_crop", crop), ("of_plot", plot)):
+        got = http.post(f"/api/v1/entity-types/{history}/attributes", json={"name": name, "data_type": "reference", "target_type_id": to},
+                        headers=t["a"])
+        assert got.status_code == 201, got.text
+    rng = np.random.default_rng(4)
+    for i in range(120):
+        water, wheat = float(rng.uniform(1, 5)), bool(rng.integers(0, 2))
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": history, "k": f"h{i}", "a": json.dumps({"water": water, "of_crop": "wheat" if wheat else "maize", "of_plot": "p1",
+                                                                  "yield_t": (3.0 if wheat else 1.0) * water})})
+    db.commit()
+    trained = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "yield_link", "entity_type": "harvest",
+                                                          "features": ["water", "of_crop.base"], "target": "yield_t",
+                                                          "trees": 40, "max_depth": 8}, headers=t["a"])
+    assert trained.status_code == 201, trained.text
+    kept = http.post(f"/api/v1/predictors/{trained.json()['id']}/apply", json={
+        "field": "yield_fc", "entity_type": "plot", "over": {"kind": "crop_type"}}, headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 2
+    cells = dict(db.execute(text("SELECT e.key, pv.value FROM parameter_value pv JOIN entity e ON e.id = pv.entity_ids[2]"
+                                 " WHERE pv.parameter_def_id = :p"), {"p": kept.json()["parameter_id"]}).all())
+    assert 10 < float(cells["wheat"]) < 14 and 3 < float(cells["maize"]) < 5  # 3 x 4 = 12, 1 x 4 = 4
+
+
+def test_an_hourly_series_keyed_by_its_timestamp_is_ordered_by_its_key(client, db):  # noqa: F811
+    """Benchmark round 4: the hourly series' timestamp was its key, and lags could not be put in its order."""
+    http, t = client
+    domain = t["domain_a"]
+    hourly = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'calls_hour', CAST('other' AS entity_role)) RETURNING id"),
+                        {"d": domain}).scalar_one()
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, 'calls', CAST('number' AS attr_type)),"
+                    " (:t, 'temp', CAST('number' AS attr_type))"), {"t": hourly})
+    # Inserted out of order: the key, not the insertion, says which hour came before.
+    hours = [f"2026-08-{1 + h // 24:02d}T{h % 24:02d}:00" for h in range(96)]
+    for h in reversed(range(96)):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": hourly, "k": hours[h], "a": json.dumps({"calls": float(h), "temp": 20.0})})
+    db.commit()
+    got = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "hourly", "entity_type": "calls_hour",
+                                                      "features": ["temp"], "target": "calls", "trees": 20, "max_depth": 6,
+                                                      "lags": {"order_by": "key", "steps": [1]}}, headers=t["a"])
+    assert got.status_code == 201, got.text
+    assert got.json()["training"]["features"] == ["temp", "calls_lag1"]
+    # Each hour is the one before plus one: the lag explains it all.
+    assert got.json()["metrics"]["r2"] > 0.9

@@ -691,6 +691,15 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
     write.finish()
     report.notes = notes
     report.created, report.updated = write.counts["created"], write.counts["updated"]
+    # Date parts, categories and copies from a link made earlier are filled on the records just
+    # added (benchmark round 4: weekday was blank on rows imported later).
+    if not clean_only and not dry_run and (report.created or report.updated):
+        from app.api.derive import refill
+
+        filled = refill(db, entity_type_id)
+        if filled:
+            db.commit()
+            report.notes = [*report.notes, f"made fields filled on {filled} records"]
     return report
 
 

@@ -69,39 +69,45 @@ def _fields(db: Session, type_id: int) -> dict[str, dict[str, Any]]:
         " WHERE entity_type_id = ANY (entity_type_lineage(:t))"), {"t": type_id})}
 
 
-@router.post("/entity-types/{entity_type_id}/derive")
-def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
-           user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
-    kind = db.execute(text("SELECT id, name, domain_id FROM entity_type WHERE id = :t"), {"t": entity_type_id}).mappings().one_or_none()
-    if kind is None:
-        raise HTTPException(404, "entity type not found")
-    fields = _fields(db, entity_type_id)
-    if body.op == "formula":
-        return _formula_field(db, user, kind, fields, body)
-    if body.op == "linked_total":
-        return _linked_total(db, user, kind, fields, body)
-    if body.op == "link_by":
-        return _link_by(db, user, kind, fields, body)
-    source = fields.get(body.field)
-    if source is None:
-        raise HTTPException(422, f"{kind['name']} has no field {body.field!r}")
-    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
-                         {"t": entity_type_id}).all()
+def _hour(raw: Any) -> int | None:
+    """The hour of a date and time written ISO-like ("2026-08-01T03:00", "2026-08-01 03:00:00"); None for a day alone."""
+    m = re.match(r"^\d{4}-\d{2}-\d{2}[T ](\d{1,2}):\d{2}", str(raw or "").strip())
+    return int(m.group(1)) if m and int(m.group(1)) < 24 else None
+
+
+def _made(db: Session, kind: Any, fields: dict[str, dict[str, Any]], body: "DeriveBody", records: list[Any]
+          ) -> tuple[list[str], dict[int, dict[str, float]], list[str]]:
+    """The fields a date part, categories or a copy from a link makes, and their values per record."""
     values: dict[int, dict[str, float]] = {}
     made: list[str] = []
     notes: list[str] = []
 
+    # A record's own key read as a date, when the kind has no field of that name: an hourly series is
+    # often keyed by its timestamp (benchmark round 4).
+    source = fields.get(body.field) or ({"data_type": "text", "references_id": None} if body.field == "key" and body.op == "date_parts" else None)
+    if source is None:
+        raise HTTPException(422, f"{kind['name']} has no field {body.field!r}")
     if body.op == "date_parts":
         if source["data_type"] not in ("date", "datetime", "text"):
             raise HTTPException(422, f"{body.field} is a {source['data_type']} field, not a date")
         made = [f"{body.field}_weekday", f"{body.field}_month", f"{body.field}_day_of_year"]
-        for entity_id, _key, attrs in records:
-            raw = (attrs or {}).get(body.field)
+        def read(key: Any, attrs: Any) -> Any:
+            return key if body.field == "key" and "key" not in fields else (attrs or {}).get(body.field)
+
+        # A time of day too, when the values hold one: `<field>_hour` (benchmark round 4: an hourly
+        # series had no hour of the day to learn from).
+        timed = any(_hour(read(key, attrs)) is not None for _, key, attrs in records)
+        if timed:
+            made.append(f"{body.field}_hour")
+        for entity_id, key, attrs in records:
+            raw = read(key, attrs)
             try:
                 day = date.fromisoformat(str(raw)[:10])
             except (TypeError, ValueError):
                 continue
             values[entity_id] = dict(zip(made, (day.weekday(), day.month, day.timetuple().tm_yday)))
+            if timed and _hour(raw) is not None:
+                values[entity_id][f"{body.field}_hour"] = _hour(raw)
     elif body.op == "categories":
         if source["data_type"] not in ("text", "enum", "boolean"):
             raise HTTPException(422, f"{body.field} is a {source['data_type']} field; categories come from text or a choice")
@@ -146,6 +152,56 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
             if isinstance(v, (int, float)):
                 values[entity_id] = {made[0]: float(v)}
 
+    return made, values, notes
+
+
+#: The ops whose fields are filled again on records added later.
+KEPT_OPS = ("date_parts", "categories", "from_link")
+
+
+def refill(db: Session, entity_type_id: int) -> int:
+    """Fill the kept derived fields on the records that lack them (an import added records). How many were filled."""
+    kept = db.execute(text("SELECT derivations FROM entity_type WHERE id = :t"), {"t": entity_type_id}).scalar_one_or_none() or []
+    if not kept:
+        return 0
+    kind = db.execute(text("SELECT id, name, domain_id FROM entity_type WHERE id = :t"), {"t": entity_type_id}).mappings().one()
+    fields = _fields(db, entity_type_id)
+    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
+                         {"t": entity_type_id}).all()
+    filled: set[int] = set()
+    for spec in kept:
+        try:
+            body = DeriveBody(**spec)
+            made, values, _ = _made(db, kind, fields, body, records)
+        except (HTTPException, ValueError):
+            continue
+        have = [n for n in made if n in fields]
+        lacking = {r[0] for r in records if any(n not in (r[2] or {}) for n in have)}
+        for entity_id in lacking & set(values):
+            extra = {n: v for n, v in values[entity_id].items() if n in fields}
+            if extra:
+                db.execute(text("UPDATE entity SET attrs = attrs || CAST(:a AS jsonb) WHERE id = :id"),
+                           {"a": json.dumps(extra), "id": entity_id})
+                filled.add(entity_id)
+    return len(filled)
+
+
+@router.post("/entity-types/{entity_type_id}/derive")
+def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
+           user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    kind = db.execute(text("SELECT id, name, domain_id FROM entity_type WHERE id = :t"), {"t": entity_type_id}).mappings().one_or_none()
+    if kind is None:
+        raise HTTPException(404, "entity type not found")
+    fields = _fields(db, entity_type_id)
+    if body.op == "formula":
+        return _formula_field(db, user, kind, fields, body)
+    if body.op == "linked_total":
+        return _linked_total(db, user, kind, fields, body)
+    if body.op == "link_by":
+        return _link_by(db, user, kind, fields, body)
+    records = db.execute(text("SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
+                         {"t": entity_type_id}).all()
+    made, values, notes = _made(db, kind, fields, body, records)
     clash = [n for n in made if n in fields and fields[n]["data_type"] not in ("number", "integer")]
     if clash:
         raise HTTPException(409, f"{', '.join(clash)} already exist as fields of another type; rename them first")
@@ -156,6 +212,11 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
     for entity_id, extra in values.items():
         db.execute(text("UPDATE entity SET attrs = attrs || CAST(:a AS jsonb) WHERE id = :id"),
                    {"a": json.dumps(extra), "id": entity_id})
+    if body.op in KEPT_OPS:
+        spec = body.model_dump(include={"op", "field", "of"}, exclude_none=True)
+        db.execute(text("UPDATE entity_type SET derivations = (SELECT coalesce(jsonb_agg(d), '[]'::jsonb) FROM"
+                        " jsonb_array_elements(derivations) d WHERE d <> CAST(:s AS jsonb)) || jsonb_build_array(CAST(:s AS jsonb))"
+                        " WHERE id = :t"), {"s": json.dumps(spec), "t": entity_type_id})
     audit.record(db, organization_id=user.organization_id, actor_id=user.id,
                  api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
                  object_type="entity_type", object_id=entity_type_id)

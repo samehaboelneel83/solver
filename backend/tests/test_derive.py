@@ -267,3 +267,21 @@ def test_two_kinds_compare_numbers_and_list_fields(tenants, db):  # noqa: F811
 
     assert made("salt_ok", "salinity", "tolerance", "<=") == {(ids["p1"], ids["wheat"]), (ids["p1"], ids["barley"]), (ids["p2"], ids["barley"])}
     assert made("soil_ok", "soil", "soils", "in") == {(ids["p1"], ids["wheat"]), (ids["p1"], ids["barley"]), (ids["p2"], ids["barley"])}
+
+
+def test_date_parts_from_a_timestamp_key_are_filled_on_records_imported_later(tenants, db):  # noqa: F811
+    """Benchmark round 4: an hourly series keyed by its timestamp had no hour to learn from, and the
+    weekday made earlier was blank on the rows imported afterwards."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+    kind = http.post("/api/v1/entity-types", json={"domain_id": domain, "name": "hour_obs", "role": "other"}, headers=h).json()
+    http.post(f"/api/v1/entity-types/{kind['id']}/attributes", json={"name": "calls", "data_type": "number"}, headers=h)
+    http.post("/api/v1/entities", json={"entity_type_id": kind["id"], "key": "2026-08-01T03:00", "attrs": {"calls": 4}}, headers=h)
+    made = http.post(f"/api/v1/entity-types/{kind['id']}/derive", json={"op": "date_parts", "field": "key"}, headers=h)
+    assert made.status_code == 200, made.text
+    assert made.json()["made"] == ["key_weekday", "key_month", "key_day_of_year", "key_hour"]
+    upload = http.post(f"/api/v1/entity-types/{kind['id']}/upload", headers=h,
+                       files={"file": ("more.csv", b"key,calls\n2026-08-03T17:00,9\n", "text/csv")})
+    assert upload.status_code == 200, upload.text
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": kind["id"]}, headers=h).json()["items"]}
+    assert items["2026-08-01T03:00"]["key_hour"] == 3 and items["2026-08-01T03:00"]["key_weekday"] == 5  # a Saturday
+    assert items["2026-08-03T17:00"]["key_hour"] == 17 and items["2026-08-03T17:00"]["key_weekday"] == 0  # a Monday

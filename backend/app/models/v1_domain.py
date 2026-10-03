@@ -120,6 +120,9 @@ class EntityType(Base):
     # type holds no entities of its own, only its descendants do.
     is_abstract: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     inherited_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Migration 0105: the number fields made from other fields (date parts, categories, from a link),
+    # as asked for, to fill on records added later.
+    derivations: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
     )
