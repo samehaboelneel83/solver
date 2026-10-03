@@ -185,3 +185,10 @@ export const makeRecords = (datasetId: number, layers: string[], plan: RecordsPr
   apiFetch<RecordsMade>(`/api/v1/gis/datasets/${datasetId}/records`, { method: "POST", ...json({ layers, plan }) });
 export const attachShapes = (datasetId: number, body: { layers: string[]; type: string; match: string; field?: string }) =>
   apiFetch<ShapesAttached>(`/api/v1/gis/datasets/${datasetId}/records/attach`, { method: "POST", ...json(body) });
+
+/** A new layer made from records: a buffer round each, the places each reaches by 0/1 data, or the places none reaches
+ * (benchmark round 5). */
+export type DeriveLayer = { domain_id: number; name: string; how: "buffer" | "service_area" | "not_reached"; entity_type_id: number;
+  radius_km?: number; parameter_id?: number; keys?: string[] };
+export const deriveLayer = (body: DeriveLayer) =>
+  apiFetch<GisDataset & { made: number }>("/api/v1/gis/derived-layers", { method: "POST", ...json(body) });

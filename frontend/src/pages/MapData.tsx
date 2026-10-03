@@ -11,6 +11,7 @@ import { getDataset, makeRecords, proposeRecords, useDatasets } from "../api/gis
 import { formatApiError } from "../api/errors";
 import { useEntityTypes } from "../api/v1";
 import MeasureFromMap from "../components/MeasureFromMap";
+import DeriveLayer from "../components/map/DeriveLayer";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
 import MapDataTabs from "../components/map/MapDataTabs";
@@ -79,7 +80,10 @@ export default function MapData() {
             </ul>
           )}
           {can("domain.edit") && list.data!.items.length > 0 && (placed.length > 0 ? (
-            <MeasureFromMap domainId={domainId} entityTypes={kinds.data?.items ?? []} />
+            <div className="space-y-3">
+              <MeasureFromMap domainId={domainId} entityTypes={kinds.data?.items ?? []} />
+              <DeriveLayer domainId={domainId} title="Make a map layer: rings round records, the places each reaches, the places none reaches" />
+            </div>
           ) : (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
               Next: open a layer and choose <strong>Use in models</strong> to make its features records. Then distances,

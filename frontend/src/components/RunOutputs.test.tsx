@@ -49,3 +49,14 @@ it("colours each area by what it got most of, with a key (benchmark re-test, Oct
   expect((out as { colour: string }[])[0].colour).toBe(key[1].colour);
   expect((out as { title: string }[])[1].title).toBe("p2 · mostly maize");
 });
+
+it("fills the areas an answer left out in amber, apart from the rest (benchmark round 5)", async () => {
+  const { marksOf } = await import("./RunOutputs");
+  const square = { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } as const;
+  const map = { layers: [{ id: "covered", kind: "places", title: "covered", set: "zone" }], features: [
+    { geometry: square, properties: { layer: "covered", key: "z1", status: "chosen", title: "z1", value: 1 } },
+    { geometry: square, properties: { layer: "covered", key: "z2", status: "not_chosen", title: "z2", value: 0 } },
+  ] } as unknown as Parameters<typeof marksOf>[0];
+  expect(marksOf(map, true).marks.map((m) => m.colour)).toEqual(["#2563eb", "#f59e0b"]);
+  expect(marksOf(map).marks[1].colour).toBe("#94a3b8");
+});

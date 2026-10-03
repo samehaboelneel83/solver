@@ -583,3 +583,115 @@ def get_crs(code: int, user: UserAccount = Depends(get_current_user)) -> dict[st
         return crs.crs_info(code)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, f"EPSG:{code} is not in the registry") from exc
+
+
+# --- derived layers (benchmark round 5) -------------------------------------------------------------
+
+class DerivedBody(BaseModel):
+    """A new map layer made from records: a buffer around each, the places each one reaches by 0/1 data
+    (its service area), or the places none of them reaches -- saved as map data like an import."""
+    model_config = ConfigDict(extra="forbid")
+    domain_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=200)
+    how: str = Field(pattern="^(buffer|service_area|not_reached)$")
+    entity_type_id: int = Field(gt=0)
+    radius_km: float | None = Field(default=None, gt=0, le=1000)
+    # 0/1 data over this kind and the places, in either order (service_area, not_reached).
+    parameter_id: int | None = Field(default=None, gt=0)
+    # Only these records of the kind (the sites an answer opened); all when left out.
+    keys: list[str] | None = Field(default=None, max_length=100_000)
+
+
+def _buffer_km(geometry: Any, km: float) -> Any:
+    """`geometry` (lon/lat) grown by `km`, measured on the ground around its middle."""
+    from pyproj import Transformer
+    from shapely.ops import transform
+
+    c = geometry.centroid
+    local = f"+proj=aeqd +lat_0={c.y} +lon_0={c.x} +units=m +ellps=WGS84"
+    there = Transformer.from_crs("EPSG:4326", local, always_xy=True).transform
+    back = Transformer.from_crs(local, "EPSG:4326", always_xy=True).transform
+    return transform(back, transform(there, geometry).buffer(km * 1000, quad_segs=16))
+
+
+@router.post("/derived-layers", status_code=201)
+def derive_layer(body: DerivedBody, db: Session = Depends(get_db),
+                 user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    from shapely.geometry import mapping
+    from shapely.ops import unary_union
+
+    from app.spatial import ops
+
+    _domain(db, body.domain_id, user)
+    kind = db.execute(text("SELECT name FROM entity_type WHERE id = :t AND domain_id = :d"),
+                      {"t": body.entity_type_id, "d": body.domain_id}).scalar_one_or_none()
+    if kind is None:
+        raise HTTPException(404, "that kind of record is not in this workspace")
+    shapes, _ = ops.load(db, body.entity_type_id)
+    if body.keys is not None:
+        wanted = set(body.keys)
+        shapes = [s for s in shapes if s.key in wanted]
+    if not shapes:
+        raise HTTPException(422, f"no {kind} {'of those ' if body.keys is not None else ''}has a shape on the map")
+    feats: list[dict[str, Any]] = []
+    if body.how == "buffer":
+        if body.radius_km is None:
+            raise HTTPException(422, "a buffer needs radius_km")
+        for s in shapes:
+            feats.append({"type": "Feature", "geometry": mapping(_buffer_km(s.geometry, body.radius_km)),
+                          "properties": {"layer": f"{kind} within {body.radius_km:g} km", "key": s.key, "radius_km": body.radius_km}})
+    else:
+        if body.parameter_id is None:
+            raise HTTPException(422, "a service area needs the 0/1 data saying who is within reach")
+        p = db.execute(text("SELECT name, index_type_ids, default_value FROM parameter_def WHERE id = :p AND domain_id = :d"),
+                       {"p": body.parameter_id, "d": body.domain_id}).mappings().one_or_none()
+        if p is None:
+            raise HTTPException(404, "that data value is not in this workspace")
+        index = list(p["index_type_ids"])
+        if len(index) != 2 or body.entity_type_id not in index or index[0] == index[1]:
+            raise HTTPException(422, f"{p['name']} is not over {kind} and one other kind")
+        mine = index.index(body.entity_type_id)
+        other = index[1 - mine]
+        place_kind = db.execute(text("SELECT name FROM entity_type WHERE id = :t"), {"t": other}).scalar_one()
+        places, _ = ops.load(db, other)
+        if not places:
+            raise HTTPException(422, f"no {place_kind} has a shape on the map")
+        values = {(int(r[0][mine]), int(r[0][1 - mine])): float(r[1]) for r in db.execute(text(
+            "SELECT entity_ids, value FROM parameter_value WHERE parameter_def_id = :p AND value IS NOT NULL"),
+            {"p": body.parameter_id}).all()}
+        default = float(p["default_value"] or 0)
+        reaches = {s.entity_id: [q for q in places if values.get((s.entity_id, q.entity_id), default) > 0.5] for s in shapes}
+        if body.how == "service_area":
+            for s in shapes:
+                got = reaches[s.entity_id]
+                if not got:
+                    continue
+                # Places with an area are joined; points only, their outline.
+                area = unary_union([q.geometry for q in got])
+                if area.geom_type not in ("Polygon", "MultiPolygon"):
+                    hull = area.convex_hull
+                    area = hull if hull.geom_type == "Polygon" else hull.buffer(0.002)
+                feats.append({"type": "Feature", "geometry": mapping(area),
+                              "properties": {"layer": f"served by each {kind}", "key": s.key, "places": len(got)}})
+        else:
+            reached = {q.entity_id for got in reaches.values() for q in got}
+            for q in places:
+                if q.entity_id not in reached:
+                    feats.append({"type": "Feature", "geometry": mapping(q.geometry),
+                                  "properties": {"layer": f"{place_kind} not reached", "key": q.key}})
+        if not feats:
+            raise HTTPException(422, "every place is reached: nothing to draw" if body.how == "not_reached"
+                                else f"no {kind} reaches any {place_kind} by {p['name']}")
+    data = json.dumps({"type": "FeatureCollection", "features": feats}).encode()
+    drawing = store.read_bytes(data, f"{body.name}.geojson")
+    source = {"filename": f"{body.name}.geojson", "format": "derived", "size_bytes": len(data), "version": "GeoJSON",
+              "units": drawing.units_name, "unit_metres": drawing.unit_metres,
+              "extent": list(drawing.extent) if drawing.extent else None, "geodata": drawing.geodata,
+              "derived": {"how": body.how, "kind": kind, "radius_km": body.radius_km, "parameter_id": body.parameter_id,
+                          "records": len(shapes)}}
+    dataset_id = store.import_drawing(db, organization_id=user.organization_id, user_id=user.id, domain_id=body.domain_id,
+                                      name=body.name, drawing=drawing, placement=crs.Placement.parse({"kind": "epsg", "code": 4326}, None),
+                                      layers=None, source=source)
+    _audit(db, user, "gis.derive", dataset_id)
+    db.commit()
+    return {**get_dataset(dataset_id, db, user), "made": len(feats)}

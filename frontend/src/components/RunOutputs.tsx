@@ -18,6 +18,7 @@ import type { Id } from "../api/v1";
 import GeoMap, { rampColour, type GeoGeometry, type GeoMark } from "./map/GeoMap";
 import { getDataset, getFeatures, useDatasets } from "../api/gis";
 import { useDomain } from "../hooks/useDomain";
+import DeriveLayer from "./map/DeriveLayer";
 
 type AnswerFeature = {
   geometry: GeoGeometry;
@@ -30,12 +31,14 @@ type AnswerFeature = {
     largest?: string;
   };
 };
-export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string }[]; features: AnswerFeature[]; truncated?: boolean;
+export type AnswerMap = { none?: string; layers: { id: string; kind: string; title: string; set?: string | null }[]; features: AnswerFeature[]; truncated?: boolean;
   /** Flows drawn along a lines layer: how many, and how many stayed straight (no way along the roads). */
   along?: { layer: string; flows: number; straight: number } };
 
 const COLOURS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#65a30d", "#4f46e5"];
 const SHORT = "#dc2626";
+/** An area an answer left out (a zone not covered): amber, filled, so the underserved stand apart (benchmark round 5). */
+const LEFT_OUT = "#f59e0b";
 const QUIET = "#94a3b8";
 const CONTEXT = "#475569";
 
@@ -75,7 +78,7 @@ export function CompareMap({ left, right }: { left: Id; right: Id }) {
   );
 }
 
-export function marksOf(map: AnswerMap): { marks: GeoMark[]; legend: { layer: string; colour: string; text: string }[] } {
+export function marksOf(map: AnswerMap, leftOut = false): { marks: GeoMark[]; legend: { layer: string; colour: string; text: string }[] } {
   const colourOf = new Map<string, string>();
   map.layers.forEach((layer, i) => {
     colourOf.set(layer.id, layer.kind === "unmet" ? SHORT : layer.kind === "context" ? CONTEXT : COLOURS[i % COLOURS.length]);
@@ -83,12 +86,13 @@ export function marksOf(map: AnswerMap): { marks: GeoMark[]; legend: { layer: st
   const marks = map.features.map((f, i) => {
     const p = f.properties;
     const base = colourOf.get(p.layer) ?? CONTEXT;
-    const colour = p.status === "short" ? SHORT : p.status === "not_chosen" ? QUIET : base;
+    const out = leftOut && p.status === "not_chosen" && isArea(f.geometry);
+    const colour = p.status === "short" ? SHORT : out ? LEFT_OUT : p.status === "not_chosen" ? QUIET : base;
     return {
       id: `${p.layer}:${p.key}:${i}`, geometry: f.geometry, colour, layer: p.layer, title: p.title,
       label: p.status === "chosen" || p.status === "short" ? p.label ?? p.key : undefined,
       size: f.geometry.type.includes("Line") ? 2 : p.status === "short" ? 8 : p.status === "chosen" ? 6 : 4,
-      fill: p.status === "chosen" ? 0.4 : 0.15,
+      fill: p.status === "chosen" ? 0.4 : out ? 0.45 : 0.15,
     } satisfies GeoMark;
   });
   const legend = map.layers.map((l) => ({ layer: l.id, colour: colourOf.get(l.id) ?? CONTEXT, text: l.title }));
@@ -225,6 +229,7 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   const [failed, setFailed] = useState<string | null>(null);
   const [colourBy, setColourBy] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [markLeftOut, setMarkLeftOut] = useState(true);
   const basemaps = useBasemaps();
   if (!answered) return null;
   const decisions = Object.entries(((ir?.variables ?? {}) as Record<string, { index?: string[]; domain?: string }>))
@@ -232,7 +237,13 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   // Only a whole answer map is drawn: a server from before it existed answers something else, or nothing.
   const usable = map.data && !map.data.none && Array.isArray(map.data.features) && Array.isArray(map.data.layers)
     && map.data.features.length > 0;
-  const plain = usable && map.data ? marksOf(map.data) : null;
+  // Areas left out (a zone not covered) stand apart, unless asked not to (benchmark round 5).
+  const leftOutCount = usable && map.data ? map.data.features.filter((f) => f.properties.status === "not_chosen" && isArea(f.geometry)).length : 0;
+  const plain = usable && map.data ? marksOf(map.data, markLeftOut && leftOutCount > 0) : null;
+  // What the answer chose of each kind with a shape: a map layer can be made from them.
+  const chosenOf = usable && map.data ? map.data.layers.filter((l) => l.kind === "places" && l.set).map((l) => ({
+    kind: l.set as string, keys: [...new Set(map.data!.features.filter((f) => f.properties.layer === l.id && f.properties.status === "chosen").map((f) => f.properties.key))],
+  })).filter((c) => c.keys.length > 0) : [];
   const fields = usable && map.data ? areaFields(map.data) : [];
   const byLargest = plain && map.data && colourBy.startsWith("largest ") ? colourByLargest(map.data, plain.marks, colourBy.slice("largest ".length)) : null;
   const coloured = byLargest ? { marks: byLargest.marks, ramp: null }
@@ -314,6 +325,13 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
                 </select>
               </label>
               )}
+              {leftOutCount > 0 && (
+                <label className="flex items-center gap-1">
+                  <input type="checkbox" checked={markLeftOut} onChange={(e) => setMarkLeftOut(e.target.checked)} />
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: LEFT_OUT }} aria-hidden />
+                  {leftOutCount} {leftOutCount === 1 ? "area" : "areas"} left out
+                </label>
+              )}
               {(datasets.data?.items ?? []).length > 0 && (
                 <label className="flex items-center gap-1">Show under it
                   <select aria-label="Show under the answer" className="rounded border border-slate-300 px-1 py-0.5 text-xs"
@@ -348,6 +366,10 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
           )}
         </div>
       )}
+      {domainId !== null && chosenOf.slice(0, 3).map((c) => (
+        <DeriveLayer key={c.kind} domainId={Number(domainId)} kind={c.kind} keys={c.keys}
+          title={`Make a map layer from the ${c.keys.length} chosen ${c.kind} (rings, the places they reach, the places none reaches)`} />
+      ))}
       <KeepAsData runId={runId} decisions={decisions} />
     </section>
   );
