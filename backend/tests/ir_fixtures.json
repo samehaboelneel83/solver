@@ -6158,6 +6158,263 @@
           ]
         }
       }
+    },
+    {
+      "name": "recipe_assignment",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "depot",
+          "store"
+        ],
+        "parameters": {
+          "unit_cost": {
+            "index": [
+              "depot",
+              "store"
+            ]
+          }
+        },
+        "variables": {
+          "open": {
+            "index": [
+              "depot"
+            ],
+            "domain": "binary"
+          },
+          "serves": {
+            "index": [
+              "depot",
+              "store"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "one_site_each",
+            "note": "each store is served by one open depot",
+            "forall": [
+              {
+                "index": "p",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "serves",
+                "index": [
+                  "s",
+                  "p"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "depot"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "only_from_open",
+            "note": "only an open depot serves",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              },
+              {
+                "index": "p",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "var": "serves",
+              "index": [
+                "s",
+                "p"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "var": "open",
+              "index": [
+                "s"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "within_reach",
+            "note": "no store is served from further than 3",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              },
+              {
+                "index": "p",
+                "set": "store"
+              }
+            ],
+            "left": {
+              "mul": [
+                {
+                  "par": "unit_cost",
+                  "index": [
+                    "s",
+                    "p"
+                  ]
+                },
+                {
+                  "var": "serves",
+                  "index": [
+                    "s",
+                    "p"
+                  ]
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 3
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "sites_open",
+            "note": "1 depots are open",
+            "left": {
+              "sum": {
+                "var": "open",
+                "index": [
+                  "s"
+                ]
+              },
+              "over": [
+                {
+                  "index": "s",
+                  "set": "depot"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "const": 1
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "site_capacity",
+            "note": "an open depot serves at most its capacity",
+            "forall": [
+              {
+                "index": "s",
+                "set": "depot"
+              }
+            ],
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "p",
+                      "name": "demand"
+                    }
+                  },
+                  {
+                    "var": "serves",
+                    "index": [
+                      "s",
+                      "p"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "p",
+                  "set": "store"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "attr": {
+                    "of": "s",
+                    "name": "capacity"
+                  }
+                },
+                {
+                  "var": "open",
+                  "index": [
+                    "s"
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ],
+        "objective": {
+          "sense": "minimize",
+          "mode": "weighted",
+          "terms": [
+            {
+              "id": "response_time",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "p",
+                        "name": "demand"
+                      }
+                    },
+                    {
+                      "mul": [
+                        {
+                          "par": "unit_cost",
+                          "index": [
+                            "s",
+                            "p"
+                          ]
+                        },
+                        {
+                          "var": "serves",
+                          "index": [
+                            "s",
+                            "p"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "s",
+                    "set": "depot"
+                  },
+                  {
+                    "index": "p",
+                    "set": "store"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [

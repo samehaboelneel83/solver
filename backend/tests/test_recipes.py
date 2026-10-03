@@ -122,3 +122,27 @@ def test_routes_visit_every_stop_from_each_vehicles_own_depot_within_its_load():
     }
     # Each truck out to its own two stops and back: 2 x 2 + 2 x 2.5 = 9.
     assert round(float(_solve("recipe_routes", data).objective), 6) == 9
+
+
+def test_assignment_sends_each_store_to_its_nearest_open_depot_within_reach_and_capacity():
+    """Benchmark round 4: nothing sent each place to one open site for the least response time."""
+    data = {
+        "sets": {"depot": [{"id": "west", "capacity": 10, "fixed_cost": 0}, {"id": "east", "capacity": 10, "fixed_cost": 0}],
+                 "store": [{"id": "a", "demand": 4}, {"id": "b", "demand": 3}, {"id": "c", "demand": 2}]},
+        "parameters": {"unit_cost": [{"depot": "west", "store": "a", "value": 1}, {"depot": "west", "store": "b", "value": 2},
+                                     {"depot": "west", "store": "c", "value": 3}, {"depot": "east", "store": "a", "value": 3},
+                                     {"depot": "east", "store": "b", "value": 2}, {"depot": "east", "store": "c", "value": 1}]},
+        "parameter_defaults": {"unit_cost": 9},
+    }
+    # One depot, every store within 3: west serves all, 4x1 + 3x2 + 2x3 = 16; east 4x3 + 3x2 + 2x1 = 20.
+    assert round(float(_solve("recipe_assignment", data).objective), 6) == 16
+    # West holds only 8 of the 9: no single depot can, so there is no answer.
+    data["sets"]["depot"][0]["capacity"] = 8
+    data["sets"]["depot"][1]["capacity"] = 8
+    from app.solve import compile_model
+    from app.solve.backends import by_name
+    from app.solve.service import solve_compiled
+
+    result, _ = solve_compiled(by_name("highs"), compile_model(FIXTURES["recipe_assignment"], {"parameters": {}, "parameter_defaults": {}, **data}),
+                               time_limit=20, seed=1)
+    assert result.status == "infeasible"

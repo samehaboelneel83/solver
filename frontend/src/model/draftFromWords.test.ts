@@ -201,3 +201,22 @@ describe("reading the words and the data better (benchmark round 3)", () => {
     expect(goal).toContain("cost_egp_per_feddan");
   });
 });
+
+describe("each place to its nearest open site (benchmark round 4)", () => {
+  it("reads 'minimise response time' as sending each district to one open station", () => {
+    const kinds: Kind[] = [
+      { name: "station", attributes: [n("build_cost"), { name: "existing", data_type: "boolean" }] },
+      { name: "district", attributes: [n("population"), n("calls_per_day")] },
+    ];
+    const data = [{ name: "station_district_min", index: ["station", "district"] }];
+    const text = "Open 5 stations so each district is served by its nearest station, minimise response time weighted by calls_per_day, never more than 15 minutes";
+    expect(recipeFor(text)[0].recipe).toBe("assignment");
+    const p = proposeDraft(text, kinds, data)!;
+    expect(p.missing).toEqual([]);
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.constraints.map((c) => c.id)).toEqual(["one_site_each", "only_from_open", "within_reach", "sites_open", "existing_stay_open"]);
+    expect(d.constraints.find((c) => c.id === "within_reach")).toMatchObject({ right: { const: 15 } });
+    expect(JSON.stringify(d.objective.terms[0].expression)).toContain('"name":"calls_per_day"');
+  });
+});

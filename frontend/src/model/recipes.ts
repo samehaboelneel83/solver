@@ -487,3 +487,67 @@ export function applyRoutes(draft: FormDraft, r: RouteRecipe): FormDraft {
       expression: sum(mul({ par: r.travel, index: [i, j] } as Term, v(visit, [t, i, j])), [t, r.vehicles], [i, r.stops], [j, r.stops]) } as ObjectiveTerm] },
   };
 }
+
+// --- each place served by its nearest open site: least response time --------------------------------
+
+export type AssignmentRecipe = {
+  /** Where help comes from (stations, bases) and who needs it (districts, towns). */
+  sites: string;
+  places: string;
+  /** Data over both kinds, either order: the minutes (or km) from a site to a place. */
+  time: { data: string; index: string[] };
+  /** A number field of a place: how much its time counts (calls, incidents, people); else 1 each. */
+  weight?: string;
+  /** How many sites are open, or what opening costs (a number field of a site) within a budget. */
+  open?: { count: number } | { cost: string; budget: number };
+  /** A yes/no field of a site: those set are open already and stay open. */
+  existing?: string;
+  /** No place is served from further than this, in the time's unit. */
+  within?: number;
+  /** A number field of a site: the most it serves, counted in the weight. */
+  capacity?: string;
+};
+
+/**
+ * Which sites to open and which open site serves each place, for the least response time weighted by
+ * demand (a p-median): each place served by exactly one open site, never further than `within`
+ * (benchmark round 4: coverage counted who is within reach; nothing sent each place to one site).
+ */
+export function applyAssignment(draft: FormDraft, r: AssignmentRecipe): FormDraft {
+  const name = namer(draft);
+  const s = "s", p = "p";
+  const open = name("open"), serve = name("serves");
+  const cell = v(serve, [s, p]);
+  const minutes: Term = { par: r.time.data, index: r.time.index[0] === r.places ? [p, s] : [s, p] } as Term;
+  const weight = (t: Term) => (r.weight ? mul(attr(p, r.weight), t) : t);
+  const constraints: Constraint[] = [...draft.constraints,
+    rule(name("one_site_each"), `each ${say(r.places)} is served by one open ${say(r.sites)}`, sum(cell, [s, r.sites]), "=", k(1), each([p, r.places])),
+    rule(name("only_from_open"), `only an open ${say(r.sites)} serves`, cell, "<=", v(open, [s]), each([s, r.sites], [p, r.places]))];
+  if (r.within !== undefined && Number.isFinite(r.within)) {
+    constraints.push(rule(name("within_reach"), `no ${say(r.places)} is served from further than ${r.within}`,
+      mul(minutes, cell), "<=", k(r.within), each([s, r.sites], [p, r.places])));
+  }
+  if (r.open && "count" in r.open) {
+    constraints.push(rule(name("sites_open"), `${r.open.count} ${say(r.sites)}s are open`, sum(v(open, [s]), [s, r.sites]), "=", k(r.open.count)));
+  } else if (r.open) {
+    constraints.push(rule(name("budget"), `the open ${say(r.sites)}s cost at most ${r.open.budget}`,
+      sum(mul(attr(s, r.open.cost), v(open, [s])), [s, r.sites]), "<=", k(r.open.budget)));
+  }
+  if (r.existing) {
+    constraints.push({ ...rule(name("existing_stay_open"), `every ${say(r.sites)} marked ${say(r.existing)} stays open`, v(open, [s]), "=", k(1)),
+      forall: [{ index: s, set: r.sites, where: [{ attr: r.existing, op: "=", value: true }] }] } as Constraint);
+  }
+  if (r.capacity) {
+    constraints.push(rule(name("site_capacity"), `an open ${say(r.sites)} serves at most its ${say(r.capacity)}`,
+      sum(weight(cell), [p, r.places]), "<=", mul(attr(s, r.capacity), v(open, [s])), each([s, r.sites])));
+  }
+  return {
+    ...draft,
+    sets: [...new Set([...draft.sets, r.sites, r.places])],
+    parameters: { ...draft.parameters, [r.time.data]: draft.parameters[r.time.data] ?? { index: r.time.index } },
+    variables: { ...draft.variables, [open]: { index: [r.sites], domain: "binary" }, [serve]: { index: [r.sites, r.places], domain: "binary" } } as Variables,
+    constraints,
+    objective: { sense: "minimize", mode: "weighted", terms: [{ id: name("response_time"), weight: 1,
+      expression: sum(weight(mul(minutes, cell)), [s, r.sites], [p, r.places]) } as ObjectiveTerm] },
+  };
+}

@@ -116,3 +116,20 @@ it("writes vehicle routes from each vehicle's own depot (benchmark round 3)", ()
   expect(d.constraints[0]).toMatchObject({ route: { depot_of: "home", demand: "drop", capacity: "load" } });
   expect(d.objective.terms[0].id).toBe("travel");
 });
+
+it("sends each place to its nearest open site from the form (benchmark round 4)", () => {
+  const onApply = vi.fn();
+  const kinds = [{ name: "station", attributes: [{ name: "existing", data_type: "boolean" }] },
+    { name: "district", attributes: [{ name: "calls", data_type: "number" }] }];
+  render(<RecipesForm kinds={kinds} data={[{ name: "minutes", index: ["district", "station"] }]} onApply={onApply} />);
+  fireEvent.click(screen.getByLabelText(/Nearest open site/));
+  fireEvent.change(screen.getByLabelText("Open"), { target: { value: "station" } });
+  fireEvent.change(screen.getByLabelText("Serving each"), { target: { value: "district" } });
+  fireEvent.change(screen.getByLabelText("Each counts by"), { target: { value: "calls" } });
+  fireEvent.change(screen.getByLabelText("How many open"), { target: { value: "4" } });
+  fireEvent.change(screen.getByLabelText("Open already"), { target: { value: "existing" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write it into the model" }));
+  const d = onApply.mock.calls[0][0](empty) as FormDraft;
+  expect(d.constraints.map((c) => c.id)).toEqual(["one_site_each", "only_from_open", "sites_open", "existing_stay_open"]);
+  expect(JSON.stringify(d.objective.terms[0].expression)).toContain('"par":"minutes","index":["p","s"]');
+});

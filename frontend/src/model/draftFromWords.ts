@@ -7,12 +7,12 @@
  */
 import { applyCoverage, type CoverageRecipe } from "./coverageRecipe";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type FlowRecipe, type InventoryRecipe, type Link,
+import { applyAllocation, applyAssignment, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection, endsOf, type AllocationRecipe, type AssignmentRecipe, type FlowRecipe, type InventoryRecipe, type Link,
   type NetworkRecipe, type PhasingRecipe, type SelectionRecipe } from "./recipes";
 
 export type Kind = { name: string; role?: string; attributes: { name: string; data_type: string }[] };
 export type Data = { name: string; index: string[] };
-export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory";
+export type Recipe = "coverage" | "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory" | "assignment";
 
 export type Proposal = {
   recipe: Recipe;
@@ -32,6 +32,7 @@ const TITLES: Record<Recipe, string> = {
   allocation: "Share each one out among options (land among crops)",
   flow: "Traffic: route the trips between zones over the roads",
   inventory: "Stock: how much of each product to order each period",
+  assignment: "Each place served by its nearest open site: least response time",
 };
 
 const SIGNALS: Record<Recipe, RegExp> = {
@@ -44,6 +45,8 @@ const SIGNALS: Record<Recipe, RegExp> = {
   // Benchmark re-test, October 2026: a trips table over a road network matched no recipe.
   flow: /\b(traffic|congest\w*|trips?|commut\w*|junctions?|intersections?|roads?|od matrix|origin-destination|lanes?|widen\w*|travel times?)\b/g,
   // Benchmark re-test, October 2026: stock per product over periods matched no recipe.
+  // Benchmark round 4: "minimise response time" had no recipe; coverage was used in its place.
+  assignment: /\b(response times?|respond\w*|nearest|closest|p-?median|assign\w* (each|every)|minimi[sz]e (the )?(total |average |mean )?(travel |response |driving )?(time|minutes|distance)|weighted (time|distance|minutes))\b/g,
   inventory: /\b(inventor\w*|stock\w*|reorder\w*|replenish\w*|holding|safety stock|skus?|lost sales?|backorders?|on hand|order quantit\w*|forecasts?|products?)\b/g,
 };
 
@@ -115,7 +118,11 @@ export function recipeFor(text: string): { recipe: Recipe; said: string[] }[] {
     recipe, said: [...new Set((text.toLowerCase().match(SIGNALS[recipe]) ?? []))],
   })).filter((r) => r.said.length > 0);
   // Phasing is selection over time: years and projects together is phasing.
-  return found.sort((a, b) => b.said.length - a.said.length || (a.recipe === "phasing" ? -1 : 1));
+  // Asking for the least response time, or the nearest site, is assignment whatever else is said: "within
+  // 15 minutes" alone was read as coverage (benchmark round 4).
+  const first = found.find((r) => r.recipe === "assignment");
+  return found.sort((a, b) => (first ? Number(b === first) - Number(a === first) : 0)
+    || b.said.length - a.said.length || (a.recipe === "phasing" ? -1 : 1));
 }
 
 export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: Recipe, links: Link[] = []): Proposal | null {
@@ -223,6 +230,42 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
       ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
       ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(all ? { all } : {}) } satisfies AllocationRecipe);
     return { recipe: "allocation", title: TITLES.allocation, choices, missing, apply: recipe ? (d) => applyAllocation(d, recipe) : null };
+  }
+
+  if (best.recipe === "assignment") {
+    const sites = pick(text, kinds, /site|depot|centre|center|station|clinic|candidate|facilit|yard|base|hospital|warehouse/);
+    const timed = (d: Data) => /(^|_)(min|mins|minutes|km|time|dist|distance|tt|travel|drive)($|_)/.test(d.name);
+    const fromTimes = sites ? [...new Set(data.filter((d) => d.index.length === 2 && d.index.includes(sites.kind.name) && timed(d))
+      .map((d) => d.index.find((k) => k !== sites.kind.name)!))] : [];
+    const places = pick(text, kinds, /zone|area|district|place|town|village|cell|community|customer|neighbou?rhood|cit/,
+      (k) => fromTimes.length === 0 || fromTimes.includes(k.name), sites ? [sites.kind.name] : []);
+    note("Open", sites?.kind.name, sites?.why ?? "");
+    note("Serving each", places?.kind.name, places?.why ?? "");
+    need(sites, "a kind of record to open (stations, bases)");
+    need(places, "a kind of record each served by one (districts, towns)");
+    const both = data.filter((d) => sites && places && d.index.length === 2 && d.index.includes(sites.kind.name) && d.index.includes(places.kind.name));
+    const time = both.find(timed) ?? both[0];
+    note("Minutes between", time?.name, "data over both kinds");
+    if (sites && places) need(time, `travel times or distances over ${sites.kind.name} and ${places.kind.name} (Data values → Compute from the map)`);
+    const named = numeric(places?.kind).filter((n) => new RegExp(`\\b${n.replace(/_/g, "[_ ]")}\\b`, "i").test(text));
+    const weight = named[0] ?? numeric(places?.kind).find((n) => /incident|calls?|demand|population|people|patients|households?/.test(n));
+    note("Each counts by", weight, named.length ? "you wrote it" : "its name");
+    const cost = field(sites?.kind, /cost|price|rent|capex/);
+    const budget = cost ? inUnitsOf(amount(text, ["budget", "spend", "afford"]), cost, choices) : undefined;
+    const count = amount(text, ["open", "at most", "up to", "choose", "build"]);
+    const open = cost && budget !== undefined ? { cost, budget } : count !== undefined && Number.isInteger(count) && count > 0 && count < 1000 ? { count } : undefined;
+    if (open) choices.push("count" in open ? `${open.count} open — the number you wrote` : `Opening costs ${open.cost}, within ${open.budget}`);
+    const existing = (sites?.kind.attributes ?? []).find((a) => a.data_type === "boolean" && /existing|current|already|open_now|operating/.test(a.name))?.name;
+    note("Open already", existing, "its name");
+    const within = amount(text, ["within", "no more than", "never more than", "not more than", "more than", "at most", "under"]);
+    const reach = within !== undefined && within !== count && /\b(min|minutes|km|kilomet)/i.test(text) ? within : undefined;
+    note("Never further than", reach, "the number you wrote");
+    const capacity = /\bcapacit/i.test(text) ? field(sites?.kind, /capacity|beds|max|units/) : undefined;
+    note("Serves at most", capacity, "you wrote of capacity");
+    const recipe = missing.length ? null : ({ sites: sites!.kind.name, places: places!.kind.name, time: { data: time!.name, index: time!.index },
+      ...(weight ? { weight } : {}), ...(open ? { open } : {}), ...(existing ? { existing } : {}), ...(reach !== undefined ? { within: reach } : {}),
+      ...(capacity ? { capacity } : {}) } satisfies AssignmentRecipe);
+    return { recipe: "assignment", title: TITLES.assignment, choices, missing, apply: recipe ? (d) => applyAssignment(d, recipe) : null };
   }
 
   if (best.recipe === "flow") {

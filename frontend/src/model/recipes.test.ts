@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyRoutes, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyAssignment, applyFlow, applyInventory, applyNetwork, applyRoutes, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
 import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 
@@ -100,6 +100,22 @@ describe("more recipes (benchmark, October 2026)", () => {
     expect(d.constraints[0]).toMatchObject({ id: "routes", route: { visit: { var: "visit", index: ["v", "i", "j"] }, depot_of: "home", demand: "demand" } });
     expect(d.variables.visit).toMatchObject({ index: ["vehicle", "stop", "stop"], domain: "binary" });
     made.routes = ir(d);
+  });
+
+  it("sends each place to one open site for the least response time (benchmark round 4)", () => {
+    const d = applyAssignment(empty, { sites: "depot", places: "store", time: { data: "unit_cost", index: ["depot", "store"] },
+      weight: "demand", open: { count: 1 }, within: 3, capacity: "capacity" });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(rules(d)).toEqual({
+      one_site_each: "for each p in store: sum(serves[s, p] for s in depot) = 1",
+      only_from_open: "for each s in depot, p in store: serves[s, p] <= open[s]",
+      within_reach: "for each s in depot, p in store: unit_cost[s, p] * serves[s, p] <= 3",
+      sites_open: "sum(open[s] for s in depot) = 1",
+      site_capacity: "for each s in depot: sum(demand[p] * serves[s, p] for p in store) <= capacity[s] * open[s]",
+    });
+    const kept = applyAssignment(empty, { sites: "depot", places: "store", time: { data: "unit_cost", index: ["depot", "store"] }, existing: "committed" });
+    expect(kept.constraints.map((c) => c.id)).toEqual(["one_site_each", "only_from_open", "existing_stay_open"]);
+    made.assignment = ir(d);
     if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
   });
 

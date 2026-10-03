@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyFlow, applyInventory, applyRoutes, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyAssignment, applyFlow, applyInventory, applyRoutes, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
 type Data = { name: string; index: string[] };
-type Which = "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory" | "routes";
+type Which = "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory" | "routes" | "assignment";
 
 const SELECT = "ml-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numbers = (kind: Kind | undefined) =>
@@ -194,6 +194,48 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         </Row>
       </>
     );
+  } else if (which === "assignment") {
+    // Each place to one open site, least response time (benchmark round 4).
+    const both = data.filter((d) => d.index.length === 2 && f.sites && f.places && d.index.includes(f.sites) && d.index.includes(f.places));
+    const time = both.find((d) => d.name === f.time) ?? both[0];
+    const count = toNumber(get("count"));
+    const budget = toNumber(get("budget"));
+    const within = toNumber(get("within"));
+    const open = f.cost && budget !== undefined && Number.isFinite(budget) ? { cost: f.cost, budget }
+      : count !== undefined && Number.isInteger(count) && count > 0 ? { count } : undefined;
+    ready = !!(f.sites && f.places && f.sites !== f.places && time);
+    apply = (d) => applyAssignment(d, { sites: f.sites, places: f.places, time: { data: time!.name, index: time!.index },
+      ...(f.weight ? { weight: f.weight } : {}), ...(open ? { open } : {}), ...(f.existing ? { existing: f.existing } : {}),
+      ...(within !== undefined && Number.isFinite(within) ? { within } : {}), ...(f.capacity ? { capacity: f.capacity } : {}) });
+    body = (
+      <>
+        <Row>
+          <Pick label="Open" value={get("sites")} onChange={set("sites")} options={names} />
+          <Pick label="Serving each" value={get("places")} onChange={set("places")} options={names} />
+          <Pick label="Minutes (or km) between" value={time?.name ?? ""} onChange={set("time")} options={both.map((d) => d.name)} />
+          <Pick label="Each counts by" value={get("weight")} onChange={set("weight")} options={numbers(kind("places"))} optional />
+        </Row>
+        {f.sites && f.places && both.length === 0 && (
+          <p className="text-xs text-amber-800">No data value is indexed by both {f.sites} and {f.places}: compute the travel times first (Data values → Compute from the map).</p>
+        )}
+        <Row>
+          <label className="text-xs text-slate-700">How many open
+            <input aria-label="How many open" className={`${SELECT} w-16`} inputMode="numeric" value={get("count")} onChange={(e) => set("count")(e.target.value)} />
+          </label>
+          <Pick label="or what opening costs" value={get("cost")} onChange={set("cost")} options={numbers(kind("sites"))} optional />
+          {f.cost && (
+            <label className="text-xs text-slate-700">within
+              <input aria-label="Opening budget" className={`${SELECT} w-28`} inputMode="decimal" value={get("budget")} onChange={(e) => set("budget")(e.target.value)} />
+            </label>
+          )}
+          <Pick label="Open already" value={get("existing")} onChange={set("existing")} options={yesNo(kind("sites"))} optional />
+          <label className="text-xs text-slate-700">Never further than
+            <input aria-label="Never further than" className={`${SELECT} w-20`} inputMode="decimal" value={get("within")} onChange={(e) => set("within")(e.target.value)} />
+          </label>
+          <Pick label="Serves at most" value={get("capacity")} onChange={set("capacity")} options={numbers(kind("sites"))} optional />
+        </Row>
+      </>
+    );
   } else if (which === "routes") {
     // Vehicle routes (benchmark round 3: route rules were "under Expert" and not found).
     const travel = data.filter((d) => f.stops && d.index.length === 2 && d.index[0] === f.stops && d.index[1] === f.stops);
@@ -299,7 +341,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
   return (
     <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
-        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads, stock over periods, vehicle routes
+        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads, stock over periods, vehicle routes, nearest open site
       </summary>
       <form aria-label="More recipes" className="mt-3 space-y-3 text-sm text-slate-800"
         onSubmit={(e) => {
@@ -311,7 +353,8 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         <div role="radiogroup" aria-label="Recipe" className="flex flex-wrap gap-3 text-xs">
           {([["selection", "Choose projects within a budget"], ["network", "Supply network: open, ship, fleet"],
             ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"],
-            ["flow", "Traffic: trips over the roads"], ["inventory", "Stock: order each period"], ["routes", "Vehicle routes"]] as [Which, string][]).map(([w, words]) => (
+            ["flow", "Traffic: trips over the roads"], ["inventory", "Stock: order each period"], ["routes", "Vehicle routes"],
+            ["assignment", "Nearest open site: least response time"]] as [Which, string][]).map(([w, words]) => (
             <label key={w}><input type="radio" checked={which === w} onChange={() => { setWhich(w); setF({}); setDone(null); }} /> {words}</label>
           ))}
         </div>
