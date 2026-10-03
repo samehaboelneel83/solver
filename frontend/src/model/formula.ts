@@ -741,7 +741,15 @@ class Parser {
     if (token.kind !== "name") throw new FormulaError(`Expected an index inside ${owner}[…].`, token.at, token.end);
     if (this.isOp("[")) {
       this.next();
-      return { par: token.value, index: this.cells(token.value) };
+      const inner = this.cells(token.value);
+      // A link field of the record bound there, not a data value: the record it names (benchmark
+      // round 5: rate[of_district[c]]).
+      const of = inner.length === 1 && typeof inner[0] === "string" ? this.bound(inner[0]) : undefined;
+      if (of && !(token.value in this.context.parameters)
+        && (this.context.attributes[of.set] ?? []).some((a) => a.name === token.value && a.data_type === "reference")) {
+        return { attr: { of: inner[0], name: token.value } };
+      }
+      return { par: token.value, index: inner };
     }
     if (!this.bound(token.value) && !this.edge(token.value)) {
       throw new FormulaError(

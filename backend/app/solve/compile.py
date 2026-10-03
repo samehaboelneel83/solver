@@ -787,6 +787,17 @@ class _Compiler:
         refused by name, never guessed."""
         if isinstance(index, str):
             return env[index][1]["id"]
+        if "attr" in index:
+            # The record a bound record's link field names (benchmark round 5: rate[of_district[c]]).
+            of, field = index["attr"]["of"], index["attr"]["name"]
+            row = env[of][1]
+            value = row.get(field)
+            if value in (None, ""):
+                raise Unsupported(
+                    f"{field} of {row.get('id')} links to no record, so the index it gives is undefined; "
+                    f"link it, or keep only the records that have one with a filter"
+                )
+            return str(value)
         name = index["par"]
         keys = tuple(self._key(i, env) for i in index["index"])
         value = self._params.get(name, {}).get(keys)

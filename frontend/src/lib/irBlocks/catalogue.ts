@@ -179,6 +179,9 @@ export function catalogueFrom(
  * parameter's cell (queue R20b) written `preferred_shift[e, d]`. */
 export function cellText(entry: unknown): string {
   if (typeof entry === "string") return entry;
+  // A record's link field (benchmark round 5): `of_district[c]`.
+  const link = (entry as { attr?: { of: string; name: string } }).attr;
+  if (link) return `${link.name}[${link.of}]`;
   const ref = entry as { par: string; index: unknown[] };
   return `${ref.par}[${ref.index.map(cellText).join(", ")}]`;
 }

@@ -694,7 +694,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "index_entry_invalid",
     where: "shape",
-    text: "an index position is an index name, or `{par, index}` naming a parameter whose values are entities of that position's set",
+    text: "an index position is an index name, `{par, index}` naming a parameter whose values are entities of that position's set, or `{attr: {of, name}}` naming a bound record's link field to that set",
   },
   {
     code: "where_index_invalid",

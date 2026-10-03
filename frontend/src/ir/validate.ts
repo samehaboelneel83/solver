@@ -1637,20 +1637,28 @@ class ShapeChecker {
 
   /** `{par, index}` standing for an entity: an entity-valued parameter, of the set wanted, read here. */
   private entityIndex(ref: Json, loc: IrLoc, scope: Map<string, string>, wanted: string | undefined): IrRefusal | null {
+    // `{attr: {of, name}}`: the record a bound record's link field names (`rate[of_district[c]]`,
+    // benchmark round 5); that the field links to the set wanted is the domain's to say.
+    if (ref && typeof ref === "object" && Object.keys(ref).length === 1 && "attr" in ref) {
+      const attr = ref.attr as Json;
+      if (attr && typeof attr === "object" && Object.keys(attr).length === 2 && "of" in attr && "name" in attr) {
+        const of = attr.of;
+        if (typeof of !== "string" || !scope.has(of) || isEdge(scope.get(of))) {
+          return refusal("index_not_bound", [...loc, "attr", "of"], `${show(of)} is not a record bound by any enclosing forall or over`);
+        }
+        if (typeof attr.name !== "string" || !attr.name) {
+          return refusal("index_entry_invalid", [...loc, "attr", "name"], "a link field is named by its name");
+        }
+        return null;
+      }
+    }
     const keys = Object.keys(ref);
     if (keys.length !== 2 || !("par" in ref) || !("index" in ref) || !this.entityParameters.has(ref.par as string)) {
-      // In words (benchmark round 4: `amount[of_parcel[h], of_crop[h]]` was answered with raw JSON).
-      const attr = ref && typeof ref === "object" ? (ref as { attr?: { name?: unknown } }).attr : undefined;
-      const field = attr && typeof attr === "object" && typeof attr.name === "string" ? attr.name : null;
       return refusal(
         "index_entry_invalid",
         loc,
-        'each position in [...] takes an index (like p, bound by "for each" or a sum) or a data value whose ' +
-          "values are records" +
-          (field
-            ? `; a record's own field (${field}) cannot choose the position -- sum over the records instead ` +
-              `and keep the ones whose ${field} matches, or make a data value from it`
-            : "")
+        'each position in [...] takes an index (like p, bound by "for each" or a sum), a record\'s ' +
+          "link field (of_district[c]), or a data value whose values are records"
       );
     }
     const of = this.entityParameters.get(ref.par as string);

@@ -1617,17 +1617,23 @@ class _ShapeChecker:
 
     def _entity_index(self, ref: Any, loc: Loc, scope: dict[str, str], wanted: str | None):
         """`{par, index}` standing for an entity: an entity-valued parameter,
-        of the set wanted there, read at indices bound here."""
+        of the set wanted there, read at indices bound here -- or `{attr: {of, name}}`, the record a
+        bound record's link field names (`rate[of_district[c]]`, benchmark round 5); that the field
+        links to the set wanted is the domain's to say."""
+        if isinstance(ref, dict) and set(ref) == {"attr"} and isinstance(ref["attr"], dict) and set(ref["attr"]) == {"of", "name"}:
+            of, name = ref["attr"]["of"], ref["attr"]["name"]
+            if not isinstance(of, str) or of not in scope or _is_edge(scope.get(of)):
+                return Refusal("index_not_bound", [*loc, "attr", "of"],
+                               f"{json.dumps(of)} is not a record bound by any enclosing forall or over")
+            if not isinstance(name, str) or not name:
+                return Refusal("index_entry_invalid", [*loc, "attr", "name"], "a link field is named by its name")
+            return None
         if not isinstance(ref, dict) or set(ref) != {"par", "index"} or ref.get("par") not in self.entity_parameters:
-            # In words (benchmark round 4: `amount[of_parcel[h], of_crop[h]]` was answered with raw JSON).
-            field = ref.get("attr", {}).get("name") if isinstance(ref, dict) and isinstance(ref.get("attr"), dict) else None
             return Refusal(
                 "index_entry_invalid",
                 loc,
-                "each position in [...] takes an index (like p, bound by \"for each\" or a sum) or a data value whose "
-                "values are records"
-                + (f"; a record's own field ({field}) cannot choose the position -- sum over the records instead "
-                   f"and keep the ones whose {field} matches, or make a data value from it" if field else ""),
+                "each position in [...] takes an index (like p, bound by \"for each\" or a sum), a record's "
+                "link field (of_district[c]), or a data value whose values are records",
             )
         of = self.entity_parameters[ref["par"]]
         if wanted is not None and of != wanted:
@@ -2076,20 +2082,27 @@ class _DomainWorld:
             self.ancestors[name] = chain
         self.attributes: dict[tuple[str, str], dict[str, Any]] = {}
         if rows:
-            for type_id, name, data_type, required, enum_values in db.execute(
+            for type_id, name, data_type, required, enum_values, references_id in db.execute(
                 select(
                     AttributeDef.entity_type_id,
                     AttributeDef.name,
                     AttributeDef.data_type,
                     AttributeDef.required,
                     AttributeDef.enum_values,
+                    AttributeDef.references_id,
                 ).where(AttributeDef.entity_type_id.in_(self.type_name_by_id))
             ).all():
                 self.attributes[(self.type_name_by_id[type_id], name)] = {
                     "data_type": data_type,
                     "required": required,
                     "enum_values": list(enum_values) if enum_values else [],
+                    "references_id": references_id,
                 }
+            # A link field's kind at the other end: what a record's link names (benchmark round 5).
+            ends = dict(db.execute(text("SELECT id, to_type_id FROM relationship_type WHERE id = ANY(:ids)"),
+                                   {"ids": [d["references_id"] for d in self.attributes.values() if d["references_id"]]}).all())
+            for declared in self.attributes.values():
+                declared["links_to"] = self.type_name_by_id.get(ends.get(declared["references_id"]))
         # An entity of a type has its ancestors' attributes too.
         for name, chain in self.ancestors.items():
             for ancestor in chain:
@@ -2425,7 +2438,31 @@ class _DomainChecker:
             )
         return None
 
+    def _linked_positions(self, term: dict[str, Any], loc: Loc, scope: dict[str, str]) -> Refusal | None:
+        """A position held by a record's link field (`rate[of_district[c]]`): the field is a link, to
+        the set that position takes."""
+        kind = "var" if "var" in term else "par"
+        declared = (self.ir.get("variables" if kind == "var" else "parameters") or {}).get(term[kind]) or {}
+        sets = declared.get("index") or []
+        for j, entry in enumerate(term.get("index") or []):
+            if not (isinstance(entry, dict) and "attr" in entry) or j >= len(sets):
+                continue
+            owner, name = scope[entry["attr"]["of"]], entry["attr"]["name"]
+            field = self.world.attributes.get((owner, name))
+            if field is None or field["data_type"] != "reference":
+                return Refusal("index_entry_invalid", [*loc, "index", j, "attr", "name"],
+                               f"{owner!r} has no link field {name!r}; a position is chosen by a link to a record")
+            if not field.get("links_to") or not self.world.is_a(field["links_to"], sets[j]):
+                return Refusal("index_set_mismatch", [*loc, "index", j],
+                               f"{owner}.{name} links to {field.get('links_to')}, but this position of "
+                               f"{term[kind]!r} takes {sets[j]}")
+        return None
+
     def _term(self, term: dict[str, Any], loc: Loc, scope: dict[str, str]) -> Refusal | None:
+        if ("var" in term or "par" in term) and any(isinstance(e, dict) and "attr" in e for e in term.get("index") or []):
+            problem = self._linked_positions(term, loc, scope)
+            if problem:
+                return problem
         if "attr" in term:
             set_name = scope[term["attr"]["of"]]
             name = term["attr"]["name"]

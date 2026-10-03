@@ -356,3 +356,19 @@ describe("a forecast over decisions (benchmark re-test, October 2026)", () => {
     expect(got.ok && JSON.stringify(got.value)).toContain('"predict":"yield_model","of":[{"var":"water","index":["p"]}');
   });
 });
+
+describe("a record's link field in an index position (benchmark round 5)", () => {
+  const linked = {
+    sets: ["cell", "district"], setIds: {}, relationships: [],
+    attributes: { cell: [{ name: "of_district", data_type: "reference" }, { name: "people", data_type: "number" }], district: [] },
+    variables: { serve: { index: ["cell"], domain: "continuous" } }, parameters: { rate: { index: ["district"] } },
+  } as unknown as ModelContext;
+
+  it("reads rate[of_district[c]] as the rate of the district the cell links to, and prints it back", () => {
+    const got = parseRule("for each c in cell: serve[c] <= rate[of_district[c]] * people[c]", linked);
+    expect(got.ok).toBe(true);
+    if (!got.ok) return;
+    expect(got.value.right).toMatchObject({ mul: [{ par: "rate", index: [{ attr: { of: "c", name: "of_district" } }] }, {}] });
+    expect(printRule(got.value)).toBe("for each c in cell: serve[c] <= rate[of_district[c]] * people[c]");
+  });
+});
