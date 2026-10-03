@@ -26,6 +26,8 @@ export type CoverageRecipe = {
   mustCover?: { field: string; atLeast: number };
   /** Seats: a covered place's people (number fields multiplied) are seated at open sites within reach,
    * none holding more than its capacity field -- not merely "a site is near". Only with !coverAll. */
+  /** With no `demand`, the capacity counts the places a site serves (at most 5 towns), each served by one
+   * site within reach (benchmark round 3: "serves at most capacity_units centres" read as people). */
   seats?: { capacity: string; demand: string[]; /** The share of them that needs a seat at once, 0..1 (else all). */ share?: number };
   /** Never open a site linked to one of these (in an outage area), unless its yes/no field says it copes. */
   avoid?: { rel: string; end: "from" | "to"; kind: string; unless?: string };
@@ -102,26 +104,31 @@ export function applyCoverage(draft: FormDraft, r: CoverageRecipe): FormDraft {
       left: costOf, relation: "<=", right: { const: r.budget } as Term, severity: "hard",
     } as Constraint);
   }
-  if (r.seats && !r.coverAll && r.seats.demand.length) {
-    const seat = free("seated", [...taken, ...Object.keys(variables), ...constraints.map((c) => c.id)]);
-    variables[seat] = { index: [r.places, r.sites], domain: "continuous", lower: 0 } as FormDraft["variables"][string];
+  if (r.seats && !r.coverAll) {
+    const counted = r.seats.demand.length === 0;
+    const seat = free(counted ? "served_by" : "seated", [...taken, ...Object.keys(variables), ...constraints.map((c) => c.id)]);
+    variables[seat] = (counted ? { index: [r.places, r.sites], domain: "binary" } : { index: [r.places, r.sites], domain: "continuous", lower: 0 }) as FormDraft["variables"][string];
     const cell: Term = { var: seat, index: [p, s] } as Term;
     const share = r.seats.share !== undefined && r.seats.share > 0 && r.seats.share < 1 ? r.seats.share : null;
-    const people = product([...r.seats.demand.map((f) => attr(p, f)), ...(share !== null ? [{ const: share } as Term] : [])]);
+    const people = counted ? ({ const: 1 } as Term) : product([...r.seats.demand.map((f) => attr(p, f)), ...(share !== null ? [{ const: share } as Term] : [])]);
     const ids = () => [...taken, seat, ...Object.keys(variables), ...constraints.map((c) => c.id)];
     const who = r.seats.demand.map(say).join(" × ") + (share !== null ? ` (${Math.round(share * 1000) / 10}% of them at once)` : "");
     constraints.push({
-      id: free("seats_for_covered", ids()), note: `a covered ${say(r.places)} has seats for all its ${who}`,
+      id: free(counted ? "served_if_covered" : "seats_for_covered", ids()),
+      note: counted ? `a covered ${say(r.places)} is served by an open ${say(r.sites)}` : `a covered ${say(r.places)} has seats for all its ${who}`,
       forall: [{ index: p, set: r.places }], left: { sum: cell, over: [{ index: s, set: r.sites }] } as Term, relation: ">=",
       right: { mul: [people, { var: covered, index: [p] }] } as Term, severity: "hard",
     } as Constraint);
     constraints.push({
-      id: free("seats_within_reach", ids()), note: `people are seated only at ${say(r.sites)} within reach`,
+      id: free(counted ? "served_within_reach" : "seats_within_reach", ids()),
+      note: counted ? `a ${say(r.places)} is served only by a ${say(r.sites)} within reach` : `people are seated only at ${say(r.sites)} within reach`,
       forall: [{ index: p, set: r.places }, { index: s, set: r.sites }], left: cell, relation: "<=",
       right: { mul: [people, reachCell] } as Term, severity: "hard",
     } as Constraint);
     constraints.push({
-      id: free("seats_capacity", ids()), note: `an open ${say(r.sites)} seats at most its ${say(r.seats.capacity)}, a closed one none`,
+      id: free(counted ? "serves_at_most" : "seats_capacity", ids()),
+      note: counted ? `an open ${say(r.sites)} serves at most its ${say(r.seats.capacity)} ${say(r.places)}s, a closed one none`
+        : `an open ${say(r.sites)} seats at most its ${say(r.seats.capacity)}, a closed one none`,
       forall: [{ index: s, set: r.sites }], left: { sum: cell, over: [{ index: p, set: r.places }] } as Term, relation: "<=",
       right: { mul: [attr(s, r.seats.capacity), opened] } as Term, severity: "hard",
     } as Constraint);

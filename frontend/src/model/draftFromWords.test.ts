@@ -153,3 +153,51 @@ describe("the problem's own words (benchmark round 3)", () => {
     expect(wordsFor(9, 32)).toBe("Route the trucks");
   });
 });
+
+describe("reading the words and the data better (benchmark round 3)", () => {
+  it("takes a budget in kEGP as thousands, and a blocked project as never chosen", () => {
+    const kinds: Kind[] = [{ name: "project", attributes: [n("benefit"), n("cost_kegp"), { name: "blocked_by_construction", data_type: "boolean" }] }];
+    const p = proposeDraft("Fund projects within a budget of 150000 kEGP, most benefit first. A project blocked by construction can never be chosen.", kinds, [])!;
+    expect(p.recipe).toBe("selection");
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.constraints.find((c) => c.id === "budget")).toMatchObject({ right: { const: 150000 } });
+    expect(d.constraints.map((c) => c.id)).toEqual(["budget", "never_chosen"]);
+    expect(JSON.stringify(d.constraints[1])).toContain('"attr":"blocked_by_construction","op":"=","value":true');
+  });
+
+  it("does not take travel minutes for who is within reach, and says how to make it", () => {
+    const kinds: Kind[] = [{ name: "candidate_site", attributes: [n("cost")] }, { name: "district", attributes: [n("population")] }];
+    const p = proposeDraft("Open candidate sites so every district is covered within 15 minutes", kinds, [{ name: "site_district_min", index: ["candidate_site", "district"] }])!;
+    expect(p.recipe).toBe("coverage");
+    expect(p.apply).toBeNull();
+    expect(p.missing.join(" ")).toMatch(/site_district_min holds travel times or distances, not yes\/no/);
+  });
+
+  it("weights coverage by the field the words name, and counts places a base serves", () => {
+    const kinds: Kind[] = [{ name: "base", attributes: [n("fixed_cost"), n("capacity_units")] },
+      { name: "town", attributes: [n("population"), n("incident_count")] }];
+    const p = proposeDraft("Open bases so towns are within reach; each base can serve at most capacity_units towns. Weight coverage by incident_count.",
+      kinds, [{ name: "within_30", index: ["base", "town"] }])!;
+    expect(p.missing).toEqual([]);
+    const d = p.apply!(empty);
+    valid(d);
+    expect(JSON.stringify(d.objective.terms[0].expression)).toContain('"name":"incident_count"');
+    expect(JSON.stringify(d.objective.terms[0].expression)).not.toContain("population");
+    expect(d.variables.served_by).toMatchObject({ index: ["town", "base"], domain: "binary" });
+    expect(d.constraints.map((c) => c.id)).toEqual(expect.arrayContaining(["served_if_covered", "served_within_reach", "serves_at_most"]));
+  });
+
+  it("makes a crop's worth its yield times its price, less its cost", () => {
+    const kinds: Kind[] = [{ name: "parcel", attributes: [n("area_feddan")] },
+      { name: "crop", attributes: [n("yield_t_per_feddan"), n("price_egp_per_t"), n("cost_egp_per_feddan")] }];
+    const p = proposeDraft("Which crops to plant on each parcel", kinds, [])!;
+    expect(p.recipe).toBe("allocation");
+    const d = p.apply!(empty);
+    valid(d);
+    const goal = JSON.stringify(d.objective.terms[0].expression);
+    expect(goal).toContain("yield_t_per_feddan");
+    expect(goal).toContain("price_egp_per_t");
+    expect(goal).toContain("cost_egp_per_feddan");
+  });
+});

@@ -58,6 +58,8 @@ export type SelectionRecipe = {
   atMost?: number;
   /** A yes/no field: items with it set are always chosen. */
   mustHave?: string;
+  /** A yes/no field: items with it set are never chosen (blocked by construction). */
+  never?: string;
 };
 
 export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft {
@@ -76,6 +78,10 @@ export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft 
   if (r.mustHave) {
     constraints.push({ ...rule(name("must_have"), `every ${say(r.items)} marked ${say(r.mustHave)} is chosen`, chosen, ">=", k(1)),
       forall: [{ index: i, set: r.items, where: [{ attr: r.mustHave, op: "=", value: true }] }] } as Constraint);
+  }
+  if (r.never) {
+    constraints.push({ ...rule(name("never_chosen"), `no ${say(r.items)} marked ${say(r.never)} is chosen`, chosen, "<=", k(0)),
+      forall: [{ index: i, set: r.items, where: [{ attr: r.never, op: "=", value: true }] }] } as Constraint);
   }
   return {
     ...draft,
@@ -227,8 +233,9 @@ export type AllocationRecipe = {
   options: string;
   /** A number field of an item: how much of it there is (feddan); all of it, or at most. */
   size: string;
-  /** What a unit given to an option is worth: a number field of the option, or data over both. */
-  worth: { field: string } | { data: string; index: string[] };
+  /** What a unit given to an option is worth: a number field of the option, data over both, or fields of
+   * the option multiplied, less another (yield × price − cost per feddan). */
+  worth: { field: string } | { data: string; index: string[] } | { product: string[]; less?: string };
   /** What a unit of an option uses of a shared resource (water per feddan), and how much there is. */
   use?: { field: string; limit: number };
   /** 0/1 data over both: where an option may go at all (suitable soil, rotation). */
@@ -245,8 +252,11 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
   const i = "i", o = "o";
   const give = name("amount");
   const cell = v(give, [i, o]);
-  const worth: Term = "field" in r.worth ? attr(o, r.worth.field)
-    : ({ par: r.worth.data, index: r.worth.index[0] === r.items ? [i, o] : [o, i] } as Term);
+  const w = r.worth;
+  const product: Term | null = "product" in w ? w.product.map((f) => attr(o, f)).reduce((a, b) => mul(a, b)) : null;
+  const worth: Term = "field" in w ? attr(o, w.field)
+    : "data" in w ? ({ par: w.data, index: w.index[0] === r.items ? [i, o] : [o, i] } as Term)
+      : w.less ? ({ add: [product!, mul(k(-1), attr(o, w.less))] } as Term) : product!;
   const everything: Term = sum(attr(i, r.size), [i, r.items]);
   const constraints: Constraint[] = [...draft.constraints,
     rule(name("size_of_each"), r.all ? `all of each ${say(r.items)}'s ${say(r.size)} is given out` : `each ${say(r.items)} gives out at most its ${say(r.size)}`,
@@ -269,7 +279,7 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
       sum(cell, [i, r.items]), "<=", mul(attr(o, r.maxShare), everything), each([o, r.options])));
   }
   const data: FormDraft["parameters"] = { ...draft.parameters };
-  for (const d of [("data" in r.worth ? r.worth : null), r.allowed ?? null]) {
+  for (const d of [("data" in w ? w : null), r.allowed ?? null]) {
     if (d) data[d.data] = draft.parameters[d.data] ?? { index: d.index };
   }
   return {
