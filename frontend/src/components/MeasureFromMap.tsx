@@ -274,6 +274,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
             <div>
               <label htmlFor={`${id}-speed`} className="block text-xs text-slate-600">Speed field (km/h, optional)</label>
               <input id={`${id}-speed`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder="speed_kmh" value={speedField}
+                     title="A field of the lines, or of the road records made from them (a speed computed from the weather, say)."
                      onChange={(event) => setSpeedField(event.target.value)} />
             </div>
             <div>

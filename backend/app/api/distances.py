@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -150,8 +150,10 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
                 avoid = [a.geometry for a in ops.load(db, network.avoid_type_id)[0] if a.geometry.geom_type in ("Polygon", "MultiPolygon")]
                 if not avoid:
                     raise HTTPException(422, "the kind to avoid has no areas")
-            net = layer_network.build(layer_network.from_layer(db, network.dataset_id, network.layer),
-                                      network.speed_field, network.default_kmh, closed_field=network.closed_field,
+            lines = layer_network.from_layer(db, network.dataset_id, network.layer)
+            asked = [f for f in (network.speed_field, network.closed_field, network.delay_field) if f]
+            lines, borrowed = _record_fields(db, domain_id, lines, asked, network.layer)
+            net = layer_network.build(lines, network.speed_field, network.default_kmh, closed_field=network.closed_field,
                                       delay_field=network.delay_field, avoid=avoid)
             values, info = layer_network.matrix(net, [(o.lon, o.lat) for o in origins], [(t.lon, t.lat) for t in targets],
                                                 minutes=metric == "network_time", snap_m=network.join_m)
@@ -164,6 +166,8 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
             raise HTTPException(422, f"layer {network.layer!r}: {exc}") from exc
         extra = {k: v for k, v in (("closed_by", network.closed_field), ("delay_by", network.delay_field),
                                    ("avoiding", network.avoid_type_id)) if v is not None}
+        if borrowed:
+            extra["fields_from_records"] = borrowed
         return values, {"metric": f"along layer {network.layer!r} of map data {network.dataset_id}", **extra, **info}
     from app.settings_resolve import resolve
     from app.spatial import roads
@@ -228,6 +232,44 @@ def _by_period(db: Session, domain_id: int, body, origins, targets) -> tuple[lis
             out.append((pid, values))
     return out, {**how, "by_period": {"kind": kind.name, ("speed_field_from" if ask.speed_field_from else "factor_from"): field,
                                       "periods": len(periods)}}, kind.id
+
+
+def _line_key(coords: list) -> tuple:
+    return tuple((round(float(p[0]), 6), round(float(p[1]), 6)) for p in coords)
+
+
+def _record_fields(db: Session, domain_id: int, lines: list, fields: list[str], layer: str) -> tuple[list, dict[str, str]]:
+    """A speed, closure or delay field the lines do not hold, read from the records made from them --
+    the same line, kept in a geometry field -- where one was computed (benchmark round 4: weather-adjusted
+    speeds on the road records were ignored, and every road ran at the default speed, without a word).
+    A field neither the lines nor any such records hold is refused by name."""
+    missing = [f for f in fields if not any(f in (props or {}) for _, props in lines)]
+    if not missing:
+        return lines, {}
+    keys = {_line_key(c) for c, _ in lines}
+    found: dict[str, dict[tuple, Any]] = {f: {} for f in missing}
+    kinds: dict[str, str] = {}
+    rows = db.execute(text(
+        "SELECT et.name, e.attrs, ad.name AS geo FROM entity e JOIN entity_type et ON et.id = e.entity_type_id"
+        " JOIN attribute_def ad ON ad.entity_type_id = et.id AND ad.data_type = 'geometry'"
+        " WHERE et.domain_id = :d AND e.active AND e.attrs ?| :f"), {"d": domain_id, "f": missing}).all()
+    for kind, attrs, geo in rows:
+        shape = (attrs or {}).get(geo)
+        if not isinstance(shape, dict) or shape.get("type") != "LineString":
+            continue
+        key = _line_key(shape.get("coordinates") or [])
+        if key not in keys:
+            continue
+        for f in missing:
+            if (attrs or {}).get(f) is not None:
+                found[f][key] = attrs[f]
+                kinds[f] = kind
+    absent = [f for f in missing if not found[f]]
+    if absent:
+        raise HTTPException(422, f"no line of layer {layer!r} holds {absent[0]!r}, and no record made from its lines has a field "
+                                 f"of that name: choose one the lines or their records hold")
+    out = [(c, {**(p or {}), **{f: found[f][_line_key(c)] for f in missing if _line_key(c) in found[f]}}) for c, p in lines]
+    return out, {f: kinds[f] for f in missing}
 
 
 def _types(db: Session, domain_id: int, from_id: int, to_id: int) -> tuple[EntityType, EntityType]:

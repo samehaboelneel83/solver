@@ -264,3 +264,36 @@ def test_travel_times_by_period_read_each_period_s_speeds_or_scale_them(town, db
                                                              "max_min": 4, "by_period": {"type_id": slot["id"], "factor_from": "factor"}},
                         headers=t["a"])
     assert refused.status_code == 422 and "output parameter" in refused.text
+
+
+def test_travel_times_read_a_speed_kept_on_the_road_records(town, db):  # noqa: F811
+    """Benchmark round 4: a speed computed on the road records (weather) was ignored, every road at the
+    default 30 km/h, and a field of no name at all gave the same times without a word."""
+    http, t, ds = town
+    _, depots = _make(http, t, ds, "DEPOTS")
+    _, sites = _make(http, t, ds, "SITES")
+    _, roads = _make(http, t, ds, "ROADS")
+    d = t["domain_a"]
+    got = http.post(f"/api/v1/entity-types/{roads['entity_type_id']}/attributes", json={"name": "storm_kmh", "data_type": "number"},
+                    headers=t["a"])
+    assert got.status_code == 201, got.text
+    db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object('storm_kmh', (attrs->>'speed_am')::float / 2)"
+                    " WHERE entity_type_id = :t"), {"t": roads["entity_type_id"]})
+    db.commit()
+    ask = {"from_type_id": depots["entity_type_id"], "to_type_id": sites["entity_type_id"], "metric": "network_time", "unit": "min"}
+
+    def minutes(name, speed_field):
+        got = http.post(f"/api/v1/domains/{d}/distances", json={"name": name, **ask,
+                        "network": {"dataset_id": ds["id"], "layer": "ROADS", "speed_field": speed_field}}, headers=t["a"])
+        return got
+
+    calm = minutes("calm_min", "speed_am")
+    storm = minutes("storm_min", "storm_kmh")
+    assert calm.status_code == 201 and storm.status_code == 201, storm.text
+    assert storm.json()["source"]["fields_from_records"] == {"storm_kmh": "road"}
+    values = {name: dict(db.execute(text(
+        "SELECT pv.entity_ids::text, pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
+        " WHERE pd.name = :n"), {"n": name}).all()) for name in ("calm_min", "storm_min")}
+    assert all(float(values["storm_min"][k]) > float(v) for k, v in values["calm_min"].items() if float(v) > 0.5)
+    wrong = minutes("nowhere_min", "no_such_speed")
+    assert wrong.status_code == 422 and "no_such_speed" in wrong.text
