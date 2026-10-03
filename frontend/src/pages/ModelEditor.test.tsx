@@ -1331,10 +1331,13 @@ describe("rules and goals as equations", () => {
     const [, options] = write.mock.calls.find(([path]) => path === "/api/v1/problems/1/versions")!;
     const rule = JSON.parse(options.body).ir.constraints[0];
     expect(rule).toMatchObject({
-      id: "c_cover", note: "each day is staffed", severity: "hard", relation: ">=",
+      id: "c_cover", severity: "hard", relation: ">=",
       left: { over: [{ index: "e", set: "employee", where: [{ attr: "hours_per_week", op: ">=", value: 20 }] }] },
       right: { mul: [{ const: 2 }, { par: "demand", index: ["d"] }] },
     });
+    // The note written for the old rule is the new rule's own words now (benchmark round 4).
+    expect(rule.note).not.toBe("each day is staffed");
+    expect(rule.note).toMatch(/2/);
   });
 
   it("explains a wrong equation and leaves the rule as it was", async () => {
@@ -1461,17 +1464,18 @@ describe("equations as drill-down diagrams", () => {
     expect(screen.queryByRole("form", { name: "The number this rule needs" })).toBeNull();
   });
 
-  it("asks whether a rule's note still fits once the rule is changed (benchmark, October 2026)", async () => {
+  it("rewrites a rule's note from the rule once the rule is changed, and can keep the old one (benchmark round 4)", async () => {
     renderPage();
     await screen.findByLabelText("Equation for c_cover");
-    expect(screen.queryByText(/has changed since this was written/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a sentence" }));
     fireEvent.change(within(screen.getByTestId("rule-sentence")).getByLabelText("comparison"), { target: { value: "=" } });
-    expect(screen.getByText(/has changed since this was written/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Use the rule's own words" }));
-    expect(screen.queryByDisplayValue("each day is staffed")).toBeNull();
+    // The note said what the old rule did: it is the new rule's own words now, everywhere it is read.
+    await waitFor(() => expect(screen.queryByDisplayValue("each day is staffed")).toBeNull());
     expect(screen.getAllByLabelText("What it means").map((e) => (e as HTMLInputElement).value).join("|")).toMatch(/must be exactly/);
-    expect(screen.queryByText(/has changed since this was written/)).toBeNull();
+    expect(screen.getByText(/Rewritten from the changed rule; it said “each day is staffed”/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep the old note" }));
+    expect(screen.getByDisplayValue("each day is staffed")).toBeInTheDocument();
+    expect(screen.queryByText(/Rewritten from the changed rule/)).toBeNull();
   });
 
   it("reads a rule as a sentence, then edits it in boxes and publishes the change", async () => {

@@ -1149,9 +1149,11 @@ function ConstraintCard({
   // What the rule said when its note was last written or confirmed: a note written for one rule
   // (a recipe's "each open base has one vehicle") is not silently kept for another after an edit
   // (benchmark, October 2026). Remembered for this visit.
-  const { note: _note, id: _id, ...arithmetic } = constraint;
+  const { note: _note, id: _id, severity: _severity, weight: _weight, ...arithmetic } = constraint;
   const said = canonicalJson(arithmetic);
   const [noteFits, setNoteFits] = useState(said);
+  // The note it had before the rule's own words replaced it, to put back on request.
+  const [oldNote, setOldNote] = useState<string | null>(null);
   // One number changed (10000 → 5) and the note says the old one: the note follows, unasked
   // (benchmark re-test, October 2026: "at least 10000 apart" was kept beside a rule of 5).
   const lastSaid = useRef({ said, rule: constraint });
@@ -1159,12 +1161,15 @@ function ConstraintCard({
     const before = lastSaid.current;
     if (before.said === said) return;
     lastSaid.current = { said, rule: constraint };
-    const followed = noteFits === before.said ? noteWithNumber(constraint.note, before.rule, constraint) : null;
-    if (followed !== null) {
-      setNoteFits(said);
-      onChange({ ...constraint, note: followed });
-    }
-  }, [said, constraint, noteFits, onChange]);
+    if (noteFits !== before.said || !constraint.note?.trim()) return;
+    const followed = noteWithNumber(constraint.note, before.rule, constraint);
+    // A note that described the old rule and cannot follow the edit is replaced by the new rule's own
+    // words, so Review, Scenarios and the infeasibility list never show it stale (benchmark round 4);
+    // the old note can be put back.
+    setNoteFits(said);
+    if (followed === null) setOldNote(constraint.note);
+    onChange({ ...constraint, note: followed ?? ruleSentence(constraint, context.relationships) });
+  }, [said, constraint, noteFits, onChange, context.relationships]);
   const noteStale = Boolean(constraint.note?.trim()) && said !== noteFits;
   // Condition, chance and the structure tree: advanced, so folded away unless
   // the rule already uses a chance.
@@ -1216,8 +1221,17 @@ function ConstraintCard({
               className={`${INPUT_CLASS} text-sm`}
               value={constraint.note ?? ""}
               aria-describedby={noteStale ? `${noteField}-stale` : undefined}
-              onChange={(event) => { setNoteFits(said); onChange({ ...constraint, note: event.target.value }); }}
+              onChange={(event) => { setNoteFits(said); setOldNote(null); onChange({ ...constraint, note: event.target.value }); }}
             />
+            {oldNote !== null && !noteStale && (
+              <p role="note" className="mt-1 text-xs text-slate-600">
+                Rewritten from the changed rule; it said “{oldNote}”.{" "}
+                <button type="button" className="underline" onClick={() => {
+                  onChange({ ...constraint, note: oldNote });
+                  setOldNote(null);
+                }}>Keep the old note</button>
+              </p>
+            )}
             {noteStale && (
               <p id={`${noteField}-stale`} role="note" className="mt-1 text-xs text-amber-800">
                 The rule has changed since this was written; does it still say what the rule does?{" "}
