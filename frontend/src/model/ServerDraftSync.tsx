@@ -12,7 +12,7 @@
  * copy to keep -- it never overwrites either one silently.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { baseOfServerDraft, fetchServerDraft, saveServerDraft, type ServerDraft } from "../api/drafts";
+import { baseOfServerDraft, discardServerDraft, fetchServerDraft, saveServerDraft, type ServerDraft } from "../api/drafts";
 import { isStaleRecordError, formatApiError } from "../api/errors";
 import { canonicalJson, readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
 
@@ -49,6 +49,27 @@ export function saveToServer(draft: ModelDraft, expected: number | null): Promis
   queued.set(draft.problemId, next);
   void next.finally(() => { if (queued.get(draft.problemId) === next) queued.delete(draft.problemId); }).catch(() => undefined);
   return next;
+}
+
+/** Once the saves already sent for this problem have answered: what Discard and Publish wait for, so
+ * none lands after them (benchmark round 3: a save answered after Discard kept the old draft). */
+export function savesSettled(problemId: number): Promise<void> {
+  return (queued.get(problemId) ?? Promise.resolve()).then(() => undefined, () => undefined);
+}
+
+/** Discard the server copy, whichever revision it is at: it is this person's own, and they asked. */
+export async function discardOnServer(problemId: number): Promise<void> {
+  await savesSettled(problemId);
+  const link = readServerLink(problemId);
+  const revision = link?.revision ?? (await fetchServerDraft(problemId).catch(() => null))?.revision;
+  if (revision == null) return;
+  try {
+    await discardServerDraft(problemId, revision);
+  } catch (error) {
+    if (!isStaleRecordError(error)) throw error;
+    const latest = await fetchServerDraft(problemId).catch(() => null);
+    if (latest) await discardServerDraft(problemId, latest.revision);
+  }
 }
 
 async function saveNow(draft: ModelDraft, expected: number | null): Promise<ServerDraft> {

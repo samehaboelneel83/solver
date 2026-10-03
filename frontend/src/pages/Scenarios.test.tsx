@@ -236,14 +236,18 @@ describe("Scenarios", () => {
     });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /new scenario/i }));
+    // A name another scenario has is said at the name, before anything is sent (benchmark round 3).
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "relaxed_cover" } });
+    expect(screen.getByText(/There is already a scenario called “relaxed_cover”/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^create$/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "taken elsewhere" } });
 
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
 
     // By text rather than by role: a toast region is also an alert, and it
     // can win the race.
     expect(await screen.findByText(/name already taken/i)).toBeInTheDocument();
-    expect(screen.getByLabelText("Name")).toHaveValue("relaxed_cover");
+    expect(screen.getByLabelText("Name")).toHaveValue("taken elsewhere");
   });
 });
 

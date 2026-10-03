@@ -12,3 +12,10 @@ it("brings a note's number up to date when the rule's one number changes (benchm
   // 100 is not the 100 inside 1000.
   expect(noteWithNumber("at most 1000", rule(100), rule(50))).toBeNull();
 });
+
+it("follows one distance held three times, as D, D and -D (benchmark round 3)", () => {
+  const apart = (d: number) => ({ left: { add: [{ mul: [{ const: d }, { var: "open" }] }, { mul: [{ const: d }, { var: "open" }] }, { const: -d }] },
+    right: { par: "dist" } });
+  expect(noteWithNumber("two chosen base items are at least 10000 apart in dist (change 10000 to the distance wanted)", apart(10000), apart(8)))
+    .toBe("two chosen base items are at least 8 apart in dist (change 8 to the distance wanted)");
+});

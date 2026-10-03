@@ -275,6 +275,7 @@ function ForProblem({ problemId }: { problemId: Id }) {
           problemId={problemId}
           scenario={editing === "new" ? null : editing}
           versions={versionItems}
+          taken={items.filter((s) => s.id !== (editing === "new" ? null : editing?.id)).map((s) => s.name)}
           onDone={() => {
             setEditing(null);
             scenarios.refetch();
@@ -289,11 +290,14 @@ function ScenarioForm({
   problemId,
   scenario,
   versions,
+  taken = [],
   onDone,
 }: {
   problemId: Id;
   scenario: Scenario | null;
   versions: { id: Id; version: number; note: string | null }[];
+  /** The names of the problem's other scenarios: a name in use is said at the name, before Create. */
+  taken?: string[];
   onDone: () => void;
 }) {
   const nameId = useId();
@@ -311,6 +315,7 @@ function ScenarioForm({
     fromPatch(scenario?.patch ?? {})
   );
   const [failure, setFailure] = useState<string | null>(null);
+  const nameTaken = taken.includes(name.trim());
   // A rule's limit, as typed: "80000" puts that number where the version has 60000.
   const [limits, setLimits] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(scenario?.patch?.set_limit ?? {}).map(([id, v]) => [id, String(v)]))
@@ -372,8 +377,10 @@ function ScenarioForm({
             id={nameId}
             className={`${INPUT_CLASS} w-56 text-sm`}
             value={name}
+            aria-invalid={nameTaken || undefined}
             onChange={(event) => setName(event.target.value)}
           />
+          {nameTaken && <p role="alert" className="mt-1 text-xs text-red-700">There is already a scenario called “{name.trim()}”: choose another name.</p>}
         </div>
         <div>
           <label htmlFor={versionId} className="block text-xs text-slate-600">
@@ -487,7 +494,7 @@ function ScenarioForm({
         <button
           type="button"
           onClick={save}
-          disabled={name.trim() === "" || create.isPending || update.isPending}
+          disabled={name.trim() === "" || nameTaken || create.isPending || update.isPending}
           className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
           {scenario ? "Save" : "Create"}
@@ -739,7 +746,7 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
       {numbers.length > 0 && (
         <>
           <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
-            <label>Scale
+            <label>Scale all of
               <select aria-label="Parameter to scale" className={`${input} ml-1`} value={scaleParam} onChange={(e) => setScaleParam(e.target.value)}>
                 <option value="">data…</option>
                 {numbers.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -759,7 +766,7 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
               }}>Add</button>
           </div>
           <div className="mt-2 flex flex-wrap items-end gap-2 text-xs text-slate-600">
-            <label>Set
+            <label>Set one value of
               <select aria-label="Parameter to change" className={`${input} ml-1`} value={cellParam} onChange={(e) => setCellParam(e.target.value)}>
                 <option value="">data…</option>
                 {numbers.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -775,6 +782,10 @@ function DataWhatIf({ ir, value, onChange }: { ir?: WhatIfIr; value: ScenarioPat
                 const arity = ir?.parameters?.[cellParam]?.index?.length ?? 0;
                 const keys = keysOf(cellKeys);
                 const v = Number(cellValue);
+                // A number with no keys meant every value (benchmark round 3: "tt_min × 1.3" was refused).
+                if (cellParam && keys.length === 0 && arity > 0 && cellValue.trim() !== "" && !Number.isNaN(v)) {
+                  return setProblem(`To change every value of ${cellParam}, use “Scale all of” above (× 1.3 for +30%). Here, name the ${arity === 1 ? "key" : `${arity} keys`} of one value.`);
+                }
                 if (!cellParam || keys.length !== arity || cellValue.trim() === "" || Number.isNaN(v)) {
                   return setProblem(`Choose data, ${arity || "its"} key${arity === 1 ? "" : "s"} and a number.`);
                 }

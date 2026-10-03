@@ -33,6 +33,9 @@ export function chipsFor(context: ModelContext): Chip[] {
   ];
 }
 
+/** Text typed into an equation field and not applied, by field, with the equation it was typed over. */
+const unapplied = new Map<string, { over: string; text: string }>();
+
 export default function EquationField<T>({
   label,
   equation,
@@ -54,12 +57,21 @@ export default function EquationField<T>({
 }) {
   const id = useId();
   const input = useRef<HTMLTextAreaElement>(null);
-  const [text, setText] = useState(equation ?? "");
-  const [editing, setEditing] = useState(false);
+  // Typing not yet applied outlives the field: a card closed to go and add the data it names comes back
+  // with it (benchmark round 3: the typed rule was gone, "0 <= 0" in its place).
+  const kept = unapplied.get(label);
+  const resumed = kept !== undefined && kept.over === (equation ?? "") ? kept.text : null;
+  const [text, setTextState] = useState(resumed ?? equation ?? "");
+  const [editing, setEditing] = useState(resumed !== null);
+  const setText = (next: string) => {
+    setTextState(next);
+    if (next.trim() === (equation ?? "").trim()) unapplied.delete(label);
+    else unapplied.set(label, { over: equation ?? "", text: next });
+  };
   // The model changed from elsewhere (structure view, undo, another tab):
   // show it, unless the person is mid-edit.
   useEffect(() => {
-    if (!editing) setText(equation ?? "");
+    if (!editing) setTextState(equation ?? "");
   }, [equation, editing]);
 
   const parsed = text.trim() === "" ? null : parse(text);
@@ -69,6 +81,7 @@ export default function EquationField<T>({
     // An equation that does not read stays on screen with its problem; the
     // model keeps its last good one until this one is fixed or Esc undoes it.
     if (!parsed?.ok) return;
+    unapplied.delete(label);
     setEditing(false);
     if (text.trim() !== (equation ?? "").trim()) onCommit(parsed.value, text);
   }
@@ -116,6 +129,7 @@ export default function EquationField<T>({
           }
           if (event.key === "Escape") {
             setText(equation ?? "");
+            unapplied.delete(label);
             setEditing(false);
           }
         }}

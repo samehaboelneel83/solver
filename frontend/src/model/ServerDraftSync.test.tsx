@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError, apiFetch } from "../api/client";
-import ServerDraftSync, { AUTOSAVE_MS } from "./ServerDraftSync";
+import ServerDraftSync, { AUTOSAVE_MS, discardOnServer } from "./ServerDraftSync";
 import { clearDraft, readDraft, readServerLink, writeDraft, writeServerLink, type ModelDraft } from "./draftStore";
 
 vi.mock("../api/client", async () => {
@@ -147,4 +147,14 @@ it("sends a second save after the first, from the revision the first left (bench
   const sent = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
   expect(sent.expected_revision).toBe(2);
   clearDraft(77);
+});
+
+it("discards the server copy at whatever revision it reached (benchmark round 3: the discarded rules came back)", async () => {
+  writeServerLink(P, { revision: 3, savedEditedAt: "x" });
+  // Revision 3 is stale -- a save moved it on -- so it asks which revision there is now, and discards that.
+  mockFetch.mockRejectedValueOnce(STALE).mockResolvedValueOnce(server(4)).mockResolvedValueOnce(undefined);
+  await discardOnServer(P);
+  const calls = mockFetch.mock.calls.map(([path, options]) => `${(options as { method?: string } | undefined)?.method ?? "GET"} ${path}`);
+  expect(calls).toEqual([`DELETE /api/v1/problems/${P}/draft?expected_revision=3`, `GET /api/v1/problems/${P}/draft?absent=null`,
+    `DELETE /api/v1/problems/${P}/draft?expected_revision=4`]);
 });

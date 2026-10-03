@@ -55,3 +55,24 @@ it("keeps the help open when it is clicked, typing or not (benchmark, October 20
   expect(card.open).toBe(true);
   expect(screen.getByText(/a rule for every member of a set/)).toBeInTheDocument();
 });
+
+it("keeps typing that did not apply when the field closes and opens again (benchmark round 3)", () => {
+  const first = render(
+    <EquationField label="Equation for c_kept" equation="0" parse={(t) => parseGoal(t, CONTEXT)}
+      onCommit={vi.fn()} chips={chipsFor(CONTEXT)} sets={CONTEXT.sets} />,
+  );
+  const field = screen.getByLabelText("Equation for c_kept");
+  fireEvent.focus(field);
+  fireEvent.change(field, { target: { value: "sum(park_reach[i] for i in item)" } });
+  fireEvent.blur(field);
+  expect(screen.getByRole("alert")).toBeInTheDocument();
+  first.unmount();
+  render(
+    <EquationField label="Equation for c_kept" equation="0" parse={(t) => parseGoal(t, CONTEXT)}
+      onCommit={vi.fn()} chips={chipsFor(CONTEXT)} sets={CONTEXT.sets} />,
+  );
+  expect(screen.getByLabelText("Equation for c_kept")).toHaveValue("sum(park_reach[i] for i in item)");
+  // Esc lets it go.
+  fireEvent.keyDown(screen.getByLabelText("Equation for c_kept"), { key: "Escape" });
+  expect(screen.getByLabelText("Equation for c_kept")).toHaveValue("0");
+});

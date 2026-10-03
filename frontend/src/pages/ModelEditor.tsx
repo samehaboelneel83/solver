@@ -66,8 +66,8 @@ import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
 import { useDomainProblem } from "../hooks/useDomainProblem";
-import ServerDraftSync, { saveToServer } from "../model/ServerDraftSync";
-import { discardServerDraft, publishServerDraft } from "../api/drafts";
+import ServerDraftSync, { discardOnServer, saveToServer } from "../model/ServerDraftSync";
+import { publishServerDraft } from "../api/drafts";
 import { canonicalJson, clearDraft, readDraft, readServerLink, updateDraftIr, useModelDraft, writeDraft, type DraftBase } from "../model/draftStore";
 import { useDraftRefusal } from "../model/useDraftRefusal";
 import { TreeItem, TreeView } from "../components/ui/tree-view";
@@ -544,15 +544,13 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   }
 
   async function discard() {
-    const link = readServerLink(Number(problemId));
-    // The server copy goes first, so nothing offers to reopen it afterwards.
-    if (link) {
-      try {
-        await discardServerDraft(Number(problemId), link.revision);
-      } catch (error) {
-        if (!(error instanceof ApiError && error.status === 404)) {
-          setFailure(`The server copy was not discarded: ${formatApiError(error)}`);
-        }
+    // The server copy goes first, so nothing offers to reopen it afterwards -- after any save still on
+    // its way, at whatever revision that left (benchmark round 3: the discarded rules came back).
+    try {
+      await discardOnServer(Number(problemId));
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 404)) {
+        setFailure(`The server copy was not discarded: ${formatApiError(error)}`);
       }
     }
     clearDraft(Number(problemId));
@@ -2164,12 +2162,14 @@ export function noteWithNumber(note: string | undefined, before: unknown, after:
   if (!note?.trim()) return null;
   const a = constantsOf(before), b = constantsOf(after);
   if (a.length !== b.length) return null;
-  const changed = a.map((v, i) => [v, b[i]] as const).filter(([x, y]) => x !== y);
-  if (changed.length !== 1) return null;
+  // One change, made wherever the number appears: the "apart" rule holds its distance three times, as
+  // D, D and -D (benchmark round 3: "at least 10000 apart" stayed beside a rule of 8).
+  const changed = a.map((v, i) => [Math.abs(v), Math.abs(b[i])] as const).filter(([x, y]) => x !== y);
+  if (!changed.length || changed.some(([x, y]) => x !== changed[0][0] || y !== changed[0][1])) return null;
   const [old, now] = changed[0];
-  const shown = (n: number) => [String(n), n.toLocaleString("en-US")];
+  const shown = (n: number) => [n.toLocaleString("en-US"), String(n)];
   for (const text of shown(old)) {
-    const at = new RegExp(`(^|[^0-9.,])${text.replace(/[.,]/g, (c) => `\\${c}`)}(?![0-9])`);
+    const at = new RegExp(`(^|[^0-9.,])${text.replace(/[.,]/g, (c) => `\\${c}`)}(?![0-9])`, "g");
     if (at.test(note)) return note.replace(at, (_m, lead: string) => `${lead}${now.toLocaleString("en-US")}`);
   }
   return null;

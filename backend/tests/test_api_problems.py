@@ -814,6 +814,8 @@ def test_duplicate_scenario_name_is_409_per_problem(client, auth_headers, crosse
     assert _scenario_post(client, auth_headers, crossed["a"], crossed["a1"], "same").status_code == 201
     again = _scenario_post(client, auth_headers, crossed["a"], crossed["a2"], "same")
     assert again.status_code == 409, again.text
+    # Said in words, not as a database conflict (benchmark round 3).
+    assert again.json()["detail"] == "There is already a scenario called “same” in this problem: choose another name."
     # Unique per problem, not globally.
     other = _scenario_post(client, auth_headers, crossed["b"], crossed["b1"], "same")
     assert other.status_code == 201, other.text

@@ -908,6 +908,15 @@ def list_scenarios(
     return ScenarioList(items=[ScenarioRead.model_validate(row) for row in rows], total=total)
 
 
+def _check_name_free(db: Session, problem_id: int, name: str, scenario_id: int | None = None) -> None:
+    """A scenario's name is its problem's own: said in words before the database refuses it as a bare
+    conflict (benchmark round 3)."""
+    taken = db.execute(select(Scenario.id).where(Scenario.problem_id == problem_id, Scenario.name == name,
+                                                 *([Scenario.id != scenario_id] if scenario_id else []))).first()
+    if taken is not None:
+        raise HTTPException(409, f"There is already a scenario called “{name}” in this problem: choose another name.")
+
+
 @router.post("/scenarios", status_code=201)
 def create_scenario(
     payload: ScenarioCreate,
@@ -919,6 +928,7 @@ def create_scenario(
     _check_gate(db, payload.problem_id, payload.model_version_id)
     _check_patch_ids(db, payload.model_version_id, payload.patch)
     _check_locks(db, payload.problem_id, payload.model_version_id, payload.patch)
+    _check_name_free(db, payload.problem_id, payload.name)
     row = Scenario(
         problem_id=payload.problem_id,
         model_version_id=payload.model_version_id,
@@ -965,6 +975,8 @@ def update_scenario(
             _check_gate(db, row.problem_id, payload.model_version_id)
         row.model_version_id = payload.model_version_id
     if "name" in changes:
+        if payload.name != row.name:
+            _check_name_free(db, row.problem_id, payload.name, row.id)
         row.name = payload.name
     if "patch" in changes:
         row.patch = payload.patch.stored()

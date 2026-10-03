@@ -1527,7 +1527,8 @@ function Conflict({
   const rules = new Map(((ir?.constraints ?? []) as Constraint[]).map((rule) => [rule.id, rule]));
   const create = useCreateScenario();
   const [penalty, setPenalty] = useState("");
-  const price = Number(penalty.replace(/,/g, ""));
+  // A rule's cost of breaking is a whole number (the scenario refuses 1.5).
+  const price = Math.round(Number(penalty.replace(/,/g, "")));
   const toast = useToast();
   const byRule = new Map<string, string[][]>();
   for (const item of items) {
@@ -1537,7 +1538,7 @@ function Conflict({
   const navigate = useNavigate();
   const { domainId } = useDomain();
   function soften() {
-    if (!scenario.data || !(price > 0)) return;
+    if (!scenario.data || !(price >= 1)) return;
     const patch: Record<string, number> = {};
     // What a unit of breaking costs is asked, never guessed (benchmark round 3: a guessed 100 made
     // "open nothing" the best plan).
@@ -1614,7 +1615,7 @@ function Conflict({
           <button
             type="button"
             onClick={soften}
-            disabled={create.isPending || !(price > 0)}
+            disabled={create.isPending || !(price >= 1)}
             className="rounded-md bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-60"
           >
             {create.isPending ? "Creating…" : "Make these preferences"}
