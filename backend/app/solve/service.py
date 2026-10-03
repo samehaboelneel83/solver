@@ -1850,7 +1850,10 @@ def _solve_lex(
     planner's priorities are not traded against bending a rule until those
     priorities are already met.
     """
-    stages: list[Linear] = [term.copy() for term in compiled.objective_terms]
+    # Each goal its own way (benchmark round 5): a "less is better" goal under a maximise is minimised.
+    from app.solve.compile import directed_terms
+
+    stages: list[Linear] = directed_terms(compiled)
     if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
         stages.append(compiled.penalty_objective.copy())
     if not stages:

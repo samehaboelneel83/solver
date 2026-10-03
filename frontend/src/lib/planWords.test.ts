@@ -79,6 +79,20 @@ describe("a plan in plain words", () => {
   });
 });
 
+describe("goals in order, each its own way (benchmark round 5)", () => {
+  it("says a goal marked less is better, by its weight, at its own value and low", () => {
+    const run = { ...base, params: { objective_mode: "lex", objective_terms: [
+      { id: "profit", value: 246100000 }, { id: "water_used", value: 19000000 }] } } as unknown as Run;
+    const crops = { objective: { sense: "maximize", mode: "lex", terms: [
+      { id: "profit", weight: 1, expression: { sum: { var: "area", index: ["p"] } } },
+      { id: "water_used", weight: -1, expression: { sum: { var: "water", index: ["p"] } } },
+    ] }, variables: ir.variables };
+    expect(planWords(run, crops as never)?.lines[0]).toBe(
+      "Goals, in order: profit 246,100,000 as high as it can go, then water used 19,000,000 as low as it can go — each given the ones before it."
+    );
+  });
+});
+
 describe("a cost among maximised goals", () => {
   it("is said as the cost, positive and kept low, not as a negative number (emergency coverage)", () => {
     const run = { ...base, params: { objective_mode: "lex", objective_terms: [

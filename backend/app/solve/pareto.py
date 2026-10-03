@@ -73,7 +73,13 @@ def front(backend, compiled: Compiled, *, steps: int, time_limit: float, solve) 
     (`solve_compiled`, bound to the backend and its knobs by the caller)."""
     admissible(compiled)
     sign = Decimal(1) if compiled.sense == "minimize" else Decimal(-1)
-    f, g = (Linear().add(term, factor=sign) for term in compiled.objective_terms)
+    # Each goal its own way, then both minimised (benchmark round 5: "less water" was drawn as "more").
+    from app.solve.compile import directed_terms
+
+    f, g = (Linear().add(term, factor=sign) for term in directed_terms(compiled))
+    # The bound on the second goal, said on its own scale: turned back when it is "less is better".
+    weights = compiled.objective_term_weights
+    turned = Decimal(-1) if len(weights) == 2 and weights[1] < 0 else Decimal(1)
     # Two solves per point, the ends included.
     budget = max(1.0, time_limit / (2 * (steps + 1)))
 
@@ -122,7 +128,7 @@ def front(backend, compiled: Compiled, *, steps: int, time_limit: float, solve) 
             within = Constraint(_ID, {}, g.copy(), "<=", Linear(const=bound))
             found, proven = best(f, g, [within])
             if found.status in ("optimal", "feasible"):
-                keep(found, proven, float(bound * sign))
+                keep(found, proven, float(bound * sign * turned))
     unique: dict[tuple[float, float], Point] = {}
     for point in points:
         unique.setdefault((round(point.first, 6), round(point.second, 6)), point)

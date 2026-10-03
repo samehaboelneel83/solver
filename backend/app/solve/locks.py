@@ -239,7 +239,9 @@ def stay_close(compiled: Compiled, spec: dict[str, Any], bases: dict[int, Base])
     changed = replace(compiled, variables=variables, constraints=[*compiled.constraints, *rows])
     if spec.get("mode", "weighted") == "lex":
         if compiled.objective_mode == "lex":
-            stages = [*compiled.objective_terms]
+            from app.solve.compile import directed_terms
+
+            stages = directed_terms(compiled)
             ids = [*compiled.objective_term_ids]
             if compiled.penalty_objective.coeffs or compiled.penalty_objective.const:
                 # The bent rules' price, which a lex solve takes as its implicit last stage, made an
@@ -251,7 +253,8 @@ def stay_close(compiled: Compiled, spec: dict[str, Any], bases: dict[int, Base])
             # The weighted goal, soft penalties folded in, as the first stage.
             stages, ids = [compiled.objective], ["goal"]
         return replace(changed, objective_mode="lex", objective_terms=[*stages, towards],
-                       objective_term_ids=[*ids, "stay_close"], penalty_objective=Linear()), measure
+                       objective_term_ids=[*ids, "stay_close"], objective_term_weights=[],
+                       penalty_objective=Linear()), measure
     weight = Decimal(str(spec.get("weight", 1)))
     objective = compiled.objective.copy()
     for key, c in towards.coeffs.items():

@@ -91,20 +91,28 @@ function lexGoalLine(run: Run, ir: Ir): string | null {
     : proven ? "as high as it can go" : "the highest found";
   // A cost among goals that are maximised is written "maximise minus the cost" (one sense for
   // all): say it as the cost, positive, kept as low as it can go -- not "running cost -247,000".
-  const flipped = new Set(
-    (ir.objective?.terms ?? []).filter((t) => negated(t as GoalTerm)).map((t) => t.id ?? "")
-  );
+  // Each goal keeps its own way (benchmark round 5): a weight below 0 turns it ("less is better");
+  // a minus inside its expression turns it too, and its value is shown without the minus.
+  const terms = new Map((ir.objective?.terms ?? []).map((t) => [t.id ?? "", t as GoalTerm]));
+  const inside = (id: string) => {
+    const term = terms.get(id);
+    return term !== undefined && negated({ expression: term.expression });
+  };
+  const turned = (id: string) => {
+    const term = terms.get(id);
+    return term !== undefined && ((typeof term.weight === "number" && term.weight < 0) !== inside(id));
+  };
   const shown = values.filter((t) => t.id !== "stay_close" && t.id !== "preferences");
   if (!shown.length) return null;
-  if (!shown.some((t) => flipped.has(t.id))) {
+  if (!shown.some((t) => turned(t.id) || inside(t.id))) {
     const parts = shown.map((t) => `${notes.get(t.id) ?? plain(t.id)} ${number(t.value)}`);
     return `Goals, in order: ${parts.join(", then ")} — each ${how} given the ones before it.`;
   }
   const low = proven ? "as low as it can go" : "the lowest found";
   const high = proven ? "as high as it can go" : "the highest found";
   const parts = shown.map((t) => {
-    const down = flipped.has(t.id) ? minimise === false : minimise;
-    return `${notes.get(t.id) ?? plain(t.id)} ${number(flipped.has(t.id) ? -t.value : t.value)} ${down ? low : high}`;
+    const down = turned(t.id) ? minimise === false : minimise;
+    return `${notes.get(t.id) ?? plain(t.id)} ${number(inside(t.id) ? -t.value : t.value)} ${down ? low : high}`;
   });
   return `Goals, in order: ${parts.join(", then ")} — each given the ones before it.`;
 }

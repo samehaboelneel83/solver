@@ -716,7 +716,9 @@ function ScenarioRuns({
               Solve version {version.data?.version ?? "it is on"} as it is
             </button>
           )}
-          {!simple && twoGoals && (
+          {/* At the Simple level too (benchmark round 5: all five testers worked in Simple, and one asked
+              for exactly this -- profit against water). */}
+          {twoGoals && (
             <button
               type="button"
               onClick={() => solve("front")}

@@ -155,8 +155,10 @@ def gap_rows(compiled: Compiled, best: Solution, within: float, relation: str) -
     """The rows holding the goal near the best: one on a weighted goal, one per goal when they are
     solved in order -- each at the value that goal has in the best answer."""
     if compiled.objective_mode == "lex" and compiled.objective_terms:
+        from app.solve.compile import directed_terms
+
         rows = []
-        for i, term in enumerate(compiled.objective_terms):
+        for i, term in enumerate(directed_terms(compiled)):
             value = float(term.evaluated_at(best.assignments))
             limit = bound(value, within, compiled.sense)
             if compiled.is_integral:

@@ -214,3 +214,38 @@ def test_a_front_never_stops_its_runs_being_deleted(db, empty_queue, order):
         db.execute(text("DELETE FROM run"))
         db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
         db.commit()
+
+
+def _two_goals(mode: str) -> dict:
+    """Profit (more is better) and water (less is better, weight -1) under one maximise: x is profit,
+    y water, and more profit needs more water (x <= y)."""
+    x, y = {"var": "x", "index": []}, {"var": "y", "index": []}
+    return {"version": 2, "sets": [], "parameters": {},
+            "variables": {"x": {"index": [], "domain": "continuous", "lower": 0, "upper": 10},
+                          "y": {"index": [], "domain": "continuous", "lower": 0, "upper": 10}},
+            "constraints": [{"id": "needs_water", "left": x, "relation": "<=", "right": y, "severity": "hard"}],
+            "objective": {"sense": "maximize", "mode": mode, "terms": [
+                {"id": "profit", "weight": 1, "expression": x}, {"id": "water", "weight": -1, "expression": y}]}}
+
+
+def test_goals_in_order_each_go_their_own_way():
+    """Benchmark round 5: in this order every goal was maximised; "less water" had to be negated."""
+    compiled = compile_model(_two_goals("lex"), {"sets": {}})
+    result, _ = solve_compiled(by_name("highs"), compiled, time_limit=10, seed=1)
+    assert result.status == "optimal"
+    assert float(result.assignments[("x", ())]) == pytest.approx(10)
+    assert float(result.assignments[("y", ())]) == pytest.approx(10)  # all the water profit needs, no more
+    compiled = compile_model({**_two_goals("lex"), "objective": {**_two_goals("lex")["objective"],
+                              "terms": list(reversed(_two_goals("lex")["objective"]["terms"]))}}, {"sets": {}})
+    result, _ = solve_compiled(by_name("highs"), compiled, time_limit=10, seed=1)
+    # Water first, as little as can be: none, so no profit.
+    assert float(result.assignments[("y", ())]) == pytest.approx(0) and float(result.assignments[("x", ())]) == pytest.approx(0)
+
+
+def test_the_front_draws_a_less_is_better_goal_as_less():
+    compiled = compile_model(_two_goals("weighted"), {"sets": {}})
+    points = front(by_name("highs"), compiled, steps=2, time_limit=20,
+                   solve=lambda c, t: solve_compiled(by_name("highs"), c, time_limit=t, seed=1)[0])
+    # Profit and water rise together: the front runs from (0, 0) to (10, 10), never "most water".
+    values = sorted((round(p.first), round(p.second)) for p in points)
+    assert values[0] == (0, 0) and values[-1] == (10, 10)

@@ -1853,6 +1853,18 @@ function ObjectiveEditor({
                     <p className="mt-1 font-mono text-sm text-slate-900" data-testid={`goal-order-${position}`}>
                       {ordinal(position + 1)}
                     </p>
+                    {/* Each goal in order keeps its own way (benchmark round 5: water had to be negated, and
+                        switching to weighted brought back an old direction). The same sign as in a weighted mix. */}
+                    <select aria-label={`Direction of ${term.id || "this goal"}`} className="mt-1 block rounded border border-slate-300 px-1 py-0.5 text-xs"
+                      value={(term.weight >= 0) === objective.sense.startsWith("max") ? "more" : "less"}
+                      onChange={(e) => {
+                        const more = e.target.value === "more";
+                        const sign = more === objective.sense.startsWith("max") ? 1 : -1;
+                        onChange({ ...objective, terms: objective.terms.map((t, i) => (i === position ? { ...t, weight: sign * Math.abs(t.weight || 1) } : t)) });
+                      }}>
+                      <option value="more">more is better</option>
+                      <option value="less">less is better</option>
+                    </select>
                   </div>
                 ) : (
                   <div>
@@ -1937,7 +1949,7 @@ function ObjectiveEditor({
                 view={view}
                 startIn={composedGoals.has(term.id) && !(view === "equation" && viewChosen(simple, "equation")) ? "boxes" : undefined}
                 goalId={term.id}
-                weighing={lex ? `${["1st", "2nd", "3rd"][position] ?? `${position + 1}th`} in order` : weighing(term.weight, objective.sense)}
+                weighing={lex ? `${["1st", "2nd", "3rd"][position] ?? `${position + 1}th`} in order, ${(term.weight >= 0) === objective.sense.startsWith("max") ? "more" : "less"} is better` : weighing(term.weight, objective.sense)}
                 expression={term.expression}
                 context={context}
                 onChange={(expression) =>

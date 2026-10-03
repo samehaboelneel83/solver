@@ -317,6 +317,9 @@ class Compiled:
     # Each term's own quadratic part, unweighted, beside `objective_terms`: what the goal breakdown
     # reads (benchmark round 4: a water-use term irr * amount showed 0).
     objective_term_quadratics: list[dict[tuple[VarKey, VarKey], Decimal]] = field(default_factory=list)
+    # Each term's weight, beside `objective_terms`: its sign is the goal's own direction, "more" or
+    # "less is better" (benchmark round 5: goals solved in order all went the model's one way).
+    objective_term_weights: list[Decimal] = field(default_factory=list)
     # constraint id -> the violation variables minted for its instances, so a
     # result can say *which* instance was broken and by how much, not merely
     # that a penalty was paid.
@@ -390,6 +393,18 @@ def slack_of(constraint: Constraint, assignments: dict[VarKey, Any]) -> Decimal:
     # Equality is tight when it holds; a residual is a breach.
     residual = left - right
     return residual if residual == 0 else -abs(residual)
+
+
+def directed_terms(compiled: "Compiled") -> list[Linear]:
+    """The goal's terms, each turned its own way: a term weighted below 0 ("less is better" under a
+    maximise, "more" under a minimise) is negated, so optimising every one in the model's sense moves
+    each the way its goal asks. Terms with no weight recorded (rewritten after compiling) go as they are."""
+    weights = compiled.objective_term_weights
+    out = []
+    for i, term in enumerate(compiled.objective_terms):
+        w = weights[i] if len(weights) == len(compiled.objective_terms) else Decimal(1)
+        out.append(term.scaled(Decimal(-1)) if w < 0 else term.copy())
+    return out
 
 
 def _idle(constraint: Constraint, assignments: dict[VarKey, Any]) -> bool:
@@ -496,6 +511,7 @@ class _Compiler:
             penalty_objective=penalties,
             objective_quadratic=quadratic,
             objective_term_quadratics=self._term_quadratics,
+            objective_term_weights=self._term_weights,
             # An interval is not a decision with a value; its start and end are.
             var_index_sets={
                 n: v["index"] for n, v in self.ir.get("variables", {}).items() if v.get("domain") != "interval"
@@ -1250,6 +1266,7 @@ class _Compiler:
         term_ids: list[str] = []
         terms: list[Linear] = []
         self._term_quadratics: list[Quadratic] = []
+        self._term_weights: list[Decimal] = []
         for term in spec.get("terms", []):
             expression = term.get("expression")
             if expression is None:
@@ -1262,6 +1279,7 @@ class _Compiler:
             term_ids.append(str(term.get("id")))
             terms.append(linear.copy())
             self._term_quadratics.append(dict(square))
+            self._term_weights.append(weight)
             total.add(linear, factor=weight)
             _add_quadratic(quadratic, _scaled(square, weight))
 
