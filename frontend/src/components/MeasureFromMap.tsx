@@ -66,7 +66,7 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
   const [from, setFrom] = useState<Id | "">(placed[0]?.id ?? "");
   const [to, setTo] = useState<Id | "">(placed[1]?.id ?? placed[0]?.id ?? "");
   const [metric, setMetric] = useState<Metric>("straight");
-  const [unit, setUnit] = useState<"m" | "km" | "s" | "min">("m");
+  const [unit, setUnit] = useState<"m" | "km" | "s" | "min" | "cost">("m");
   const [nearest, setNearest] = useState("");
   const [km, setKm] = useState("5");
   const [minutes, setMinutes] = useState("15");
@@ -94,7 +94,9 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
   const [level] = useEditorLevel();
   const simple = level === "simple";
   const timed = metric === "time" || metric === "network_time";
-  const onLayer = metric === "network" || metric === "network_time";
+  // A cost along the roads (benchmark round 5): a cost per km and a toll per line, summed on the cheapest path.
+  const costed = metric === "network_cost";
+  const onLayer = metric === "network" || metric === "network_time" || costed;
   // Read only when a layer is to be travelled along: the form otherwise asks nothing of the server.
   const datasets = useDatasets(onLayer ? (domainId as number) : null);
   const chosenDataset = datasetId ?? datasets.data?.items?.[0]?.id ?? null;
@@ -122,11 +124,13 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
     const speed = Number(defaultKmh);
     return {
       dataset_id: chosenDataset, layer: chosenLayer,
-      ...(speedField.trim() ? { speed_field: speedField.trim() } : {}),
-      ...(speed > 0 && speed !== 30 ? { default_kmh: speed } : {}),
+      ...(costed
+        ? { ...(speedField.trim() ? { cost_field: speedField.trim() } : {}), ...(speed > 0 ? { default_cost_per_km: speed } : {}),
+          ...(delayField.trim() ? { toll_field: delayField.trim() } : {}) }
+        : { ...(speedField.trim() ? { speed_field: speedField.trim() } : {}), ...(speed > 0 && speed !== 30 ? { default_kmh: speed } : {}),
+          ...(delayField.trim() ? { delay_field: delayField.trim() } : {}) }),
       ...(Number(joinM) > 0 && Number(joinM) !== 500 ? { join_m: Number(joinM) } : {}),
       ...(closedField.trim() ? { closed_field: closedField.trim() } : {}),
-      ...(delayField.trim() ? { delay_field: delayField.trim() } : {}),
       ...(avoidKind ? { avoid_type_id: Number(avoidKind) } : {}),
     };
   }
@@ -146,6 +150,7 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
     const toId = (to === "" ? from : to) as Id;
     // Said here rather than as the server's validation text (benchmark, October 2026).
     if (onLayer && Number(joinM) > 20000) return setError("Join places up to: at most 20,000 m (20 km). A place further from every line is left out and named.");
+    if (costed && kind !== "distances") return setError("A cost along the roads is kept as a data value: choose “a distance or travel-time parameter”.");
     const net = onLayer ? network() : null;
     if (onLayer && !net) return setError("Choose imported map data with a lines layer to travel along.");
     const along = net ? { network: net } : {};
@@ -246,13 +251,15 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
                     onChange={(event) => {
                       const next = event.target.value as Metric;
                       setMetric(next);
-                      setUnit(next === "time" || next === "network_time" ? "min" : "m");
+                      setUnit(next === "network_cost" ? "cost" : next === "time" || next === "network_time" ? "min" : "m");
+                      if (next === "network_cost" && defaultKmh === "30") setDefaultKmh("1");
                     }}>
               <option value="straight">in a straight line</option>
               <option value="road">along the roads</option>
               <option value="time">as road travel time</option>
               <option value="network">along a lines layer I imported</option>
               <option value="network_time">as travel time along a lines layer I imported</option>
+              <option value="network_cost">as a cost along a lines layer I imported (per km, plus tolls)</option>
             </select>
           </div>
         )}
@@ -277,13 +284,13 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
               </select>
             </div>
             <div>
-              <label htmlFor={`${id}-speed`} className="block text-xs text-slate-600">Speed field (km/h, optional)</label>
-              <input id={`${id}-speed`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder="speed_kmh" value={speedField}
+              <label htmlFor={`${id}-speed`} className="block text-xs text-slate-600">{costed ? "Cost per km field (optional)" : "Speed field (km/h, optional)"}</label>
+              <input id={`${id}-speed`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder={costed ? "cost_per_km" : "speed_kmh"} value={speedField}
                      title="A field of the lines, or of the road records made from them (a speed computed from the weather, say)."
                      onChange={(event) => setSpeedField(event.target.value)} />
             </div>
             <div>
-              <label htmlFor={`${id}-kmh`} className="block text-xs text-slate-600">Otherwise (km/h)</label>
+              <label htmlFor={`${id}-kmh`} className="block text-xs text-slate-600">{costed ? "Otherwise (per km)" : "Otherwise (km/h)"}</label>
               <input id={`${id}-kmh`} className="w-20 rounded border px-2 py-1 text-sm" inputMode="decimal" value={defaultKmh}
                      onChange={(event) => setDefaultKmh(event.target.value)} />
             </div>
@@ -300,9 +307,9 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
                      onChange={(event) => setClosedField(event.target.value)} />
             </div>
             <div>
-              <label htmlFor={`${id}-delay`} className="block text-xs text-slate-600">Delay (minutes field, optional)</label>
-              <input id={`${id}-delay`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder="delay_min" value={delayField}
-                     title="Minutes added to travel along the whole line: a checkpoint, roadworks."
+              <label htmlFor={`${id}-delay`} className="block text-xs text-slate-600">{costed ? "Toll (a field, once per line, optional)" : "Delay (minutes field, optional)"}</label>
+              <input id={`${id}-delay`} className="w-28 rounded border px-2 py-1 font-mono text-sm" placeholder={costed ? "toll" : "delay_min"} value={delayField}
+                     title={costed ? "A cost added once for using the line: a toll, a ferry." : "Minutes added to travel along the whole line: a checkpoint, roadworks."}
                      onChange={(event) => setDelayField(event.target.value)} />
             </div>
             <div>
@@ -319,8 +326,8 @@ export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
             <div>
               <label htmlFor={`${id}-unit`} className="block text-xs text-slate-600">In</label>
               <select id={`${id}-unit`} className="rounded border px-2 py-1 text-sm" value={unit}
-                      onChange={(event) => setUnit(event.target.value as "m" | "km" | "s" | "min")}>
-                {timed ? (
+                      onChange={(event) => setUnit(event.target.value as "m" | "km" | "s" | "min" | "cost")}>
+                {costed ? <option value="cost">the cost&apos;s own units</option> : timed ? (
                   <>
                     <option value="min">minutes</option>
                     <option value="s">whole seconds</option>
@@ -431,7 +438,13 @@ export function leftOut(source: ComputedSource | undefined, joinM: number, joinS
     parts.push(`${off.length} place${off.length > 1 ? "s are" : " is"} further than ${joinM} m from every line, so ${off.length > 1 ? "their" : "its"} pairs were left out: ${off.slice(0, 8).join(", ")}${off.length > 8 ? ` and ${off.length - 8} more` : ""}. ${widen}`);
   }
   if (offRoad.length) parts.push(`${offRoad.length} too far from any road: ${offRoad.slice(0, 8).join(", ")}${offRoad.length > 8 ? ` and ${offRoad.length - 8} more` : ""}.`);
-  if (source?.no_road) parts.push(`${source.no_road} pairs have no road between them.`);
+  // Said with the value they read and which they are (benchmark round 5: 813 minutes in the grid, with
+  // nothing saying it meant "no road").
+  if (source?.no_road) {
+    const named = (source as { no_road_pairs?: string[] }).no_road_pairs ?? [];
+    const far = (source as { far?: number }).far;
+    parts.push(`${source.no_road} pairs have no road between them${far !== undefined ? `; a model reads each as ${far.toLocaleString("en-US")} (ten times the longest), so it never takes one as near` : ""}${named.length ? `: ${named.slice(0, 8).join(", ")}${source.no_road > 8 ? ` and ${source.no_road - Math.min(8, named.length)} more` : ""}` : ""}.`);
+  }
   return parts.length ? parts.join(" ") : null;
 }
 

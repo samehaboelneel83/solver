@@ -44,6 +44,26 @@ describe("computing distances from the map (queue R16a)", () => {
     expect(JSON.parse(init.body as string)).toEqual({ name: "distance", from_type_id: 1, to_type_id: 2, metric: "straight", unit: "m", nearest: 5 });
   });
 
+  it("sends a cost along a lines layer: per km by a field, plus a toll (benchmark round 5)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      const body = url.includes("/gis/datasets/") ? { id: 4, name: "roads", layers: [{ id: 1, name: "ROADS", kinds: { line: 9 } }] }
+        : url.includes("/gis/datasets") ? { items: [{ id: 4, name: "roads" }], total: 1 }
+          : { parameter_id: 3, pairs: 12, missing: [], source: {} };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    renderForm([shaped(1, "warehouse"), shaped(2, "customer")]);
+    fireEvent.change(screen.getByLabelText("Measured"), { target: { value: "network_cost" } });
+    fireEvent.change(await screen.findByLabelText("Cost per km field (optional)"), { target: { value: "egp_per_km" } });
+    fireEvent.change(screen.getByLabelText("Toll (a field, once per line, optional)"), { target: { value: "toll_egp" } });
+    await screen.findByRole("option", { name: "ROADS" });
+    fireEvent.click(screen.getByRole("button", { name: "Compute" }));
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.some(([u]) => /\/distances$/.test(String(u)))).toBe(true));
+    const [, init] = vi.mocked(globalThis.fetch).mock.calls.find(([u]) => /\/distances$/.test(String(u)))! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ metric: "network_cost", unit: "cost",
+      network: { dataset_id: 4, layer: "ROADS", cost_field: "egp_per_km", default_cost_per_km: 1, toll_field: "toll_egp" } });
+  });
+
   it("links pairs within a distance given in km", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ relationship_type_id: 4, edges: 3, missing: [], source: {} }), { status: 201, headers: { "Content-Type": "application/json" } })

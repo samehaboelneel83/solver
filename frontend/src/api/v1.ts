@@ -1397,16 +1397,18 @@ export type ComputedSource = {
   missing?: string[];
   computed_at: string;
 };
-export type Metric = "straight" | "road" | "time" | "network" | "network_time";
+export type Metric = "straight" | "road" | "time" | "network" | "network_time" | "network_cost";
 /** A lines layer of imported map data to travel along (improvement plan 2.9). */
 export type NetworkSource = {
   dataset_id: number; layer: string; speed_field?: string; default_kmh?: number; join_m?: number;
   /** A line property that closes it, one of minutes added along it, a kind of areas no route enters (benchmark, October 2026). */
   closed_field?: string; delay_field?: string; avoid_type_id?: Id;
+  /** A cost along the lines (metric network_cost): per km by a field or a default, plus a toll per line (benchmark round 5). */
+  cost_field?: string; default_cost_per_km?: number; toll_field?: string;
 };
 /** Travel times per period (benchmark re-test, October 2026): each period names the lines' speed field, or scales every speed. */
 export type ByPeriod = { type_id: Id; speed_field_from?: string; factor_from?: string };
-export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min"; nearest?: number; network?: NetworkSource; by_period?: ByPeriod };
+export type DistancesBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; unit: "m" | "km" | "s" | "min" | "cost"; nearest?: number; network?: NetworkSource; by_period?: ByPeriod };
 export type WithinBody = { name: string; from_type_id: Id; to_type_id: Id; metric: Metric; max_m?: number; max_min?: number; network?: NetworkSource; output?: "relationship" | "parameter"; by_period?: ByPeriod };
 export const computeDistances = ({ domainId, ...body }: DistancesBody & { domainId: Id }) =>
   send<{ parameter_id: Id; pairs: number; missing: string[]; source: ComputedSource }>(

@@ -30,3 +30,11 @@ describe("the way to bring places in", () => {
     expect(leftOut(source, 500)).toMatch(/Widen “Join places up to”/);
   });
 });
+
+describe("pairs with no road between them", () => {
+  it("says the value they read and which they are (benchmark round 5)", () => {
+    const said = leftOut({ kind: "distance", metric: "time", from: "base", to: "zone", computed_at: "", no_road: 2, far: 885,
+      no_road_pairs: ["B1 → Z9", "B2 → Z9"] } as never, 500);
+    expect(said).toBe("2 pairs have no road between them; a model reads each as 885 (ten times the longest), so it never takes one as near: B1 → Z9, B2 → Z9.");
+  });
+});

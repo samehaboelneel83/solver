@@ -297,3 +297,29 @@ def test_travel_times_read_a_speed_kept_on_the_road_records(town, db):  # noqa: 
     assert all(float(values["storm_min"][k]) > float(v) for k, v in values["calm_min"].items() if float(v) > 0.5)
     wrong = minutes("nowhere_min", "no_such_speed")
     assert wrong.status_code == 422 and "no_such_speed" in wrong.text
+
+
+def test_a_cost_follows_the_roads_per_km_and_with_tolls(town, db):  # noqa: F811
+    """Benchmark round 5: transport cost per pallet-km and tolls in the road table could not be summed
+    along each path; one flat rate was used."""
+    http, t, ds = town
+    _, depots = _make(http, t, ds, "DEPOTS")
+    _, sites = _make(http, t, ds, "SITES")
+    d = t["domain_a"]
+    ask = {"from_type_id": depots["entity_type_id"], "to_type_id": sites["entity_type_id"]}
+
+    def made(name, metric, unit, network):
+        got = http.post(f"/api/v1/domains/{d}/distances", json={"name": name, **ask, "metric": metric, "unit": unit,
+                        "network": {"dataset_id": ds["id"], "layer": "ROADS", **network}}, headers=t["a"])
+        assert got.status_code == 201, got.text
+        return {k: float(v) for k, v in db.execute(text(
+            "SELECT pv.entity_ids::text, pv.value FROM parameter_value pv JOIN parameter_def pd ON pd.id = pv.parameter_def_id"
+            " WHERE pd.name = :n"), {"n": name}).all()}, got.json()["source"]
+
+    km, _ = made("road_km", "network", "km", {})
+    per_km, _ = made("cost_flat", "network_cost", "cost", {"default_cost_per_km": 2.0})
+    # At 2 a km everywhere, the cheapest path is the shortest: twice its kilometres.
+    assert all(abs(per_km[k] - 2 * v) <= 0.02 * max(1.0, 2 * v) for k, v in km.items())
+    tolled, source = made("cost_tolled", "network_cost", "cost", {"default_cost_per_km": 2.0, "toll_field": "speed_am"})
+    assert source["toll_by"] == "speed_am"
+    assert all(tolled[k] >= per_km[k] - 1e-6 for k in per_km) and any(tolled[k] > per_km[k] + 1 for k in per_km)

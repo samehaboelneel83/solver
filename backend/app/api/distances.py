@@ -57,9 +57,15 @@ class NetworkSource(BaseModel):
     delay_field: str | None = Field(default=None, max_length=255)
     #: A kind of record whose areas no route may enter (flood zones, no-go areas).
     avoid_type_id: int | None = None
+    #: For a cost along the lines (metric `network_cost`): a property of each line holding its cost per
+    #: km, lines without one at `default_cost_per_km`; and a property with a cost added once per line
+    #: (a toll). Benchmark round 5: transport cost per pallet-km and tolls could not follow the roads.
+    cost_field: str | None = Field(default=None, max_length=255)
+    default_cost_per_km: float = Field(default=1.0, gt=0, le=1e9)
+    toll_field: str | None = Field(default=None, max_length=255)
 
 
-Metric = Literal["straight", "road", "time", "network", "network_time"]
+Metric = Literal["straight", "road", "time", "network", "network_time", "network_cost"]
 
 
 class ByPeriod(BaseModel):
@@ -82,7 +88,7 @@ class DistanceRequest(BaseModel):
     network: NetworkSource | None = None
     #: Distance in whole metres (what CP-SAT and the network lane take) or km to three places;
     #: time in whole seconds or minutes to one place.
-    unit: Literal["m", "km", "s", "min"] = "m"
+    unit: Literal["m", "km", "s", "min", "cost"] = "m"
     #: Keep each place's nearest this many; the rest take a recorded "far" default, never 0.
     nearest: int | None = Field(default=None, ge=1, le=10_000)
     by_period: ByPeriod | None = None
@@ -120,10 +126,19 @@ class WithinReport(BaseModel):
 
 
 _UNITS = {"straight": ("m", "km"), "road": ("m", "km"), "time": ("s", "min"),
-          "network": ("m", "km"), "network_time": ("s", "min")}
+          "network": ("m", "km"), "network_time": ("s", "min"), "network_cost": ("cost",)}
 _TIMED = ("time", "network_time")
 #: Each unit's divisor from the base (metres or minutes) and its decimal places.
-_SCALE = {"m": (1.0, 0), "km": (1000.0, 3), "s": (1 / 60.0, 0), "min": (1.0, 1)}
+_SCALE = {"m": (1.0, 0), "km": (1000.0, 3), "s": (1 / 60.0, 0), "min": (1.0, 1), "cost": (1.0, 2)}
+
+
+def _per_km(props: dict[str, Any] | None, field: str | None, default: float) -> float:
+    """A line's cost per km: its field when that holds a number above 0, else the default."""
+    try:
+        value = float((props or {}).get(field)) if field else default
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) and value > 0 else default
 
 
 def _measure(db: Session, domain_id: int, metric: str, origins, targets,
@@ -132,7 +147,7 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
     joins them, and what the source should say about how."""
     if metric == "straight":
         return distance.matrix(origins, targets), {"metric": "straight line (geodesic, WGS84)"}
-    if metric in ("network", "network_time"):
+    if metric in ("network", "network_time", "network_cost"):
         from app.spatial import layer_network
 
         if network is None:
@@ -151,12 +166,23 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
                 if not avoid:
                     raise HTTPException(422, "the kind to avoid has no areas")
             lines = layer_network.from_layer(db, network.dataset_id, network.layer)
-            asked = [f for f in (network.speed_field, network.closed_field, network.delay_field) if f]
+            costed = metric == "network_cost"
+            asked = [f for f in ((network.cost_field, network.toll_field) if costed else (network.speed_field, network.delay_field)) if f]
+            asked += [network.closed_field] if network.closed_field else []
             lines, borrowed = _record_fields(db, domain_id, lines, asked, network.layer)
-            net = layer_network.build(lines, network.speed_field, network.default_kmh, closed_field=network.closed_field,
-                                      delay_field=network.delay_field, avoid=avoid)
+            if costed:
+                # A cost per km is a "speed" of 60 / cost (so a km takes `cost` minutes), and a toll a
+                # delay of that many minutes on its line: the cheapest path's minutes are its cost.
+                lines = [(c, {**(p or {}), "__speed": 60.0 / _per_km(p, network.cost_field, network.default_cost_per_km),
+                              **({"__toll": (p or {}).get(network.toll_field)} if network.toll_field else {})})
+                         for c, p in lines]
+                net = layer_network.build(lines, "__speed", 60.0 / network.default_cost_per_km, closed_field=network.closed_field,
+                                          delay_field="__toll" if network.toll_field else None, avoid=avoid)
+            else:
+                net = layer_network.build(lines, network.speed_field, network.default_kmh, closed_field=network.closed_field,
+                                          delay_field=network.delay_field, avoid=avoid)
             values, info = layer_network.matrix(net, [(o.lon, o.lat) for o in origins], [(t.lon, t.lat) for t in targets],
-                                                minutes=metric == "network_time", snap_m=network.join_m)
+                                                minutes=metric in ("network_time", "network_cost"), snap_m=network.join_m)
             # Name the places too far from any line to join it: their pairs are left out, not zero.
             off = [f"{origins[i].key} ({m} m)" for i, m in info.pop("off_origins", [])]
             off += [f"{targets[i].key} ({m} m)" for i, m in info.pop("off_targets", [])]
@@ -164,8 +190,10 @@ def _measure(db: Session, domain_id: int, metric: str, origins, targets,
                 info["off_network"] = sorted(set(off))[:200]
         except layer_network.NetworkError as exc:
             raise HTTPException(422, f"layer {network.layer!r}: {exc}") from exc
-        extra = {k: v for k, v in (("closed_by", network.closed_field), ("delay_by", network.delay_field),
-                                   ("avoiding", network.avoid_type_id)) if v is not None}
+        extra = {k: v for k, v in (("closed_by", network.closed_field), ("delay_by", None if metric == "network_cost" else network.delay_field),
+                                   ("avoiding", network.avoid_type_id),
+                                   ("cost_per_km_by", network.cost_field if metric == "network_cost" else None),
+                                   ("toll_by", network.toll_field if metric == "network_cost" else None)) if v is not None}
         if borrowed:
             extra["fields_from_records"] = borrowed
         return values, {"metric": f"along layer {network.layer!r} of map data {network.dataset_id}", **extra, **info}
@@ -309,7 +337,7 @@ def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commi
     scale, places_ = _SCALE[body.unit]
     longest = max(float(values[~np.isnan(values)].max(initial=0.0)) for _, values in measured)
     keep = body.nearest if body.nearest is not None else len(targets)
-    cells, left_out = [], 0
+    cells, left_out, unreached = [], 0, []
     for period, values in measured:
         tail = [period] if period is not None else []
         for i, origin in enumerate(origins):
@@ -318,6 +346,9 @@ def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commi
             for j in order[:keep]:
                 if np.isnan(row[j]):
                     left_out += 1  # no road joins them: left to the far default, never guessed
+                    if len(unreached) < 20:
+                        # Named, so the grid's far values can be told apart (benchmark round 5).
+                        unreached.append(f"{origin.key} → {targets[int(j)].key}")
                     continue
                 value = 0 if origin.entity_id == targets[j].entity_id else round(float(row[j]) / scale, places_)
                 if places_ == 0:
@@ -330,6 +361,7 @@ def write_distances(db: Session, domain_id: int, body: DistanceRequest, *, commi
     source = {"kind": "distance", "unit": body.unit, **how, **({"nearest": body.nearest} if body.nearest else {}),
               "from": origin_type.name, "to": target_type.name, "pairs": len(cells),
               **({"far": far} if far is not None else {}), **({"no_road": left_out} if left_out else {}),
+              **({"no_road_pairs": unreached} if unreached else {}),
               **({"missing": missing_o + missing_t} if missing_o or missing_t else {}),
               "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "shapes": shapes_fingerprint(db, index),
