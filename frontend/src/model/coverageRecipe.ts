@@ -22,6 +22,10 @@ export type CoverageRecipe = {
   weights: string[];
   /** Every place must be covered (the goal is then the least cost) -- else cover the most worth. */
   coverAll: boolean;
+  /** At most this many sites open: "at most 8 bases" (benchmark round 5). */
+  maxOpen?: number;
+  /** A place counts as covered with this many open sites within reach: "covered twice" (benchmark round 5). */
+  times?: number;
   /** Never leave out a place this needy: every one whose number field is at least this is covered. */
   mustCover?: { field: string; atLeast: number };
   /** Seats: a covered place's people (number fields multiplied) are seated at open sites within reach,
@@ -71,17 +75,21 @@ export function applyCoverage(draft: FormDraft, r: CoverageRecipe): FormDraft {
   const constraints: Constraint[] = [...draft.constraints];
   const terms: ObjectiveTerm[] = [];
   const taken = [...names, open, covered];
+  const times = r.times !== undefined && Number.isInteger(r.times) && r.times > 1 ? r.times : 1;
+  const within = times > 1 ? `${times} open ${say(r.sites)}s` : `an open ${say(r.sites)}`;
   if (r.coverAll) {
     constraints.push({
-      id: free("every_place_covered", taken), note: `every ${say(r.places)} has an open ${say(r.sites)} within reach`,
-      forall: [{ index: p, set: r.places }], left: reached, relation: ">=", right: { const: 1 } as Term, severity: "hard",
+      id: free("every_place_covered", taken), note: `every ${say(r.places)} has ${within} within reach`,
+      forall: [{ index: p, set: r.places }], left: reached, relation: ">=", right: { const: times } as Term, severity: "hard",
     } as Constraint);
     terms.push({ id: free(r.cost ? "cost" : "sites_open", taken), weight: 1, expression: costOf } as ObjectiveTerm);
   } else {
     variables[covered] = { index: [r.places], domain: "binary" } as FormDraft["variables"][string];
     constraints.push({
-      id: free("covered_needs_open", taken), note: `a ${say(r.places)} counts as covered only with an open ${say(r.sites)} within reach`,
-      forall: [{ index: p, set: r.places }], left: { var: covered, index: [p] } as Term, relation: "<=", right: reached, severity: "hard",
+      id: free("covered_needs_open", taken), note: `a ${say(r.places)} counts as covered only with ${within} within reach`,
+      forall: [{ index: p, set: r.places }],
+      left: times > 1 ? ({ mul: [{ const: times }, { var: covered, index: [p] }] } as Term) : ({ var: covered, index: [p] } as Term),
+      relation: "<=", right: reached, severity: "hard",
     } as Constraint);
     const worth: Term = r.weights.length
       ? ({ mul: [product(r.weights.map((w) => attr(p, w))), { var: covered, index: [p] }] } as Term)
@@ -96,6 +104,12 @@ export function applyCoverage(draft: FormDraft, r: CoverageRecipe): FormDraft {
       note: `every ${say(r.places)} with ${say(m.field)} of ${m.atLeast} or more is covered`,
       forall: [{ index: p, set: r.places, where: [{ attr: m.field, op: ">=", value: m.atLeast }] }],
       left: { var: covered, index: [p] } as Term, relation: ">=", right: { const: 1 } as Term, severity: "hard",
+    } as Constraint);
+  }
+  if (r.maxOpen !== undefined && Number.isInteger(r.maxOpen) && r.maxOpen >= 0) {
+    constraints.push({
+      id: free("at_most_open", [...taken, ...constraints.map((c) => c.id)]), note: `at most ${r.maxOpen} ${say(r.sites)}s open`,
+      left: { sum: opened, over: [{ index: s, set: r.sites }] } as Term, relation: "<=", right: { const: r.maxOpen } as Term, severity: "hard",
     } as Constraint);
   }
   if (r.budget !== undefined && Number.isFinite(r.budget)) {

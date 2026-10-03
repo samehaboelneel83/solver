@@ -22,6 +22,13 @@ describe("the coverage recipe", () => {
     expect(JSON.stringify(d.objective.terms[0])).toContain('"name":"population"');
   });
 
+  it("caps how many sites open and asks for cover twice", () => {
+    const d = applyCoverage(empty, { ...recipe, maxOpen: 8, times: 2 });
+    const rules = Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+    expect(rules.covered_needs_open).toMatch(/^for each p in zone: 2 \* covered\[p\] <= /);
+    expect(rules.at_most_open).toBe("sum(open[s] for s in site) <= 8");
+  });
+
   it("covers every place at the least cost when asked, and keeps what the draft had", () => {
     const had = applyCoverage(empty, recipe);
     const d = applyCoverage(had, { ...recipe, coverAll: true, budget: undefined });

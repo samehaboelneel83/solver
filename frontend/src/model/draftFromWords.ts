@@ -501,8 +501,23 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
   const seats = coverAll || !capacity ? undefined : countsPlaces ? { capacity, demand: [] as string[] } : people.length ? { capacity, demand: people } : undefined;
   if (seats) choices.push(seats.demand.length ? `Each open ${sites!.kind.name} serves at most its ${capacity}, of the ${people[0]} it covers — their names`
     : `Each open ${sites!.kind.name} serves at most its ${capacity} ${places!.kind.name}s, each served by one — you wrote it`);
+  // "At most 8 bases open", "no more than 5 sites" (benchmark round 5: the limit was typed by hand).
+  const siteWords = sites ? [...new Set([...words(sites.kind.name), ...words(sites.kind.name).flatMap(plural), "sites", "bases", "stations", "centres", "centers", "depots"])] : [];
+  const maxOpen = sites ? (() => {
+    const m = text.match(new RegExp(`\\b(?:at most|no more than|up to|maximum of|max|open)\\s+(\\d+)\\s+(?:new\\s+)?(?:${siteWords.join("|")})\\b`, "i"));
+    return m ? Number(m[1]) : undefined;
+  })() : undefined;
+  if (maxOpen !== undefined) choices.push(`At most ${maxOpen} ${sites!.kind.name}s open — the number you wrote`);
+  // "Covered twice", "at least two bases within reach" (benchmark round 5: double coverage was typed by hand).
+  const twice = /\b(covered|cover(ed)? (each|every) \w+) twice\b|\bdouble[- ]cover\w*|\bbackup cover\w*/i.test(text) ? 2
+    : (() => {
+      const m = text.match(new RegExp(`\\bat least (two|three|2|3) (?:open\\s+)?(?:${siteWords.join("|")})\\b`, "i"));
+      return m ? ({ two: 2, three: 3 } as Record<string, number>)[m[1].toLowerCase()] ?? Number(m[1]) : undefined;
+    })();
+  if (twice) choices.push(`Covered means ${twice} open ${sites?.kind.name ?? "site"}s within reach — you wrote it`);
   const recipe = missing.length ? null : ({ sites: sites!.kind.name, places: places!.kind.name, reach: reach!.name, reachIndex: reach!.index,
-    ...(cost ? { cost } : {}), ...(budget !== undefined ? { budget } : {}), weights, coverAll, ...(seats ? { seats } : {}) } satisfies CoverageRecipe);
+    ...(cost ? { cost } : {}), ...(budget !== undefined ? { budget } : {}), weights, coverAll, ...(seats ? { seats } : {}),
+    ...(maxOpen !== undefined ? { maxOpen } : {}), ...(twice ? { times: twice } : {}) } satisfies CoverageRecipe);
   return { recipe: "coverage", title: TITLES.coverage, choices, missing, apply: recipe ? (d) => applyCoverage(d, recipe) : null };
 }
 

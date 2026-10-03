@@ -191,6 +191,18 @@ describe("reading the words and the data better (benchmark round 3)", () => {
     expect(d.constraints.map((c) => c.id)).toEqual(expect.arrayContaining(["served_if_covered", "served_within_reach", "serves_at_most"]));
   });
 
+  it("reads a cap on how many open and cover twice", () => {
+    const kinds: Kind[] = [{ name: "base", attributes: [n("fixed_cost")] }, { name: "town", attributes: [n("population")] }];
+    const p = proposeDraft("Open at most 8 bases so towns are within reach, and every town covered twice for backup.",
+      kinds, [{ name: "within_30", index: ["base", "town"] }])!;
+    expect(p.recipe).toBe("coverage");
+    const d = p.apply!(empty);
+    valid(d);
+    const ids = d.constraints.map((c) => c.id);
+    expect(ids).toContain("at_most_open");
+    expect(JSON.stringify(d.constraints)).toContain('"const":2');
+  });
+
   it("makes a crop's worth its yield times its price, less its cost", () => {
     const kinds: Kind[] = [{ name: "parcel", attributes: [n("area_feddan")] },
       { name: "crop", attributes: [n("yield_t_per_feddan"), n("price_egp_per_t"), n("cost_egp_per_feddan")] }];
