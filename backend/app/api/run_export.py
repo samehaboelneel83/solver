@@ -66,6 +66,11 @@ def _labels(data: dict[str, Any]) -> dict[str, dict[str, str]]:
     return out
 
 
+def _share(term: dict[str, Any]) -> str:
+    """A goal term's share of the whole, or a dash for goals solved in order (they make no one sum)."""
+    return "—" if term.get("share") is None else f"{term['share'] * 100:.1f}%"
+
+
 def _num(value: Any) -> str:
     """A number as a person reads it in a report: 65,264,600 and 0.375, never 6.52646e+07
     (benchmark re-test, October 2026)."""
@@ -468,7 +473,7 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
         rows = "".join(
             # The weight is said, and what the term counts in the goal (benchmark round 3: the PDF dropped "× 600").
             f"<tr><td>{e(t['id'].replace('_', ' '))}{'' if t['weight'] == 1 else ' × ' + _num(t['weight'])}</td><td>{_num(t['value'])}</td>"
-            f"<td>{_num(t.get('contribution', t['value']))}</td><td>{t['share'] * 100:.1f}%</td>"
+            f"<td>{_num(t.get('contribution', t['value']))}</td><td>{_share(t)}</td>"
             f"<td>{e(', '.join(str((labels.get(r['kind']) or {}).get(r['key'], r['key'])) + ' ' + _num(r['value']) for r in (t.get('records') or [])[:5]))}</td></tr>"
             for t in shown)
         parts.append("<h2>What the goal is made of</h2><table><tr><th>Goal term</th><th>Its value</th><th>In the goal</th><th>Share</th><th>Most of it from</th></tr>"

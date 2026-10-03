@@ -314,6 +314,9 @@ class Compiled:
     # but a quadratic program. The contract keeps rules linear and allows
     # this only in a weighted objective, so nothing else carries one.
     objective_quadratic: dict[tuple[VarKey, VarKey], Decimal] = field(default_factory=dict)
+    # Each term's own quadratic part, unweighted, beside `objective_terms`: what the goal breakdown
+    # reads (benchmark round 4: a water-use term irr * amount showed 0).
+    objective_term_quadratics: list[dict[tuple[VarKey, VarKey], Decimal]] = field(default_factory=list)
     # constraint id -> the violation variables minted for its instances, so a
     # result can say *which* instance was broken and by how much, not merely
     # that a penalty was paid.
@@ -469,6 +472,7 @@ class _Compiler:
             objective_terms=terms,
             penalty_objective=penalties,
             objective_quadratic=quadratic,
+            objective_term_quadratics=self._term_quadratics,
             # An interval is not a decision with a value; its start and end are.
             var_index_sets={
                 n: v["index"] for n, v in self.ir.get("variables", {}).items() if v.get("domain") != "interval"
@@ -1207,6 +1211,7 @@ class _Compiler:
         quadratic: Quadratic = {}
         term_ids: list[str] = []
         terms: list[Linear] = []
+        self._term_quadratics: list[Quadratic] = []
         for term in spec.get("terms", []):
             expression = term.get("expression")
             if expression is None:
@@ -1218,6 +1223,7 @@ class _Compiler:
             weight = number(term.get("weight", 1))
             term_ids.append(str(term.get("id")))
             terms.append(linear.copy())
+            self._term_quadratics.append(dict(square))
             total.add(linear, factor=weight)
             _add_quadratic(quadratic, _scaled(square, weight))
 

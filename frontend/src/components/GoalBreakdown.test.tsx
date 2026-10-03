@@ -31,3 +31,15 @@ it("says nothing for a single term from a single record", () => {
     terms: [{ id: "cost", weight: 1, value: 3, contribution: 3, share: 1, records: [{ kind: "", key: "", value: 3 }] }] }} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+it("shows goals solved in order by their place, with no share of one sum (benchmark round 4)", () => {
+  render(<GoalBreakdown breakdown={{ sense: "maximize", mode: "lex", terms: [
+    { id: "people_covered", weight: 1, value: 23900, contribution: 23900, share: null, records: [] },
+    { id: "cost", weight: -1, value: 76100, contribution: -76100, share: null, records: [] },
+  ] }} />);
+  const table = screen.getByRole("table", { name: "Goal by term" });
+  expect(table).not.toHaveTextContent("%");
+  expect(table).not.toHaveTextContent("Share");
+  expect(screen.getByRole("row", { name: /cost/ })).toHaveTextContent("2nd");
+  expect(screen.getByRole("row", { name: /cost/ })).not.toHaveTextContent("×");
+});

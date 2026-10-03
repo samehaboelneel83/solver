@@ -74,3 +74,29 @@ def test_report_numbers_are_written_as_people_read_them():
     from app.api.run_export import _num
 
     assert [_num(65264600.4), _num(1234.5), _num(0.375), _num(3), _num(-247000)] == ["65,264,600", "1,234.50", "0.375", "3", "-247,000"]
+
+
+def test_a_product_of_decisions_counts_in_its_term_and_goals_in_order_have_no_shares():
+    """Benchmark round 4: water use = sum(irr * amount) showed 0, the terms did not add up to the goal,
+    and goals solved in order were given shares of one sum."""
+    from decimal import Decimal
+
+    ir = {"version": 2, "sets": ["plot"], "parameters": {},
+          "variables": {"irr": {"index": ["plot"], "domain": "continuous", "lower": 0, "upper": 5},
+                        "amount": {"index": ["plot"], "domain": "continuous", "lower": 0, "upper": 5}},
+          "constraints": [],
+          "objective": {"sense": "maximize", "mode": "weighted", "terms": [
+              {"id": "worth", "weight": 1, "expression": {"sum": {"mul": [{"const": 3}, {"var": "amount", "index": ["p"]}]},
+                                                          "over": [{"index": "p", "set": "plot"}]}},
+              {"id": "water_use", "weight": -1, "expression": {"sum": {"mul": [{"var": "irr", "index": ["p"]}, {"var": "amount", "index": ["p"]}]},
+                                                               "over": [{"index": "p", "set": "plot"}]}}]}}
+    data = {"sets": {"plot": [{"id": "a"}, {"id": "b"}]}}
+    compiled = compile_model(ir, data)
+    at = {("irr", ("a",)): Decimal(2), ("amount", ("a",)): Decimal(4), ("irr", ("b",)): Decimal(1), ("amount", ("b",)): Decimal(3)}
+    made = objective_breakdown(ir, compiled, at)
+    terms = {t["id"]: t for t in made["terms"]}
+    assert terms["water_use"]["value"] == 2 * 4 + 1 * 3 and terms["water_use"]["contribution"] == -11
+    assert {r["key"]: r["value"] for r in terms["water_use"]["records"]} == {"a": 8, "b": 3}
+    assert sum(t["contribution"] for t in made["terms"]) == 3 * 7 - 11
+    lex = {**ir, "objective": {**ir["objective"], "mode": "lex", "terms": ir["objective"]["terms"][:1]}}
+    assert all(t["share"] is None for t in objective_breakdown(lex, compile_model(lex, data), at)["terms"])

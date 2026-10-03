@@ -7,7 +7,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from app.solve.compile import Compiled, number
+from app.solve.compile import Compiled, number, quadratic_at
 
 #: Records listed per term; the rest are summed as one line.
 TOP = 15
@@ -18,17 +18,30 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
         return None
     weights = {str(t.get("id")): number(t.get("weight", 1)) for t in ((ir.get("objective") or {}).get("terms") or [])}
     terms = []
-    for term_id, linear in zip(compiled.objective_term_ids, compiled.objective_terms, strict=True):
+    squares = compiled.objective_term_quadratics or [{} for _ in compiled.objective_terms]
+    for term_id, linear, square in zip(compiled.objective_term_ids, compiled.objective_terms, squares, strict=True):
         weight = weights.get(term_id, Decimal(1))
-        value = linear.evaluated_at(assignments)
+        # Its products of decisions count too (benchmark round 4: irr * amount showed 0, and the terms
+        # did not add up to the goal).
+        value = linear.evaluated_at(assignments) + (quadratic_at(square, assignments) if square else Decimal(0))
         by_record: dict[tuple[str, str], Decimal] = {}
+
+        def count(key_var: Any, amount: Decimal) -> None:
+            name, index = key_var
+            kind = (compiled.var_index_sets.get(name) or [""])[0] if index else ""
+            key = (kind, index[0] if index else "")
+            by_record[key] = by_record.get(key, Decimal(0)) + amount
+
         for (name, index), coeff in linear.coeffs.items():
             got = assignments.get((name, index))
             if got is None or coeff * number(got) == 0:
                 continue
-            kind = (compiled.var_index_sets.get(name) or [""])[0] if index else ""
-            key = (kind, index[0] if index else "")
-            by_record[key] = by_record.get(key, Decimal(0)) + coeff * number(got)
+            count((name, index), coeff * number(got))
+        for (a, b), coeff in square.items():
+            x, y = assignments.get(a), assignments.get(b)
+            if x is None or y is None or coeff * number(x) * number(y) == 0:
+                continue
+            count(a, coeff * number(x) * number(y))
         ranked = sorted(by_record.items(), key=lambda kv: -abs(kv[1]))
         rest = sum((v for _, v in ranked[top:]), Decimal(0))
         terms.append({
@@ -39,6 +52,8 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
     penalties = float(compiled.penalty_objective.evaluated_at(assignments)) if compiled.penalty_objective.coeffs else 0.0
     whole = sum(abs(t["contribution"]) for t in terms) + abs(penalties)
     for t in terms:
-        t["share"] = round(abs(t["contribution"]) / whole, 4) if whole else 0.0
+        # Goals solved in order are not one sum: no share of one in another (benchmark round 4: a count
+        # of people and a cost in pounds were put together as 23.9 % and 76.1 %).
+        t["share"] = None if compiled.objective_mode == "lex" else round(abs(t["contribution"]) / whole, 4) if whole else 0.0
     return {"sense": compiled.sense, "mode": compiled.objective_mode, "terms": terms,
             **({"soft_rules": penalties} if penalties else {})}
