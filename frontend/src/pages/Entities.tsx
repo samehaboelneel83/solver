@@ -37,6 +37,7 @@ import { useWords } from "../lib/words";
 import { useEditorLevel } from "../model/editorLevel";
 import FormulaField from "../components/FormulaField";
 import LinkedTotalField from "../components/LinkedTotalField";
+import LinkedValueField from "../components/LinkedValueField";
 import LinkByField from "../components/LinkByField";
 
 // Lazy, like the graph's filter bar. The builder is the only module that
@@ -607,9 +608,9 @@ function EntityTable({
           the title, where testers looked for them (re-test, October 2026). */}
       <details className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2">
         <summary className="cursor-pointer select-none text-sm font-medium text-slate-800">
-          Compute and join: a field from others, link by a code (a join), totals of linked records
+          Compute and join: a field from others, link by a code (a join), totals of linked records, a number of the linked record
         </summary>
-        <div className="mt-2"><FormulaField kind={type} /><LinkByField kind={type} /><LinkedTotalField kind={type} /></div>
+        <div className="mt-2"><FormulaField kind={type} /><LinkByField kind={type} /><LinkedTotalField kind={type} /><LinkedValueField kind={type} /></div>
         <p className="mt-3 text-xs text-slate-600">
           A value for each pair of records — a parcel&apos;s suitability for each crop read through its soil, 1 or 0 by a
           comparison — is made under{" "}
