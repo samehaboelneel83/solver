@@ -156,7 +156,7 @@ def _made(db: Session, kind: Any, fields: dict[str, dict[str, Any]], body: "Deri
 
 
 #: The ops whose fields are filled again on records added later.
-KEPT_OPS = ("date_parts", "categories", "from_link")
+KEPT_OPS = ("date_parts", "categories", "from_link")  # and link_by, kept by `_link_by` itself
 
 
 def refill(db: Session, entity_type_id: int) -> int:
@@ -169,7 +169,18 @@ def refill(db: Session, entity_type_id: int) -> int:
     records = db.execute(text("SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"),
                          {"t": entity_type_id}).all()
     filled: set[int] = set()
+    relinked = 0
     for spec in kept:
+        if spec.get("op") == "link_by":
+            target = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
+                                {"d": kind["domain_id"], "n": spec.get("to_kind")}).scalar_one_or_none()
+            if target is not None and spec.get("field") in fields:
+                try:
+                    linked, _, _ = _link_records(db, entity_type_id, target, DeriveBody(**spec), only_unlinked=True)
+                except ValueError:
+                    continue
+                relinked += linked
+            continue
         try:
             body = DeriveBody(**spec)
             made, values, _ = _made(db, kind, fields, body, records)
@@ -183,7 +194,7 @@ def refill(db: Session, entity_type_id: int) -> int:
                 db.execute(text("UPDATE entity SET attrs = attrs || CAST(:a AS jsonb) WHERE id = :id"),
                            {"a": json.dumps(extra), "id": entity_id})
                 filled.add(entity_id)
-    return len(filled)
+    return len(filled) + relinked
 
 
 @router.post("/entity-types/{entity_type_id}/derive")
@@ -393,6 +404,27 @@ def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[s
             "INSERT INTO attribute_def (entity_type_id, name, data_type, references_id, sort_order)"
             " VALUES (:t, :n, 'reference', :r, coalesce((SELECT max(sort_order) + 1 FROM attribute_def WHERE entity_type_id = :t), 0))"),
             {"t": kind["id"], "n": body.field, "r": rel})
+    linked, unmatched, ambiguous = _link_records(db, kind["id"], target, body)
+    # Kept, to link the records an import adds later (benchmark round 5: a link was missing on rows
+    # imported after it was made, and a forecast total read 0).
+    spec = body.model_dump(include={"op", "field", "of", "to_kind", "match"}, exclude_none=True)
+    # The latest way of making this link replaces any earlier one (by code, then by name).
+    db.execute(text("UPDATE entity_type SET derivations = (SELECT coalesce(jsonb_agg(d), '[]'::jsonb) FROM"
+                    " jsonb_array_elements(derivations) d WHERE NOT (d->>'op' = 'link_by' AND d->>'field' = :f))"
+                    " || jsonb_build_array(CAST(:s AS jsonb)) WHERE id = :t"),
+               {"s": json.dumps(spec), "f": body.field, "t": kind["id"]})
+    audit.record(db, organization_id=user.organization_id, actor_id=user.id,
+                 api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
+                 object_type="entity_type", object_id=kind["id"])
+    db.commit()
+    return {"made": [body.field], "records": linked, "left_empty": len(unmatched) + len(ambiguous),
+            "unmatched": unmatched[:20], "ambiguous": ambiguous[:20]}
+
+
+def _link_records(db: Session, type_id: int, target: int, body: "DeriveBody", only_unlinked: bool = False
+                  ) -> tuple[int, list[str], list[str]]:
+    """Each record's link set to the record its `of` field names; how many, and those unmatched or
+    ambiguous. `only_unlinked`: records whose link is empty only (records imported later)."""
     # What each value names: a key, then a label (or the chosen field). Two records answering to one
     # value make it ambiguous; it is listed, not guessed.
     names: dict[str, set[str]] = {}
@@ -404,9 +436,11 @@ def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[s
                 names.setdefault(_fold(value), set()).add(key)
     linked, unmatched, ambiguous = 0, [], []
     for entity_id, key, attrs in db.execute(text(
-            "SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t)) ORDER BY key"), {"t": kind["id"]}).all():
+            "SELECT id, key, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t)) ORDER BY key"), {"t": type_id}).all():
         value = (attrs or {}).get(body.of)
         if value in (None, ""):
+            continue
+        if only_unlinked and (attrs or {}).get(body.field) not in (None, ""):
             continue
         found = names.get(_fold(value), set())
         if len(found) != 1:
@@ -415,12 +449,7 @@ def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[s
         db.execute(text("UPDATE entity SET attrs = attrs || jsonb_build_object(:f, CAST(:v AS text)) WHERE id = :i"),
                    {"f": body.field, "v": next(iter(found)), "i": entity_id})
         linked += 1
-    audit.record(db, organization_id=user.organization_id, actor_id=user.id,
-                 api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
-                 object_type="entity_type", object_id=kind["id"])
-    db.commit()
-    return {"made": [body.field], "records": linked, "left_empty": len(unmatched) + len(ambiguous),
-            "unmatched": unmatched[:20], "ambiguous": ambiguous[:20]}
+    return linked, unmatched, ambiguous
 
 
 # --- data values computed from records and other data values -------------------------------------

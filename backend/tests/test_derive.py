@@ -221,6 +221,12 @@ def test_records_are_linked_by_a_code_they_hold(tenants, db):  # noqa: F811
     assert by_name["records"] == 2
     refused = http.post(path, json={"op": "link_by", "field": "dist_code", "of": "dist_code", "to_kind": "district"}, headers=h)
     assert refused.status_code == 409
+    # Records imported later are linked the same way (benchmark round 5: a forecast total read 0).
+    upload = http.post(f"/api/v1/entity-types/{call['id']}/upload", headers=h,
+                       files={"file": ("more.csv", b"key,district_name\nc5,IMBABA\n", "text/csv")})
+    assert upload.status_code == 200, upload.text
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": call["id"]}, headers=h).json()["items"]}
+    assert items["c5"]["in_district"] == "D2"
 
 
 def test_yes_no_fields_merge_spellings_and_put_the_rarest_values_together(tenants, db):  # noqa: F811

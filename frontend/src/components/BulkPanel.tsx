@@ -91,7 +91,9 @@ export default function BulkPanel({
   // Several columns read as the key make one key, joined by "_" (a route and a stop: R1_3).
   const twice = [...new Set(chosen.filter((c) => c !== LEAVE_OUT && c !== NEW_FIELD && (c !== "key" || !recordsUpload)
     && chosen.indexOf(c) !== chosen.lastIndexOf(c)))];
-  const keyMissing = preview != null && recordsUpload && !chosen.includes("key");
+  // A column naming records already here by their name or a field stands for the key (benchmark round 5).
+  const matched = chosen.some((c) => c.startsWith("match:"));
+  const keyMissing = preview != null && recordsUpload && !chosen.includes("key") && !matched;
   // A values file with several number columns names its value column, never a guess (benchmark round 3).
   const valueMissing = preview != null && !recordsUpload && preview.targets.some((t) => t.name === "value") && !chosen.includes("value");
   const keyParts = recordsUpload ? Object.keys(choices).filter((c) => choices[c] === "key") : [];
@@ -249,6 +251,10 @@ export default function BulkPanel({
                     >
                       {recordsUpload && <option value="key">the key{c.unique ? "" : " (values repeat!)"}</option>}
                       {recordsUpload && <option value="label">the label (the name shown)</option>}
+                      {recordsUpload && (preview.existing ?? 0) > 0 && <option value="match:label">which record it is, by its name (label)</option>}
+                      {recordsUpload && (preview.existing ?? 0) > 0 && preview.targets
+                        .filter((t) => !["key", "label"].includes(t.name) && !t.links_to && t.kind === "text")
+                        .map((t) => <option key={`match-${t.name}`} value={`match:${t.name}`}>which record it is, by its {t.name}</option>)}
                       {preview.targets
                         .filter((t) => !["key", "label"].includes(t.name))
                         .map((t) => (

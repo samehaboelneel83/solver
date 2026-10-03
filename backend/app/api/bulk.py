@@ -616,6 +616,48 @@ def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, s
                                                    for r in rows]
 
 
+def match_existing(db: Session, entity_type: EntityType, header: list[str], rows: list[list[Any]],
+                   named: dict[str, str], notes: list[str]) -> tuple[dict[str, str], list[list[Any]]]:
+    """A column mapped `match:label` or `match:<field>` names records already there by their name or a
+    field, not by key: each value becomes the key of the one record it names, case and spaces aside
+    (benchmark round 5: rates keyed by district name had to become a kind of their own and a link).
+    A value naming no record, or two, is left without a key and reported as such."""
+    matching = [(col, to[len("match:"):]) for col, to in named.items() if to.startswith("match:")]
+    if not matching:
+        return named, rows
+    if len(matching) > 1 or "key" in named.values():
+        raise HTTPException(422, "one column names the records: either the key, or one column matched by name or field")
+    col, by = matching[0]
+    if col not in header:
+        raise HTTPException(422, f"there is no column {col!r} in the file")
+    if by != "label" and by not in {a.name for a in _attributes(db, entity_type_id=entity_type.id)}:
+        raise HTTPException(422, f"{entity_type.name} has no field {by!r} to match by")
+    names: dict[str, str | None] = {}
+    for key, label, attrs in db.execute(text(
+            "SELECT key, label, attrs FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"), {"t": entity_type.id}):
+        value = label if by == "label" else (attrs or {}).get(by)
+        if value in (None, ""):
+            continue
+        folded = _fold(str(value))
+        names[folded] = None if folded in names and names[folded] != key else key  # two alike match neither
+    at = header.index(col)
+    unmatched = []
+    out = []
+    for r in rows:
+        row = list(r)
+        value = row[at] if at < len(row) else None
+        key = names.get(_fold(str(value))) if value not in (None, "") else None
+        if key is None and value not in (None, ""):
+            unmatched.append(str(value))
+        if at < len(row):
+            row[at] = key
+        out.append(row)
+    said = "its name" if by == "label" else by
+    notes.append(f"{col}: rows matched to {entity_type.name} records by {said}"
+                 + (f"; {len(unmatched)} name none, or more than one: {', '.join(unmatched[:8])}" if unmatched else ""))
+    return {**named, col: "key"}, out
+
+
 def _mapping(raw: str | None) -> dict[str, str]:
     if not raw:
         return {}
@@ -691,6 +733,7 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
     notes: list[str] = []
     named = _mapping(mapping)
     header, rows = with_places(db, entity_type, header, rows, notes, {col for col, to in named.items() if to == ""})
+    named, rows = match_existing(db, entity_type, header, rows, named, notes)
     before = set(apply_mapping(header, rows[:1], named)[0])
     header, rows = apply_mapping(header, rows, named, keep_parts=True)
     parts = [i for i, h in enumerate(header) if h not in before]

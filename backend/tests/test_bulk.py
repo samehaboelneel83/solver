@@ -328,6 +328,25 @@ def test_a_sheet_never_turns_areas_into_points_and_left_out_columns_place_nothin
     assert items["z1"]["shape"] == square and items["z1"]["people"] == 900
 
 
+def test_a_sheet_names_its_records_by_name_or_field_instead_of_key(shop):
+    """Benchmark round 5: disease rates keyed by district name could not be read onto the districts."""
+    kind = shop["post"]("/api/v1/entity-types", {"domain_id": shop["domain"], "name": "district_x", "role": "location"})
+    shop["post"](f"/api/v1/entity-types/{kind['id']}/attributes", {"name": "code", "data_type": "text"})
+    for key, label, code in (("D1", "Dokki", "GZ-01"), ("D2", "Imbaba", "GZ-02")):
+        shop["post"]("/api/v1/entities", {"entity_type_id": kind["id"], "key": key, "label": label, "attrs": {"code": code}})
+    by_name = _upload_mapped(shop, kind["id"], [["district", "rate"], ["dokki ", "3.5"], ["IMBABA", "4"]],
+                             {"district": "match:label", "rate": "rate"}, add_fields=True)
+    assert by_name["ok"], by_name
+    assert any("matched to district_x records by its name" in n for n in by_name["notes"])
+    by_code = _upload_mapped(shop, kind["id"], [["code", "beds"], ["gz-02", "40"]], {"code": "match:code", "beds": "beds"}, add_fields=True)
+    assert by_code["ok"], by_code
+    items = {e["key"]: e["attrs"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={kind['id']}").json()["items"]}
+    assert sorted(items) == ["D1", "D2"]  # no record made for a name
+    assert items["D1"]["rate"] == 3.5 and items["D2"]["rate"] == 4 and items["D2"]["beds"] == 40
+    unknown = _upload_mapped(shop, kind["id"], [["district", "rate"], ["Giza", "1"]], {"district": "match:label", "rate": "rate"})
+    assert not unknown["ok"] and any("name none" in n for n in unknown["notes"])
+
+
 def test_several_records_are_deleted_at_once_or_none(shop):
     site = shop["site"]["id"]
     _upload(shop, f"/api/v1/entity-types/{site}/upload", [["key", "capacity"], ["a", "1"], ["b", "2"], ["c", "3"]])

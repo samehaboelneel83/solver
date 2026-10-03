@@ -130,6 +130,40 @@ describe("BulkPanel (queue R21)", () => {
     expect(await screen.findByText(/would make 0 new records and update 3/)).toBeInTheDocument();
   });
 
+  it("reads a column as which record it is, by name or by a field, in place of the key (benchmark round 5)", async () => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith("/upload/preview")
+          ? {
+              rows: 2, existing: 20,
+              columns: [
+                { name: "district", sample: ["Dokki"], unique: true, suggestion: null, matches_keys: 0 },
+                { name: "rate", sample: ["3.5"], unique: false, suggestion: "rate", matches_keys: 0 },
+              ],
+              targets: [{ name: "key", kind: "text", required: true }, { name: "label", kind: "text", required: false },
+                { name: "code", kind: "text", required: false }, { name: "rate", kind: "number", required: false }],
+            }
+          : { ok: true, rows: 2, written: 2, skipped: 0, dry_run: false, faults: [], created: 0, updated: 2 },
+      ) as never,
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BulkPanel base="/api/v1/entity-types/9" what="district records" />
+      </QueryClientProvider>
+    );
+    fireEvent.change(screen.getByLabelText("File to upload"), { target: { files: [new File(["x"], "d.csv")] } });
+    const select = await screen.findByLabelText("district is read as");
+    expect(within(select).getByRole("option", { name: "which record it is, by its code" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "match:label" } });
+    expect(screen.queryByText(/Choose the column that names each record uniquely/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    const sent = ([path]: unknown[]) => /\/upload(\?|$)/.test(String(path));
+    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(sent)).toBe(true));
+    const [, options] = vi.mocked(apiFetch).mock.calls.find(sent)!;
+    expect(JSON.parse(((options as { body: FormData }).body).get("mapping") as string)).toMatchObject({ district: "match:label" });
+  });
+
   it("reads a values file's columns as the index and the value (benchmark, October 2026)", async () => {
     vi.mocked(apiFetch).mockReset();
     vi.mocked(apiFetch).mockImplementation((path: string) =>
