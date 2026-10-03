@@ -22,7 +22,7 @@ it("links records to the record their code names, and says which were not (bench
   fireEvent.change(screen.getByLabelText("The kind it names"), { target: { value: "district" } });
   fireEvent.change(screen.getByLabelText("What of it the code matches"), { target: { value: "code" } });
   fireEvent.click(screen.getByRole("button", { name: "Link" }));
-  expect(await screen.findByText(/298 call records linked to their district by district_link; 1 not: c3: GZ-99 \(no district has it\)/)).toBeInTheDocument();
+  expect(await screen.findByText(/298 call records linked to their district by district_link; 2 not, among them: c3: GZ-99 \(no district has it\)/)).toBeInTheDocument();
   const call = vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).includes("/derive"))!;
   expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual(
     { op: "link_by", field: "district_link", of: "dist_code", to_kind: "district", match: "code" });

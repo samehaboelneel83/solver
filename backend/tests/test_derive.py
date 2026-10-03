@@ -221,3 +221,21 @@ def test_records_are_linked_by_a_code_they_hold(tenants, db):  # noqa: F811
     assert by_name["records"] == 2
     refused = http.post(path, json={"op": "link_by", "field": "dist_code", "of": "dist_code", "to_kind": "district"}, headers=h)
     assert refused.status_code == 409
+
+
+def test_yes_no_fields_merge_spellings_and_put_the_rarest_values_together(tenants, db):  # noqa: F811
+    """Benchmark round 3: 13 crop names (Wheat and WHEAT among them) were refused outright."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+    obs = http.post("/api/v1/entity-types", json={"domain_id": domain, "name": "yield_row", "role": "other"}, headers=h).json()
+    http.post(f"/api/v1/entity-types/{obs['id']}/attributes", json={"name": "crop", "data_type": "text"}, headers=h)
+    crops = ["Wheat", "WHEAT ", "wheat"] + [f"crop {i}" for i in range(13) for _ in range(2)] + ["rare"]
+    for i, crop in enumerate(crops):
+        http.post("/api/v1/entities", json={"entity_type_id": obs["id"], "key": f"r{i}", "attrs": {"crop": crop}}, headers=h)
+    done = http.post(f"/api/v1/entity-types/{obs['id']}/derive", json={"op": "categories", "field": "crop"}, headers=h)
+    assert done.status_code == 200, done.text
+    made = done.json()["made"]
+    # 15 values once spellings are one: the 11 most common get a field each, the other 4 share crop_other.
+    assert len(made) == 12 and made[-1] == "crop_other" and "crop_wheat" in made and "crop_rare" not in made
+    assert done.json()["notes"] == ["4 rarer values of crop share crop_other"]
+    items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": obs["id"], "limit": 100}, headers=h).json()["items"]}
+    assert items["r1"]["crop_wheat"] == 1 and items[f"r{len(crops) - 1}"]["crop_other"] == 1

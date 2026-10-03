@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormDraft } from "./draftIr";
-import { keptWords, proposeDraft, type Data, type Kind, type Recipe } from "./draftFromWords";
+import { keepProblemWords, proposeDraft, wordsFor, type Data, type Kind, type Recipe } from "./draftFromWords";
 import type { Link } from "./recipes";
 
 const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["selection", "projects within a budget"],
@@ -12,12 +12,14 @@ const RECIPES: [Recipe, string][] = [["coverage", "places within reach"], ["sele
  * for, filled in from this workspace's kinds, fields and data, each choice with its reason -- and
  * what is still missing. Written into the model only when asked.
  */
-export default function DescribeToDraft({ kinds, data, links = [], onApply, startOpen = false, domainId }: {
+export default function DescribeToDraft({ kinds, data, links = [], onApply, startOpen = false, domainId, problemId }: {
   kinds: Kind[]; data: Data[]; links?: Link[]; onApply: (edit: (draft: FormDraft) => FormDraft) => void; startOpen?: boolean;
   /** The words typed on the Start page for this workspace start the box. */
   domainId?: number | string;
+  /** The problem these words are for: they are kept for it, and not offered to the workspace's next problem. */
+  problemId?: number | string;
 }) {
-  const [text, setText] = useState(() => keptWords(domainId));
+  const [text, setText] = useState(() => wordsFor(domainId, problemId));
   const [only, setOnly] = useState<Recipe | "">("");
   const [done, setDone] = useState(false);
   const proposal = proposeDraft(text, kinds, data, only || undefined, links);
@@ -26,7 +28,7 @@ export default function DescribeToDraft({ kinds, data, links = [], onApply, star
       <summary className="cursor-pointer text-sm font-semibold text-violet-900">Describe the problem in words, and get a first draft</summary>
       <div className="mt-3 space-y-2 text-sm text-slate-800">
         <textarea aria-label="The problem in words" className="h-20 w-full rounded border border-slate-300 px-2 py-1"
-          value={text} onChange={(e) => { setText(e.target.value); setDone(false); }}
+          value={text} onChange={(e) => { setText(e.target.value); keepProblemWords(problemId, e.target.value); setDone(false); }}
           placeholder="e.g. Choose up to 5 projects within a budget of 2 million, the most benefit first" />
         {text.trim().length >= 12 && !proposal && (
           <p className="text-slate-600">Nothing in those words matched a recipe yet: say what is chosen, and what limits it.</p>

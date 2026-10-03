@@ -89,6 +89,7 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
                          {"t": entity_type_id}).all()
     values: dict[int, dict[str, float]] = {}
     made: list[str] = []
+    notes: list[str] = []
 
     if body.op == "date_parts":
         if source["data_type"] not in ("date", "datetime", "text"):
@@ -104,12 +105,22 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
     elif body.op == "categories":
         if source["data_type"] not in ("text", "enum", "boolean"):
             raise HTTPException(422, f"{body.field} is a {source['data_type']} field; categories come from text or a choice")
-        seen = sorted({str((attrs or {}).get(body.field)) for _, _, attrs in records
-                       if (attrs or {}).get(body.field) not in (None, "")}, key=_slug)
-        if len(seen) > MAX_CATEGORIES:
-            raise HTTPException(422, f"{body.field} has {len(seen)} different values; at most {MAX_CATEGORIES} become fields")
-        names = {v: f"{body.field}_{_slug(v)}" for v in seen}
-        made = list(dict.fromkeys(names.values()))
+        # Values that differ only in case and spaces are one ("Wheat", "WHEAT "); past the most that
+        # become fields, the rarest share one `<field>_other` (benchmark round 3: 13 values were refused).
+        from collections import Counter
+
+        counts = Counter(_slug(str(attrs[body.field])) for _, _, attrs in records
+                         if (attrs or {}).get(body.field) not in (None, ""))
+        common = {v for v, _ in counts.most_common(MAX_CATEGORIES - 1 if len(counts) > MAX_CATEGORIES else MAX_CATEGORIES)}
+        names = {}
+        for _, _, attrs in records:
+            raw = (attrs or {}).get(body.field)
+            if raw not in (None, ""):
+                slug = _slug(str(raw))
+                names[str(raw)] = f"{body.field}_{slug if slug in common else 'other'}"
+        made = sorted(dict.fromkeys(names.values()), key=lambda n: (n.endswith("_other"), n))
+        if len(counts) > len(common):
+            notes.append(f"{len(counts) - len(common)} rarer values of {body.field} share {body.field}_other")
         for entity_id, _key, attrs in records:
             raw = (attrs or {}).get(body.field)
             if raw in (None, ""):
@@ -149,7 +160,7 @@ def derive(entity_type_id: int, body: DeriveBody, db: Session = Depends(get_db),
                  api_key_id=getattr(user, "api_key_id", None), action="entity_type.derive",
                  object_type="entity_type", object_id=entity_type_id)
     db.commit()
-    return {"made": made, "records": len(values), "left_empty": len(records) - len(values)}
+    return {"made": made, "records": len(values), "left_empty": len(records) - len(values), **({"notes": notes} if notes else {})}
 
 
 _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}

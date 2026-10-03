@@ -1,7 +1,7 @@
 import CoverageRecipeForm from "../model/CoverageRecipeForm";
 import RecipesForm from "../model/RecipesForm";
 import DescribeToDraft from "../model/DescribeToDraft";
-import { keptWords } from "../model/draftFromWords";
+import { wordsFor } from "../model/draftFromWords";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -762,7 +762,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       {canEdit && !graphFocus && (!stepByStep || step === "sets") && (
         <DescribeToDraft
           domainId={domainId}
-          startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0 && keptWords(domainId) !== ""}
+          problemId={problemId}
+          startOpen={draft.constraints.length === 0 && Object.keys(draft.variables).length === 0 && wordsFor(domainId, problemId) !== ""}
           kinds={(entityTypes.data?.items ?? []).map((t) => ({ name: t.name, role: t.role, attributes: t.attributes }))}
           data={parameterOptions(parameters.data?.items ?? [], entityTypes.data?.items ?? [])}
           links={kindLinks}

@@ -140,3 +140,16 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(d.constraints.find((c) => c.id === "budget")).toMatchObject({ right: { const: 150 } });
   });
 });
+
+describe("the problem's own words (benchmark round 3)", () => {
+  it("are taken from the workspace by the first problem that opens them, not offered to the next", async () => {
+    const { keepWords, keepProblemWords, wordsFor } = await import("./draftFromWords");
+    localStorage.clear();
+    keepWords(9, "Choose projects within a budget");
+    expect(wordsFor(9, 31)).toBe("Choose projects within a budget");
+    expect(wordsFor(9, 32)).toBe("");
+    expect(wordsFor(9, 31)).toBe("Choose projects within a budget");
+    keepProblemWords(32, "Route the trucks");
+    expect(wordsFor(9, 32)).toBe("Route the trucks");
+  });
+});

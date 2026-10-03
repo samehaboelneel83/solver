@@ -581,9 +581,14 @@ def add_new_fields(db: Session, entity_type: EntityType, header: list[str], rows
     return added
 
 
-def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, str]) -> tuple[list[str], list[list[Any]]]:
+def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, str], *,
+                  keep_parts: bool = False) -> tuple[list[str], list[list[Any]]]:
     """The file's columns renamed as the person chose: `{"team": "key", "notes": ""}` reads the
-    column `team` as the key and leaves `notes` out. Columns not named keep their names."""
+    column `team` as the key and leaves `notes` out. Columns not named keep their names.
+
+    `keep_parts`: the columns that make a key together are also kept as fields of their own names --
+    a date, a road and an hour stay readable for links and forecasts (benchmark round 3: they were
+    lost, and with them the joins on them and a "month" input)."""
     for target in mapping.values():
         if not isinstance(target, str):
             raise HTTPException(422, "a mapping names each file column's target as text, or \"\" to leave it out")
@@ -605,7 +610,10 @@ def apply_mapping(header: list[str], rows: list[list[Any]], mapping: dict[str, s
             return None if any(v == "" for v in values) else "_".join(values)
         return r[i] if i < len(r) else None
 
-    return renamed, [[cell(r, i) for i in keep] for r in rows]
+    kept = [i for i in parts if header[i] not in renamed and header[i] not in ("key", "label")
+            and _FIELD_NAME.match(header[i] or "")] if keep_parts else []
+    return [*renamed, *(header[i] for i in kept)], [[*(cell(r, i) for i in keep), *(r[i] if i < len(r) else None for i in kept)]
+                                                   for r in rows]
 
 
 def _mapping(raw: str | None) -> dict[str, str]:
@@ -668,9 +676,15 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
     header, rows = _read(file)
     notes: list[str] = []
     header, rows = with_places(db, entity_type, header, rows, notes)
-    header, rows = apply_mapping(header, rows, _mapping(mapping))
+    named = _mapping(mapping)
+    before = set(apply_mapping(header, rows[:1], named)[0])
+    header, rows = apply_mapping(header, rows, named, keep_parts=True)
+    parts = [i for i, h in enumerate(header) if h not in before]
     if add_fields:
         add_new_fields(db, entity_type, header, rows)
+    elif parts:
+        # The key's own columns, kept as fields even when new fields were not asked for.
+        add_new_fields(db, entity_type, [header[i] for i in parts], [[r[i] for i in parts] for r in rows])
     columns, write = entity_writer(db, entity_type, header, notes)
     report = run_rows(db, header, rows, columns, write, clean_only, dry_run,
                       user=user, request=request, audit_object=("entity_type", entity_type_id))
@@ -1027,7 +1041,13 @@ def parameter_upload_preview(parameter_id: int, file: UploadFile = File(...), db
             except ValueError:
                 return False
 
-        pick = named or [h for h in header if guess[h] is None and numeric(h)][:1]
+        # Of several number columns, only one that shares a word with the data's name is a guess
+        # (lane_cost: cost_per_pallet_egp); else the person chooses (benchmark round 3: road_km went
+        # into lane_cost unasked).
+        numbers = [h for h in header if guess[h] is None and numeric(h)]
+        words = {w for w in parameter.name.split("_") if len(w) >= 3}
+        sharing = [h for h in numbers if words & set(norm[h].split("_"))]
+        pick = named or (numbers if len(numbers) == 1 else sharing if len(sharing) == 1 else [])
         if pick:
             guess[pick[0]] = "value"
     out = [ColumnGuess(name=h, sample=list(dict.fromkeys(column(h)))[:3], filled=len(column(h)), unique=len(set(column(h))) == len(column(h)) == len(rows) and bool(rows),

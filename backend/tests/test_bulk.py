@@ -231,6 +231,8 @@ def test_several_columns_read_as_the_key_make_one_key(teams):
     assert got["written"] == 2 and got["skipped"] == 1, got  # a missing part is a missing key, not "R2_"
     stored = teams["call"]("GET", f"/api/v1/entities?entity_type_id={teams['team']['id']}").json()["items"]
     assert sorted((e["key"], e["label"]) for e in stored) == [("R1_3", "Market"), ("R1_4", "Bridge")]
+    # The key's own columns stay as fields, to link and forecast by (benchmark round 3).
+    assert sorted((e["attrs"]["route"], e["attrs"]["stop"]) for e in stored) == [("R1", 3), ("R1", 4)]
 
 
 def test_a_value_upload_reads_columns_as_mapped(shop):
@@ -244,6 +246,22 @@ def test_a_value_upload_reads_columns_as_mapped(shop):
     assert got["ok"] and got["written"] == 2, got
     cells = shop["call"]("GET", f"/api/v1/parameters/{par['id']}/values").json()["cells"]
     assert sorted(c["value"] for c in cells) == [2, 4]
+
+
+def test_a_values_preview_does_not_guess_between_number_columns(shop):
+    """Benchmark round 3: road_km went into lane_cost because it was the first number column."""
+    par = shop["post"]("/api/v1/parameters", {"domain_id": shop["domain"], "name": "lane_cost", "default_value": 0,
+                                              "index_type_ids": [shop["site"]["id"], shop["day"]["id"]]})
+
+    def guess(header):
+        rows = [header, ["north", "mon", "4", "7", "2"]]
+        got = shop["call"]("POST", f"/api/v1/parameters/{par['id']}/upload/preview", files=_csv(rows)).json()
+        return {c["name"]: c["suggestion"] for c in got["columns"]}
+
+    # One shares a word with the data's name: that one.
+    assert guess(["site", "day", "road_km", "cost_per_pallet", "drive_hours"])["cost_per_pallet"] == "value"
+    # None does: the person chooses.
+    assert "value" not in guess(["site", "day", "road_km", "fee", "drive_hours"]).values()
 
 
 def test_a_refused_row_among_many_is_named_and_the_rest_kept_when_asked(shop):

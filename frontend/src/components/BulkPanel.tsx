@@ -92,6 +92,8 @@ export default function BulkPanel({
   const twice = [...new Set(chosen.filter((c) => c !== LEAVE_OUT && c !== NEW_FIELD && (c !== "key" || !recordsUpload)
     && chosen.indexOf(c) !== chosen.lastIndexOf(c)))];
   const keyMissing = preview != null && recordsUpload && !chosen.includes("key");
+  // A values file with several number columns names its value column, never a guess (benchmark round 3).
+  const valueMissing = preview != null && !recordsUpload && preview.targets.some((t) => t.name === "value") && !chosen.includes("value");
   const keyParts = recordsUpload ? Object.keys(choices).filter((c) => choices[c] === "key") : [];
   const unread = valuesUpload && preview != null ? preview.targets.filter((t) => !chosen.includes(t.name)).map((t) => t.name) : [];
 
@@ -207,7 +209,7 @@ export default function BulkPanel({
           <button
             type="button"
             onClick={() => upload()}
-            disabled={busy || twice.length > 0 || keyMissing || unread.length > 0}
+            disabled={busy || twice.length > 0 || keyMissing || valueMissing || unread.length > 0}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
             {busy ? (dryRun ? "Checking…" : preview && preview.rows > 0 ? `Writing ${preview.rows.toLocaleString()} rows…` : "Writing…") : "Upload"}
@@ -266,6 +268,7 @@ export default function BulkPanel({
               ))}
             </tbody>
           </table>
+          {valueMissing && <p className="mt-1 text-sm text-amber-800">Choose the column holding the values: more than one column has numbers.</p>}
           {keyMissing && <p className="mt-1 text-sm text-amber-800">Choose the column that names each record uniquely as the key — or several columns, read together as one key.</p>}
           {(() => {
             // A key whose values repeat: say that two columns can make one (benchmark re-test, October 2026:
@@ -279,7 +282,7 @@ export default function BulkPanel({
             ) : null;
           })()}
           {keyParts.length > 1 && (
-            <p className="mt-1 text-sm text-slate-700">The key is made of {keyParts.join(" and ")}, joined by “_”: {keyParts.map((k) => preview.columns.find((c) => c.name === k)?.sample[0] ?? "…").join("_")}.</p>
+            <p className="mt-1 text-sm text-slate-700">The key is made of {keyParts.join(" and ")}, joined by “_”: {keyParts.map((k) => preview.columns.find((c) => c.name === k)?.sample[0] ?? "…").join("_")}. Each is also kept as a field of its own name, to link and forecast by.</p>
           )}
           {unread.length > 0 && <p className="mt-1 text-sm text-amber-800">Choose the column read as {unread.join(", ")}.</p>}
           {(() => {

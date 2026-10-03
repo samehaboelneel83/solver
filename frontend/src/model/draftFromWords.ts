@@ -376,3 +376,31 @@ export function keptWords(domainId: number | string | null | undefined): string 
     return "";
   }
 }
+
+/** The words for one problem: its own, else the workspace's Start-page words, which it then takes --
+ * a later problem in the workspace starts empty (benchmark round 3: one problem's words were offered
+ * to the next). */
+const PROBLEM_WORDS_KEY = (problemId: number | string) => `solver_problem_words:problem:${problemId}`;
+export function wordsFor(domainId: number | string | null | undefined, problemId: number | string | null | undefined): string {
+  if (problemId == null) return keptWords(domainId);
+  try {
+    const own = localStorage.getItem(PROBLEM_WORDS_KEY(problemId));
+    if (own !== null) return own;
+    const shared = keptWords(domainId);
+    if (shared && domainId != null) {
+      localStorage.setItem(PROBLEM_WORDS_KEY(problemId), shared);
+      localStorage.removeItem(WORDS_KEY(domainId));
+    }
+    return shared;
+  } catch {
+    return keptWords(domainId);
+  }
+}
+export function keepProblemWords(problemId: number | string | null | undefined, text: string): void {
+  if (problemId == null) return;
+  try {
+    localStorage.setItem(PROBLEM_WORDS_KEY(problemId), text);
+  } catch {
+    /* kept for this page only */
+  }
+}

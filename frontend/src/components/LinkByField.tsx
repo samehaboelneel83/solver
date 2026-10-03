@@ -31,10 +31,11 @@ export default function LinkByField({ kind }: { kind: EntityType }) {
         setSaid(null);
         derive.mutate({ entityTypeId: kind.id, body: { op: "link_by", field, of, to_kind: to, match } }, {
           onSuccess: (done) => {
-            const d = done as typeof done & { unmatched?: string[]; ambiguous?: string[] };
-            const missed = (d.unmatched?.length ?? 0) + (d.ambiguous?.length ?? 0);
+            const d = done as typeof done & { unmatched?: string[]; ambiguous?: string[]; left_empty?: number };
+            // The server lists the first 20; it counts all of them (benchmark round 3: "20 not" for 38).
+            const missed = d.left_empty ?? (d.unmatched?.length ?? 0) + (d.ambiguous?.length ?? 0);
             setSaid({ error: false, text: `${done.records} ${kind.name} records linked to their ${to} by ${field}${missed
-              ? `; ${missed} not: ${[...(d.unmatched ?? []).map((u) => `${u} (no ${to} has it)`), ...(d.ambiguous ?? []).map((a) => `${a} (more than one ${to} has it)`)].slice(0, 5).join(", ")}`
+              ? `; ${missed} not${missed > (d.unmatched?.length ?? 0) + (d.ambiguous?.length ?? 0) ? ", among them" : ""}: ${[...(d.unmatched ?? []).map((u) => `${u} (no ${to} has it)`), ...(d.ambiguous ?? []).map((a) => `${a} (more than one ${to} has it)`)].slice(0, 5).join(", ")}`
               : ""}.` });
           },
           onError: (err) => setSaid({ error: true, text: formatApiError(err) }),

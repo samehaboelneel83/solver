@@ -162,11 +162,13 @@ function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] })
     const target = kinds.find((k) => k.id === a.target_type_id);
     return (target?.attributes ?? []).filter((x) => NUMERIC.has(x.data_type)).map((x) => x.name);
   };
-  const run = (body: { op: "date_parts" | "categories" | "from_link"; field: string; of?: string }) =>
+  const run = (body: { op: "date_parts" | "categories" | "from_link"; field: string; of?: string }) => {
+    setSaid(null);
     derive.mutate({ entityTypeId: kind.id, body }, {
-      onSuccess: (done) => setSaid({ error: false, text: `Made ${done.made.join(", ")} on ${done.records} records${done.left_empty ? `; ${done.left_empty} had nothing to read` : ""}. Tick them above.` }),
+      onSuccess: (done) => setSaid({ error: false, text: `Made ${done.made.join(", ")} on ${done.records} records${done.left_empty ? `; ${done.left_empty} had nothing to read` : ""}${(done as { notes?: string[] }).notes?.length ? `; ${(done as { notes?: string[] }).notes!.join("; ")}` : ""}. Tick them above.` }),
       onError: (e) => setSaid({ error: true, text: formatApiError(e) }),
     });
+  };
   const button = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50 disabled:opacity-60";
   return (
     <div className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-sm" aria-label="Make number fields">
@@ -193,7 +195,9 @@ function MakeNumbers({ kind, kinds }: { kind: EntityType; kinds: EntityType[] })
               onClick={() => run({ op: "from_link", field: a.name, of: linkOf[a.name] })}>copy onto each record</button></li>
         ))}
       </ul>
-      {said && <p role={said.error ? "alert" : "status"} className={`mt-1 text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
+      {/* Said at once: thousands of records take a moment (benchmark round 3: nothing seemed to happen). */}
+      {derive.isPending && <p role="status" className="mt-1 text-xs text-slate-600">Making the fields…</p>}
+      {said && !derive.isPending && <p role={said.error ? "alert" : "status"} className={`mt-1 text-xs ${said.error ? "text-red-700" : "text-green-800"}`}>{said.text}</p>}
     </div>
   );
 }
