@@ -510,7 +510,7 @@ def apply_predictor(
     # Per period, an input read through a link of the kind trained on (`of_crop.water`) is the period's
     # own field when that link leads to the periods' kind, and the record's own when it leads to the
     # kind predicted for (benchmark round 4: "'of_crop' is not a link field of parcel").
-    through = _through_over(db, row, source, body, type_id, features, inputs) if body.over is not None else {}
+    through = _through_over(db, row, source, body, type_id, features, inputs)
     read = _reader(db, type_id, kind_name, [inputs.get(f, f) for f in features if f not in lag_at and f not in through])
 
     def value_of(attrs: dict[str, Any], feature: str) -> Any:
@@ -574,23 +574,26 @@ MAX_OVER_CELLS = 200_000
 
 def _through_over(db: Session, row: Any, source: dict[str, Any], body: ApplyBody, type_id: int, features: list[str],
                   inputs: dict[str, Any]) -> dict[str, tuple[str, str]]:
-    """Inputs read through a link of the kind trained on, when predicting per record and period:
-    feature -> ("period", field) or ("own", field)."""
-    assert body.over is not None
+    """Inputs read through a link of the kind trained on, when predicting for the kind it links to
+    (record by record, or per record and period): feature -> ("period", field) or ("own", field).
+    Benchmark round 5: "its own capacity_vph (through on_segment)" was offered, then refused."""
     trained = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
                          {"d": row["domain_id"], "n": source["entity_type"]}).scalar_one_or_none()
+    if trained is None or trained == type_id:
+        return {}
     period = db.execute(text("SELECT id FROM entity_type WHERE domain_id = :d AND name = :n"),
-                        {"d": row["domain_id"], "n": body.over.kind}).scalar_one_or_none()
+                        {"d": row["domain_id"], "n": body.over.kind}).scalar_one_or_none() if body.over is not None else None
+    taken = set(body.over.more) | {body.over.feature} if body.over is not None else set()
     out: dict[str, tuple[str, str]] = {}
     for f in features:
         spec = inputs.get(f, f)
-        if f in body.over.more or f == body.over.feature or not isinstance(spec, str) or "." not in spec or trained is None:
+        if f in taken or not isinstance(spec, str) or "." not in spec:
             continue
         link, name = spec.split(".", 1)
         to = db.execute(text(
             "SELECT rt.to_type_id FROM attribute_def ad JOIN relationship_type rt ON rt.id = ad.references_id"
             " WHERE ad.entity_type_id = ANY (entity_type_lineage(:t)) AND ad.name = :n"), {"t": trained, "n": link}).scalar_one_or_none()
-        if to is not None and to == period:
+        if to is not None and period is not None and to == period:
             out[f] = ("period", name)
         elif to is not None and to == type_id:
             out[f] = ("own", name)

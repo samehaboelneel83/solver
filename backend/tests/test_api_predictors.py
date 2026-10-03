@@ -513,3 +513,36 @@ def test_an_hourly_series_keyed_by_its_timestamp_is_ordered_by_its_key(client, d
     assert got.json()["training"]["features"] == ["temp", "calls_lag1"]
     # Each hour is the one before plus one: the lag explains it all.
     assert got.json()["metrics"]["r2"] > 0.9
+
+
+def test_a_forecast_for_the_linked_kind_reads_its_own_field_through_the_link_it_was_trained_with(client, db):  # noqa: F811
+    """Benchmark round 5: trained on observations reading on_segment.capacity, "Predict and keep" for the
+    road segments offered "its own capacity (through on_segment)", then refused it."""
+    http, t = client
+    domain = t["domain_a"]
+    segment = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'segment', CAST('other' AS entity_role)) RETURNING id"),
+                         {"d": domain}).scalar_one()
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, 'capacity', CAST('number' AS attr_type))"), {"t": segment})
+    for key, cap in (("s1", 1000), ("s2", 3000)):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": segment, "k": key, "a": json.dumps({"capacity": cap})})
+    obs = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, 'flow_obs', CAST('other' AS entity_role)) RETURNING id"),
+                     {"d": domain}).scalar_one()
+    db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, 'delay', CAST('number' AS attr_type))"), {"t": obs})
+    db.commit()
+    got = http.post(f"/api/v1/entity-types/{obs}/attributes", json={"name": "on_segment", "data_type": "reference", "target_type_id": segment},
+                    headers=t["a"])
+    assert got.status_code == 201, got.text
+    for i in range(80):
+        key = "s1" if i % 2 else "s2"
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": obs, "k": f"o{i}", "a": json.dumps({"on_segment": key, "delay": 10 if key == "s1" else 30})})
+    db.commit()
+    trained = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "delay_by_cap", "entity_type": "flow_obs",
+                                                          "features": ["on_segment.capacity"], "target": "delay", "trees": 10}, headers=t["a"])
+    assert trained.status_code == 201, trained.text
+    kept = http.post(f"/api/v1/predictors/{trained.json()['id']}/apply", json={"field": "delay_fc", "entity_type": "segment"}, headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 2
+    fc = dict(db.execute(text("SELECT key, (attrs->>'delay_fc')::float FROM entity WHERE entity_type_id = :t"), {"t": segment}).all())
+    assert fc["s1"] < 15 and fc["s2"] > 25
