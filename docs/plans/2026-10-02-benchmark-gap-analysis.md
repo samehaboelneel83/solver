@@ -533,23 +533,37 @@ routing, raster data, large embedded models -- and three map/ML bugs cost points
 
 ### Bugs from round 4
 - [x] A road speed field the lines layer does not have is ignored without a word (P1). Fixed with R4d.
-- [ ] A rule's plain-words note stays stale after its equation is edited, in Review, Scenarios and the
-      infeasibility list (P1, P3, P5).
-- [ ] A scenario run's "within reach" map overlay reads the base data, not the scenario's (P1).
-- [ ] The goal breakdown's shares mix goals solved in order (P1); a quadratic term shows 0 and the
-      terms do not add up (P4).
-- [ ] Predict and keep, one per crop: disabled without a reason; 0 kept; "'of_crop' is not a link
-      field of parcel" for an input through a link (P4).
-- [ ] Publishing new versions left Base on version 1, and "Solve again" reused the old run (P4).
-- [ ] A drafted shortage price is a hidden goal weight, counted twice after an edit (P5).
-- [ ] New decisions start without a lower bound, so a cost goal can be unbounded (P5).
-- [ ] A raw contract message ("an index position is an index name, or {\"par\": ...") after an
-      accepted equation (P4).
-- [ ] "A blank rule" wrote into an open goal card and renamed it (P4).
-- [ ] Flows drawn as straight lines until "Flows along: lines" is chosen (P3).
-- [ ] A 30 × 30 data value reports 3,600 cells (P3).
-- [ ] Rounding noise shown: "-0.000002 to spare" (P2); goal weights missing in the sentence view (P2).
-- [ ] Publishing an unchanged model makes a new version; "Make records" repeats silently (P3).
-- [ ] Inputs without accessible labels (model editor name and weight, new what-if name, form labels) (P4, P5).
-- [ ] The "From scratch" card cannot be clicked as a button (P3).
+- [x] A rule's plain-words note stays stale after its equation is edited, in Review, Scenarios and the
+      infeasibility list (P1, P3, P5). Fixed: the note is rewritten from the changed rule, with a
+      one-click way to keep the old one.
+- [x] A scenario run's "within reach" map overlay reads the base data, not the scenario's (P1). Fixed:
+      the answer map applies the run's scenario what-ifs, as the solve does.
+- [x] The goal breakdown's shares mix goals solved in order (P1); a quadratic term shows 0 and the terms
+      do not add up (P4). Fixed: goals in order are shown by their place, with no shares; a term's
+      products of decisions count in it.
+- [x] Predict and keep, one per crop: disabled without a reason; 0 kept; "'of_crop' is not a link field
+      of parcel" for an input through a link (P4). Fixed: with R4e.
+- [x] Publishing new versions left Base on version 1, and "Solve again" reused the old run (P4). Fixed: a
+      publish moves Base forward when it was on the latest version and changes nothing of its own.
+- [x] A drafted shortage price is a hidden goal weight, counted twice after an edit (P5). Fixed: with
+      R4c: the price is in the goal's equation.
+- [x] New decisions start without a lower bound, so a cost goal can be unbounded (P5). Fixed: a new
+      number decision starts at 0.
+- [x] A raw contract message ("an index position is an index name, or {\"par\": ...") after an accepted
+      equation (P4). Fixed: the refusal is in words and says what to write instead.
+- [x] "A blank rule" wrote into an open goal card and renamed it (P4). Fixed: a card opened by + Add
+      takes the keyboard focus.
+- [x] Flows drawn as straight lines until "Flows along: lines" is chosen (P3). Fixed: with R4b: flows go
+      along the first lines layer.
+- [x] A 30 × 30 data value reports 3,600 cells (P3). Fixed: a kind indexed twice is read once.
+- [x] Rounding noise shown: "-0.000002 to spare" (P2); goal weights missing in the sentence view (P2).
+      Fixed: within the solver's tolerance is "at its limit"; the sentence view says each goal's weight
+      and direction.
+- [x] Publishing an unchanged model makes a new version; "Make records" repeats silently (P3). Fixed: the
+      latest version is returned (no new one); a repeated Make records says it refreshed, none new.
+- [x] Inputs without accessible labels (model editor name and weight, new what-if name, form labels) (P4,
+      P5). Fixed: the link-by-field form's names start with their labels (the others were already
+      labelled).
+- [x] The "From scratch" card cannot be clicked as a button (P3). Fixed: the start cards are named by
+      their titles.
 
