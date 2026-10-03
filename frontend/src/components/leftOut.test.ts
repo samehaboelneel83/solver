@@ -22,3 +22,11 @@ describe("areaKinds", () => {
     expect(areaKinds(kinds).map((t: { name: string }) => t.name)).toEqual(["district", "flood_zone"]);
   });
 });
+
+describe("the way to bring places in", () => {
+  it("names the field only where it is shown (benchmark round 5)", () => {
+    const source = { kind: "distance", metric: "time", from: "cell", to: "station", computed_at: "", off_network: ["C1 (900 m)"] };
+    expect(leftOut(source, 500, false)).toMatch(/measure “along a lines layer I imported”/);
+    expect(leftOut(source, 500)).toMatch(/Widen “Join places up to”/);
+  });
+});

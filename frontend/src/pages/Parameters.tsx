@@ -198,7 +198,8 @@ function ForDomain({ domainId }: { domainId: Id }) {
       ) : (
         canEdit && (
         <>
-        <MeasureFromMap domainId={domainId} entityTypes={entityTypes} />
+        <MeasureFromMap domainId={domainId} entityTypes={entityTypes}
+          onMade={(id) => { setSearchParams({ parameter: String(id) }, { replace: true }); window.scrollTo?.({ top: 0, behavior: "smooth" }); }} />
         <TimesTooClose domainId={domainId} entityTypes={entityTypes} />
         <ComputedValue domainId={domainId} entityTypes={entityTypes}
           onMade={(id) => setSearchParams({ parameter: String(id) }, { replace: true })} />

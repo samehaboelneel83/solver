@@ -4,7 +4,7 @@ import DescribeToDraft from "../model/DescribeToDraft";
 import { wordsFor } from "../model/draftFromWords";
 import { exampleWords } from "../lib/examples";
 import EmptyRanges from "../components/EmptyRanges";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import OfflineNotice from "../components/OfflineNotice";
@@ -1130,7 +1130,7 @@ function ConstraintCard({
   constraint,
   otherIds,
   context,
-  onChange,
+  onChange: onChangeOuter,
   onRemove,
   startIn,
   simple = false,
@@ -1151,6 +1151,15 @@ function ConstraintCard({
 }) {
   const idField = useId();
   const noteField = useId();
+  // What this card last wrote: the note follows only an edit made here, never the rule changing under
+  // it (benchmark round 5: after a publish the draft went, the cards showed version 1 again, and the
+  // note "followed" -- writing a new draft from version 1 that greeted the next visit).
+  const wrote = useRef<string | null>(null);
+  const onChange = useCallback((next: Constraint) => {
+    const { note: _n, id: _i, severity: _s, weight: _w, ...rest } = next;
+    wrote.current = canonicalJson(rest);
+    onChangeOuter(next);
+  }, [onChangeOuter]);
   // What the rule said when its note was last written or confirmed: a note written for one rule
   // (a recipe's "each open base has one vehicle") is not silently kept for another after an edit
   // (benchmark, October 2026). Remembered for this visit.
@@ -1166,6 +1175,11 @@ function ConstraintCard({
     const before = lastSaid.current;
     if (before.said === said) return;
     lastSaid.current = { said, rule: constraint };
+    if (wrote.current !== said) {
+      // Changed from outside (another version shown, an undo): the note is that rule's own.
+      setNoteFits(said);
+      return;
+    }
     if (noteFits !== before.said || !constraint.note?.trim()) return;
     const followed = noteWithNumber(constraint.note, before.rule, constraint);
     // A note that described the old rule and cannot follow the edit is replaced by the new rule's own

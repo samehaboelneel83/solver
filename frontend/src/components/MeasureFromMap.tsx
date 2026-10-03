@@ -53,7 +53,11 @@ export function resultPlace(kind: Make, domainId: Id, simple = false): { to: str
     : { to: `/domains/${domainId}/data/relationships`, words: "See the links under Relationships", read: "a model walks them from either end" };
 }
 
-export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id; entityTypes: EntityType[] }) {
+export default function MeasureFromMap({ domainId, entityTypes, onMade }: {
+  domainId: Id; entityTypes: EntityType[];
+  /** A data value was made: the page can open it (benchmark round 5: no confirmation was seen). */
+  onMade?: (parameterId: Id) => void;
+}) {
   const id = useId();
   const placed = entityTypes.filter((t) => t.attributes.some((a) => a.data_type === "geometry"));
   const [kind, setKind] = useState<Make>("distances");
@@ -151,7 +155,8 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
         if (keep !== undefined && !(Number.isInteger(keep) && keep >= 1)) return setError("Keep the nearest: a whole number, 1 or more, or blank for all.");
         const done = await distances.mutateAsync({ domainId, name, from_type_id: fromId, to_type_id: toId, metric, unit, ...(keep ? { nearest: keep } : {}), ...along, ...byPeriod });
         report(`${name}: ${done.pairs.toLocaleString("en-US")} ${timed ? "travel times" : "distances"} computed${"by_period" in byPeriod ? ` (by ${periodType!.name})` : ""}${done.missing.length ? `; ${done.missing.length} without a shape left out` : ""}`);
-        setNotice(leftOut(done.source, Number(joinM) || 500));
+        setNotice(leftOut(done.source, Number(joinM) || 500, onLayer));
+        onMade?.(done.parameter_id);
       } else if (kind === "within" || kind === "within_flag") {
         const max = Number(timed ? minutes : km);
         if (!(max > 0)) return setError(timed ? "Within: a time above 0 minutes." : "Within: a distance above 0 km.");
@@ -161,7 +166,7 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
           ...(kind === "within_flag" ? { output: "parameter" as const, ...byPeriod } : {}),
         });
         report(`${name}: ${done.edges.toLocaleString("en-US")} pairs within ${max} ${timed ? "min" : "km"} ${kind === "within_flag" ? "marked 1" : "linked"}`);
-        setNotice(leftOut(done.source, Number(joinM) || 500));
+        setNotice(leftOut(done.source, Number(joinM) || 500, onLayer));
       } else if (kind === "elevation") {
         const done = await spatial.mutateAsync({ domainId, op: "elevation", name, type_id: fromId });
         const off = done.uncovered?.length ? `; ${done.uncovered.length} outside the terrain tiles` : "";
@@ -413,12 +418,17 @@ export default function MeasureFromMap({ domainId, entityTypes }: { domainId: Id
 }
 
 /** What a travel computation could not reach, in words -- or null when it reached everything. */
-export function leftOut(source: ComputedSource | undefined, joinM: number): string | null {
+export function leftOut(source: ComputedSource | undefined, joinM: number, joinShown = true): string | null {
   const off = source?.off_network ?? [];
   const offRoad = source?.off_road ?? [];
   const parts: string[] = [];
   if (off.length) {
-    parts.push(`${off.length} place${off.length > 1 ? "s are" : " is"} further than ${joinM} m from every line, so ${off.length > 1 ? "their" : "its"} pairs were left out: ${off.slice(0, 8).join(", ")}${off.length > 8 ? ` and ${off.length - 8} more` : ""}. Widen “Join places up to” to bring ${off.length > 1 ? "them" : "it"} in.`);
+    // The way in is named where it is: "Join places up to" is a field of the imported-lines way only
+    // (benchmark round 5: the road travel time pointed at a field it does not show).
+    const widen = joinShown
+      ? `Widen “Join places up to” to bring ${off.length > 1 ? "them" : "it"} in.`
+      : `To bring ${off.length > 1 ? "them" : "it"} in, measure “along a lines layer I imported”, where “Join places up to” sets how far a place may be from a road.`;
+    parts.push(`${off.length} place${off.length > 1 ? "s are" : " is"} further than ${joinM} m from every line, so ${off.length > 1 ? "their" : "its"} pairs were left out: ${off.slice(0, 8).join(", ")}${off.length > 8 ? ` and ${off.length - 8} more` : ""}. ${widen}`);
   }
   if (offRoad.length) parts.push(`${offRoad.length} too far from any road: ${offRoad.slice(0, 8).join(", ")}${offRoad.length > 8 ? ` and ${offRoad.length - 8} more` : ""}.`);
   if (source?.no_road) parts.push(`${source.no_road} pairs have no road between them.`);

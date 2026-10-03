@@ -1474,6 +1474,21 @@ describe("equations as drill-down diagrams", () => {
     expect(screen.queryByRole("form", { name: "The number this rule needs" })).toBeNull();
   });
 
+  it("leaves no draft behind after publishing an edited rule (benchmark round 5)", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
+    stub({ write });
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show c_cover as a sentence" }));
+    fireEvent.change(within(screen.getByTestId("rule-sentence")).getByLabelText("comparison"), { target: { value: "=" } });
+    await waitFor(() => expect(localStorage.getItem(draftStorageKey(1))).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: /publish a new version/i }));
+    await waitFor(() => expect(write.mock.calls.some(([path]) => path === "/api/v1/problems/1/versions")).toBe(true));
+    // The cards fall back to the version shown; nothing writes a draft from it again.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(localStorage.getItem(draftStorageKey(1))).toBeNull();
+  });
+
   it("rewrites a rule's note from the rule once the rule is changed, and can keep the old one (benchmark round 4)", async () => {
     renderPage();
     await screen.findByLabelText("Equation for c_cover");

@@ -169,7 +169,8 @@ function RecordItem({ props, record }: { props: TreeProps; record: TreeRecord })
           onClick={() => props.onSelect({ kind: "record", id: record.id })}
         >
           {name}
-          {record.label && <span className="ml-1 font-mono text-xs text-slate-500">{record.key}</span>}
+          {/* A space in the text, not only a margin: read aloud or copied, "intake AW1" ran together (benchmark round 5). */}
+          {record.label && <>{" "}<span className="font-mono text-xs text-slate-500">({record.key})</span></>}
         </button>
         <Dot codes={props.problems[String(record.id)]} />
         {record.children > 0 && <span className="text-xs text-slate-400">{record.children}</span>}
