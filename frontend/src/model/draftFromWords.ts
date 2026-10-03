@@ -273,6 +273,13 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const useField = field(options?.kind, /water|use|need|requirement|labou?r|m3|input/);
     const limit = amount(text, ["water", "limit", "budget", "quota", "at most", "no more than"]);
     if (useField && limit !== undefined) choices.push(`Shared limit: ${useField} up to ${limit} — its name and the number you wrote`);
+    // Each item draws from the source it links to (a canal intake, a well), up to the source's capacity.
+    const sourceLink = useField && items ? links.find((l) => l.from === items.kind.name && l.to !== options?.kind.name
+      && /water|source|intake|well|canal|pump|supply/.test(`${l.to} ${l.name}`)) : undefined;
+    const sourceKind = sourceLink ? kinds.find((k) => k.name === sourceLink.to) : undefined;
+    const sourceCap = field(sourceKind, /capacity|cap|supply|allocation|quota|available|m3|limit/);
+    const useBySource = useField && sourceLink && sourceCap ? { field: useField, kind: sourceLink.to, link: sourceLink.name, capacity: sourceCap } : undefined;
+    if (useBySource) choices.push(`Each ${sourceLink!.to} supplies at most its ${sourceCap}, to the ${items!.kind.name}s linked by ${sourceLink!.name} — their names`);
     // A share by its name (share, pct, frac); any other least or most is an amount in the size's units
     // (benchmark round 4: min_area_feddan was written as a share of all the land).
     const minShare = field(options?.kind, /min\w*(share|pct|frac|percent)|(share|pct|frac|percent)\w*min|least\w*(share|pct|frac)/);
@@ -287,7 +294,7 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     if (all) choices.push("All of it given out — you wrote it");
     const recipe = missing.length ? null : ({ items: items!.kind.name, options: options!.kind.name, size: size!,
       worth: worthData ? { data: worthData.name, index: worthData.index } : built ?? { field: worthField! },
-      ...(useField && limit !== undefined ? { use: { field: useField, limit } } : {}),
+      ...(useField && limit !== undefined ? { use: { field: useField, limit } } : {}), ...(useBySource ? { useBySource } : {}),
       ...(allowed ? { allowed: { data: allowed.name, index: allowed.index } } : {}),
       ...(minShare ? { minShare } : {}), ...(maxShare ? { maxShare } : {}), ...(minAmount ? { minAmount } : {}), ...(maxAmount ? { maxAmount } : {}),
       ...(all ? { all } : {}) } satisfies AllocationRecipe);
@@ -319,8 +326,10 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     if (open) choices.push("count" in open ? `${open.count} open — the number you wrote` : `Opening costs ${open.cost}, within ${open.budget}`);
     const existing = (sites?.kind.attributes ?? []).find((a) => a.data_type === "boolean" && /existing|current|already|open_now|operating/.test(a.name))?.name;
     note("Open already", existing, "its name");
-    const within = amount(text, ["within", "no more than", "never more than", "not more than", "more than", "at most", "under"]);
-    const reach = within !== undefined && within !== count && /\b(min|minutes|km|kilomet)/i.test(text) ? within : undefined;
+    // Only a number written with its minutes or km is a reach: "within a budget of 400M" is not
+    // (benchmark round 5: the budget was read as a distance).
+    const within = text.match(/\b(?:within|no more than|never more than|not more than|more than|at most|under)\s+([0-9]+(?:\.[0-9]+)?)\s*(?:-\s*)?(?:min|mins|minutes|km|kilomet\w*)\b/i);
+    const reach = within ? Number(within[1]) : undefined;
     note("Never further than", reach, "the number you wrote");
     const capacity = /\bcapacit/i.test(text) ? field(sites?.kind, /capacity|beds|max|units/) : undefined;
     note("Serves at most", capacity, "you wrote of capacity");
@@ -446,10 +455,26 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const load = field(fleetKind, /capacity|load|payload|size/);
     const price = field(fleetKind, /cost|price|rate|rent/);
     if (fleetKind && load && price) choices.push(`Vehicles by type: ${fleetKind.name}, each carries ${load}, costs ${price} — you wrote of a fleet`);
+    // How many vehicles there are, and how long a delivery may take (benchmark round 5: both typed by hand).
+    const availableField = field(fleetKind, /avail|count|number|fleet_size|units|owned|how_many/);
+    const available = availableField !== load && availableField !== price ? availableField : undefined;
+    const fleetMost = (() => {
+      const m = text.match(/\b(?:fleet of|at most|no more than|up to|only|have)\s+(\d+)\s+(?:\w+\s+)?(?:vehicles?|trucks?|vans?|lorr(?:y|ies))\b/i)
+        ?? text.match(/\b(\d+)\s+(?:vehicles?|trucks?|vans?|lorr(?:y|ies))\s+(?:in all|in total|available)\b/i);
+      return m ? Number(m[1]) : undefined;
+    })();
+    if (fleetKind && load && price && available) choices.push(`No more ${fleetKind.name}s than its ${available} — its name`);
+    else if (fleetKind && load && price && fleetMost !== undefined) choices.push(`At most ${fleetMost} vehicles in all — the number you wrote`);
+    const hours = text.match(/\b(?:within|in at most|in no more than|no more than|at most|under)\s+([0-9]+(?:\.[0-9]+)?)\s*(h|hrs?|hours?|min|mins|minutes)\b/i);
+    const timeData = hours ? both.find((d) => (/^h/i.test(hours[2]) ? /(^|_)(h|hrs?|hours?|time|tt|travel|duration)($|_)/ : /(^|_)(min|mins|minutes|time|tt|travel|duration)($|_)/).test(d.name)) : undefined;
+    const deliveryLimit = hours && timeData ? { data: timeData.name, index: timeData.index, most: Number(hours[1]) } : undefined;
+    if (deliveryLimit) choices.push(`Nothing goes where ${timeData!.name} is over ${deliveryLimit.most} — the limit you wrote`);
     const recipe = missing.length ? null : ({ sources: sources!.kind.name, customers: customers!.kind.name, demand: demand!, unitCost: unit!.name,
       unitCostIndex: unit!.index, ...(capacity ? { capacity } : {}), ...(openCost ? { openCost } : {}), ...(single ? { singleSource: true } : {}),
       ...(shortage !== undefined ? { shortagePenalty: shortage } : {}), ...(shortageField ? { shortageField } : {}),
-      ...(fleetKind && load && price ? { fleet: { kind: fleetKind.name, capacity: load, cost: price } } : {}) } satisfies NetworkRecipe);
+      ...(fleetKind && load && price ? { fleet: { kind: fleetKind.name, capacity: load, cost: price,
+        ...(available ? { available } : fleetMost !== undefined ? { most: fleetMost } : {}) } } : {}),
+      ...(deliveryLimit ? { deliveryLimit } : {}) } satisfies NetworkRecipe);
     return { recipe: "network", title: TITLES.network, choices, missing, apply: recipe ? (d) => applyNetwork(d, recipe) : null };
   }
 

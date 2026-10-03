@@ -129,7 +129,11 @@ export type NetworkRecipe = {
   shortagePenalty?: number;
   shortageField?: string;
   /** Vehicles by type, bought per source: a number field each of their capacity and their cost. */
-  fleet?: { kind: string; capacity: string; cost: string };
+  fleet?: { kind: string; capacity: string; cost: string;
+    /** How many of each type there are: a number field of the type, or one number for them all (benchmark round 5). */
+    available?: string; most?: number };
+  /** Nothing goes further than this: data over both kinds (hours, minutes) and its most (benchmark round 5). */
+  deliveryLimit?: { data: string; index: string[]; most: number };
 };
 
 export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
@@ -186,8 +190,21 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
     variables[trucks] = { index: [r.sources, f.kind], domain: "integer", lower: 0 } as Variables[string];
     constraints.push(rule(name("fleet_carries"), `what a ${say(r.sources)} ships fits in its ${say(f.kind)}s`,
       sum(flow, [c, r.customers]), "<=", sum(mul(attr(t, f.capacity), v(trucks, [s, t])), [t, f.kind]), each([s, r.sources])));
+    if (f.available) constraints.push(rule(name("fleet_available"), `no more ${say(f.kind)}s than there are`,
+      sum(v(trucks, [s, t]), [s, r.sources]), "<=", attr(t, f.available), each([t, f.kind])));
+    else if (f.most !== undefined && Number.isFinite(f.most)) constraints.push(rule(name("fleet_size"), `at most ${f.most} vehicles in all`,
+      sum(v(trucks, [s, t]), [s, r.sources], [t, f.kind]), "<=", k(f.most)));
     terms.push({ id: name("fleet_cost"), weight: 1, expression: sum(mul(attr(t, f.cost), v(trucks, [s, t])), [s, r.sources], [t, f.kind]) } as ObjectiveTerm);
     sets.push(f.kind);
+  }
+  const params: FormDraft["parameters"] = { ...draft.parameters, [r.unitCost]: draft.parameters[r.unitCost] ?? { index: r.unitCostIndex } };
+  if (r.deliveryLimit && Number.isFinite(r.deliveryLimit.most)) {
+    const dl = r.deliveryLimit;
+    const time: Term = { par: dl.data, index: dl.index[0] === r.customers ? [c, s] : [s, c] } as Term;
+    params[dl.data] = params[dl.data] ?? { index: dl.index };
+    // Linear because the time is data: a pair further than the limit ships nothing.
+    constraints.push(rule(name("delivery_time"), `nothing goes where ${say(dl.data)} is over ${dl.most}`,
+      mul(time, flow), "<=", mul(k(dl.most), flow), each([s, r.sources], [c, r.customers])));
   }
   terms.unshift({ id: name("shipping_cost"), weight: 1, expression: sum(mul(unit, flow), [s, r.sources], [c, r.customers]) } as ObjectiveTerm);
   // The price is in the goal's equation, weight 1, to read and change there (benchmark round 4: a hidden
@@ -197,7 +214,7 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
   return {
     ...draft,
     sets: [...new Set([...draft.sets, ...sets])],
-    parameters: { ...draft.parameters, [r.unitCost]: draft.parameters[r.unitCost] ?? { index: r.unitCostIndex } },
+    parameters: params,
     variables,
     constraints,
     objective: { sense: "minimize", mode: "weighted", terms },
@@ -257,6 +274,9 @@ export type AllocationRecipe = {
   worth: { field: string } | { data: string; index: string[] } | { product: string[]; less?: string };
   /** What a unit of an option uses of a shared resource (water per feddan), and how much there is. */
   use?: { field: string; limit: number };
+  /** The same use, drawn from the source each item links to, up to the source's own field: water per
+   * intake (benchmark round 5). */
+  useBySource?: { field: string; kind: string; link: string; capacity: string };
   /** 0/1 data over both: where an option may go at all (suitable soil, rotation). */
   allowed?: { data: string; index: string[] };
   /** Number fields of an option: its least and most share of everything, 0..1. */
@@ -286,6 +306,12 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
   if (r.use) {
     constraints.push(rule(name("shared_limit"), `what is given out uses at most ${r.use.limit} of ${say(r.use.field)}`,
       sum(mul(attr(o, r.use.field), cell), [i, r.items], [o, r.options]), "<=", k(r.use.limit)));
+  }
+  if (r.useBySource) {
+    const u = r.useBySource, w = "w";
+    constraints.push(rule(name("source_limit"), `what each ${say(u.kind)} supplies, ${say(u.field)} of what its ${say(r.items)}s are given, is at most its ${say(u.capacity)}`,
+      { sum: mul(attr(o, u.field), cell), over: [{ index: i, set: r.items, via: { rel: u.link, to: w } }, { index: o, set: r.options }] } as Term,
+      "<=", attr(w, u.capacity), each([w, u.kind])));
   }
   if (r.allowed) {
     const ok: Term = { par: r.allowed.data, index: r.allowed.index[0] === r.items ? [i, o] : [o, i] } as Term;
@@ -318,7 +344,7 @@ export function applyAllocation(draft: FormDraft, r: AllocationRecipe): FormDraf
   }
   return {
     ...draft,
-    sets: [...new Set([...draft.sets, r.items, r.options])],
+    sets: [...new Set([...draft.sets, r.items, r.options, ...(r.useBySource ? [r.useBySource.kind] : [])])],
     parameters: data,
     variables: { ...draft.variables, [give]: { index: [r.items, r.options], domain: "continuous", lower: 0 } } as Variables,
     constraints,

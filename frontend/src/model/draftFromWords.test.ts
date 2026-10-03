@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
 import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
+import { printRule } from "./formula";
 import { proposeDraft, recipeFor, type Kind } from "./draftFromWords";
 
 const empty: FormDraft = { sets: [], parameters: {}, variables: {}, constraints: [], objective: { sense: "minimize", mode: "weighted", terms: [] } };
@@ -234,6 +235,16 @@ describe("each place to its nearest open site (benchmark round 4)", () => {
     expect(d.constraints.find((c) => c.id === "within_reach")).toMatchObject({ right: { const: 15 } });
     expect(JSON.stringify(d.objective.terms[0].expression)).toContain('"name":"calls_per_day"');
   });
+
+  it("does not read a budget as a distance (benchmark round 5)", () => {
+    const kinds: Kind[] = [{ name: "station", attributes: [n("build_cost")] }, { name: "district", attributes: [n("population")] }];
+    const p = proposeDraft("Open stations within a budget of 400M so each district is served by its nearest station, minimise response minutes",
+      kinds, [{ name: "station_district_min", index: ["station", "district"] }])!;
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.constraints.map((c) => c.id)).not.toContain("within_reach");
+    expect(p.choices.join(" ")).toMatch(/within 400000000/);
+  });
 });
 
 describe("reading more of the words (benchmark round 4)", () => {
@@ -267,6 +278,34 @@ describe("reading more of the words (benchmark round 4)", () => {
     expect(d.constraints[1]).toMatchObject({ id: "at_most_signal", left: { over: [{ where: [{ attr: "category", value: "Signal" }] }] } });
     expect(d.constraints).toHaveLength(2);
     expect(p.choices.join("\n")).toMatch(/Not added: at least one in every district .* no project is linked to a district/);
+  });
+
+  it("reads a delivery-time limit and how many vehicles there are (benchmark round 5)", () => {
+    const kinds: Kind[] = [{ name: "warehouse", attributes: [n("capacity_t")] }, { name: "store", attributes: [n("demand_t")] },
+      { name: "truck_type", attributes: [n("load_t"), n("cost_per_day"), n("available")] }];
+    const data = [{ name: "unit_cost", index: ["warehouse", "store"] }, { name: "road_hours", index: ["store", "warehouse"] }];
+    const p = proposeDraft("Ship from warehouses to every store with our fleet of trucks, each delivered within 6 hours", kinds, data)!;
+    const d = p.apply!(empty);
+    valid(d);
+    const rules = Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+    expect(rules.delivery_time).toBe("for each s in warehouse, c in store: road_hours[c, s] * ship[s, c] <= 6 * ship[s, c]");
+    expect(rules.fleet_available).toBe("for each t in truck_type: sum(vehicles[s, t] for s in warehouse) <= available[t]");
+    expect(d.parameters.road_hours).toEqual({ index: ["store", "warehouse"] });
+    const q = proposeDraft("Ship from warehouses to every store with a fleet of 26 trucks", [kinds[0], kinds[1],
+      { name: "truck_type", attributes: [n("load_t"), n("cost_per_day")] }], data)!;
+    expect(q.apply!(empty).constraints.find((c) => c.id === "fleet_size")).toMatchObject({ right: { const: 26 } });
+  });
+
+  it("limits water by the source each parcel draws from (benchmark round 5)", () => {
+    const kinds: Kind[] = [{ name: "parcel", attributes: [n("area_feddan")] },
+      { name: "crop", attributes: [n("profit"), n("water_m3_per_feddan")] },
+      { name: "water_source", attributes: [n("annual_capacity_m3")] }];
+    const p = proposeDraft("Allocate land among crops on each parcel for the most profit, within the water each source has", kinds, [],
+      undefined, [{ name: "fed_by", from: "parcel", to: "water_source" }])!;
+    const d = p.apply!(empty);
+    expect(checkIrShape(publishable({ ...EMPTY_MODEL, ...d }))).toBeNull();
+    expect(d.sets).toContain("water_source");
+    expect(printRule(d.constraints.find((c) => c.id === "source_limit")!)).toMatch(/^for each w in water_source: sum\(.*water_m3_per_feddan.*amount\[i, o\].*\) <= .*annual_capacity_m3/);
   });
 
   it("takes the opening cost the words name, never `rent` inside `current_inventory_t`", () => {
