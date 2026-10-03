@@ -73,7 +73,9 @@ export function publishable(ir: Record<string, unknown>): Record<string, unknown
     variables: Object.fromEntries(
       Object.entries(draft.variables).map(([name, spec]) => [name, cleanVariable(spec)])
     ),
-    constraints: draft.constraints.map((constraint) => {
+    // A rule left as it was started, "0 is at most 0", says nothing: it is not published (benchmark
+    // round 3: blank rules made by a mis-click lingered in the model).
+    constraints: draft.constraints.filter((c) => !isBlankRule(c)).map((constraint) => {
       // A hard rule must not carry a weight (contract §3.4); a soft one
       // must. The Strength control keeps the draft honest, and this
       // strips a leftover weight so Publish is not blocked by a key
@@ -151,3 +153,10 @@ export const EMPTY_MODEL = {
   constraints: [],
   objective: { sense: "minimize", mode: "weighted", terms: [] },
 } as const;
+
+/** A rule still as "A blank rule" starts it: 0 is at most 0, nothing else. */
+export function isBlankRule(c: Constraint): boolean {
+  const zero = (t: unknown) => !!t && typeof t === "object" && Object.keys(t).length === 1 && (t as { const?: unknown }).const === 0;
+  return zero(c.left) && zero(c.right) && c.relation === "<=" && !c.note?.trim()
+    && !(c as { when?: unknown }).when && !(c as { chance?: unknown }).chance;
+}

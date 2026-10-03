@@ -310,7 +310,11 @@ def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[s
     else:
         if db.execute(text("SELECT 1 FROM relationship_type WHERE domain_id = :d AND name = :n"),
                       {"d": kind["domain_id"], "n": body.field}).first():
-            raise HTTPException(409, f"there is already a link called {body.field!r}; choose another name")
+            # Link names are the workspace's, one of each (a model walks them by name): say one that is
+            # free (benchmark round 3: a second `in_district` was refused with no way on).
+            free = f"{kind['name']}_{body.field}"
+            raise HTTPException(409, f"there is already a link called {body.field!r} in this workspace (each link name is used "
+                                     f"once, as models walk links by name); call this one {free!r}, say")
         rel = db.execute(text(
             "INSERT INTO relationship_type (domain_id, name, from_type_id, to_type_id, cardinality)"
             " VALUES (:d, :n, :a, :b, 'many_to_one') RETURNING id"),

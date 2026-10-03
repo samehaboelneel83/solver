@@ -24,3 +24,14 @@ describe("the form projection of a draft", () => {
     expect((out.constraints as Record<string, unknown>[])[0]).not.toHaveProperty("weight");
   });
 });
+
+it("leaves out a rule still as a blank rule starts, 0 <= 0 (benchmark round 3)", () => {
+  const ir = { version: 2, sets: ["day"], parameters: {}, variables: { x: { index: ["day"], domain: "binary" } },
+    constraints: [
+      { id: "c_1", forall: [{ index: "d", set: "day" }], left: { const: 0 }, relation: "<=", right: { const: 0 }, severity: "hard" },
+      { id: "c_real", left: { var: "x", index: ["d"] }, relation: "<=", right: { const: 1 }, severity: "hard",
+        forall: [{ index: "d", set: "day" }] },
+    ],
+    objective: { sense: "minimize", mode: "weighted", terms: [] } };
+  expect((publishable(ir).constraints as { id: string }[]).map((c) => c.id)).toEqual(["c_real"]);
+});

@@ -87,7 +87,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -259,8 +259,10 @@ def list_entities(
     # `sort_order` first: it is what makes mon..sun come back in week order
     # rather than alphabetically. `key` then `id` complete the total order,
     # without which offset pagination can skip or repeat rows across pages.
+    # Whole-number keys in number order, 1, 2, 10, 100 -- not 1, 10, 100, 2 (benchmark round 3).
+    numeric = case((Entity.key.op("~")(r"^[0-9]{1,18}$"), func.lpad(Entity.key, 18, "0")), else_=None)
     rows = (
-        query.order_by(Entity.sort_order.asc(), Entity.key.asc(), Entity.id.asc())
+        query.order_by(Entity.sort_order.asc(), numeric.asc().nulls_last(), Entity.key.asc(), Entity.id.asc())
         .offset(offset)
         .limit(limit)
         .all()

@@ -181,7 +181,9 @@ function Loaded({ domainId }: { domainId: Id }) {
       ) : (
         <>
           <p className="mb-2 text-sm text-slate-600" data-testid="relationship-count">
-            {rows.length === 1 ? "1 relationship" : `${rows.length} relationships`}
+            {(relationships.total ?? rows.length) > rows.length
+              ? `The first ${rows.length.toLocaleString("en-US")} of ${(relationships.total ?? 0).toLocaleString("en-US")} relationships`
+              : rows.length === 1 ? "1 relationship" : `${rows.length.toLocaleString("en-US")} relationships`}
             {typeFilter === "all" ? " in this domain" : ""}.
           </p>
           <RelationshipList

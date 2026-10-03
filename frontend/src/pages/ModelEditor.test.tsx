@@ -1422,6 +1422,16 @@ describe("equations as drill-down diagrams", () => {
     expect(await screen.findByTestId("goal-blocks")).toBeInTheDocument();
   });
 
+  it("opens a new goal in the equation view the person chose, not in boxes (benchmark round 3)", async () => {
+    localStorage.setItem("solver_equation_view", "equation");
+    renderPage();
+    await screen.findByLabelText("Equation for c_cover");
+    fireEvent.change(screen.getByLabelText("Start a goal from a shape"), { target: { value: "count" } });
+    await waitFor(() => expect(screen.getAllByLabelText(/^Equation for o_/).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("goal-blocks")).toBeNull();
+    localStorage.removeItem("solver_equation_view");
+  });
+
   it("asks how far apart before writing an apart rule, never guessing it (benchmark round 3)", async () => {
     stub({ ir: { ...IR_V2, sets: ["day"], parameters: { gap_km: { index: ["day", "day"] } },
       variables: { open: { index: ["day"], domain: "binary" } }, constraints: [] } });

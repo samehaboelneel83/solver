@@ -841,3 +841,12 @@ def test_entities_require_authentication():
     client = TestClient(app)
     assert client.get("/api/v1/entities").status_code == 401
     assert client.post("/api/v1/entities", json={"entity_type_id": 1, "key": "x"}).status_code == 401
+
+
+def test_whole_number_keys_list_in_number_order(auth_headers, entity_type_id):
+    """Benchmark round 3: incidents listed 1, 10, 100, 101 ... 2."""
+    client = TestClient(app)
+    for key in ("10", "2", "100", "1", "b", "a"):
+        _make_entity(client, auth_headers, entity_type_id, key)
+    listed = client.get(f"/api/v1/entities?entity_type_id={entity_type_id}", headers=auth_headers).json()["items"]
+    assert [e["key"] for e in listed] == ["1", "2", "10", "100", "a", "b"]

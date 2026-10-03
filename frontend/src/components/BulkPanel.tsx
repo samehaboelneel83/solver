@@ -290,7 +290,9 @@ export default function BulkPanel({
             // (benchmark, October 2026: duplicates in three of five problems, and the check said "clean").
             const keyColumn = preview.columns.find((c) => choices[c.name] === "key");
             const stored = preview.existing ?? 0;
-            if (!keyColumn || stored === 0 || (keyColumn.matches_keys ?? 0) > 0) return null;
+            // A key of several columns is judged by the check, not one part at a time (benchmark round 3:
+            // "year matches none ... every row would be new", then 300 updated).
+            if (!keyColumn || keyParts.length > 1 || stored === 0 || (keyColumn.matches_keys ?? 0) > 0) return null;
             const better = preview.columns.find((c) => (c.matches_keys ?? 0) > 0);
             return (
               <p role="alert" className="mt-1 text-sm text-amber-800">

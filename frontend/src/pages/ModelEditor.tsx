@@ -54,7 +54,7 @@ import LegacyDraftRecovery from "../model/LegacyDraftRecovery";
 import EquationField, { chipsFor } from "../model/EquationField";
 import { GoalDiagram, RuleDiagram } from "../model/EquationDiagram";
 import { GoalBlocks, GoalSentence, RuleBlocks, RuleSentence } from "../model/NestedBlocks";
-import { useCardView, useEquationView, viewAt, ViewToggle, type EquationView } from "../model/ViewToggle";
+import { useCardView, useEquationView, viewAt, viewChosen, ViewToggle, type EquationView } from "../model/ViewToggle";
 import { EditorLevelContext, useEditorLevel } from "../model/editorLevel";
 import AddMenu, { AddChoice } from "../components/AddMenu";
 import { checkGoal, checkRule, explain } from "../model/blockCheck";
@@ -848,7 +848,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
               // Composed from a shape: in its boxes, to see what was filled in. A blank rule opens where the
               // person works -- in equations, to type it (benchmark re-test, October 2026: each new rule
               // needed a reload to type it).
-              startIn={composed.has(constraint.id) && !(blankRules.has(constraint.id) && equationView === "equation") ? "boxes" : undefined}
+              startIn={composed.has(constraint.id) && !(equationView === "equation" && (blankRules.has(constraint.id) || viewChosen(simple, "equation"))) ? "boxes" : undefined}
               simple={simple}
               openSignal={opening?.kind === "rule" && opening.id === constraint.id ? opening.seq : undefined}
               constraint={constraint}
@@ -1877,7 +1877,7 @@ function ObjectiveEditor({
             ) : (
               <GoalExpression
                 view={view}
-                startIn={composedGoals.has(term.id) ? "boxes" : undefined}
+                startIn={composedGoals.has(term.id) && !(view === "equation" && viewChosen(simple, "equation")) ? "boxes" : undefined}
                 goalId={term.id}
                 expression={term.expression}
                 context={context}

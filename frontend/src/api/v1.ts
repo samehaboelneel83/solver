@@ -1285,6 +1285,8 @@ type MultiList<T> = {
   error: unknown;
   /** True when at least one of the lists held more rows than one page. */
   truncated: boolean;
+  /** How many rows there are in all, past the page (benchmark round 3: "500" was said for 1,584). */
+  total?: number;
 };
 
 /**
@@ -1317,6 +1319,7 @@ export function useRelationshipsOfTypes(relationshipTypeIds: Id[]): MultiList<Re
     isLoading: results.some((result) => result.isLoading),
     error: results.find((result) => result.error)?.error ?? null,
     truncated: results.some((result) => (result.data?.total ?? 0) > (result.data?.items.length ?? 0)),
+    total: results.reduce((n, result) => n + (result.data?.total ?? result.data?.items.length ?? 0), 0),
   };
 }
 

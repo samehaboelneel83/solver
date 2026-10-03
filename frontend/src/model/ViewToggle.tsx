@@ -59,6 +59,16 @@ export function useEquationView(simple = false): [EquationView, (next: EquationV
   }];
 }
 
+/** Whether the person chose this view themselves, rather than it being where the level starts: a new
+ * rule or goal then opens in it, not in boxes (benchmark round 3). */
+export function viewChosen(simple: boolean, view: EquationView): boolean {
+  try {
+    return localStorage.getItem(simple ? `${EQUATION_VIEW_KEY}_simple` : EQUATION_VIEW_KEY) === view;
+  } catch {
+    return false;
+  }
+}
+
 /** Sentence | Boxes | Diagram | Equation, as pressed-state buttons: the simplest first. */
 export function ViewToggle({ value, onChange, name, size = "sm" }: {
   value: EquationView;

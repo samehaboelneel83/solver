@@ -110,8 +110,9 @@ const coordKey = (ids: Id[]) => ids.join(",");
 // text colour -- which, layered on INPUT_CLASS, would be two competing
 // utilities for the same property whose winner depends on Tailwind's output
 // order. Same visual language, built from non-overlapping utilities.
+// At least wide enough for "31.25" or "12,000": many columns squeezed the cells to "31." (benchmark round 3).
 const CELL_CLASS =
-  "block w-full rounded border px-2 py-1 text-right font-mono text-sm aria-[invalid=true]:border-red-500";
+  "block w-full min-w-[6.5rem] rounded border px-2 py-1 text-right font-mono text-sm aria-[invalid=true]:border-red-500";
 export const STORED_CELL_CLASS = `${CELL_CLASS} border-slate-300 bg-white font-medium text-slate-900`;
 export const EMPTY_CELL_CLASS = `${CELL_CLASS} border-slate-200 bg-slate-50 text-slate-600 placeholder:text-slate-400`;
 
@@ -493,6 +494,7 @@ function CellInput({
         data-stored={isStored ? "true" : "false"}
         className={isStored ? STORED_CELL_CLASS : EMPTY_CELL_CLASS}
         value={text}
+        title={text || undefined}
         {...(isStored || defaultValue === null ? {} : { placeholder: String(defaultValue) })}
         onChange={(event) => onChange(cellKey, event.target.value)}
         onPaste={(event) => {
