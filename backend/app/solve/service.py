@@ -2184,7 +2184,9 @@ def solve_compiled(
         should_stop,
     )
     if unbounded is not None:
-        return unbounded
+        result, why = unbounded
+        if why is not None:
+            return result, why
     gap = gap_of(result.objective, result.best_bound)
     if result.status == "optimal" and gap is not None and gap > OPTIMAL_GAP:
         result = replace(result, status="feasible", optimal=False)
@@ -2215,7 +2217,7 @@ def _solve(
 
 def _unbounded_ceilings(
     backend, compiled: Compiled, result: Solution, time_limit: float, knobs: dict, should_stop
-) -> tuple[Solution, str] | None:
+) -> tuple[Solution, str | None] | None:
     """An answer resting on a ceiling the model never set, shown to be unbounded.
 
     Every variable without an upper bound gets `DEFAULT_UPPER`, so a goal that
@@ -2223,8 +2225,10 @@ def _unbounded_ceilings(
     model nobody wrote. When the answer touches a defaulted ceiling, the model
     is solved once more with those ceilings a thousand times higher. If the
     goal improves, it was held back only by the guard: the run is `unbounded`,
-    and the reason names the variables. If not, the ceiling was incidental and
-    the answer stands.
+    and the reason names the variables -- unless the raised solve stops short of
+    its own ceiling, held by the model's rules: then that solve is the answer,
+    with no reason (the guard was merely too low). If the goal does not improve,
+    the ceiling was incidental and the answer stands.
     """
     if result.status not in ("optimal", "feasible") or result.objective is None:
         return None
@@ -2251,10 +2255,18 @@ def _unbounded_ceilings(
     improved = second < first - tolerance if compiled.sense == "minimize" else second > first + tolerance
     if not improved:
         return None
+    # Held back by the guard, but stopped by the model's own rules once it was raised (benchmark round
+    # 5: water[P039] needed 1,041,500, its rules said so, and the run was called unbounded): the raised
+    # answer is the answer. Only a decision that runs into the raised ceiling too is unbounded.
+    still = [key for key in at_ceiling
+             if number(again.assignments.get(key, 0)) >= lifted.variables[key].upper - Decimal("1e-6")]
+    if not still:
+        compiled.variables.update(lifted.variables)
+        return again, None
     names = ", ".join(
-        f"{name}[{', '.join(index)}]" if index else name for name, index in at_ceiling[:5]
+        f"{name}[{', '.join(index)}]" if index else name for name, index in still[:5]
     )
-    more = f" and {len(at_ceiling) - 5} more" if len(at_ceiling) > 5 else ""
+    more = f" and {len(still) - 5} more" if len(still) > 5 else ""
     reason = (
         f"The goal can improve without limit. {names}{more} rose to "
         f"{DEFAULT_UPPER:,}, a ceiling the model never set, and raising that "

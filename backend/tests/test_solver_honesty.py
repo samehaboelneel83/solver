@@ -118,6 +118,19 @@ def test_a_goal_that_grows_forever_is_an_unbounded_run_naming_the_variable(db):
     assert "upper bound" in row["error"]
 
 
+def test_a_decision_its_rules_hold_above_the_guard_is_solved_not_called_unbounded(db):
+    """Benchmark round 5: water[P039] needed 1,041,500 m3, a rule said so, and the run was called
+    unbounded because the guard ceiling (1,000,000) held it back first."""
+    ir = _scalar("continuous", "maximize", X,
+                 [{"id": "capacity", "left": X, "relation": "<=", "right": {"const": 1_041_500}, "severity": "hard"}])
+
+    row = _run(db, ir, "honesty-above-guard")
+
+    assert row["status"] == "optimal", row
+    assert float(row["objective"]) == pytest.approx(1_041_500)
+    assert not row["error"]
+
+
 def test_an_explicit_upper_bound_is_not_a_ceiling_nobody_set(db):
     ir = _scalar("continuous", "maximize", X, [], upper=1_000_000)
 

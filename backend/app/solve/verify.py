@@ -122,6 +122,10 @@ def accept(compiled: Compiled, result: Solution, approximate: float | None = Non
             report["failures"].append({"kind": "non_finite_value", "var": key[0], "index": list(key[1])})
             continue
         lo, hi = float(var.lower), float(var.upper)
+        # The guard ceiling on a decision with no upper bound is not the model's bound: an answer the
+        # rules hold above it (raised once to be sure, app.solve.service) is not out of bounds.
+        if getattr(var, "default_upper", False):
+            hi = math.inf
         if value < lo - 1e-6 or value > hi + 1e-6:
             report["accepted"] = False
             report["failures"].append(
