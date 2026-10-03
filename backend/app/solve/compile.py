@@ -421,6 +421,7 @@ class _Compiler:
         self._models: dict[str, dict[str, Any]] = {}
         self._predictions: list[Any] = []
         self._embedded_leaves = 0
+        self._embedded_steps = 0
         self.ir = ir
         self.sets: dict[str, list[dict[str, Any]]] = data.get("sets", {})
         self.params_raw: dict[str, list[dict[str, Any]]] = data.get("parameters", {})

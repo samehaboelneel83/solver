@@ -48,6 +48,9 @@ ROW_ID = "__predict"
 DELTA = Decimal("0.000001")
 #: Reachable leaves, over every embedded prediction of one model version.
 MAX_EMBEDDED_LEAVES = 20_000
+#: Steps, over every prediction embedded as a step function of one input (below): one binary and
+#: three rows each, ordered -- far lighter than a leaf, so many more fit.
+MAX_EMBEDDED_STEPS = 200_000
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,10 @@ def embed(compiler: Any, name: str, model: dict[str, Any], arguments: list[Any],
             raise Unsupported(f"input {position} of {name}{where} has no finite range, so its splits cannot be written")
         bounds.append((Decimal(repr(low)), Decimal(repr(high))))
 
+    varying = [f for f, argument in enumerate(arguments) if argument.coeffs]
+    if len(varying) == 1:
+        return _as_steps(compiler, name, model, arguments, bounds, varying[0], where)
+
     number = len(compiler._predictions)
     one = Decimal(1)
     scale = one / len(model["trees"]) if model["aggregation"] == "mean" else one
@@ -156,6 +163,63 @@ def embed(compiler: Any, name: str, model: dict[str, Any], arguments: list[Any],
                     )
         compiler.constraints.append(Constraint(ROW_ID, {"predict": name, "tree": str(t)}, choice, "=", Linear(const=one)))
 
+    compiler._predictions.append(PredictDef(name, model, tuple(a.copy() for a in arguments), expression))
+    return expression.copy()
+
+
+def _as_steps(compiler: Any, name: str, model: dict[str, Any], arguments: list[Any], bounds: list[tuple[Decimal, Decimal]],
+              f: int, where: str) -> Any:
+    """A prediction whose inputs are data but one, as the step function of that one it is.
+
+    With the other inputs fixed, every tree is a step function of input f, changing only at its
+    thresholds on f; so is their sum. Between two neighbouring thresholds the whole ensemble is one
+    number, worked out by the model itself. One binary per threshold where the value changes,
+    ``y[k] = 1`` exactly when ``a_f > t[k]``, ordered (``y[k+1] <= y[k]``)::
+
+        a_f <= t[k] + (hi - t[k]) y[k]            a_f >= t[k] + delta - (t[k] + delta - lo)(1 - y[k])
+
+    and the prediction is ``v[0] + sum_k (v[k] - v[k-1]) y[k]`` -- exact, and the size of the
+    thresholds on one input, not of every leaf of every tree (benchmark round 4: a yield model with
+    R² 0.98 was over the leaf limit; only a 4-tree model, R² 0.52, fit)."""
+    from app.solve.compile import Constraint, Linear, Unsupported, Variable
+
+    low, high = bounds[f]
+    cuts = sorted({Decimal(repr(float(node["threshold"]))) for tree in model["trees"] for node in tree["nodes"]
+                   if "value" not in node and node["feature"] == f})
+    cuts = [t for t in cuts if low <= t and t + DELTA <= high]
+    xs = [float(a.const) for a in arguments]
+
+    def at(x: Decimal) -> Decimal:
+        xs[f] = float(x)
+        return Decimal(repr(ml.predict(model, xs)))
+
+    # The value on each piece: at its right end (a threshold itself goes left), the last at `high`.
+    values = [at(t) for t in cuts] + [at(high)]
+    steps = [(t, values[k + 1] - values[k]) for k, t in enumerate(cuts) if values[k + 1] != values[k]]
+    compiler._embedded_steps += len(steps)
+    if compiler._embedded_steps > MAX_EMBEDDED_STEPS:
+        raise Unsupported(
+            f"{name}{where} would add more than {MAX_EMBEDDED_STEPS} steps to the model; "
+            "train it with fewer or shallower trees, or narrow its inputs' bounds"
+        )
+    number = len(compiler._predictions)
+    one = Decimal(1)
+    expression = Linear(const=values[0])
+    before = None
+    for k, (t, rise) in enumerate(steps):
+        y = (LEAF, (str(number), "step", str(k)))
+        compiler.variables[y] = Variable(y, "binary", Decimal(0), one)
+        expression.coeffs[y] = rise
+        label = {"predict": name, "step": str(k)}
+        m = high - t
+        compiler.constraints.append(Constraint(ROW_ID, dict(label), arguments[f].copy().add(Linear(coeffs={y: -m})), "<=", Linear(const=t)))
+        m = t + DELTA - low
+        if m > 0:
+            compiler.constraints.append(Constraint(ROW_ID, dict(label), arguments[f].copy().add(Linear(coeffs={y: -m})), ">=",
+                                                   Linear(const=t + DELTA - m)))
+        if before is not None:
+            compiler.constraints.append(Constraint(ROW_ID, dict(label), Linear(coeffs={y: one, before: -one}), "<=", Linear(const=Decimal(0))))
+        before = y
     compiler._predictions.append(PredictDef(name, model, tuple(a.copy() for a in arguments), expression))
     return expression.copy()
 

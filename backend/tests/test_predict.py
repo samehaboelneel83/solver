@@ -241,3 +241,37 @@ def test_the_readiness_check_reads_the_workspace_s_predictors(db):  # noqa: F811
     assert not [f for f in found["findings"] if f["code"] == "does_not_compile"], found["findings"]
     db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
     db.commit()
+
+
+@pytest.mark.parametrize("kind", ["forest", "boosting"])
+@pytest.mark.parametrize("sense", ["maximize", "minimize"])
+def test_a_prediction_varying_in_one_input_is_its_step_function_and_finds_what_enumeration_finds(kind, sense):
+    """Benchmark round 4: a yield model read one decision (irrigation) and data; it is a step function of it."""
+    model = _fitted(kind)
+    expression = {"predict": "m", "of": [A, {"const": 3}]}
+    compiled = compile_model(_ir(expression, sense=sense, domain="continuous"), _data(model))
+    steps = [k for k in compiled.variables if k[0] == LEAF]
+    assert steps and all(k[1][1] == "step" for k in steps)
+    pick = max if sense == "maximize" else min
+    grid = sorted({0.0, 10.0, *(float(n["threshold"]) for t in model["trees"] for n in t["nodes"] if "value" not in n and n["feature"] == 0)})
+    best = pick(predict(model, [x, 3]) for x in [*grid, *(x + 1e-5 for x in grid)] if 0 <= x <= 10)
+    result, _ = solve_compiled(by_name("highs"), compiled, time_limit=60, seed=1)
+    assert result.status == "optimal"
+    assert float(result.objective) == pytest.approx(best, abs=1e-4)
+    assert accept(compiled, result)["accepted"]
+
+
+def test_a_model_past_the_leaf_cap_fits_as_a_step_function_of_its_one_decision():
+    """Benchmark round 4: an R² 0.98 model was refused for more than 20,000 leaf choices."""
+    from sklearn.ensemble import RandomForestRegressor
+
+    rng = np.random.default_rng(3)
+    X = rng.uniform(0, 10, (600, 2))
+    deep = from_sklearn(RandomForestRegressor(n_estimators=4, random_state=0).fit(X, X.sum(axis=1)), ["a", "b"])
+    model = copy.deepcopy(deep)
+    per_tree = sum(1 for n in deep["trees"][0]["nodes"] if "value" in n)
+    model["trees"] = deep["trees"] * (MAX_EMBEDDED_LEAVES // (per_tree * 4) + 2)
+    compiled = compile_model(_ir({"predict": "m", "of": [A, {"const": 5}]}), _data(model))
+    result, _ = solve_compiled(by_name("highs"), compiled, time_limit=60, seed=1)
+    best = max(predict(model, [a, 5]) for a in range(11))
+    assert float(result.objective) == pytest.approx(best, abs=1e-5)
