@@ -175,6 +175,16 @@ function tokenize(text: string): Token[] {
       i = j + 1;
       continue;
     }
+    // 'existing', “existing” and ‘existing’ are text too (benchmark round 4: single quotes were refused
+    // with "' is not part of an equation").
+    const closing: Record<string, string> = { "'": "'", "“": "”", "‘": "’", "”": "”" };
+    if (closing[ch]) {
+      const j = text.indexOf(closing[ch], i + 1);
+      if (j < 0) throw new FormulaError("This text is missing its closing quote.", i, text.length);
+      tokens.push({ kind: "str", value: text.slice(i + 1, j), at: i, end: j + 1 });
+      i = j + 1;
+      continue;
+    }
     const two = text.slice(i, i + 2);
     if (["<=", ">=", "!=", "=="].includes(two)) {
       tokens.push({ kind: "op", value: two === "==" ? "=" : two, at: i, end: i + 2 });

@@ -1337,6 +1337,11 @@ def _passes(row: dict[str, Any], filters: list[dict[str, Any]]) -> bool:
                 return False
             continue
         value, wanted, op = row.get(f["attr"]), f.get("value"), f["op"]
+        # Text is compared as people read it: "Existing " is "existing" (benchmark round 4).
+        if isinstance(value, str) and op in ("=", "==", "!=", "in", "notIn"):
+            value = value.strip().casefold()
+            wanted = [w.strip().casefold() if isinstance(w, str) else w for w in wanted] if isinstance(wanted, list) \
+                else wanted.strip().casefold() if isinstance(wanted, str) else wanted
         if op in ("=", "=="):
             ok = value == wanted
         elif op == "!=":

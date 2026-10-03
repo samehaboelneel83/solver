@@ -41,6 +41,11 @@ describe("equations for rules", () => {
     const over = (parsed.value.left as { over: Binding[] }).over;
     expect(over[0].where).toEqual([{ attr: "team", op: "=", value: "north" }, { attr: "cap", op: ">=", value: 2 }]);
     expect(parsed.value.right).toEqual({ add: [{ par: "demand", index: ["d"] }, { mul: [{ const: -1 }, { par: "budget", index: [] }] }] });
+    // Single and curly quotes read as text too (benchmark round 4).
+    for (const quoted of ["'north'", "“north”", "‘north’"]) {
+      const same = parseRule(`for each d in day: sum(assign[p, d, s] for p in person where team = ${quoted}, s in shift) >= 1`, CONTEXT);
+      expect(same.ok && (same.value.left as { over: Binding[] }).over[0].where).toEqual([{ attr: "team", op: "=", value: "north" }]);
+    }
     expect(parseRule("sum(abs(x[i]) for i in item) <= 4", CONTEXT).ok).toBe(true);
     expect(parseRule("sum(cap[p] * hours[p] for p in person) <= 40", CONTEXT)).toMatchObject({
       ok: true, value: { left: { sum: { mul: [{ attr: { of: "p", name: "cap" } }, { var: "hours", index: ["p"] }] } } },

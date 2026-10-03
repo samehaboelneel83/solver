@@ -199,6 +199,7 @@ export function SyntaxCard({ sets }: { sets: string[] }) {
     [`for each ${y} in ${b}: … <= 1`, "a rule for every member of a set"],
     [`sum(choose[${x}, ${y}] for ${x} in ${a}, ${y} in ${b})`, "a sum over two sets: one “for”, a comma between"],
     [`sum(choose[${x}] for ${x} in ${a} where capacity >= 6)`, "only the members whose field passes (“where”, not “if”)"],
+    [`for each ${x} in ${a} where status = 'existing': open[${x}] = 1`, "a text field: its value in quotes, single or double"],
     [`sum(choose[${x}] for ${x} in ${a} where supervisor)`, "a yes/no field on its own: only those marked yes (“where not supervisor”: marked no)"],
     [`capacity[${x}] * open[${x}]`, "a record's field (capacity of x), times a decision"],
     [`for each ${y} in ${b}: sum(reach[${x}, ${y}] * open[${x}] for ${x} in ${a}) >= 1`, "within reach: multiply by 0/1 data computed from the map"],
