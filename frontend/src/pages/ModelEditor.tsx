@@ -482,7 +482,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const toPublish = nextIr as Record<string, unknown>;
 
   function published(created: { id: Id; version: number }) {
-    toast.success(`Published version ${created.version}`);
+    // The server answers an unchanged model with the version that already holds it (benchmark round 4).
+    const unchanged = versionItems.some((row) => row.version === created.version);
+    toast.success(unchanged ? `Nothing changed since version ${created.version}: no new version made` : `Published version ${created.version}`);
     setJustPublished(created.version);
     clearDraft(Number(problemId));
     setScratch(false);
@@ -629,7 +631,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         // Where the page lands after publishing, with the next step on it (UX audit B-7).
         <div role="status" className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
           <p>
-            Version {justPublished} is published.{" "}
+            Version {justPublished} is published; the Base scenario solves it.{" "}
             <Link className="underline" to={`/domains/${domainId}/problems/${problemId}/versions`}>See the versions</Link>.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -650,7 +652,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                 {solvingNow ? "Starting…" : `Solve version ${justPublished} now`}
               </button>
             )}
-            <span className="text-xs text-blue-800">It solves on the Base scenario; other scenarios keep their version until moved on the Scenarios page.</span>
+            <span className="text-xs text-blue-800">Other scenarios keep their version until moved on the Scenarios page.</span>
           </div>
         </div>
       )}

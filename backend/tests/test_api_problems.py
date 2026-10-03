@@ -384,16 +384,35 @@ def test_note_is_optional(client, auth_headers, problems):
     assert response.json()["note"] is None
 
 
-def test_identical_ir_twice_gives_two_versions_with_one_hash(client, auth_headers, problems):
-    """Hashing is content-based, not a dedup: both inserts succeed."""
+def test_publishing_the_latest_model_again_makes_no_new_version(client, auth_headers, problems):
+    """Benchmark round 4: two publishes without an edit made versions 2 and 3. The latest version is
+    the answer (200); going back to an older model is still a new version, with that one's hash."""
     a, _ = problems
     ir = _ir("open")
     first = _version(client, auth_headers, a, ir)
-    second = _version(client, auth_headers, a, ir)
+    again = client.post(f"/api/v1/problems/{a}/versions", json={"ir": ir}, headers=auth_headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["id"] == first["id"] and again.json()["version"] == 1
 
-    assert first["id"] != second["id"]
-    assert (first["version"], second["version"]) == (1, 2)
-    assert first["ir_hash"] == second["ir_hash"]
+    other = _version(client, auth_headers, a, _ir("shut"))
+    back = _version(client, auth_headers, a, ir)
+    assert (other["version"], back["version"]) == (2, 3)
+    assert back["ir_hash"] == first["ir_hash"] and back["id"] != first["id"]
+
+
+def test_the_base_scenario_follows_a_new_version_and_others_stay(client, auth_headers, db, problems):
+    """Benchmark round 4: versions 2-4 were published and "Solve again" kept solving version 1."""
+    a, _ = problems
+    one = _version(client, auth_headers, a, _ir("open"))
+    made = {}
+    for name, patch in (("Base", {}), ("strict", {"disable": ["c_x"]}), ("other", {})):
+        got = client.post("/api/v1/scenarios", json={"problem_id": a, "model_version_id": one["id"], "name": name, "patch": patch},
+                          headers=auth_headers)
+        assert got.status_code == 201, got.text
+        made[name] = got.json()["id"]
+    two = _version(client, auth_headers, a, _ir("shut"))
+    on = dict(db.execute(text("SELECT name, model_version_id FROM scenario WHERE problem_id = :p"), {"p": a}).all())
+    assert on == {"Base": two["id"], "strict": one["id"], "other": one["id"]}
 
 
 def test_reordered_keys_and_whitespace_hash_the_same(client, auth_headers, problems):
@@ -409,7 +428,9 @@ def test_reordered_keys_and_whitespace_hash_the_same(client, auth_headers, probl
     first = client.post(f"/api/v1/problems/{a}/versions", content=body_1, headers=headers)
     second = client.post(f"/api/v1/problems/{a}/versions", content=body_2, headers=headers)
     assert first.status_code == 201, first.text
-    assert second.status_code == 201, second.text
+    # The same model, written differently: it is the latest version already.
+    assert second.status_code == 200, second.text
+    assert second.json()["id"] == first.json()["id"]
 
     assert first.json()["ir_hash"] == second.json()["ir_hash"]
     raw_hashes = {hashlib.sha256(b.encode()).hexdigest() for b in (body_1, body_2)}

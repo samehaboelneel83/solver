@@ -306,12 +306,22 @@ def publish_draft(
         raise stale_record_conflict("draft")
     # Validated under the lock: exactly the revision being published.
     _check_ir(db, problem, current["ir"])
+    from app.api.problems import carry_base, latest_if_same
+
+    same = latest_if_same(db, problem_id, current["ir"])
+    if same is not None:
+        # Nothing changed since the latest version: it is the answer, and the draft is done.
+        db.execute(text("DELETE FROM model_draft WHERE id = :id"), {"id": current["id"]})
+        db.commit()
+        response.status_code = 200
+        return ModelVersionRead.model_validate(same)
     try:
         row = db.execute(
             insert(ModelVersion.__table__)
             .values(problem_id=problem_id, ir=current["ir"], note=payload.note)
             .returning(*_version_columns)
         ).mappings().one()
+        carry_base(db, problem_id, row["id"])
         if key is not None:
             db.execute(
                 text(

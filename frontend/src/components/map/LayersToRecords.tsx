@@ -159,7 +159,10 @@ export default function LayersToRecords({ dataset, canEdit }: { dataset: GisData
                 onClick={() => void run(async () => {
                   const made = await makeRecords(dataset.id, layers, plan);
                   void client.invalidateQueries();
-                  setDone({ text: `${made.made} ${made.type} records made${made.updated ? `, ${made.updated} refreshed` : ""}.`, typeId: made.entity_type_id });
+                  // Made again: said as such, not as a new making (benchmark round 4: a second click redid it silently).
+                  setDone({ text: made.made === 0 && made.updated
+                    ? `Already made: the ${made.updated} ${made.type} records were refreshed from the file; none new.`
+                    : `${made.made} ${made.type} records made${made.updated ? `, ${made.updated} refreshed` : ""}.`, typeId: made.entity_type_id });
                 })}
                 className="rounded bg-blue-600 px-3 py-1.5 font-medium text-white disabled:opacity-50">
                 Make {plan.features} records

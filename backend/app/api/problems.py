@@ -122,7 +122,7 @@ not state are enforced here, as 422s:
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -705,16 +705,43 @@ def validate_version(
     return {"ok": True}
 
 
+def latest_if_same(db: Session, problem_id: int, ir: dict[str, Any]) -> dict[str, Any] | None:
+    """The latest version when it already holds exactly this model: publishing it again makes no new
+    version (benchmark round 4: two publishes without an edit made versions 2 and 3)."""
+    row = db.execute(
+        select(*_version_columns).where(_version_columns.problem_id == problem_id)
+        .order_by(_version_columns.version.desc()).limit(1)
+    ).mappings().one_or_none()
+    return dict(row) if row is not None and row["ir"] == ir else None
+
+
+def carry_base(db: Session, problem_id: int, new_version_id: int) -> None:
+    """The Base scenario follows a new version when it was on the one before and changes nothing of
+    its own (benchmark round 4: versions 2-4 were published, and "Solve again" kept solving 1).
+    Other scenarios keep their version until moved."""
+    db.execute(text(
+        "UPDATE scenario s SET model_version_id = :new WHERE s.problem_id = :p AND s.name = 'Base'"
+        " AND (s.patch IS NULL OR s.patch = '{}'::jsonb)"
+        " AND s.model_version_id = (SELECT id FROM model_version WHERE problem_id = :p AND id <> :new"
+        "                           ORDER BY version DESC LIMIT 1)"),
+        {"p": problem_id, "new": new_version_id})
+
+
 @router.post("/problems/{problem_id}/versions", status_code=201)
 def create_version(
     problem_id: int,
     payload: ModelVersionCreate,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("model.publish")),
 ) -> ModelVersionRead:
     problem = _get_problem(db, problem_id)
     _check_ir(db, problem, payload.ir)
+    same = latest_if_same(db, problem_id, payload.ir)
+    if same is not None:
+        response.status_code = 200
+        return ModelVersionRead.model_validate(same)
     # Core, not ORM: see the module docstring. RETURNING reports the row as
     # the BEFORE INSERT triggers left it, so `version` and `ir_hash` are the
     # database's own values.
@@ -725,6 +752,7 @@ def create_version(
     )
     try:
         row = db.execute(statement).mappings().one()
+        carry_base(db, problem_id, row["id"])
         audit.write(
             db, user, request,
             action="model.publish",
