@@ -404,3 +404,43 @@ def test_a_predictor_trains_on_a_linked_record_s_field(client, db):  # noqa: F81
     bad = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "nowhere", "entity_type": "shop",
                                                       "features": ["nowhere.income"], "target": "sales"}, headers=t["a"])
     assert bad.status_code == 422 and "not a link field" in bad.text
+
+
+def test_a_forecast_per_parcel_and_crop_reads_several_inputs_from_the_crop(client, db):  # noqa: F811
+    """Benchmark round 3: a yield model's crop inputs (its base yield, 'is it wheat') could not all be fed."""
+    http, t = client
+    domain = t["domain_a"]
+
+    def kind(name, fields):
+        type_id = db.execute(text("INSERT INTO entity_type (domain_id, name, role) VALUES (:d, :n, CAST('other' AS entity_role)) RETURNING id"),
+                             {"d": domain, "n": name}).scalar_one()
+        for f in fields:
+            db.execute(text("INSERT INTO attribute_def (entity_type_id, name, data_type) VALUES (:t, :n, CAST('number' AS attr_type))"),
+                       {"t": type_id, "n": f})
+        return type_id
+
+    obs = kind("yield_obs", ["water", "base_yield", "crop_wheat", "yield"])
+    rng = np.random.default_rng(3)
+    for i in range(120):
+        water, wheat = float(rng.uniform(1, 5)), float(rng.integers(0, 2))
+        base = 3.0 if wheat else 1.0
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": obs, "k": f"o{i}", "a": json.dumps({"water": water, "base_yield": base, "crop_wheat": wheat, "yield": base * water})})
+    parcel = kind("field_plot", ["water"])
+    crop = kind("crop_kind", ["base_yield"])
+    db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, 'p1', '{\"water\": 4}')"), {"t": parcel})
+    for key, base in (("wheat", 3), ("maize", 1)):
+        db.execute(text("INSERT INTO entity (entity_type_id, key, attrs) VALUES (:t, :k, CAST(:a AS jsonb))"),
+                   {"t": crop, "k": key, "a": json.dumps({"base_yield": base})})
+    db.commit()
+    trained = http.post("/api/v1/predictors/train", json={"domain_id": domain, "name": "yield_model", "entity_type": "yield_obs",
+                                                          "features": ["water", "base_yield", "crop_wheat"], "target": "yield",
+                                                          "trees": 40, "max_depth": 8}, headers=t["a"]).json()
+    kept = http.post(f"/api/v1/predictors/{trained['id']}/apply", json={
+        "field": "expected_yield", "entity_type": "field_plot",
+        "over": {"kind": "crop_kind", "feature": "base_yield", "field": "base_yield", "more": {"crop_wheat": "key=wheat"}}}, headers=t["a"])
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["written"] == 2
+    cells = dict(db.execute(text("SELECT e.key, pv.value FROM parameter_value pv JOIN entity e ON e.id = pv.entity_ids[2]"
+                                 " WHERE pv.parameter_def_id = :p"), {"p": kept.json()["parameter_id"]}).all())
+    assert 10 < float(cells["wheat"]) < 14 and 3 < float(cells["maize"]) < 5  # 3 x 4 = 12, 1 x 4 = 4

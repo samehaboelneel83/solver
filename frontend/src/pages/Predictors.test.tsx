@@ -233,3 +233,23 @@ it("trains on earlier values in time, each series its own (benchmark re-test, Oc
     features: ["price", "demand_lag1", "demand_lag7"], lags: { order_by: "label", steps: [1, 7] },
   });
 });
+
+it("feeds several inputs from each crop: a field of it, and 1 for one crop (benchmark round 3)", async () => {
+  ENTITY_TYPES.items.push({ id: 6, domain_id: 7, name: "crop", role: "resource", colour: null, icon: null,
+    attributes: [{ id: 61, entity_type_id: 6, name: "base_price", data_type: "number" }] } as never);
+  const write = stub(vi.fn().mockResolvedValue({ parameter: "demand_forecast", parameter_id: 40, written: 4, skipped: [], skipped_count: 0 }));
+  renderPage();
+  const card = await screen.findByTestId("predictor");
+  await within(card).findAllByRole("option", { name: "crop" });
+  fireEvent.change(within(card).getByLabelText("One prediction per"), { target: { value: "crop" } });
+  fireEvent.change(within(card).getByLabelText("Input each period feeds"), { target: { value: "promo" } });
+  fireEvent.change(within(card).getByLabelText("price comes from"), { target: { value: "over:base_price" } });
+  fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
+  await within(card).findByText(/4 predictions kept/);
+  expect(JSON.parse(write.mock.calls.at(-1)![1].body).over).toEqual({ kind: "crop", feature: "promo", more: { price: "base_price" } });
+  fireEvent.change(within(card).getByLabelText("price comes from"), { target: { value: "over:is" } });
+  fireEvent.change(within(card).getByLabelText("price is 1 for"), { target: { value: "wheat" } });
+  fireEvent.click(within(card).getByRole("button", { name: "Predict and keep" }));
+  await waitFor(() => expect(JSON.parse(write.mock.calls.at(-1)![1].body).over.more).toEqual({ price: "key=wheat" }));
+  ENTITY_TYPES.items.pop();
+});

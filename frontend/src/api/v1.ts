@@ -1965,7 +1965,8 @@ export const predictWith = (id: Id, inputs: number[][]) =>
  * inputs from a field, a linked record's field ("road.lanes") or a fixed number, and one per period. */
 export type ApplyPredictorBody = {
   field: string; only_missing: boolean; entity_type?: string; inputs?: Record<string, string | number>;
-  over?: { kind: string; feature: string; field?: string };
+  /** One per record and period; `more`: other inputs from each period's record (a field, `key`, or `key=wheat`). */
+  over?: { kind: string; feature: string; field?: string; more?: Record<string, string> };
 };
 export const applyPredictor = (id: Id, body: ApplyPredictorBody) =>
   send<{ field?: string; entity_type?: string; parameter?: string; parameter_id?: Id; written: number; skipped: string[]; skipped_count: number }>(
@@ -1985,9 +1986,11 @@ export const deriveFields = (entityTypeId: Id, body: DeriveBody) =>
 export const useDeriveFields = () =>
   useV1Mutation(({ entityTypeId, body }: { entityTypeId: Id; body: DeriveBody }) => deriveFields(entityTypeId, body));
 /** A data value computed from the records: read through a link (`lookup`) or 1/0 by a comparison (`compare`). */
+/** = and != on anything; numbers by size; `in`: one of the other's list ("LOAM;CLAY"), `has`: the other way. */
+export type Compare = "=" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "has";
 export type DeriveValueBody = {
   op: "lookup" | "compare"; name: string; kind: string; field: string;
-  source?: string; other?: string; against?: string; compare?: "=" | "!=";
+  source?: string; other?: string; against?: string; compare?: Compare;
 };
 export const deriveValue = (domainId: Id, body: DeriveValueBody) =>
   send<{ parameter_id: Id; name: string; cells: number; index: Id[] }>("POST", `/api/v1/domains/${domainId}/derive-value`, body);

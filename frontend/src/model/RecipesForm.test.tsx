@@ -98,3 +98,21 @@ it("orders stock each period from the form, the room as a number when there is o
   expect(d.constraints.map((c) => c.id)).toEqual(["stock_balance", "storage"]);
   expect(d.constraints[1]).toMatchObject({ right: { const: 500 } });
 });
+
+it("writes vehicle routes from each vehicle's own depot (benchmark round 3)", () => {
+  const onApply = vi.fn();
+  const kinds = [{ name: "truck", attributes: [{ name: "home", data_type: "text" }, { name: "load", data_type: "number" }] },
+    { name: "stop", attributes: [{ name: "drop", data_type: "number" }] }];
+  render(<RecipesForm kinds={kinds} data={[{ name: "km", index: ["stop", "stop"] }]} onApply={onApply} />);
+  fireEvent.click(screen.getByLabelText(/Vehicle routes/));
+  fireEvent.change(screen.getByLabelText("Vehicles"), { target: { value: "truck" } });
+  fireEvent.change(screen.getByLabelText("Visit"), { target: { value: "stop" } });
+  fireEvent.change(screen.getByLabelText("Where vehicles start"), { target: { value: "field" } });
+  fireEvent.change(screen.getByLabelText("The field"), { target: { value: "home" } });
+  fireEvent.change(screen.getByLabelText("Each stop needs"), { target: { value: "drop" } });
+  fireEvent.change(screen.getByLabelText("Each vehicle carries"), { target: { value: "load" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write it into the model" }));
+  const d = onApply.mock.calls[0][0](empty) as FormDraft;
+  expect(d.constraints[0]).toMatchObject({ route: { depot_of: "home", demand: "drop", capacity: "load" } });
+  expect(d.objective.terms[0].id).toBe("travel");
+});

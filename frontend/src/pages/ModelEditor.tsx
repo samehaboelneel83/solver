@@ -920,7 +920,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                     close();
                     goTo("rule", id);
                   }} />
-                <p className="text-xs text-slate-500">Scheduling, connected and route rules are under Expert.</p>
+                <p className="text-xs text-slate-500">Vehicle routes: More recipes, above. Scheduling, connected and route rules on a decision you made: under Expert.</p>
               </>
             )}
           </AddMenu>
@@ -1818,6 +1818,18 @@ function ObjectiveEditor({
                         ...objective,
                         terms: objective.terms.map((t, i) => (i === position ? { ...t, weight: next } : t)),
                       })} />
+                    {/* One goal minimised among goals maximised, without a minus sign to work out
+                        (benchmark round 3: water use was a weight of -0.5 inside "maximise profit"). */}
+                    <select aria-label={`Direction of ${term.id || "this goal"}`} className="mt-1 block rounded border border-slate-300 px-1 py-0.5 text-xs"
+                      value={(term.weight >= 0) === objective.sense.startsWith("max") ? "more" : "less"}
+                      onChange={(e) => {
+                        const more = e.target.value === "more";
+                        const sign = more === objective.sense.startsWith("max") ? 1 : -1;
+                        onChange({ ...objective, terms: objective.terms.map((t, i) => (i === position ? { ...t, weight: sign * Math.abs(t.weight || 1) } : t)) });
+                      }}>
+                      <option value="more">more is better</option>
+                      <option value="less">less is better</option>
+                    </select>
                   </div>
                 )}
               </div>

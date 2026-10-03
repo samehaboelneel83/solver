@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatApiError } from "../api/errors";
-import { useDeriveValue, useParameters, useRelationshipTypes, type EntityType, type Id } from "../api/v1";
+import { useDeriveValue, useParameters, useRelationshipTypes, type Compare, type EntityType, type Id } from "../api/v1";
 
 /**
  * A data value computed once from the records (benchmark, October 2026: worked out in a
@@ -20,7 +20,7 @@ export default function ComputedValue({ domainId, entityTypes, onMade }: {
   const [source, setSource] = useState("");
   const [other, setOther] = useState("");
   const [against, setAgainst] = useState("key");
-  const [compare, setCompare] = useState<"=" | "!=">("!=");
+  const [compare, setCompare] = useState<Compare>("!=");
   const [name, setName] = useState("");
   const [said, setSaid] = useState<{ error: boolean; text: string } | null>(null);
   const kind = entityTypes.find((k) => k.name === kindName);
@@ -79,9 +79,16 @@ export default function ComputedValue({ domainId, entityTypes, onMade }: {
           </label>
         ) : (
           <>
-            <select aria-label="Comparison" className={select} value={compare} onChange={(e) => setCompare(e.target.value as "=" | "!=")}>
+            <select aria-label="Comparison" className={select} value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
               <option value="=">is</option>
               <option value="!=">is not</option>
+              {/* Benchmark round 3: salinity at most the crop's tolerance; a soil among the crop's soils. */}
+              <option value="<=">is at most</option>
+              <option value="<">is below</option>
+              <option value=">=">is at least</option>
+              <option value=">">is above</option>
+              <option value="in">is one of (a list: LOAM;CLAY)</option>
+              <option value="has">lists</option>
             </select>
             <label className="text-xs text-slate-600">the
               <select aria-label="Against" className={select} value={against} onChange={(e) => setAgainst(e.target.value)}>

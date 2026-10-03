@@ -1432,6 +1432,19 @@ describe("equations as drill-down diagrams", () => {
     localStorage.removeItem("solver_equation_view");
   });
 
+  it("lets one goal be less-is-better among goals made larger, setting its weight's sign (benchmark round 3)", async () => {
+    stub({ ir: { ...IR_V2, objective: { sense: "maximize", mode: "weighted", terms: [
+      { id: "profit", weight: 1, expression: { sum: { var: "assign", index: ["e", "d"] }, over: [{ index: "e", set: "employee" }, { index: "d", set: "day" }] } },
+      { id: "water", weight: 0.5, expression: { sum: { var: "assign", index: ["e", "d"] }, over: [{ index: "e", set: "employee" }, { index: "d", set: "day" }] } },
+    ] } } });
+    renderPage();
+    const direction = await screen.findByLabelText("Direction of water");
+    expect(direction).toHaveValue("more");
+    fireEvent.change(direction, { target: { value: "less" } });
+    await waitFor(() => expect(screen.getByLabelText("Direction of water")).toHaveValue("less"));
+    expect(document.getElementById("obj-1-weight")).toHaveValue("-0.5");
+  });
+
   it("asks how far apart before writing an apart rule, never guessing it (benchmark round 3)", async () => {
     stub({ ir: { ...IR_V2, sets: ["day"], parameters: { gap_km: { index: ["day", "day"] } },
       variables: { open: { index: ["day"], domain: "binary" } }, constraints: [] } });
@@ -1549,7 +1562,7 @@ describe("the Simple level", () => {
     await screen.findByText("What must be true");
     fireEvent.click(screen.getByRole("button", { name: "+ Add a rule" }));
     const menu = screen.getByRole("group", { name: "Add a rule" });
-    expect(within(menu).getByText("Scheduling, connected and route rules are under Expert.")).toBeInTheDocument();
+    expect(within(menu).getByText(/Vehicle routes: More recipes, above. Scheduling, connected and route rules on a decision you made: under Expert./)).toBeInTheDocument();
     fireEvent.click(within(menu).getByRole("button", { name: /For each item, a total covers what is needed/ }));
     expect(screen.queryByRole("group", { name: "Add a rule" })).toBeNull();
     const blocks = await screen.findByTestId("rule-blocks");

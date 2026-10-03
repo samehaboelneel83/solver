@@ -427,46 +427,46 @@ UX sub-scores, R2 → R3: orientation 88 → 89, finding features 75 → 77, wor
   (four of five), weighted goals described by their unweighted values (P3, P4, P5).
 
 ### Gaps found in round 3 (R3a–R3h)
-- [ ] **R3a Safe defaults (wrong answers labelled best).** The minimum-distance template fills in
+- [x] **R3a Safe defaults (wrong answers labelled best).** The minimum-distance template fills in
       10,000 km and shows "Complete" (P1); "Make these preferences" sets a penalty of 100, which gave a
       plan opening nothing (P1). A default that changes the answer should be asked for, not guessed.
-- [ ] **R3b What-ifs on whole data values and reach.** Scaling a whole data value needs keys picked and
+- [x] **R3b What-ifs on whole data values and reach** (the rows say “Scale all of” and “Set one value of”; a value given with no keys points to scaling). Scaling a whole data value needs keys picked and
       fails with "Choose data, its keys and a number" (P1); remaking "within" from scaled travel times
       was not found (P1).
-- [ ] **R3c Import keeps key columns.** A key of several columns is not kept as fields (P3, P5): joins
+- [x] **R3c Import keeps key columns** (each part of a key is also a field; a values upload names its value column). A key of several columns is not kept as fields (P3, P5): joins
       on them and a "month" input to a forecast were lost. Join on the other table's key (P1).
-- [ ] **R3d Explore: charts and colour by field.** A histogram / bar chart of a field, and the map
+- [x] **R3d Explore: charts and colour by field** (counts per value, the map coloured by a number field, a link to them at the top). A histogram / bar chart of a field, and the map
       coloured by a field (underserved districts, P2; flows by volume, P3).
-- [ ] **R3e Draft from words reads data and words better.** Units in the words (kEGP, mEGP), negation
+- [x] **R3e Draft from words reads data and words better** (kEGP, never chosen, minutes vs. 0/1, the named weight, places counted, yield × price − cost). Units in the words (kEGP, mEGP), negation
       ("never", "not"), 0/1 data vs. minutes, the weight the words name (incidents vs. population),
       products of fields (yield × price − cost); the traffic recipe and its form link (P3).
-- [ ] **R3f Comparing fields of two kinds.** `salinity[p] <= tolerance[c]` as a 0/1 condition or a rule
+- [x] **R3f Comparing fields of two kinds** (0/1 data by <, ≤, >, ≥, “is one of a list”, “lists”). `salinity[p] <= tolerance[c]` as a 0/1 condition or a rule
       over parcel × crop (P4); 0/1 data from a list field ("LOAM;CLAY", P4).
-- [ ] **R3g Goals in both directions.** A goal that is minimised inside a maximise model without a
+- [x] **R3g Goals in both directions** (each goal: more or less is better; the trade-off view is still to do). A goal that is minimised inside a maximise model without a
       negative weight, and a trade-off view (P4).
-- [ ] **R3h Features not found.** Earlier values as forecast inputs (P2: "cannot"), route rules (P5:
+- [x] **R3h Features not found** (a Vehicle routes recipe; earlier values said in the training form; several inputs from each crop). Earlier values as forecast inputs (P2: "cannot"), route rules (P5:
       "under Expert" but not found), predictions per parcel × crop (P4).
 
 ### Bugs from round 3
-- [ ] Draft saves return HTTP 409 (all five), with nothing shown; edits kept.
-- [ ] The analytics banner shows on every page again (P1, P2, P3, P5).
-- [ ] Discard in the model editor does not discard the saved draft (P1).
-- [ ] A scenario keeps describing a rule's old number after it is fixed (P1).
-- [ ] The goal breakdown shows a weighted goal's unweighted value (P4, P5); the PDF drops the weight.
-- [ ] Run headlines describe weighted goals wrongly ("the total of benefit and cost", P3).
-- [ ] Run compare reads in reverse and lists codes instead of names (P2, P5).
-- [ ] Link-by-code always says "20 not linked" (P3).
-- [ ] A rejected equation reverts to "0 <= 0", losing the typed text (P3).
-- [ ] A new goal opens in boxes with equations chosen; blank rules linger (P5).
-- [ ] A values upload silently took the first number column as the value (P5).
-- [ ] The links page undercounts ("500" for 1,584 links, P5).
-- [ ] Re-import says every row is new, then updates them all (P4).
-- [ ] "One yes/no field per value" fails above 12 values (HTTP 422, P4) and gives no feedback (P3).
-- [ ] A duplicate scenario name is a bare HTTP 409 (P4).
-- [ ] Link names must be unique across the workspace (P2).
-- [ ] Problem words carry over into a new problem in the same workspace (P3).
-- [ ] A stale "Camps" tab on a workspace's map data page (P2); the data-value grid cuts numbers (P2).
-- [ ] Record keys sort as text, 1, 10, 100 (P1).
+- [x] Draft saves return HTTP 409 (all five), with nothing shown; edits kept.
+- [x] The analytics banner shows on every page again (P1, P2, P3, P5).
+- [x] Discard in the model editor does not discard the saved draft (P1).
+- [x] A scenario keeps describing a rule's old number after it is fixed (P1).
+- [x] The goal breakdown shows a weighted goal's unweighted value (P4, P5); the PDF drops the weight.
+- [x] Run headlines describe weighted goals wrongly ("the total of benefit and cost", P3).
+- [x] Run compare reads in reverse and lists codes instead of names (P2, P5).
+- [x] Link-by-code always says "20 not linked" (P3).
+- [x] A rejected equation reverts to "0 <= 0", losing the typed text (P3).
+- [x] A new goal opens in boxes with equations chosen; blank rules linger (P5).
+- [x] A values upload silently took the first number column as the value (P5).
+- [x] The links page undercounts ("500" for 1,584 links, P5).
+- [x] Re-import says every row is new, then updates them all (P4).
+- [x] "One yes/no field per value" fails above 12 values (HTTP 422, P4) and gives no feedback (P3).
+- [x] A duplicate scenario name is a bare HTTP 409 (P4).
+- [x] Link names must be unique across the workspace (P2).
+- [x] Problem words carry over into a new problem in the same workspace (P3).
+- [x] A stale "Camps" tab on a workspace's map data page (P2); the data-value grid cuts numbers (P2).
+- [x] Record keys sort as text, 1, 10, 100 (P1).
 - [ ] Test harness: the brief puts `/tmp/claude-0` first on the import path, so one tester loaded
       another's script; use a per-tester folder next round.
 

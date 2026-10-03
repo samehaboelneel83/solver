@@ -443,6 +443,10 @@ class Over(BaseModel):
     kind: str = Field(pattern=_NAME, max_length=63)
     feature: str = Field(max_length=63)
     field: str = Field(default="key", max_length=63)
+    #: More inputs from each period's own record (benchmark round 3: a yield model per parcel and crop
+    #: read the crop's base yield and its yes/no "is it wheat" inputs, and only one could be fed):
+    #: input -> a field of the record, `key`, or `key=wheat` (1 for that record, else 0).
+    more: dict[str, str] = Field(default_factory=dict, max_length=64)
 
 
 class ApplyBody(BaseModel):
@@ -492,6 +496,8 @@ def apply_predictor(
         raise HTTPException(422, f"{row['name']} has no input {unknown[0]!r}; its inputs are {', '.join(features)}")
     if body.over is not None and body.over.feature not in features:
         raise HTTPException(422, f"{row['name']} has no input {body.over.feature!r} for the periods to feed")
+    if body.over is not None and (odd := [f for f in body.over.more if f not in features]):
+        raise HTTPException(422, f"{row['name']} has no input {odd[0]!r}; its inputs are {', '.join(features)}")
     lag = source.get("lags")
     lag_at = {lagging.name(lag["field"], k): i for i, k in enumerate(lag["steps"])} if lag else {}
     if lag and body.over is not None:
@@ -574,6 +580,7 @@ def _apply_over(db: Session, user: UserAccount, identity: int, row: Any, body: A
     if existing is not None and list(existing["index_type_ids"]) != [type_id, period_type]:
         raise HTTPException(409, f"there is already a data value {body.field!r} over other kinds; choose another name")
     source = {"kind": "predicted", "predictor": row["name"], "over": over.kind, "feature": over.feature,
+              **({"more": over.more} if over.more else {}),
               **({"inputs": body.inputs} if body.inputs else {})}
     if existing is None:
         parameter_id = db.execute(text(
@@ -586,17 +593,23 @@ def _apply_over(db: Session, user: UserAccount, identity: int, row: Any, body: A
         db.execute(text("DELETE FROM parameter_value WHERE parameter_def_id = :p"), {"p": parameter_id})
     model = row["model"]
     written, skipped = 0, []
+    def number(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def fed(spec: str, period_key: str, period_attrs: dict[str, Any]) -> float | None:
+        if spec.startswith("key="):
+            return 1.0 if str(period_key).strip().casefold() == spec[4:].strip().casefold() else 0.0
+        return number(period_key if spec == "key" else period_attrs.get(spec))
+
+    from_period = {over.feature: over.field, **over.more}
     for entity_id, key, attrs in records:
         attrs = dict(attrs or {})
-        base = [value_of(attrs, f) for f in features]
-        at = features.index(over.feature)
+        base = {f: value_of(attrs, f) for f in features if f not in from_period}
         for period_id, period_key, period_attrs in periods:
-            fed = period_key if over.field == "key" else (period_attrs or {}).get(over.field)
-            try:
-                fed = float(fed)
-            except (TypeError, ValueError):
-                fed = None
-            values = [*base[:at], fed, *base[at + 1:]]
+            values = [fed(from_period[f], period_key, dict(period_attrs or {})) if f in from_period else base[f] for f in features]
             if not all(training._number(v) for v in values):
                 skipped.append(f"{key} · {period_key}")
                 continue

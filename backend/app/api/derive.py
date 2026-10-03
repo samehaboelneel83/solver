@@ -363,7 +363,10 @@ class DeriveValueBody(BaseModel):
     - `lookup`: `name[kind, ...]` = `source[kind's link, ...]` -- a parcel's suitability for each crop,
       read through the parcel's soil from `suitability[soil, crop]`;
     - `compare`: `name[kind, other]` = 1 where the kind's `field` is (`=`) or is not (`!=`) the other
-      record -- its key, or its `against` field -- else 0: `rotation_ok[parcel, crop]`.
+      record -- its key, or its `against` field -- else 0: `rotation_ok[parcel, crop]`. Numbers compare
+      too (`<`, `<=`, `>`, `>=`: a parcel's salinity at most the crop's tolerance), and a list field
+      ("LOAM;CLAY") holds a value (`in`: the parcel's soil is one the crop takes; `has`: the other
+      way) -- benchmark round 3.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -377,9 +380,31 @@ class DeriveValueBody(BaseModel):
     #: compare: the other kind, what of it is compared, and how.
     other: str | None = Field(default=None, pattern=_NAME, max_length=63)
     against: str = Field(default="key", max_length=63)
-    compare: Literal["=", "!="] = "="
+    compare: Literal["=", "!=", "<", "<=", ">", ">=", "in", "has"] = "="
 
 MAX_CELLS = 200_000
+
+
+def _listed(value: Any) -> set[str]:
+    """A list field's items: "LOAM; clay, Sand" -> {"loam", "clay", "sand"}."""
+    return {v.strip().casefold() for v in re.split(r"[;,|/]", str(value)) if v.strip()}
+
+
+def _holds(mine: Any, compare: str, theirs: Any) -> bool:
+    """Whether `mine compare theirs`; a missing value holds nothing."""
+    if mine is None or theirs is None or mine == "" or theirs == "":
+        return compare == "!=" and not (mine in (None, "") and theirs in (None, ""))
+    if compare in ("=", "!="):
+        return (str(mine).strip().casefold() == str(theirs).strip().casefold()) == (compare == "=")
+    if compare == "in":
+        return str(mine).strip().casefold() in _listed(theirs)
+    if compare == "has":
+        return str(theirs).strip().casefold() in _listed(mine)
+    try:
+        a, b = float(mine), float(theirs)
+    except (TypeError, ValueError):
+        return False
+    return {"<": a < b, "<=": a <= b, ">": a > b, ">=": a >= b}[compare]
 
 
 @router.post("/domains/{domain_id}/derive-value", status_code=201)
@@ -461,8 +486,7 @@ def derive_value(domain_id: int, body: DeriveValueBody, db: Session = Depends(ge
             mine_value = (attrs or {}).get(body.field)
             for other_id, other_key, other_attrs in others:
                 theirs = other_key if body.against == "key" else (other_attrs or {}).get(body.against)
-                same = mine_value is not None and str(mine_value).strip().casefold() == str(theirs).strip().casefold()
-                cells.append(([entity_id, other_id], 1.0 if same == (body.compare == "=") else 0.0))
+                cells.append(([entity_id, other_id], 1.0 if _holds(mine_value, body.compare, theirs) else 0.0))
         how = {"op": "compare", "field": body.field, "other": body.other, "against": body.against, "compare": body.compare}
     if len(cells) > MAX_CELLS:
         raise HTTPException(422, f"{len(cells):,} cells is more than {MAX_CELLS:,}")

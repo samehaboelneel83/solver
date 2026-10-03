@@ -229,17 +229,23 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
     (all.find((k) => k.id === a.target_type_id)?.attributes ?? []).filter((b) => b.data_type === "number" || b.data_type === "integer")
       .map((b) => `${a.name}.${b.name}`));
   const sourceOf = (f: string) => inputs[f] ?? (fields.includes(f) ? f : "");
+  // With one per crop (period), an input may also come from each crop: its fields, or 1 for one crop
+  // (benchmark round 3: a yield model's crop inputs could not all be fed).
+  const overFields = ((all.find((k) => k.name === overKind)?.attributes) ?? []).filter((a) => a.data_type === "number" || a.data_type === "integer").map((a) => a.name);
   const body = (): ApplyPredictorBody => {
     const mapped: Record<string, string | number> = {};
+    const more: Record<string, string> = {};
     for (const f of features) {
       if (overKind && f === overFeature) continue;
       const from = sourceOf(f);
       if (from === "#") { const n = Number(numbers[f]); if (Number.isFinite(n)) mapped[f] = n; }
+      else if (overKind && from === "over:is") { if (numbers[f]?.trim()) more[f] = `key=${numbers[f].trim()}`; }
+      else if (overKind && from.startsWith("over:")) more[f] = from.slice(5);
       else if (from && from !== f) mapped[f] = from;
     }
     return { field, only_missing: onlyMissing && !overKind && forKind === trainedOn,
       ...(forKind !== trainedOn ? { entity_type: forKind } : {}), ...(Object.keys(mapped).length ? { inputs: mapped } : {}),
-      ...(overKind && overFeature ? { over: { kind: overKind, feature: overFeature } } : {}) };
+      ...(overKind && overFeature ? { over: { kind: overKind, feature: overFeature, ...(Object.keys(more).length ? { more } : {}) } } : {}) };
   };
   const select = "rounded border border-slate-300 px-1 py-0.5 font-mono text-xs";
   return (
@@ -291,9 +297,15 @@ function KeepPredictions({ predictor }: { predictor: Predictor }) {
                 <option value="">choose…</option>
                 {fields.map((n) => <option key={n} value={n}>{n}</option>)}
                 {through.map((n) => <option key={n} value={n}>{n}</option>)}
+                {overKind && overFields.map((n) => <option key={`over-${n}`} value={`over:${n}`}>each {overKind}&apos;s {n}</option>)}
+                {overKind && <option value="over:is">1 for one {overKind}, else 0…</option>}
                 <option value="#">a number…</option>
               </select>
             </label>
+            {sourceOf(f) === "over:is" && (
+              <input aria-label={`${f} is 1 for`} placeholder={`${overKind} key`} className="ml-1 w-24 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                value={numbers[f] ?? ""} onChange={(e) => setNumbers({ ...numbers, [f]: e.target.value })} />
+            )}
             {sourceOf(f) === "#" && (
               <input aria-label={`${f} held at`} inputMode="decimal" className="ml-1 w-16 rounded border border-slate-300 px-1 py-0.5 text-xs"
                 value={numbers[f] ?? ""} onChange={(e) => setNumbers({ ...numbers, [f]: e.target.value })} />
@@ -387,6 +399,7 @@ function TrainForm({ domainId }: { domainId: number }) {
       <p className="text-sm text-slate-600">
         Learns one attribute of a record type from its numeric ones, with a held-out fifth of the records to say how well it predicts.
         A yes-or-no model learns an attribute with two values and predicts the chance of one of them.
+        Earlier values (yesterday&apos;s, last week&apos;s) are inputs too: choose what to predict, then “Earlier …” under the inputs.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">Name of the model

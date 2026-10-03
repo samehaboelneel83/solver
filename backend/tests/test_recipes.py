@@ -109,3 +109,16 @@ def test_inventory_orders_ahead_within_the_order_limit_and_storage_and_counts_lo
     # Room for 9: a's 1 and 4 of b (size 2) are held over; b is 1 short: 163 + (19 + 4 + 50) = 236.
     data["sets"]["depot"] = [{"id": "d", "capacity": 9}]
     assert round(float(_solve("recipe_inventory", data).objective), 6) == 236
+
+
+def test_routes_visit_every_stop_from_each_vehicles_own_depot_within_its_load():
+    """Benchmark round 3: route rules were 'under Expert' and not found."""
+    at = {"north": 0.0, "n1": 1.0, "n2": 2.0, "south": 10.0, "s1": 11.0, "s2": 12.5}
+    data = {
+        "sets": {"vehicle": [{"id": "t_north", "capacity": 10, "home": "north"}, {"id": "t_south", "capacity": 10, "home": "south"}],
+                 "stop": [{"id": k, "demand": 0 if k in ("north", "south") else 1} for k in at]},
+        "parameters": {"travel": [{"0": a, "1": b, "value": abs(at[a] - at[b])} for a in at for b in at]},
+        "parameter_defaults": {"travel": 0},
+    }
+    # Each truck out to its own two stops and back: 2 x 2 + 2 x 2.5 = 9.
+    assert round(float(_solve("recipe_routes", data).objective), 6) == 9

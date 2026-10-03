@@ -445,3 +445,45 @@ export function applyInventory(draft: FormDraft, r: InventoryRecipe): FormDraft 
     objective: { sense: "minimize", mode: "weighted", terms },
   };
 }
+
+// --- vehicle routes -----------------------------------------------------------------------------
+
+export type RouteRecipe = {
+  /** Who drives (trucks) and where they go (stops, the depots among them). */
+  vehicles: string;
+  stops: string;
+  /** Data over two stops: the distance or time from one to the next. */
+  travel: string;
+  /** Where every vehicle starts and ends: one stop for all, a field of each vehicle naming its own, or a
+   * relationship linking each vehicle to its own (placed there by an earlier plan). */
+  depot: { one: string } | { field: string } | { link: string };
+  /** A number field of a stop (what is dropped there) and of a vehicle (what it carries). */
+  load?: { demand: string; capacity: string };
+};
+
+/**
+ * Every stop but the depots visited once, by vehicles that leave their depot and come back, each
+ * within what it carries, for the least travel (benchmark round 3: route rules were "under Expert",
+ * and not found there without a decision to build them on).
+ */
+export function applyRoutes(draft: FormDraft, r: RouteRecipe): FormDraft {
+  const name = namer(draft);
+  const visit = name("visit");
+  const t = "v", i = "i", j = "j";
+  const home = "one" in r.depot ? { depot: r.depot.one } : "field" in r.depot ? { depot_of: r.depot.field } : { depot_by: r.depot.link };
+  const constraints: Constraint[] = [...draft.constraints, {
+    id: name("routes"), note: `every ${say(r.stops)} is visited once, by a ${say(r.vehicles)} from its depot and back`,
+    route: { visit: { var: visit, index: [t, i, j] }, vehicles: { index: t, set: r.vehicles }, stops: { index: i, set: r.stops },
+      ...home, ...(r.load ? { demand: r.load.demand, capacity: r.load.capacity } : {}) },
+    severity: "hard",
+  } as Constraint];
+  return {
+    ...draft,
+    sets: [...new Set([...draft.sets, r.vehicles, r.stops])],
+    parameters: { ...draft.parameters, [r.travel]: draft.parameters[r.travel] ?? { index: [r.stops, r.stops] } },
+    variables: { ...draft.variables, [visit]: { index: [r.vehicles, r.stops, r.stops], domain: "binary" } } as Variables,
+    constraints,
+    objective: { sense: "minimize", mode: "weighted", terms: [{ id: name("travel"), weight: 1,
+      expression: sum(mul({ par: r.travel, index: [i, j] } as Term, v(visit, [t, i, j])), [t, r.vehicles], [i, r.stops], [j, r.stops]) } as ObjectiveTerm] },
+  };
+}

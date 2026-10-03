@@ -239,3 +239,31 @@ def test_yes_no_fields_merge_spellings_and_put_the_rarest_values_together(tenant
     assert done.json()["notes"] == ["4 rarer values of crop share crop_other"]
     items = {e["key"]: e["attrs"] for e in http.get("/api/v1/entities", params={"entity_type_id": obs["id"], "limit": 100}, headers=h).json()["items"]}
     assert items["r1"]["crop_wheat"] == 1 and items[f"r{len(crops) - 1}"]["crop_other"] == 1
+
+
+def test_two_kinds_compare_numbers_and_list_fields(tenants, db):  # noqa: F811
+    """Benchmark round 3: 'parcel salinity at most the crop's tolerance' and a soil list 'LOAM;CLAY'."""
+    http, h, domain = TestClient(app), tenants["a"], tenants["domain_a"]
+
+    def post(path, body):
+        got = http.post(path, json=body, headers=h)
+        assert got.status_code in (200, 201), got.text
+        return got.json()
+
+    parcel = post("/api/v1/entity-types", {"domain_id": domain, "name": "plot", "role": "location"})
+    crop = post("/api/v1/entity-types", {"domain_id": domain, "name": "plant", "role": "resource"})
+    for kind, field, kind_of in ((parcel, "salinity", "number"), (parcel, "soil", "text"), (crop, "tolerance", "number"), (crop, "soils", "text")):
+        post(f"/api/v1/entity-types/{kind['id']}/attributes", {"name": field, "data_type": kind_of})
+    ids = {}
+    for kind, key, attrs in ((parcel, "p1", {"salinity": 4, "soil": "Loam"}), (parcel, "p2", {"salinity": 9, "soil": "sand"}),
+                             (crop, "wheat", {"tolerance": 6, "soils": "LOAM; CLAY"}), (crop, "barley", {"tolerance": 10, "soils": "sand,loam"})):
+        ids[key] = post("/api/v1/entities", {"entity_type_id": kind["id"], "key": key, "attrs": attrs})["id"]
+
+    def made(name, field, against, compare):
+        done = post(f"/api/v1/domains/{domain}/derive-value",
+                    {"op": "compare", "name": name, "kind": "plot", "field": field, "other": "plant", "against": against, "compare": compare})
+        cells = http.get(f"/api/v1/parameters/{done['parameter_id']}/values", headers=h).json()["cells"]
+        return {(c["entity_ids"][0], c["entity_ids"][1]) for c in cells if c["value"] == 1}
+
+    assert made("salt_ok", "salinity", "tolerance", "<=") == {(ids["p1"], ids["wheat"]), (ids["p1"], ids["barley"]), (ids["p2"], ids["barley"])}
+    assert made("soil_ok", "soil", "soils", "in") == {(ids["p1"], ids["wheat"]), (ids["p1"], ids["barley"]), (ids["p2"], ids["barley"])}

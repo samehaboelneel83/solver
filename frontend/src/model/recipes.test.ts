@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, applyInventory, applyNetwork, applyRoutes, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
 import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 
@@ -92,6 +92,14 @@ describe("more recipes (benchmark, October 2026)", () => {
     });
     expect(d.objective.terms.map((x) => x.id)).toEqual(["ordering_cost", "holding_cost", "lost_sales"]);
     made.inventory = ir(d);
+  });
+
+  it("routes vehicles from their own depots to every stop within their load (benchmark round 3)", () => {
+    const d = applyRoutes(empty, { vehicles: "vehicle", stops: "stop", travel: "travel", depot: { field: "home" }, load: { demand: "demand", capacity: "capacity" } });
+    expect(checkIrShape(ir(d))).toBeNull();
+    expect(d.constraints[0]).toMatchObject({ id: "routes", route: { visit: { var: "visit", index: ["v", "i", "j"] }, depot_of: "home", demand: "demand" } });
+    expect(d.variables.visit).toMatchObject({ index: ["vehicle", "stop", "stop"], domain: "binary" });
+    made.routes = ir(d);
     if (process.env.RECIPES_OUT) writeFileSync(process.env.RECIPES_OUT, JSON.stringify(made, null, 1));
   });
 

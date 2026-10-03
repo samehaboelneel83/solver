@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { FormDraft } from "./draftIr";
-import { applyAllocation, applyFlow, applyInventory, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyFlow, applyInventory, applyRoutes, endsOf, type Link, applyNetwork, applyPhasing, applySelection } from "./recipes";
 
 type Kind = { name: string; attributes: { name: string; data_type: string }[] };
 type Data = { name: string; index: string[] };
-type Which = "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory";
+type Which = "selection" | "network" | "phasing" | "allocation" | "flow" | "inventory" | "routes";
 
 const SELECT = "ml-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm";
 const numbers = (kind: Kind | undefined) =>
@@ -31,7 +31,7 @@ function Row({ children }: { children: ReactNode }) {
 
 /**
  * More recipes (benchmark, October 2026): projects within a budget, a supply network, projects
- * phased over periods, land among crops, traffic over roads, stock over periods -- each writes its
+ * phased over periods, land among crops, traffic over roads, stock over periods, vehicle routes -- each writes its
  * decisions, rules and goals into the draft.
  */
 export default function RecipesForm({ kinds, data, links = [], onApply }: {
@@ -194,6 +194,50 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         </Row>
       </>
     );
+  } else if (which === "routes") {
+    // Vehicle routes (benchmark round 3: route rules were "under Expert" and not found).
+    const travel = data.filter((d) => f.stops && d.index.length === 2 && d.index[0] === f.stops && d.index[1] === f.stops);
+    const chosenTravel = travel.find((d) => d.name === f.travel) ?? travel[0];
+    const vehicle = kind("vehicles");
+    const fieldsOf = (k: Kind | undefined) => (k?.attributes ?? []).filter((a) => ["text", "enum", "reference"].includes(a.data_type)).map((a) => a.name);
+    const placements = links.filter((l) => (l.from === f.vehicles && l.to === f.stops) || (l.from === f.stops && l.to === f.vehicles)).map((l) => l.name);
+    const how = f.how || "one";
+    const depot = how === "one" ? (f.depot ? { one: f.depot } : null) : how === "field" ? (f.home ? { field: f.home } : null) : (f.link ? { link: f.link } : null);
+    ready = !!(f.vehicles && f.stops && f.vehicles !== f.stops && chosenTravel && depot);
+    apply = (d) => applyRoutes(d, { vehicles: f.vehicles, stops: f.stops, travel: chosenTravel!.name, depot: depot!,
+      ...(f.demand && f.capacity ? { load: { demand: f.demand, capacity: f.capacity } } : {}) });
+    body = (
+      <>
+        <Row>
+          <Pick label="Vehicles" value={get("vehicles")} onChange={set("vehicles")} options={names} />
+          <Pick label="Visit" value={get("stops")} onChange={set("stops")} options={names} />
+          <Pick label="Distance or time between stops" value={chosenTravel?.name ?? ""} onChange={set("travel")} options={travel.map((d) => d.name)} />
+        </Row>
+        {f.stops && travel.length === 0 && (
+          <p className="text-xs text-amber-800">No data value is indexed by {f.stops} twice: make the distances or travel times between them first (Data values → Compute from the map).</p>
+        )}
+        <Row>
+          <label className="text-xs text-slate-700">Each starts and ends
+            <select aria-label="Where vehicles start" className={SELECT} value={how} onChange={(e) => set("how")(e.target.value)}>
+              <option value="one">at one depot</option>
+              <option value="field">at its own, named by a field</option>
+              <option value="link">where it is linked</option>
+            </select>
+          </label>
+          {how === "one" && (
+            <label className="text-xs text-slate-700">the depot ({f.stops || "stop"} key)
+              <input aria-label="Depot" className={`${SELECT} w-28`} value={get("depot")} onChange={(e) => set("depot")(e.target.value)} />
+            </label>
+          )}
+          {how === "field" && <Pick label="The field" value={get("home")} onChange={set("home")} options={fieldsOf(vehicle)} />}
+          {how === "link" && <Pick label="The link" value={get("link")} onChange={set("link")} options={placements} />}
+        </Row>
+        <Row>
+          <Pick label="Each stop needs" value={get("demand")} onChange={set("demand")} options={numbers(kind("stops"))} optional />
+          <Pick label="Each vehicle carries" value={get("capacity")} onChange={set("capacity")} options={numbers(vehicle)} optional />
+        </Row>
+      </>
+    );
   } else if (which === "network") {
     const costs = data.filter((d) => d.index.length === 2 && f.sources && f.customers && d.index.includes(f.sources) && d.index.includes(f.customers));
     const unit = costs.find((d) => d.name === f.unitCost) ?? costs[0];
@@ -255,7 +299,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
   return (
     <details className="mb-6 rounded-md border border-sky-200 bg-sky-50 p-3">
       <summary className="cursor-pointer text-sm font-semibold text-sky-900">
-        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads, stock over periods
+        More recipes: projects within a budget, a supply network, projects over years, land among crops, traffic over roads, stock over periods, vehicle routes
       </summary>
       <form aria-label="More recipes" className="mt-3 space-y-3 text-sm text-slate-800"
         onSubmit={(e) => {
@@ -267,7 +311,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
         <div role="radiogroup" aria-label="Recipe" className="flex flex-wrap gap-3 text-xs">
           {([["selection", "Choose projects within a budget"], ["network", "Supply network: open, ship, fleet"],
             ["phasing", "Phase projects over periods"], ["allocation", "Share land among crops"],
-            ["flow", "Traffic: trips over the roads"], ["inventory", "Stock: order each period"]] as [Which, string][]).map(([w, words]) => (
+            ["flow", "Traffic: trips over the roads"], ["inventory", "Stock: order each period"], ["routes", "Vehicle routes"]] as [Which, string][]).map(([w, words]) => (
             <label key={w}><input type="radio" checked={which === w} onChange={() => { setWhich(w); setF({}); setDone(null); }} /> {words}</label>
           ))}
         </div>
