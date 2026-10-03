@@ -54,7 +54,8 @@ def test_the_exports_say_what_the_goal_is_made_of():
 
     made = {"sense": "minimize", "mode": "weighted", "terms": [
         {"id": "shipping_cost", "weight": 1, "value": 70, "contribution": 70, "share": 0.4268, "records": [{"kind": "depot", "key": "south", "value": 70}]},
-        {"id": "opening_cost", "weight": 1, "value": 80, "contribution": 80, "share": 0.4878, "records": [{"kind": "depot", "key": "south", "value": 80}]}]}
+        {"id": "opening_cost", "weight": 1, "value": 80, "contribution": 80, "share": 0.4878, "records": [{"kind": "depot", "key": "south", "value": 80}]},
+        {"id": "shortage", "weight": 600, "value": 0.02, "contribution": 12, "share": 0.0732, "records": []}]}
     rec = {"id": 8, "problem": "p", "scenario": "Base", "status": "optimal", "solver": "highs", "finished_at": datetime(2026, 10, 1),
            "params": {"objective_breakdown": made}, "objective": 150, "error": None, "ir": {},
            "data": {"sets": {"depot": [{"id": "south", "label": "South depot"}]}}, "assignments": None, "amounts": None, "results": []}
@@ -62,7 +63,10 @@ def test_the_exports_say_what_the_goal_is_made_of():
     assert "What the goal is made of" in html and "opening cost" in html and "48.8%" in html and "South depot 80" in html
     sheet = load_workbook(BytesIO(to_xlsx(rec)))["Goal"]
     rows = [list(r) for r in sheet.iter_rows(values_only=True)]
-    assert rows[1][:4] == ["shipping_cost", 1, 70, 0.4268] and rows[2][4:] == ["depot", "south", 70]
+    assert rows[1][:5] == ["shipping_cost", 1, 70, 70, 0.4268] and rows[2][5:] == ["depot", "south", 70]
+    # A weighted term says its weight and what it counts in the goal (benchmark round 3).
+    assert ["shortage", 600, 0.02, 12, 0.0732] in [r[:5] for r in rows]
+    assert "shortage × 600</td><td>0.02</td><td>12</td>" in html
 
 
 def test_report_numbers_are_written_as_people_read_them():

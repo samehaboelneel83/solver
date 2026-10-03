@@ -211,7 +211,11 @@ describe("chosen ones apart (benchmark, October 2026)", () => {
       variables: { open: { index: ["base"], domain: "binary" } }, parameters: { dist_km: { index: ["base", "base"] } },
     } as never;
     expect(RULE_SHAPES.find((s) => s.shape === "apart")!.needs(context)).toBeNull();
-    const rule = ruleFromShape("apart", "c_apart", context);
-    expect(printRule(rule)).toBe("for each b in base, b2 in base where b2 > b: 10000 * open[b] + 10000 * open[b2] - 10000 <= dist_km[b, b2]");
+    // The distance is asked for, never guessed (benchmark round 3: 10,000 km allowed one base only).
+    expect(RULE_SHAPES.find((s) => s.shape === "apart")!.asks!(context)).toEqual({ label: "At least how far apart", par: "dist_km" });
+    expect(() => ruleFromShape("apart", "c_apart", context)).toThrow(/a distance above 0/);
+    const rule = ruleFromShape("apart", "c_apart", context, 30);
+    expect(printRule(rule)).toBe("for each b in base, b2 in base where b2 > b: 30 * open[b] + 30 * open[b2] - 30 <= dist_km[b, b2]");
+    expect(rule.note).toBe("two chosen base items are at least 30 apart in dist_km");
   });
 });

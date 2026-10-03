@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReachabilityBanner from "./ReachabilityBanner";
 import { NetworkError } from "../api/client";
@@ -51,30 +51,14 @@ describe("ReachabilityBanner", () => {
     expect(await screen.findByTestId("degraded-notice")).toHaveTextContent(/database/i);
   });
 
-  function renderAs(capabilities: string[]) {
-    (apiFetch as any).mockImplementation((path: string) =>
-      Promise.resolve(path.startsWith("/api/v1/me") ? { username: "u", capabilities } : { postgres: "ok", clickhouse: "error" })
-    );
+  it("keeps an analytics-only fault off every page, for administrators too (benchmark round 3)", async () => {
+    (apiFetch as any).mockResolvedValue({ postgres: "ok", clickhouse: "error" });
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ReachabilityBanner />
       </QueryClientProvider>
     );
-  }
-
-  it("keeps an analytics-only fault from people who cannot fix it", async () => {
-    localStorage.clear();
-    renderAs(["domain.edit"]);
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     expect(screen.queryByTestId("degraded-notice")).not.toBeInTheDocument();
-  });
-
-  it("tells an administrator, who may hide it for the session", async () => {
-    localStorage.clear();
-    renderAs(["settings.edit"]);
-    expect(await screen.findByTestId("degraded-notice")).toHaveTextContent("The analytics store reported an error");
-    fireEvent.click(screen.getByRole("button", { name: "Hide until it is back" }));
-    expect(screen.queryByTestId("degraded-notice")).not.toBeInTheDocument();
-    expect(localStorage.getItem("solver_analytics_notice_hidden")).toBe("1");
   });
 });

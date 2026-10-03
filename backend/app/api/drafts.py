@@ -225,6 +225,12 @@ def save_draft(
             response.status_code = 201
         else:
             if payload.expected_revision != current["revision"]:
+                if current["ir"] == payload.ir and current["base_version_id"] == payload.base_version_id:
+                    # Nothing of anyone's is lost: the server already holds this very model -- a save
+                    # repeated after its answer was missed. The copy is returned as it is, not refused
+                    # (benchmark round 3: a 409 in the network log on every tester's draft saves).
+                    db.rollback()
+                    return DraftRead.model_validate(current)
                 raise stale_record_conflict("draft")
             row = db.execute(
                 text(

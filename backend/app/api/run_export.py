@@ -130,15 +130,15 @@ def to_xlsx(rec: dict[str, Any]) -> bytes:
     if made_of and made_of.get("terms"):
         # What the goal is made of, by term and by record (benchmark, October 2026).
         goal = wb.create_sheet("Goal")
-        goal.append(["Goal term", "Weight", "Value", "Share", "Kind", "Record", "Record's part"])
+        goal.append(["Goal term", "Weight", "Its value", "In the goal", "Share", "Kind", "Record", "Record's part"])
         for cell in goal[1]:
             cell.font = Font(bold=True)
         for t in made_of["terms"]:
-            goal.append([t["id"], t["weight"], t["value"], t["share"]])
+            goal.append([t["id"], t["weight"], t["value"], t.get("contribution", t["value"]), t["share"]])
             for r in t.get("records") or []:
-                goal.append([t["id"], None, None, None, r["kind"], r["key"], r["value"]])
+                goal.append([t["id"], None, None, None, None, r["kind"], r["key"], r["value"]])
             if t.get("rest"):
-                goal.append([t["id"], None, None, None, None, f"{t['rest']['records']} others", t["rest"]["value"]])
+                goal.append([t["id"], None, None, None, None, None, f"{t['rest']['records']} others", t["rest"]["value"]])
         if made_of.get("soft_rules"):
             goal.append(["soft rules broken", None, made_of["soft_rules"]])
     labels = _labels(rec["data"] or {})
@@ -466,10 +466,12 @@ def to_html(rec: dict[str, Any], *, print_now: bool = False, basemap: tuple[str,
     shown = [t for t in made_of.get("terms") or [] if t.get("id") not in ("stay_close", "preferences")]
     if len(shown) > 1 or (shown and len(shown[0].get("records") or []) > 1):
         rows = "".join(
-            f"<tr><td>{e(t['id'].replace('_', ' '))}</td><td>{_num(t['value'])}</td><td>{t['share'] * 100:.1f}%</td>"
+            # The weight is said, and what the term counts in the goal (benchmark round 3: the PDF dropped "× 600").
+            f"<tr><td>{e(t['id'].replace('_', ' '))}{'' if t['weight'] == 1 else ' × ' + _num(t['weight'])}</td><td>{_num(t['value'])}</td>"
+            f"<td>{_num(t.get('contribution', t['value']))}</td><td>{t['share'] * 100:.1f}%</td>"
             f"<td>{e(', '.join(str((labels.get(r['kind']) or {}).get(r['key'], r['key'])) + ' ' + _num(r['value']) for r in (t.get('records') or [])[:5]))}</td></tr>"
             for t in shown)
-        parts.append("<h2>What the goal is made of</h2><table><tr><th>Goal term</th><th>Value</th><th>Share</th><th>Most of it from</th></tr>"
+        parts.append("<h2>What the goal is made of</h2><table><tr><th>Goal term</th><th>Its value</th><th>In the goal</th><th>Share</th><th>Most of it from</th></tr>"
                      f"{rows}</table>")
     if rec["error"]:
         parts.append(f"<p class=bad>{e(rec['error'])}</p>")

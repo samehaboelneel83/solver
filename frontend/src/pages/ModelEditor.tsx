@@ -61,7 +61,7 @@ import { checkGoal, checkRule, explain } from "../model/blockCheck";
 import { checkDeclaration } from "../model/declarationViews";
 import { StepNav, Stepper, ThingsToFix, useStepByStep, type Fix, type Step, type StepStatus } from "../model/ModelSteps";
 import { ruleSentence, termSentence } from "../model/ruleSentence";
-import { GOAL_SHAPES, goalFromShape, RULE_SHAPES, ruleFromShape, type GoalShape, type RuleShape } from "../model/shapes";
+import { GOAL_SHAPES, goalFromShape, RULE_SHAPES, ruleFromShape, type GoalShape, type RuleShape, type ShapeAsk } from "../model/shapes";
 import { goalEquation, parseGoal, parseRule, ruleEquation, withEquation } from "../model/formula";
 import ProblemPicker from "../components/ProblemPicker";
 import LoadFailure from "../components/LoadFailure";
@@ -307,6 +307,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
   const ruleIds = (draft?.constraints ?? []).map((rule) => rule.id);
   // Rules composed from a shape in this visit, which open in their boxes.
   const [composed, setComposed] = useState<Set<string>>(() => new Set());
+  // A shape whose number changes the answer asks for it first (benchmark round 3).
+  const [asking, setAsking] = useState<{ shape: RuleShape; ask: ShapeAsk } | null>(null);
+  const [askedValue, setAskedValue] = useState("");
   const [blankRules, setBlankRules] = useState<Set<string>>(() => new Set());
   const ruleKeys = useMemo(() => {
     const keys = stableKeys(ruleIdentity.current.ids, ruleIdentity.current.keys, ruleIds);
@@ -575,6 +578,23 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       const target = document.getElementById(kind === "rule" ? `rule-card-${id}` : kind === "goal" ? "objective-editor" : `${kind}-card-${id}`);
       target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
     }, 0);
+  }
+  const units = Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit])) as Record<string, string | null | undefined>;
+  /** A rule from a shape, opened where it is seen; a shape whose number changes the answer asks for it first. */
+  function addShape(shape: RuleShape, asked?: number) {
+    if (!context || !draft) return;
+    const ask = RULE_SHAPES.find((s) => s.shape === shape)?.asks?.(context) ?? null;
+    if (ask && asked === undefined) {
+      setAskedValue("");
+      setAsking({ shape, ask });
+      return;
+    }
+    const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
+    const rule = ruleFromShape(shape, id, context, asked);
+    setAsking(null);
+    setComposed((current) => new Set(current).add(id));
+    setDraft((current) => current && { ...current, constraints: [...current.constraints, rule] });
+    goTo("rule", id);
   }
   const ruleFixes: Fix[] = draft.constraints.flatMap((rule) => checkRule(rule, context).map((problem, i) => ({
     key: `rule-${rule.id}-${i}`, where: `Rule ${rule.id || "(unnamed)"}`, message: explain(problem), go: () => goTo("rule", rule.id),
@@ -857,6 +877,22 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             />
           ))}
         </div>
+        {asking && (
+          <form aria-label="The number this rule needs" className="mt-3 flex flex-wrap items-end gap-2 rounded border border-sky-300 bg-sky-50 p-3 text-sm"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = Number(askedValue.replace(/,/g, ""));
+              if (!(value > 0)) return;
+              addShape(asking.shape, value);
+            }}>
+            <label className="block">{asking.ask.label}, in the unit of {asking.ask.par}{units[asking.ask.par] ? ` (${units[asking.ask.par]})` : ""}
+              <input autoFocus aria-label={asking.ask.label} inputMode="decimal" className="ml-2 w-28 rounded border px-2 py-1"
+                value={askedValue} onChange={(event) => setAskedValue(event.target.value)} />
+            </label>
+            <button type="submit" disabled={!(Number(askedValue.replace(/,/g, "")) > 0)} className="rounded bg-sky-800 px-3 py-1 text-white disabled:opacity-60">Add the rule</button>
+            <button type="button" className="rounded px-2 py-1 underline" onClick={() => setAsking(null)}>Cancel</button>
+          </form>
+        )}
         {simple ? (
           <AddMenu label="Add a rule">
             {(close) => (
@@ -865,11 +901,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
                   <AddChoice key={shape.shape} title={shape.title} disabledReason={shape.needs(context)}
                     hint="Filled in from this model's names; change any part afterwards."
                     onPick={() => {
-                      const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
-                      setComposed((current) => new Set(current).add(id));
-                      setDraft((current) => current && { ...current, constraints: [...current.constraints, ruleFromShape(shape.shape, id, context)] });
                       close();
-                      goTo("rule", id);
+                      addShape(shape.shape);
                     }} />
                 ))}
                 <AddChoice title="A blank rule" hint="Starts as “0 is at most 0”: fill in both sides before publishing."
@@ -928,13 +961,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         <ShapePicker
           label="Start a rule from a shape"
           shapes={RULE_SHAPES.map((s) => ({ value: s.shape, title: s.title, needs: s.needs(context) }))}
-          onPick={(shape) => {
-            const id = freeNumberedId("c_", draft.constraints.map((constraint) => constraint.id));
-            const rule = ruleFromShape(shape as RuleShape, id, context);
-            setComposed((current) => new Set(current).add(id));
-            setDraft((current) => current && { ...current, constraints: [...current.constraints, rule] });
-            goTo("rule", id);
-          }}
+          onPick={(shape) => addShape(shape as RuleShape)}
         />
         {newSchedulingRule("c_", context) !== null && (
           <button

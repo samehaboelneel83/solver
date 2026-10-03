@@ -1422,6 +1422,22 @@ describe("equations as drill-down diagrams", () => {
     expect(await screen.findByTestId("goal-blocks")).toBeInTheDocument();
   });
 
+  it("asks how far apart before writing an apart rule, never guessing it (benchmark round 3)", async () => {
+    stub({ ir: { ...IR_V2, sets: ["day"], parameters: { gap_km: { index: ["day", "day"] } },
+      variables: { open: { index: ["day"], domain: "binary" } }, constraints: [] } });
+    renderPage();
+    await screen.findByLabelText("Start a rule from a shape");
+    fireEvent.change(screen.getByLabelText("Start a rule from a shape"), { target: { value: "apart" } });
+    const ask = await screen.findByRole("form", { name: "The number this rule needs" });
+    expect(screen.queryByTestId("rule-blocks")).toBeNull();
+    expect(within(ask).getByRole("button", { name: "Add the rule" })).toBeDisabled();
+    fireEvent.change(within(ask).getByLabelText("At least how far apart"), { target: { value: "30" } });
+    fireEvent.click(within(ask).getByRole("button", { name: "Add the rule" }));
+    await screen.findByTestId("rule-blocks");
+    expect(screen.getAllByDisplayValue(/at least 30 apart in gap_km/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("form", { name: "The number this rule needs" })).toBeNull();
+  });
+
   it("asks whether a rule's note still fits once the rule is changed (benchmark, October 2026)", async () => {
     renderPage();
     await screen.findByLabelText("Equation for c_cover");

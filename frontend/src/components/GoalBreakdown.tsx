@@ -25,12 +25,14 @@ export default function GoalBreakdown({ breakdown, labels = {} }: { breakdown: B
       <summary className="cursor-pointer text-sm font-semibold text-slate-900">What the goal is made of</summary>
       {breakdown.mode === "lex" && <p className="mt-1 text-xs text-slate-600">Goals in order: each was made as good as it could be before the next.</p>}
       <table className="mt-2 w-full text-left text-sm" aria-label="Goal by term">
-        <thead><tr className="text-xs text-slate-600"><th className="py-1">Goal term</th><th>Value</th><th>Share</th><th>Most of it from</th></tr></thead>
+        <thead><tr className="text-xs text-slate-600"><th className="py-1">Goal term</th><th>Its value</th><th>In the goal</th><th>Share</th><th>Most of it from</th></tr></thead>
         <tbody>
           {terms.map((t) => (
             <tr key={t.id} className="border-t border-slate-100 align-top">
               <td className="py-1 pr-2 font-medium">{words(t.id)}{t.weight !== 1 && <span className="text-xs text-slate-500"> × {show(t.weight)}</span>}</td>
               <td className="pr-2 font-mono">{show(t.value)}</td>
+              {/* Weighted, as it counts in the goal (benchmark round 3: "water use × -0.5" showed only its own total). */}
+              <td className="pr-2 font-mono">{show(t.contribution)}</td>
               <td className="pr-2">
                 <span className="inline-block h-2 rounded bg-blue-500 align-middle" style={{ width: `${Math.max(2, Math.round(t.share * 80))}px` }} />{" "}
                 {Math.round(t.share * 1000) / 10}%
@@ -47,7 +49,7 @@ export default function GoalBreakdown({ breakdown, labels = {} }: { breakdown: B
             </tr>
           ))}
           {breakdown.soft_rules ? (
-            <tr className="border-t border-slate-100"><td className="py-1 font-medium">soft rules broken</td><td className="font-mono">{show(breakdown.soft_rules)}</td><td colSpan={2} /></tr>
+            <tr className="border-t border-slate-100"><td className="py-1 font-medium">soft rules broken</td><td /><td className="font-mono">{show(breakdown.soft_rules)}</td><td colSpan={2} /></tr>
           ) : null}
         </tbody>
       </table>

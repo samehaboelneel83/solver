@@ -973,7 +973,10 @@ export function goalChanges(leftParams: unknown, rightParams: unknown): { id: st
   return [...a.keys()].filter((id) => b.has(id)).map((id) => ({ id, left: a.get(id)!, right: b.get(id)! }));
 }
 
-function Comparison({ left, right }: { left: Id; right: Id }) {
+function Comparison({ left: first, right: second }: { left: Id; right: Id }) {
+  // From the earlier run to the later, whichever was opened first (benchmark round 3: "run 127 → run 105,
+  // overload 6 removed" described going back to the base).
+  const [left, right] = Number(first) <= Number(second) ? [first, second] : [second, first];
   const comparison = useRunComparison(left, right);
   const leftRun = useRun(left);
   const rightRun = useRun(right);
@@ -985,6 +988,10 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
   }
   const data = comparison.data;
   if (!data) return null;
+  // Records by the names the runs knew them by, not their codes (benchmark round 3).
+  const labels = { ...(leftRun.data?.labels ?? {}), ...(rightRun.data?.labels ?? {}) };
+  const named = (variable: string, tuple: string[]) =>
+    naming(labels, rightRun.data?.index_sets?.variables?.[variable] ?? leftRun.data?.index_sets?.variables?.[variable])(tuple).join(" · ");
 
   return (
     <section
@@ -1068,7 +1075,7 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
                   key={`-${tuple.join("\u0001")}`}
                   className="rounded border border-red-200 bg-red-50 px-2 py-1 font-mono text-xs text-red-900"
                 >
-                  &minus; {tuple.join(" · ")}
+                  &minus; {named(variable, tuple)}
                 </li>
               ))}
               {diff.added.map((tuple) => (
@@ -1076,7 +1083,7 @@ function Comparison({ left, right }: { left: Id; right: Id }) {
                   key={`+${tuple.join("\u0001")}`}
                   className="rounded border border-green-200 bg-green-50 px-2 py-1 font-mono text-xs text-green-900"
                 >
-                  + {tuple.join(" · ")}
+                  + {named(variable, tuple)}
                 </li>
               ))}
             </ul>
@@ -1519,6 +1526,8 @@ function Conflict({
   const scenario = useScenario(scenarioId);
   const rules = new Map(((ir?.constraints ?? []) as Constraint[]).map((rule) => [rule.id, rule]));
   const create = useCreateScenario();
+  const [penalty, setPenalty] = useState("");
+  const price = Number(penalty.replace(/,/g, ""));
   const toast = useToast();
   const byRule = new Map<string, string[][]>();
   for (const item of items) {
@@ -1528,9 +1537,11 @@ function Conflict({
   const navigate = useNavigate();
   const { domainId } = useDomain();
   function soften() {
-    if (!scenario.data) return;
+    if (!scenario.data || !(price > 0)) return;
     const patch: Record<string, number> = {};
-    for (const id of byRule.keys()) patch[id] = 100;
+    // What a unit of breaking costs is asked, never guessed (benchmark round 3: a guessed 100 made
+    // "open nothing" the best plan).
+    for (const id of byRule.keys()) patch[id] = price;
     // Keep everything the run's own scenario changed (records left out, data scaled or set):
     // the question is "this what-if, with these rules bent", not the base case bent.
     const base = (scenario.data.patch ?? {}) as Record<string, unknown>;
@@ -1596,16 +1607,22 @@ function Conflict({
       </ul>
       {can("model.publish") && scenario.data && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="text-sm text-amber-950">Breaking one by a unit costs
+            <input aria-label="Breaking one by a unit costs" inputMode="decimal" className="ml-2 w-28 rounded border border-amber-300 px-2 py-1"
+              value={penalty} onChange={(event) => setPenalty(event.target.value)} placeholder="in the goal's units" />
+          </label>
           <button
             type="button"
             onClick={soften}
-            disabled={create.isPending}
+            disabled={create.isPending || !(price > 0)}
             className="rounded-md bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-60"
           >
             {create.isPending ? "Creating…" : "Make these preferences"}
           </button>
-          <span className="text-xs text-amber-900">
-            Creates a scenario with the same what-if changes and these rules bent, and opens it to solve.
+          <span className="w-full text-xs text-amber-900">
+            Creates a scenario with the same what-if changes and these rules bent, and opens it to solve. Choose more
+            than any one choice can save -- more than the dearest site costs to open -- or breaking the rules becomes
+            the cheapest plan.
           </span>
         </div>
       )}

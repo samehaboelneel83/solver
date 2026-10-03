@@ -50,6 +50,13 @@ describe("a plan in plain words", () => {
     expect(planWords({ ...base, status: "running" } as Run, ir)).toBeNull();
   });
 
+  it("says weighted goals as they are combined, not as one total (benchmark round 3)", () => {
+    const mixed = { objective: { sense: "maximize", terms: [{ id: "benefit", weight: 1, expression: { var: "pick", index: [] } },
+      { id: "cost", weight: -0.2, expression: { var: "pick", index: [] } }] } };
+    expect(planWords({ ...base, status: "optimal" } as Run, mixed)?.lines[0])
+      .toBe("The goal, benefit less 0.2 × cost, came to 43.53, as high as it can go.");
+  });
+
   it("says what a goal adds up when its name does not (UX audit C-1: 'Morning came to 0')", () => {
     const lectures = { objective: { sense: "minimize", terms: [{ id: "o_morning",
       expression: { sum: { mul: [{ par: "late", index: ["p"] }, { var: "assign", index: ["s", "p"] }] }, over: [] } }] } };

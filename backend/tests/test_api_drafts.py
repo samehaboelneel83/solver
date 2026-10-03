@@ -74,6 +74,12 @@ def test_saves_advance_the_revision_and_stale_saves_are_refused(client, auth_hea
     assert read["revision"] == 2
     assert "b" in read["ir"]["variables"]
 
+    # A save repeated after its answer was missed holds what the server already has: answered with the
+    # copy as it is, not refused (benchmark round 3: 409s in every tester's network log).
+    again = _save(client, auth_headers, problem_id, _ir("b"), expected=1)
+    assert again.status_code == 200 and again.json()["revision"] == 2
+    assert _save(client, auth_headers, problem_id, _ir("b")).json()["revision"] == 2
+
 
 def test_a_save_after_the_draft_was_published_elsewhere_is_stale(client, auth_headers, problem_id):
     _save(client, auth_headers, problem_id, _ir("a"))

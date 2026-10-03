@@ -15,6 +15,17 @@ it("shows each goal term's value, its share and the records it comes from (bench
   expect(table).toHaveTextContent("3 others 5");
 });
 
+it("shows a weighted term's own value and what it counts in the goal (benchmark round 3)", () => {
+  render(<GoalBreakdown breakdown={{ sense: "maximize", mode: "weighted", terms: [
+    { id: "profit", weight: 1, value: 86, contribution: 86, share: 0.9, records: [] },
+    { id: "water_use", weight: -0.5, value: 20, contribution: -10, share: 0.1, records: [] },
+  ] }} />);
+  const row = screen.getByRole("row", { name: /water use/ });
+  expect(row).toHaveTextContent("water use × -0.5");
+  expect(row.querySelectorAll("td")[1]).toHaveTextContent("20");
+  expect(row.querySelectorAll("td")[2]).toHaveTextContent("-10");
+});
+
 it("says nothing for a single term from a single record", () => {
   const { container } = render(<GoalBreakdown breakdown={{ sense: "minimize", mode: "weighted",
     terms: [{ id: "cost", weight: 1, value: 3, contribution: 3, share: 1, records: [{ kind: "", key: "", value: 3 }] }] }} />);

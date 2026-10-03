@@ -164,7 +164,12 @@ function apartPair(context: ModelContext): { name: string; set: string; par: str
   return null;
 }
 
-export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: ModelContext) => string | null }[] = [
+/** A shape whose number changes the answer is asked for it, never given a guess (benchmark round 3: a
+ * 10,000 km "apart" read as complete and allowed one base only). */
+export type ShapeAsk = { label: string; par: string };
+
+export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: ModelContext) => string | null;
+  asks?: (context: ModelContext) => ShapeAsk | null }[] = [
   {
     shape: "cap_total",
     title: "A total is at most a limit",
@@ -214,10 +219,14 @@ export const RULE_SHAPES: { shape: RuleShape; title: string; needs: (context: Mo
     shape: "apart",
     title: "No two chosen closer than a distance (bases at least 30 km apart)",
     needs: (c) => (apartPair(c) ? null : "a yes/no decision over one set, and distances between its items (Data values → Compute from the map)"),
+    asks: (c) => {
+      const pair = apartPair(c);
+      return pair ? { label: "At least how far apart", par: pair.par } : null;
+    },
   },
 ];
 
-export function ruleFromShape(shape: RuleShape, id: string, context: ModelContext): Constraint {
+export function ruleFromShape(shape: RuleShape, id: string, context: ModelContext, asked?: number): Constraint {
   const d = decision(context);
   if (!d) throw new Error("This model has no decision to build a rule on yet.");
   if (shape === "cap_each") {
@@ -308,7 +317,8 @@ export function ruleFromShape(shape: RuleShape, id: string, context: ModelContex
     const [first] = bindingsFor([apart.set]);
     const [second] = bindingsFor([apart.set], [first]);
     const pair = [first, { ...second, where: [{ index: first.index, op: ">" }] }];
-    const D = 10000;
+    if (asked === undefined || !Number.isFinite(asked) || asked <= 0) throw new Error("How far apart: a distance above 0, in the unit of the distances.");
+    const D = asked;
     const times = (i: string): Term => ({ mul: [{ const: D }, { var: apart.name, index: [i] }] });
     return {
       id, forall: pair,
@@ -316,7 +326,7 @@ export function ruleFromShape(shape: RuleShape, id: string, context: ModelContex
       relation: "<=",
       right: { par: apart.par, index: [first.index, second.index] },
       severity: "hard",
-      note: `two chosen ${apart.set} items are at least ${D} apart in ${apart.par} (change ${D} to the distance wanted, in its unit)`,
+      note: `two chosen ${apart.set} items are at least ${D} apart in ${apart.par}`,
     };
   }
   const link = shape === "cap_linked" ? linked(context) : null;

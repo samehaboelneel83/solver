@@ -646,7 +646,11 @@ describe("Runs", () => {
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: /make these preferences/i }));
+    // What breaking costs is asked, never guessed (benchmark round 3: a guessed 100 opened nothing).
+    const make = await screen.findByRole("button", { name: /make these preferences/i });
+    expect(make).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Breaking one by a unit costs"), { target: { value: "300,000" } });
+    fireEvent.click(make);
 
     await waitFor(() => expect(write).toHaveBeenCalled());
     const [path, options] = write.mock.calls[0];
@@ -656,7 +660,7 @@ describe("Runs", () => {
       model_version_id: 2,
       // The run's own scenario's what-if is kept; the clash's rules are bent on top of it.
       name: "relaxed_cover, c_cover, c_max_hours bent (run 11)",
-      patch: { soften: { c_cover: 100, c_max_hours: 100 } },
+      patch: { soften: { c_cover: 300000, c_max_hours: 300000 } },
     });
   });
 
@@ -865,8 +869,9 @@ describe("Runs", () => {
     const panel = heading.closest("section") as HTMLElement;
     // What moved, in both directions -- a list of only additions would read
     // as a bigger roster rather than a different one.
-    expect(within(panel).getByText(/sara . tue . morning/)).toBeInTheDocument();
-    expect(within(panel).getByText(/ahmed . tue . morning/)).toBeInTheDocument();
+    // By the names the runs knew them by, not their codes (benchmark round 3).
+    expect(within(panel).getByText(/sara . Tuesday . morning/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Ahmed Salah . Tuesday . morning/)).toBeInTheDocument();
     expect(within(panel).getByText(/\+120/)).toBeInTheDocument();
     expect(within(panel).getByText("c_cover")).toBeInTheDocument();
   });
@@ -907,7 +912,8 @@ describe("Runs", () => {
     // A run with no answer is nothing to compare with.
     expect(within(chooser).queryByRole("option", { name: /Run 10/ })).toBeNull();
     fireEvent.change(chooser, { target: { value: "9" } });
-    expect(await screen.findByRole("heading", { name: /run 11 compared with run 9/i })).toBeInTheDocument();
+    // From the earlier run to the later, whichever was opened (benchmark round 3).
+    expect(await screen.findByRole("heading", { name: /run 9 compared with run 11/i })).toBeInTheDocument();
   });
 
   it("does not offer to compare a run with itself", async () => {

@@ -124,9 +124,21 @@ function goalLine(run: Run, ir: Ir): string | null {
   // A name made from that data already says it.
   const only = terms.length === 1 ? terms[0] as { id?: string; note?: string } : undefined;
   const madeFromData = only !== undefined && !only.note?.trim() && /^o_?\d+$/.test(only.id ?? "");
-  const said = counts.length && !madeFromData && !counts.some((c) => plain(c) === name.toLowerCase())
-    ? `${sentence(name)}, the total of ${listed(counts.map(plain))},`
-    : sentence(name);
+  // Several goals, or one weighted, are said as they are combined: "benefit less 0.2 × cost", not "the
+  // total of benefit and cost" (benchmark round 3).
+  const combined = terms.length > 1 || terms.some((t) => typeof (t as GoalTerm).weight === "number" && (t as GoalTerm).weight !== 1)
+    ? terms.map((t, i) => {
+      const w = typeof (t as GoalTerm).weight === "number" ? Math.abs((t as GoalTerm).weight!) : 1;
+      const label = `${w === 1 ? "" : `${number(w)} × `}${goalName(t, t.id ?? "")}`;
+      const less = negated(t as GoalTerm);
+      return i === 0 ? `${less ? "minus " : ""}${label}` : `${less ? "less" : "plus"} ${label}`;
+    }).join(" ")
+    : null;
+  const said = combined
+    ? `The goal, ${combined},`
+    : counts.length && !madeFromData && !counts.some((c) => plain(c) === name.toLowerCase())
+      ? `${sentence(name)}, the total of ${listed(counts.map(plain))},`
+      : sentence(name);
   const proven = run.status === "optimal";
   const how = minimise
     ? proven ? "as low as it can go" : "the lowest found"
