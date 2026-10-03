@@ -1,6 +1,6 @@
 # Five-problem benchmark — unified gap analysis and to-do plan
 
-**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** Phases 0–4 and round-2 gaps done; re-tested twice (§6, §7)
+**Date:** 2026-10-02 · **Base commit:** `529520c` · **Status:** Phases 0–4, round-2 and round-3 gaps done; re-tested three times (§6, §7, §8)
 
 Five testers, each a new user with one hard real-world problem, worked only through the UI with no
 prepared workflow. Each brought synthetic tabular data (CSV/Excel) and GIS data (GeoJSON points,
@@ -469,4 +469,69 @@ UX sub-scores, R2 → R3: orientation 88 → 89, finding features 75 → 77, wor
 - [x] Record keys sort as text, 1, 10, 100 (P1).
 - [ ] Test harness: the brief puts `/tmp/claude-0` first on the import path, so one tester loaded
       another's script; use a per-tester folder next round.
+
+## 8. Round 4 (after the round-3 fixes)
+
+Five fresh testers on `fec664f`, the same brief and rubric, each in "ROUND4 n — …" with its own copy of
+the browser harness (round 3 had one tester load another's script). Raw results:
+`/tmp/claude-0/bench4/<n>/result.json` and `notes.md`. No bug blocked any tester; four of five
+worked in Simple throughout.
+
+| Problem | Coverage R1 → R2 → R3 → R4 | Navigation/UX R1 → R2 → R3 → R4 |
+| --- | --- | --- |
+| 1. Emergency base and supply deployment | 82.8 → 89.1 → 90.6 → **90.6** | 68.6 → 75.0 → 77.9 → **82.0** |
+| 2. Ambulance and hospital network | 82.8 → 93.8 → 93.8 → **93.8** | 67.9 → 79.3 → 80.0 → **83.6** |
+| 3. City traffic and infrastructure | 85.9 → 89.1 → 90.6 → **90.6** | 67.1 → 79.3 → 75.7 → **79.3** |
+| 4. Precision irrigation and crop planning | 62.5 → 81.2 → 90.6 → **89.1** | 56.4 → 70.0 → 81.0 → **74.3** |
+| 5. National warehouse and distribution | 84.4 → 93.8 → 93.8 → **95.3** | 67.1 → 79.3 → 77.9 → **79.3** |
+| **Overall** | **79.7 → 89.4 → 91.9 → 91.9** | **65.4 → 76.6 → 78.5 → 79.7** |
+
+Per point, R3 → R4: joins 90 → **100**, constraints 95 → 90, exploring 75 → **80**, GIS layers 85 → 80,
+objectives 90 → 85, prediction 80 → **85**, map 95 → 85, the rest unchanged; words → equations still 75
+for all five. UX: feedback 81 → **85**, consistency 67 → 70, finding 77 → 78, wording 76 → 78.
+
+Coverage held at 91.9: the round-3 fixes landed (joins, exploring, feedback), but each tester then went
+further into their problem and met the next layer -- response-time assignment, congestion, trip-level
+routing, raster data, large embedded models -- and three map/ML bugs cost points.
+
+### Gaps found in round 4 (R4a–R4h)
+- [ ] **R4a Assign to the nearest open site, least response time** (P1, P2): coverage recipes count who
+      is within reach; neither assigns each place to one open site nor minimises weighted minutes.
+- [ ] **R4b The result map shows the answer for any kind** (P3): chosen roads, signals and parking
+      were drawn in one colour, and the GeoJSON export marked every feature "place".
+- [ ] **R4c The drafter reads more of the words** (P3, P4, P5): "at most 8 parking projects" (a limit
+      per type), "every district at least one" (a cover rule), the worth and opening-cost fields the
+      words name, a shortage price shown where it can be changed, crop shares as shares of each kind's
+      land that can hold.
+- [ ] **R4d Travel times from the records' own speeds** (P1): a speed field on the road records (from
+      weather factors) was ignored -- only the lines layer's properties are read -- and silently.
+- [ ] **R4e Forecast data in time** (P2, P4): order by a timestamp's hour as well as its date; date
+      parts filled on rows imported later; predict-and-keep per parcel × crop through a link input.
+- [ ] **R4f Larger models inside the optimiser** (P4): a good yield model (R² 0.98) exceeded the 20,000
+      leaf limit, leaving a weak one.
+- [ ] **R4g Congestion and capacity added in one traffic model** (P3): travel time that grows as a road
+      fills, and a widening that raises that road's capacity in the flow.
+- [ ] **R4h Rules filter on text** (P1, P2): `where status = 'existing'` was refused.
+
+### Bugs from round 4
+- [ ] A road speed field the lines layer does not have is ignored without a word (P1).
+- [ ] A rule's plain-words note stays stale after its equation is edited, in Review, Scenarios and the
+      infeasibility list (P1, P3, P5).
+- [ ] A scenario run's "within reach" map overlay reads the base data, not the scenario's (P1).
+- [ ] The goal breakdown's shares mix goals solved in order (P1); a quadratic term shows 0 and the
+      terms do not add up (P4).
+- [ ] Predict and keep, one per crop: disabled without a reason; 0 kept; "'of_crop' is not a link
+      field of parcel" for an input through a link (P4).
+- [ ] Publishing new versions left Base on version 1, and "Solve again" reused the old run (P4).
+- [ ] A drafted shortage price is a hidden goal weight, counted twice after an edit (P5).
+- [ ] New decisions start without a lower bound, so a cost goal can be unbounded (P5).
+- [ ] A raw contract message ("an index position is an index name, or {\"par\": ...") after an
+      accepted equation (P4).
+- [ ] "A blank rule" wrote into an open goal card and renamed it (P4).
+- [ ] Flows drawn as straight lines until "Flows along: lines" is chosen (P3).
+- [ ] A 30 × 30 data value reports 3,600 cells (P3).
+- [ ] Rounding noise shown: "-0.000002 to spare" (P2); goal weights missing in the sentence view (P2).
+- [ ] Publishing an unchanged model makes a new version; "Make records" repeats silently (P3).
+- [ ] Inputs without accessible labels (model editor name and weight, new what-if name, form labels) (P4, P5).
+- [ ] The "From scratch" card cannot be clicked as a button (P3).
 
