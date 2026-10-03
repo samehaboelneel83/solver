@@ -153,6 +153,16 @@ function ForDomain({ domainId }: { domainId: Id }) {
         selected={selected}
         onSelect={select}
       />
+      {/* The charts and map are below a long table: said at the top (benchmark round 3: "no charts"). */}
+      {selected && (
+        <p className="mb-2 text-sm">
+          <a href="#at-a-glance" className="text-blue-700 underline"
+            onClick={(e) => { e.preventDefault(); document.getElementById("at-a-glance")?.scrollIntoView?.({ behavior: "smooth" }); }}>
+            Charts and the map of {selected.name}
+          </a>
+          <span className="text-slate-500"> — how each field spreads, and the map coloured by a field</span>
+        </p>
+      )}
       {/* Data and structure together: a new kind of record, or a field, without leaving the records. */}
       {can("domain.edit") && <QuickStructure domainId={domainId} type={selected} onMade={(made) => select(made.id)} />}
       {selected && (

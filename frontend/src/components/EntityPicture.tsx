@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useEntities, type EntityType } from "../api/v1";
 import { formatAmount } from "../lib/runViews";
 import { MapView } from "./RunViews";
@@ -28,11 +29,35 @@ export function placeOf(value: unknown): Point | null {
  * A type's entities as a picture (queue R17b's input views): how each number attribute spreads
  * across them, and -- when they have a place -- where they are. Read from the first 500.
  */
+/** Five steps of one hue, light to dark: the more, the darker. */
+export const SEQUENTIAL = ["#b7d3f6", "#6da7ec", "#3987e5", "#1c5cab", "#0d366b"];
+
+/** Values in five bins of equal count (quantiles), so a few large ones do not wash out the rest. */
+export function stepsOf(values: number[]): { cuts: number[]; step: (v: number) => number } {
+  const sorted = [...values].sort((a, b) => a - b);
+  const cuts = [1, 2, 3, 4].map((q) => sorted[Math.min(sorted.length - 1, Math.floor((q * sorted.length) / 5))]);
+  return { cuts, step: (v: number) => cuts.filter((c) => v >= c).length };
+}
+
 export default function EntityPicture({ type }: { type: EntityType }) {
   const list = useEntities(type.id, { limit: 500 });
+  // The map coloured by a number field (benchmark round 3: underserved districts were a number in a table).
+  const [colourBy, setColourBy] = useState("");
   const items = list.data?.items ?? [];
   if (items.length === 0) return null;
   const numbers = type.attributes.filter((a) => a.data_type === "integer" || a.data_type === "number");
+  // Text and choice fields as counts per value (benchmark round 3: "no charts" when exploring).
+  const kinds = type.attributes.filter((a) => a.data_type === "text" || a.data_type === "enum" || a.data_type === "boolean")
+    .map((a) => {
+      const counts = new Map<string, number>();
+      for (const e of items) {
+        const v = e.attrs?.[a.name];
+        if (v === null || v === undefined || v === "") continue;
+        counts.set(String(v), (counts.get(String(v)) ?? 0) + 1);
+      }
+      return { name: a.name, counts: [...counts.entries()].sort((x, y) => y[1] - x[1]) };
+    })
+    .filter((k) => k.counts.length >= 2 && k.counts.length <= 30 && k.counts.length < items.length);
   const shapes = type.attributes.filter((a) => a.data_type === "geometry");
   // A time set with dates (queue R17c): its members on a calendar.
   const dated = type.role === "time" ? type.attributes.find((a) => a.data_type === "date") : undefined;
@@ -49,14 +74,20 @@ export default function EntityPicture({ type }: { type: EntityType }) {
       })
     : [];
   const geometries = shapes.length ? items.map((e) => [e, e.attrs?.[shapes[0].name] as GeoGeometry | undefined] as const) : [];
-  const shaped = geometries.some(([, g]) => g && typeof g === "object" && g.type !== "Point" && Array.isArray(g.coordinates))
-    ? geometries.flatMap(([e, g]) => (g && typeof g === "object" && Array.isArray(g.coordinates)
-      ? [{ id: e.key, geometry: g, colour: "#2563eb", size: g.type === "Point" ? 4 : 2, fill: 0.15, title: e.label ?? e.key, layer: type.name }]
-      : []))
+  const coloured = colourBy ? items.map((e) => e.attrs?.[colourBy]).filter((v): v is number => typeof v === "number") : [];
+  const scale = coloured.length ? stepsOf(coloured) : null;
+  const shaped = scale || geometries.some(([, g]) => g && typeof g === "object" && g.type !== "Point" && Array.isArray(g.coordinates))
+    ? geometries.flatMap(([e, g]) => {
+      if (!g || typeof g !== "object" || !Array.isArray(g.coordinates)) return [];
+      const v = scale ? e.attrs?.[colourBy] : undefined;
+      const colour = !scale ? "#2563eb" : typeof v === "number" ? SEQUENTIAL[scale.step(v)] : "#cbd5e1";
+      return [{ id: e.key, geometry: g, colour, size: g.type === "Point" ? (scale ? 6 : 4) : (scale ? 3 : 2), fill: scale ? 0.75 : 0.15,
+        title: `${e.label ?? e.key}${scale ? `: ${colourBy} ${typeof v === "number" ? formatAmount(v) : "not set"}` : ""}`, layer: type.name }];
+    })
     : [];
   if (numbers.length === 0 && points.length === 0 && days.length === 0) return null;
   return (
-    <section aria-label={`${type.name} at a glance`} className="mt-6 rounded-md border border-slate-200 bg-white p-3">
+    <section id="at-a-glance" aria-label={`${type.name} at a glance`} className="mt-6 rounded-md border border-slate-200 bg-white p-3">
       <h3 className="mb-2 text-sm font-semibold text-slate-900">
         {type.name} at a glance
         {list.data && list.data.total > items.length && (
@@ -69,7 +100,32 @@ export default function EntityPicture({ type }: { type: EntityType }) {
           return <Histogram key={a.name} name={a.name} unit={a.unit} values={values} of={items.length} />;
         })}
       </div>
+      {kinds.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-4">
+          {kinds.map((k) => <Counts key={k.name} name={k.name} counts={k.counts} />)}
+        </div>
+      )}
       {days.length > 0 && <CalendarView days={days} by={dated!.name} />}
+      {points.length > 0 && numbers.length > 0 && (
+        <label className="mt-3 block text-xs text-slate-700">Colour the map by
+          <select aria-label="Colour the map by" className="ml-1 rounded border border-slate-300 px-1 py-0.5 text-xs" value={colourBy}
+            onChange={(e) => setColourBy(e.target.value)}>
+            <option value="">nothing</option>
+            {numbers.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+          </select>
+        </label>
+      )}
+      {scale && (
+        <p aria-label={`Colours for ${colourBy}`} className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+          {SEQUENTIAL.map((c, i) => (
+            <span key={c} className="inline-flex items-center gap-1">
+              <span className="inline-block h-3 w-4 rounded-sm" style={{ background: c }} aria-hidden />
+              {i === 0 ? `below ${formatAmount(scale.cuts[0])}` : i === 4 ? `${formatAmount(scale.cuts[3])} and more` : `${formatAmount(scale.cuts[i - 1])}–${formatAmount(scale.cuts[i])}`}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-3 w-4 rounded-sm bg-slate-300" aria-hidden />not set</span>
+        </p>
+      )}
       {points.length > 0 && shaped.length > 0 ? (
         // Roads, canals and areas drawn as themselves, not as one point each (benchmark, October 2026).
         <div className="mt-3">
@@ -115,6 +171,29 @@ function Histogram({ name, unit, values, of }: { name: string; unit: string | nu
           <text x={W} y={H - 3} fontSize={10} textAnchor="end" className="fill-slate-500">{formatAmount(high)}</text>
         </svg>
       )}
+    </figure>
+  );
+}
+
+/** How many records hold each value of a text field, the most common first (eight shown, the rest summed). */
+function Counts({ name, counts }: { name: string; counts: [string, number][] }) {
+  const shown = counts.slice(0, 8);
+  const rest = counts.slice(8).reduce((n, [, c]) => n + c, 0);
+  const rows: [string, number][] = rest ? [...shown, [`${counts.length - 8} others`, rest]] : shown;
+  const most = Math.max(1, ...rows.map(([, c]) => c));
+  return (
+    <figure className="w-[220px]">
+      <figcaption className="mb-1 text-xs text-slate-700"><span className="font-mono">{name}</span>
+        <span className="text-slate-500"> · {counts.length} values</span></figcaption>
+      <ul aria-label={`${name}: records per value`} className="space-y-0.5">
+        {rows.map(([value, n]) => (
+          <li key={value} title={`${value}: ${n}`} className="flex items-center gap-1 text-[11px] text-slate-700">
+            <span className="w-20 truncate">{value}</span>
+            <span className="inline-block h-2.5 rounded-r bg-slate-500" style={{ width: `${Math.max(2, Math.round((n / most) * 100))}px` }} aria-hidden />
+            <span className="text-slate-500">{n}</span>
+          </li>
+        ))}
+      </ul>
     </figure>
   );
 }
