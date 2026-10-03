@@ -155,3 +155,21 @@ def test_each_place_carries_its_amounts_and_what_it_got_most_of():
     assert p1["properties"]["value"] == 15.5 and p1["properties"]["largest"] == "wheat"
     assert p1["properties"]["by"] == {"wheat": 12.5, "maize": 3}
     assert "wheat 12.5, maize 3" in p1["properties"]["title"]
+
+
+def test_a_choice_of_records_with_no_shape_is_drawn_where_each_links_to():
+    """Benchmark round 4: projects on roads were drawn as roads in one colour; the export said 'place'."""
+    from app.api.answer_map import answer_map
+
+    line = lambda x: {"type": "LineString", "coordinates": [[30 + x, 31], [30.01 + x, 31]]}  # noqa: E731
+    ir = {"sets": ["project", "road"], "variables": {"fund": {"index": ["project"], "domain": "binary"}}}
+    data = {"sets": {"road": [{"id": "R1", "shape": line(0)}, {"id": "R2", "shape": line(0.02)}, {"id": "R3", "shape": line(0.04)}],
+                     "project": [{"id": "P1", "label": "Widen R1", "on_road": "R1"}, {"id": "P2", "label": "Signal R2", "on_road": "R2"},
+                                 {"id": "P3", "label": "Widen R2", "on_road": "R2"}]}}
+    found = answer_map(ir, data, {"fund": [["P1"], ["P3"]]}, {}, [])
+    drawn = {f["properties"]["key"]: f["properties"] for f in found["features"] if f["properties"]["layer"] == "fund"}
+    assert drawn["R1"]["status"] == "chosen" and drawn["R2"]["status"] == "chosen" and "R3" not in drawn
+    assert "Widen R2" in drawn["R2"]["title"] and "Signal R2" not in drawn["R2"]["title"]
+    assert any(layer["id"] == "fund" and layer["title"].startswith("fund: 2 of 3 project") for layer in found["layers"])
+    # The road no project is on is context; nothing of it says "chosen".
+    assert next(f for f in found["features"] if f["properties"]["key"] == "R3")["properties"]["status"] == "place"

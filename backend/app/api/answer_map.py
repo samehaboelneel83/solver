@@ -186,6 +186,47 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                                     "title": f"{member['label']}: {var} {value:g}" + (f" — {shown}" if got else "")}})
             layers.append({"id": var, "kind": "counts", "set": s, "title": f"{var}: {total} over {len(placed[s])} {_words(s)}"})
 
+    linked_drawn: set[tuple[str, str]] = set()
+    # A decision over records with no shape of their own, drawn where each links to: a project on its road,
+    # a signal at its junction, a car park at its site (benchmark round 4: the linked roads were drawn in
+    # one colour, and the export marked every one "place", so the answer could not be seen).
+    for var, spec in variables.items():
+        index = list(spec.get("index") or [])
+        if len(index) != 1 or index[0] in placed or (spec.get("domain") or "binary") == "interval":
+            continue
+        s = index[0]
+        rows = [r for r in (sets.get(s) or []) if isinstance(r, dict)]
+        links = [(field, t) for t in placed for field in sorted({f for r in rows for f in r if f not in ("id", "label")})
+                 if any(isinstance(r.get(field), (str, int)) and str(r.get(field)) in placed[t] for r in rows)]
+        if not rows or not links:
+            continue
+        binary = (spec.get("domain") or "binary") == "binary"
+        at: dict[tuple[str, str], dict[str, list[str]]] = {}
+        on = 0
+        for r in rows:
+            key = str(r.get("id"))
+            value = 1.0 if binary and (key,) in chosen.get(var, set()) else amount.get(var, {}).get((key,), 0.0)
+            is_on = abs(value) > 1e-9
+            on += is_on
+            name = (labels.get(s) or {}).get(key) or _label(r, key)
+            for field, t in links:
+                target = r.get(field)
+                if isinstance(target, (str, int)) and str(target) in placed[t]:
+                    entry = at.setdefault((t, str(target)), {"on": [], "off": []})
+                    entry["on" if is_on else "off"].append(name if binary else f"{name} {value:g}")
+                    break
+        for (t, key), got in at.items():
+            member = placed[t][key]
+            linked_drawn.add((t, key))
+            add({"type": "Feature", "geometry": member["geometry"],
+                 "properties": {"layer": var, "set": t, "key": key, "label": member["label"], "value": len(got["on"]),
+                                "status": "chosen" if got["on"] else "not_chosen", "data": member["data"],
+                                "title": f"{member['label']}: " + (f"{var} {', '.join(got['on'][:6])}" if got["on"]
+                                                                   else f"none chosen of {', '.join(got['off'][:6])}")}})
+        kinds = sorted({t for t, _ in at})
+        layers.append({"id": var, "kind": "places", "set": kinds[0] if len(kinds) == 1 else None,
+                       "title": f"{var}: {on} of {len(rows)} {_words(s)}, where they link to ({', '.join(_words(k) for k in kinds)})"})
+
     # Who serves whom: 0/1 reach data between two placed sets and a yes/no choice over one of them
     # (open[yard] with reach[yard, hotspot]) -- each item joined to the nearest chosen place that
     # reaches it, and an item no chosen place reaches marked. Read from the data, so it holds for
@@ -224,6 +265,8 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
         if s in drawn_sets:
             continue
         for key, member in members.items():
+            if (s, key) in linked_drawn:
+                continue
             add({"type": "Feature", "geometry": member["geometry"],
                  "properties": {"layer": s, "set": s, "key": key, "label": member["label"], "value": None,
                                 "status": "place", "title": member["label"], "data": member["data"]}})

@@ -203,13 +203,16 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
   const { domainId } = useDomain();
   const datasets = useDatasets(answered ? domainId : null);
   const [overlay, setOverlay] = useState<number | null>(null);
-  const [alongLayer, setAlongLayer] = useState("");
+  // Flows go along the first lines layer laid under the answer unless straight lines are asked for
+  // (benchmark round 4: straight "spider" lines were the default and misled).
+  const [alongPick, setAlongLayer] = useState<string | null>(null);
   const overlaid = useQuery({
     queryKey: ["answer-overlay", overlay],
     queryFn: async () => ({ dataset: await getDataset(overlay as number), features: await getFeatures(overlay as number) }),
     enabled: overlay !== null,
   });
   const lineLayers = (overlaid.data?.dataset.layers ?? []).filter((l) => (l.kinds?.line ?? 0) > 0);
+  const alongLayer = alongPick ?? lineLayers[0]?.name ?? "";
   const along = overlay !== null && alongLayer && lineLayers.some((l) => l.name === alongLayer)
     ? `?along_dataset=${overlay}&along_layer=${encodeURIComponent(alongLayer)}` : "";
   const map = useQuery({
@@ -314,7 +317,7 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
               {(datasets.data?.items ?? []).length > 0 && (
                 <label className="flex items-center gap-1">Show under it
                   <select aria-label="Show under the answer" className="rounded border border-slate-300 px-1 py-0.5 text-xs"
-                    value={overlay ?? ""} onChange={(e) => { setOverlay(e.target.value ? Number(e.target.value) : null); setAlongLayer(""); }}>
+                    value={overlay ?? ""} onChange={(e) => { setOverlay(e.target.value ? Number(e.target.value) : null); setAlongLayer(null); }}>
                     <option value="">nothing</option>
                     {(datasets.data?.items ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>

@@ -26,9 +26,12 @@ it("shows map data under the answer and draws the flows along its roads (benchma
   });
   render(<QueryClientProvider client={new QueryClient()}><RunOutputs runId={9} status="optimal" /></QueryClientProvider>);
   fireEvent.change(await screen.findByLabelText("Show under the answer"), { target: { value: "5" } });
-  fireEvent.change(await screen.findByLabelText("Draw flows along"), { target: { value: "ROADS" } });
+  // Along the roads at once (benchmark round 4: straight lines were the default); straight lines when asked.
+  expect(await screen.findByLabelText("Draw flows along")).toHaveValue("ROADS");
   await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.map(([p]) => String(p)))
     .toContain("/api/v1/runs/9/answer-map?along_dataset=5&along_layer=ROADS"));
+  fireEvent.change(screen.getByLabelText("Draw flows along"), { target: { value: "" } });
+  expect(screen.getByLabelText("Draw flows along")).toHaveValue("");
   expect(screen.getByText("ROADS (city roads, under the answer)")).toBeInTheDocument();
 });
 
