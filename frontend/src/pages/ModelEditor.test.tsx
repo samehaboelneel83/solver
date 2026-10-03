@@ -1537,6 +1537,13 @@ describe("the Simple level", () => {
     localStorage.setItem("solver_editor_steps", "all");
   });
 
+  it("shows a closed rule as its equation once equations are chosen (benchmark round 5)", async () => {
+    renderPage();
+    await screen.findByText("What must be true");
+    fireEvent.click(screen.getAllByRole("button", { name: "Show all as equations" })[0]);
+    await waitFor(() => expect(screen.getAllByText(/for each d in day: sum\(assign\[e, d\] for e in employee\) >= demand\[d\]/).length).toBeGreaterThan(0));
+  });
+
   it("is where a new person starts, with fewer tabs and no guided-forms panel, and remembers Expert", async () => {
     localStorage.removeItem("solver_editor_level");
     const first = renderPage();

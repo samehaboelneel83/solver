@@ -234,6 +234,9 @@ function checkFilters(entries: WhereEntry[], attributes: { name: string; data_ty
       if (!Array.isArray(filter.value) || filter.value.length === 0) out.push(`“${filter.attr} ${OP_WORDS[filter.op]}” needs at least one value`);
     } else if ((attribute.data_type === "number" || attribute.data_type === "integer") && typeof filter.value !== "number") {
       out.push(`${filter.attr} is a number, so compare it with a number`);
+    } else if (attribute.data_type === "boolean" && typeof filter.value !== "boolean") {
+      // Benchmark round 5: `signalized = 'Y'` read "Complete", then the server refused it.
+      out.push(`${filter.attr} is yes or no, so compare it with true or false (not “${String(filter.value)}”)`);
     }
     const choices = attribute.enum_values;
     if (choices?.length) {

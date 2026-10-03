@@ -256,6 +256,17 @@ describe("DeclarationsEditor", () => {
     );
   });
 
+  it("closes + Add a decision once the decision is added, at the Simple level (benchmark round 5)", () => {
+    const onChange = renderEditor({ simple: true });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a decision" }));
+    fireEvent.change(screen.getByLabelText(/new variable/i), { target: { value: "stock" } });
+    fireEvent.click(within(screen.getByRole("group", { name: /one for every/i })).getByRole("checkbox", { name: /^day/ }));
+    fireEvent.click(screen.getByRole("button", { name: /add variable/i }));
+    expect(onChange).toHaveBeenCalled();
+    expect(screen.queryByLabelText(/new variable/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "+ Add a decision" })).toBeInTheDocument();
+  });
+
   it("can change what an existing variable decides", () => {
     const onChange = renderEditor({
       variables: { assign: { index: ["employee", "day"], domain: "binary" } },

@@ -1196,7 +1196,9 @@ function ConstraintCard({
       name={constraint.id || "rule"}
       defaultOpen={!simple || startIn !== undefined}
       openSignal={openSignal}
-      collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={ruleSentence(constraint, context.relationships)} problems={checkRule(constraint, context).length} /> : undefined}
+      // Closed, it reads in the view chosen: an equation when equations are asked for (benchmark round 5:
+      // "Equation" still showed every closed rule as a sentence).
+      collapsedHeader={simple ? <OneLine name={constraint.id || "rule"} text={view === "equation" && equation ? equation : ruleSentence(constraint, context.relationships)} problems={checkRule(constraint, context).length} /> : undefined}
       header={
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
           <div>
@@ -1796,7 +1798,9 @@ function ObjectiveEditor({
             name={term.id || "objective term"}
             defaultOpen={!simple || composedGoals.has(term.id)}
             openSignal={openGoal?.id === term.id ? openGoal.seq : undefined}
-            collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={term.expression ? `Counts ${termSentence(term.expression, context.relationships)}.` : "Counts nothing yet."}
+            collapsedHeader={simple ? <OneLine name={term.id || "goal"} text={!term.expression ? "Counts nothing yet."
+              : view === "equation" && goalEquation(term.expression, context) ? goalEquation(term.expression, context)!
+                : `Counts ${termSentence(term.expression, context.relationships)}.`}
               problems={term.expression ? checkGoal(term.expression, context).length : 1} /> : undefined}
             header={
               <div className="flex flex-wrap items-end gap-3">

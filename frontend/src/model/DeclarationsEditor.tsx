@@ -510,7 +510,7 @@ export default function DeclarationsEditor({
             </DeclarationCard>
           ))}
           {simple ? (
-            <AddMenu label="Add a decision">{() => (
+            <AddMenu label="Add a decision">{(close) => (
               <>
           <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2">
             <p className="mb-1 text-xs font-medium text-slate-700">Add a variable</p>
@@ -518,6 +518,9 @@ export default function DeclarationsEditor({
             sets={sets}
             taken={[...Object.keys(variables), ...Object.keys(parameters)]}
             onAdd={(variable) => {
+              // Added: the menu closes, the new decision's card is the next thing to read (benchmark
+              // round 5: the form stayed open with the name just added and "already something called").
+              close();
               if (variable.domain !== "interval") {
                 apply({
                   // A quantity starts at 0, not unbounded below: a cost goal over it could otherwise run
