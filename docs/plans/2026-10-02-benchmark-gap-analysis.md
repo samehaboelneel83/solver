@@ -567,3 +567,77 @@ routing, raster data, large embedded models -- and three map/ML bugs cost points
 - [x] The "From scratch" card cannot be clicked as a button (P3). Fixed: the start cards are named by
       their titles.
 
+
+## 9. Round 5 (after the round-4 gaps and bugs)
+
+Five fresh testers on `37e5d80`, the same brief and rubric, each in "ROUND5 n — …" with its own harness
+copy and profile. Raw results: `/tmp/claude-0/bench5/<n>/result.json` and `notes.md`. All five worked in
+Simple throughout. Two bugs blocked a feature: a decision held above 1,000,000 by its own rules was called
+unbounded (P4), and "Why not?" failed on every question (P2); both are fixed (below).
+
+| Problem | Coverage R1 → R2 → R3 → R4 → R5 | Navigation/UX R1 → R2 → R3 → R4 → R5 |
+| --- | --- | --- |
+| 1. Emergency base and supply deployment | 82.8 → 89.1 → 90.6 → 90.6 → **92.2** | 68.6 → 75.0 → 77.9 → 82.0 → **81.4** |
+| 2. Ambulance and hospital network | 82.8 → 93.8 → 93.8 → 93.8 → **89.1** | 67.9 → 79.3 → 80.0 → 83.6 → **77.1** |
+| 3. City traffic and infrastructure | 85.9 → 89.1 → 90.6 → 90.6 → **92.2** | 67.1 → 79.3 → 75.7 → 79.3 → **78.6** |
+| 4. Precision irrigation and crop planning | 62.5 → 81.2 → 90.6 → 89.1 → **93.8** | 56.4 → 70.0 → 81.0 → 74.3 → **80.0** |
+| 5. National warehouse and distribution | 84.4 → 93.8 → 93.8 → 95.3 → **93.8** | 67.1 → 79.3 → 77.9 → 79.3 → **82.1** |
+| **Overall** | **79.7 → 89.4 → 91.9 → 91.9 → 92.2** | **65.4 → 76.6 → 78.5 → 79.7 → 79.8** |
+
+Per point, R4 → R5: exploring 80 → **85**, GIS layers 80 → **85**, constraints 90 → **95**, map 85 →
+**95**, import 95 → 90, variables 100 → 95, prediction 85 → 80; words → equations still 75 for all five.
+UX: consistency 70 → **75**, results 83 → **85**, feedback 85 → 78 (the two blocking bugs).
+
+P4 rose most (irrigation: the yield model fed the profit goal, rules for soil, rotation and water held).
+P2 fell: "Why not?" failed (a breakdown change of round 4 that did not survive goals rewritten for a
+probe), and the hospital-assignment and fleet rules had to be typed by hand.
+
+### Gaps found in round 5 (R5a–R5h)
+- [ ] **R5a Goals in order keep their own direction, and a trade-off curve** (P4, P2): in lexicographic
+      mode every goal was maximised, so water had to be negated ("water saved 18,999,998 as low as it
+      can go"); no profit-vs-water (epsilon) sweep with a chart.
+- [ ] **R5b A linked record's field in an equation** (P2, P4): `rate[of_district[c]]`,
+      `amount[of_parcel[h], of_crop[h]]` -- a record's link picking a record -- was refused; testers
+      copied fields onto records through a hidden path.
+- [ ] **R5c Links and imports by any field** (P2): a link made by a matching field is not applied to
+      records imported later (a forecast total read 0); an import cannot match rows to records by a
+      unique name field, only by key.
+- [ ] **R5d Travel and cost along the roads** (P1, P5): unreachable pairs are stored as a large number
+      with no mark; a per-segment cost field (cost per km × length + toll) cannot be summed along each
+      path; road conditions per period in a separate table cannot feed travel times.
+- [ ] **R5e Derived map layers and a clearer result map** (P1, P2): no buffer / service-area layer to
+      save; underserved places not styled apart; 154 assignment lines with no way to hide them.
+- [ ] **R5f Recipes of the next size** (P1, P3, P5): selection over several kinds of project with one
+      budget (roads, signals, parking); several products in the supply network; units of each type
+      at bases, within reach of each zone.
+- [ ] **R5g The drafter reads budgets, capacities and limits** (P1–P5): a 400M budget read as a
+      distance; base count limits, capacities, double coverage, delivery-time limits, water per source
+      and fleet sizes left out.
+- [ ] **R5h Forecasts into the model's data** (P2, P5): a forecast per zone has no one-click way onto
+      the records that link to the zone (customer demand), summed or split.
+
+### Bugs from round 5
+- [x] A CSV with lat/lon replaced polygon shapes with points, even with lat/lon left out (P1). Fixed:
+      left-out columns place nothing; records with an area or a line keep it, and the import says so.
+- [x] A decision held at 1,041,500 by its own rule was called unbounded (the guard ceiling is 1,000,000)
+      (P4). Fixed: only a decision that also runs into the raised ceiling is unbounded; otherwise the
+      raised solve is the answer.
+- [x] "Why not?" never answered: the probe failed with `zip() argument 3 is shorter` (P2). Fixed: the
+      goal breakdown reads per-term products only when they match the goal's terms.
+- [x] Predict and keep for the linked kind refused the offered "its own capacity (through on_segment)"
+      (P3). Fixed: link inputs resolve record by record too.
+- [x] A rule idle where nothing is used (`hours * ship <= limit * ship`) read "at its limit" (P5).
+      Fixed: idle instances are not counted.
+- [ ] Equation view does not show equations for collapsed rules (P1); earlier equation editors stay
+      open, so a new equation lands in the wrong rule (P3, P4).
+- [ ] "+ Add a decision" stays open after adding, with the old name and a false duplicate error (P5).
+- [ ] A yes/no field compared to the text 'Y' is marked complete, then refused by the server (P3).
+- [ ] The runs table keeps "running" after the run finished, until a reload (P3).
+- [ ] "Counted nobody" warns for a sum of linked totals when only one part is empty (P3).
+- [ ] The budget sweep's "gained per unit" rounds to 0 (P3).
+- [ ] HTTP 500 when creating a link whose name is taken (P2).
+- [ ] "Unpublished changes started from version 1" right after version 2 was published (P2).
+- [ ] The road travel-time message names a "Join places up to" field shown only in another mode (P2).
+- [ ] "Compute from the map" gives no confirmation when it finishes (P5).
+- [ ] The workbench tree runs a label and its key together ("intake AW1") (P4).
+- [ ] Switching from lexicographic to weighted silently restores an old direction (P4).
