@@ -18,7 +18,11 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
         return None
     weights = {str(t.get("id")): number(t.get("weight", 1)) for t in ((ir.get("objective") or {}).get("terms") or [])}
     terms = []
-    squares = compiled.objective_term_quadratics or [{} for _ in compiled.objective_terms]
+    # One per term; a model whose terms were rewritten after compiling (a lex stage, a why-not probe)
+    # may carry fewer -- those terms have no product of decisions to count.
+    known = compiled.objective_term_quadratics
+    squares = [known[i] if i < len(known) and len(known) == len(compiled.objective_terms) else {}
+               for i in range(len(compiled.objective_terms))]
     for term_id, linear, square in zip(compiled.objective_term_ids, compiled.objective_terms, squares, strict=True):
         weight = weights.get(term_id, Decimal(1))
         # Its products of decisions count too (benchmark round 4: irr * amount showed 0, and the terms

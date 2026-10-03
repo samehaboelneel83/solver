@@ -392,6 +392,24 @@ def slack_of(constraint: Constraint, assignments: dict[VarKey, Any]) -> Decimal:
     return residual if residual == 0 else -abs(residual)
 
 
+def _idle(constraint: Constraint, assignments: dict[VarKey, Any]) -> bool:
+    """Both sides hold decisions and no constant, and every decision in them is 0. A rule with a
+    side of plain numbers (`ship <= 0` while closed) is a real limit, however idle."""
+    if constraint.left.const != 0 or constraint.right.const != 0:
+        return False
+    if not all(any(k[0] != _VIOLATION and c != 0 for k, c in side.coeffs.items())
+               for side in (constraint.left, constraint.right)):
+        return False
+    for side in (constraint.left, constraint.right):
+        for key, coeff in side.coeffs.items():
+            if key[0] == _VIOLATION:
+                continue
+            if coeff != 0 and number(assignments.get(key, 0)) != 0:
+                return False
+    return all(coeff == 0 or number(assignments.get(a, 0)) * number(assignments.get(b, 0)) == 0
+               for (a, b), coeff in constraint.quadratic.items())
+
+
 def slack_by_constraint(
     compiled: Compiled, assignments: dict[VarKey, Any]
 ) -> dict[str, Decimal]:
@@ -402,6 +420,11 @@ def slack_by_constraint(
         # bind, however far its sides are apart.
         if not constraint.is_active(assignments) or constraint.schedule is not None:
             # A scheduling rule has no one number of room left.
+            continue
+        # A row whose every term is 0 here (`hours * ship <= limit * ship` where nothing ships) is
+        # "0 <= 0" because it is idle, not because it binds (benchmark round 5: such a rule read "at
+        # its limit"). Its room is not counted; a rule idle everywhere has none to report.
+        if _idle(constraint, assignments):
             continue
         value = slack_of(constraint, assignments)
         current = tightest.get(constraint.id)
