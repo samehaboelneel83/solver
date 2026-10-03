@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import LimitSweep, { gains, sweepValues } from "./LimitSweep";
+import LimitSweep, { gains, perUnitText, sweepValues } from "./LimitSweep";
 
 vi.mock("../api/client", async () => {
   const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
@@ -56,4 +56,12 @@ it("solves the model once per value, each kept as a scenario, and tabulates the 
   // 50 more for each 20,000 more.
   expect(within(table).getAllByText("0.003")).toHaveLength(2);
   expect(screen.getByRole("img", { name: /The goal as budget's limit goes from 40,000 to 80,000/ })).toBeInTheDocument();
+});
+
+describe("gains per unit", () => {
+  it("keeps the first digits of a small gain per unit (benchmark round 5)", () => {
+    expect(perUnitText(15000 / 100_000_000)).toBe("0.00015");
+    expect(perUnitText(2.34567)).toBe("2.346");
+    expect(perUnitText(0)).toBe("0");
+  });
 });

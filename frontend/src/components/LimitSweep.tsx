@@ -202,7 +202,7 @@ export default function LimitSweep({ problemId, versionId, scenarioHref }: {
                 <tr key={r.runId} className="border-t border-slate-100">
                   <td className="px-2 py-1 font-mono">{r.value.toLocaleString("en-US")}</td>
                   <td className="px-2 py-1">{r.goal !== null ? r.goal.toLocaleString("en-US", { maximumFractionDigits: 1 }) : r.status}</td>
-                  <td className="px-2 py-1">{perUnit[i] !== null ? perUnit[i]!.toLocaleString("en-US", { maximumFractionDigits: 3 }) : "—"}</td>
+                  <td className="px-2 py-1">{perUnit[i] !== null ? perUnitText(perUnit[i]!) : "—"}</td>
                   <td className="px-2 py-1"><Link className="text-blue-700 underline" to={scenarioHref(r.scenarioId, r.runId)}>Run {String(r.runId)}</Link></td>
                 </tr>
               ))}
@@ -212,4 +212,12 @@ export default function LimitSweep({ problemId, versionId, scenarioHref }: {
       )}
     </section>
   );
+}
+
+/** A gain per unit of the limit, with its first digits however small: 0.000038 per pound, not 0
+ * (benchmark round 5: a 100M-pound step gaining 15,000 read "0"). */
+export function perUnitText(value: number): string {
+  if (value === 0) return "0";
+  if (Math.abs(value) >= 0.001) return value.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return value.toLocaleString("en-US", { maximumSignificantDigits: 3 });
 }

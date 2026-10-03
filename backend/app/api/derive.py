@@ -376,10 +376,19 @@ def _link_by(db: Session, user: UserAccount, kind: Any, fields: dict[str, dict[s
             free = f"{kind['name']}_{body.field}"
             raise HTTPException(409, f"there is already a link called {body.field!r} in this workspace (each link name is used "
                                      f"once, as models walk links by name); call this one {free!r}, say")
-        rel = db.execute(text(
-            "INSERT INTO relationship_type (domain_id, name, from_type_id, to_type_id, cardinality)"
-            " VALUES (:d, :n, :a, :b, 'many_to_one') RETURNING id"),
-            {"d": kind["domain_id"], "n": body.field, "a": kind["id"], "b": target}).scalar_one()
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            with db.begin_nested():
+                rel = db.execute(text(
+                    "INSERT INTO relationship_type (domain_id, name, from_type_id, to_type_id, cardinality)"
+                    " VALUES (:d, :n, :a, :b, 'many_to_one') RETURNING id"),
+                    {"d": kind["domain_id"], "n": body.field, "a": kind["id"], "b": target}).scalar_one()
+        except IntegrityError as exc:
+            # Made a moment ago by another request (benchmark round 5: a second click while a long link was
+            # being made answered 500).
+            raise HTTPException(409, f"there is already a link called {body.field!r} in this workspace -- one was made "
+                                     "a moment ago; look under the kind's fields, or choose another name") from exc
         db.execute(text(
             "INSERT INTO attribute_def (entity_type_id, name, data_type, references_id, sort_order)"
             " VALUES (:t, :n, 'reference', :r, coalesce((SELECT max(sort_order) + 1 FROM attribute_def WHERE entity_type_id = :t), 0))"),

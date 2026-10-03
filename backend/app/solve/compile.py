@@ -886,6 +886,12 @@ class _Compiler:
             low, high = low + min(a, b), high + max(a, b)
         return low, high
 
+    def _forget_empty_since(self, noted: int) -> None:
+        """Take back the empty ranges noted since `noted`: they were parts of a sum that counted someone."""
+        for dropped in self.empty_ranges[noted:]:
+            self._empty_seen.discard((dropped["constraint_id"], dropped["kind"], tuple(sorted(dropped["index"].items()))))
+        del self.empty_ranges[noted:]
+
     def _note_empty(self, constraint_id: str, kind: str, index: dict[str, str]) -> None:
         key = (constraint_id, kind, tuple(sorted(index.items())))
         if key in self._empty_seen:
@@ -1159,8 +1165,14 @@ class _Compiler:
 
         if "add" in term:
             total = Linear()
+            noted = len(self.empty_ranges)
             for part in term["add"]:
                 total.add(self._term(part, env))
+            # One empty part of a sum of several is not a rule counting nobody, when the others count
+            # someone (benchmark round 5: a district with 5 intersections "counted nobody" because it had
+            # no car park).
+            if total.coeffs:
+                self._forget_empty_since(noted)
             return total
 
         if "mul" in term:
@@ -1197,10 +1209,13 @@ class _Compiler:
 
         if "add" in term:
             linear, quadratic = Linear(), {}
+            noted = len(self.empty_ranges)
             for part in term["add"]:
                 piece, square = self._poly(part, env)
                 linear.add(piece)
                 _add_quadratic(quadratic, square)
+            if linear.coeffs or quadratic:
+                self._forget_empty_since(noted)  # as in `_term`: a part empty beside others that count
             return linear, quadratic
 
         if "mul" in term:

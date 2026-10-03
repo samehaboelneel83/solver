@@ -28,3 +28,22 @@ def test_a_rule_idle_where_nothing_is_used_is_not_at_its_limit():
     assert slack["most"] == 50
     some = {("ship", ("a",)): Decimal(10), ("ship", ("b",)): Decimal(0)}
     assert slack_by_constraint(compiled, some)["delivery_time"] == 12 * 10 - 3 * 10
+
+
+def test_an_empty_part_of_a_sum_beside_parts_that_count_is_not_counting_nobody():
+    """Benchmark round 5: per district, intersections + car parks >= 1; a district with intersections
+    but no car park was said to have "counted nobody"."""
+    def pick(var, s, rel):
+        return {"sum": {"var": var, "index": ["x"]}, "over": [{"index": "x", "set": s, "via": {"rel": rel, "to": "d"}}]}
+
+    ir = {"version": 2, "sets": ["district", "junction", "car_park"], "parameters": {}, "relationships": ["junction_in", "park_in"],
+          "variables": {"signal": {"index": ["junction"], "domain": "binary"}, "build": {"index": ["car_park"], "domain": "binary"}},
+          "constraints": [{"id": "every_district", "forall": [{"index": "d", "set": "district"}], "severity": "hard",
+                           "left": {"add": [pick("signal", "junction", "junction_in"), pick("build", "car_park", "park_in")]},
+                           "relation": ">=", "right": {"const": 1}}]}
+    data = {"sets": {"district": [{"id": "z1"}, {"id": "z2"}, {"id": "z3"}], "junction": [{"id": "j1"}, {"id": "j2"}],
+                     "car_park": [{"id": "p1"}]},
+            "relationships": {"junction_in": [{"from": "j1", "to": "z1"}, {"from": "j2", "to": "z2"}], "park_in": [{"from": "p1", "to": "z1"}]}}
+    compiled = compile_model(ir, data)
+    # z2 has a junction and no car park: it counts someone; z3 has neither: nobody.
+    assert {tuple(e["index"].items()) for e in compiled.empty_ranges} == {(("d", "z3"),)}

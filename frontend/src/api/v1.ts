@@ -1624,6 +1624,10 @@ export function useRuns(scenarioId: Id | null, page: PageParams = {}) {
     queryKey: [V1, "runs", { scenarioId, ...page }],
     queryFn: () => listRuns({ scenarioId, ...page }),
     enabled: isId(scenarioId),
+    // While a run is queued or running, the list asks again (benchmark round 5: the table said
+    // "running" after the run below it on the same page had its answer).
+    refetchInterval: (query) =>
+      ((query.state.data as { items?: { status: string }[] } | undefined)?.items ?? []).some((r) => r.status === "queued" || r.status === "running") ? 2000 : false,
   });
 }
 /** Whether a problem has any run yet, over all its scenarios (operator trial F10). */

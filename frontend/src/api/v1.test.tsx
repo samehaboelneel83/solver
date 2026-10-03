@@ -52,6 +52,7 @@ import {
   useDeleteEntity,
   useEntitiesOfTypes,
   useEntityTypes,
+  useRuns,
   validationErrors,
 } from "./v1";
 
@@ -186,6 +187,14 @@ describe("v1 hooks", () => {
     rerender({ domainId: 7 });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockFetch).toHaveBeenCalledWith("/api/v1/entity-types?domain_id=7");
+  });
+
+  it("asks for the runs again while one is still running (benchmark round 5)", async () => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce({ items: [{ id: 9, status: "running" }], total: 1 })
+      .mockResolvedValue({ items: [{ id: 9, status: "optimal" }], total: 1 });
+    const { result } = renderHook(() => useRuns(4), { wrapper: wrapper(new QueryClient()) });
+    await waitFor(() => expect(result.current.data?.items[0].status).toBe("optimal"), { timeout: 4000 });
   });
 
   it("reads a kind's records once when a data value is over it twice (benchmark round 4)", async () => {
