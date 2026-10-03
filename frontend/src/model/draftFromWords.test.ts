@@ -308,6 +308,34 @@ describe("reading more of the words (benchmark round 4)", () => {
     expect(printRule(d.constraints.find((c) => c.id === "source_limit")!)).toMatch(/^for each w in water_source: sum\(.*water_m3_per_feddan.*amount\[i, o\].*\) <= .*annual_capacity_m3/);
   });
 
+  it("chooses roads, signals and parking under one budget (benchmark round 5)", () => {
+    const kinds: Kind[] = [{ name: "road_project", attributes: [n("benefit"), n("cost_m")] },
+      { name: "signal", attributes: [n("delay_saved"), n("cost_m")] }, { name: "parking_site", attributes: [n("benefit"), n("capex_m")] }];
+    const p = proposeDraft("Choose road projects, signals and parking sites within a budget of 400, for the most benefit", kinds, [])!;
+    expect(p.recipe).toBe("selection");
+    const d = p.apply!(empty);
+    valid(d);
+    expect(Object.keys(d.variables)).toEqual(["choose", "choose_signal", "choose_parking_site"]);
+    const rules = Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+    expect(rules.budget).toBe("sum(cost_m[i] * choose[i] for i in road_project) + sum(cost_m[i] * choose_signal[i] for i in signal) "
+      + "+ sum(capex_m[i] * choose_parking_site[i] for i in parking_site) <= 400");
+  });
+
+  it("ships several products, each customer's need per product (benchmark round 5)", () => {
+    const kinds: Kind[] = [{ name: "warehouse", attributes: [n("capacity_t")] }, { name: "customer", attributes: [n("population")] },
+      { name: "product", attributes: [n("weight_kg")] }];
+    const data = [{ name: "unit_cost", index: ["warehouse", "customer"] }, { name: "demand_t", index: ["customer", "product"] }];
+    const p = proposeDraft("Ship each product from warehouses to customers at the least cost, unmet demand at a penalty of 50", kinds, data)!;
+    expect(p.recipe).toBe("network");
+    const d = p.apply!(empty);
+    valid(d);
+    expect(d.variables.ship).toMatchObject({ index: ["warehouse", "customer", "product"] });
+    const rules = Object.fromEntries(d.constraints.map((c) => [c.id, printRule(c)]));
+    expect(rules.demand_met).toBe("for each c in customer, p in product: sum(ship[s, c, p] for s in warehouse) + short[c, p] >= demand_t[c, p]");
+    expect(rules.source_capacity).toBe("for each s in warehouse: sum(ship[s, c, p] for c in customer, p in product) <= capacity_t[s]");
+    expect(d.parameters.demand_t).toEqual({ index: ["customer", "product"] });
+  });
+
   it("takes the opening cost the words name, never `rent` inside `current_inventory_t`", () => {
     const kinds: Kind[] = [{ name: "warehouse", attributes: [n("current_inventory_t"), n("capacity_t"), n("fixed_cost_egp_yr")] },
       { name: "store", attributes: [n("demand_t"), n("shortage_penalty")] }];

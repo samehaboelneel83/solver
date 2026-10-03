@@ -64,6 +64,9 @@ export type SelectionRecipe = {
   perType?: { field: string; value: string; atMost: number }[];
   /** At least one chosen for every record of a kind the items link to: "every district at least one". */
   atLeastOnePer?: { kind: string; link: string };
+  /** Other kinds chosen from under the same budget -- roads, signals and parking at once (benchmark round 5):
+   * each with its own worth and cost field, its own yes/no decision, and its worth in the one goal. */
+  also?: { items: string; value: string; cost: string }[];
 };
 
 export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft {
@@ -71,8 +74,14 @@ export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft 
   const pick = name("choose");
   const i = "i";
   const chosen = v(pick, [i]);
+  const others = (r.also ?? []).filter((o) => o.items !== r.items).map((o) => ({ ...o, pick: name(`choose_${o.items}`) }));
+  const spent = (field: (o: { cost: string; value: string }) => string) => {
+    const parts = [sum(mul(attr(i, field(r)), chosen), [i, r.items]), ...others.map((o) => sum(mul(attr(i, field(o)), v(o.pick, [i])), [i, o.items]))];
+    return parts.length === 1 ? parts[0] : ({ add: parts } as Term);
+  };
+  const what = [r.items, ...others.map((o) => o.items)].map(say).join(", ");
   const constraints = [...draft.constraints,
-    rule(name("budget"), `the chosen ${say(r.items)} cost at most ${r.budget}`, sum(mul(attr(i, r.cost), chosen), [i, r.items]), "<=", k(r.budget))];
+    rule(name("budget"), `the chosen ${what} cost at most ${r.budget}`, spent((o) => o.cost), "<=", k(r.budget))];
   if (r.atLeast !== undefined && Number.isFinite(r.atLeast)) {
     constraints.push(rule(name("at_least_chosen"), `at least ${r.atLeast} ${say(r.items)} are chosen`, sum(chosen, [i, r.items]), ">=", k(r.atLeast)));
   }
@@ -99,11 +108,12 @@ export function applySelection(draft: FormDraft, r: SelectionRecipe): FormDraft 
   }
   return {
     ...draft,
-    sets: [...new Set([...draft.sets, r.items, ...(r.atLeastOnePer ? [r.atLeastOnePer.kind] : [])])],
-    variables: { ...draft.variables, [pick]: { index: [r.items], domain: "binary" } } as Variables,
+    sets: [...new Set([...draft.sets, r.items, ...others.map((o) => o.items), ...(r.atLeastOnePer ? [r.atLeastOnePer.kind] : [])])],
+    variables: { ...draft.variables, [pick]: { index: [r.items], domain: "binary" },
+      ...Object.fromEntries(others.map((o) => [o.pick, { index: [o.items], domain: "binary" }])) } as Variables,
     constraints,
     objective: { sense: "maximize", mode: "weighted", terms: [
-      { id: name("value_chosen"), weight: 1, expression: sum(mul(attr(i, r.value), chosen), [i, r.items]) } as ObjectiveTerm] },
+      { id: name("value_chosen"), weight: 1, expression: spent((o) => o.value) } as ObjectiveTerm] },
   };
 }
 
@@ -134,18 +144,26 @@ export type NetworkRecipe = {
     available?: string; most?: number };
   /** Nothing goes further than this: data over both kinds (hours, minutes) and its most (benchmark round 5). */
   deliveryLimit?: { data: string; index: string[]; most: number };
+  /** Several products: what is shipped is per product, and each customer's need is data over it and
+   * the products (benchmark round 5); the demand field is then not used. */
+  products?: { kind: string; demand: string; demandIndex: string[] };
 };
 
 export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
   const name = namer(draft);
   const s = "s", c = "c";
   const ship = name("ship");
-  const variables = { ...draft.variables, [ship]: { index: [r.sources, r.customers], domain: "continuous", lower: 0 } } as Variables;
-  const flow = v(ship, [s, c]);
+  const pr = r.products, p = "p";
+  const variables = { ...draft.variables, [ship]: { index: [r.sources, r.customers, ...(pr ? [pr.kind] : [])], domain: "continuous", lower: 0 } } as Variables;
+  const flow = v(ship, pr ? [s, c, p] : [s, c]);
+  // With products, a rule per customer is per customer and product, and a sum over customers is over both.
+  const perC: [string, string][] = pr ? [[c, r.customers], [p, pr.kind]] : [[c, r.customers]];
   const unit: Term = { par: r.unitCost, index: r.unitCostIndex[0] === r.customers ? [c, s] : [s, c] } as Term;
+  const params: FormDraft["parameters"] = { ...draft.parameters, [r.unitCost]: draft.parameters[r.unitCost] ?? { index: r.unitCostIndex } };
   const constraints = [...draft.constraints];
   const terms: ObjectiveTerm[] = [];
-  const needs = attr(c, r.demand);
+  const needs: Term = pr ? ({ par: pr.demand, index: pr.demandIndex[0] === pr.kind ? [p, c] : [c, p] } as Term) : attr(c, r.demand);
+  const needSaid = pr ? say(pr.demand) : `its ${say(r.demand)}`;
 
   let open: string | null = null;
   if (r.openCost) {
@@ -156,19 +174,20 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
   let short: string | null = null;
   if (r.shortageField || (r.shortagePenalty !== undefined && Number.isFinite(r.shortagePenalty))) {
     short = name("short");
-    variables[short] = { index: [r.customers], domain: "continuous", lower: 0 } as Variables[string];
+    variables[short] = { index: [r.customers, ...(pr ? [pr.kind] : [])], domain: "continuous", lower: 0 } as Variables[string];
   }
-  const served: Term = short ? ({ add: [sum(flow, [s, r.sources]), v(short, [c])] } as Term) : sum(flow, [s, r.sources]);
+  const shortOf = short ? v(short, pr ? [c, p] : [c]) : null;
+  const served: Term = shortOf ? ({ add: [sum(flow, [s, r.sources]), shortOf] } as Term) : sum(flow, [s, r.sources]);
   constraints.push(rule(name("demand_met"), short
-    ? `each ${say(r.customers)} gets its ${say(r.demand)}, or the rest counts as short`
-    : `each ${say(r.customers)} gets its ${say(r.demand)}`, served, ">=", needs, each([c, r.customers])));
+    ? `each ${say(r.customers)} gets ${needSaid}, or the rest counts as short`
+    : `each ${say(r.customers)} gets ${needSaid}`, served, ">=", needs, each(...perC)));
   if (r.singleSource) {
     const assign = name("served_by");
     variables[assign] = { index: [r.sources, r.customers], domain: "binary" } as Variables[string];
     constraints.push(rule(name("one_source_each"), `each ${say(r.customers)} is served by one ${say(r.sources)}`,
       sum(v(assign, [s, c]), [s, r.sources]), "=", k(1), each([c, r.customers])));
     constraints.push(rule(name("ship_only_if_served"), `a ${say(r.sources)} ships to a ${say(r.customers)} only if it serves it`,
-      flow, "<=", mul(needs, v(assign, [s, c])), each([s, r.sources], [c, r.customers])));
+      flow, "<=", mul(needs, v(assign, [s, c])), each([s, r.sources], ...perC)));
     if (open) {
       constraints.push(rule(name("serve_only_if_open"), `only an open ${say(r.sources)} serves`,
         v(assign, [s, c]), "<=", v(open, [s]), each([s, r.sources], [c, r.customers])));
@@ -177,19 +196,20 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
   if (r.capacity) {
     const most = attr(s, r.capacity);
     constraints.push(rule(name("source_capacity"), open ? `an open ${say(r.sources)} ships at most its ${say(r.capacity)}, a closed one nothing`
-      : `a ${say(r.sources)} ships at most its ${say(r.capacity)}`, sum(flow, [c, r.customers]), "<=", open ? mul(most, v(open, [s])) : most,
+      : `a ${say(r.sources)} ships at most its ${say(r.capacity)}`, sum(flow, ...perC), "<=", open ? mul(most, v(open, [s])) : most,
     each([s, r.sources])));
   } else if (open && !r.singleSource) {
     constraints.push(rule(name("ship_only_if_open"), `only an open ${say(r.sources)} ships`, flow, "<=", mul(needs, v(open, [s])),
-      each([s, r.sources], [c, r.customers])));
+      each([s, r.sources], ...perC)));
   }
-  const sets = [r.sources, r.customers];
+  const sets = [r.sources, r.customers, ...(pr ? [pr.kind] : [])];
+  if (pr) params[pr.demand] = params[pr.demand] ?? { index: pr.demandIndex };
   if (r.fleet) {
     const f = r.fleet, t = "t";
     const trucks = name("vehicles");
     variables[trucks] = { index: [r.sources, f.kind], domain: "integer", lower: 0 } as Variables[string];
     constraints.push(rule(name("fleet_carries"), `what a ${say(r.sources)} ships fits in its ${say(f.kind)}s`,
-      sum(flow, [c, r.customers]), "<=", sum(mul(attr(t, f.capacity), v(trucks, [s, t])), [t, f.kind]), each([s, r.sources])));
+      sum(flow, ...perC), "<=", sum(mul(attr(t, f.capacity), v(trucks, [s, t])), [t, f.kind]), each([s, r.sources])));
     if (f.available) constraints.push(rule(name("fleet_available"), `no more ${say(f.kind)}s than there are`,
       sum(v(trucks, [s, t]), [s, r.sources]), "<=", attr(t, f.available), each([t, f.kind])));
     else if (f.most !== undefined && Number.isFinite(f.most)) constraints.push(rule(name("fleet_size"), `at most ${f.most} vehicles in all`,
@@ -197,20 +217,19 @@ export function applyNetwork(draft: FormDraft, r: NetworkRecipe): FormDraft {
     terms.push({ id: name("fleet_cost"), weight: 1, expression: sum(mul(attr(t, f.cost), v(trucks, [s, t])), [s, r.sources], [t, f.kind]) } as ObjectiveTerm);
     sets.push(f.kind);
   }
-  const params: FormDraft["parameters"] = { ...draft.parameters, [r.unitCost]: draft.parameters[r.unitCost] ?? { index: r.unitCostIndex } };
   if (r.deliveryLimit && Number.isFinite(r.deliveryLimit.most)) {
     const dl = r.deliveryLimit;
     const time: Term = { par: dl.data, index: dl.index[0] === r.customers ? [c, s] : [s, c] } as Term;
     params[dl.data] = params[dl.data] ?? { index: dl.index };
     // Linear because the time is data: a pair further than the limit ships nothing.
     constraints.push(rule(name("delivery_time"), `nothing goes where ${say(dl.data)} is over ${dl.most}`,
-      mul(time, flow), "<=", mul(k(dl.most), flow), each([s, r.sources], [c, r.customers])));
+      mul(time, flow), "<=", mul(k(dl.most), flow), each([s, r.sources], ...perC)));
   }
-  terms.unshift({ id: name("shipping_cost"), weight: 1, expression: sum(mul(unit, flow), [s, r.sources], [c, r.customers]) } as ObjectiveTerm);
+  terms.unshift({ id: name("shipping_cost"), weight: 1, expression: sum(mul(unit, flow), [s, r.sources], ...perC) } as ObjectiveTerm);
   // The price is in the goal's equation, weight 1, to read and change there (benchmark round 4: a hidden
   // weight of 15000 on this goal was found late and counted twice).
   if (short) terms.push({ id: name("shortage"), weight: 1,
-    expression: sum(mul(r.shortageField ? attr(c, r.shortageField) : k(r.shortagePenalty!), v(short, [c])), [c, r.customers]) } as ObjectiveTerm);
+    expression: sum(mul(r.shortageField ? attr(c, r.shortageField) : k(r.shortagePenalty!), shortOf!), ...perC) } as ObjectiveTerm);
   return {
     ...draft,
     sets: [...new Set([...draft.sets, ...sets])],

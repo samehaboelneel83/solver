@@ -36,8 +36,9 @@ const TITLES: Record<Recipe, string> = {
 };
 
 const SIGNALS: Record<Recipe, RegExp> = {
-  coverage: /\b(cover\w*|within|reach\w*|minutes?|response|nearby|closest|serve every|hotspots?)\b/g,
-  selection: /\b(projects?|portfolio|select\w*|invest\w*|proposals?|candidates?|fund\w*|shortlist\w*|options?)\b/g,
+  // "Within a budget" is not reach (benchmark round 5: projects within a budget were read as coverage).
+  coverage: /\b(cover\w*|within(?! (?:a|the|our|its|each|one|this) (?:\w+ )?budget)|reach\w*|minutes?|response|nearby|closest|serve every|hotspots?)\b/g,
+  selection: /\b(projects?|portfolio|select\w*|invest\w*|proposals?|candidates?|fund\w*|shortlist\w*|options?|budget)\b/g,
   network: /\b(ship\w*|deliver\w*|supply|suppl(y|ier)s?|warehouses?|depots?|customers?|stores?|flows?|transport\w*|distribut\w*|trucks?|fleet|vehicles?)\b/g,
   phasing: /\b(years?|yearly|annual\w*|quarters?|periods?|phas\w*|over time|month\w*|multi-?year|horizon)\b/g,
   // Benchmark re-test, October 2026: crop planning matched no recipe.
@@ -236,7 +237,15 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const mustHave = items ? flags(items.kind).find((n) => n !== never && /(^|_)(committed|must|mandatory|required|locked)(_|$)/.test(n)) : undefined;
     note("Always chosen when", mustHave, "its name");
     note("Never chosen when", never, "its name and your words");
-    const recipe = missing.length ? null : ({ items: items!.kind.name, value: value!, cost: cost!, budget: budget!,
+    // Other kinds the words name, each with a worth and a cost, share the budget (benchmark round 5:
+    // roads, signals and parking were three models).
+    const also = items ? kinds.filter((k) => k.name !== items.kind.name && !time(k) && mentions(text, k)).flatMap((k) => {
+      const v = namedField(k, text, costLike) ?? field(k, /benefit|value|score|return|npv|worth|impact|priority|gain|saved|saving/);
+      const c = field(k, /cost|capex|price|spend|invest|amount/);
+      return v && c && v !== c ? [{ items: k.name, value: v, cost: c }] : [];
+    }) : [];
+    for (const o of also) choices.push(`Also chosen from ${o.items}, worth ${o.value}, cost ${o.cost}, within the same budget — you wrote “${mentions(text, kinds.find((k) => k.name === o.items)!)}”`);
+    const recipe = missing.length ? null : ({ items: items!.kind.name, value: value!, cost: cost!, budget: budget!, ...(also.length ? { also } : {}),
       ...(most !== undefined ? { atMost: most } : {}), ...(mustHave ? { mustHave } : {}), ...(never ? { never } : {}),
       ...(perType.length ? { perType: perType.map(({ field: f, value: x, atMost: n }) => ({ field: f, value: x, atMost: n })) } : {}),
       ...(per?.link ? { atLeastOnePer: { kind: per.kind, link: per.link } } : {}) } satisfies SelectionRecipe);
@@ -431,8 +440,17 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     note("To", customers?.kind.name, customers?.why ?? "");
     need(sources, "a kind of record goods come from (depots, warehouses)");
     need(customers, "a kind of record that needs them, with a number field for how much");
-    const demand = field(customers?.kind, /demand|need|order|qty|quantity|volume|amount/) ?? numeric(customers?.kind)[0];
-    note("Each needs", demand, "its name");
+    // Several products: demand as data over the customers and a product kind the words name (benchmark round 5).
+    const productData = customers ? data.find((d) => d.index.length === 2 && d.index.includes(customers.kind.name)
+      && !d.index.includes(sources?.kind.name ?? "") && /demand|need|order|qty|quantity|volume|forecast/.test(d.name)
+      && (() => {
+        const other = kinds.find((k) => k.name === d.index.find((x) => x !== customers.kind.name));
+        return !!other && (/product|sku|item|commodit|goods|article/.test(other.name) || !!mentions(text, other));
+      })()) : undefined;
+    const products = productData ? { kind: productData.index.find((x) => x !== customers!.kind.name)!, demand: productData.name, demandIndex: productData.index } : undefined;
+    if (products) choices.push(`Per product: ${products.kind}, each ${customers!.kind.name} needs ${products.demand} — data over both`);
+    const demand = products ? products.demand : field(customers?.kind, /demand|need|order|qty|quantity|volume|amount/) ?? numeric(customers?.kind)[0];
+    note("Each needs", products ? undefined : demand, "its name");
     if (customers) need(demand, `a number field of ${customers.kind.name} for how much it needs`);
     const both = data.filter((d) => d.index.length === 2 && sources && customers && d.index.includes(sources.kind.name) && d.index.includes(customers.kind.name));
     const unit = both.find((d) => /cost|price|rate|tariff/.test(d.name)) ?? both.find((d) => /dist|km|time|min/.test(d.name)) ?? both[0];
@@ -474,7 +492,7 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
       ...(shortage !== undefined ? { shortagePenalty: shortage } : {}), ...(shortageField ? { shortageField } : {}),
       ...(fleetKind && load && price ? { fleet: { kind: fleetKind.name, capacity: load, cost: price,
         ...(available ? { available } : fleetMost !== undefined ? { most: fleetMost } : {}) } } : {}),
-      ...(deliveryLimit ? { deliveryLimit } : {}) } satisfies NetworkRecipe);
+      ...(deliveryLimit ? { deliveryLimit } : {}), ...(products ? { products } : {}) } satisfies NetworkRecipe);
     return { recipe: "network", title: TITLES.network, choices, missing, apply: recipe ? (d) => applyNetwork(d, recipe) : null };
   }
 
