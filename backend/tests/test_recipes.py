@@ -102,6 +102,42 @@ def test_flow_routes_trips_over_the_quickest_roads_within_capacity_and_widens_wi
     assert round(float(_solve("recipe_flow", data).objective), 6) == 47
 
 
+def test_flow_lets_time_grow_as_a_road_fills_and_widening_eases_it():
+    """Benchmark round 4: travel time that grows as a road fills, and a widening that raises its capacity."""
+    roads = {"fast": (1, 10, 99), "slow": (2, 10, 99)}
+    data = {
+        "sets": {"junction": [{"id": "a"}, {"id": "c"}],
+                 "road": [{"id": r, "minutes": t, "capacity": cap, "extra": 10, "widen_cost": cost} for r, (t, cap, cost) in roads.items()]},
+        "relationships": {"road_from": [{"from": r, "to": "a"} for r in roads], "road_to": [{"from": r, "to": "c"} for r in roads]},
+        "parameters": {"trips": [{"0": "a", "1": "c", "value": 20}]},
+        "parameter_defaults": {"trips": 0},
+    }
+    cuts = [0.5, 0.75, 1, 1.25, 1.5]
+
+    def total(x):
+        return x + 0.15 * x ** 5
+
+    slopes = [round((total(x) - total(w)) / (x - w), 4) for w, x in zip([0, *cuts], cuts)]
+
+    def minutes(load, free, cap):
+        # The curve in pieces, as the recipe writes it: each share of capacity at its own mean slope.
+        out, at = 0.0, 0.0
+        for k, slope in enumerate(slopes):
+            width = (cuts[k] - (cuts[k - 1] if k else 0)) * cap if k < len(slopes) - 1 else float("inf")
+            part = min(width, max(load - at, 0))
+            out, at = out + free * slope * part, at + part
+        return out
+
+    def best(cap_fast):
+        return min(minutes(v / 4, 1, cap_fast) + minutes(20 - v / 4, 2, 10) for v in range(0, 81))
+
+    # No widening within the budget of 10: the fast road fills until its next car is as slow as the slow road's.
+    assert round(float(_solve("recipe_flow_congestion", data).objective), 4) == round(best(10), 4)
+    # Widening the fast road now fits (5): it takes twice as much before it slows.
+    data["sets"]["road"][0]["widen_cost"] = 5
+    assert round(float(_solve("recipe_flow_congestion", data).objective), 4) == round(best(20), 4) < round(best(10), 4)
+
+
 def test_inventory_orders_ahead_within_the_order_limit_and_storage_and_counts_lost_sales():
     """Benchmark re-test, October 2026: stock per product over periods had no recipe."""
     data = {

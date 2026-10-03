@@ -495,26 +495,44 @@ further into their problem and met the next layer -- response-time assignment, c
 routing, raster data, large embedded models -- and three map/ML bugs cost points.
 
 ### Gaps found in round 4 (R4a–R4h)
-- [ ] **R4a Assign to the nearest open site, least response time** (P1, P2): coverage recipes count who
+- [x] **R4a Assign to the nearest open site, least response time** (P1, P2): coverage recipes count who
       is within reach; neither assigns each place to one open site nor minimises weighted minutes.
-- [ ] **R4b The result map shows the answer for any kind** (P3): chosen roads, signals and parking
+      Done: `applyAssignment`: open sites, each place served by one open site within reach, least
+      weighted minutes; in the recipes form and the drafter.
+- [x] **R4b The result map shows the answer for any kind** (P3): chosen roads, signals and parking
       were drawn in one colour, and the GeoJSON export marked every feature "place".
-- [ ] **R4c The drafter reads more of the words** (P3, P4, P5): "at most 8 parking projects" (a limit
+      Done: a decision over an unplaced kind is drawn on the placed records it links to; flows go
+      along the lines layer by default.
+- [x] **R4c The drafter reads more of the words** (P3, P4, P5): "at most 8 parking projects" (a limit
       per type), "every district at least one" (a cover rule), the worth and opening-cost fields the
       words name, a shortage price shown where it can be changed, crop shares as shares of each kind's
       land that can hold.
-- [ ] **R4d Travel times from the records' own speeds** (P1): a speed field on the road records (from
+      Done: per-type limits, at least one per linked district, named worth and opening-cost fields
+      (fields match at a word start), the shortage price in the goal's equation or a penalty field,
+      least/most area as amounts and shares of the land that can hold the crop.
+- [x] **R4d Travel times from the records' own speeds** (P1): a speed field on the road records (from
       weather factors) was ignored -- only the lines layer's properties are read -- and silently.
-- [ ] **R4e Forecast data in time** (P2, P4): order by a timestamp's hour as well as its date; date
+      Done: travel times read a speed field kept on the road records (matched by geometry) and
+      refuse by name a field held by neither.
+- [x] **R4e Forecast data in time** (P2, P4): order by a timestamp's hour as well as its date; date
       parts filled on rows imported later; predict-and-keep per parcel × crop through a link input.
-- [ ] **R4f Larger models inside the optimiser** (P4): a good yield model (R² 0.98) exceeded the 20,000
+      Done: lags in the order of the record's key; date parts from the key, with the hour; date
+      parts, categories and link copies kept per kind and filled on later imports; per parcel ×
+      crop, inputs through the trained kind's links read the crop's or the parcel's own fields, and
+      no input has to take the key.
+- [x] **R4f Larger models inside the optimiser** (P4): a good yield model (R² 0.98) exceeded the 20,000
       leaf limit, leaving a weak one.
-- [ ] **R4g Congestion and capacity added in one traffic model** (P3): travel time that grows as a road
+      Done: a prediction whose inputs are data but one is embedded as its exact step function in
+      that input (ordered threshold binaries, 200,000 steps), not one binary per leaf.
+- [x] **R4g Congestion and capacity added in one traffic model** (P3): travel time that grows as a road
       fills, and a widening that raises that road's capacity in the flow.
-- [ ] **R4h Rules filter on text** (P1, P2): `where status = 'existing'` was refused.
+      Done: `congestion` in the flow recipe: the BPR curve in five straight pieces against capacity
+      as widened, no yes/no choices; the drafter turns it on for congestion words.
+- [x] **R4h Rules filter on text** (P1, P2): `where status = 'existing'` was refused.
+      Done: text values are quoted in any quote style and compared ignoring case and spaces.
 
 ### Bugs from round 4
-- [ ] A road speed field the lines layer does not have is ignored without a word (P1).
+- [x] A road speed field the lines layer does not have is ignored without a word (P1). Fixed with R4d.
 - [ ] A rule's plain-words note stays stale after its equation is edited, in Review, Scenarios and the
       infeasibility list (P1, P3, P5).
 - [ ] A scenario run's "within reach" map overlay reads the base data, not the scenario's (P1).

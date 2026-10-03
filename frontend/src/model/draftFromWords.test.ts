@@ -97,8 +97,11 @@ describe("describe it -> a first draft (benchmark, October 2026)", () => {
     expect(p.missing).toEqual([]);
     expect(p.choices).toContain("A road starts at from_zone and ends at to_zone — their names");
     const d = p.apply!(empty);
-    expect(d.constraints.map((c) => c.id)).toEqual(["trips_arrive", "upgrade_budget", "road_capacity"]);
+    // "congest" asks for time that grows as a road fills (benchmark round 4), not a hard limit.
+    expect(d.constraints.map((c) => c.id)).toEqual(["trips_arrive", "upgrade_budget", "load_in_pieces", "load_1_width", "load_2_width", "load_3_width", "load_4_width"]);
     expect(d.constraints[1]).toMatchObject({ right: { const: 30 } });
+    const plain = proposeDraft("Route the commute trips between zones over the roads: which roads to widen with a budget of 30 million", kinds, data, undefined, links)!;
+    expect(plain.apply!(empty).constraints.map((c) => c.id)).toEqual(["trips_arrive", "upgrade_budget", "road_capacity"]);
     // Without the two links it says what is missing instead of guessing.
     expect(proposeDraft(text, kinds, data)!.missing[0]).toMatch(/each linked twice to zone/);
   });

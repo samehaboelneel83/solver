@@ -363,8 +363,11 @@ export function proposeDraft(text: string, kinds: Kind[], data: Data[], only?: R
     const budget = added && cost ? inUnitsOf(amount(text, ["budget", "spend", "afford"]), cost, choices) : undefined;
     const upgrade = capacity && added && cost && budget !== undefined ? { added, cost, budget } : undefined;
     if (upgrade) choices.push(`Roads may be widened by ${added} at ${cost}, within ${budget} — you wrote of widening`);
+    // "travel time grows as a road fills", "congestion": the BPR curve in place of a hard limit (benchmark round 4).
+    const congestion = !!capacity && /\b(congest\w*|bpr|volume[- ]delay|(grows?|rises?|increases?|slows?)\b[^.;]{0,30}\b(fills?|full|busy|load\w*|volume)|as (a |the )?roads? fills?)\b/i.test(text);
+    if (congestion) choices.push("Time grows as a road fills (time × (1 + 0.15 (load/capacity)⁴)), in place of a hard limit — you wrote of congestion");
     const recipe = missing.length ? null : ({ nodes: nodes!.kind.name, arcs: arcs!.kind.name, startsAt: startsAt!, endsAt: endsAt!, trips: trips!.name,
-      time: time!, ...(capacity ? { capacity } : {}), ...(upgrade ? { upgrade } : {}) } satisfies FlowRecipe);
+      time: time!, ...(capacity ? { capacity } : {}), ...(upgrade ? { upgrade } : {}), ...(congestion ? { congestion: {} } : {}) } satisfies FlowRecipe);
     return { recipe: "flow", title: TITLES.flow, choices, missing, apply: recipe ? (d) => applyFlow(d, recipe) : null };
   }
 

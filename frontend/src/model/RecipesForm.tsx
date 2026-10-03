@@ -119,7 +119,8 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
     const widen = !!(f.capacity && f.added && f.widenCost && budget !== undefined && Number.isFinite(budget));
     ready = !!(f.nodes && f.arcs && f.nodes !== f.arcs && startsAt && endsAt && startsAt !== endsAt && f.trips && f.time);
     apply = (d) => applyFlow(d, { nodes: f.nodes, arcs: f.arcs, startsAt, endsAt, trips: f.trips, time: f.time,
-      ...(f.capacity ? { capacity: f.capacity } : {}), ...(widen ? { upgrade: { added: f.added, cost: f.widenCost, budget: budget! } } : {}) });
+      ...(f.capacity ? { capacity: f.capacity } : {}), ...(widen ? { upgrade: { added: f.added, cost: f.widenCost, budget: budget! } } : {}),
+      ...(f.capacity && f.congestion === "yes" ? { congestion: {} } : {}) });
     body = (
       <>
         <Row>
@@ -146,6 +147,7 @@ export default function RecipesForm({ kinds, data, links = [], onApply }: {
             <label className="text-xs text-slate-700">Widening budget
               <input aria-label="Widening budget" className={`${SELECT} w-28`} inputMode="decimal" value={get("budget")} onChange={(e) => set("budget")(e.target.value)} />
             </label>
+            <Pick label="Time grows as a road fills" value={get("congestion")} onChange={set("congestion")} options={["yes"]} optional />
           </Row>
         )}
       </>

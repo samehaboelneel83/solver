@@ -344,7 +344,25 @@ export type FlowRecipe = {
   capacity?: string;
   /** Roads may be widened: a number field each of the capacity added and what it costs, within a budget. */
   upgrade?: { added: string; cost: string; budget: number };
+  /** With a capacity: a road's time grows as it fills, `time × (1 + alpha (load/capacity)^power)`, the
+   * BPR curve (0.15 and 4 unless said), in place of a hard limit; widening raises the capacity it is
+   * measured against (benchmark round 4). */
+  congestion?: { alpha?: number; power?: number };
 };
+
+/** Load as a share of capacity where the congestion curve is cut into straight pieces; the last runs on. */
+export const CONGESTION_CUTS = [0.5, 0.75, 1, 1.25, 1.5];
+
+/** Each piece of the curve: its width as a share of capacity (none for the last), and what a trip on
+ * it adds to the total time, per unit of the road's free time: the curve's mean slope over the piece. */
+export function congestionPieces(alpha = 0.15, power = 4): { width?: number; slope: number }[] {
+  const total = (x: number) => x + alpha * x ** (power + 1);
+  const at = [0, ...CONGESTION_CUTS];
+  return at.slice(1).map((x, i) => ({
+    ...(i < at.length - 2 ? { width: x - at[i] } : {}),
+    slope: Math.round(((total(x) - total(at[i])) / (x - at[i])) * 1e4) / 1e4,
+  }));
+}
 
 /** A relationship between two kinds, by name. */
 export type Link = { name: string; from: string; to: string };
@@ -373,17 +391,38 @@ export function applyFlow(draft: FormDraft, r: FlowRecipe): FormDraft {
     rule(name("trips_arrive"), `at every ${say(r.nodes)}, the traffic from each origin that stays there is the ${say(r.trips)} ending there`,
       { add: [along(r.endsAt), mul(k(-1), along(r.startsAt))] } as Term, "=", { par: r.trips, index: [o, n] } as Term,
       [{ index: o, set: r.nodes }, { index: n, set: r.nodes, where: [{ index: o, op: "!=" }] }])];
+  let travel: Term = sum(mul(attr(a, r.time), onRoad), [a, r.arcs], [o, r.nodes]);
   if (r.capacity) {
     let most: Term = attr(a, r.capacity);
+    let widen: string | undefined;
     if (r.upgrade) {
-      const widen = name("upgrade");
+      widen = name("upgrade");
       variables[widen] = { index: [r.arcs], domain: "binary" } as Variables[string];
       most = { add: [most, mul(attr(a, r.upgrade.added), v(widen, [a]))] } as Term;
       constraints.push(rule(name("upgrade_budget"), `the ${say(r.arcs)}s upgraded cost at most ${r.upgrade.budget}`,
         sum(mul(attr(a, r.upgrade.cost), v(widen, [a])), [a, r.arcs]), "<=", k(r.upgrade.budget)));
     }
-    constraints.push(rule(name("road_capacity"), r.upgrade ? `each ${say(r.arcs)} carries at most its ${say(r.capacity)}, more if upgraded`
-      : `each ${say(r.arcs)} carries at most its ${say(r.capacity)}`, sum(onRoad, [o, r.nodes]), "<=", most, each([a, r.arcs])));
+    if (r.congestion) {
+      // The load on a road in pieces, each up to a share of its capacity (as widened), each slower than
+      // the one before: least time fills them in order, so the curve needs no yes/no choices.
+      const pieces = congestionPieces(r.congestion.alpha, r.congestion.power);
+      const loads = pieces.map((_, i) => name(`load_${i + 1}`));
+      for (const l of loads) variables[l] = { index: [r.arcs], domain: "continuous", lower: 0 } as Variables[string];
+      constraints.push(rule(name("load_in_pieces"), `what a ${say(r.arcs)} carries is its load in pieces, each slower than the last`,
+        sum(onRoad, [o, r.nodes]), "=", { add: loads.map((l) => v(l, [a])) } as Term, each([a, r.arcs])));
+      let upTo = 0;
+      pieces.forEach((p, i) => {
+        if (p.width === undefined) return;
+        upTo += p.width;
+        constraints.push(rule(name(`load_${i + 1}_width`), `piece ${i + 1} of a ${say(r.arcs)}'s load is at most ${p.width} of its ${say(r.capacity!)}`
+          + `${widen ? ", as widened" : ""} (up to ${Math.round(upTo * 100)}% full)`,
+          v(loads[i], [a]), "<=", mul(k(p.width), most), each([a, r.arcs])));
+      });
+      travel = sum(mul(attr(a, r.time), { add: pieces.map((p, i) => mul(k(p.slope), v(loads[i], [a]))) } as Term), [a, r.arcs]);
+    } else {
+      constraints.push(rule(name("road_capacity"), r.upgrade ? `each ${say(r.arcs)} carries at most its ${say(r.capacity)}, more if upgraded`
+        : `each ${say(r.arcs)} carries at most its ${say(r.capacity)}`, sum(onRoad, [o, r.nodes]), "<=", most, each([a, r.arcs])));
+    }
   }
   return {
     ...draft,
@@ -392,7 +431,7 @@ export function applyFlow(draft: FormDraft, r: FlowRecipe): FormDraft {
     variables,
     constraints,
     objective: { sense: "minimize", mode: "weighted", terms: [
-      { id: name("travel_time"), weight: 1, expression: sum(mul(attr(a, r.time), onRoad), [a, r.arcs], [o, r.nodes]) } as ObjectiveTerm] },
+      { id: name("travel_time"), weight: 1, expression: travel } as ObjectiveTerm] },
   };
 }
 

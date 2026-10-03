@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { checkIrShape } from "../ir/validate";
-import { applyAllocation, applyAssignment, applyFlow, applyInventory, applyNetwork, applyRoutes, applyPhasing, applySelection } from "./recipes";
+import { applyAllocation, applyAssignment, applyFlow, congestionPieces, applyInventory, applyNetwork, applyRoutes, applyPhasing, applySelection } from "./recipes";
 import { printRule } from "./formula";
 import { EMPTY_MODEL, publishable, type FormDraft } from "./draftIr";
 
@@ -93,6 +93,23 @@ describe("more recipes (benchmark, October 2026)", () => {
     });
     expect(published.relationships).toEqual(["road_from", "road_to"]);
     made.flow = published;
+  });
+
+  it("lets a road's time grow as it fills, against its capacity as widened (benchmark round 4)", () => {
+    const d = applyFlow(empty, { nodes: "junction", arcs: "road", startsAt: "road_from", endsAt: "road_to", trips: "trips", time: "minutes",
+      capacity: "capacity", upgrade: { added: "extra", cost: "widen_cost", budget: 10 }, congestion: {} });
+    const published = publishable(ir(d));
+    expect(checkIrShape(published)).toBeNull();
+    const r = rules(d);
+    expect(r.road_capacity).toBeUndefined();
+    expect(r.load_in_pieces).toBe("for each a in road: sum(flow[a, o] for o in junction) = load_1[a] + load_2[a] + load_3[a] + load_4[a] + load_5[a]");
+    expect(r.load_1_width).toBe("for each a in road: load_1[a] <= 0.5 * (capacity[a] + extra[a] * upgrade[a])");
+    expect(Object.keys(r)).toEqual(["trips_arrive", "upgrade_budget", "load_in_pieces", "load_1_width", "load_2_width", "load_3_width", "load_4_width"]);
+    // Each piece slower than the one before: least time fills them in order.
+    const slopes = congestionPieces().map((p) => p.slope);
+    expect(slopes).toEqual([...slopes].sort((x, y) => x - y));
+    expect(slopes[0]).toBeCloseTo(1.0094, 4);
+    made.flow_congestion = published;
   });
 
   it("orders each product each week at each depot to meet what is needed, within storage (benchmark re-test, October 2026)", () => {

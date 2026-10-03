@@ -6604,6 +6604,553 @@
           ]
         }
       }
+    },
+    {
+      "name": "recipe_flow_congestion",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "junction",
+          "road"
+        ],
+        "parameters": {
+          "trips": {
+            "index": [
+              "junction",
+              "junction"
+            ]
+          }
+        },
+        "variables": {
+          "flow": {
+            "index": [
+              "road",
+              "junction"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "upgrade": {
+            "index": [
+              "road"
+            ],
+            "domain": "binary"
+          },
+          "load_1": {
+            "index": [
+              "road"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "load_2": {
+            "index": [
+              "road"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "load_3": {
+            "index": [
+              "road"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "load_4": {
+            "index": [
+              "road"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          },
+          "load_5": {
+            "index": [
+              "road"
+            ],
+            "domain": "continuous",
+            "lower": 0
+          }
+        },
+        "constraints": [
+          {
+            "id": "trips_arrive",
+            "note": "at every junction, the traffic from each origin that stays there is the trips ending there",
+            "forall": [
+              {
+                "index": "o",
+                "set": "junction"
+              },
+              {
+                "index": "n",
+                "set": "junction",
+                "where": [
+                  {
+                    "index": "o",
+                    "op": "!="
+                  }
+                ]
+              }
+            ],
+            "left": {
+              "add": [
+                {
+                  "sum": {
+                    "var": "flow",
+                    "index": [
+                      "a",
+                      "o"
+                    ]
+                  },
+                  "over": [
+                    {
+                      "index": "a",
+                      "set": "road",
+                      "via": {
+                        "rel": "road_to",
+                        "to": "n"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "mul": [
+                    {
+                      "const": -1
+                    },
+                    {
+                      "sum": {
+                        "var": "flow",
+                        "index": [
+                          "a",
+                          "o"
+                        ]
+                      },
+                      "over": [
+                        {
+                          "index": "a",
+                          "set": "road",
+                          "via": {
+                            "rel": "road_from",
+                            "to": "n"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "par": "trips",
+              "index": [
+                "o",
+                "n"
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "upgrade_budget",
+            "note": "the roads upgraded cost at most 10",
+            "left": {
+              "sum": {
+                "mul": [
+                  {
+                    "attr": {
+                      "of": "a",
+                      "name": "widen_cost"
+                    }
+                  },
+                  {
+                    "var": "upgrade",
+                    "index": [
+                      "a"
+                    ]
+                  }
+                ]
+              },
+              "over": [
+                {
+                  "index": "a",
+                  "set": "road"
+                }
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "const": 10
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "load_in_pieces",
+            "note": "what a road carries is its load in pieces, each slower than the last",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "sum": {
+                "var": "flow",
+                "index": [
+                  "a",
+                  "o"
+                ]
+              },
+              "over": [
+                {
+                  "index": "o",
+                  "set": "junction"
+                }
+              ]
+            },
+            "relation": "=",
+            "right": {
+              "add": [
+                {
+                  "var": "load_1",
+                  "index": [
+                    "a"
+                  ]
+                },
+                {
+                  "var": "load_2",
+                  "index": [
+                    "a"
+                  ]
+                },
+                {
+                  "var": "load_3",
+                  "index": [
+                    "a"
+                  ]
+                },
+                {
+                  "var": "load_4",
+                  "index": [
+                    "a"
+                  ]
+                },
+                {
+                  "var": "load_5",
+                  "index": [
+                    "a"
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "load_1_width",
+            "note": "piece 1 of a road's load is at most 0.5 of its capacity, as widened (up to 50% full)",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "var": "load_1",
+              "index": [
+                "a"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "const": 0.5
+                },
+                {
+                  "add": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "capacity"
+                      }
+                    },
+                    {
+                      "mul": [
+                        {
+                          "attr": {
+                            "of": "a",
+                            "name": "extra"
+                          }
+                        },
+                        {
+                          "var": "upgrade",
+                          "index": [
+                            "a"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "load_2_width",
+            "note": "piece 2 of a road's load is at most 0.25 of its capacity, as widened (up to 75% full)",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "var": "load_2",
+              "index": [
+                "a"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "const": 0.25
+                },
+                {
+                  "add": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "capacity"
+                      }
+                    },
+                    {
+                      "mul": [
+                        {
+                          "attr": {
+                            "of": "a",
+                            "name": "extra"
+                          }
+                        },
+                        {
+                          "var": "upgrade",
+                          "index": [
+                            "a"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "load_3_width",
+            "note": "piece 3 of a road's load is at most 0.25 of its capacity, as widened (up to 100% full)",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "var": "load_3",
+              "index": [
+                "a"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "const": 0.25
+                },
+                {
+                  "add": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "capacity"
+                      }
+                    },
+                    {
+                      "mul": [
+                        {
+                          "attr": {
+                            "of": "a",
+                            "name": "extra"
+                          }
+                        },
+                        {
+                          "var": "upgrade",
+                          "index": [
+                            "a"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          },
+          {
+            "id": "load_4_width",
+            "note": "piece 4 of a road's load is at most 0.25 of its capacity, as widened (up to 125% full)",
+            "forall": [
+              {
+                "index": "a",
+                "set": "road"
+              }
+            ],
+            "left": {
+              "var": "load_4",
+              "index": [
+                "a"
+              ]
+            },
+            "relation": "<=",
+            "right": {
+              "mul": [
+                {
+                  "const": 0.25
+                },
+                {
+                  "add": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "capacity"
+                      }
+                    },
+                    {
+                      "mul": [
+                        {
+                          "attr": {
+                            "of": "a",
+                            "name": "extra"
+                          }
+                        },
+                        {
+                          "var": "upgrade",
+                          "index": [
+                            "a"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "severity": "hard"
+          }
+        ],
+        "relationships": [
+          "road_from",
+          "road_to"
+        ],
+        "objective": {
+          "sense": "minimize",
+          "terms": [
+            {
+              "id": "travel_time",
+              "weight": 1,
+              "expression": {
+                "sum": {
+                  "mul": [
+                    {
+                      "attr": {
+                        "of": "a",
+                        "name": "minutes"
+                      }
+                    },
+                    {
+                      "add": [
+                        {
+                          "mul": [
+                            {
+                              "const": 1.0094
+                            },
+                            {
+                              "var": "load_1",
+                              "index": [
+                                "a"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "mul": [
+                            {
+                              "const": 1.1236
+                            },
+                            {
+                              "var": "load_2",
+                              "index": [
+                                "a"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "mul": [
+                            {
+                              "const": 1.4576
+                            },
+                            {
+                              "var": "load_3",
+                              "index": [
+                                "a"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "mul": [
+                            {
+                              "const": 2.2311
+                            },
+                            {
+                              "var": "load_4",
+                              "index": [
+                                "a"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "mul": [
+                            {
+                              "const": 3.7252
+                            },
+                            {
+                              "var": "load_5",
+                              "index": [
+                                "a"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "over": [
+                  {
+                    "index": "a",
+                    "set": "road"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "invalid": [
