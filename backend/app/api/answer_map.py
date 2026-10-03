@@ -279,7 +279,7 @@ def _coverage(ir: dict[str, Any], data: dict[str, Any], placed: dict[str, dict[s
     flags = {spec["index"][0]: name for name, spec in (ir.get("variables") or {}).items()
              if (spec.get("domain") or "binary") == "binary" and len(spec.get("index") or []) == 1
              and spec["index"][0] in placed}
-    defaults = data.get("defaults") or {}
+    defaults = data.get("parameter_defaults") or data.get("defaults") or {}
     out = []
     for par, spec in (ir.get("parameters") or {}).items():
         index = list(spec.get("index") or [])
@@ -332,7 +332,7 @@ def _gap(a: list[float], b: list[float]) -> float:
 
 def _map_of(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
-        text("SELECT r.status, mv.ir, d.data, sol.assignments, sol.amounts FROM run r"
+        text("SELECT r.status, r.params, s.patch, mv.ir, d.data, sol.assignments, sol.amounts FROM run r"
              " JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
              " JOIN dataset d ON d.id = r.dataset_id LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"),
         {"r": run_id},
@@ -344,7 +344,21 @@ def _map_of(db: Session, run_id: int) -> dict[str, Any]:
     results = [dict(r) for r in db.execute(
         text("SELECT constraint_id, satisfied, violations FROM constraint_result WHERE run_id = :r"), {"r": run_id}
     ).mappings()]
-    return answer_map(row["ir"], row["data"] or {}, row["assignments"], row["amounts"], results)
+    ir, data = solved_with(row["ir"], row["data"] or {}, row["params"] or {}, row["patch"] or {})
+    return answer_map(ir, data, row["assignments"], row["amounts"], results)
+
+
+def solved_with(ir: dict[str, Any], data: dict[str, Any], params: dict[str, Any], patch: dict[str, Any]
+                ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The model and data a run solved: its scenario's (or case's) patch and data what-ifs on a copy of
+    the frozen dataset, as the solve applied them (benchmark round 4: a scenario's remade reach was
+    drawn from the base's)."""
+    from app.solve import whatif
+    from app.solve.service import patched
+
+    patch = params["case_patch"] if "case_patch" in params else patch
+    model = patched(ir, patch)
+    return model, whatif.apply(data, model, patch)
 
 
 @router.get("/runs/{run_id}/answer-map")

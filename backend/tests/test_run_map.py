@@ -173,3 +173,21 @@ def test_a_choice_of_records_with_no_shape_is_drawn_where_each_links_to():
     assert any(layer["id"] == "fund" and layer["title"].startswith("fund: 2 of 3 project") for layer in found["layers"])
     # The road no project is on is context; nothing of it says "chosen".
     assert next(f for f in found["features"] if f["properties"]["key"] == "R3")["properties"]["status"] == "place"
+
+
+def test_a_scenario_run_draws_who_is_served_from_the_scenario_s_own_reach():
+    """Benchmark round 4: a scenario that remade reach30 (12 of 15 covered) was drawn from the base's (14 of 15)."""
+    from app.api.answer_map import answer_map, solved_with
+
+    point = lambda x: {"type": "Point", "coordinates": [30 + x, 31]}  # noqa: E731
+    ir = {"sets": ["base", "town"], "parameters": {"reach": {"index": ["base", "town"]}},
+          "variables": {"open": {"index": ["base"], "domain": "binary"}}}
+    data = {"sets": {"base": [{"id": "B", "shape": point(0)}], "town": [{"id": t, "shape": point(0.01 * (i + 1))} for i, t in enumerate("xyz")]},
+            "parameters": {"reach": [{"base": "B", "town": t, "value": 1} for t in "xyz"]}, "parameter_defaults": {"reach": 0}}
+    patch = {"set_param": [{"param": "reach", "index": ["B", "z"], "value": 0}]}
+    base = answer_map(ir, data, {"open": [["B"]]}, {}, [])
+    model, scenario = solved_with(ir, data, {}, patch)
+    found = answer_map(model, scenario, {"open": [["B"]]}, {}, [])
+    title = lambda m: next(layer["title"] for layer in m["layers"] if layer["id"] == "reach_served")  # noqa: E731
+    assert title(base).endswith("3 of 3") and title(found).endswith("2 of 3")
+    assert data["parameters"]["reach"][2]["value"] == 1  # the frozen data is left as it was
