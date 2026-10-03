@@ -50,7 +50,8 @@ export function applyGuidedCommand(draft: FormDraft, command: GuidedCommand, ava
     if (command.index.some(set => !availableSets.includes(set))) throw new Error("Choose sets that exist in this domain.");
     const spec: VariableSpec = { domain: command.domain, index: [...command.index] };
     if (command.domain !== "binary") {
-      if (command.lower.trim()) spec.lower = number(command.lower, "Minimum");
+      // A blank minimum is 0, not unbounded below (benchmark round 4: a cost goal ran to minus infinity).
+      spec.lower = command.lower.trim() ? number(command.lower, "Minimum") : 0;
       if (command.upper.trim()) spec.upper = number(command.upper, "Maximum");
       if (spec.lower !== undefined && spec.upper !== undefined && spec.lower > spec.upper) throw new Error("Minimum must not exceed maximum.");
       if (command.domain === "integer" && [spec.lower, spec.upper].some(value => value !== undefined && !Number.isSafeInteger(value))) throw new Error("Whole-number decisions need whole-number bounds.");

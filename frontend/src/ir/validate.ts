@@ -1639,11 +1639,18 @@ class ShapeChecker {
   private entityIndex(ref: Json, loc: IrLoc, scope: Map<string, string>, wanted: string | undefined): IrRefusal | null {
     const keys = Object.keys(ref);
     if (keys.length !== 2 || !("par" in ref) || !("index" in ref) || !this.entityParameters.has(ref.par as string)) {
+      // In words (benchmark round 4: `amount[of_parcel[h], of_crop[h]]` was answered with raw JSON).
+      const attr = ref && typeof ref === "object" ? (ref as { attr?: { name?: unknown } }).attr : undefined;
+      const field = attr && typeof attr === "object" && typeof attr.name === "string" ? attr.name : null;
       return refusal(
         "index_entry_invalid",
         loc,
-        'an index position is an index name, or {"par": <parameter>, "index": [...]} naming a parameter whose ' +
-          "values are entities"
+        'each position in [...] takes an index (like p, bound by "for each" or a sum) or a data value whose ' +
+          "values are records" +
+          (field
+            ? `; a record's own field (${field}) cannot choose the position -- sum over the records instead ` +
+              `and keep the ones whose ${field} matches, or make a data value from it`
+            : "")
       );
     }
     const of = this.entityParameters.get(ref.par as string);

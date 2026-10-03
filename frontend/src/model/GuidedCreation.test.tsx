@@ -62,7 +62,7 @@ it("explains invalid bounds and prevents creating an invalid decision", () => {
   render(<Harness />);
   fireEvent.change(screen.getByLabelText("Decision name"), { target: { value: "staff" } });
   fireEvent.change(screen.getByLabelText("What kind of decision?"), { target: { value: "integer" } });
-  fireEvent.change(screen.getByLabelText("Minimum (optional)"), { target: { value: "2.5" } });
+  fireEvent.change(screen.getByLabelText("Minimum (0 if blank)"), { target: { value: "2.5" } });
   expect(screen.getByRole("button", { name: "Create decision variable" })).toBeDisabled();
   expect(screen.getByText("Whole-number decisions need whole-number bounds.")).toBeInTheDocument();
   expect(Object.keys(draft().variables)).toHaveLength(0);

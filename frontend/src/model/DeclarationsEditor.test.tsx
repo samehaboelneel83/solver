@@ -251,7 +251,7 @@ describe("DeclarationsEditor", () => {
 
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        variables: expect.objectContaining({ flow: { index: ["day"], domain: "continuous" } }),
+        variables: expect.objectContaining({ flow: { index: ["day"], domain: "continuous", lower: 0 } }),
       })
     );
   });

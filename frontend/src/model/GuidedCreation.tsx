@@ -92,7 +92,7 @@ export default function GuidedCreation({ draft, availableSets, onApply, onPatter
             <div className="mt-2 flex flex-wrap gap-4">{availableSets.map(set => <label key={set} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={index.includes(set)} onChange={event => setIndex(event.target.checked ? [...index, set] : index.filter(item => item !== set))} />{set}</label>)}</div>
             {!availableSets.length && <p className="mt-2 text-sm">No record types yet. You can create an overall decision now, or define record types in Domain data.</p>}
           </fieldset>
-          {domain !== "binary" && <>{field("Minimum (optional)", lower, setLower, true)}{field("Maximum (optional)", upper, setUpper, true)}<p className="text-xs text-slate-600 sm:col-span-2">Blank bounds mean no bound. A missing bound can make an objective unbounded.</p></>}
+          {domain !== "binary" && <>{field("Minimum (0 if blank)", lower, setLower, true)}{field("Maximum (optional)", upper, setUpper, true)}<p className="text-xs text-slate-600 sm:col-span-2">A blank minimum is 0; a blank maximum is no bound, which can make a goal unbounded.</p></>}
         </> : <>
           <label className="block text-sm font-medium">Decision to use
             <select className={input} value={decision} onChange={event => { setDecision(event.target.value); setSeparate([]); setCoefficient({ name: "", dimensions: [] }); setLimitParameter({ name: "", dimensions: [] }); }}>

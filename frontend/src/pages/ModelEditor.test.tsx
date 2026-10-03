@@ -1583,6 +1583,17 @@ describe("the Simple level", () => {
     expect(screen.queryByTestId("rule-blocks")).toBeNull();
   });
 
+  it("moves typing to a new blank rule, away from an open goal's equation (benchmark round 4)", async () => {
+    renderPage();
+    await screen.findByText("What must be true");
+    const goal = screen.getAllByRole("textbox").find((e) => /goal|objective/i.test(e.getAttribute("aria-label") ?? "")) as HTMLElement | undefined;
+    goal?.focus();
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a rule" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Add a rule" })).getByRole("button", { name: /A blank rule/ }));
+    const card = await waitFor(() => { const c = document.getElementById("rule-card-c_1"); expect(c).not.toBeNull(); return c!; });
+    await waitFor(() => expect(card.contains(document.activeElement)).toBe(true));
+  });
+
   it("names the declarations plainly, closes them to a line, and keeps choosing and creating behind + Add", async () => {
     renderPage();
     await screen.findByText("What must be true");

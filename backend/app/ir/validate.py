@@ -1619,11 +1619,15 @@ class _ShapeChecker:
         """`{par, index}` standing for an entity: an entity-valued parameter,
         of the set wanted there, read at indices bound here."""
         if not isinstance(ref, dict) or set(ref) != {"par", "index"} or ref.get("par") not in self.entity_parameters:
+            # In words (benchmark round 4: `amount[of_parcel[h], of_crop[h]]` was answered with raw JSON).
+            field = ref.get("attr", {}).get("name") if isinstance(ref, dict) and isinstance(ref.get("attr"), dict) else None
             return Refusal(
                 "index_entry_invalid",
                 loc,
-                "an index position is an index name, or {\"par\": <parameter>, \"index\": [...]} naming "
-                "a parameter whose values are entities",
+                "each position in [...] takes an index (like p, bound by \"for each\" or a sum) or a data value whose "
+                "values are records"
+                + (f"; a record's own field ({field}) cannot choose the position -- sum over the records instead "
+                   f"and keep the ones whose {field} matches, or make a data value from it" if field else ""),
             )
         of = self.entity_parameters[ref["par"]]
         if wanted is not None and of != wanted:

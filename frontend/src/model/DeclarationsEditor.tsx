@@ -520,7 +520,10 @@ export default function DeclarationsEditor({
             onAdd={(variable) => {
               if (variable.domain !== "interval") {
                 apply({
-                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain } },
+                  // A quantity starts at 0, not unbounded below: a cost goal over it could otherwise run
+                  // to minus infinity (benchmark round 4). The bound is shown and can be changed.
+                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain,
+                    ...(variable.domain === "continuous" || variable.domain === "integer" ? { lower: 0 } : {}) } },
                 });
                 return;
               }
@@ -559,7 +562,10 @@ export default function DeclarationsEditor({
             onAdd={(variable) => {
               if (variable.domain !== "interval") {
                 apply({
-                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain } },
+                  // A quantity starts at 0, not unbounded below: a cost goal over it could otherwise run
+                  // to minus infinity (benchmark round 4). The bound is shown and can be changed.
+                  variables: { ...variables, [variable.name]: { index: variable.index, domain: variable.domain,
+                    ...(variable.domain === "continuous" || variable.domain === "integer" ? { lower: 0 } : {}) } },
                 });
                 return;
               }

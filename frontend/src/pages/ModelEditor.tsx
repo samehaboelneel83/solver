@@ -575,6 +575,9 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     window.setTimeout(() => {
       const target = document.getElementById(kind === "rule" ? `rule-card-${id}` : kind === "goal" ? "objective-editor" : `${kind}-card-${id}`);
       target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      // Typing goes to the card just opened, not to the box that had focus (benchmark round 4: a new
+      // blank rule's name was typed into an open goal card and renamed the goal).
+      target?.querySelector<HTMLElement>("input:not([type=checkbox]), textarea")?.focus();
     }, 0);
   }
   const units = Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit])) as Record<string, string | null | undefined>;
