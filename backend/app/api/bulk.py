@@ -633,7 +633,7 @@ _LON = ("lon", "lng", "long", "longitude", "x_lon")
 
 
 def with_places(db: Session, entity_type: EntityType, header: list[str], rows: list[list[Any]],
-                notes: list[str]) -> tuple[list[str], list[list[Any]]]:
+                notes: list[str], left_out: set[str] | None = None) -> tuple[list[str], list[list[Any]]]:
     """A sheet with a latitude and a longitude column gives each row a place: a point in the kind's
     geometry field (made, as `location`, when it has none). The columns themselves stay, to be kept
     or left out like any other. Benchmark, October 2026: the page said so, and the records got
@@ -643,7 +643,21 @@ def with_places(db: Session, entity_type: EntityType, header: list[str], rows: l
     lon = next((i for i, n in enumerate(norm) if n in _LON), None)
     if lat is None or lon is None:
         return header, rows
+    # Columns the person left out place nothing (benchmark round 5: lat/lon "left out" still turned
+    # the zones' polygons into points).
+    if left_out and (header[lat] in left_out or header[lon] in left_out):
+        return header, rows
     geometry = next((a.name for a in _attributes(db, entity_type_id=entity_type.id) if a.data_type == "geometry"), None)
+    if geometry is not None:
+        # Records already drawn as areas or lines keep their shapes: a point from a sheet is not one.
+        shaped = db.execute(text(
+            "SELECT count(*) FROM entity WHERE entity_type_id = ANY (entity_type_family(:t))"
+            " AND jsonb_typeof(attrs -> :g) = 'object' AND attrs -> :g ->> 'type' <> 'Point'"),
+            {"t": entity_type.id, "g": geometry}).scalar_one()
+        if shaped:
+            notes.append(f"{header[lat]} and {header[lon]} left as fields: {shaped} {entity_type.name} records already have "
+                         f"shapes in {geometry}, which a point would replace")
+            return header, rows
     if geometry is None:
         geometry = "location"
         db.add(AttributeDef(entity_type_id=entity_type.id, name=geometry, data_type="geometry"))
@@ -675,8 +689,8 @@ def entity_upload(entity_type_id: int, request: Request, file: UploadFile = File
         raise HTTPException(422, f"{entity_type.name!r} is abstract and holds no entities of its own")
     header, rows = _read(file)
     notes: list[str] = []
-    header, rows = with_places(db, entity_type, header, rows, notes)
     named = _mapping(mapping)
+    header, rows = with_places(db, entity_type, header, rows, notes, {col for col, to in named.items() if to == ""})
     before = set(apply_mapping(header, rows[:1], named)[0])
     header, rows = apply_mapping(header, rows, named, keep_parts=True)
     parts = [i for i, h in enumerate(header) if h not in before]

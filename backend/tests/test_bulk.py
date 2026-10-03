@@ -311,6 +311,23 @@ def test_latitude_and_longitude_columns_put_the_records_on_the_map(shop):
     assert items["c1"]["location"] == {"type": "Point", "coordinates": [31.24, 30.05]} and "location" not in items["c2"]
 
 
+def test_a_sheet_never_turns_areas_into_points_and_left_out_columns_place_nothing(shop):
+    """Benchmark round 5: a CSV onto the population zones (polygons), its lat/lon "left out", replaced
+    every zone's polygon with a point, without a word."""
+    kind = shop["post"]("/api/v1/entity-types", {"domain_id": shop["domain"], "name": "zone_area", "role": "location"})
+    shop["post"](f"/api/v1/entity-types/{kind['id']}/attributes", {"name": "shape", "data_type": "geometry"})
+    square = {"type": "Polygon", "coordinates": [[[31, 30], [31.1, 30], [31.1, 30.1], [31, 30.1], [31, 30]]]}
+    shop["post"]("/api/v1/entities", {"entity_type_id": kind["id"], "key": "z1", "attrs": {"shape": square}})
+    rows = [["key", "lat", "lon", "people"], ["z1", "30.05", "31.05", "900"]]
+    left = _upload_mapped(shop, kind["id"], rows, {"key": "key", "lat": "", "lon": "", "people": "people"}, add_fields=True)
+    assert left["ok"], left
+    report = _upload_mapped(shop, kind["id"], rows, add_fields=True)
+    assert report["ok"], report
+    assert any("already have shapes in shape" in n for n in report["notes"])
+    items = {e["key"]: e["attrs"] for e in shop["call"]("GET", f"/api/v1/entities?entity_type_id={kind['id']}").json()["items"]}
+    assert items["z1"]["shape"] == square and items["z1"]["people"] == 900
+
+
 def test_several_records_are_deleted_at_once_or_none(shop):
     site = shop["site"]["id"]
     _upload(shop, f"/api/v1/entity-types/{site}/upload", [["key", "capacity"], ["a", "1"], ["b", "2"], ["c", "3"]])
