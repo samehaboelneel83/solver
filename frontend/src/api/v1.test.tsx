@@ -50,6 +50,7 @@ import {
   updateRelationshipType,
   updateScenario,
   useDeleteEntity,
+  useEntitiesOfTypes,
   useEntityTypes,
   validationErrors,
 } from "./v1";
@@ -185,6 +186,15 @@ describe("v1 hooks", () => {
     rerender({ domainId: 7 });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockFetch).toHaveBeenCalledWith("/api/v1/entity-types?domain_id=7");
+  });
+
+  it("reads a kind's records once when a data value is over it twice (benchmark round 4)", async () => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ items: [{ id: 1, entity_type_id: 3, key: "a" }, { id: 2, entity_type_id: 3, key: "b" }], total: 2 });
+    const { result } = renderHook(() => useEntitiesOfTypes([3, 3]), { wrapper: wrapper(new QueryClient()) });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toHaveLength(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("invalidates every v1 query after a mutation, since deletes cascade across resources", async () => {

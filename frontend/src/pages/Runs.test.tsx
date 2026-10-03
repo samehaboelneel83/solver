@@ -69,7 +69,8 @@ const RUN_DETAIL = {
       satisfied: true,
       total_violation: 0,
       penalty_paid: 0,
-      slack: 0,
+      // Solver rounding: read as at the limit (benchmark round 4).
+      slack: -0.000002,
       dual: 6,
       violations: [],
     },

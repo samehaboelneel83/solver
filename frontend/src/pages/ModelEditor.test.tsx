@@ -279,6 +279,16 @@ describe("ModelEditor", () => {
     expect(sent.constraints).toHaveLength(1);
   });
 
+  it("says each goal's weight and direction in the sentence view (benchmark round 4)", async () => {
+    stub({ ir: { ...IR_V2, objective: { sense: "minimize", terms: [
+      { id: "o_cost", weight: 1, expression: { sum: { var: "assign", index: ["e", "d"] }, over: [{ index: "e", set: "employee" }, { index: "d", set: "day" }] } },
+      { id: "o_cover", weight: -0.05, expression: { sum: { var: "assign", index: ["e", "d"] }, over: [{ index: "e", set: "employee" }, { index: "d", set: "day" }] } }] } } });
+    renderPage();
+    await screen.findByDisplayValue("o_cover");
+    fireEvent.click(screen.getByRole("button", { name: "Show o_cover as a sentence" }));
+    expect(screen.getByTestId("goal-weighing")).toHaveTextContent("In the goal: × 0.05, more is better.");
+  });
+
   it("takes a goal weight of 0.5 and publishes it (benchmark re-test, October 2026)", async () => {
     const write = vi.fn().mockResolvedValue({ id: 23, version: 3 });
     stub({ write, ir: { ...IR_V2, objective: { sense: "minimize", terms: [

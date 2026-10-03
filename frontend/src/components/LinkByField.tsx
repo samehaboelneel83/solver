@@ -47,25 +47,25 @@ export default function LinkByField({ kind }: { kind: EntityType }) {
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-slate-600">Its field
-          <select aria-label="The field holding the code" className={select} value={of} onChange={(e) => setOf(e.target.value)}>
+          <select aria-label="Its field, holding the code" className={select} value={of} onChange={(e) => setOf(e.target.value)}>
             <option value="">choose…</option>
             {codes.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </label>
         <label className="text-xs text-slate-600">names a
-          <select aria-label="The kind it names" className={select} value={to} onChange={(e) => { setTo(e.target.value); setMatch("key"); }}>
+          <select aria-label="names a kind" className={select} value={to} onChange={(e) => { setTo(e.target.value); setMatch("key"); }}>
             <option value="">choose…</option>
             {others.map((k) => <option key={k.id} value={k.name}>{k.name}</option>)}
           </select>
         </label>
         <label className="text-xs text-slate-600">by its
-          <select aria-label="What of it the code matches" className={select} value={match} onChange={(e) => setMatch(e.target.value)}>
+          <select aria-label="by its key or field" className={select} value={match} onChange={(e) => setMatch(e.target.value)}>
             <option value="key">key or name</option>
             {(target?.attributes ?? []).filter((a) => ["text", "integer", "enum"].includes(a.data_type)).map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
           </select>
         </label>
         <label className="text-xs text-slate-600">Link name
-          <input aria-label="Name of the link" className="ml-1 w-40 rounded border border-slate-300 px-2 py-1 font-mono text-sm"
+          <input aria-label="Link name" className="ml-1 w-40 rounded border border-slate-300 px-2 py-1 font-mono text-sm"
             value={name} onChange={(e) => setName(e.target.value)} placeholder={field || "in_district"} />
         </label>
         <button type="submit" disabled={derive.isPending || !ready} className="rounded-md bg-slate-900 px-3 py-1.5 text-white disabled:opacity-60">

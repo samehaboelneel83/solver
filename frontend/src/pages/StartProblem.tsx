@@ -94,10 +94,13 @@ function Start({ domainId }: { domainId: Id }) {
       </label>
       <div role="radiogroup" aria-label="Start from" className="grid gap-3 md:grid-cols-3">
         {ways.map(([key, title, says]) => (
+          // Named by its title, its line a description (benchmark round 4: "From scratch" could not be
+          // found by name -- the whole card's text was its name).
           <button key={key} type="button" role="radio" aria-checked={way === key} onClick={() => setWay(key)}
+            aria-labelledby={`way-${key}-title`} aria-describedby={`way-${key}-says`}
             className={`rounded-lg border p-4 text-left ${way === key ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
-            <span className="block font-semibold text-slate-900">{title}</span>
-            <span className="mt-1 block text-sm text-slate-600">{says}</span>
+            <span id={`way-${key}-title`} className="block font-semibold text-slate-900">{title}</span>
+            <span id={`way-${key}-says`} className="mt-1 block text-sm text-slate-600">{says}</span>
           </button>
         ))}
       </div>

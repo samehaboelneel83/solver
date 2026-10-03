@@ -1333,8 +1333,10 @@ export function useRelationshipsOfTypes(relationshipTypeIds: Id[]): MultiList<Re
  * as `useEntities(id, { limit: 500 })`, for the same reason as above.
  */
 export function useEntitiesOfTypes(entityTypeIds: Id[]): MultiList<Entity> {
+  // Each kind once: a data value over one kind twice (trips[intersection, intersection]) read every
+  // record twice (benchmark round 4: 30 × 30 showed 3,600 cells and 60 columns).
   const results = useQueries({
-    queries: entityTypeIds.map((entityTypeId) => {
+    queries: [...new Set(entityTypeIds)].map((entityTypeId) => {
       const params = { entityTypeId, limit: MAX_PAGE };
       return {
         queryKey: [V1, "entities", params],

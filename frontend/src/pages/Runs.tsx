@@ -1894,7 +1894,10 @@ function ConstraintRow({ outcome }: { outcome: ConstraintOutcome }) {
         )}
         {outcome.slack != null && outcome.satisfied && (
           <span className="text-xs text-slate-500">
-            {outcome.slack === 0 ? "at its limit" : `${outcome.slack} to spare`}
+            {/* Within the solver's tolerance is at the limit, and no more digits than a person reads
+                (benchmark round 4: "hosp_cap held -0.000002 to spare"). */}
+            {Math.abs(outcome.slack) < 1e-5 ? "at its limit"
+              : `${outcome.slack.toLocaleString("en-US", { maximumSignificantDigits: 6 })} to spare`}
           </span>
         )}
         {outcome.dual != null && outcome.dual !== 0 && (

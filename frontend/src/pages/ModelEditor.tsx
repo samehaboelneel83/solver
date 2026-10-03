@@ -1647,8 +1647,17 @@ function ChanceField({
 
 /** A goal's expression as an equation, with its structure a click away; a
  * goal the equation form cannot write exactly keeps the structure editor. */
-function GoalExpression({ view, goalId, expression, context, onChange, startIn }: {
+/** How a weighted goal term counts, in words: "× 0.05, more is better" (benchmark round 4: the
+ * Sentence view left the weights out). */
+function weighing(weight: number, sense: string): string {
+  const more = (weight >= 0) === sense.startsWith("max");
+  return `× ${Math.abs(weight).toLocaleString("en-US", { maximumSignificantDigits: 6 })}, ${more ? "more" : "less"} is better`;
+}
+
+function GoalExpression({ view, goalId, expression, context, onChange, startIn, weighing: weighed }: {
   view: EquationView;
+  /** How this term counts in the goal, said beside its sentence. */
+  weighing?: string;
   /** Where a goal just composed opens. */
   startIn?: EquationView;
   goalId: string;
@@ -1666,7 +1675,7 @@ function GoalExpression({ view, goalId, expression, context, onChange, startIn }
       <div className="space-y-2 px-2 py-1">
         <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
         {shown === "sentence" ? (
-          <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
+          <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} weighing={weighed} />
         ) : shown === "boxes" ? (
           <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
         ) : builder}
@@ -1677,7 +1686,7 @@ function GoalExpression({ view, goalId, expression, context, onChange, startIn }
     <div className="space-y-2 px-2 py-1">
       <ViewToggle value={shown} onChange={setShown} name={goalId || "this goal"} size="xs" />
       {shown === "sentence" ? (
-        <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} />
+        <GoalSentence expression={expression} context={context} onEdit={() => setShown("boxes")} onChange={onChange} weighing={weighed} />
       ) : shown === "boxes" ? (
         <GoalBlocks label={goalId || "the goal"} expression={expression} context={context} onChange={onChange} />
       ) : shown === "diagram" ? (
@@ -1908,6 +1917,7 @@ function ObjectiveEditor({
                 view={view}
                 startIn={composedGoals.has(term.id) && !(view === "equation" && viewChosen(simple, "equation")) ? "boxes" : undefined}
                 goalId={term.id}
+                weighing={lex ? `${["1st", "2nd", "3rd"][position] ?? `${position + 1}th`} in order` : weighing(term.weight, objective.sense)}
                 expression={term.expression}
                 context={context}
                 onChange={(expression) =>

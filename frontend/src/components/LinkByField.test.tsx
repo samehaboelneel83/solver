@@ -18,9 +18,9 @@ it("links records to the record their code names, and says which were not (bench
     (String(path).includes("/derive") ? { made: ["district_link"], records: 298, left_empty: 2, unmatched: ["c3: GZ-99"], ambiguous: [] }
       : { items: [CALL, DISTRICT], total: 2 }) as never);
   render(<QueryClientProvider client={new QueryClient()}><LinkByField kind={CALL} /></QueryClientProvider>);
-  fireEvent.change(await screen.findByLabelText("The field holding the code"), { target: { value: "dist_code" } });
-  fireEvent.change(screen.getByLabelText("The kind it names"), { target: { value: "district" } });
-  fireEvent.change(screen.getByLabelText("What of it the code matches"), { target: { value: "code" } });
+  fireEvent.change(await screen.findByLabelText("Its field, holding the code"), { target: { value: "dist_code" } });
+  fireEvent.change(screen.getByLabelText("names a kind"), { target: { value: "district" } });
+  fireEvent.change(screen.getByLabelText("by its key or field"), { target: { value: "code" } });
   fireEvent.click(screen.getByRole("button", { name: "Link" }));
   expect(await screen.findByText(/298 call records linked to their district by district_link; 2 not, among them: c3: GZ-99 \(no district has it\)/)).toBeInTheDocument();
   const call = vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).includes("/derive"))!;

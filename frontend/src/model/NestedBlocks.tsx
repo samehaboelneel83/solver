@@ -506,17 +506,20 @@ export function RuleSentence({ rule, context, onEdit, onChange }: {
   );
 }
 
-export function GoalSentence({ expression, context, onEdit, onChange }: {
+export function GoalSentence({ expression, context, onEdit, onChange, weighing }: {
   expression: Term;
   context: ModelContext;
   onEdit: () => void;
   onChange?: (next: Term) => void;
+  /** How it counts in the goal: "× 0.05, more is better", or its place in order. */
+  weighing?: string;
 }) {
   return (
     <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="goal-sentence">
       <p className="text-sm leading-loose text-slate-900">
         Counts{" "}
         {onChange ? <TermWords term={expression} path="what it counts" context={context} bound={[]} onChange={onChange} /> : termSentence(expression, context.relationships)}.
+        {weighing && <span className="ml-1 text-slate-600" data-testid="goal-weighing">In the goal: {weighing}.</span>}
       </p>
       {onChange && <p className="sr-only" data-testid="sentence-reading">Counts {termSentence(expression, context.relationships)}.</p>}
       <Summary problems={checkGoal(expression, context)} />

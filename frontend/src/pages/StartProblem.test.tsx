@@ -85,7 +85,7 @@ describe("start a problem", () => {
 
   it("starts from scratch once it has a name", async () => {
     mount();
-    fireEvent.click(screen.getByRole("radio", { name: /From scratch/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "From scratch", description: /An empty problem/ }));
     const make = screen.getByRole("button", { name: "Make the problem" });
     expect(make).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/What is it called/), { target: { value: "Rota" } });
