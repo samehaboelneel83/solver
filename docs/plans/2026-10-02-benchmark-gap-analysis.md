@@ -593,28 +593,44 @@ P2 fell: "Why not?" failed (a breakdown change of round 4 that did not survive g
 probe), and the hospital-assignment and fleet rules had to be typed by hand.
 
 ### Gaps found in round 5 (R5a–R5h)
-- [ ] **R5a Goals in order keep their own direction, and a trade-off curve** (P4, P2): in lexicographic
+- [x] **R5a Goals in order keep their own direction, and a trade-off curve** (P4, P2): in lexicographic
       mode every goal was maximised, so water had to be negated ("water saved 18,999,998 as low as it
-      can go"); no profit-vs-water (epsilon) sweep with a chart.
-- [ ] **R5b A linked record's field in an equation** (P2, P4): `rate[of_district[c]]`,
+      can go"); no profit-vs-water (epsilon) sweep with a chart. Done: each goal in order has its own
+      direction (lex, alternatives, locks and the trade-off solve all read it); the trade-off curve is
+      offered at Simple too, its steps on the goal's own scale.
+- [x] **R5b A linked record's field in an equation** (P2, P4): `rate[of_district[c]]`,
       `amount[of_parcel[h], of_crop[h]]` -- a record's link picking a record -- was refused; testers
-      copied fields onto records through a hidden path.
-- [ ] **R5c Links and imports by any field** (P2): a link made by a matching field is not applied to
+      copied fields onto records through a hidden path. Done: a reference field in an index position is
+      read and printed back, and checked to point at the wanted kind; "Copy from a link" is on Records →
+      Compute and join.
+- [x] **R5c Links and imports by any field** (P2): a link made by a matching field is not applied to
       records imported later (a forecast total read 0); an import cannot match rows to records by a
-      unique name field, only by key.
-- [ ] **R5d Travel and cost along the roads** (P1, P5): unreachable pairs are stored as a large number
+      unique name field, only by key. Done: derivations and links by a field are kept and re-applied to
+      later records; an import can match rows by label or any field.
+- [x] **R5d Travel and cost along the roads** (P1, P5): unreachable pairs are stored as a large number
       with no mark; a per-segment cost field (cost per km × length + toll) cannot be summed along each
-      path; road conditions per period in a separate table cannot feed travel times.
-- [ ] **R5e Derived map layers and a clearer result map** (P1, P2): no buffer / service-area layer to
-      save; underserved places not styled apart; 154 assignment lines with no way to hide them.
-- [ ] **R5f Recipes of the next size** (P1, P3, P5): selection over several kinds of project with one
+      path; road conditions per period in a separate table cannot feed travel times. Done: unreachable
+      pairs are recorded and named, with the "far" value said; a cost along the roads (per km field or
+      default, plus toll) is a metric. Not done: conditions per period from a separate table (a
+      computed speed field per segment still feeds travel times).
+- [x] **R5e Derived map layers and a clearer result map** (P1, P2): no buffer / service-area layer to
+      save; underserved places not styled apart; 154 assignment lines with no way to hide them. Done:
+      "Make a map layer" (Map data, and from an answer's chosen records) saves rings, the places each
+      reaches by 0/1 data, or the places none reaches; areas an answer left out are amber, with their
+      count; each answer layer (the assignment lines among them) has its own show/hide box.
+- [x] **R5f Recipes of the next size** (P1, P3, P5): selection over several kinds of project with one
       budget (roads, signals, parking); several products in the supply network; units of each type
-      at bases, within reach of each zone.
-- [ ] **R5g The drafter reads budgets, capacities and limits** (P1–P5): a 400M budget read as a
+      at bases, within reach of each zone. Done: other kinds the words name share the selection's
+      budget and goal; the network ships per product when demand is data over customers and products.
+      Not done: units of each type at bases (the coverage recipe's staffing from a pool is the nearest).
+- [x] **R5g The drafter reads budgets, capacities and limits** (P1–P5): a 400M budget read as a
       distance; base count limits, capacities, double coverage, delivery-time limits, water per source
-      and fleet sizes left out.
-- [ ] **R5h Forecasts into the model's data** (P2, P5): a forecast per zone has no one-click way onto
-      the records that link to the zone (customer demand), summed or split.
+      and fleet sizes left out. Done: only a number written with minutes or km is a reach, and "within
+      a budget" is not coverage; "at most 8 bases", "covered twice", "within 6 hours", "a fleet of 26
+      trucks" (or the type's available field) and water per linked source are drafted.
+- [x] **R5h Forecasts into the model's data** (P2, P5): a forecast per zone has no one-click way onto
+      the records that link to the zone (customer demand), summed or split. Done: "Copy from a link"
+      puts a linked record's value (a forecast total) onto each record that links to it.
 
 ### Bugs from round 5
 - [x] A CSV with lat/lon replaced polygon shapes with points, even with lat/lon left out (P1). Fixed:
@@ -628,16 +644,24 @@ probe), and the hospital-assignment and fleet rules had to be typed by hand.
       (P3). Fixed: link inputs resolve record by record too.
 - [x] A rule idle where nothing is used (`hours * ship <= limit * ship`) read "at its limit" (P5).
       Fixed: idle instances are not counted.
-- [ ] Equation view does not show equations for collapsed rules (P1); earlier equation editors stay
-      open, so a new equation lands in the wrong rule (P3, P4).
-- [ ] "+ Add a decision" stays open after adding, with the old name and a false duplicate error (P5).
-- [ ] A yes/no field compared to the text 'Y' is marked complete, then refused by the server (P3).
-- [ ] The runs table keeps "running" after the run finished, until a reload (P3).
-- [ ] "Counted nobody" warns for a sum of linked totals when only one part is empty (P3).
-- [ ] The budget sweep's "gained per unit" rounds to 0 (P3).
-- [ ] HTTP 500 when creating a link whose name is taken (P2).
-- [ ] "Unpublished changes started from version 1" right after version 2 was published (P2).
-- [ ] The road travel-time message names a "Join places up to" field shown only in another mode (P2).
-- [ ] "Compute from the map" gives no confirmation when it finishes (P5).
-- [ ] The workbench tree runs a label and its key together ("intake AW1") (P4).
-- [ ] Switching from lexicographic to weighted silently restores an old direction (P4).
+- [x] Equation view does not show equations for collapsed rules (P1); earlier equation editors stay
+      open, so a new equation lands in the wrong rule (P3, P4). Fixed: collapsed rules and goals show
+      their equation; a new card is opened and focused.
+- [x] "+ Add a decision" stays open after adding, with the old name and a false duplicate error (P5). Fixed.
+- [x] A yes/no field compared to the text 'Y' is marked complete, then refused by the server (P3). Fixed:
+      the check says so before publishing.
+- [x] The runs table keeps "running" after the run finished, until a reload (P3). Fixed: it refreshes
+      while a run is running.
+- [x] "Counted nobody" warns for a sum of linked totals when only one part is empty (P3). Fixed.
+- [x] The budget sweep's "gained per unit" rounds to 0 (P3). Fixed: small rates keep their digits.
+- [x] HTTP 500 when creating a link whose name is taken (P2). Fixed: 409 with the name.
+- [x] "Unpublished changes started from version 1" right after version 2 was published (P2). Fixed as
+      far as reproduced: publishing moves the base forward (the exact path the tester took was not
+      reproduced).
+- [x] The road travel-time message names a "Join places up to" field shown only in another mode (P2).
+      Fixed: the message names what is on screen.
+- [x] "Compute from the map" gives no confirmation when it finishes (P5). Fixed: it says what was made
+      and opens it.
+- [x] The workbench tree runs a label and its key together ("intake AW1") (P4). Fixed.
+- [x] Switching from lexicographic to weighted silently restores an old direction (P4). Fixed: each
+      goal's direction is shown and kept in both modes.
