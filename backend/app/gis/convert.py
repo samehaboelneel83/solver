@@ -115,3 +115,25 @@ def bounds(features: list[dict[str, Any]]) -> list[float] | None:
             xs.append(x)
             ys.append(y)
     return [min(xs), min(ys), max(xs), max(ys)] if xs else None
+
+
+def placed_bounds(features: list[CadFeature], placement: Placement) -> list[float] | None:
+    """Exact bounds of placed drawing coordinates without building GeoJSON objects.
+
+    Preview callers need the extent of every selected feature, but only a small
+    sample needs geometry conversion. Reusing the vectorized transform here
+    keeps the map fit accurate without rebuilding every geometry and property.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for feature, points in zip(features, transform_all(features, placement)):
+        if feature.kind == "polygon":
+            # GeoJSON's exterior ring defines the feature bounds; holes are
+            # contained by it and must not expand the map extent.
+            points = points[:len(feature.coords[0])]
+        # Match `place`: a feature with any invalid coordinate is dropped as a
+        # whole and must not influence the displayed extent.
+        if len(points) and np.all(np.isfinite(points)):
+            xs.extend((float(points[:, 0].min()), float(points[:, 0].max())))
+            ys.extend((float(points[:, 1].min()), float(points[:, 1].max())))
+    return [min(xs), min(ys), max(xs), max(ys)] if xs else None

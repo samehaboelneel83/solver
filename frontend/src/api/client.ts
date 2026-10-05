@@ -56,7 +56,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   let response: Response;
   try {
     response = await fetch(path, { ...options, headers });
-  } catch {
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") throw error;
     throw new NetworkError();
   }
 

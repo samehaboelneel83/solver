@@ -120,8 +120,8 @@ export const listRegions = () => apiFetch<{ items: SiteRegion[] }>("/api/v1/gis/
 export function useRegions() {
   return useQuery({ queryKey: [GIS, "regions"], queryFn: listRegions, staleTime: Infinity });
 }
-export const previewUpload = (id: string, body: { placement: GisPlacement; units?: number | null; layers?: string[] }) =>
-  apiFetch<GisPreview>(`/api/v1/gis/uploads/${id}/preview`, { method: "POST", ...json(body) });
+export const previewUpload = (id: string, body: { placement: GisPlacement; units?: number | null; layers?: string[] }, signal?: AbortSignal) =>
+  apiFetch<GisPreview>(`/api/v1/gis/uploads/${id}/preview`, { method: "POST", ...json(body), signal });
 export const importDataset = (body: {
   upload_id: string; domain_id: number; name: string; placement: GisPlacement; units?: number | null; layers?: string[];
 }) => apiFetch<GisDataset>("/api/v1/gis/datasets", { method: "POST", ...json(body) });

@@ -101,12 +101,13 @@ export default function MapImport() {
   const layerList = useMemo(() => [...layers].sort(), [layers]);
   useEffect(() => {
     if (!upload || !pick.placement) { setPreview(null); return; }
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      previewUpload(upload.upload_id, { placement: pick.placement!, units: pick.units, layers: layerList })
+      previewUpload(upload.upload_id, { placement: pick.placement!, units: pick.units, layers: layerList }, controller.signal)
         .then((got) => { setPreview(got); setError(null); })
-        .catch((e) => { setPreview(null); setError(formatApiError(e)); });
-    }, 300);
-    return () => window.clearTimeout(timer);
+        .catch((e) => { if (!controller.signal.aborted) { setPreview(null); setError(formatApiError(e)); } });
+    }, 400);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [upload, pick, layerList]);
 
   const origin: Pt = useMemo(() => {

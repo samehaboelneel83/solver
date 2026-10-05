@@ -47,13 +47,13 @@ from app import audit
 from app.api.deps import get_current_user, requires
 from app.core.db import get_db
 from app.gis import cad, crs, formats, store
-from app.gis.convert import bounds, to_geojson
+from app.gis.convert import bounds, placed_bounds, to_geojson
 from app.models.iam import UserAccount
 
 router = APIRouter(prefix="/api/v1/gis", tags=["map data"])
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-PREVIEW_FEATURES = 6000
+PREVIEW_FEATURES = 3000
 MAX_FEATURES_PAGE = 100_000
 _DATASET = "id, domain_id, name, source, placement, bbox, stats, notes, created_at, updated_at"
 
@@ -120,9 +120,12 @@ def _audit(db: Session, user: UserAccount, action: str, identity: int) -> None:
                  object_type="gis_dataset", object_id=identity)
 
 
-def _upload(db: Session, upload_id: str, user: UserAccount) -> Any:
+def _upload(db: Session, upload_id: str, user: UserAccount, *, include_data: bool = True) -> Any:
+    columns = "id, filename, size_bytes, summary"
+    if include_data:
+        columns += ", data"
     try:
-        row = db.execute(text("SELECT id, filename, size_bytes, data, summary FROM gis_upload"
+        row = db.execute(text(f"SELECT {columns} FROM gis_upload"
                               " WHERE id = CAST(:i AS uuid) AND organization_id = :o"),
                          {"i": upload_id, "o": user.organization_id}).mappings().one_or_none()
     except Exception:  # noqa: BLE001 -- not a uuid
@@ -131,6 +134,17 @@ def _upload(db: Session, upload_id: str, user: UserAccount) -> Any:
     if row is None:
         raise HTTPException(404, "That upload is gone (uploads are kept a day); upload the file again")
     return row
+
+
+def _uploaded_drawing(db: Session, upload_id: str, row: Any, user: UserAccount) -> cad.CadDrawing:
+    drawing = store.cached_upload(upload_id)
+    if drawing is not None:
+        return drawing
+    data = db.execute(text("SELECT data FROM gis_upload WHERE id = CAST(:i AS uuid) AND organization_id = :o"),
+                      {"i": upload_id, "o": user.organization_id}).scalar_one_or_none()
+    if data is None:
+        raise HTTPException(404, "That upload is gone (uploads are kept a day); upload the file again")
+    return store.read_upload(upload_id, bytes(data), row["filename"])
 
 
 def _dataset(db: Session, dataset_id: int, user: UserAccount) -> Any:
@@ -202,6 +216,7 @@ def upload(
         {"o": user.organization_id, "u": str(user.id), "f": name, "s": len(data), "d": data,
          "sm": json.dumps({**summary, "sha256": hashlib.sha256(data).hexdigest(), "domain_id": domain_id})}).scalar_one()
     db.commit()
+    store.cache_upload(str(upload_id), data, drawing)
     return {"upload_id": str(upload_id), "filename": name, "size_bytes": len(data), "summary": summary,
             "candidates": offered, "utm_zones": crs.utm_zones(drawing.extent, drawing.unit_metres),
             "unit_choices": cad.UNIT_CHOICES}
@@ -215,7 +230,7 @@ def upload_candidates(
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
     """The likely coordinate systems again, for a site said to be in `region` or near `point`."""
-    row = _upload(db, upload_id, user)
+    row = _upload(db, upload_id, user, include_data=False)
     s = row["summary"]
     region, point = _where(body.region, body.point)
     usual, near = _hints(db, s["domain_id"]) if s.get("domain_id") else (None, None)
@@ -230,15 +245,15 @@ def preview(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(get_current_user),
 ) -> dict[str, Any]:
-    row = _upload(db, upload_id, user)
-    drawing = store.read_bytes(bytes(row["data"]), row["filename"])
+    row = _upload(db, upload_id, user, include_data=False)
+    drawing = _uploaded_drawing(db, upload_id, row, user)
     placement = _placement(body.placement, body.units or drawing.unit_metres)
     keep = set(body.layers) if body.layers else None
     feats = [f for f in drawing.features if keep is None or f.layer in keep]
-    step = max(1, len(feats) // PREVIEW_FEATURES)
+    step = max(1, (len(feats) + PREVIEW_FEATURES - 1) // PREVIEW_FEATURES)
     shown = feats[::step]
     geo, stats = to_geojson(shown, placement)
-    box = bounds(to_geojson(feats, placement)[0]) if step > 1 else bounds(geo)
+    box = placed_bounds(feats, placement) if step > 1 else bounds(geo)
     warnings = []
     if box is None:
         warnings.append("nothing could be placed with this coordinate system")
@@ -263,8 +278,8 @@ def import_dataset(
     user: UserAccount = Depends(requires("domain.edit")),
 ) -> dict[str, Any]:
     _domain(db, body.domain_id, user)
-    row = _upload(db, body.upload_id, user)
-    drawing = store.read_bytes(bytes(row["data"]), row["filename"])
+    row = _upload(db, body.upload_id, user, include_data=False)
+    drawing = _uploaded_drawing(db, body.upload_id, row, user)
     placement = _placement(body.placement, body.units or drawing.unit_metres)
     unknown = set(body.layers or []) - set(drawing.layers)
     if unknown:
@@ -280,6 +295,7 @@ def import_dataset(
     db.execute(text("DELETE FROM gis_upload WHERE id = CAST(:i AS uuid)"), {"i": body.upload_id})
     _audit(db, user, "gis.import", dataset_id)
     db.commit()
+    store.clear_upload(body.upload_id)
     return get_dataset(dataset_id, db, user)
 
 

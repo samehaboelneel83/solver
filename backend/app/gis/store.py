@@ -10,6 +10,8 @@ the file is not needed twice.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 from sqlalchemy import text
@@ -22,12 +24,61 @@ from app.gis.crs import Placement
 UPLOAD_DAYS = 1
 PAGE = 2000
 
+# An upload is parsed once on the upload request, then previewed several times
+# before the user imports it. Keep only the most recent small upload's parsed
+# drawing in each API process: this avoids repeated DXF parsing while placing a
+# cap on memory use. The bytes remain authoritative in `gis_upload`.
+_PARSED_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+_PARSED_UPLOAD_TTL_SECONDS = 15 * 60
+_parsed_upload_lock = threading.RLock()
+_parsed_upload: tuple[str, cad.CadDrawing, float] | None = None
+
 
 def read_bytes(data: bytes, filename: str = "drawing.dxf") -> cad.CadDrawing:
     """A DXF drawing or any other spatial file (`app.gis.formats`), by its file name."""
     from app.gis.formats import read_any
 
     return read_any(data, filename)
+
+
+def cache_upload(upload_id: str, data: bytes, drawing: cad.CadDrawing) -> None:
+    """Retain the already parsed drawing for the preview/import steps."""
+    global _parsed_upload
+    with _parsed_upload_lock:
+        _parsed_upload = (upload_id, drawing, time.monotonic()) if len(data) <= _PARSED_UPLOAD_MAX_BYTES else None
+
+
+def cached_upload(upload_id: str) -> cad.CadDrawing | None:
+    """Return the current parsed drawing without loading its database blob."""
+    global _parsed_upload
+    with _parsed_upload_lock:
+        if _parsed_upload is None:
+            return None
+        key, drawing, cached_at = _parsed_upload
+        if time.monotonic() - cached_at >= _PARSED_UPLOAD_TTL_SECONDS:
+            _parsed_upload = None
+            return None
+        return drawing if key == upload_id else None
+
+
+def clear_upload(upload_id: str) -> None:
+    """Release a parsed drawing when its temporary upload is consumed."""
+    global _parsed_upload
+    with _parsed_upload_lock:
+        if _parsed_upload is not None and _parsed_upload[0] == upload_id:
+            _parsed_upload = None
+
+
+def read_upload(upload_id: str, data: bytes, filename: str) -> cad.CadDrawing:
+    """Reuse the current parsed upload or parse it once and keep it if small."""
+    global _parsed_upload
+    with _parsed_upload_lock:
+        if _parsed_upload is not None and _parsed_upload[0] == upload_id and \
+                time.monotonic() - _parsed_upload[2] < _PARSED_UPLOAD_TTL_SECONDS:
+            return _parsed_upload[1]
+        drawing = read_bytes(data, filename)
+        _parsed_upload = (upload_id, drawing, time.monotonic()) if len(data) <= _PARSED_UPLOAD_MAX_BYTES else None
+        return drawing
 
 
 def has_postgis(db: Session) -> bool:

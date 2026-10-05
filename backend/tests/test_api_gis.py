@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.core.db import SessionLocal
+from app.gis import store
 from app.main import app
 from tests.cad_fixtures import E0, N0, site_drawing
 from tests.test_tenancy import tenants  # noqa: F401
@@ -75,6 +76,26 @@ def test_an_upload_lists_layers_and_where_each_crs_would_put_it(client, drawing_
     refused = http.post("/api/v1/gis/uploads", files={"file": ("plan.dwg", io.BytesIO(b"AC1032"))},
                         data={"domain_id": str(t["domain_a"])}, headers=t["a"])
     assert refused.status_code == 415 and "DXF" in refused.text
+
+
+def test_previews_reuse_the_upload_parse(client, drawing_bytes, monkeypatch):
+    http, t = client
+    read = store.read_bytes
+    parses = 0
+
+    def counted(data, filename="drawing.dxf"):
+        nonlocal parses
+        parses += 1
+        return read(data, filename)
+
+    monkeypatch.setattr(store, "read_bytes", counted)
+    up = _upload(http, t, drawing_bytes)
+    assert parses == 1  # the upload request parses the DXF
+    for _ in range(2):
+        response = http.post(f"/api/v1/gis/uploads/{up['upload_id']}/preview",
+                             json={"placement": UTM36, "layers": ["Buildings"]}, headers=t["a"])
+        assert response.status_code == 200, response.text
+    assert parses == 1  # previews reuse that parse instead of rereading the DXF
 
 
 def test_an_import_stores_layers_and_features_that_read_back_as_geojson(client, drawing_bytes):

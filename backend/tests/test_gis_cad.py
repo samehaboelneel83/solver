@@ -6,7 +6,7 @@ import math
 import pytest
 
 from app.gis import cad, crs
-from app.gis.convert import bounds, to_geojson
+from app.gis.convert import bounds, placed_bounds, to_geojson
 from tests.cad_fixtures import E0, N0, site_drawing
 
 
@@ -81,6 +81,7 @@ def test_placed_features_are_geojson_in_wgs84(drawing):
     feats, stats = to_geojson(drawing.features, placement)
     assert stats["dropped"] == 0 and len(feats) == len(drawing.features)
     w, s, e, n = bounds(feats)
+    assert placed_bounds(drawing.features, placement) == pytest.approx([w, s, e, n], abs=1e-7)
     assert 31 < w < e < 32.5 and 29.5 < s < n < 31 and (e - w) < 0.002
     gate = next(f for f in feats if f["properties"].get("text") == "Main gate")
     assert gate["geometry"]["type"] == "Point" and gate["properties"]["layer"] == "Labels"
