@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -54,8 +54,31 @@ def _base(db: Session, problem_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def _model_readiness(db: Session, problem: dict[str, Any], problem_id: int,
+                    latest: dict[str, Any] | None) -> dict[str, Any] | None:
+    if latest is None:
+        return None
+    checked = model_findings(db, problem["domain_id"], problem_id, latest["ir"])
+    return {
+        "ready": not any(f["kind"] == "blocker" for f in checked["findings"]),
+        "findings": checked["findings"],
+        "model_class": checked["model_class"],
+        "sets": checked["sets"],
+    }
+
+
+@router.get("/problems/{problem_id}/readiness/check")
+def readiness_check(problem_id: int, db: Session = Depends(get_db),
+                     user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """Run the complete, data-dependent preflight independently of page metadata."""
+    problem = _problem(db, problem_id)
+    latest = _latest(db, problem_id)
+    return {"check": _model_readiness(db, problem, problem_id, latest)}
+
+
 @router.get("/problems/{problem_id}/readiness")
-def readiness(problem_id: int, db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+def readiness(problem_id: int, include_check: bool = Query(default=True),
+              db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
     problem = _problem(db, problem_id)
     latest = _latest(db, problem_id)
     draft = db.execute(text(
@@ -64,15 +87,7 @@ def readiness(problem_id: int, db: Session = Depends(get_db), user: UserAccount 
         "       WHERE problem_id = :p ORDER BY version DESC LIMIT 1)"
         " WHERE d.problem_id = :p AND d.owner_id = :o"),
         {"p": problem_id, "o": user.id}).mappings().one_or_none()
-    check = None
-    if latest is not None:
-        checked = model_findings(db, problem["domain_id"], problem_id, latest["ir"])
-        check = {
-            "ready": not any(f["kind"] == "blocker" for f in checked["findings"]),
-            "findings": checked["findings"],
-            "model_class": checked["model_class"],
-            "sets": checked["sets"],
-        }
+    check = _model_readiness(db, problem, problem_id, latest) if include_check else None
     last_run = db.execute(text(
         "SELECT r.id, r.status, r.optimality, r.objective, r.queued_at, r.finished_at, r.scenario_id, s.name AS scenario"
         "  FROM run r JOIN scenario s ON s.id = r.scenario_id"

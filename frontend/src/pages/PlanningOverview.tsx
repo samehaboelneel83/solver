@@ -5,7 +5,7 @@ import { ArrowRight, Database, FileStack, GitBranch, Map as MapIcon, Play } from
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEntityList } from "../api/entities";
 import { formatApiError } from "../api/errors";
-import { publishDraft, solveProblem, useDomains, useDomainDetail, useReadiness } from "../api/v1";
+import { publishDraft, solveProblem, useDomains, useDomainDetail, useReadiness, useReadinessCheck } from "../api/v1";
 import MissingValues from "../components/MissingValues";
 import { missingOf, nextAction, problemSteps, type StepKey, type StepState } from "../lib/problemSteps";
 import { useCapabilities } from "../hooks/useCapability";
@@ -131,6 +131,8 @@ export function ProblemOverview() {
   const domainId = parseRouteId(params.domainId ?? null);
   const problemId = parseRouteId(params.problemId ?? null);
   const readiness = useReadiness(problemId);
+  const [checkRequested, setCheckRequested] = useState(false);
+  const readinessCheck = useReadinessCheck(problemId, readiness.data?.latest_version !== null && readiness.data?.latest_version !== undefined, checkRequested);
   const w = useWords();
   const { can } = useCapabilities();
   const navigate = useNavigate();
@@ -154,7 +156,7 @@ export function ProblemOverview() {
   });
   if (readiness.isError) return <LoadFailure subject="The problem overview" error={readiness.error} retry={() => void readiness.refetch()} />;
   if (readiness.isLoading || !readiness.data) return <p role="status">Loading problem overview…</p>;
-  const data = readiness.data;
+  const data = { ...readiness.data, check: readinessCheck.data?.check ?? null };
   if (Number(data.problem.domain_id) !== domainId) return <p role="alert">This problem is not available here.</p>;
 
   const steps = problemSteps(data);
@@ -176,6 +178,10 @@ export function ProblemOverview() {
       case "build": return <Link className={primary} to={`${base}/model`}>{can("model.publish") ? "Build the model" : "View the model"}<ArrowRight size={16} aria-hidden /></Link>;
       case "publish-and-solve": return <button type="button" className={primary} disabled={!mayRun || solve.isPending} onClick={() => solveNow(true)}>{solve.isPending ? "Publishing…" : "Publish changes and solve"}<Play size={16} aria-hidden /></button>;
       case "fill": return <button type="button" className={primary} onClick={() => jump("data")}>Fill in {next.count} missing {next.count === 1 ? "value" : "values"}<ArrowRight size={16} aria-hidden /></button>;
+      case "check": return <button type="button" className={primary} disabled={readinessCheck.isFetching} onClick={() => {
+        if (readinessCheck.isError) void readinessCheck.refetch();
+        else setCheckRequested(true);
+      }}>{readinessCheck.isError ? "Retry model check" : readinessCheck.isFetching ? "Checking model…" : "Run model check"}</button>;
       case "fix": return <button type="button" className={primary} onClick={() => jump("check")}>See what stops it<ArrowRight size={16} aria-hidden /></button>;
       case "follow": return <Link className={primary} to={`${base}/runs/${next.runId}`}>Follow the run<ArrowRight size={16} aria-hidden /></Link>;
       case "results": return <Link className={primary} to={`${base}/runs/${next.runId}`}>See the results<ArrowRight size={16} aria-hidden /></Link>;
@@ -206,6 +212,9 @@ export function ProblemOverview() {
       )}
     </div>;
     if (key === "check") {
+      if (readinessCheck.isError) return <p role="alert" className="mt-2 text-sm text-rose-900">The full model check could not be completed. Retry it when the service is available.</p>;
+      if (readinessCheck.isFetching) return <p role="status" className="mt-2 text-sm text-slate-600">Checking today’s data against the full model. Large models may take longer; the rest of this page is ready to use.</p>;
+      if (!checkRequested && !readinessCheck.data) return <p className="mt-2 text-sm text-slate-600">Run a full model check when you are ready to validate this version against today’s data.</p>;
       const shown = (data.check?.findings ?? []).filter((f) => f.code !== "missing_values");
       return shown.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
         {shown.map((f) => <li key={f.code + f.says} className={f.kind === "blocker" ? "text-rose-900" : "text-amber-900"}>{f.says}</li>)}

@@ -986,11 +986,24 @@ export type Readiness = {
   } | null;
   workers: WorkerStatus;
 };
-export const getReadiness = (problemId: Id) => apiFetch<Readiness>(`/api/v1/problems/${problemId}/readiness`);
+export const getReadiness = (problemId: Id) =>
+  apiFetch<Readiness>(`/api/v1/problems/${problemId}/readiness?include_check=false`);
 export function useReadiness(problemId: Id | null) {
   return useQuery({ queryKey: [V1, "readiness", problemId], queryFn: () => getReadiness(problemId as Id), enabled: isId(problemId),
     // A run settles, a worker comes and goes: the page follows.
-    refetchInterval: 10_000 });
+    refetchInterval: (query) => {
+      const status = query.state.data?.last_run?.status;
+      return status === "queued" || status === "running" ? 10_000 : false;
+    } });
+}
+export function useReadinessCheck(problemId: Id | null, hasPublishedVersion: boolean, requested: boolean) {
+  return useQuery({
+    queryKey: [V1, "readiness-check", problemId],
+    queryFn: () => apiFetch<{ check: Readiness["check"] }>(`/api/v1/problems/${problemId}/readiness/check`),
+    enabled: isId(problemId) && hasPublishedVersion && requested,
+    retry: false,
+    staleTime: 60_000,
+  });
 }
 /** Solve the latest published version on the problem's "Base" scenario, made or moved forward first. */
 export const solveProblem = (problemId: Id, timeLimitS?: number) =>

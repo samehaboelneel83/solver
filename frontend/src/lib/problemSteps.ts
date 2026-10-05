@@ -13,6 +13,7 @@ export type NextAction =
   | { kind: "build" }
   | { kind: "publish-and-solve" }
   | { kind: "fill"; count: number }
+  | { kind: "check" }
   | { kind: "fix" }
   | { kind: "solve" }
   | { kind: "follow"; runId: string | number }
@@ -39,6 +40,8 @@ export function problemSteps(readiness: Readiness): Step[] {
 
   const data: Step = !latest
     ? { key: "data", title: "Data", state: "wait", says: "The model says which records it needs; build it first, or add records now." }
+    : !check
+      ? { key: "data", title: "Data", state: "wait", says: "Checking whether today’s data is ready for this model." }
     : missing.length
       ? { key: "data", title: "Data", state: "fix", says: `${values} ${values === 1 ? "value is" : "values are"} missing. Fill ${values === 1 ? "it" : "them"} in below.` }
       : empty.length
@@ -82,6 +85,7 @@ export function nextAction(readiness: Readiness, canPublish: boolean): NextActio
   const { latest_version: latest, draft, check, last_run: run } = readiness;
   if (!latest) return { kind: "build" };
   if (draft?.unpublished && canPublish) return { kind: "publish-and-solve" };
+  if (!check) return { kind: "check" };
   const missing = missingOf(readiness).reduce((n, f) => n + (f.missing?.records.length ?? 0), 0);
   if (missing) return { kind: "fill", count: missing };
   if (check && !check.ready) return { kind: "fix" };

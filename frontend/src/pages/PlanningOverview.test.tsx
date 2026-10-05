@@ -44,7 +44,8 @@ describe("planning overviews", () => {
     capabilities = ["domain.edit", "model.publish", "run.submit"];
     readiness = ready();
     vi.mocked(apiFetch).mockReset().mockImplementation(async (path, options) => {
-      if (path === "/api/v1/problems/9/readiness") return readiness;
+      if (path.startsWith("/api/v1/problems/9/readiness/check")) return { check: readiness.check };
+      if (path.startsWith("/api/v1/problems/9/readiness")) return readiness;
       if (path === "/api/v1/problems/9/solve") return { id: 77, status: "queued" };
       if (path === "/api/v1/problems/9/draft/publish") return { id: 21, version: 5 };
       if (path === "/api/v1/entities/41") return options?.method === "PATCH" ? {} : { id: 41, attrs: { band: "senior" }, updated_at: "2026-09-30T10:00:00Z" };
@@ -100,6 +101,8 @@ describe("planning overviews", () => {
   it("walks the five steps and solves from the problem page in one click", async () => {
     mount("/domains/7/problems/9/overview");
     expect(await screen.findByRole("heading", { name: "Weekly staffing", level: 1 })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Run model check" }));
+    await screen.findByRole("button", { name: "Solve" });
     const steps = within(screen.getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((item) => item.getAttribute("aria-label"));
     expect(steps).toEqual(["Step 1, Data: done", "Step 2, Model: done", "Step 3, Check: done", "Step 4, Solve: to do", "Step 5, Results: waiting"]);
     expect(screen.getByTestId("step-data-says")).toHaveTextContent("employee: 2");
@@ -108,10 +111,30 @@ describe("planning overviews", () => {
     expect(vi.mocked(apiFetch).mock.calls.some(([path, options]) => path === "/api/v1/problems/9/solve" && options?.method === "POST")).toBe(true);
   });
 
+  it("renders the overview while the full model check is still running", async () => {
+    let finishCheck!: (value: { check: Readiness["check"] }) => void;
+    const serve = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation((path, options) => path.endsWith("/readiness/check")
+      ? new Promise((resolve) => { finishCheck = resolve; })
+      : serve(path, options));
+    mount("/domains/7/problems/9/overview");
+
+    expect(await screen.findByRole("heading", { name: "Weekly staffing", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run model check" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Run model check" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Large models may take longer");
+    expect(screen.getByRole("button", { name: "Checking model…" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Solve" })).not.toBeInTheDocument();
+
+    finishCheck({ check: readiness.check });
+    expect(await screen.findByRole("button", { name: "Solve" })).toBeInTheDocument();
+  });
+
   it("takes the person to what stops the solve, focused and lit (benchmark re-test, October 2026)", async () => {
     readiness = { ...ready(), check: { ready: false, model_class: "IP", sets: { employee: 2 }, findings: [{
       kind: "blocker", code: "does_not_compile", says: "c_cover reads a field no employee has." }] } };
     mount("/domains/7/problems/9/overview");
+    fireEvent.click(await screen.findByRole("button", { name: "Run model check" }));
     fireEvent.click(await screen.findByRole("button", { name: /See what stops it/ }));
     const check = screen.getByRole("listitem", { name: /^Step 3, Check/ });
     expect(check).toHaveFocus();
@@ -126,6 +149,7 @@ describe("planning overviews", () => {
         default_value: null, records: [{ id: 41, key: "ahmed", label: null, updated_at: "2026-09-30T10:00:00Z" }] },
     }] } };
     mount("/domains/7/problems/9/overview");
+    fireEvent.click(await screen.findByRole("button", { name: "Run model check" }));
     expect(await screen.findByRole("button", { name: "Fill in 1 missing value" })).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "Step 1, Data: something to fix" })).toBeInTheDocument();
     expect(screen.getByRole("listitem", { name: "Step 3, Check: waiting" })).toBeInTheDocument();
@@ -148,6 +172,7 @@ describe("planning overviews", () => {
     }] } });
     readiness = gap([{ id: 41, key: "ahmed" }, { id: 42, key: "sara" }]);
     mount("/domains/7/problems/9/overview");
+    fireEvent.click(await screen.findByRole("button", { name: "Run model check" }));
     fireEvent.change(await screen.findByLabelText("hours_per_week for every employee without one"), { target: { value: "38" } });
     fireEvent.change(screen.getByLabelText("hours_per_week for ahmed"), { target: { value: "40" } });
     readiness = gap([{ id: 42, key: "sara" }]);
@@ -179,6 +204,7 @@ describe("planning overviews", () => {
   it("leads to the results once a run has settled, and still offers what-if work", async () => {
     readiness = { ...ready(), last_run: { id: 77, status: "optimal", optimality: "global", objective: 120, queued_at: "", finished_at: "", scenario_id: 12, scenario: "Base" } };
     mount("/domains/7/problems/9/overview");
+    fireEvent.click(await screen.findByRole("button", { name: "Run model check" }));
     expect(await screen.findByRole("link", { name: "See the results" })).toHaveAttribute("href", "/domains/7/problems/9/runs/77");
     expect(screen.getByTestId("step-results-says")).toHaveTextContent("A plan was found, worth 120.");
     expect(screen.getByRole("button", { name: "Solve again" })).toBeInTheDocument();
