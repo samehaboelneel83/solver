@@ -246,6 +246,7 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
             missing=gap))
 
     compiled = None
+    structure = None
     try:
         compiled = compile_model(ir, data)
     except Unsupported as exc:
@@ -255,6 +256,11 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
         findings.append(_finding("blocker", "does_not_compile", f"The model could not be built: {exc}"))
 
     findings += empty_range_findings(compiled.empty_ranges if compiled is not None else [])
+
+    if compiled is not None:
+        from app.solve.blocks import structure as decomposition_structure
+
+        structure = decomposition_structure(compiled)
 
     # A hard rule that, on today's data, comes to numbers alone -- a sum that matched
     # nobody counts as 0, so "protein >= 20" reads 0 >= 20 -- and those numbers break it.
@@ -289,6 +295,7 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
         "planner": list(found.planner),
         "solvers": solvers,
         "sets": {name: len(data.get("sets", {}).get(name) or []) for name in ir.get("sets", [])},
+        "structure": structure,
     }
 
 
@@ -327,5 +334,6 @@ def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount
         "model_class": checked["model_class"],
         "planner": checked["planner"],
         "solvers": checked["solvers"],
+        "structure": checked["structure"],
         "workers": worker_status(db),
     }

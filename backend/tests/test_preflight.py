@@ -57,6 +57,7 @@ def test_a_ready_scenario_says_so_with_its_solvers_and_workers(scenario, auth_he
     body = TestClient(app).get(f"/api/v1/scenarios/{sid}/preflight", headers=auth_headers).json()
     assert body["ready"] is True and body["findings"] == []
     assert body["model_class"] == "IP"
+    assert body["structure"]["blocks"] >= 1 and body["structure"]["linking_rules"] >= 0
     assert [s["name"] for s in body["solvers"] if s["chosen"]] == ["cp-sat"]
     assert body["workers"]["state"] in ("offline", "ready", "busy")
 

@@ -65,9 +65,29 @@ def test_the_camp_drawing_in_well_under_a_second(tmp_path):
     assert out["zones"] == [f"C{n:02d}" for n in range(1, 12)]
     assert out["grid_step_m"] == 0.5 and out["free_area_m2"] == pytest.approx(2071.7, abs=1)
     assert 20_000 < out["candidates"] < 40_000 and out["upper_bound"]["items"] == 2473
-    with pytest.raises(layout.LayoutRefused, match="Ask the user"):
+    with pytest.raises(layout.LayoutRefused, match="coarser exact steps"):
         layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], items=[{"name": "bed", "length": 1.5, "width": 0.5}],
                     aisle=0.35, aisle_side="any", step=0.25)
+
+
+def test_layout_can_generate_one_polygon_from_a_layer(tmp_path):
+    f = agent_files.parse_spatial("camp_layout_layers.dxf", DRAWING.read_bytes())
+    one = layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], area_indices=[0],
+                      blocked_layers=["OBSTACLES", "DOORS_OBSTACLE"], label_layer="LABELS",
+                      items=[{"name": "bed", "length": 1.75, "width": 0.5, "rotations": [0, 90]}],
+                      aisle=0.35, aisle_side="short")
+    assert one["areas"] == 1
+    assert one["candidates"] > 0
+
+
+def test_candidate_limit_lists_only_coarser_steps_that_divide_item_sizes(tmp_path):
+    f = agent_files.parse_spatial("camp_layout_layers.dxf", DRAWING.read_bytes())
+    with pytest.raises(layout.LayoutRefused) as error:
+        layout.make([f], str(tmp_path), area_layers=["BOUNDARY"],
+                    items=[{"name": "bed", "length": 1.75, "width": 0.5}],
+                    aisle=0.35, aisle_side="any", step=0.25)
+    assert "Coarser exact steps: none" in str(error.value)
+    assert "0.5 m" not in str(error.value) and "1 m" not in str(error.value)
 
 
 def test_the_assistant_tool_attaches_the_files_and_returns_the_plan(tmp_path, monkeypatch):

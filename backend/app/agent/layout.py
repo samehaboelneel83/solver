@@ -125,7 +125,7 @@ def choose_step(sizes: list[float], aisle: float, area: float, step: float | Non
 def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], items: list[dict[str, Any]],
          file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
          aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
-         max_file_rows: int = 200_000,
+         max_file_rows: int = 200_000, area_indices: list[int] | None = None,
          prefix: str = "layout") -> dict[str, Any]:
     """Write `<prefix>_items.csv`, `_cells.csv`, `_occupies.csv` (and `_keeps_free.csv`) into `folder`, and
     return the counts, an upper bound and the plan's seed and model."""
@@ -154,7 +154,14 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
     if aisle == 0:
         aisle_side = "none"
 
-    areas = [(shape, row) for shape, row in _shapes(files, file, area_layers) if shape.area > 0]
+    all_areas = [(shape, row) for shape, row in _shapes(files, file, area_layers) if shape.area > 0]
+    if area_indices is not None:
+        if any(i < 0 or i >= len(all_areas) for i in area_indices):
+            raise LayoutRefused(f"area indices must be between 0 and {len(all_areas) - 1}")
+        wanted = set(area_indices)
+        areas = [area for i, area in enumerate(all_areas) if i in wanted]
+    else:
+        areas = all_areas
     if not areas:
         raise LayoutRefused(f"no areas (polygons) on {area_layers}")
     zones = _zones(areas, files, file, label_layer)
@@ -242,11 +249,12 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
     if total == 0:
         raise LayoutRefused("no item fits anywhere: check the sizes, the aisle and the layers")
     if total > MAX_CANDIDATES:
-        coarser = [x for x in STEPS if x > s]
+        coarser = [x for x in STEPS if x > s and all(abs(v / x - round(v / x)) < 1e-6 for v in sizes)]
+        suggestions = ", ".join(f"{x:g} m" for x in coarser) or "none; the current grid is the coarsest exact grid for these item sizes"
         raise LayoutRefused(
             f"a {s:g} m grid gives {total:,} candidate positions, more than the {MAX_CANDIDATES:,} a model can take "
-            f"well. Ask the user: a coarser step ({', '.join(f'{x:g} m' for x in coarser[-2:]) or 'none divides'}), "
-            "fewer turns, or one area at a time.")
+            f"well. Coarser exact steps: {suggestions}. Generate one selected area at a time, or reduce turns only "
+            "when the user has not required them.")
 
     # The generated CSVs are read back into the assistant's file table. Keep each relation
     # table within that reader's row budget; otherwise parsing truncates links and the model

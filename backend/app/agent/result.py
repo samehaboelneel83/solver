@@ -48,6 +48,23 @@ def summary(rec: dict[str, Any]) -> str:
     sense = (ir.get("objective") or {}).get("sense", "")
     goal = "none (feasibility)" if rec.get("objective") is None else _num(rec["objective"])
     out.append(f"RUN {rec.get('id')}: {rec.get('status')}; goal ({sense}) = {goal}; solver {rec.get('solver')}.")
+    structure = params.get("structure") or {}
+    actual_split = params.get("blocks") or {}
+    if actual_split.get("blocks"):
+        out.append(f"DECOMPOSITION: solved as {actual_split['blocks']} independent blocks, grouped into "
+                   f"{actual_split.get('groups', actual_split['blocks'])} parallel solves; block statuses "
+                   f"{', '.join(actual_split.get('statuses') or [])}. The block objectives and bounds were merged.")
+    elif actual_split.get("solved_whole"):
+        out.append(f"DECOMPOSITION: solved as one model ({actual_split['solved_whole']}).")
+    elif structure.get("linking_rules", 0):
+        out.append(f"DECOMPOSITION: structure analysis found {structure.get('blocks', 1)} near-independent groups, "
+                   f"tied by {structure.get('linking_rules')} instances of "
+                   f"{', '.join(structure.get('linking') or [])}; this was not an exact split.")
+    elif structure.get("blocks", 1) > 1:
+        out.append(f"DECOMPOSITION: {structure['blocks']} independent blocks were detected, but this run did not "
+                   "record a block-by-block solve.")
+    else:
+        out.append("DECOMPOSITION: the compiled decisions form one coupled block.")
     if rec.get("error"):
         out.append(f"ERROR: {rec['error']}")
     made_of = params.get("objective_breakdown") or {}

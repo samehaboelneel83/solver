@@ -669,7 +669,7 @@ def _seed_end(value: Any) -> tuple[str, str] | None:
     return None
 
 
-def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
+def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bool = False) -> None:
     """Create missing types, records and cells named by a template's seed.
 
     A name that already exists is left alone -- applying weekly_rota to
@@ -751,9 +751,10 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
         params[name] = row
 
     entities: dict[tuple[str, str], Entity] = {}
-    for type_name, entity_type in types.items():
-        for row in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)).scalars():
-            entities[(type_name, row.key)] = row
+    if not fresh_types:
+        for type_name, entity_type in types.items():
+            for row in db.execute(select(Entity).where(Entity.entity_type_id == entity_type.id)).scalars():
+                entities[(type_name, row.key)] = row
     for spec in seed.get("entities") or []:
         if not isinstance(spec, dict) or not spec.get("key") or spec.get("type") not in types:
             continue
@@ -779,7 +780,7 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
             continue
         rel_type = rel_types[spec["type"]]
         if rel_type.id not in linked:
-            linked[rel_type.id] = {
+            linked[rel_type.id] = set() if fresh_types else {
                 (a, b) for a, b in db.execute(
                     select(Relationship.from_entity_id, Relationship.to_entity_id).where(
                         Relationship.relationship_type_id == rel_type.id)).all()}

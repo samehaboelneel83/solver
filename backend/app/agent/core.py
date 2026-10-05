@@ -183,6 +183,14 @@ TOOLS: list[dict[str, Any]] = [
         "description": "Pause a few seconds (while a run is queued or running), then poll again.",
         "parameters": {"type": "object", "properties": {
             "seconds": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["seconds"]}}},
+    {"type": "function", "function": {
+        "name": "inspect_decomposition",
+        "description": "Inspect a scenario's compiled decision structure before solving. Reports exact independent blocks "
+                       "that the platform can solve in parallel, or near-independent groups and the constraints linking "
+                       "them. It is analysis only; it never changes the model or splits linked decisions approximately.",
+        "parameters": {"type": "object", "properties": {
+            "scenario_id": {"type": "integer", "description": "An existing scenario id from the workspace or build result"}},
+            "required": ["scenario_id"]}}},
 ]
 PLAN_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "propose_plan",
@@ -300,8 +308,9 @@ MAX_SOLVES = 2  # per scenario per turn
 # became records because the Assistant could not import it nor compute what the file lacked): a new domain,
 # map data imported into it and turned into records, and the platform's own calculations on those records.
 DATA_POST = re.compile(r"^/api/domain/?$|^/api/v1/gis/datasets$|^/api/v1/gis/datasets/\d+/records(?:/attach)?$"
-                       r"|^/api/v1/gis/domains/\d+/records$|^/api/v1/gis/derived-layers$"
+                       r"|^/api/v1/gis/domains/\d+/(?:datasets|records)$|^/api/v1/gis/derived-layers$"
                        r"|^/api/v1/domains/\d+/(?:derive-value|distances|within)$|^/api/v1/entity-types/\d+/derive$"
+                       r"|^/api/v1/candidate-sets(?:/from-map)?$"
                        r"|^/api/v1/parameters/\d+/recompute$")
 READ_ONLY_POST = re.compile(r"^/api/v1/gis/domains/\d+/records/propose$|^/api/v1/problems/\d+/versions/validate$")
 
@@ -422,8 +431,8 @@ def _platform_order_faults(spec: dict, workspace: dict | None, files: list[dict]
                       and float(value) < 999_999})
     if made_up:
         faults.append("STEP 4, DATA VALUES: these numbers were not given by the user nor found in the data or a "
-                      f"calculation: {', '.join(made_up)}. Ask the user for them, or compute them (query_file, "
-                      "run_python, the platform's calculations) -- never put in a placeholder.")
+                      f"calculation: {', '.join(made_up)}. Ask the user for them, or compute them with an "
+                      "available platform calculation or query_file -- never put in a placeholder.")
     return faults
 
 
@@ -509,11 +518,18 @@ def _empty_parameters(spec: dict) -> list[str]:
         p = declared.get(name)
         if not p or not p.get("index") or cells.get(name):
             continue
-        faults.append(f'Parameter "{name}"[{", ".join(map(str, p["index"]))}] is used by the model but no value is '
-                      f'loaded: every cell would be its default {p.get("default_value", 0)}. Load it '
-                      f'(parameter_values_from_file), or compute it in the model from what is loaded (cost per ton '
-                      f'x demand is {{"mul": [{{"mul": [{{"par": "lane_cost", ...}}, {{"attr": {{"of": "c", '
-                      f'"name": "demand"}}}}]}}, {{"var": "assign", ...}}]}}), or drop it.')
+        indexes = ", ".join(map(str, p["index"]))
+        if re.search(r"(?:near|nearby|within|reach|adjacen|connect|distance|proxim|access)", name, re.I):
+            action = (" Do not leave this as an empty parameter or replace a relationship with a parameter. If the "
+                      "agreed rule means geometric proximity, use POST /api/v1/domains/{domain_id}/within to create "
+                      "a relationship from actual geometry, with a threshold the user gave; use that relationship "
+                      "in the IR. Do not invent a threshold. If the rule means a walkable path, /within cannot "
+                      "prove it; use actual path-connectivity data or state that the rule cannot yet be modelled.")
+        else:
+            action = (" Load it with parameter_values_from_file or use a platform calculation that produces this "
+                      "exact value. If neither is possible, ask for the missing source; do not invent values.")
+        faults.append(f'Parameter "{name}"[{indexes}] is used by the model but no value is loaded: every cell would '
+                      f'be its default {p.get("default_value", 0)}.{action}')
     return faults
 
 
@@ -1013,7 +1029,27 @@ def model_prompt(ctx: "Context") -> str:
 - WORKBENCH: run_python runs Python in this conversation's folder, where every attached sheet is a CSV. Use it to
   read and check data, compute totals and bounds, and GENERATE the data a model needs (candidate positions at true
   size, pairs that touch or cover, distances...) as CSV files: they come back as attachments that the plan loads
-  with *_from_file. After solving, use it to check the answer against the raw data, rule by rule.""" if ctx.can_run_python else "")
+  with *_from_file. After solving, use it to check the answer against the raw data, rule by rule.""" if ctx.can_run_python else """
+- TOOL LIMIT: run_python is not available in this conversation. Do not call it or propose files generated with it.
+  Use the candidate APIs, attached data, and supported platform calculations; if they cannot produce a required
+  value or relationship, ask for a suitable data source or explain the limitation. Use only tools listed in the
+  current tool schema and make one API call at a time; never concatenate a route with another tool call.""")
+    generated_sources = ("(d) when run_python is on, generated data: candidate items at real size, the cells or "
+                         "resources each occupies, neighbours, door cells -- written as CSV files that come back "
+                         "as attachments to load."
+                         if ctx.can_run_python else
+                         "(d) candidate and relationship data produced by the platform's candidate APIs or spatial "
+                         "calculations; if no supported operation can produce the required data, ask for a data "
+                         "source or state the limitation rather than inventing records or values.")
+    layout_generation = ("Only when the candidate API cannot express the problem, use run_python to generate "
+                         "candidates.csv (cand, x_m, y_m, rot, ...), cells.csv (cell, x_m, y_m) on a grid whose "
+                         "step divides every item size, and occupies.csv (cand, cell: one row per cell a candidate "
+                         "covers; keep it under about 200,000 rows). Load with entities_from_file and "
+                         "relationships_from_file; declare occupies from cand to cell and list it in the IR."
+                         if ctx.can_run_python else
+                         "If the candidate API cannot express a required relationship, do not attempt client-side "
+                         "generation: use a supported platform calculation or ask for source data. Never substitute "
+                         "a count approximation or drop a required rule without the user's approval.")
     return f"""You are the modelling assistant of the Problem Solver platform, talking with "{ctx.username}".
 They describe a real decision problem in their own words. You understand it fully, turn it into a platform
 model, get their approval, build it, and explain what you built. {where} Reply in the user's language.
@@ -1073,16 +1109,16 @@ geometry...); (b) map data imported into a domain: POST /api/domain/ {{"name"}} 
 /api/v1/gis/datasets/<id>/records/propose and POST .../records with the reviewed plan; build the problem there
 with domain_id; (c) numbers the files lack, computed by the platform on records already in a domain: POST
 /api/v1/domains/<id>/distances, /within, /derive-value, /api/v1/entity-types/<id>/derive (describe_endpoint
-first for their bodies); (d) when run_python is on, generated data: candidate items at real size, the cells or
-resources each occupies, neighbours, door cells -- written as CSV files that come back as attachments to load.
+first for their bodies); {generated_sources}
 Never invent a number a file or a calculation can give (no placeholder factors); never plan a kind with no source.
 A layout problem (where to place items on a drawing: beds, desks, stalls, shelves) is modelled over generated
-CANDIDATE positions, not a count per area: call make_layout (areas, blocked layers, item sizes and turns, the aisle)
-and use the plan it returns. Never write that geometry yourself with run_python. Only when make_layout cannot express
-the problem, generate the files yourself as follows. With run_python write: candidates.csv (cand, x_m, y_m, rot, ...), cells.csv (cell, x_m, y_m) on a grid
-whose step divides the item sizes (0.25 m for 1.5 x 0.5), and occupies.csv (cand, cell: one row per cell a candidate
-covers; keep it under about 200,000 rows). The plan loads them (entities_from_file; relationships_from_file for
-occupies; declare the relationship type occupies from cand to cell, and list it in the IR's "relationships"). NO OVERLAP,
+CANDIDATE positions, not a count per area. When the candidate and cell records should live in the selected domain,
+use POST /api/v1/candidate-sets/from-map with the attached drawing's upload_id, domain_id, area/blocked layers,
+item sizes and turns, and aisle rule. It generates the records and occupancy links server-side, and returns an IR
+that already uses those records; use that IR as the basis for the proposed model. The endpoint can generate selected
+polygon indices separately when one request exceeds its candidate limit. For candidate rows supplied by a user or
+another service, POST /api/v1/candidate-sets with the explicit attribute schema and rows. Never copy a large
+candidate table into the model conversation. {layout_generation} NO OVERLAP,
 one rule over cells, never pairs of candidates: forall k in cell: Σ over c in cand {{"via":{{"rel":"occupies",
 "to":"k"}}}} of pick[c] <= 1. ACCESS: keep corridor cells free the same way (a second link, e.g. blocks, from
 candidates to the corridor cells they would close) or generate only candidates that leave the paths open.
@@ -1112,7 +1148,10 @@ PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec a
 
 PHASE 3 - SOLVE AND REPORT: when the result starts with BUILT, solve it straight away (the result says how), wait
 for the run to finish (a run with status "error" FAILED: read its error, tell the user, never queue it again unchanged),
-call read_result with its id and report from what it returns (never recompute numbers yourself), then explain in plain language what was built (sets, parameters, variables, rules, goals,
+first call inspect_decomposition with the scenario id from BUILT. Independent blocks are solved exactly in parallel
+by the platform when eligible; reported near-independent groups with linking rules are diagnostics, not an exact split.
+Then call read_result with its id and report whether a block-by-block solve actually ran (never recompute numbers yourself),
+then explain in plain language what was built (sets, parameters, variables, rules, goals,
 assumptions) and the results: status, the goal's value, the decisions as a table in the user's names, and for an
 infeasible run which rules conflict and what to relax. Nothing else can be written in this mode.
 
@@ -1188,6 +1227,8 @@ Today is {time.strftime('%Y-%m-%d')}."""
 
 def system_prompt(index: ApiIndex, ctx: Context, native: bool) -> str:
     attached = agent_files.outline(ctx.files)
+    path_tool = ("run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach a door)."
+                 if ctx.can_run_python else "")
     tools = list(MODEL_TOOLS if ctx.mode == "model" else TOOLS) + ([sandbox.SCHEMA] if ctx.can_run_python else [])
     if ctx.mode == "model":
         return model_prompt(ctx) + ("\n\n" + attached if attached else "") + \
@@ -1209,7 +1250,8 @@ platform's own API, with exactly their permissions. {"; ".join(where).capitalize
 Endpoint groups (tag (count)): {index.tag_overview()}
 
 How to work:
-1. search_endpoints -> describe_endpoint -> call_api. Never guess a request body; describe it first.
+1. Use only tools listed in the current tool schema; never call an unavailable tool. Make one API call at a time.
+   For writes, search_endpoints -> describe_endpoint -> call_api. Never guess a request body; describe it first.
 2. Look things up before changing them; use ids you got from the API, never invented ones.
    describe_workspace gives a domain's whole contents (kinds of record, fields, relationships, data values,
    map data, problems) in one call: start there.
@@ -1219,15 +1261,20 @@ How to work:
    The body may name a solver ({{"solver": "networkx"}}); leave it out and the platform chooses. A network
    model (transport, assignment, shortest path, max flow: each rule flow in less flow out, numbers whole) is
    solved by NetworkX's network simplex anyway; ask for "networkx" by name only when the user wants it.
-   run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach a door).
+    {path_tool}
+   When asked to split or parallelize a problem, call inspect_decomposition for its scenario first. The platform
+   solves truly independent compiled blocks exactly and in parallel when eligible. If the report names linking
+   rules, those parts are coupled: do not claim an exact split or create child models that drop those constraints.
+   Explain the coupling and offer an approximate decomposition only if the user explicitly requests one.
    The answer downloads as files: /api/v1/runs/{{id}}/export?format=xlsx|csv|geojson|dxf|pdf. dxf is a CAD drawing
    on the domain's drawing, in its own coordinates (chosen items on <decision>-CHOSEN layers): offer it for a
    layout or any answer on a drawing.
 5. On a 4xx, read the detail, fix the request and retry; a 422 names the bad field. A 403 means the
    user lacks the capability: say which, don't work around it.
 6. Delete or remove only what the user clearly asked to.
-7. A MAP FILE attached (see ATTACHED FILES) goes on the map with POST /api/v1/gis/datasets
-   {{"upload_id", "domain_id", "name", "placement": {{"kind": "epsg", "code": n}}, "layers": [...] (optional)}};
+7. A MAP FILE attached (see ATTACHED FILES) goes on the map with POST /api/v1/gis/domains/{{domain_id}}/datasets
+   {{"upload_id", "name", "placement": {{"kind": "epsg", "code": n}}, "layers": [...] (optional)}};
+   the equivalent POST /api/v1/gis/datasets takes `domain_id` in the body;
    records from its layers with POST /api/v1/gis/datasets/{{id}}/records/propose, then .../records with that plan.
    To map ALL of a domain's map data onto its kinds of record at once (matched by shared record keys, name and
    fields; features that name a record update it, the rest are added): POST /api/v1/gis/domains/{{id}}/records/propose
@@ -1305,6 +1352,19 @@ class Agent:
                                  "domains": self.call("GET", "/api/domain/", {"limit": 100}).get("body")}, lim)
                 res = self.call("GET", "/api/v1/agent/workspace", {"domain_id": int(domain)})
                 return clip(res.get("body") if res.get("ok") else res, lim)
+            if name == "inspect_decomposition":
+                scenario_id = int(args.get("scenario_id") or 0)
+                if scenario_id < 1:
+                    return "Give the id of an existing scenario from the workspace or the build result."
+                res = self.call("GET", f"/api/v1/scenarios/{scenario_id}/preflight")
+                body = res.get("body") if isinstance(res, dict) else None
+                if not res.get("ok"):
+                    return clip(res, lim)
+                if not isinstance(body, dict):
+                    return "The preflight did not return a decomposition report."
+                return clip({"scenario_id": scenario_id, "ready": body.get("ready"),
+                             "structure": body.get("structure"), "findings": body.get("findings", []),
+                             "planner": body.get("planner", [])}, lim)
             if name == "read_output":
                 return self._read_output(args)
             if name == "make_layout":
@@ -1332,6 +1392,14 @@ class Agent:
             if name == "call_api":
                 method = str(args.get("method", "GET")).upper()
                 path = "/" + str(args.get("path", "")).lstrip("/")
+                # Treat a trailing slash as the same API route for both policy
+                # checks and dispatch. The candidate APIs are documented
+                # without a slash, but assistants commonly add one; the guard
+                # used to reject that valid data-preparation request before
+                # FastAPI could apply its normal redirect.
+                route, separator, query_string = path.partition("?")
+                route = route.rstrip("/") or "/"
+                path = route + (separator + query_string if separator else "")
                 if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
                     return f"unsupported method {method}"
                 if method == "POST" and path.split("?")[0] == "/api/v1/problems/from-spec":
@@ -1345,7 +1413,8 @@ class Agent:
                         (method == "POST" and DATA_POST.match(path.split("?")[0])) or
                         (self.built and method == "POST" and SOLVE_PATH.match(path.split("?")[0]))):
                     return ("Refused: in problem-description mode nothing is written except data preparation (a new "
-                            "domain, map data imported and turned into records, the platform's calculations), the "
+                            "domain, map data imported and turned into records, candidate sets and their generated "
+                            "links, the platform's calculations), the "
                             "approved plan (propose_plan), and, once it is built, solving its scenario.")
                 bare = path.split("?")[0]
                 if method == "POST" and SOLVE_PATH.match(bare):
@@ -1591,7 +1660,8 @@ class Agent:
         base = f"/domains/{b.get('domain_id')}/problems/{b.get('problem_id')}"
         mapped = self._import_drawings(b.get("domain_id"))
         return ("BUILT " + json.dumps(b, default=str) + (f" {mapped}" if mapped else "") +
-                f" Now, without asking: solve it -- call_api POST /api/v1/scenarios/{b.get('scenario_id')}/runs "
+                f" Now, without asking: inspect_decomposition for scenario_id {b.get('scenario_id')}, then solve it -- "
+                f"call_api POST /api/v1/scenarios/{b.get('scenario_id')}/runs "
                 f"with body {{}}, then GET /api/v1/runs/<run_id> (wait 3-5 s between polls) until its status is "
                 f"no longer queued or running. Then tell the user (1) what was built, in the editor's terms "
                 f"(sets, parameters, variables, rules, goals), with links [the problem]({base}), "

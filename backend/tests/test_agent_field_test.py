@@ -286,6 +286,28 @@ def test_a_parameter_the_model_reads_but_nothing_loads_is_refused(tenants, monke
                                    "seed": agent_files.expand(_warehouse_spec("loaded")["seed"], _parsed())}) == []
 
 
+def test_empty_spatial_parameter_points_to_relationship_computation_not_a_placeholder():
+    spec = {
+        "seed": {"parameters": [{"name": "is_near_door", "index": ["item"], "default_value": 0}]},
+        "ir": {"parameters": {"is_near_door": {"index": ["item"]}},
+               "constraints": [{"left": {"par": "is_near_door", "index": ["i"]}}]},
+    }
+    fault = core._empty_parameters(spec)[0]
+    assert "Do not leave this as an empty parameter" in fault
+    assert "POST /api/v1/domains/{domain_id}/within" in fault
+    assert "Do not invent a threshold" in fault and "walkable path" in fault
+
+
+def test_describe_prompt_does_not_offer_python_when_the_tool_is_unavailable():
+    prompt = core.model_prompt(core.Context("person", mode="model", can_run_python=False))
+    assert "run_python is not available in this conversation" in prompt
+    assert "Only when the candidate API cannot express the problem, generate files with run_python" not in prompt
+    assert "run_python has networkx too" not in prompt
+    normalized = " ".join(prompt.split())
+    assert "Use only tools listed in the current tool schema" in normalized
+    assert "make one API call at a time" in normalized
+
+
 def test_an_objective_past_a_billion_is_saved(tenants, db):
     """Migration 0107. The run was solved, optimal, and then crashed while saving an objective of
     12,000,849,988 into numeric(15, 6), which holds less than a billion; the run said only "current
@@ -823,6 +845,19 @@ def test_problem_creation_cannot_bypass_the_checked_plan_flow():
     assert "must go through Describe a problem mode" in result
 
 
+def test_candidate_api_with_trailing_slash_is_allowed_in_describe_mode():
+    seen = {}
+
+    def call(method, path, *args):
+        seen.update(method=method, path=path)
+        return {"ok": True, "status": 201, "body": {"candidate_type_id": 42}}
+
+    agent = core.Agent(core.Settings(), agent_api._index, call, core.Context("x", mode="model"))
+    result = agent.run_tool("call_api", {"method": "POST", "path": "/api/v1/candidate-sets/from-map/"})
+    assert seen == {"method": "POST", "path": "/api/v1/candidate-sets/from-map"}
+    assert "Refused" not in result
+
+
 def test_the_reply_gets_the_room_the_prompt_leaves_and_the_server_size_is_read(monkeypatch):
     seen = {}
 
@@ -875,6 +910,8 @@ def test_data_preparation_is_allowed_in_describe_mode(tenants, monkeypatch):
     result = next(e for e in events if e["type"] == "result" and e["name"] == "call_api")
     assert result["ok"] and '"status": 201' in result["preview"]
     assert core.DATA_POST.match("/api/v1/gis/datasets") and core.DATA_POST.match("/api/v1/domains/3/distances")
+    assert core.DATA_POST.match("/api/v1/gis/domains/34/datasets")
+    assert core.DATA_POST.match("/api/v1/candidate-sets") and core.DATA_POST.match("/api/v1/candidate-sets/from-map")
     assert not core.DATA_POST.match("/api/v1/problems")
     del model
 

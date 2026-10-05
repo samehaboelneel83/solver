@@ -130,6 +130,19 @@ def test_an_import_stores_layers_and_features_that_read_back_as_geojson(client, 
             assert n_geom == len(everything["features"])
 
 
+def test_domain_scoped_import_route_imports_map_data(client, drawing_bytes):
+    http, t = client
+    up = _upload(http, t, drawing_bytes)
+    made = http.post(f"/api/v1/gis/domains/{t['domain_a']}/datasets",
+                     json={"upload_id": up["upload_id"], "name": "Domain scoped plan", "placement": UTM36},
+                     headers=t["a"])
+    assert made.status_code == 201, made.text
+    assert made.json()["name"] == "Domain scoped plan"
+    assert made.json()["domain_id"] == t["domain_a"]
+    assert http.get("/api/v1/gis/datasets", params={"domain_id": t["domain_a"]},
+                    headers=t["a"]).json()["items"][0]["id"] == made.json()["id"]
+
+
 def test_a_dataset_is_placed_again_without_the_file_and_exports(client, drawing_bytes):
     http, t = client
     up = _upload(http, t, drawing_bytes)

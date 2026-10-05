@@ -7,6 +7,7 @@
     POST   /api/v1/gis/uploads/{id}/preview          {placement, units?, layers?} -> where it lands, as GeoJSON
     GET    /api/v1/gis/regions                       the countries a site can be said to be in
     POST   /api/v1/gis/datasets                      {upload_id, domain_id, name, placement, units?, layers?}
+    POST   /api/v1/gis/domains/{domain_id}/datasets  {upload_id, name, placement, units?, layers?}
     GET    /api/v1/gis/datasets?domain_id=
     GET    /api/v1/gis/datasets/{id}                 the dataset and its layers
     GET    /api/v1/gis/datasets/{id}/features        ?layers=1,2&bbox=w,s,e,n&limit= -> GeoJSON (WGS 84)
@@ -84,6 +85,18 @@ class ImportBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     upload_id: str
     domain_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=200)
+    placement: dict[str, Any]
+    units: float | None = Field(default=None, gt=0)
+    layers: list[str] | None = None
+
+
+class DomainImportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    upload_id: str
+    # Accepted for compatibility with clients that send the domain in both
+    # the path and body; the path remains authoritative and they must agree.
+    domain_id: int | None = Field(default=None, gt=0)
     name: str = Field(min_length=1, max_length=200)
     placement: dict[str, Any]
     units: float | None = Field(default=None, gt=0)
@@ -277,6 +290,24 @@ def import_dataset(
     db: Session = Depends(get_db),
     user: UserAccount = Depends(requires("domain.edit")),
 ) -> dict[str, Any]:
+    return _import_dataset(body, db, user)
+
+
+@router.post("/domains/{domain_id}/datasets", status_code=201)
+def import_domain_dataset(
+    domain_id: int,
+    body: DomainImportBody,
+    db: Session = Depends(get_db),
+    user: UserAccount = Depends(requires("domain.edit")),
+) -> dict[str, Any]:
+    """Import uploaded map data using the domain-scoped route."""
+    if body.domain_id is not None and body.domain_id != domain_id:
+        raise HTTPException(422, "the domain_id in the request body must match the domain in the URL")
+    return _import_dataset(ImportBody(upload_id=body.upload_id, domain_id=domain_id, name=body.name,
+                                      placement=body.placement, units=body.units, layers=body.layers), db, user)
+
+
+def _import_dataset(body: ImportBody, db: Session, user: UserAccount) -> dict[str, Any]:
     _domain(db, body.domain_id, user)
     row = _upload(db, body.upload_id, user, include_data=False)
     drawing = _uploaded_drawing(db, body.upload_id, row, user)

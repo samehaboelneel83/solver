@@ -33,6 +33,7 @@ from app.api.genui import router as genui_router
 from app.api.distances import router as distances_router
 from app.api.spatial_ops import router as spatial_ops_router
 from app.api.bulk import router as bulk_router
+from app.api.candidates import router as candidates_router
 from app.api.grids import router as grids_router
 from app.api.run_map import router as run_map_router
 from app.api.answer_map import router as answer_map_router
@@ -241,6 +242,7 @@ app.include_router(grids_router)
 app.include_router(distances_router)
 app.include_router(spatial_ops_router)
 app.include_router(bulk_router)
+app.include_router(candidates_router)
 app.include_router(run_map_router)
 app.include_router(answer_map_router)
 app.include_router(run_export_router)
